@@ -40103,6 +40103,46 @@ mod tests {
         );
     }
     #[test]
+    fn absent_document_projection_round_trips_as_a_successful_none() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/no-state-yet.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let request = ControllerRequest {
+            command: "document_state_projection".to_string(),
+            file: Some(doc),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("embedded_editor_projection_client".to_string()),
+            reason: Some("editor_projection_read".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        };
+
+        let response = controller_envelope(handle_document_state_projection(
+            runtime.as_ref(),
+            request.clone(),
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&response).unwrap(),
+            serde_json::json!({"ok": true, "data": null})
+        );
+
+        let projection: Option<agent_doc_state_backbone::DocumentStateProjection> =
+            decode_controller_response(dir.path(), &request, &response)
+                .expect("a present null payload is the handler's successful optional result");
+        assert!(projection.is_none());
+    }
+
+    #[test]
     fn typed_controller_decode_reports_missing_data_with_command_and_raw_envelope() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

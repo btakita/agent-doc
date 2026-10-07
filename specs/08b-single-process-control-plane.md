@@ -18,6 +18,11 @@ projections, and tmux transcript inference.
 - IPC remains the boundary between external callers and the controller process:
   CLI commands, editor plugins, and managed panes send requests through the
   controller API instead of mutating session sidecars directly.
+- A successful typed controller RPC always includes its `data` field. JSON
+  `null` is a present payload and represents a successful absent value for an
+  optional result such as `document_state_projection` or
+  `turn_admission_projection`; clients must deliver it as `Ok(None)`. Omitting
+  `data` is a malformed success envelope and remains a diagnosed error.
 - In-process consolidation does not make every operation synchronous. The hot
   path validates commands and records durable intent quickly; slow work runs in
   document actors, supervisor adapters, or background workers.

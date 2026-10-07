@@ -3904,6 +3904,25 @@ mod tests {
         );
     }
 
+    /// GH #170: a controller with no document projection replies with the valid
+    /// optional-result envelope `{"data":null,"ok":true}`. The embedded
+    /// resolver must treat that as an empty baseline, not as missing envelope
+    /// data, so a cold editor can capture its first operation burst.
+    #[test]
+    fn document_base_hash_maps_a_null_projection_response_to_the_empty_baseline() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("tasks/cold-editor.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body\n").unwrap();
+        let _actor =
+            agent_doc_controller_io::project_controller::start_state_actor_for_tests(tmp.path())
+                .unwrap();
+
+        let hash = ffi_document_base_hash_on_plane(&doc, true)
+            .expect("a null projection payload must resolve as the empty baseline");
+        assert_eq!(hash, agent_doc_hash::content_hash(""));
+    }
+
     /// `#basehashsilentnull`: a merge base the resolver cannot project must name
     /// its cause where an operator or agent can read it. Before this, the only
     /// record of the failure was the cdylib's stderr — which a JetBrains IDE

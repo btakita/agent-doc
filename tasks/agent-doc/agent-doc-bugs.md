@@ -16,7 +16,6 @@ presets:
   '#gh-fix': fix then close
   '#release': release + publish
   '#self': agent-doc-bugs.md
-  '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: go
@@ -148,7 +147,6 @@ Completed and released `agent-doc v0.35.474` at commit `397b6a6e5`.
 - Release CI was in progress during the single inspection; the GitHub Release object was not yet available.
 
 The agent-doc workflow enforced isolated subagent worktrees and committed closeout; tsift provided bounded navigation and test evidence. See [agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md) and [sdk.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md).
-
 ### Re: recovered response
 
 Yes. The current declaration is correct:
@@ -164,6 +162,141 @@ The `#subagents` entry inside `preset` is redundant—the attribute controls dis
 ```md
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 ```
+
+### Re: subagent scaling, queue recovery, editor layout fixes, and v0.35.475 — gpt-6.1-sol · 2026-10-07T14:59:33-04:00
+
+> **Chat prompt (#chatprompt):** cont
+
+> **Chat prompt (#chatprompt):** subagent fix: › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/devops.md
+>
+>
+> • Preflight refused this turn because the document’s agent:done archive points to tasks/devops.md instead of a .done.md
+>   file. I won’t start a response or edit the document; I’m running the permitted session check now to surface any
+>   pending operator prompt verbatim.
+>
+> • Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/devops.md
+>   └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/devops.md total_ms=3…
+>     [session-check] INTERRUPTED: cycle `cycle-1791316137364` is `committed` (commit_success), but the active harness s…
+>     + 2 lines (ctrl+t to expand)
+>
+> • Preflight admission failed; no response cycle was started and the document was not edited.
+>
+>   Reason: agent:done archive=tasks/devops.md must point to a .done.md file.
+>
+>   session-check reported this pending operator prompt verbatim:
+>
+>   > agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/devops.md
+>
+>   Worked for 21s • 2:44 AM
+
+> **Chat prompt (#chatprompt):** never mind...user error
+
+> **Chat prompt (#chatprompt):** However, I fixed the archive, then Run Agent Doc...and the prompt did not submit. I manually	submitted the prompt.
+
+> **Chat prompt (#chatprompt):** subagent: Allow the operator to delete backlog items: › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+>
+>
+> • The turn is still refused for the same missing backlog item, #setuppersonalslack. I’ll run the permitted session
+>   check once more and report its exact result without modifying the document.
+>
+> • Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+>   └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md total_ms=4381…
+>     [session-check] INTERRUPTED: open backlog item(s) from recent history are completely absent from the project: #set…
+>     + 2 lines (ctrl+t to expand)
+>
+> • Agent-doc remains blocked because #setuppersonalslack is absent from the live backlog. Session-check found no
+>   additional pending operator prompt.
+>
+>   Restore, relocate, or mark that item done before retrying. No files were changed.
+>
+>   Worked for 37s • 12:23 PM
+
+> **Chat prompt (#chatprompt):** also fix in subagent: auto-sync to agent-doc-bugs.md cause a 1 pane layout. Sync Tmux Pane did recover the 2 pane layout.
+
+> **Chat prompt (#chatprompt):** also fix Run Agent Doc on agent-doc-bugs.md while this turn was running: dispatch-only codex reopen refused to inject into pane %130 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md because the pane still shows queued draft in composer; restore an idle prompt and retry
+> the route-owned host supervisor (pid 870535) serving this document is mapping a STALE agent-doc binary while a newer build is installed, so it can keep producing File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). Refresh it without discarding the live turn: `agent-doc admin recycle` (recycles at the next idle boundary) or `agent-doc session restart-supervisor <FILE>` (refuses busy panes).
+
+> **Chat prompt (#chatprompt):** It should have been "- I'm skeptical about the reported 63.2% Not Flagged rate."
+
+> **Chat prompt (#chatprompt):** Can we use more subagents?
+
+> **Chat prompt (#chatprompt):** Is the current usage of the `subagents` `agent:queue` attribute correct?
+
+> **Chat prompt (#chatprompt):** Is the `#subagents` preset redundant now?
+
+> **Chat prompt (#chatprompt):** In a subagent: fix: • Blocked by hook
+>   └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/tasks/agent-
+> doc/agent-doc-bugs.md. [session-check] INTERRUPTED: cycle `cycle-1791393792054` is still `preflight_started`
+> (preflight_started) — cycle started but no write/commit followed. The latest assistant text was captured into the
+> pending/capture ledger before auto-close. The hook could not finish the required commit boundary: [lint-gate]
+> INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
+> (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write
+> --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to
+> temporarily skip this gate. /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md:174:1 error: attribute
+> `subagents` on `agent:queue` is missing `=value` [agent-doc/malformed-attr]   hint: try `subagents=<value>` . The
+> retained capture or projection is already durable and the same intent commits itself once delivery converges — this is a
+> deferral, not a lost response. Run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-
+> doc-bugs.md` once to observe the terminal state; do NOT re-send the response, force disk, or `admin recycle`, which
+> disturb the capture being awaited. Do not reach for `admin reload-lib` on your own either: `admin reload-lib` is the
+> sanctioned recovery only when `agent-doc session-check` reports that the editor holding the document is not serving its
+> replica, and then its remedy governs. Do not send the final answer yet. If the response is missing from the document,
+> run `agent-doc repair /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` first. Then finish the
+> commit boundary for this turn and end with `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+> agent-doc-bugs.md`.
+
+> **Queue prompt:** ⏭️ do [#subagentsattributescale]
+
+Implemented. Bare `subagents` now means all eligible, dependency-ready, unclaimed queue heads, while `subagents=N` provides a fixed cap. The active Codex environment permits four agents total, including the root, so it can run three worker agents concurrently; additional eligible work dispatches as slots become free. `fan-out` remains the bare alias.
+
+The declaration now in this document is correct:
+
+```md
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+```
+
+The `#subagents` preset is redundant now because the typed queue attribute owns scheduling. Removing it from the preset list was correct. The earlier recovered response stated the intended runtime semantics but exposed a real lint mismatch: the installed dialect validator rejected bare `subagents` even though the queue parser accepted it. The lint adapter now shares the queue-domain interpretation, so bare `subagents` and `fan-out` pass while malformed bare attributes such as `preset` still fail.
+
+> **Queue prompt:** The last 2 responses in sdk.md have been unescaped.
+
+Fixed. Strict closeout/replay now commits the canonical escaped response through the private index and recognizes the safe pending repair after restart, without overwriting newer editor authority or a concurrent disk cut. This also repairs the retained Stop-hook cycle that was blocked by the false bare-attribute lint error.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/174
+
+Fixed on `main` in `85ecc680e` and closed. Half-rekeyed rename identities are tolerated and repaired by matching current document identity, while genuine copy conflicts retain a typed terminal refusal instead of retrying 132 times.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/175
+
+Fixed on `main` in `d1cc2491b` and closed. Remote Dev capture now separates visible structural evidence from selected focus evidence, preventing hidden tabs from widening a two-pane or one-pane tmux layout.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/176
+
+Fixed on `main` in `7bdd2a0fc` and `32fa4b3a8`, then closed. Plugin packaging now enforces a tracked-plus-untracked source digest fence, and the JetBrains generation advanced to `0.2.504`, preventing changed sources from shipping under an already-released plugin version.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/177
+
+Fixed on `main` in `b013de126` and closed. JetBrains evaluates Remote Dev snapshot/authority before backend-window readiness, so tab-switch capture no longer waits for `wins=1`; deferrals now include an INFO reason.
+
+The other reported defects are fixed on `main` as well:
+
+- Run Agent Doc submit verification now keeps the pass-through window open long enough to distinguish a real empty composer from a delayed submission (`f3ff1b4fa`).
+- Explicit operator backlog deletion is accepted when proven by editor operations or an idle cut with committed history; unexplained disappearance still blocks (`a8a3ec148`, `b72ab679e`).
+- Safe passive auto-sync preserves the current layout when any requested column is stale, preventing the observed two-pane-to-one-pane collapse; an explicit full sync may still realize the valid remainder (`3601a7b03`).
+- Queued same-route reopen is coalesced after supervisor refresh, foreign drafts still refuse injection, and an obsolete stale-supervisor warning is suppressed once the recycle settles (`03db286e6`). No forced recycle disturbed this live turn.
+
+The corrected document wording is exactly:
+
+- I'm skeptical about the reported 63.2% Not Flagged rate.
+
+> **Queue prompt:** release + publish
+
+Published `agent-doc v0.35.475` from `f374e3f7d`: GitHub Release assets, PyPI, and release CI are green, and the release was installed locally. The subsequent fixes above are pushed to public `main` through `3158f3c80`; they are installed locally but intentionally are not represented as a second tag or release.
+
+Verification and installation are complete:
+
+- The integrated `make check` passed with no failures (`tart-6ef16a123b`), including the cross-editor simulation.
+- `make install-full` installed CLI/native `0.35.475`, JetBrains `0.2.504`, and VS Code `0.2.80`. The active document endpoint deferred native reload to the safe idle boundary, preserving this turn.
+- Book and Pages checks for `3158f3c80` are green; the main CI run was still in progress at the required one-shot observation.
+- All queue claims were released before this response.
 <!-- agent:boundary:d2a9ba1d -->
 <!-- /agent:exchange -->
 
@@ -173,16 +306,16 @@ The `#subagents` entry inside `preset` is redundant—the attribute controls dis
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ⏭️ do [#subagentsattributescale]
-- The last 2 responses in sdk.md have been unescaped.
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/174
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/175
-- #gh-fix https://github.com/btakita/agent-doc/issues/176
-- 🚧 release + publish
+- 🚧 The last 2 responses in sdk.md have been unescaped.
+- #gh-fix https://github.com/btakita/agent-doc/issues/174
+- #gh-fix https://github.com/btakita/agent-doc/issues/175
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/176
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/177
+- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#subagentsattributescale] In `agent:queue`, can we have the subagents attribute scale to as many as needed?
 <!-- /agent:backlog -->
 
 ## Review

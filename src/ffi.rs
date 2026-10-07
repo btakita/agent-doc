@@ -1726,6 +1726,17 @@ pub unsafe extern "C" fn agent_doc_log_editor_op_capture_refusal(
             sanitize_op_capture_refusal_field(detail),
         ),
     );
+    if reason == "doc_advanced_during_drain"
+        && let Err(error) = agent_doc_op_capture_io::refresh_op_capture_activity(&file_path_buf)
+    {
+        agent_doc_ops_log_io::log_op(
+            &file_path_buf,
+            &format!(
+                "editor_op_capture_activity_refresh_failed reason=doc_advanced_during_drain error={} #opcapturedormant",
+                sanitize_op_capture_refusal_field(&format!("{error:#}")),
+            ),
+        );
+    }
     1
 }
 

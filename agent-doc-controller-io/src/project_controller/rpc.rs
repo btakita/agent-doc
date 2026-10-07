@@ -18579,6 +18579,10 @@ enum EditorOpCaptureUpdate {
     Clear {
         event_nonce: String,
     },
+    Touch {
+        updated_ms: u64,
+        event_nonce: String,
+    },
 }
 
 /// Atomically derive and append the next complete editor-op epoch checkpoint.
@@ -18653,6 +18657,32 @@ fn handle_editor_op_capture_update(
                 agent_doc_state_backbone::StateFact::EditorOpCaptureCleared {
                     document_hash,
                     epoch,
+                },
+            )
+        }
+        EditorOpCaptureUpdate::Touch {
+            updated_ms,
+            event_nonce,
+        } => {
+            let Some(active) = current
+                .as_ref()
+                .and_then(|document| document.document.editor_op_capture.as_ref())
+            else {
+                return Ok(false);
+            };
+            let event_id = format!(
+                "editor-op-capture-activity:{document_hash}:{}:{event_nonce}",
+                active.epoch
+            );
+            (
+                event_id,
+                agent_doc_state_backbone::StateFact::EditorOpCaptureCheckpointed {
+                    document_hash,
+                    canonical_path: file.to_string_lossy().into_owned(),
+                    epoch: active.epoch,
+                    base_hash: active.base_hash.clone(),
+                    ops_json: active.ops_json.clone(),
+                    updated_ms,
                 },
             )
         }
@@ -37009,6 +37039,44 @@ mod tests {
                 .len(),
             2,
             "same-base callbacks must serialize into one complete checkpoint"
+        );
+
+        let ops_before_touch = capture.ops_json.clone();
+        let request: ControllerRequest = serde_json::from_value(serde_json::json!({
+            "command": "editor_op_capture_update",
+            "file": doc,
+            "diagnostic_payload": serde_json::to_string(&serde_json::json!({
+                "action": "touch",
+                "updated_ms": 15_000,
+                "event_nonce": "raced-drain",
+            })).unwrap(),
+        }))
+        .unwrap();
+        assert!(handle_editor_op_capture_update(&bootstrap, &runtime, request).unwrap());
+        let projected = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        let capture = projected
+            .document
+            .editor_op_capture
+            .as_ref()
+            .expect("activity refresh preserves active capture");
+        assert_eq!(
+            capture.epoch, 1,
+            "activity refresh must not rotate the epoch"
+        );
+        assert_eq!(
+            capture.ops_json, ops_before_touch,
+            "activity refresh must not duplicate ops"
+        );
+        assert_eq!(capture.updated_ms, 15_000);
+        assert_eq!(
+            compact_document_admission(Some(&projected), 20_000),
+            CompactDocumentAdmission::DeferActiveTyping {
+                retry_after_ms: 5_000,
+            },
+            "a raced editor drain must keep Compact Exchange behind the quiet window",
         );
 
         let request: ControllerRequest = serde_json::from_value(serde_json::json!({

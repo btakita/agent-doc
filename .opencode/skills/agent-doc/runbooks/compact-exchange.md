@@ -49,6 +49,14 @@ Steps to compact an agent-doc exchange component when it grows too large.
 - The CLI, JetBrains action, and VS Code action submit one operation to the CP;
 they never compute or apply compaction themselves. The CP performs the read,
 archive, and canonical CRDT replacement in one controller-owned mutation scope.
+This document maintenance request is independent of whether a harness turn is
+running or was interrupted; any durable captured response is folded into the
+working model as described above. Active editor typing is a separate admission
+gate: the request remains in its bounded deferred-typing loop until it observes
+a continuous quiet window. A JetBrains drain that races a newer edit refreshes
+the unchanged pending op epoch, so it extends that window instead of exposing a
+partial replay to compaction. Starting another Agent Doc turn is neither needed
+nor a recovery step for a deferred Compact Exchange request.
 Editor delivery, durable settlement, and closeout are derived by the keyed
 per-document Lazily projection. A retained target is accepted without a
 foreground ACK-recovery request or polling barrier.

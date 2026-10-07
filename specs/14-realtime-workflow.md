@@ -1085,6 +1085,15 @@ names these reasons when both producer markers are absent, and reports the
 absence of receipts as an unobserved reporter chain — a different diagnosis from
 a named refusal.
 
+The retryable `doc_advanced_during_drain` refusal also refreshes the active
+epoch checkpoint's `updated_ms` without changing its base, epoch, or operations.
+The locally requeued burst is still operator activity even though it has not yet
+reached the record FFI. Controller-owned maintenance such as Compact Exchange
+must therefore defer through its normal quiet-window outcome instead of
+replaying an older checkpoint while the editor is still advancing. The next
+stable drain either appends the intact burst or leaves the existing fail-closed
+capture rules in force; the refresh never drops or invents an operation.
+
 A handed-over burst states its evidence too (`#opcaptureliveread`). The refusal
 receipt made a *dormant* ledger diagnosable, but a ledger that DOES record still
 proved the four facts verification depends on only by the **absence** of a

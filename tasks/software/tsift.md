@@ -50,7 +50,7 @@ Compacted content:
 
 ## Queue
 
-<!-- agent:queue subagents=3 preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents=3 preset="#spec-test-build-install-commit-push" priority go -->
 - #gh-fix https://github.com/btakita/tsift/issues/26
 - #gh-fix https://github.com/btakita/tsift/issues/27
 - #gh-fix https://github.com/btakita/tsift/issues/28

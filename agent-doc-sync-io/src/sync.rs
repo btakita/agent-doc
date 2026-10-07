@@ -205,15 +205,15 @@ use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
 use agent_doc_supervisor::startup_miss::unresolved_startup_miss_blocks_autostart;
 use agent_doc_sync::{
-    AutoStartMode, RENAME_DEBOUNCE_TTL_SECS, SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
-    SYNC_DOCTOR_REPAIR_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET,
+    AutoStartMode, GatedLayoutDecision, RENAME_DEBOUNCE_TTL_SECS,
+    SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET, SYNC_DOCTOR_REPAIR_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET,
     SYNC_OWNERSHIP_PROOF_BUDGET, SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET,
     SYNC_PRUNE_SUBPHASE_BUDGET, SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
     SYNC_WINDOW_RESOLUTION_BUDGET, WindowIndexNormalizationPlan, auto_started_panes_summary,
     destructive_repair_throttle_state_key, effective_sync_columns, epoch_millis_now,
-    last_visible_excerpt, latency_budget_status, plan_window_index_normalization,
-    planned_stash_window_indices, registry_relative_file_path, rename_debounce_expired,
-    sanitize_excerpt, sync_latency_message,
+    gated_layout_decision, last_visible_excerpt, latency_budget_status,
+    plan_window_index_normalization, planned_stash_window_indices, registry_relative_file_path,
+    rename_debounce_expired, sanitize_excerpt, sync_latency_message,
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -4948,7 +4948,8 @@ fn run_with_options_internal_at_root(
     // from what tmux-router realises (the focused document excepted) and its
     // safe-boundary recycle is requested; the next sync after the recycle
     // admits the now-fresh pane.
-    let router_col_args = {
+    let requested_column_count = col_args.len();
+    let (router_col_args, excluded_column_count) = {
         let gate_session_keys: HashMap<PathBuf, String> = session_files
             .borrow()
             .iter()
@@ -4999,17 +5000,36 @@ fn run_with_options_internal_at_root(
         // GH #136: acknowledge what this pass deliberately does not build, so
         // the controller converges on it instead of retrying it.
         record_sync_gated_documents(&gate.excluded);
-        gate.col_args
+        let excluded_column_count = requested_column_count.saturating_sub(gate.col_args.len());
+        (gate.col_args, excluded_column_count)
     };
-    if router_col_args.is_empty() && !col_args.is_empty() {
-        // GH #124: every column was gated out (stale, or a stale focused pane
-        // that would have stashed a live turn). tmux-router refuses an empty
-        // column set, and realising nothing must not mean stashing everything:
-        // keep the current layout until a recycle admits a fresh pane.
-        let message = "[sync] every layout column was excluded as stale; preserving the current tmux layout (GH #124)";
+    if gated_layout_decision(
+        auto_start_mode,
+        requested_column_count,
+        excluded_column_count,
+    ) == GatedLayoutDecision::PreserveCurrent
+    {
+        // Safe-passive exact-visible observations are atomic surface
+        // projections: a temporary stale-supervisor exclusion must not be
+        // realised as a narrower layout. Full/manual repair may still realise
+        // a non-empty remainder, while every mode preserves when all columns
+        // were gated out.
+        let message = if excluded_column_count == requested_column_count {
+            "[sync] every layout column was excluded as stale; preserving the current tmux layout (GH #124)".to_string()
+        } else {
+            format!(
+                "[sync] safe passive sync preserved the current tmux layout because {} of {} requested columns were excluded as stale",
+                excluded_column_count, requested_column_count
+            )
+        };
         eprintln!("{message}");
-        mark_sync_layout_preserved(message);
-        sync_log("layout_preserved_all_columns_stale_excluded (GH #124)");
+        mark_sync_layout_preserved(&message);
+        sync_log(&format!(
+            "layout_preserved_stale_columns_excluded excluded={} requested={} mode={} (GH #124)",
+            excluded_column_count,
+            requested_column_count,
+            auto_start_mode.log_label(),
+        ));
         return Ok(());
     }
     let col_args: &[String] = &router_col_args;

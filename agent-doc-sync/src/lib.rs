@@ -118,6 +118,36 @@ impl AutoStartMode {
     }
 }
 
+/// Whether a sync pass may realise the columns left after the stale-supervisor
+/// gate has excluded one or more requested documents.
+///
+/// Safe-passive sync is a projection of the editor's complete visible surface.
+/// Realising a strict subset would turn a temporary stale-supervisor condition
+/// into a destructive pane-layout change. Full/manual sync keeps its repair
+/// behaviour and may realise a non-empty remainder while the excluded actor is
+/// recycled. Every mode preserves the current layout when no column remains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatedLayoutDecision {
+    RealizeRemaining,
+    PreserveCurrent,
+}
+
+pub fn gated_layout_decision(
+    mode: AutoStartMode,
+    requested_columns: usize,
+    excluded_columns: usize,
+) -> GatedLayoutDecision {
+    let excluded_columns = excluded_columns.min(requested_columns);
+    if requested_columns > 0
+        && (excluded_columns == requested_columns
+            || (matches!(mode, AutoStartMode::SafePassive) && excluded_columns > 0))
+    {
+        GatedLayoutDecision::PreserveCurrent
+    } else {
+        GatedLayoutDecision::RealizeRemaining
+    }
+}
+
 /// Already-observed candidates for a windowless tmux layout target.
 ///
 /// The IO adapters resolve pane ids, live sessions, and project configuration;
@@ -1054,6 +1084,42 @@ mod tests {
     fn auto_start_mode_reports_stable_log_labels() {
         assert_eq!(AutoStartMode::Full.log_label(), "full");
         assert_eq!(AutoStartMode::SafePassive.log_label(), "safe-passive");
+    }
+
+    #[test]
+    fn gated_layout_decision_preserves_every_pass_with_no_remaining_column() {
+        for mode in [AutoStartMode::Full, AutoStartMode::SafePassive] {
+            assert_eq!(
+                gated_layout_decision(mode, 2, 2),
+                GatedLayoutDecision::PreserveCurrent,
+            );
+        }
+    }
+
+    #[test]
+    fn gated_layout_decision_preserves_partial_safe_passive_projection() {
+        assert_eq!(
+            gated_layout_decision(AutoStartMode::SafePassive, 2, 1),
+            GatedLayoutDecision::PreserveCurrent,
+        );
+    }
+
+    #[test]
+    fn gated_layout_decision_keeps_full_sync_repair_and_ungated_paths() {
+        assert_eq!(
+            gated_layout_decision(AutoStartMode::Full, 2, 1),
+            GatedLayoutDecision::RealizeRemaining,
+        );
+        for mode in [AutoStartMode::Full, AutoStartMode::SafePassive] {
+            assert_eq!(
+                gated_layout_decision(mode, 2, 0),
+                GatedLayoutDecision::RealizeRemaining,
+            );
+            assert_eq!(
+                gated_layout_decision(mode, 0, 0),
+                GatedLayoutDecision::RealizeRemaining,
+            );
+        }
     }
 
     #[test]

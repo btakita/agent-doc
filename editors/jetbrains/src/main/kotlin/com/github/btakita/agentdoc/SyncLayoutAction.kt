@@ -830,8 +830,10 @@ object LayoutDetector {
             sessionDocumentPaths?.contains(file.path) ?: AgentDocSessionFiles.isSessionDocument(file)
         }
         // On a Remote Dev backend the editor tracker is the split-aware
-        // RdServerEditorTracker: its active editors are the frontend text editors
-        // whose visibility the client reported, one per visible split.
+        // RdServerEditorTracker. Its active editors are the frontend text editors
+        // whose visibility the client reported, but Editor/Preview can transiently
+        // retain a hidden tab here (GH #175); the native fold treats selected as
+        // focus evidence and prevents that edge from widening established width.
         val activeEditors = EditorOpenFileSurface.activeEditors(project)
         return remoteManagers
             .mapIndexed { index, manager ->
@@ -895,13 +897,36 @@ object LayoutDetector {
         val windows = resolution.columns.flatMap { column ->
             column.files.map { LayoutWindowSnapshot(x = 0, y = 0, file = it) }
         }
-        logObservedLayout(
-            0,
-            windows,
-            resolution.columns,
-            source = resolution.source + (resolution.reason?.let { " reason=$it" } ?: ""),
+        logLayoutObservation(
+            observedRemoteLayoutLine(
+                windows,
+                resolution.columns,
+                resolution.source + (resolution.reason?.let { " reason=$it" } ?: ""),
+                snapshot.clients,
+            ),
         )
         return EditorLayout(resolution.columns)
+    }
+
+    /** GH #175: successful Remote Dev observations retain the raw evidence needed to audit width. */
+    internal fun observedRemoteLayoutLine(
+        snapshots: List<LayoutWindowSnapshot>,
+        columns: List<LayoutColumn>,
+        source: String,
+        clients: List<RemoteClientSessionEditors>,
+    ): String =
+        observedLayoutLine(
+            0,
+            snapshots,
+            columns,
+        ) + " source=$source " + remoteClientEvidenceLine(clients)
+
+    internal fun remoteClientEvidenceLine(clients: List<RemoteClientSessionEditors>): String {
+        fun render(files: List<String>) = files.joinToString(",").ifEmpty { "<none>" }
+        return "remote_clients=${clients.size} clients=[" + clients.mapIndexed { index, client ->
+            "$index:{visible=[${render(client.visible)}] selected=[${render(client.selected)}] " +
+                "open=[${render(client.open)}]}"
+        }.joinToString(" ") + "]"
     }
 
     private fun resolveRemoteLayout(
@@ -914,9 +939,10 @@ object LayoutDetector {
         nativeFold(snapshot.projectRoot, evidenceJson)
             ?.let(::parseRemoteLayoutResolution)
             ?.let { return it }
-        val fallback = uniqueRemoteSplitSelection(
-            snapshot.clients.map { (it.visible + it.selected).distinct() },
-        )
+        // Older native libraries are memoryless, but must still keep focus
+        // evidence out of the visible split set (GH #175).
+        val fallback = uniqueRemoteSplitSelection(snapshot.clients.map { it.visible })
+            ?: uniqueRemoteSplitSelection(snapshot.clients.map { it.selected })
             ?: return null
         return RemoteLayoutResolution(
             columns = buildColumnsFromSnapshots(headlessSelectionSnapshots(fallback)),

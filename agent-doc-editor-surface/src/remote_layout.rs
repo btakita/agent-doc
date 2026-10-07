@@ -8,9 +8,12 @@
 //! handed zero columns and tmux can never show more than one pane.
 //!
 //! The backend does know which client editors are *visible*: the Remote Dev
-//! editor tracker records every frontend text editor whose visibility the
-//! client reported (one per visible split). Two visible session documents for
-//! one client are two splits, because a split shows one tab at a time.
+//! editor tracker records frontend text editors whose visibility the client
+//! reported. Usually that is one per visible split, but compound editors such
+//! as JetBrains' "Editor and Preview" can leave the hidden tab's text editor in
+//! that set after a tab switch (GH #175). The globally selected file therefore
+//! identifies focus, not another split, and cannot make an established layout
+//! wider by itself.
 //!
 //! This module is the pure fold from that per-client evidence (visible,
 //! selected, and open session documents) plus the previous resolution to the
@@ -21,10 +24,14 @@
 //!
 //! Rules, in order:
 //!
-//! 1. **Detected.** Exactly one distinct client evidence set names two or more
-//!    session documents → one column per document. Visible editors outrank
-//!    selected files. Column order is stable: documents already in the
-//!    previous layout keep their order, new ones follow in reported order.
+//! 1. **Detected.** Exactly one distinct client visible set names two or more
+//!    session documents → one column per document. A multi-file selected set
+//!    remains a compatibility fallback, but selected is never unioned into a
+//!    visible set. Column order is stable: documents already in the previous
+//!    layout keep their order, new ones follow in reported order. If the only
+//!    added visible document is the globally selected one, an established
+//!    width is held because that observation is equally explained by a hidden
+//!    compound-editor tab (GH #175).
 //! 2. **Retained.** Otherwise the evidence is degenerate (each client names at
 //!    most one document, or several clients disagree). A previous layout whose
 //!    documents are still open is kept, so a single-selection observation never
@@ -59,9 +66,16 @@ pub struct RemoteClientEditors {
 }
 
 impl RemoteClientEditors {
-    /// Visible editors first, then selected files, de-duplicated.
-    fn evidence(&self) -> Vec<String> {
-        distinct(self.visible.iter().chain(self.selected.iter()))
+    /// Structural split evidence. Visible and selected are deliberately not
+    /// unioned: Remote Dev selected files report focus, and adding that focus
+    /// to a lagging/stale visible set fabricates a column on a tab switch.
+    fn split_evidence(&self) -> Option<(Vec<String>, RemoteLayoutSource)> {
+        let visible = distinct(self.visible.iter());
+        if visible.len() >= 2 {
+            return Some((visible, RemoteLayoutSource::RemoteClientVisibleEditors));
+        }
+        let selected = distinct(self.selected.iter());
+        (selected.len() >= 2).then_some((selected, RemoteLayoutSource::RemoteClientSelectedFiles))
     }
 }
 
@@ -142,26 +156,23 @@ impl RemoteLayoutMemory {
         // Rule 1: one client's split evidence.
         let mut candidates: Vec<(Vec<String>, RemoteLayoutSource)> = Vec::new();
         for client in &evidence.clients {
-            let files = client.evidence();
-            if files.len() < 2 {
+            let Some((files, source)) = client.split_evidence() else {
                 continue;
-            }
-            let source = if distinct(client.visible.iter()).len() >= 2 {
-                RemoteLayoutSource::RemoteClientVisibleEditors
-            } else {
-                RemoteLayoutSource::RemoteClientSelectedFiles
             };
             if !candidates.iter().any(|(seen, _)| same_set(seen, &files)) {
                 candidates.push((files, source));
             }
         }
         let ambiguous = candidates.len() > 1;
-        if let [(files, source)] = candidates.as_slice() {
-            return RemoteLayoutResolution {
-                columns: self.ordered_columns(files),
-                source: *source,
-                reason: None,
-            };
+        match candidates.as_slice() {
+            [(files, source)] if !self.selection_only_change(files, evidence) => {
+                return RemoteLayoutResolution {
+                    columns: self.ordered_columns(files),
+                    source: *source,
+                    reason: None,
+                };
+            }
+            _ => {}
         }
 
         // Rule 2: retain the previous layout, width held.
@@ -181,6 +192,10 @@ impl RemoteLayoutMemory {
             .filter(|column| !column.files.is_empty())
             .collect();
         if !retained.is_empty() {
+            let selection_only_change = !ambiguous
+                && candidates
+                    .first()
+                    .is_some_and(|(files, _)| self.selection_only_change(files, evidence));
             let reason = match active {
                 Some(active) if !covers(&retained, active) => {
                     let index = self
@@ -189,8 +204,13 @@ impl RemoteLayoutMemory {
                         .and_then(|focused| column_of(&retained, focused))
                         .unwrap_or(retained.len() - 1);
                     retained[index] = SurfaceColumn::new([active.to_string()]);
-                    "tab_switch_replaced_focus_column"
+                    if selection_only_change {
+                        "selected_visible_change_replaced_focus_column"
+                    } else {
+                        "tab_switch_replaced_focus_column"
+                    }
                 }
+                _ if selection_only_change => "selected_visible_change_width_held",
                 _ if ambiguous => "ambiguous_remote_clients",
                 _ => "single_selection_within_retained_layout",
             };
@@ -235,16 +255,49 @@ impl RemoteLayoutMemory {
             .map(|file| SurfaceColumn::new([file.clone()]))
             .collect()
     }
+
+    /// GH #175: `EditorTracker.activeEditors` may retain the hidden text half
+    /// of an Editor/Preview tab. If a known layout's only new visible member is
+    /// also the one globally selected file, the observation proves a focus
+    /// change but not a new split. Route it through rule 2 so the focused
+    /// column is replaced and width is held.
+    fn selection_only_change(&self, files: &[String], evidence: &RemoteLayoutEvidence) -> bool {
+        if self.columns.is_empty() {
+            return false;
+        }
+        let selected = distinct(
+            evidence
+                .clients
+                .iter()
+                .flat_map(|client| client.selected.iter()),
+        );
+        let [selected] = selected.as_slice() else {
+            return false;
+        };
+        // The tracker has not caught up: the only selected file is absent from
+        // its otherwise-authoritative visible set.
+        if !files.contains(selected) {
+            return true;
+        }
+        if files.len() <= self.columns.len() {
+            return false;
+        }
+        let added: Vec<&String> = files
+            .iter()
+            .filter(|file| !covers(&self.columns, file))
+            .collect();
+        added.as_slice() == [selected]
+    }
 }
 
-/// The document the operator is on: a lone client evidence file, else the
-/// backend-local focused file.
+/// The document the operator is on: one selected client file, else the
+/// backend-local focused file. Visible is structural evidence, not focus.
 fn active_document(evidence: &RemoteLayoutEvidence) -> Option<String> {
     let singles = distinct(
         evidence
             .clients
             .iter()
-            .filter_map(|client| match client.evidence().as_slice() {
+            .filter_map(|client| match distinct(client.selected.iter()).as_slice() {
                 [only] => Some(only.clone()),
                 _ => None,
             })
@@ -397,6 +450,46 @@ mod tests {
         assert_eq!(
             resolution.reason.as_deref(),
             Some("tab_switch_replaced_focus_column")
+        );
+    }
+
+    /// GH #175: selected is focus evidence, not another split. While the
+    /// tracker still names the old two visible tabs, selecting an already-open
+    /// third tab replaces the focused column instead of appending a third.
+    #[test]
+    fn gh175_selected_file_does_not_extend_visible_split_set() {
+        let (memory, _) = RemoteLayoutMemory::default()
+            .advance(&evidence(vec![client(&[A, B], &[A], &[A, B, C])], &[A]));
+        let (_, resolution) =
+            memory.advance(&evidence(vec![client(&[A, B], &[C], &[A, B, C])], &[C]));
+        assert_eq!(resolution.source, RemoteLayoutSource::RetainedRemoteColumns);
+        assert_eq!(resolution.columns.len(), 2);
+        assert_eq!(
+            columns(&resolution),
+            vec![vec![C.to_string()], vec![B.to_string()]]
+        );
+        assert_eq!(
+            resolution.reason.as_deref(),
+            Some("selected_visible_change_replaced_focus_column")
+        );
+    }
+
+    /// GH #175 reproduction: one established split has an Editor/Preview tab
+    /// A. After switching that split to B, Remote Dev can transiently report
+    /// both text editors as visible. B is selected, so this is a tab switch,
+    /// not proof of a second split; the established width remains one.
+    #[test]
+    fn gh175_editor_preview_tab_switch_holds_one_column() {
+        let memory = RemoteLayoutMemory {
+            columns: vec![SurfaceColumn::new([A])],
+            focused: Some(A.to_string()),
+        };
+        let (_, resolution) = memory.advance(&evidence(vec![client(&[A, B], &[B], &[A, B])], &[B]));
+        assert_eq!(resolution.source, RemoteLayoutSource::RetainedRemoteColumns);
+        assert_eq!(columns(&resolution), vec![vec![B.to_string()]]);
+        assert_eq!(
+            resolution.reason.as_deref(),
+            Some("selected_visible_change_replaced_focus_column")
         );
     }
 

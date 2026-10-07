@@ -161,17 +161,21 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   Remote Dev client editor-manager sessions selects the remote evidence path even when the
   backend happens to expose an incidental local window (for example a source/Find Usages window);
   backend window count is not remote-layout authority. Remote client-selected files name only the
-  focused document, so the plugin reports per-client `visible` (the Remote Dev editor tracker's active client editors,
-  one per visible split), `selected`, and `open` session documents to the shared native fold
+  focused document, so the plugin reports per-client `visible` (the Remote Dev editor tracker's active client editors),
+  `selected`, and `open` session documents to the shared native fold
   `agent_doc_editor_surface_resolve_remote_layout_json` (GH #134). The plugin snapshots those
   client/editor collections and the backend-focused files on the EDT, then runs the fold from the
   generation-fenced surface delivery worker; direct synchronous detection also marshals only the
   immutable fold off the EDT. The native bridge's EDT guard therefore remains intact and a
   selection observation can use retained split memory instead of silently taking the memoryless
   fallback (GH #157). One client naming two or
-  more documents is a detected split; a later single-selection observation retains that known
-  split (width held; a tab switch to an uncovered document replaces the previously focused
-  column, never appends), and documents whose tabs closed drop out. Only with no split
+  more visible documents is a detected split; `selected` remains separate focus evidence and is
+  never unioned into that visible set. Remote Dev can leave the text half of a hidden
+  Editor/Preview tab active, so when the sole visible-set addition is also the newly selected
+  document, the fold retains the established width and replaces the previously focused column
+  instead of appending (GH #175). Every successful `[layout-detect] observed` line records each
+  client's raw `visible`, `selected`, and `open` lists. A later single-selection observation also
+  retains the known split, and documents whose tabs closed drop out. Only with no split
   evidence and no retained split does the observation stay `unknown`. The controller's coalesced ingress receipt joins
   `layout=unknown|observed|focus_only` to `pane_action=none|focus_only|structural_sync` on one
   line so every pane effect names its authority.

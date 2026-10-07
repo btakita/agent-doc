@@ -70,6 +70,34 @@ class LayoutDetectorTest {
     }
 
     @Test
+    fun `memoryless remote fallback does not append selected file to visible splits`() {
+        val detected = LayoutDetector.detectEditorLayout(
+            LayoutDetector.RemoteLayoutSnapshot(
+                projectRoot = "/repo",
+                clients = listOf(
+                    LayoutDetector.RemoteClientSessionEditors(
+                        visible = listOf("tasks/a.md", "tasks/b.md"),
+                        selected = listOf("tasks/c.md"),
+                        open = listOf("tasks/a.md", "tasks/b.md", "tasks/c.md"),
+                    ),
+                ),
+                focusedSessionFiles = listOf("tasks/c.md"),
+            ),
+            nativeFold = { _, _ -> null },
+        )
+
+        assertEquals(
+            EditorLayout(
+                listOf(
+                    LayoutColumn(listOf("tasks/a.md")),
+                    LayoutColumn(listOf("tasks/b.md")),
+                ),
+            ),
+            detected,
+        )
+    }
+
+    @Test
     fun `buildColumnsFromSnapshots keeps screen order when focused window is listed first`() {
         val columns = LayoutDetector.buildColumnsFromSnapshots(
             listOf(
@@ -157,6 +185,39 @@ class LayoutDetectorTest {
             "[layout-detect] observed windows=2 snapshots=[(0,0) a.md, (0,0) <none>] " +
                 "columns=2 [a.md | <empty>]",
             line,
+        )
+    }
+
+    @Test
+    fun `remote observed line names each clients visible selected and open evidence`() {
+        val line = LayoutDetector.observedRemoteLayoutLine(
+            snapshots = listOf(LayoutDetector.LayoutWindowSnapshot(0, 0, "tasks/b.md")),
+            columns = listOf(LayoutColumn(listOf("tasks/b.md"))),
+            source = "retained_remote_columns reason=selected_visible_change_replaced_focus_column",
+            clients = listOf(
+                LayoutDetector.RemoteClientSessionEditors(
+                    visible = listOf("tasks/a.md", "tasks/b.md"),
+                    selected = listOf("tasks/b.md"),
+                    open = listOf("tasks/a.md", "tasks/b.md", "tasks/c.md"),
+                ),
+                LayoutDetector.RemoteClientSessionEditors(
+                    visible = emptyList(),
+                    selected = emptyList(),
+                    open = listOf("tasks/d.md"),
+                ),
+            ),
+        )
+
+        assertTrue(line.startsWith("[layout-detect] observed windows=0"))
+        assertTrue(line.contains("remote_clients=2"))
+        assertTrue(
+            line.contains(
+                "0:{visible=[tasks/a.md,tasks/b.md] selected=[tasks/b.md] " +
+                    "open=[tasks/a.md,tasks/b.md,tasks/c.md]}",
+            ),
+        )
+        assertTrue(
+            line.contains("1:{visible=[<none>] selected=[<none>] open=[tasks/d.md]}"),
         )
     }
 

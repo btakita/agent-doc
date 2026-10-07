@@ -513,13 +513,14 @@ pub fn dispatch_routed_reopen(
 /// the trigger sitting unsent in the composer forever: route logged
 /// `exit_code=0` / `pass_through_single_submit` while no cycle ever started.
 ///
-/// `#runsubmitclaude`: the common case pays exactly one
-/// `PASS_THROUGH_STRANDED_DRAFT_SETTLE` window before the first verdict.
+/// `#runsubmitclaude`: positive busy/draft evidence can decide after one
+/// `PASS_THROUGH_STRANDED_DRAFT_SETTLE` window. An idle-and-empty pane remains
+/// ambiguous for the ordinary direct-pane stable-empty acceptance window.
 /// `tmux send-keys` returns once the bytes reach the pty, so a capture taken
 /// immediately after it shows the pane *before* the trigger arrived; reading
 /// that empty composer as `Cleared` ended the repair in a millisecond and left
-/// the operator's real strand unrepaired. 150ms is still two orders of
-/// magnitude under the dispatch-start proof budget this path exists to skip.
+/// the operator's real strand unrepaired. The bounded 900ms stable-empty check
+/// remains below the dispatch-start proof budget this path exists to skip.
 /// A capture failure is never read as "stranded": unknown pane state must not
 /// authorize pressing keys. This is a one-shot transport boundary inside a
 /// single route call with no long-lived state relationship, so it stays a
@@ -536,12 +537,13 @@ fn repair_pass_through_stranded_draft(
 ) {
     let start = Instant::now();
     let max_enters = pass_through_stranded_draft_max_enter_resubmits();
-    let required_clear_observations = pass_through_stranded_draft_required_clear_observations();
     let mut enters_sent = 0usize;
     let mut clear_observations = 0usize;
     let mut settled = false;
     let mut capture_failed = false;
     let settle = agent_doc_controller::dispatch::pass_through_stranded_draft_settle();
+    let required_clear_observations =
+        pass_through_stranded_draft_required_clear_observations(settle);
     loop {
         let (draft_visible, pane_busy) = match agent_doc_tmux_io::capture_pane(tmux, pane) {
             Ok(content) => (

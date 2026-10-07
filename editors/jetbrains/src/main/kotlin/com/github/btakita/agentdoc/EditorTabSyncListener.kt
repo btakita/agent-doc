@@ -472,6 +472,11 @@ private data class CapturedSurface(
             AwaitingSelectedDocument,
         }
 
+        enum class WindowSelectionReadiness {
+            Current,
+            AwaitingBackendWindowSelection,
+        }
+
         fun projectionReadiness(
             preferredActiveFile: String?,
             visibleMdFiles: List<String>,
@@ -503,6 +508,21 @@ private data class CapturedSurface(
 
         fun restoredEditorWindowsReady(selectedWindowFiles: List<String?>): Boolean =
             selectedWindowFiles.isNotEmpty() && selectedWindowFiles.all { it != null }
+
+        /**
+         * Remote Dev client state owns the visible layout even when the backend happens to expose
+         * an incomplete local [com.intellij.openapi.fileEditor.impl.EditorWindow]. The backend gate
+         * therefore applies only after the remote-client authority decision (GH #177).
+         */
+        fun windowSelectionReadiness(
+            selectedWindowFiles: List<String?>,
+            useRemoteClientLayout: Boolean,
+        ): WindowSelectionReadiness =
+            if (useRemoteClientLayout || restoredEditorWindowsReady(selectedWindowFiles)) {
+                WindowSelectionReadiness.Current
+            } else {
+                WindowSelectionReadiness.AwaitingBackendWindowSelection
+            }
 
         /**
          * `#stickymdpane`: `stickyWindowFallbacks[i]` is the last document
@@ -631,6 +651,11 @@ private data class CapturedSurface(
 
     private fun log(msg: String) {
         LOG.debug("[layout-sync] $msg")
+    }
+
+    private fun captureDeferred(reason: String): CapturedSurface? {
+        LOG.info("[layout-sync] capture deferred reason=$reason")
+        return null
     }
 
     /** Call only while holding [lifecycleLock]. */
@@ -899,16 +924,38 @@ private data class CapturedSurface(
         val manager = FileEditorManager.getInstance(project)
         val managerEx = FileEditorManagerEx.getInstanceEx(project)
         val editorWindows = managerEx.windows
-        val selectedWindowPaths =
-            SurfaceReport.splitSelections(
-                editorWindows.map { it.selectedFile?.path },
-                manager.selectedFiles.map { it.path },
-            )
-        if (!SurfaceReport.restoredEditorWindowsReady(selectedWindowPaths)) {
-            return null
-        }
         val openSessionFiles = manager.openFiles.filter(AgentDocSessionFiles::isSessionDocument)
         val sessionDocumentPaths = openSessionFiles.map { it.path }.toSet()
+        // GH #177: capture remote-client evidence before consulting backend-window readiness.
+        // Remote Dev may expose an incidental backend window whose selected file is null; that
+        // window must not gate the frontend-owned layout.
+        val remoteLayoutCandidate =
+            LayoutDetector.snapshotRemoteLayout(project, sessionDocumentPaths)
+        val useRemoteClientLayout =
+            LayoutDetector.shouldUseRemoteClientLayout(
+                backendWindowCount = editorWindows.size,
+                remoteClientSessionCount = remoteLayoutCandidate.clients.size,
+            )
+        val selectedWindowPaths =
+            SurfaceReport.splitSelections(
+                if (useRemoteClientLayout) {
+                    emptyList()
+                } else {
+                    editorWindows.map { it.selectedFile?.path }
+                },
+                manager.selectedFiles.map { it.path },
+            )
+        if (
+            SurfaceReport.windowSelectionReadiness(
+                selectedWindowFiles = selectedWindowPaths,
+                useRemoteClientLayout = useRemoteClientLayout,
+            ) == SurfaceReport.WindowSelectionReadiness.AwaitingBackendWindowSelection
+        ) {
+            return captureDeferred(
+                "backend_window_selection_incomplete " +
+                    "windows=${editorWindows.size} selected=${selectedWindowPaths.size}",
+            )
+        }
         val rawVisibleMdFiles =
             SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
                 selectedWindowPaths,
@@ -932,8 +979,8 @@ private data class CapturedSurface(
         // GH #157: capture Remote Dev client/editor state on this EDT turn, but defer its native
         // retained-split fold to the generation-owned surface delivery worker below.
         val remoteLayoutSnapshot =
-            if (editorWindows.isEmpty()) {
-                LayoutDetector.snapshotRemoteLayout(project, sessionDocumentPaths)
+            if (useRemoteClientLayout || editorWindows.isEmpty()) {
+                remoteLayoutCandidate
             } else {
                 null
             }
@@ -963,14 +1010,18 @@ private data class CapturedSurface(
                 )
             }
         val visibleMdFiles = settledProjection.visibleMdFiles
-        if (visibleMdFiles.isEmpty()) return null
+        if (visibleMdFiles.isEmpty()) {
+            return captureDeferred("no_visible_session_documents")
+        }
         val openMarkdownFiles = openSessionFiles
         val preferredMarkdownFile = preferredFile?.takeIf { candidate ->
             candidate.isValid &&
                 AgentDocSessionFiles.isSessionDocument(candidate) &&
                 openMarkdownFiles.any { it.path == candidate.path }
         }
-        if (preferredFile != null && preferredMarkdownFile == null) return null
+        if (preferredFile != null && preferredMarkdownFile == null) {
+            return captureDeferred("preferred_file_not_open_session_document")
+        }
         if (
             SurfaceReport.projectionReadiness(
                 preferredActiveFile = preferredMarkdownFile?.path,
@@ -981,7 +1032,7 @@ private data class CapturedSurface(
                         ?.flatMap(LayoutColumn::files),
             ) != SurfaceReport.ProjectionReadiness.Current
         ) {
-            return null
+            return captureDeferred("preferred_document_not_in_current_projection")
         }
         val selectedEditorFile =
             manager.selectedTextEditor?.virtualFile
@@ -991,7 +1042,7 @@ private data class CapturedSurface(
                 preferredActiveFile = preferredMarkdownFile?.path,
                 selectedEditorFile = selectedEditorFile?.path,
                 visibleMdFiles = visibleMdFiles,
-            ) ?: return null
+            ) ?: return captureDeferred("active_session_document_unresolved")
         val file =
             sequenceOf(
                 preferredMarkdownFile,
@@ -999,7 +1050,8 @@ private data class CapturedSurface(
                 manager.selectedFiles.firstOrNull(AgentDocSessionFiles::isSessionDocument),
                 )
                 .filterNotNull()
-                .firstOrNull { it.path == activeFilePath } ?: return null
+                .firstOrNull { it.path == activeFilePath }
+                ?: return captureDeferred("active_virtual_file_unresolved")
         val focusedWindowTabs =
             managerEx.windows
                 .firstOrNull { it.selectedFile?.path == activeFilePath }

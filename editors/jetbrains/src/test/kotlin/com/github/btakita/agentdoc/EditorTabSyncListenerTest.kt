@@ -455,11 +455,89 @@ class EditorTabSyncListenerTest {
                 listOf("/repo/right.md", null),
             ),
         )
+        assertEquals(
+            EditorTabSyncListener.SurfaceReport.WindowSelectionReadiness
+                .AwaitingBackendWindowSelection,
+            EditorTabSyncListener.SurfaceReport.windowSelectionReadiness(
+                selectedWindowFiles = listOf("/repo/right.md", null),
+                useRemoteClientLayout = false,
+            ),
+        )
         assertTrue(
             EditorTabSyncListener.SurfaceReport.restoredEditorWindowsReady(
                 listOf("/repo/right.md", "/repo/left.md"),
             ),
         )
+    }
+
+    @Test
+    fun `remote tab switch bypasses incomplete backend window and publishes two columns`() {
+        val snapshot =
+            LayoutDetector.RemoteLayoutSnapshot(
+                projectRoot = "/repo",
+                clients =
+                    listOf(
+                        LayoutDetector.RemoteClientSessionEditors(
+                            visible = listOf("tasks/left.md", "tasks/right.md"),
+                            selected = listOf("tasks/left.md"),
+                            open = listOf("tasks/left.md", "tasks/right.md"),
+                        ),
+                    ),
+                focusedSessionFiles = listOf("tasks/left.md"),
+            )
+        val useRemoteClientLayout =
+            LayoutDetector.shouldUseRemoteClientLayout(
+                backendWindowCount = 1,
+                remoteClientSessionCount = snapshot.clients.size,
+            )
+
+        assertEquals(
+            EditorTabSyncListener.SurfaceReport.WindowSelectionReadiness.Current,
+            EditorTabSyncListener.SurfaceReport.windowSelectionReadiness(
+                selectedWindowFiles = listOf(null),
+                useRemoteClientLayout = useRemoteClientLayout,
+            ),
+        )
+
+        val layout =
+            LayoutDetector.detectEditorLayout(snapshot) { _, _ ->
+                """{"columns":[{"files":["tasks/left.md"]},{"files":["tasks/right.md"]}],"source":"remote_client_visible_editors","reason":null}"""
+            }
+        val surface =
+            EditorTabSyncListener.SurfaceReport.buildSurface(
+                focusedFile = "tasks/left.md",
+                visibleMdFiles = listOf("tasks/left.md", "tasks/right.md"),
+                editorLayout = layout,
+                forceReconcile = false,
+            )
+
+        assertEquals(2, surface.columns.size)
+        assertFalse(surface.focusOnly)
+    }
+
+    @Test
+    fun `every capture deferral logs an INFO reason`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val capture =
+            source
+                .substringAfter("private fun captureSurface(")
+                .substringBefore("private fun resolveSurface(")
+
+        assertTrue(
+            capture.indexOf("LayoutDetector.snapshotRemoteLayout(") <
+                capture.indexOf("SurfaceReport.windowSelectionReadiness("),
+        )
+        assertTrue(capture.contains("LayoutDetector.shouldUseRemoteClientLayout("))
+        assertFalse(capture.contains("return null"))
+        assertTrue(capture.contains("return captureDeferred("))
+        assertTrue(source.contains("LOG.info(\"[layout-sync] capture deferred reason=\$reason\")"))
     }
 
     @Test

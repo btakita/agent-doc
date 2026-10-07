@@ -240,6 +240,11 @@ An in-progress marker on a free-text head records selection, not completion
 (`#bugautostruck`). It never replaces the exact `> **Queue prompt:**` evidence.
 If the response does not actually quote and answer that head, closeout must leave
 it active even when the marker was added earlier in the cycle.
+When a selected head enters the live queue after the pre-turn baseline, the
+combination of that marker and an exact current-response quote plus answer prose
+allows the same atomic closeout to consume it. This prevents the next Stop hook
+from reopening work the just-committed response demonstrably completed; neither
+the marker nor preset-expansion wording is sufficient by itself.
 
 **Already-complete or backlog-tracked free-text heads auto-strike (`#qftbklgstrike`).**
 Separately from the exchange-answer strike above, preflight queue maintenance

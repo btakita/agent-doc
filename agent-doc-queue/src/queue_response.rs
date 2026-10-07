@@ -833,6 +833,23 @@ fn response_heading_targets_distinctive_identifier(response_body: &str, head_tex
     })
 }
 
+/// True when the current response explicitly echoes this queue prompt and has
+/// answer prose after the echo. This is stronger than the broader matching
+/// accepted by [`free_text_head_answered_by_response`]: callers may use it to
+/// prove that the responder observed a queue head selected during the turn.
+pub fn free_text_head_has_explicit_answer_evidence(
+    response_body: &str,
+    head_text: &str,
+) -> bool {
+    // Strip the leading operator/agent pin (`:pushpin:` ...) first -- its literal
+    // shortcode word would otherwise survive normalization and break the match.
+    let head_clean = strip_priority_markers(head_text);
+    if head_echoed_only_in_bare_singular_blocks(response_body, &head_clean) {
+        return false;
+    }
+    response_explicit_queue_prompt_echoes_head(response_body, &head_clean)
+}
+
 /// True when the committed `response_body` answers the free-text queue head
 /// `head_text`: the head's normalized **prose prefix** (text before any fenced
 /// code block -- see [`free_text_head_match_prose`]) appears inside the response's
@@ -847,7 +864,7 @@ pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str)
     if head_echoed_only_in_bare_singular_blocks(response_body, &head_clean) {
         return false;
     }
-    if response_explicit_queue_prompt_echoes_head(response_body, &head_clean) {
+    if free_text_head_has_explicit_answer_evidence(response_body, &head_clean) {
         return true;
     }
     if response_heading_targets_distinctive_identifier(response_body, &head_clean) {

@@ -763,6 +763,11 @@ pub fn answered_free_text_head_node_keys(
         // was selected for this cycle. It is not evidence that the response
         // addressed that head. Require exact quoted-prompt proof for ordinary
         // free text, or resolved-expansion proof for a prompt-preset head.
+        let has_explicit_answer_evidence =
+            crate::queue_response::free_text_head_has_explicit_answer_evidence(
+                response_body,
+                text,
+            );
         if !crate::queue_response::free_text_head_answered_by_response(response_body, text)
             && !crate::queue_response::prompt_preset_head_answered_by_response(
                 content,
@@ -781,6 +786,14 @@ pub fn answered_free_text_head_node_keys(
         }
         if let Some(baseline) = baseline
             && !crate::queue_response::free_text_head_present_in_baseline(baseline, text)
+            // A selected head may enter the live queue after the pre-turn
+            // baseline (for example, a subagent claim merged during the turn).
+            // The marker alone is not completion evidence, but together with
+            // an exact current-response echo it proves that the responder saw
+            // and answered this item. Consume it atomically so auto-queue does
+            // not reopen the already-completed preset on the next Stop hook.
+            && !(agent_doc_document::queue_projection::has_in_progress_marker(text)
+                && has_explicit_answer_evidence)
         {
             continue;
         }
@@ -2707,6 +2720,58 @@ Old.
                 .unwrap()
                 .is_none(),
             "the projection must disappear once its target is authoritative"
+        );
+    }
+
+    /// `#presetlateclaim`: a claimed preset head can join the live queue after
+    /// the pre-turn baseline while the response is still being composed. An
+    /// exact prompt echo plus answer proves that this is selected work, not an
+    /// operator draft that should be deferred to the next auto-queue cycle.
+    #[test]
+    fn selected_preset_added_after_baseline_is_struck_by_exact_response_evidence() {
+        let baseline = concat!(
+            "---\nqueue_active: true\nprompt_presets:\n",
+            "  '#gh-fix': fix then close\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- unrelated later work\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: issue 177 — gpt-6.1-sol\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/177\n\n",
+            "Fixed on main in b013de126 and closed.\n",
+        );
+        let current = format!(
+            concat!(
+                "---\nqueue_active: true\nprompt_presets:\n",
+                "  '#gh-fix': fix then close\n",
+                "---\n\n",
+                "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue auto -->\n",
+                "- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/177\n",
+                "- unrelated later work\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response = response,
+        );
+
+        let projected = project_answered_free_text_strike(&current, response, Some(baseline))
+            .unwrap()
+            .expect("selected and explicitly answered late head should be consumed");
+        assert_eq!(projected.node_keys.len(), 1);
+        assert!(projected.target_content.contains(
+            "- ~~#gh-fix https://github.com/btakita/agent-doc/issues/177~~ — auto-struck: answered this cycle (#ftstrike)"
+        ));
+        assert!(projected.target_content.contains("- unrelated later work"));
+
+        let operator_draft = current.replacen("- 🚧 #gh-fix", "- #gh-fix", 1);
+        assert!(
+            project_answered_free_text_strike(&operator_draft, response, Some(baseline))
+                .unwrap()
+                .is_none(),
+            "an unselected head absent from the baseline remains next-cycle work"
         );
     }
 

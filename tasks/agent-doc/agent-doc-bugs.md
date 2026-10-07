@@ -404,7 +404,53 @@ I closed [GH #160](https://github.com/btakita/agent-doc/issues/160) and [GH #161
 The queued #162 work remains delegated. Its fix is merged through PR #163 and issue #162 is closed; the v0.35.470 release gate is still running after correcting an editor-parity record omission and a deterministic controller-test timing flaw. No premature tag or publication has occurred.
 
 The newly queued #164 item is claimed by a separate background worker in an isolated worktree. The #chatpromptmulti fix is also complete on pushed branch `fix/chatpromptmulti-quoted-blank-lines` at `040410cf2`, with 418 affected tests and `make check-fast` passing; it remains outside the already-sealed v0.35.470 batch.
-<!-- agent:boundary:8ef49f52 -->
+> **Chat prompt (#chatprompt):** also fix in subagent: pane %87 composer still holds the unsubmitted /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md trigger after Enter; admission was not observed within 3000ms. Retry later — route never appends a second trigger to a stranded draft.
+
+> **Chat prompt (#chatprompt):** Are you fixing the docs.md issue? pane %87 composer still holds the unsubmitted /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md trigger after Enter; admission was not observed within 3000ms. Retry later — route never appends a second trigger to a stranded draft.
+
+> **Chat prompt (#chatprompt):** Can I run agent-doc manually in Claude Code?
+
+> **Chat prompt (#chatprompt):** or should I wait?
+
+> **Chat prompt (#chatprompt):** Why is this taking so long?
+
+### Re: docs.md routing fix and v0.35.471 publication — gpt-5 · 2026-10-06T22:03:23-04:00
+
+The `docs.md` issue is fixed and released in agent-doc v0.35.471.
+
+The apparent draft in pane `%87` was Claude Code's faint autosuggestion, not operator input: the composer buffer was empty. Route correctly classified it as `ReadyEmpty`, but a second raw-screen substring check overrode that result and treated the rendered ghost text as a stranded exact trigger. Repeated Enter keys were therefore no-ops. The fix makes the harness composer projection authoritative: only a real `OperatorDraft` is resubmitted or protected, while faint ghost text receives a normal fresh dispatch. Exact, wrapped-path, and foreign-draft protections remain covered.
+
+Normally, manual Claude Code invocation is supported from an empty composer:
+
+`/agent-doc /absolute/path/to/document.md`
+
+For the reported `%87` state, waiting was correct before the fix because retyping could have duplicated an active trigger. With v0.35.471 installed, the ghost-text state is recognized correctly.
+
+The avoidable part of the delay was waiting on three duplicate PR CI runs after local and combined staging proofs were already green. I corrected that: all three PRs merged immediately, and the final combined tree ran one authoritative full release gate. The legitimate remainder was that gate—9,603 Rust tests, controller/editor/cross-editor/Python/formal checks, tmux CI, optimized installation, and four-platform artifact publication.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/162
+
+GH #162 was fixed through PR #163, closed, and released in v0.35.470. The release also stabilized a controller-pressure timing test uncovered by the full gate.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/164
+
+GH #164 was fixed through PR #165, closed with release evidence, and released in v0.35.471. Runtime recycle fan-out is now reason/evidence-driven: current binary installs skip same-image controller churn; plugin fan-out requires a proven live JetBrains hot upgrade and targets only roots with live editor endpoints; explicit same-image refresh is completion while stale-binary same-image remains failure.
+
+> **Queue prompt:** do [#chatpromptmulti]
+
+Completed and released in v0.35.471 through PR #168. Multi-paragraph `#chatprompt` records now retain quoted blank separators as one atomic record, so their later paragraphs are not reclassified as fresh exchange steering. The affected realtime and prompt-contract suites passed, and the full release gate passed.
+
+> **Queue prompt:** release + publish
+
+agent-doc v0.35.471 is published from `92eb5b75692d00df64f182e1056d787982a12d0c`.
+
+- [GitHub Release v0.35.471](https://github.com/btakita/agent-doc/releases/tag/v0.35.471) contains all four native archives, JetBrains and VS Code packages, and both checksum manifests.
+- [PyPI 0.35.471](https://pypi.org/project/agent-doc/0.35.471/) contains the unyanked universal wheel.
+- The Release and PyPI workflows succeeded.
+- `make check`, `make tmux-ci`, and exactly one `make install-full` succeeded; the installed CLI/native library reports v0.35.471.
+
+GH #160 and #161 were also confirmed released in v0.35.469 and are now closed with release evidence.
+<!-- agent:boundary:e0f2b885 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -415,16 +461,15 @@ The newly queued #164 item is claimed by a separate background worker in an isol
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/160~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/161~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/162
-- #gh-fix https://github.com/btakita/agent-doc/issues/164
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/162~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/164~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 do [#chatpromptmulti]
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] 🚧 [#chatpromptmulti] [agent-doc] Preserve multi-paragraph #chatprompt recordings as one prompt when quoted blank lines separate paragraphs; add regression coverage so committed chat prompt bodies are not reclassified as fresh exchange steering.
 <!-- /agent:backlog -->
 
 ## Review

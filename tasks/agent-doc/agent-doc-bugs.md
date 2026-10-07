@@ -19,7 +19,6 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -134,6 +133,20 @@ During integration, the clean baseline exposed a deterministic delayed-replica p
 Released `v0.35.474` from commit `397b6a6e54bc493513cb0d01316e19b4ce7943ac`. The tag and `main` are pushed, the installed CLI reports `agent-doc 0.35.474`, the native library and editor packages were installed, and both GitHub issues were closed with release notes. The final version-projected `make check` and release-owned tmux CI gate passed. The one-shot GitHub Actions inspection found CI run 37611054867 in progress for the release commit; the GitHub Release object was not yet present, so it was not polled. The release parity audit records all four changes.
 
 The implementation was isolated in subagent worktrees, reviewed and integrated serially into one release tree. `tsift` bounded navigation and test-digest evidence, while the agent-doc workflow enforced claim ownership, the single response write, and the commit/session-check boundary.
+
+### Re: recovered response
+
+Completed and released `agent-doc v0.35.474` at commit `397b6a6e5`.
+
+- Fixed GitHub issues #172 and #173 and closed both.
+- Fixed the SDK Stop-hook replay/queue bug for HAVN-1489/HAVN-1490.
+- Fixed delayed editor-replica preflight handling.
+- Full `make check` and tmux CI passed.
+- CLI, native library, JetBrains, and VS Code integrations installed.
+- SDK and primary documents both pass `agent-doc session-check`.
+- Release CI was in progress during the single inspection; the GitHub Release object was not yet available.
+
+The agent-doc workflow enforced isolated subagent worktrees and committed closeout; tsift provided bounded navigation and test evidence. See [agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md) and [sdk.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md).
 <!-- agent:boundary:d2a9ba1d -->
 <!-- /agent:exchange -->
 
@@ -142,9 +155,6 @@ The implementation was isolated in subagent worktrees, reviewed and integrated s
 
 ## Pending / Not Built
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/172
-- #gh-fix https://github.com/btakita/agent-doc/issues/173
-- 🚧 release + publish
 <!-- /agent:queue -->
 
 

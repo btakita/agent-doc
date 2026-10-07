@@ -153,7 +153,10 @@ pub enum ActiveQueuePromptState {
 /// authority before startup so a recoverable formatting slip does not prevent
 /// the supervisor from opening.
 pub fn repair_document_frontmatter_on_disk(file: &Path) -> Result<bool> {
-    let content = match agent_doc_document_realtime_io::resolve_disk_current_document_content(
+    // The historical name predates live document authority. Repair the same
+    // current text that startup will parse so an attached editor's newer bytes
+    // are never replaced by a repaired stale disk replica.
+    let content = match agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "repair_document_frontmatter_on_disk",
     ) {
@@ -163,17 +166,21 @@ pub fn repair_document_frontmatter_on_disk(file: &Path) -> Result<bool> {
     if frontmatter::parse(&content).is_ok() {
         return Ok(false);
     }
-    let Some((bad, good)) = frontmatter::raw_frontmatter_yaml(&content)
+    let repaired = if let Some((bad, good)) = frontmatter::raw_frontmatter_yaml(&content)
         .map(str::to_string)
         .and_then(|bad| frontmatter::repair_frontmatter_yaml(&bad).map(|good| (bad, good)))
-    else {
+    {
+        content.replacen(&bad, &good, 1)
+    } else if let Some(repaired) = frontmatter::repair_single_char_prefixed_closing_fence(&content)
+    {
+        repaired
+    } else {
         return Ok(false);
     };
-    let repaired = content.replacen(&bad, &good, 1);
     agent_doc_document_realtime_io::atomic_write_through_authority(file, &repaired)
         .with_context(|| format!("failed to persist repaired frontmatter {}", file.display()))?;
     eprintln!(
-        "[agent-doc] repaired malformed frontmatter in {} (tabs/stray fence) before startup",
+        "[agent-doc] repaired malformed frontmatter in {} (tabs/stray or prefixed fence) before startup",
         file.display()
     );
     Ok(true)

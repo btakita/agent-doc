@@ -153,6 +153,24 @@ mod tests {
     }
 
     #[test]
+    fn repair_document_frontmatter_on_disk_repairs_prefixed_closing_fence() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("api.md");
+        let malformed =
+            "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n9---\nBody\n";
+        std::fs::write(&doc, malformed).unwrap();
+
+        assert!(repair_document_frontmatter_on_disk(&doc).unwrap());
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            repaired,
+            "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n---\nBody\n"
+        );
+        assert!(frontmatter::parse(&repaired).is_ok());
+    }
+
+    #[test]
     fn repair_document_frontmatter_on_disk_missing_file_is_noop() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("missing.md");

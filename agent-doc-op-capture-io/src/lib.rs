@@ -276,6 +276,106 @@ pub fn record_editor_op(doc: &Path, base_hash: &str, op: EditorOp) -> Result<()>
     record_editor_ops(doc, base_hash, vec![op])
 }
 
+/// Refresh the activity time of an already-active editor-op epoch without
+/// changing its base, epoch, or operations.
+///
+/// An editor may drain a burst next to a document snapshot and then discover
+/// that the document advanced before handoff. The burst remains live and is
+/// requeued, but no new operation can be appended until the next stable quiet
+/// boundary. Refreshing the complete checkpoint makes that retryable activity
+/// visible to controller admission (notably Compact Exchange) without dropping
+/// or duplicating any captured operation.
+pub fn refresh_op_capture_activity(doc: &Path) -> Result<bool> {
+    let (project_root, document_hash, canonical_path) = state_db_identity(doc)?;
+    let updated_ms = now_millis();
+    let nonce = event_nonce();
+    let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
+    if controller_socket.exists() && !agent_doc_state_wire::in_controller_request() {
+        let payload = serde_json::json!({
+            "action": "touch",
+            "updated_ms": updated_ms,
+            "event_nonce": nonce,
+        });
+        let request = serde_json::json!({
+            "command": "editor_op_capture_update",
+            "file": doc,
+            "diagnostic_payload": serde_json::to_string(&payload)?,
+        });
+        match agent_doc_state_wire::send_ndjson_request_to_actor(
+            &controller_socket,
+            &request,
+            EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
+        ) {
+            Ok(raw) => {
+                #[derive(serde::Deserialize)]
+                struct UpdateEnvelope {
+                    ok: bool,
+                    data: Option<bool>,
+                    error: Option<String>,
+                }
+                let envelope: UpdateEnvelope =
+                    serde_json::from_str(&raw).context("decode editor-op activity response")?;
+                if !envelope.ok {
+                    anyhow::bail!(
+                        "Lazily editor-op activity refresh rejected: {}",
+                        envelope.error.as_deref().unwrap_or("unknown error")
+                    );
+                }
+                return Ok(envelope.data.unwrap_or(false));
+            }
+            Err(agent_doc_state_wire::ActorRequestError::Connect(_))
+                if !controller_socket.exists() => {}
+            Err(err) => return Err(err).context("refresh Lazily editor-op activity"),
+        }
+    }
+
+    let mut conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(
+        &project_root,
+        EDITOR_OP_CAPTURE_BUSY_TIMEOUT,
+    )?;
+    let tx = conn.transaction()?;
+    let rows = agent_doc_sqlite::state_store::load_state_events_from_db(&tx, Some(&document_hash))?;
+    let mut ledger = agent_doc_state_backbone::EventLedger::new();
+    for row in rows {
+        ledger.append(serde_json::from_str(&row.payload_json)?);
+    }
+    let projection = ledger.project();
+    let Some(active) = projection
+        .document(&document_hash)
+        .and_then(|document| document.document.editor_op_capture.as_ref())
+    else {
+        return Ok(false);
+    };
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!(
+            "editor-op-capture-activity:{document_hash}:{}:{nonce}",
+            active.epoch
+        ),
+        agent_doc_state_backbone::StateFact::EditorOpCaptureCheckpointed {
+            document_hash: document_hash.clone(),
+            canonical_path,
+            epoch: active.epoch,
+            base_hash: active.base_hash.clone(),
+            ops_json: active.ops_json.clone(),
+            updated_ms,
+        },
+    );
+    let payload_json = serde_json::to_string(&event)?;
+    agent_doc_sqlite::state_store::insert_state_event_in_db(
+        &tx,
+        &agent_doc_sqlite::state_store::StateEventInsert {
+            event_id: &event.event_id,
+            document_hash: event.document_hash(),
+            domain: event.domain().label(),
+            fact_type: event.fact.label(),
+            payload_json: &payload_json,
+        },
+    )?;
+    tx.commit()?;
+    agent_doc_state_wire::mark_local_state_db_dirty();
+    Ok(true)
+}
+
 /// Record an ordered editor-op burst in one bounded state-ledger transaction.
 ///
 /// A quiet-period editor report can contain hundreds of keystrokes. Persisting
@@ -949,6 +1049,32 @@ mod tests {
             Some(retained),
             "later idempotent clears must not erase retained evidence"
         );
+    }
+
+    #[test]
+    fn activity_refresh_preserves_the_pending_epoch_and_operations() {
+        let (_dir, doc) = setup_doc();
+        let base = "b\n";
+        let base_hash = content_hash(base);
+        record_editor_op(
+            &doc,
+            &base_hash,
+            EditorOp::Insert {
+                offset: 0,
+                text: "a".into(),
+            },
+        )
+        .unwrap();
+        let before = load_op_capture(&doc).unwrap().expect("active capture");
+
+        assert!(refresh_op_capture_activity(&doc).unwrap());
+        let after = load_op_capture(&doc)
+            .unwrap()
+            .expect("activity refresh retains the capture");
+        assert_eq!(after.epoch, before.epoch);
+        assert_eq!(after.base_hash, before.base_hash);
+        assert_eq!(after.ops, before.ops);
+        assert!(after.updated_ms >= before.updated_ms);
     }
 
     #[test]

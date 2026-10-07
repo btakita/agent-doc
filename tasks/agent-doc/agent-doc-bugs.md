@@ -113,7 +113,19 @@ Not yet. Keep the current 94 GiB limit for now.
 The better first move is to keep large Cargo/Gradle targets and temporary worktrees on `/var/tmp` or another root-backed build directory, clean them at lifecycle boundaries, and reserve `/tmp` for genuinely short-lived data. If normal parallel builds still need more than 94 GiB after that, raise the cap cautiously to 128 GiB and monitor memory and swap pressure. The size setting is a ceiling rather than an up-front allocation, but it still increases the amount tmpfs may consume.
 
 No mount change was made.
-<!-- agent:boundary:1ab78e64 -->
+> **Chat prompt (#chatprompt):** raise /tmp to 128 GiB
+
+### Re: `/tmp` raised to 128 GiB — gpt-5 · 2026-10-07T17:46-04:00
+
+Completed.
+
+- Persisted `size=128G` on the `/tmp` tmpfs entry in `/etc/fstab`.
+- Remounted `/tmp` immediately; no reboot is required.
+- Verified the live mount is 128 GiB with 35.5 GiB used and 92.5 GiB available.
+- Preserved the prior configuration at `/etc/fstab.agent-doc-before-tmp-128g-20261007`.
+
+The temporary staging directory was removed after verification.
+<!-- agent:boundary:55dff4f7 -->
 <!-- /agent:exchange -->
 
 <!--

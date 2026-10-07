@@ -208,6 +208,18 @@ and `columns=N`; fall-through is `source=none` with the explicit survey
 diagnosable, while two registered live panes cannot be replaced by a fresh
 one-column seed.
 
+**Fresh-controller focus-escalation basis (GH #166):** a focus-only editor tab
+switch carries no columns. When the retained layout graph is empty after a
+controller restart or handoff, the focus escalation therefore uses the same
+positive live-tmux document survey as a fresh-controller `ensure` route. The
+live columns are a merge basis only: if they already contain the selected
+document they are republished unchanged, otherwise the selected document
+replaces one live column under the GH #106/GH #120 no-growth rule. A missing,
+empty, failed, or out-of-project observation still fails closed with
+`cause=no_editor_columns`. Every eligible probe logs
+`controller_editor_surface_focus_merge_basis`, including its `source=`,
+`reason=`, `session_source=`, and successful `columns=N` evidence.
+
 **Layout publisher arbitration (`layoutpublisherarbiter`, GH #120 asks 2-3):**
 the route publisher and `plugin_publication` both publish the one retained
 desired layout. They were applied last-writer-wins with the loser unlogged, so

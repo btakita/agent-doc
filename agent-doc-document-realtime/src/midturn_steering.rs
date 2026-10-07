@@ -673,7 +673,12 @@ fn strip_new_response_sections(baseline: &str, current: &str) -> String {
     let mut in_chat_record = false;
     for line in current.split_inclusive('\n') {
         let trimmed = line.trim();
-        if in_chat_record && trimmed.starts_with('>') && !baseline_lines.contains(trimmed) {
+        // Once a newly added record starts, every contiguous blockquote line
+        // belongs to that record. Do not consult `baseline_lines` here: a
+        // quoted blank separator is just `>`, which commonly already exists in
+        // an older record. Treating that repeated line as old content would end
+        // the record early and reclassify the following paragraph as steering.
+        if in_chat_record && trimmed.starts_with('>') {
             continue;
         }
         in_chat_record = false;
@@ -2479,12 +2484,18 @@ mod tests {
     #[test]
     fn agent_recorded_chat_prompt_is_never_operator_steering() {
         let owned = BTreeSet::new();
-        let baseline = doc("", EX);
+        // The pre-existing quote makes the blank blockquote separator (`>`)
+        // non-unique relative to the baseline. It must still remain part of a
+        // newly recorded multi-paragraph chat prompt.
+        let baseline_exchange = format!(
+            "{EX}> **Chat prompt (#chatprompt):** older prompt\n>\n> older second paragraph\n\n"
+        );
+        let baseline = doc("", &baseline_exchange);
         let record = "> **Chat prompt (#chatprompt):** Did you get my steering change when I edited the queue item?";
         let current = doc(
             "",
             &format!(
-                "{EX}{record}\n> second line of the same chat prompt\n\n### Re: steering edit on the #126 queue head\n\nAnswer.\n"
+                "{baseline_exchange}{record}\n> first paragraph continuation\n>\n> second paragraph of the same chat prompt\n\n### Re: steering edit on the #126 queue head\n\nAnswer.\n"
             ),
         );
         let wm = seeded(&baseline, None);

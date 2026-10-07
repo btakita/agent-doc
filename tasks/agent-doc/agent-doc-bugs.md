@@ -393,7 +393,9 @@ The requested cross-document subagent checks also completed safely:
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/160~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/161~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/162
+- do [#chatpromptmulti]
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 

@@ -165,6 +165,15 @@ pub fn check_completed_pending_reap_guard(
     ))
 }
 
+/// Identifies the terminal-maintenance interruption without parsing its
+/// human-readable tracked-item list. Stop hooks use this to finish the reap
+/// before considering any assistant-text capture for newer prompt work.
+pub fn is_completed_pending_reap_interruption(message: &str) -> bool {
+    message.starts_with(
+        agent_doc_workflow::session_check::COMPLETED_PENDING_REAP_GUARD_PREFIX,
+    )
+}
+
 pub fn check_snapshot_committed_guard(
     file: &Path,
     rc: &CycleContext,

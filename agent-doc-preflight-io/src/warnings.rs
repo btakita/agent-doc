@@ -1,7 +1,7 @@
 use crate::PreflightWarning;
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Collect warnings that can be evaluated before preflight mutates document or
 /// sidecar state. These are read-only checks over harness selection, live
@@ -394,6 +394,7 @@ pub fn stale_plugin_message(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LivePluginGenerationStatus {
     pub editor_id: Option<String>,
+    pub pid: u32,
     pub kind: String,
     pub running: String,
     pub expected: String,
@@ -441,6 +442,7 @@ pub fn live_plugin_generation_statuses_from_registrations(
             let expected = expected_for_kind(kind)?;
             Some(LivePluginGenerationStatus {
                 editor_id: Some(registration.editor_id.clone()),
+                pid: u32::try_from(registration.pid).unwrap_or_default(),
                 kind: kind.to_string(),
                 running: running.to_string(),
                 expected: expected.to_string(),
@@ -512,8 +514,7 @@ pub fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
     // text production never emitted.
     stale_plugin_warnings_from_statuses(
         live_plugin_generation_statuses(file),
-        installed_plugin_version,
-        plugin_staged_for_restart,
+        live_plugin_install_state,
     )
 }
 
@@ -592,29 +593,101 @@ pub fn installed_plugin_version(kind: &str) -> Option<String> {
         .flatten()
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct PluginInstallState {
+    installed: Option<String>,
+    staged_for_restart: bool,
+}
+
+/// Resolve install evidence from the plugin tree used by this live editor, not
+/// from whichever JetBrains data directory happened to receive the newest jar.
+/// A missing `/proc` mapping fails open to the generic update remedy instead of
+/// borrowing another IDE's install or staging state.
+fn live_plugin_install_state(status: &LivePluginGenerationStatus) -> PluginInstallState {
+    if !status.kind.eq_ignore_ascii_case("jetbrains") || status.pid == 0 {
+        return PluginInstallState::default();
+    }
+    let Some(jar_stem) = plugin_jar_stem(&status.kind) else {
+        return PluginInstallState::default();
+    };
+    plugin_install_state_for_mapped_jar(
+        &status.kind,
+        &status.expected,
+        &probe_mapped_plugin_jar(status.pid, jar_stem),
+        &agent_doc_fs::jetbrains_install::jetbrains_system_roots(),
+    )
+}
+
+fn plugin_install_state_for_mapped_jar(
+    kind: &str,
+    expected: &str,
+    mapped: &MappedPluginJar,
+    system_roots: &[PathBuf],
+) -> PluginInstallState {
+    if !kind.eq_ignore_ascii_case("jetbrains") {
+        return PluginInstallState::default();
+    }
+    let Some(plugins_dir) = jetbrains_plugins_dir_from_mapped_jar(mapped) else {
+        return PluginInstallState::default();
+    };
+    let installed = agent_doc_fs::jetbrains_install::newest_installed_artifact(
+        std::slice::from_ref(&plugins_dir),
+    )
+    .map(|artifact| artifact.version);
+    let staged_for_restart = agent_doc_fs::jetbrains_install::jetbrains_plugin_staged_in(
+        std::slice::from_ref(&plugins_dir),
+        system_roots,
+        expected,
+    );
+    PluginInstallState {
+        installed,
+        staged_for_restart,
+    }
+}
+
+fn jetbrains_plugins_dir_from_mapped_jar(mapped: &MappedPluginJar) -> Option<PathBuf> {
+    let path = match mapped {
+        MappedPluginJar::Deleted { path }
+        | MappedPluginJar::Superseded { path, .. }
+        | MappedPluginJar::Current { path, .. } => Path::new(path),
+        MappedPluginJar::Unknown => return None,
+    };
+    let lib_dir = path.parent()?;
+    let plugin_dir = lib_dir.parent()?;
+    if lib_dir.file_name()? != "lib" || plugin_dir.file_name()? != "agent-doc-jetbrains" {
+        return None;
+    }
+    plugin_dir.parent().map(Path::to_path_buf)
+}
+
 /// Shared tail of both `stale_plugin` entry points: one deduplicated warning per
-/// stale (kind, running-version) pair.
+/// distinct message. Two live IDEs with the same running version may need
+/// different remedies when only one has the expected package staged.
 fn stale_plugin_warnings_from_statuses(
     statuses: impl IntoIterator<Item = LivePluginGenerationStatus>,
-    installed_for_kind: impl Fn(&str) -> Option<String>,
-    staged_for_kind: impl Fn(&str, &str) -> bool,
+    install_state_for_status: impl Fn(&LivePluginGenerationStatus) -> PluginInstallState,
 ) -> Vec<PreflightWarning> {
-    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut seen: HashSet<String> = HashSet::new();
     statuses
         .into_iter()
         .filter_map(|status| {
-            if !status.stale || !seen.insert((status.kind.clone(), status.running.clone())) {
+            if !status.stale {
+                return None;
+            }
+            let install_state = install_state_for_status(&status);
+            let message = stale_plugin_message(
+                &status.kind,
+                &status.running,
+                &status.expected,
+                install_state.installed.as_deref(),
+                install_state.staged_for_restart,
+            );
+            if !seen.insert(message.clone()) {
                 return None;
             }
             Some(PreflightWarning {
                 code: "stale_plugin".to_string(),
-                message: stale_plugin_message(
-                    &status.kind,
-                    &status.running,
-                    &status.expected,
-                    installed_for_kind(&status.kind).as_deref(),
-                    staged_for_kind(&status.kind, &status.expected),
-                ),
+                message,
                 document_agent: None,
                 active_harness: None,
             })
@@ -631,8 +704,7 @@ pub fn stale_plugin_warnings_from_registrations(
 ) -> Vec<PreflightWarning> {
     stale_plugin_warnings_from_statuses(
         live_plugin_generation_statuses_from_registrations(registrations, &expected_for_kind),
-        |_| None,
-        |_, _| false,
+        |_| PluginInstallState::default(),
     )
 }
 
@@ -726,7 +798,7 @@ pub fn plugin_byte_identity_warnings(file: &Path) -> Vec<PreflightWarning> {
 mod tests {
     use super::{
         MappedPluginJar, classify_mapped_plugin_jar, plugin_byte_identity_warnings_from,
-        plugin_jar_stem, prefer_mapped_plugin_jar,
+        plugin_install_state_for_mapped_jar, plugin_jar_stem, prefer_mapped_plugin_jar,
     };
 
     /// `#pluginbyteidentity`: the kernel's `" (deleted)"` suffix is the only
@@ -1324,7 +1396,8 @@ mod tests {
         let core = stale_plugin_warnings_from_registrations(&registrations, |_| Some("0.2.206"));
         let statuses =
             live_plugin_generation_statuses_from_registrations(&registrations, |_| Some("0.2.206"));
-        let shared = stale_plugin_warnings_from_statuses(statuses, |_| None, |_, _| false);
+        let shared =
+            stale_plugin_warnings_from_statuses(statuses, |_| PluginInstallState::default());
         assert_eq!(core.len(), 1);
         assert_eq!(shared.len(), 1);
         assert_eq!(
@@ -1335,6 +1408,71 @@ mod tests {
             core[0].message,
             stale_plugin_message("jetbrains", "0.2.205", "0.2.206", None, false)
         );
+    }
+
+    /// GH #180: an idle IDE data directory can hold a newer jar or a pending
+    /// staging. Neither is evidence about the live IDE whose mapped jar names a
+    /// different plugin tree.
+    #[test]
+    fn stale_plugin_install_state_is_scoped_to_the_live_mapped_jar() {
+        let tmp = TempDir::new().unwrap();
+        let live = tmp.path().join("data/IntelliJIdea2026.3");
+        let idle = tmp.path().join("data/IntelliJIdea2026.2");
+        let live_lib = live.join("agent-doc-jetbrains/lib");
+        let idle_lib = idle.join("agent-doc-jetbrains/lib");
+        std::fs::create_dir_all(&live_lib).unwrap();
+        std::fs::create_dir_all(&idle_lib).unwrap();
+        let live_jar = live_lib.join("agent-doc-jetbrains-0.2.502.jar");
+        std::fs::write(&live_jar, b"live").unwrap();
+        std::fs::write(idle_lib.join("agent-doc-jetbrains-0.2.503.jar"), b"idle").unwrap();
+
+        let mapped = MappedPluginJar::Current {
+            path: live_jar.to_string_lossy().into_owned(),
+            inode: 1,
+        };
+        std::fs::write(
+            live.join(agent_doc_fs::plugin_jar::PLUGIN_RESTART_REQUIRED_MARKER),
+            "agent-doc declined the restart-free upgrade\nstaged_version=0.2.503\n",
+        )
+        .unwrap();
+        let staged = plugin_install_state_for_mapped_jar("jetbrains", "0.2.503", &mapped, &[]);
+        assert_eq!(staged.installed.as_deref(), Some("0.2.502"));
+        assert!(staged.staged_for_restart);
+        let staged_message = stale_plugin_message(
+            "jetbrains",
+            "0.2.502",
+            "0.2.503",
+            staged.installed.as_deref(),
+            staged.staged_for_restart,
+        );
+        assert!(staged_message.contains("ALREADY STAGED"), "{staged_message}");
+        assert!(
+            !staged_message.contains("ALREADY installed on disk"),
+            "{staged_message}"
+        );
+
+        std::fs::remove_file(live.join(agent_doc_fs::plugin_jar::PLUGIN_RESTART_REQUIRED_MARKER))
+            .unwrap();
+        std::fs::write(
+            idle.join(agent_doc_fs::plugin_jar::PLUGIN_RESTART_REQUIRED_MARKER),
+            "agent-doc declined the restart-free upgrade\nstaged_version=0.2.503\n",
+        )
+        .unwrap();
+        let not_staged = plugin_install_state_for_mapped_jar("jetbrains", "0.2.503", &mapped, &[]);
+        assert_eq!(not_staged.installed.as_deref(), Some("0.2.502"));
+        assert!(!not_staged.staged_for_restart);
+        let update_message = stale_plugin_message(
+            "jetbrains",
+            "0.2.502",
+            "0.2.503",
+            not_staged.installed.as_deref(),
+            not_staged.staged_for_restart,
+        );
+        assert!(
+            update_message.contains("on-disk install is 0.2.502"),
+            "{update_message}"
+        );
+        assert!(!update_message.contains("ALREADY STAGED"), "{update_message}");
     }
 
     #[test]
@@ -1372,26 +1510,26 @@ mod tests {
         // The production core threads the lookup into the message.
         let statuses = vec![LivePluginGenerationStatus {
             editor_id: Some("e".to_string()),
+            pid: 1,
             kind: "jetbrains".to_string(),
             running: "0.2.392".to_string(),
             expected: "0.2.453".to_string(),
             timestamp_ms: 1,
             stale: true,
         }];
-        let warnings = stale_plugin_warnings_from_statuses(
-            statuses.clone(),
-            |_| Some("0.2.451".into()),
-            |_, _| false,
-        );
+        let warnings =
+            stale_plugin_warnings_from_statuses(statuses.clone(), |_| PluginInstallState {
+                installed: Some("0.2.451".into()),
+                staged_for_restart: false,
+            });
         assert!(warnings[0].message.contains("on-disk install is 0.2.451"));
 
         // GH #87: the same on-disk state with {expected} staged for the next IDE
         // start is restart-only, through the production core too.
-        let staged = stale_plugin_warnings_from_statuses(
-            statuses,
-            |_| Some("0.2.451".into()),
-            |kind, expected| kind == "jetbrains" && expected == "0.2.453",
-        );
+        let staged = stale_plugin_warnings_from_statuses(statuses, |_| PluginInstallState {
+            installed: Some("0.2.451".into()),
+            staged_for_restart: true,
+        });
         assert!(
             staged[0].message.contains("ALREADY STAGED"),
             "{}",

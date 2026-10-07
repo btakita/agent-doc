@@ -1999,14 +1999,31 @@ fn already_staged_outcome(
         .into_iter()
         .find(|staging| staging.zip_present && staging.version == expected_version)?;
     let marker = target_dir.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
-    let reason = format!(
+    let base_reason = format!(
         "v{expected_version} is already staged for the next IDE start ({} in {}); not staging it again",
         staging.zip.display(),
         staging.script.display()
     );
-    let recorded = fs::read_to_string(&marker).ok().and_then(|body| {
-        agent_doc_fs::jetbrains_install::staged_version_from_restart_marker(&body)
-    });
+    let recorded_marker = fs::read_to_string(&marker).ok();
+    let recorded = recorded_marker
+        .as_deref()
+        .and_then(agent_doc_fs::jetbrains_install::staged_version_from_restart_marker);
+    // GH #180: reusing a viable staging must retain why its restart-free
+    // upgrade was unavailable. `PluginTargetOutcome` classifies permanence from
+    // this reason, so replacing it with only "already staged" made summaries
+    // regress to `restart_free_unavailable=false` on every subsequent run.
+    let reason = if recorded.as_deref() == Some(expected_version) {
+        recorded_marker
+            .as_deref()
+            .and_then(|body| {
+                body.lines()
+                    .find(|line| agent_doc_declined_dynamic_upgrade(line))
+            })
+            .map(|original| format!("{base_reason}; original staging reason: {original}"))
+            .unwrap_or(base_reason)
+    } else {
+        base_reason
+    };
     if recorded.as_deref() != Some(expected_version) {
         record_restart_required_marker(
             &marker,
@@ -4111,9 +4128,22 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
 
         fs::write(&zip, b"pkg").unwrap();
         assert!(super::already_staged_outcome(&target, &roots, "0.2.482").is_none());
-        match super::already_staged_outcome(&target, &roots, "0.2.481") {
-            Some(JetbrainsLocalInstallOutcome::StagedForRestart { reason }) => {
+        fs::write(
+            target.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER),
+            "pid 9: agent-doc declined the restart-free upgrade because it is permanently unavailable on this build\nstaged_version=0.2.481\nprevious_version=0.2.480\n",
+        )
+        .unwrap();
+        let outcome = super::already_staged_outcome(&target, &roots, "0.2.481")
+            .expect("the viable staging should be reused");
+        assert_eq!(
+            super::PluginTargetOutcome::from_jetbrains(&outcome),
+            super::PluginTargetOutcome::StagedForRestart { permanent: true },
+            "reusing a staging must preserve the marker's permanent decline"
+        );
+        match outcome {
+            JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
                 assert!(reason.contains("already staged"), "{reason}");
+                assert!(reason.contains("agent-doc declined"), "{reason}");
             }
             other => panic!("expected the existing staging, got {other:?}"),
         }

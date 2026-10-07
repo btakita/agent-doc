@@ -6,7 +6,7 @@ Extends `editors/SPEC.md` with JetBrains-specific behavior.
 
 - **ID:** `com.github.btakita.agent-doc`
 - **Name:** Agent Doc
-- **Restart:** Dynamic Kotlin package upgrades; no mandatory IDE restart
+- **Restart:** Required for every package upgrade on builds with asynchronous classloader retirement; compatible builds may upgrade dynamically
 - **Native upgrades:** Safe in-process generation handoff
 
 ## Implementation Details
@@ -80,11 +80,14 @@ project containers can retain a light-service adapter by implementation class
 name while a replacement classloader is activating, which would return an old
 generation instance to new bytecode. Unload cleanup removes and disposes every
 registry entry before the replacement initializes open projects.
-An unload leak is a defect and JetBrains' explicit unload-failure prompt is the
-only package-update restart fallback. The one migration exception is an IDE
-that already loaded a package generation declaring `require-restart="true"`;
-that old generation must be restarted once before this dynamic lifecycle can
-govern later upgrades.
+On compatible builds, an unload leak is a defect and JetBrains' explicit
+unload-failure prompt is the package-update restart fallback. Builds that retire
+plugin classloaders asynchronously cannot satisfy agent-doc's synchronous
+retirement proof: agent-doc deliberately declines dynamic replacement, stages
+every package upgrade, and requires an IDE restart to load it. An IDE that
+already loaded a package generation declaring `require-restart="true"` also
+requires a restart before the dynamic lifecycle can govern later upgrades on a
+compatible build.
 
 Local package convergence compares every ZIP payload byte and relative path
 with the installed plugin tree before replacing it. A byte-identical package is

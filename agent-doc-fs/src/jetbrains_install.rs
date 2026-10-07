@@ -791,20 +791,10 @@ pub fn jetbrains_plugin_staged_in(
                 .is_some_and(|staged| staged == version)
     });
     marker_staged
-        || system_roots.iter().any(|root| {
-            let Ok(entries) = std::fs::read_dir(root) else {
-                return false;
-            };
-            entries.flatten().any(|entry| {
-                is_jetbrains_ide_data_dir(&entry.file_name().to_string_lossy())
-                    && std::fs::read(entry.path().join("plugins/action.script"))
-                        .ok()
-                        .is_some_and(|bytes| {
-                            staged_versions_from_action_script(&String::from_utf8_lossy(&bytes))
-                                .iter()
-                                .any(|staged| staged == version)
-                        })
-            })
+        || plugins_dirs.iter().any(|dir| {
+            pending_stagings_for(dir, system_roots)
+                .iter()
+                .any(|staging| staging.zip_present && staging.version == version)
         })
 }
 
@@ -897,16 +887,33 @@ mod tests {
     fn staged_detection_reads_marker_and_action_script() {
         let tmp = std::env::temp_dir().join(format!("adoc-gh87-{}", std::process::id()));
         let plugins = tmp.join("data/IntelliJIdea2026.3");
+        let other_plugins = tmp.join("data/IntelliJIdea2026.2");
         let system = tmp.join("cache");
         std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::create_dir_all(&other_plugins).unwrap();
         std::fs::create_dir_all(system.join("IntelliJIdea2026.3/plugins")).unwrap();
         let dirs = vec![plugins.clone()];
         let roots = vec![system.clone()];
         assert!(!jetbrains_plugin_staged_in(&dirs, &roots, "0.2.459"));
 
+        let staged_zip = system.join("IntelliJIdea2026.3/plugins/agent-doc-jetbrains-0.2.459.zip");
+        std::fs::write(&staged_zip, b"pkg").unwrap();
         std::fs::write(
             system.join("IntelliJIdea2026.3/plugins/action.script"),
-            "unzip:/c/agent-doc-jetbrains-0.2.459.zip:/d\n",
+            format!(
+                "unzip:{}:{}\n",
+                staged_zip.display(),
+                other_plugins.display()
+            ),
+        )
+        .unwrap();
+        assert!(
+            !jetbrains_plugin_staged_in(&dirs, &roots, "0.2.459"),
+            "another IDE's pending install must not describe this live plugin tree"
+        );
+        std::fs::write(
+            system.join("IntelliJIdea2026.3/plugins/action.script"),
+            format!("unzip:{}:{}\n", staged_zip.display(), plugins.display()),
         )
         .unwrap();
         assert!(jetbrains_plugin_staged_in(&dirs, &roots, "0.2.459"));

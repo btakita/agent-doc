@@ -3594,13 +3594,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // until it lands the idle path keeps its current behavior.
                 // `#turnsaferecycle` Goal 1 — an install fan-out
                 // (`recycle_supervisors_all_projects_force`) writes a per-document
-                // recycle-request marker so EVERY open supervisor recycles onto
-                // the freshly-installed binary at its next idle boundary, not just the
-                // ones that independently self-detect staleness. Honor it like an
-                // explicit admin recycle: `supervisor_recycle_action` maps that to
-                // `RecycleImmediate` whether or not the running binary reads stale. The
-                // marker is cleared immediately before the `execve` below so the fresh
-                // process does not re-loop on it.
+                // recycle-request marker so EVERY open supervisor observes the
+                // install intent at its next idle boundary. The policy owner below
+                // rechecks binary staleness before admission: fan-out delivery can
+                // race the first reexec and must not recycle the fresh generation.
+                // A consumed marker is cleared immediately before the `execve` below.
                 // GH #121: a stale-supervisor request does not lapse while this
                 // supervisor still runs replaced bytes; it used to expire during a
                 // long open cycle and the requested recycle never executed.
@@ -3618,7 +3616,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     request.reason
                         == agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE
                 });
-                let explicit_admin_recycle = recycle_requested;
                 // `#lazily-recycle-request`: mirror the pending recycle/restart request
                 // onto the lazily statechart (phase `Requested`) so route callers and
                 // the editor observe the intent through the state subscription instead
@@ -3670,6 +3667,37 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         )
                     })
                     .unwrap_or(false);
+                // A durable request carries an intent, not an unconditional proof
+                // that its producer's cause still holds. Install fan-out and editor
+                // health work can complete after this process has already reexeced;
+                // admitting that late request as `explicit_admin` makes the fresh
+                // generation reexec again. Re-observe the named cause here, at the
+                // policy-owner boundary. True operator/force requests remain
+                // unconditional.
+                let recycle_request_cause_live = recycle_request.as_ref().is_some_and(|request| {
+                    agent_doc_supervisor::recycle_request::recycle_request_cause_is_live(
+                        &request.reason,
+                        supervisor_stale || own_binary_replaced,
+                        wedge_needs_recycle,
+                        stale_editor_replica_requested,
+                    )
+                });
+                if recycle_requested && !recycle_request_cause_live {
+                    agent_doc_supervisor_io::recycle_request::clear_recycle_request(&file);
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "supervisor_recycle_request_settled_without_reexec file={} pane={} reason={} cause=no_longer_live",
+                            path.display(),
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            recycle_request
+                                .as_ref()
+                                .map(|request| request.reason.as_str())
+                                .unwrap_or("unknown"),
+                        ),
+                    );
+                }
+                let explicit_admin_recycle = recycle_request_cause_live;
                 // Recycle a wedged OR stale supervisor at the FIRST AVAILABLE SAFE
                 // intra-turn checkpoint, not merely at an idle prompt. A tick is a safe checkpoint when no
                 // supervisor IPC connection is being handled
@@ -3694,7 +3722,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // deferring on the open cycle that only the replacement can close.
                 let stale_capture_resume_latched =
                     agent_doc_supervisor::lifecycle::stale_generation_capture_resume_needs_recycle(
-                        supervisor_stale || recycle_requested,
+                        supervisor_stale || own_binary_replaced,
                         resume_retry.as_ref().is_some_and(|retry| retry.needs_operator),
                     );
                 let editor_delivery_stale = (stale_editor_replica_requested
@@ -5933,23 +5961,30 @@ mod tests {
     }
 
     /// `#stalesupresumedeadlock`: a latched captured-resume verdict in a
-    /// generation that is already due for replacement must feed the
+    /// generation whose running image is already due for replacement must feed the
     /// capture-backed recycle slot, or the open cycle holds the recycle that
-    /// alone could close it (2026-09-30 06:17-06:35 UTC, agent-doc-bugs.md).
+    /// alone could close it (2026-09-30 06:17-06:35 UTC, agent-doc-bugs.md). A
+    /// generic request marker is not generation staleness: a delayed producer
+    /// may write one after the replacement has already started.
     #[test]
-    fn latched_capture_resume_feeds_the_capture_backed_recycle() {
+    fn latched_capture_resume_requires_actual_generation_staleness() {
         let source = include_str!("idle_watch.rs");
         // Built from fragments so this guard never matches its own source text.
         let join = ["stale_generation_capture_resume", "_needs_recycle("].concat();
-        let recycle_wanted = ["supervisor_stale || ", "recycle_requested,"].concat();
+        let stale_generation = ["supervisor_stale || ", "own_binary_replaced,"].concat();
+        let generic_request = ["supervisor_stale || ", "recycle_requested,"].concat();
         let latch = ["retry.", "needs_operator)"].concat();
         let slot = ["|| stale_capture_resume", "_latched)"].concat();
-        for needle in [&join, &recycle_wanted, &latch, &slot] {
+        for needle in [&join, &stale_generation, &latch, &slot] {
             assert!(
                 source.contains(needle.as_str()),
                 "idle watch lost the stale capture-resume recycle wiring: missing `{needle}`"
             );
         }
+        assert!(
+            !source.contains(&generic_request),
+            "a generic marker must not make an already-fresh generation capture-recycle again"
+        );
     }
 
     #[test]

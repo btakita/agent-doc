@@ -3,10 +3,11 @@
 //! Distinct from `recycle_inflight` (which signals a recycle is *in progress* so
 //! dispatch should defer) and `recycle_yield` (which asks a self-driving loop to
 //! yield one boundary): a recycle-request is a positive cross-process instruction
-//! that a specific open supervisor should recycle onto the freshly-installed
-//! binary at its next idle boundary, EVEN when it is not yet stale and auto-recycle
-//! is opted out. An install fan-out records it per served document; the supervisor
-//! idle loop honors it like an `explicit_admin` recycle.
+//! that a specific open supervisor should reconsider recycling at its next safe
+//! boundary. An install fan-out records it per served document; the supervisor
+//! re-observes the named cause before acting, so delivery that arrives after the
+//! repair cannot recycle the replacement generation. Explicit operator and force
+//! requests remain unconditional.
 
 use std::time::Duration;
 
@@ -24,6 +25,9 @@ pub const RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE: &str = "stale_supervisor_
 /// Canonical reason for a route-owned editor authority whose relay replica is
 /// missing or whose disk projection no longer matches canonical state.
 pub const RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE: &str = "stale_editor_replica_turn_stage";
+/// Canonical reason for an editor transport episode that crossed the durable
+/// write-wedge threshold.
+pub const RECYCLE_REQUEST_EDITOR_WRITE_WEDGE: &str = "repeated_ack_timeout_active_listener";
 
 /// Projected recycle-request state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +96,33 @@ pub fn recycle_reason_is_binary_replacement(reason: &str) -> bool {
             | RECYCLE_REQUEST_INSTALL_FANOUT
             | RECYCLE_REQUEST_INSTALL_FANOUT_FORCE
     )
+}
+
+/// Whether the cause named by a durable recycle request still holds in the
+/// supervisor generation that is about to consume it.
+///
+/// Requests are delivery of intent, not proof that their cause still exists.
+/// In particular, install fan-out and editor-health producers can finish after
+/// an in-place reexec has already repaired the condition. Treating those late
+/// deliveries as unconditional admin requests makes the fresh generation
+/// reexec again and can form a project-wide respawn loop. Unknown reasons are
+/// retained as explicit/admin requests for compatibility; force is explicitly
+/// unconditional.
+pub fn recycle_request_cause_is_live(
+    reason: &str,
+    supervisor_stale: bool,
+    editor_write_wedge_needs_recycle: bool,
+    stale_editor_replica: bool,
+) -> bool {
+    match reason {
+        RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE | RECYCLE_REQUEST_INSTALL_FANOUT => {
+            supervisor_stale
+        }
+        RECYCLE_REQUEST_EDITOR_WRITE_WEDGE => editor_write_wedge_needs_recycle,
+        RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE => stale_editor_replica,
+        RECYCLE_REQUEST_INSTALL_FANOUT_FORCE => true,
+        _ => true,
+    }
 }
 
 /// GH #136: how long the layout path waits for an IDLE stale supervisor to
@@ -266,6 +297,50 @@ mod tests {
             !recycle_request_is_live(&replica, long_after, true),
             "an editor-replica request is not caused by the binary and keeps its TTL"
         );
+    }
+
+    #[test]
+    fn delayed_causal_requests_do_not_recycle_a_repaired_generation() {
+        for reason in [
+            RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE,
+            RECYCLE_REQUEST_INSTALL_FANOUT,
+        ] {
+            assert!(recycle_request_cause_is_live(reason, true, false, false));
+            assert!(
+                !recycle_request_cause_is_live(reason, false, false, false),
+                "a delayed {reason} must not reexec an already-fresh generation"
+            );
+        }
+        assert!(recycle_request_cause_is_live(
+            RECYCLE_REQUEST_EDITOR_WRITE_WEDGE,
+            false,
+            true,
+            false,
+        ));
+        assert!(!recycle_request_cause_is_live(
+            RECYCLE_REQUEST_EDITOR_WRITE_WEDGE,
+            false,
+            false,
+            false,
+        ));
+        assert!(recycle_request_cause_is_live(
+            RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+            false,
+            false,
+            true,
+        ));
+        assert!(recycle_request_cause_is_live(
+            RECYCLE_REQUEST_INSTALL_FANOUT_FORCE,
+            false,
+            false,
+            false,
+        ));
+        assert!(recycle_request_cause_is_live(
+            "operator_request",
+            false,
+            false,
+            false,
+        ));
     }
 
     fn outstanding(first: u64, latest: u64) -> OutstandingRecycleRequest {

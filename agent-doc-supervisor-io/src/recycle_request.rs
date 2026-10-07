@@ -172,8 +172,10 @@ pub fn fresh_recycle_request(file: &str, now: u64) -> Option<RecycleRequest> {
     recycle_request_is_fresh(&request, now).then_some(request)
 }
 
-/// GH #121: the request the owning supervisor should act on now — fresh, or a
-/// lapsed stale-supervisor request while `supervisor_stale` still holds. See
+/// GH #121: a request eligible for policy-owner cause validation now — fresh,
+/// or a lapsed stale-supervisor request while `supervisor_stale` still holds.
+/// Eligibility is not unconditional recycle admission: the idle watch rechecks
+/// the typed cause before acting. See
 /// [`agent_doc_supervisor::recycle_request::recycle_request_is_live`].
 pub fn live_recycle_request(
     file: &str,

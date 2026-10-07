@@ -21,7 +21,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -77,17 +76,27 @@ Released and published tsift v0.1.104 successfully.
 - Local CLI: tsift 0.1.104 installed from the locked release tree.
 - Verification: focused issue regressions and full local make check passed; GitHub Actions release run 37645547218 completed successfully, including release-input CI, all platform builds, crates.io publish, GitHub release, and npm publish.
 - Non-blocking workflow annotations note upstream Node.js 20 action deprecation and the upcoming ubuntu-latest runner migration.
+
+### Re: upgrade-friendly tsift skill — gpt-5 · 2026-10-07T12:27:54-04:00
+
+> **Queue prompt:** Make the tsift skill upgrade friendly? Can the skill in the harness refer to the package tsift skill/runbook?
+
+Yes. The harness skill is now an upgrade-safe bootstrap over package-owned live instructions.
+
+- Added `tsift skill [PATH]` for the authoritative SKILL.md bundled with the running binary and `tsift skill --reference` for its detailed code-navigation runbook.
+- Generated harness skills now delegate to `tsift skill` once per session. Live output includes an explicit recursion guard; generated skill and reference files remain complete, versioned fallbacks when command execution is unavailable.
+- A normal binary upgrade can therefore expose current guidance without rewriting harness directories or tracked repository files.
+- Existing pre-bootstrap skills need one `tsift init` after adopting the first release containing this change. The current Codex harness bootstrap is refreshed and points to the user-scoped canonical skill.
+- Added CLI parsing, unit, integration, generated-surface, and specification coverage.
+- Full `make check` passed in the worker branch. Parent verification passed focused package-skill, package-reference, and CLI integration tests plus git diff checks.
+- Installed the development build locally and verified both live instruction surfaces.
+- Pushed main at 7c1d378570778dc98d8cbdde166b0566491a6307. This change is on main after the v0.1.104 tag and awaits a later release.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue subagents=3 preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/tsift/issues/26~~
-- ~~#gh-fix https://github.com/btakita/tsift/issues/27~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/tsift/issues/28~~ — auto-struck: answered this cycle (#ftstrike)
-- Make the tsift skill upgrade friendly? Can the skill in the harness refer to the package tsift skill/runbook?
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -2001,7 +2001,11 @@ pub fn upsert_editor_transport_health_in_db(
           session_id = excluded.session_id, \
           consecutive_timeouts = excluded.consecutive_timeouts, \
           degraded = excluded.degraded, \
-          recycle_attempted = excluded.recycle_attempted, \
+          recycle_attempted = CASE \
+            WHEN editor_transport_health.session_id = excluded.session_id \
+            THEN MAX(editor_transport_health.recycle_attempted, excluded.recycle_attempted) \
+            ELSE excluded.recycle_attempted \
+          END, \
           last_delivery_id = excluded.last_delivery_id, \
           last_transport = excluded.last_transport, \
           updated_at_secs = excluded.updated_at_secs, \
@@ -5241,6 +5245,48 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_health_writer_cannot_rearm_a_recycle_attempted_episode() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let conn = open_state_db(dir.path())?;
+        let stale_writer = EditorTransportHealthRecord {
+            document_hash: "doc-wedge".to_string(),
+            session_id: "session-a".to_string(),
+            consecutive_timeouts: 2,
+            degraded: true,
+            recycle_attempted: false,
+            last_delivery_id: Some("delivery-2".to_string()),
+            last_transport: "socket_ipc".to_string(),
+            updated_at_secs: 10,
+            consecutive_rejections: 0,
+        };
+        upsert_editor_transport_health_in_db(&conn, &stale_writer)?;
+
+        let mut latch_writer = stale_writer.clone();
+        latch_writer.recycle_attempted = true;
+        upsert_editor_transport_health_in_db(&conn, &latch_writer)?;
+
+        // A concurrent delivery worker that read before the latch can finish
+        // afterward. Its stale false must not regress the once-per-episode bit.
+        upsert_editor_transport_health_in_db(&conn, &stale_writer)?;
+        assert!(
+            load_editor_transport_health_from_db(&conn, "doc-wedge")?
+                .expect("health row")
+                .recycle_attempted
+        );
+
+        // A different session is a new episode and may start unattempted.
+        let mut next_session = stale_writer;
+        next_session.session_id = "session-b".to_string();
+        upsert_editor_transport_health_in_db(&conn, &next_session)?;
+        assert!(
+            !load_editor_transport_health_from_db(&conn, "doc-wedge")?
+                .expect("replacement health row")
+                .recycle_attempted
+        );
+        Ok(())
+    }
 
     /// A corrupt state db must fail with recovery steps attached, not a bare
     /// `database disk image is malformed`. Corruption took down every command

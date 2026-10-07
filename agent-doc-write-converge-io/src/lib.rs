@@ -4697,7 +4697,7 @@ pub fn log_write_wedge_requests_supervisor_recycle(file: &Path, source: &str) {
     } else if let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) {
         match agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
             file,
-            "repeated_ack_timeout_active_listener",
+            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_EDITOR_WRITE_WEDGE,
         ) {
             Ok(()) => format!("requested project_root={}", project_root.display()),
             Err(err) => format!(
@@ -5676,7 +5676,6 @@ mod tests {
             editor_ipc_write_wedge_needs_recycle(project_root, &file),
             "a fresh latched wedge should request a mid-turn recycle"
         );
-
         // After the recycle is attempted, the guard flips false so the fresh
         // supervisor cannot re-read the still-latched wedge and recycle-loop.
         mark_ipc_wedge_recycle_attempted(project_root, &file).unwrap();

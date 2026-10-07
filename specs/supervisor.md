@@ -709,7 +709,7 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   has no durable replay checkpoint. Three capture-backed facts cross it at a
   supervisor-safe checkpoint (IPC drained): a proven editor-IPC write wedge, a
   typed stale editor-delivery request, and a generation already due for
-  replacement (stale binary or pending recycle request) whose own
+  replacement (the running binary is observably stale) whose own
   captured-finalize resume has latched `needs_operator`. The resume runs inside
   the supervisor, so a stale generation judges the retained response with stale
   code; deferring on the cycle it cannot close is a circular wait (2026-09-30,
@@ -717,6 +717,15 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   and the replacement starts without the latch or the request marker, so the
   escape fires at most once per episode. A verdict the fresh build also latches
   stays with the operator.
+- Recycle-request markers are durable delivery of an intent, not proof that the
+  producer's cause still holds. At the policy-owner boundary, install fan-out
+  and stale-supervisor requests require the running generation to remain stale;
+  editor-write-wedge requests require a current, not-yet-attempted wedge; and
+  stale-replica requests require the matching replica condition. A request that
+  arrives after its repair is settled without `execve`. Explicit operator and
+  forced requests remain unconditional. The editor-health `recycle_attempted`
+  bit is monotone within a session so a concurrent stale health writer cannot
+  re-arm the same wedge episode after the supervisor latches it.
 - `#wd40` / `#supboundarylivelock` state-flush: an explicit `admin recycle`
   recycles at the first supervisor-safe checkpoint even when the installed binary
   already matches the running supervisor (`supervisor:fresh`). A checkpoint is

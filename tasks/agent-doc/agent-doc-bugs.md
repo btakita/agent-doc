@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -308,6 +307,50 @@ Verification and installation are complete:
 - Terminal `session-check` passed for cycle `cycle-1791395961104`; supervisor continuation requires no operator action.
 
 ❯ The check emitted only a non-blocking coined-ID warning from verbatim historical prompt text.
+
+### Re: late selected preset closeout and GH #177 — gpt-6.1-sol · 2026-10-07T15:58:03-04:00
+
+> **Chat prompt (#chatprompt):** subagent fix: • Blocked by hook
+>   └ agent-doc Stop hook opened a fresh cycle for post-commit prompt work in /home/brian/work/btakita/agent-loop/tasks/
+> agent-doc/agent-doc-bugs.md, then retained the response under that cycle but could not finish closeout. The latest
+> assistant text was captured into the pending/capture ledger before auto-close. The hook could not finish the required
+> commit boundary: [finalize] pre-write gate: selected prompt-preset queue head lacks response evidence: #gh-fix https://
+> github.com/btakita/agent-doc/issues/177. Address every resolved preset expansion in the response; a literal `#preset`
+> queue-head quote is optional. No response has been captured.. The retained capture or projection is already durable and
+> the same intent commits itself once delivery converges — this is a deferral, not a lost response. Run `agent-doc
+> session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` once to observe the terminal state;
+> do NOT re-send the response, force disk, or `admin recycle`, which disturb the capture being awaited. Do not reach for
+> `admin reload-lib` on your own either: `admin reload-lib` is the sanctioned recovery only when `agent-doc session-check`
+> reports that the editor holding the document is not serving its replica, and then its remedy governs. Do not recapture
+> the response or rerun finalize/write. Run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+> agent-doc-bugs.md` and let the binary-owned keyed retry finish.
+>
+> • The agent-doc Stop hook retained the response and explicitly forbids recapture or another write. I’m running the one
+>   permitted session-check so the binary-owned keyed retry can finish the commit boundary.
+>
+> • Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
+>   └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md total_ms…
+>     [session-check] INTERRUPTED: cycle `cycle-1791399707092` is still `response_captured` (response_captured) — respons…
+>     + 2 lines (ctrl+t to expand)
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/177
+
+Fixed and closed. The underlying Remote Dev tab-capture defect remains fixed on public `main` in `b013de126`: JetBrains evaluates remote snapshot and authority before backend-window readiness, so tab switches no longer wait for `wins=1`, and capture deferrals log an INFO reason.
+
+The subagent also fixed the closeout defect that reopened this already-answered head. Root cause: #177 entered the live queue after the pre-turn baseline with the selected `🚧` marker. The response contained the exact queue prompt and answer, but the baseline fence rejected every late head, leaving #177 active; the next Stop hook then opened a fresh cycle whose short terminal summary lacked current-cycle preset evidence.
+
+The corrected invariant is now implemented on public `main`:
+
+- `7aa890a00` atomically consumes a baseline-late head only when it is already selected/in-progress **and** the current response contains exact answer evidence.
+- A marker alone, preset-expansion prose alone, or a concurrent unselected operator draft remains insufficient, so newly typed work is still protected.
+- `6f8c29fa7` aligns the cross-crate queue-IO contract test.
+- `8d8b7480a` synchronizes the updated respond runbook across all bundled harness surfaces.
+
+Verification and delivery are complete:
+
+- The final `make check` passed with no failures (`tart-dab74fac69`), including 9,641 tests, closeout/session simulations, editor parity, and TLA+.
+- The commits are pushed through `8d8b7480a` and installed locally as CLI/native `0.35.475`; the live editor endpoint deferred its native handoff until this safe cycle boundary.
+- Book and Pages checks are green; CI was still in progress at the required one-shot observation.
 <!-- agent:boundary:d2a9ba1d -->
 <!-- /agent:exchange -->
 
@@ -316,13 +359,6 @@ Verification and installation are complete:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~⏭️ do [#subagentsattributescale]~~
-- ~~The last 2 responses in sdk.md have been unescaped.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/174~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/175~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/176~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/177
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

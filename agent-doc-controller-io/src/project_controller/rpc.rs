@@ -3935,6 +3935,30 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
     ))
 }
 
+/// Final editor-route supervisor freshness, classified across the route effect.
+///
+/// A route can itself carry the stale supervisor through its requested safe
+/// boundary and let it `execve` the installed binary. Only the post-route
+/// observation is user-facing; the initial observation exists to distinguish a
+/// successful in-route settlement from a route that never saw staleness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EditorRouteSupervisorWarningTransition {
+    None,
+    SettledDuringRoute,
+    Current(String),
+}
+
+fn classify_editor_route_supervisor_warning(
+    before_route: Option<&str>,
+    after_route: Option<String>,
+) -> EditorRouteSupervisorWarningTransition {
+    match (before_route, after_route) {
+        (_, Some(warning)) => EditorRouteSupervisorWarningTransition::Current(warning),
+        (Some(_), None) => EditorRouteSupervisorWarningTransition::SettledDuringRoute,
+        (None, None) => EditorRouteSupervisorWarningTransition::None,
+    }
+}
+
 /// `#supdrainlive` (GH #73) — IO wrapper: can the document's supervisor receive a
 /// `[focused-cycle]` drain hand-off right now?
 ///
@@ -9997,18 +10021,15 @@ fn handle_editor_route_rpc_with_tmux(
             harness_ready_secs,
         ),
     );
-    // GH #110 ask 5 (diagnostic half; see GH #109 for pane selection): the
-    // occupant guard only proves the pane is alive and owned, not that its
-    // route-owned supervisor runs the installed build. Surface a stale
-    // supervisor binary on the route instead of letting it pass silently. This
-    // is read-only and fail-open; it never refuses, because a stale supervisor
-    // still hosts a live, working harness and recycles itself.
-    let supervisor_stale_warning = host_supervisor_stale_warning_for_doc(&canonical);
-    if let Some(warning) = supervisor_stale_warning.as_deref() {
+    // Preserve an initial observation for diagnostics, but do not make it the
+    // final user-facing answer. The route can cross the pending safe boundary
+    // and let this supervisor re-exec before it returns.
+    let supervisor_stale_warning_before_route = host_supervisor_stale_warning_for_doc(&canonical);
+    if let Some(warning) = supervisor_stale_warning_before_route.as_deref() {
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "controller_editor_route_supervisor_binary_stale file={} warning={}",
+                "controller_editor_route_supervisor_binary_stale_observed file={} phase=before_route warning={}",
                 canonical.display(),
                 warning.replace('\n', " "),
             ),
@@ -10044,11 +10065,39 @@ fn handle_editor_route_rpc_with_tmux(
         ),
     );
     let mut output = result.output;
-    if let Some(warning) = supervisor_stale_warning {
-        if !output.is_empty() && !output.ends_with('\n') {
-            output.push('\n');
+    // GH #110 ask 5 (diagnostic half; see GH #109 for pane selection): the
+    // occupant guard only proves the pane is alive and owned, not that its
+    // route-owned supervisor runs the installed build. Re-observe after the
+    // route effect so a successful in-route hot reload cannot leave a false
+    // stale warning in the editor result. Both probes are read-only/fail-open.
+    match classify_editor_route_supervisor_warning(
+        supervisor_stale_warning_before_route.as_deref(),
+        host_supervisor_stale_warning_for_doc(&canonical),
+    ) {
+        EditorRouteSupervisorWarningTransition::Current(warning) => {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_editor_route_supervisor_binary_stale file={} phase=after_route warning={}",
+                    canonical.display(),
+                    warning.replace('\n', " "),
+                ),
+            );
+            if !output.is_empty() && !output.ends_with('\n') {
+                output.push('\n');
+            }
+            output.push_str(&warning);
         }
-        output.push_str(&warning);
+        EditorRouteSupervisorWarningTransition::SettledDuringRoute => {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_editor_route_supervisor_binary_stale_settled file={} phase=after_route outcome=fresh",
+                    canonical.display(),
+                ),
+            );
+        }
+        EditorRouteSupervisorWarningTransition::None => {}
     }
     Ok(ControllerEditorRouteResult {
         exit_code: result.exit_code,
@@ -29808,6 +29857,36 @@ mod tests {
     #![allow(unused_imports)]
 
     use super::*;
+
+    #[test]
+    fn editor_route_suppresses_a_stale_warning_that_settled_during_the_route() {
+        assert_eq!(
+            classify_editor_route_supervisor_warning(Some("stale before"), None),
+            EditorRouteSupervisorWarningTransition::SettledDuringRoute,
+        );
+    }
+
+    #[test]
+    fn editor_route_surfaces_only_the_current_post_route_stale_warning() {
+        assert_eq!(
+            classify_editor_route_supervisor_warning(
+                Some("old supervisor warning"),
+                Some("current supervisor warning".to_string()),
+            ),
+            EditorRouteSupervisorWarningTransition::Current(
+                "current supervisor warning".to_string()
+            ),
+        );
+        assert_eq!(
+            classify_editor_route_supervisor_warning(
+                None,
+                Some("became stale during route".to_string()),
+            ),
+            EditorRouteSupervisorWarningTransition::Current(
+                "became stale during route".to_string()
+            ),
+        );
+    }
 
     /// `#netadv5` R1: a busy controller whose status receipt exceeds the 5s
     /// budget must never be reaped. The ensure call defers with a retryable

@@ -214,9 +214,13 @@ No legacy layout file is imported or emitted.
 - A prompt-aware dispatch-only reopen whose starting pane contains exactly the
   route's own unsubmitted agent-doc trigger may send one bare harness submit key,
   then must await the controller turn-admission projection. Missing projection
-  fails closed without another submit. A trigger plus operator text, a trigger for
-  another document, or any other composer draft remains operator-owned and must
-  not be submitted by this recovery (`#dispatchonlyresubmitwiring`).
+  fails closed without another submit. If Codex instead identifies that exact
+  trigger as current queued input behind an active turn, the trigger has already
+  crossed the pane-input boundary: route coalesces the request as accepted and
+  sends no additional bytes or submit key. A trigger plus operator text, a trigger
+  for another document, or any other composer draft remains operator-owned and
+  must not be submitted or coalesced by this recovery
+  (`#dispatchonlyresubmitwiring`).
 - Direct-pane submit profiles get bounded bare submit-key re-submits
 (`#jbcodexsubmit` / `#jbclaudesubmit`). Codex, Claude, OpenCode, and default
 tmux submits send normalized text plus a named `Enter` key in one

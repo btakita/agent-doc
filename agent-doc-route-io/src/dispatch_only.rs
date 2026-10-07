@@ -254,6 +254,7 @@ fn dispatch_only_starting_pane_settled_via_authoritative_actor(
 /// once the recycle settles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DispatchOnlyBlockerAction {
+    AlreadyQueuedTrigger,
     SubmitPlainTrigger,
     QueuePrompt(&'static str),
     Refuse,
@@ -264,7 +265,16 @@ fn classify_dispatch_only_blocker(
     harness_binary: &str,
     blocker_reason: &str,
     has_queue_prompt: bool,
+    requested_trigger_already_queued: bool,
 ) -> DispatchOnlyBlockerAction {
+    // Codex leaves an accepted type-ahead message visible in the composer while
+    // the active turn runs and labels that surface `tab to queue message`. If
+    // the visible draft is exactly this route's trigger, the reopen has already
+    // crossed the pane-input boundary. The exact-draft projection is computed
+    // by the caller; a trigger plus any operator text remains fail-closed.
+    if blocker_reason == "queued draft in composer" && requested_trigger_already_queued {
+        return DispatchOnlyBlockerAction::AlreadyQueuedTrigger;
+    }
     if intent == AuthoritativeActorDispatchIntent::PlainTrigger
         && agent_doc_queue::route_dispatch::dispatch_active_turn_accepts_plain_trigger(
             harness_binary,
@@ -427,6 +437,7 @@ pub fn dispatch_only_send_reopen(
         cycle_id: route_start_cycle_id.as_deref(),
         phase: route_start_phase,
     };
+    let route_trigger = harness.trigger_command(file_path);
     if dispatch_only_cycle_owns_pane_input(file, pane, harness, route_start_stamp)? {
         return Ok(pane.to_string());
     }
@@ -487,7 +498,6 @@ pub fn dispatch_only_send_reopen(
         // had already stopped polling (#jbroutasync-starting).
         let ready_timeout = (options.effects.dispatch_only_starting_pane_ready_timeout)(harness);
         let ready_deadline = Instant::now() + ready_timeout;
-        let route_trigger = harness.trigger_command(file_path);
         loop {
             // A visible draft is classified before spending the editor's route
             // budget. Operator text is a terminal blocker; agent-doc's exact
@@ -777,7 +787,7 @@ pub fn dispatch_only_send_reopen(
     let pre_submit_content = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)?;
     let pre_submit_projection =
         pane_composer_projection(tmux, &dispatch_pane, &pre_submit_content, harness);
-    if let PaneComposerProjection::AgentAddressed { target } = pre_submit_projection {
+    if let PaneComposerProjection::AgentAddressed { target } = &pre_submit_projection {
         let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
             StartingPaneBlocker::AgentAddressed.unblocker(),
         );
@@ -786,7 +796,7 @@ pub fn dispatch_only_send_reopen(
                 harness_binary: &harness.binary,
                 pane: &dispatch_pane,
                 file_display: &file.display().to_string(),
-                target: &target,
+                target,
                 outcome_fields: &outcome_fields,
             },
         ));
@@ -811,7 +821,31 @@ pub fn dispatch_only_send_reopen(
             &harness.binary,
             &reason,
             options.queue_prompt_text.is_some(),
+            dispatch_only_starting_pane_blocker(&pre_submit_projection, &route_trigger)
+                == StartingPaneBlocker::StrandedTrigger,
         ) {
+            DispatchOnlyBlockerAction::AlreadyQueuedTrigger => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_trigger_already_queued file={} pane={} harness={} blocker={} outcome=accepted_existing_input",
+                        file.display(),
+                        dispatch_pane,
+                        harness.binary,
+                        reason,
+                    ),
+                );
+                eprintln!(
+                    "[route] coalesced dispatch-only {} reopen for {}: pane {} already holds this exact trigger in Codex's queued-input surface; no duplicate input was submitted {}",
+                    harness.binary,
+                    file.display(),
+                    dispatch_pane,
+                    agent_doc_flow::outcome::user_outcome_fields(
+                        agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                    )
+                );
+                return Ok(dispatch_pane);
+            }
             DispatchOnlyBlockerAction::SubmitPlainTrigger => {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -1521,6 +1555,7 @@ mod tests {
                 "codex",
                 "active codex turn",
                 false,
+                false,
             ),
             DispatchOnlyBlockerAction::SubmitPlainTrigger,
         );
@@ -1529,6 +1564,7 @@ mod tests {
                 AuthoritativeActorDispatchIntent::PlainTrigger,
                 "claude",
                 "claude artifact picker open",
+                false,
                 false,
             ),
             DispatchOnlyBlockerAction::Refuse,
@@ -1543,6 +1579,7 @@ mod tests {
                 "codex",
                 "active codex turn",
                 true,
+                false,
             ),
             DispatchOnlyBlockerAction::QueuePrompt("dispatch_only_codex_active_turn"),
         );
@@ -1552,8 +1589,45 @@ mod tests {
                 "codex",
                 "active codex turn",
                 false,
+                false,
             ),
             DispatchOnlyBlockerAction::Refuse,
+        );
+    }
+
+    #[test]
+    fn blocker_policy_coalesces_only_the_requested_trigger_on_codex_queued_input() {
+        assert_eq!(
+            classify_dispatch_only_blocker(
+                AuthoritativeActorDispatchIntent::PlainTrigger,
+                "codex",
+                "queued draft in composer",
+                false,
+                true,
+            ),
+            DispatchOnlyBlockerAction::AlreadyQueuedTrigger,
+        );
+        assert_eq!(
+            classify_dispatch_only_blocker(
+                AuthoritativeActorDispatchIntent::PlainTrigger,
+                "codex",
+                "queued draft in composer",
+                false,
+                false,
+            ),
+            DispatchOnlyBlockerAction::Refuse,
+            "foreign queued drafts remain protected",
+        );
+        assert_eq!(
+            classify_dispatch_only_blocker(
+                AuthoritativeActorDispatchIntent::PlainTrigger,
+                "codex",
+                "codex hook review prompt",
+                false,
+                true,
+            ),
+            DispatchOnlyBlockerAction::Refuse,
+            "an exact-looking draft cannot bypass a different protected substate",
         );
     }
 

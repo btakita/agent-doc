@@ -414,6 +414,16 @@ mod tests {
             &multi,
             "first line\nsecond line"
         ));
+        // A quoted blank line separates Markdown blockquote paragraphs without
+        // ending the one chat-prompt record.
+        let multi_paragraph = DOC.replace(
+            "hello\n",
+            "> **Chat prompt (#chatprompt):** first paragraph\n>\n> second paragraph\n\nbody\n",
+        );
+        assert!(chat_prompt_record_present(
+            &multi_paragraph,
+            "first paragraph\n\nsecond paragraph"
+        ));
         assert!(!chat_prompt_record_present(
             &multi,
             "first line\nthird line"

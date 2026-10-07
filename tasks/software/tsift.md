@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 03da93b9-58a8-4aa3-b530-ca5405b2ea0b
-  codex: 01a0ca63-49bb-7040-a638-a80239e1503e
+  codex: 01a116e6-b3cf-7583-bc3b-1c09741a8848
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -91,12 +91,30 @@ Yes. The harness skill is now an upgrade-safe bootstrap over package-owned live 
 - Full `make check` passed in the worker branch. Parent verification passed focused package-skill, package-reference, and CLI integration tests plus git diff checks.
 - Installed the development build locally and verified both live instruction surfaces.
 - Pushed main at 7c1d378570778dc98d8cbdde166b0566491a6307. This change is on main after the v0.1.104 tag and awaits a later release.
+
+### Re: v0.1.105 release — gpt-5 · 2026-10-07T13:58-04:00
+
+> **Queue prompt:**
+>
+> do [#releasepublish]
+
+
+Released and published tsift v0.1.105 successfully.
+
+- Dispatched release preparation to an isolated subagent worktree, then integrated and verified it serially on the coordinator path.
+- Release commit: `2d307407ad4c9207b2e837b6f27e6bfa6d2b5378`; `origin/main` and annotated tag `v0.1.105` both resolve to it.
+- GitHub release: https://github.com/btakita/tsift/releases/tag/v0.1.105 with Linux, macOS, Windows, and matching checksum assets.
+- crates.io: https://crates.io/crates/tsift/0.1.105 verified from the public registry by downloading its metadata.
+- npm: `opencode-tsift@0.1.105` verified from the public registry.
+- Local CLI: `tsift 0.1.105` installed from the locked release tree using the repository-documented `cargo install --path . --locked` path (the project has no `make install` target).
+- Verification passed: focused package-skill regression, all 27 workspace version/package checks, npm publish check, locked all-languages release build, worker and coordinator full `make check` gates, main CI run 37658875282, and Release run 37658906350.
+- The Release workflow completed successfully across input validation, all three platform builds, crates.io OIDC publication, GitHub release publication, and npm OIDC publication.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue subagents=3 preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue subagents=3 preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

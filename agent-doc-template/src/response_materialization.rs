@@ -251,6 +251,8 @@ pub fn response_text_has_heading(text: &str) -> bool {
 /// non-exchange patchbacks are left untouched so the ordinary strict validators
 /// still reject them.
 pub fn canonicalize_strict_closeout_response_heading(response: &str) -> String {
+    let normalized = normalize_fully_escaped_exchange_patch(response);
+    let response = normalized.as_deref().unwrap_or(response);
     if response.trim().is_empty() || response_text_has_heading(response) {
         return response.to_string();
     }
@@ -272,6 +274,65 @@ pub fn canonicalize_strict_closeout_response_heading(response: &str) -> String {
         return response.to_string();
     }
     canonicalize_response_region(response, 0, response.len())
+}
+
+/// Recover a shell-quoted strict-template response whose line endings reached
+/// stdin as literal `\n` / `\r\n` sequences.
+///
+/// The repair is deliberately narrow: the original input must be one physical
+/// line, and decoding must produce exactly one complete exchange patch with no
+/// unmatched text and a real response heading. This keeps ordinary prose and
+/// already-multiline examples containing literal escape sequences byte-exact.
+fn normalize_fully_escaped_exchange_patch(response: &str) -> Option<String> {
+    if response.contains('\n') || response.contains('\r') || !response.contains("\\n") {
+        return None;
+    }
+
+    let decoded = decode_escaped_line_endings(response);
+    let (patches, unmatched) = crate::parse_patches(&decoded).ok()?;
+    let [patch] = patches.as_slice() else {
+        return None;
+    };
+    if patch.name != "exchange"
+        || !unmatched.trim().is_empty()
+        || !response_text_has_heading(&patch.content)
+    {
+        return None;
+    }
+    Some(decoded)
+}
+
+fn decode_escaped_line_endings(response: &str) -> String {
+    let mut decoded = String::with_capacity(response.len());
+    let mut chars = response.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character != '\\' {
+            decoded.push(character);
+            continue;
+        }
+
+        let mut slash_count = 1usize;
+        while chars.peek() == Some(&'\\') {
+            chars.next();
+            slash_count += 1;
+        }
+        for _ in 0..slash_count / 2 {
+            decoded.push('\\');
+        }
+        let escaped_line_ending = slash_count % 2 == 1 && matches!(chars.peek(), Some('n' | 'r'));
+        if escaped_line_ending {
+            match chars.next() {
+                Some('n') => decoded.push('\n'),
+                Some('r') => decoded.push('\r'),
+                _ => unreachable!("peeked escaped line ending"),
+            }
+        } else {
+            if slash_count % 2 == 1 {
+                decoded.push('\\');
+            }
+        }
+    }
+    decoded
 }
 
 fn canonicalize_response_region(response: &str, start: usize, end: usize) -> String {
@@ -751,6 +812,85 @@ mod tests {
         let canonical = canonicalize_strict_closeout_response_heading(response);
 
         assert!(canonical.contains("### Re: Response\n\nImplemented and verified."));
+    }
+
+    #[test]
+    fn strict_closeout_decodes_fully_escaped_exchange_patch_before_heading_canonicalization() {
+        let response = concat!(
+            "<!-- patch:exchange -->\\n",
+            "### Re: escaped transport — gpt-5\\n\\n",
+            "Implemented and verified.\\n",
+            "<!-- /patch:exchange -->",
+        );
+
+        let canonical = canonicalize_strict_closeout_response_heading(response);
+
+        assert_eq!(
+            canonical,
+            concat!(
+                "<!-- patch:exchange -->\n",
+                "### Re: escaped transport — gpt-5\n\n",
+                "Implemented and verified.\n",
+                "<!-- /patch:exchange -->",
+            )
+        );
+        assert!(!canonical.contains("### Re: Response"));
+    }
+
+    #[test]
+    fn strict_closeout_preserves_literal_newline_examples_in_multiline_response() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: newline example — gpt-5\n\n",
+            "Use `\\n` for a literal newline escape.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        assert_eq!(
+            canonicalize_strict_closeout_response_heading(response),
+            response
+        );
+    }
+
+    #[test]
+    fn strict_closeout_keeps_even_backslash_runs_literal_while_decoding_transport_newlines() {
+        let response = concat!(
+            "<!-- patch:exchange -->\\n",
+            "### Re: escaped example — gpt-5\\n\\n",
+            "Use `\\\\n` for a literal newline escape.\\n",
+            "<!-- /patch:exchange -->",
+        );
+
+        let canonical = canonicalize_strict_closeout_response_heading(response);
+
+        assert!(canonical.contains("Use `\\n` for a literal newline escape.\n"));
+    }
+
+    #[test]
+    fn fully_escaped_exchange_patch_normalization_rejects_ambiguous_shapes() {
+        for (label, response) in [
+            (
+                "unmatched prefix",
+                "prefix\\n<!-- patch:exchange -->\\n### Re: topic — gpt-5\\nBody.\\n<!-- /patch:exchange -->",
+            ),
+            (
+                "unmatched suffix",
+                "<!-- patch:exchange -->\\n### Re: topic — gpt-5\\nBody.\\n<!-- /patch:exchange -->\\ntrailer",
+            ),
+            (
+                "multiple patches",
+                concat!(
+                    "<!-- patch:exchange -->\\n### Re: first — gpt-5\\nOne.\\n<!-- /patch:exchange -->\\n",
+                    "<!-- patch:exchange -->\\n### Re: second — gpt-5\\nTwo.\\n<!-- /patch:exchange -->",
+                ),
+            ),
+            (
+                "missing response heading",
+                "<!-- patch:exchange -->\\nBody without a response heading.\\n<!-- /patch:exchange -->",
+            ),
+        ] {
+            assert_eq!(normalize_fully_escaped_exchange_patch(response), None, "{label}");
+        }
     }
 
     #[test]

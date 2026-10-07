@@ -25,7 +25,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-Released agent-doc v0.35.460; fixed and closed GH #139–#143; restored this document pane; cleared backlog cruft; captured two release-cycle follow-ups.
+Released agent-doc v0.35.475. v0.35.476 is not yet tagged or published; the actionable review added the release gap and two correctness follow-ups.
 <!-- /agent:status -->
  
 
@@ -56,7 +56,54 @@ The delegated actionable review added three non-duplicate recommended items to t
 3. `#semanticcontinuationfalsepositive` — prevent semantic-completion warnings from treating a newer re-gated continuation as resolved by an obsolete predecessor.
 
 The preflight warning about `#steergatemodelrerun` was therefore not treated as proof of completion: that live gate has advanced evidence but remains below its required dataset threshold.
-<!-- agent:boundary:2577cced -->
+> **Chat prompt (#chatprompt):** review + publish
+>
+> **Chat prompt (#chatprompt):** release + publish I mean
+>
+> **Chat prompt (#chatprompt):** fix in subagent: • Blocked by hook
+>   └ agent-doc Stop hook kept an active `agent:queue auto` moving for /home/brian/work/btakita/agent-loop/tasks/agent-
+> doc/agent-doc-bugs.md. The next queue prompt is "#actionable-review". Continue THIS turn in-pane: answer that prompt
+> in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md and persist with `agent-doc finalize /home/
+> brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` (or `agent-doc write --commit /home/brian/work/btakita/
+> agent-loop/tasks/agent-doc/agent-doc-bugs.md`). Do NOT run `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-
+> doc/agent-doc-bugs.md` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock
+> guard, and do not send the final answer yet. A background context reset was requested because exchange was compacted
+> after the last tracked context clear; compaction shrinks the document but not the already-loaded conversation, but
+> automatic context clearing is disabled; only an explicit operator clear may reset the session.
+>
+> • The Stop hook correctly caught the unconsumed preset head. I’m closing it with the exact > **Queue prompt:**
+>   #actionable-review evidence now, without re-adding the three backlog items.
+>
+> **Chat prompt (#chatprompt):** In a subagent, review + publish the next version
+>
+> **Chat prompt (#chatprompt):** Remove tsift AGENTS.md tsift section in favor of local usage of tsift
+>
+> **Chat prompt (#chatprompt):** Is no space due to the tmp directory being full?
+>
+> **Chat prompt (#chatprompt):** Is no space due to the tmp directory being full?
+
+> **Queue prompt:** #actionable-review
+
+> **Queue prompt:** release + publish
+
+### Re: v0.35.476 release and review closeout — gpt-5 · 2026-10-07T17:34-04:00
+
+Released and published `v0.35.476` through the dedicated release subagent as requested. The release commit/tag is `ab1f0b69f1bf0e7875470398f7fad9ebb7005f78`; `origin/main` and `v0.35.476` matched that SHA at handoff. One authoritative `make check` passed with 9,646/9,646 main tests, `make tmux-ci` passed, the PyPI quota gate reported 1.637 GiB headroom, and the single `install-full` completed in 533.803 seconds. The installed CLI/library report 0.35.476; JetBrains 0.2.504 and VS Code 0.2.80 were installed.
+
+The hosted Release and PyPI workflows were still in progress at the required one-time snapshot, so the GitHub Release and PyPI wheel were not yet visible then. The independent release handoff itself succeeded. A duplicate ancillary Book workflow failed because deploy-pages found no `github-pages` artifact, while the separate mdBook Pages deployment succeeded.
+
+The Stop-hook loop was fixed in the release: resolved preset heads now accept their registered expansion as completion evidence without requiring a literal queue quote, while true free-text heads retain the exact-quote requirement. The regression-backed fix was integrated as `0eafb78c9` in the release.
+
+The actionable review is complete:
+
+1. `#releasepost475fixes` — completed by `v0.35.476`.
+2. `#annotatehistorynoop` — real Git blame-backed `annotate --history` shipped in `v0.35.476`, with cache invalidation and fail-closed coverage.
+3. `#semanticcontinuationfalsepositive` — fixed, verified with 3,162/3,162 `check-fast` tests, and fast-forwarded onto post-release `main` at `3856fcf438dfaf10e24834c7aaa4d92376bcfb33`.
+
+The requested tsift Code Navigation marker block was removed from agent-doc’s `AGENTS.md`; navigation now relies on local/user-scoped tsift usage.
+
+Yes, the no-space error was caused specifically by `/tmp`’s separate 94 GB tmpfs reaching 100%, not by the main filesystem. `/home` still had about 1.3 TB free. Removing only generated Rust build artifacts restored roughly 58 GB in `/tmp`, and subsequent builds used dedicated target directories on `/home`.
+<!-- agent:boundary:1a9ad1d2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -65,13 +112,15 @@ The preflight warning about `#steergatemodelrerun` was therefore not treated as 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - #actionable-review
+- do [#releasepost475fixes]
+- do [#annotatehistorynoop]
+- do [#semanticcontinuationfalsepositive]
+- release + publish
 <!-- /agent:queue -->
 
+## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#releasepost475fixes] [recommended] [P1][release] Release and publish the fixes landed after v0.35.475 through public main 8d8b7480a, including GH #174–#177, Run Agent Doc delayed-submit verification, operator backlog deletion, layout/reopen recovery, bare-subagents lint/replay, and late selected-preset closeout. Run the authoritative full check/install/release path and verify GitHub assets and PyPI.
-- [ ] [#annotatehistorynoop] [recommended] [P2][correctness] Implement git-history attribution for `agent-doc annotate --history`, or reject/remove the flag until implemented; add CLI and sidecar regression tests proving history mode differs from snapshot-only attribution and invalidates its cache when relevant Git history changes.
-- [ ] [#semanticcontinuationfalsepositive] [recommended] [P2][diagnostics] Stop semantic-completion warnings from treating a newer re-gated continuation under a different item ID as already resolved by its obsolete predecessor; add the #steergatemodelrerun/#steergatenamodata pair as a regression while preserving warnings for true duplicate work.
 <!-- /agent:backlog -->
 
 ## Review

@@ -235,7 +235,12 @@ Released and published `agent-doc v0.35.477`.
 Release commit, `main`, and tag are `cf20ed9bcc575108c81d74cc553ce9032fff8183`. The full 9,652-test suite, all secondary gates, and tmux CI passed. The single installation completed with CLI/library 0.35.477, JetBrains 0.2.505, and VS Code 0.2.80.
 
 At the required one-time hosted snapshot, Release, PyPI, and CI workflows were in progress; Book and Pages had succeeded. No additional polling was performed.
-<!-- agent:boundary:acdfe8a0 -->
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/178
+
+### Re: GitHub issue 178 fixed — gpt-5 · 2026-10-07T19:54-04:00
+
+Fixed and released in `v0.35.477`. Matching live-buffer and post-publication retained replica content now attaches through the settled path, while divergent state remains fail-closed and unresolved holds are surfaced. The focused JetBrains regressions and the final release gates passed.
+<!-- agent:boundary:1bd54fa2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -244,10 +249,10 @@ At the required one-time hosted snapshot, Release, PyPI, and CI workflows were i
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~api.md had duplication issues in the queue item when run.~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/178
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/178~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/179
 - #gh-fix https://github.com/btakita/agent-doc/issues/180
-- release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

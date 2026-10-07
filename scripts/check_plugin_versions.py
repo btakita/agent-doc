@@ -7,10 +7,10 @@ so a build cannot ship distinct bytes under a version string that already
 shipped. Two builds of JetBrains 0.2.388 on 2026-09-20 did exactly that, and the
 running IDE then mapped an unlinked jar whose version claimed to be current.
 
-The bump predicate deliberately includes the UNSTAGED working tree. The fence
-above only needs staged/committed evidence, but `gradlew buildPlugin` compiles
-whatever is on disk, so an unstaged `.kt` edit is already in the artifact. That
-is the exact gap the duplicate 0.2.388 pair came through.
+The bump predicate and every digest-aware check deliberately include the
+UNSTAGED working tree. `gradlew buildPlugin` compiles whatever is on disk, so an
+unstaged `.kt` edit is already in the artifact. That is the exact gap the
+duplicate 0.2.388 pair came through.
 """
 
 from __future__ import annotations
@@ -23,6 +23,9 @@ import sys
 from dataclasses import dataclass
 
 
+DIGEST_KEY = "pluginSourceDigest"
+
+
 @dataclass(frozen=True)
 class Target:
     name: str
@@ -30,6 +33,7 @@ class Target:
     source_suffixes: tuple[str, ...]
     primary_version: str
     version_files: tuple[str, ...]
+    source_digest_key: str | None = None
 
 
 TARGETS = (
@@ -39,6 +43,7 @@ TARGETS = (
         (".kt", ".java", ".xml", ".kts"),
         "editors/jetbrains/gradle.properties",
         ("editors/jetbrains/gradle.properties",),
+        DIGEST_KEY,
     ),
     Target(
         "VS Code",
@@ -72,9 +77,6 @@ def is_source(target: Target, path: str) -> bool:
     return path.startswith(target.source_prefixes) and path.endswith(target.source_suffixes)
 
 
-DIGEST_KEY = "pluginSourceDigest"
-
-
 def source_digest(target: Target) -> str:
     """Digest of the exact source bytes a build would compile.
 
@@ -105,6 +107,27 @@ def read_property(path: str, key: str) -> str | None:
     with open(path, encoding="utf-8") as handle:
         match = re.search(rf"(?m)^{re.escape(key)}\s*=\s*(\S+)\s*$", handle.read())
     return match.group(1) if match else None
+
+
+def source_digest_failure(target: Target) -> str | None:
+    """Return the content-identity fence failure for a digest-aware target."""
+    if target.source_digest_key is None:
+        return None
+
+    recorded = read_property(target.primary_version, target.source_digest_key)
+    if recorded is None:
+        return (
+            f"{target.name}: {target.primary_version} does not record "
+            f"{target.source_digest_key}; run the package generation bump"
+        )
+
+    current = source_digest(target)
+    if recorded == current:
+        return None
+    return (
+        f"{target.name}: current source digest {current} does not match the recorded "
+        f"{target.source_digest_key} {recorded}; run the package generation bump"
+    )
 
 
 def bump_gradle_patch(path: str) -> tuple[str, str]:
@@ -209,9 +232,21 @@ def self_test() -> int:
                 assert source_digest(jb) == first, (
                     "an unchanged tree must digest identically, or every build bumps"
                 )
+                with open(jb.primary_version, "w", encoding="utf-8") as handle:
+                    handle.write("pluginVersion = 0.2.388\n")
+                missing = source_digest_failure(jb)
+                assert missing and "does not record" in missing, missing
+                write_property(jb.primary_version, DIGEST_KEY, first)
+                assert source_digest_failure(jb) is None, (
+                    "recorded digest must admit the byte-identical package generation"
+                )
                 with open(kt, "w", encoding="utf-8") as handle:
                     handle.write("class A { }")
                 assert source_digest(jb) != first, "changed source bytes must change the digest"
+                mismatch = source_digest_failure(jb)
+                assert mismatch and "does not match" in mismatch, (
+                    "an unstaged byte change must fail without consulting git history"
+                )
                 second = source_digest(jb)
                 with open(java, "w", encoding="utf-8") as handle:
                     handle.write("class UpgradeAgent { static void agentmain() {} }")
@@ -248,6 +283,14 @@ def self_test() -> int:
     assert "sed -i" not in bump_plugin, "bump-plugin must not bump pluginVersion without recording its digest"
     assert "--bump JetBrains" in recipe("editor-generation-bump")
 
+    release_workflow_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", ".github", "workflows", "release.yml"
+    )
+    release_workflow = open(release_workflow_path, encoding="utf-8").read()
+    assert "python3 scripts/check_plugin_versions.py" in release_workflow, (
+        "tag-triggered releases must fail closed on editor source-generation drift"
+    )
+
     print("[self-test] check_plugin_versions: ok")
     return 0
 
@@ -277,6 +320,20 @@ def check() -> int:
     failures: list[str] = []
     for target in TARGETS:
         staged_source = any(is_source(target, path) for path in staged)
+        digest_failure = source_digest_failure(target)
+        if digest_failure is not None:
+            failures.append(digest_failure)
+            continue
+
+        missing_versions = [path for path in target.version_files if path not in staged]
+        if target.source_digest_key is not None:
+            if staged_source and missing_versions:
+                failures.append(
+                    f"{target.name}: staged source changes require staged generation files: "
+                    + ", ".join(missing_versions)
+                )
+            continue
+
         version_commit = git("log", "-1", "--format=%H", "--", target.primary_version)
         drifted_source = False
         if version_commit:
@@ -284,7 +341,6 @@ def check() -> int:
                 "diff", "--name-only", f"{version_commit[0]}..HEAD", "--"
             )
             drifted_source = any(is_source(target, path) for path in changed_since_version)
-        missing_versions = [path for path in target.version_files if path not in staged]
         if (staged_source or drifted_source) and missing_versions:
             reason = "staged source changes" if staged_source else "source changes since the last package generation"
             failures.append(

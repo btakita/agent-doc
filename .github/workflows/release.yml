@@ -145,6 +145,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A tag can publish even when branch CI failed. Recompute the generation
+      # identity from checkout bytes here so shallow history cannot admit changed
+      # plugin sources under an already-released version.
+      - name: Verify editor package generations
+        run: python3 scripts/check_plugin_versions.py
+
       # The JetBrains plugin consumes lazily-kt as a Gradle composite build when
       # the sibling checkout is present. Without it the build resolves
       # `io.github.lazily:lazily` from mavenLocal / GitHub Packages, which is

@@ -160,6 +160,23 @@ pub fn cmdline_has_preparing_handoff(pid: u32) -> bool {
     agent_doc_controller::command_line::args_have_preparing_handoff(&args)
 }
 
+pub fn is_preparing_handoff_successor_pid(
+    project_root: &Path,
+    pid: u32,
+    previous_controller_pid: u32,
+    generation: u64,
+) -> bool {
+    let Some(args) = read_cmdline_args(pid) else {
+        return false;
+    };
+    agent_doc_controller::command_line::preparing_handoff_successor_args_match(
+        &args,
+        project_root,
+        previous_controller_pid,
+        generation,
+    )
+}
+
 pub fn open_supervisor_document(pid: u32) -> Option<PathBuf> {
     supervisor_document_from_observation(&read_cmdline_args(pid)?, process_cwd(pid).as_deref())
 }

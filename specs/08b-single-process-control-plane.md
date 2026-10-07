@@ -302,6 +302,21 @@ race class instead of papering over each symptom.
   replacement marker permanently. A later outgoing handoff may temporarily
   remove that public pathname, but cannot resurrect replacement identity or
   trigger the orphaned-replacement watchdog against the established controller.
+- **A preparing successor is not a stale duplicate.** Duplicate-controller
+  cleanup must protect the same-project process whose command line names the
+  current authoritative pid as `previous_controller_pid`, the next controller
+  generation, and `Preparing` handoff state. Every other same-project duplicate
+  remains eligible for verified reaping. This identity check is made again at
+  the signal boundary because an adoption status snapshot may predate the
+  concurrent handoff launch.
+- **Handoff launch failure is observable and bounded by process lifetime.** The
+  launcher records the replacement pid and appends its stderr to
+  `.agent-doc/logs/controller-stderr.log`; a launcher that owns the child handle
+  also records its eventual exit status in `ops.log`. The ready-socket wait
+  fails as soon as that child exits rather than consuming the whole handoff
+  timeout. If promotion aborts while the child is still alive, the handoff guard
+  requests graceful shutdown and then reaps that exact verified pid; every
+  SIGTERM/SIGKILL attempt is recorded with pid and generation.
 - **Admission release is not persistence proof.** A live replica that exhausts
   the bounded pull-without-ACK or silence budget may stop blocking new work, but
   that availability decision does not prove its editor buffer contains the

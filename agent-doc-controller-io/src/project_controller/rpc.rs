@@ -4970,15 +4970,29 @@ pub(crate) fn reap_verified_controller_pid(project_root: &Path, pid: u32, genera
     if pid == std::process::id() || !is_same_project_controller_pid(project_root, pid) {
         return;
     }
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!("controller_reap_signal pid={pid} generation={generation} signal=SIGTERM"),
+    );
     crate::process::send_signal(pid, crate::process::ProcessSignal::Term);
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(750) {
         if !process_is_alive(pid) {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_reap_completed pid={pid} generation={generation} after=SIGTERM"
+                ),
+            );
             return;
         }
         std::thread::sleep(Duration::from_millis(25));
     }
     if is_same_project_controller_pid(project_root, pid) {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!("controller_reap_signal pid={pid} generation={generation} signal=SIGKILL"),
+        );
         crate::process::send_signal(pid, crate::process::ProcessSignal::Kill);
         eprintln!(
             "[controller] reaped stale same-project controller pid={pid} generation={generation}"
@@ -4992,6 +5006,23 @@ pub(crate) fn reap_stale_duplicate_controllers(
     generation: u64,
 ) {
     for pid in discover_stale_duplicate_pids(project_root, authoritative_pid) {
+        if let Some(previous_pid) = authoritative_pid
+            && crate::process::is_preparing_handoff_successor_pid(
+                project_root,
+                pid,
+                previous_pid,
+                generation.saturating_add(1),
+            )
+        {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_duplicate_reap_protected_handoff_successor pid={pid} previous_pid={previous_pid} generation={}",
+                    generation.saturating_add(1),
+                ),
+            );
+            continue;
+        }
         reap_verified_controller_pid(project_root, pid, generation);
     }
 }
@@ -13051,14 +13082,31 @@ pub fn publish_pending_native_reload(file: &Path) -> Option<ReloadLibraryFanoutR
 pub(crate) struct HandoffDropGuard<'a> {
     project_root: &'a Path,
     temp_sock: &'a Path,
+    replacement: Option<(u32, u64)>,
     completed: bool,
 }
 
 impl<'a> HandoffDropGuard<'a> {
+    #[cfg(test)]
     pub(crate) fn new(project_root: &'a Path, temp_sock: &'a Path) -> Self {
         Self {
             project_root,
             temp_sock,
+            replacement: None,
+            completed: false,
+        }
+    }
+
+    pub(crate) fn with_replacement(
+        project_root: &'a Path,
+        temp_sock: &'a Path,
+        pid: u32,
+        generation: u64,
+    ) -> Self {
+        Self {
+            project_root,
+            temp_sock,
+            replacement: Some((pid, generation)),
             completed: false,
         }
     }
@@ -13077,13 +13125,23 @@ impl Drop for HandoffDropGuard<'_> {
         // replacement and rollback of the old public controller's `Preparing`
         // marker. Both operations are idempotent; failures leave the watchdog and
         // process reapers as backstops.
-        let _ = request_path_with_reason(self.temp_sock, "shutdown", "handoff_drop_guard");
+        let shutdown = request_path_with_reason(self.temp_sock, "shutdown", "handoff_drop_guard");
+        if let Some((pid, generation)) = self.replacement
+            && process_is_alive(pid)
+        {
+            reap_verified_controller_pid(self.project_root, pid, generation);
+        }
         let rollback = request(self.project_root, "abort_handoff");
         agent_doc_ops_log_io::log_op(
             self.project_root,
             &format!(
-                "handoff_drop_guard_aborted_handoff_shutdown temp_sock={} rollback={}",
+                "handoff_drop_guard_aborted_handoff_shutdown temp_sock={} replacement_pid={:?} shutdown={} rollback={}",
                 self.temp_sock.display(),
+                self.replacement.map(|(pid, _)| pid),
+                shutdown
+                    .as_ref()
+                    .map(|_| "ok".to_string())
+                    .unwrap_or_else(|err| format!("failed:{}", compact_controller_error(err))),
                 rollback
                     .as_ref()
                     .map(|_| "ok".to_string())
@@ -13119,7 +13177,7 @@ fn handoff_controller_generation(
     let _ = std::fs::remove_file(&temp_sock);
     let _ = request(project_root, "prepare_handoff");
 
-    launch_detached_at(
+    let replacement = launch_detached_at(
         project_root,
         launch_mode,
         Some(&temp_sock),
@@ -13129,8 +13187,14 @@ fn handoff_controller_generation(
     )?;
     // M4: from here until the promotion+rename succeed, any early return aborts the
     // handoff and must not leak the `Preparing` replacement.
-    let mut drop_guard = HandoffDropGuard::new(project_root, &temp_sock);
-    let _temp_stream = wait_for_controller_path_with_timeout(&temp_sock, HANDOFF_CONNECT_WAIT)?;
+    let mut drop_guard = HandoffDropGuard::with_replacement(
+        project_root,
+        &temp_sock,
+        replacement.pid,
+        new_generation,
+    );
+    let _temp_stream =
+        wait_for_controller_path_with_launch(&temp_sock, HANDOFF_CONNECT_WAIT, &replacement)?;
     let replacement_status: ControllerStatus = serde_json::from_str(
         &request_path(&temp_sock, "handoff_status")
             .context("failed to read replacement handoff status")?,
@@ -13720,6 +13784,12 @@ pub(crate) fn launch_detached(project_root: &Path, launch_mode: LaunchMode) -> R
         None,
         ControllerHandoffState::Stable,
     )
+    .map(|_| ())
+}
+
+pub(crate) struct DetachedControllerLaunch {
+    pid: u32,
+    exit: Option<std::sync::mpsc::Receiver<std::io::Result<std::process::ExitStatus>>>,
 }
 
 pub(crate) fn launch_detached_at(
@@ -13729,7 +13799,7 @@ pub(crate) fn launch_detached_at(
     controller_generation: Option<u64>,
     previous_controller_pid: Option<u32>,
     handoff_state: ControllerHandoffState,
-) -> Result<()> {
+) -> Result<DetachedControllerLaunch> {
     if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) {
         return launch_detached_via_helper(
             project_root,
@@ -13740,7 +13810,22 @@ pub(crate) fn launch_detached_at(
             handoff_state,
         );
     }
-    let build_command = |exe: &Path| -> Command {
+    let stderr_path = project_root
+        .join(".agent-doc")
+        .join("logs")
+        .join("controller-stderr.log");
+    std::fs::create_dir_all(
+        stderr_path
+            .parent()
+            .context("controller stderr log has no parent directory")?,
+    )
+    .with_context(|| {
+        format!(
+            "failed to create controller stderr log directory for {}",
+            stderr_path.display()
+        )
+    })?;
+    let build_command = |exe: &Path| -> Result<Command> {
         let mut command = Command::new(exe);
         command
             .current_dir(project_root)
@@ -13773,11 +13858,21 @@ pub(crate) fn launch_detached_at(
             });
         }
         close_inherited_fds_on_exec(&mut command);
+        let stderr_log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stderr_path)
+            .with_context(|| {
+                format!(
+                    "failed to open controller stderr log {}",
+                    stderr_path.display()
+                )
+            })?;
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        command
+            .stderr(Stdio::from(stderr_log));
+        Ok(command)
     };
     // `#ctlrlaunchenoent`: a concurrent `cargo install` / `make install-full`
     // atomically replaces the installed `agent-doc` binary (unlink + rename).
@@ -13817,7 +13912,7 @@ pub(crate) fn launch_detached_at(
     let mut attempt: u32 = 0;
     let child = loop {
         let exe = current_agent_doc_binary()?;
-        match build_command(&exe).spawn() {
+        match build_command(&exe)?.spawn() {
             Ok(child) => {
                 if attempt > 0 {
                     agent_doc_ops_log_io::log_op(
@@ -13871,8 +13966,38 @@ pub(crate) fn launch_detached_at(
     // reconcile tick) a replacement controller that immediately finds a live
     // peer owning the socket exits fast, and an unreaped handle becomes a
     // `<defunct>` zombie parented to the supervisor forever (`#zombiereap`).
-    agent_doc_supervisor_process::detached_child::reap_detached(child);
-    Ok(())
+    let pid = child.id();
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "controller_detached_child_launched pid={pid} generation={:?} previous_pid={:?} handoff_state={handoff_state:?} socket={}",
+            controller_generation,
+            previous_controller_pid,
+            listen_socket
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| socket_path(project_root).display().to_string()),
+        ),
+    );
+    let (exit_tx, exit_rx) = std::sync::mpsc::channel();
+    let log_root = project_root.to_path_buf();
+    agent_doc_supervisor_process::detached_child::reap_detached_observed(
+        child,
+        move |observed_pid, result| {
+            let status = result
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|err| format!("wait_error={err}"));
+            agent_doc_ops_log_io::log_op(
+                &log_root,
+                &format!("controller_detached_child_exited pid={observed_pid} status={status}"),
+            );
+            let _send_result = exit_tx.send(result);
+        },
+    );
+    Ok(DetachedControllerLaunch {
+        pid,
+        exit: Some(exit_rx),
+    })
 }
 
 fn launch_detached_via_helper(
@@ -13882,7 +14007,7 @@ fn launch_detached_via_helper(
     controller_generation: Option<u64>,
     previous_controller_pid: Option<u32>,
     handoff_state: ControllerHandoffState,
-) -> Result<()> {
+) -> Result<DetachedControllerLaunch> {
     let exe = current_agent_doc_binary()?;
     let mut command = Command::new(&exe);
     command
@@ -13916,21 +14041,48 @@ fn launch_detached_via_helper(
         });
     }
     close_inherited_fds_on_exec(&mut command);
-    let status = command
+    let stderr_path = project_root
+        .join(".agent-doc")
+        .join("logs")
+        .join("controller-stderr.log");
+    std::fs::create_dir_all(
+        stderr_path
+            .parent()
+            .context("controller stderr log has no parent directory")?,
+    )?;
+    let stderr_log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&stderr_path)
+        .with_context(|| {
+            format!(
+                "failed to open controller stderr log {}",
+                stderr_path.display()
+            )
+        })?;
+    let output = command
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(stderr_log))
+        .output()
         .with_context(|| {
             format!(
                 "failed to launch controller through detached helper {}",
                 exe.display()
             )
         })?;
-    if !status.success() {
-        anyhow::bail!("detached controller helper exited with {status}");
+    if !output.status.success() {
+        anyhow::bail!("detached controller helper exited with {}", output.status);
     }
-    Ok(())
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pid = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("controller_pid="))
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .with_context(|| {
+            format!("detached controller helper did not report child pid; stdout={stdout:?}")
+        })?;
+    Ok(DetachedControllerLaunch { pid, exit: None })
 }
 
 #[cfg(unix)]
@@ -14010,6 +14162,69 @@ pub(crate) fn wait_for_controller_path_with_timeout(
             agent_doc_debounce::admission_deadline::ensure_remaining("project_controller_connect")?;
             anyhow::bail!(
                 "timed out waiting for project controller at {}",
+                path.display()
+            );
+        }
+        std::thread::sleep(CONNECT_POLL);
+    }
+}
+
+fn wait_for_controller_path_with_launch(
+    path: &Path,
+    timeout: Duration,
+    launch: &DetachedControllerLaunch,
+) -> Result<interprocess::local_socket::Stream> {
+    if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(path) {
+        anyhow::bail!(reason);
+    }
+    let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
+        "project_controller_connect",
+        timeout,
+    )?;
+    let start = Instant::now();
+    loop {
+        if let Ok(stream) = connect_path(path) {
+            return Ok(stream);
+        }
+        if let Some(exit) = launch.exit.as_ref() {
+            match exit.try_recv() {
+                Ok(Ok(status)) => anyhow::bail!(
+                    "replacement controller pid {} exited before reporting ready at {}: {status}; stderr: {}",
+                    launch.pid,
+                    path.display(),
+                    path.parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .join("logs/controller-stderr.log")
+                        .display(),
+                ),
+                Ok(Err(err)) => anyhow::bail!(
+                    "replacement controller pid {} could not be observed before reporting ready at {}: {err}",
+                    launch.pid,
+                    path.display(),
+                ),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => anyhow::bail!(
+                    "replacement controller pid {} exit observer disconnected before reporting ready at {}",
+                    launch.pid,
+                    path.display(),
+                ),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        } else if !process_is_alive(launch.pid) {
+            anyhow::bail!(
+                "replacement controller pid {} exited before reporting ready at {}; stderr: {}",
+                launch.pid,
+                path.display(),
+                path.parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("logs/controller-stderr.log")
+                    .display(),
+            );
+        }
+        if start.elapsed() >= timeout {
+            agent_doc_debounce::admission_deadline::ensure_remaining("project_controller_connect")?;
+            anyhow::bail!(
+                "timed out waiting for replacement controller pid {} at {}",
+                launch.pid,
                 path.display()
             );
         }
@@ -29333,14 +29548,16 @@ pub fn run_launch_detached(
     handoff_state: &str,
 ) -> Result<()> {
     let project_root = agent_doc_project_root_io::project_root_from_arg(root)?;
-    launch_detached_at(
+    let launch = launch_detached_at(
         &project_root,
         LaunchMode::parse(launch_mode)?,
         listen_socket,
         controller_generation,
         previous_controller_pid,
         status::parse_handoff_state(handoff_state)?,
-    )
+    )?;
+    println!("controller_pid={}", launch.pid);
+    Ok(())
 }
 
 #[cfg(all(unix, not(test)))]
@@ -30243,6 +30460,30 @@ mod tests {
             !message.contains("timed out"),
             "the refusal must name the real cause, not a timeout: {message}"
         );
+    }
+
+    #[test]
+    fn handoff_wait_fails_as_soon_as_the_replacement_exit_is_observed() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join(".agent-doc/controller-handoff.sock");
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let status = Command::new("false").status().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Ok(status)).unwrap();
+        let launch = DetachedControllerLaunch {
+            pid: 424_242,
+            exit: Some(rx),
+        };
+
+        let started = Instant::now();
+        let err = wait_for_controller_path_with_launch(&sock, Duration::from_secs(30), &launch)
+            .expect_err("an exited replacement can never report ready");
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let message = format!("{err:#}");
+        assert!(message.contains("pid 424242 exited"), "{message}");
+        assert!(message.contains("exit status"), "{message}");
+        assert!(message.contains("controller-stderr.log"), "{message}");
     }
 
     /// A single connect must name the cause too: a bare OS error here is what

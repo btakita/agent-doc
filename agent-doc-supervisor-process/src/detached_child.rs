@@ -15,7 +15,24 @@
 /// a `<defunct>` zombie under a long-lived launcher. Prefer this over dropping
 /// the [`std::process::Child`] returned by a fire-and-forget `spawn()`.
 pub fn reap_detached(child: std::process::Child) {
-    let _ = spawn_reaper(child);
+    if let Err(err) = spawn_reaper(child, |pid, result| {
+        if let Err(err) = result {
+            eprintln!("[detached-child] failed to wait for pid={pid}: {err}");
+        }
+    }) {
+        eprintln!("[detached-child] failed to spawn reaper thread: {err}");
+    }
+}
+
+/// Reap a detached child while exposing its exit status to the owning adapter.
+/// The callback runs on the reaper thread after `wait()` returns.
+pub fn reap_detached_observed<F>(child: std::process::Child, on_exit: F)
+where
+    F: FnOnce(u32, std::io::Result<std::process::ExitStatus>) + Send + 'static,
+{
+    if let Err(err) = spawn_reaper(child, on_exit) {
+        eprintln!("[detached-child] failed to spawn observed reaper thread: {err}");
+    }
 }
 
 /// Reap already-exited `agent-doc` children whose dedicated reaper thread was
@@ -66,17 +83,20 @@ pub fn reap_historical_agent_doc_zombies() -> usize {
 /// [`reap_detached`] and ignore it. Closing the inherited stdio handles first
 /// keeps an unread pipe from filling and blocking the daemon; this adapter only
 /// cares about the exit status.
-fn spawn_reaper(mut child: std::process::Child) -> Option<std::thread::JoinHandle<()>> {
+fn spawn_reaper<F>(
+    mut child: std::process::Child,
+    on_exit: F,
+) -> std::io::Result<std::thread::JoinHandle<()>>
+where
+    F: FnOnce(u32, std::io::Result<std::process::ExitStatus>) + Send + 'static,
+{
     drop(child.stdin.take());
     drop(child.stdout.take());
     drop(child.stderr.take());
     let pid = child.id();
     std::thread::Builder::new()
         .name(format!("reap-detached-{pid}"))
-        .spawn(move || {
-            let _ = child.wait();
-        })
-        .ok()
+        .spawn(move || on_exit(pid, child.wait()))
 }
 
 #[cfg(test)]
@@ -106,7 +126,10 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn `true`");
-        let handle = spawn_reaper(child).expect("reaper thread spawns");
+        let handle = spawn_reaper(child, |_pid, result| {
+            assert!(result.expect("wait succeeds").success());
+        })
+        .expect("reaper thread spawns");
         handle.join().expect("reaper thread reaps and exits");
     }
 
@@ -121,7 +144,30 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn `sleep`");
-        let handle = spawn_reaper(child).expect("reaper thread spawns");
+        let handle = spawn_reaper(child, |_pid, result| {
+            assert!(result.expect("wait succeeds").success());
+        })
+        .expect("reaper thread spawns");
         handle.join().expect("reaper thread reaps and exits");
+    }
+
+    #[test]
+    fn observed_reaper_reports_the_child_exit_status() {
+        let child = Command::new("false")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn `false`");
+        let pid = child.id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        reap_detached_observed(child, move |observed_pid, result| {
+            tx.send((observed_pid, result)).unwrap();
+        });
+        let (observed_pid, status) = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("observed exit callback");
+        assert_eq!(observed_pid, pid);
+        assert!(!status.expect("wait succeeds").success());
     }
 }

@@ -22399,6 +22399,7 @@ fn focus_refusal_requires_structural_layout(reason: &str) -> bool {
 /// (`merge_editor_route_columns_within`). The width is unchanged, so GH #106's
 /// invariant holds: no sequence of escalations can grow the layout.
 fn focus_escalation_columns(
+    bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     document: &str,
     columns: &[SurfaceColumn],
@@ -22413,12 +22414,42 @@ fn focus_escalation_columns(
             replaced: None,
         });
     }
-    let (retained, retained_focus) = runtime
+    let (mut retained, mut retained_focus) = runtime
         .pane_layout_desired()
         .map(|desired| (desired.invocation.columns, desired.invocation.focus))
         .unwrap_or_default();
+    let mut basis_source = "retained_layout";
     if retained.is_empty() {
-        return Err("no_editor_columns");
+        // GH #166: a promoted controller's layout graph starts empty even
+        // though its supervisor-owned panes remain live in tmux. A focus-only
+        // editor event carries no columns by design, so use the same positive
+        // live observation that protects fresh-controller `ensure` routes.
+        // The observation is only a merge basis; publishing the focused
+        // layout below remains the first desired intent in this process.
+        let probe = automatic_layout_sync_invocation(Vec::new(), document, true);
+        let observation = observe_live_layout_documents(bootstrap, runtime, &probe);
+        let Some(live) = observation.documents.filter(|live| !live.is_empty()) else {
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "controller_editor_surface_focus_merge_basis source=none reason={} session_source={} (GH #166)",
+                    observation.reason, observation.session_source,
+                ),
+            );
+            return Err("no_editor_columns");
+        };
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "controller_editor_surface_focus_merge_basis source=live_tmux_observation reason={} session_source={} columns={} (GH #166)",
+                observation.reason,
+                observation.session_source,
+                live.len(),
+            ),
+        );
+        retained = live;
+        retained_focus = None;
+        basis_source = "live_tmux_layout";
     }
     if retained
         .iter()
@@ -22426,7 +22457,7 @@ fn focus_escalation_columns(
     {
         return Ok(FocusEscalationColumns {
             columns: retained,
-            source: "retained_layout",
+            source: basis_source,
             replaced: None,
         });
     }
@@ -22451,7 +22482,11 @@ fn focus_escalation_columns(
     }
     Ok(FocusEscalationColumns {
         columns: merged,
-        source: "retained_focus_column",
+        source: if basis_source == "live_tmux_layout" {
+            "live_tmux_focus_column"
+        } else {
+            "retained_focus_column"
+        },
         replaced,
     })
 }
@@ -22488,7 +22523,7 @@ fn escalate_focus_to_structural_layout(
         columns,
         source,
         replaced,
-    } = match focus_escalation_columns(runtime, document, columns) {
+    } = match focus_escalation_columns(bootstrap, runtime, document, columns) {
         Ok(escalation) => escalation,
         Err(cause) => {
             agent_doc_ops_log_io::log_op(
@@ -22523,10 +22558,14 @@ fn escalate_focus_to_structural_layout(
             .unwrap_or_default();
     }
     // GH #136 follow-up (a): an escalation is a derived publisher, but when it
-    // carries the editor surface's own visible columns it asserts all of them
-    // (that is the editor's observation); from the retained layout it asserts
-    // only the focused document.
-    let asserted_columns = if source == "editor_surface" {
+    // carries the editor surface's own visible columns, or GH #166's positive
+    // live-tmux basis, it asserts all of them (those are observations of the
+    // current structure); from the retained desired layout it asserts only the
+    // focused document.
+    let asserted_columns = if matches!(
+        source,
+        "editor_surface" | "live_tmux_layout" | "live_tmux_focus_column"
+    ) {
         invocation.columns.len()
     } else {
         1
@@ -30500,6 +30539,71 @@ mod tests {
                  reason=actor_pane_not_visible columns=2"
             ),
             "the handoff to the structural layout owner must be provable: {ops_log}"
+        );
+    }
+
+    #[test]
+    fn gh166_fresh_controller_focus_only_switch_uses_two_live_panes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let path = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
+            path.canonicalize().unwrap().display().to_string()
+        };
+        let first = path("first.md");
+        let second = path("second.md");
+        let stashed = path("stashed.md");
+        assert!(
+            runtime.pane_layout_desired().is_none(),
+            "the promoted controller must start without retained desired layout"
+        );
+
+        TEST_LIVE_LAYOUT_DOCUMENTS
+            .with(|documents| *documents.borrow_mut() = Some(vec![first.clone(), second.clone()]));
+        let escalated = escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &stashed,
+            &[],
+            "actor_pane_not_visible",
+        );
+        TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| *documents.borrow_mut() = None);
+
+        assert!(
+            escalated,
+            "a positive two-pane observation must recover the fresh-controller focus escalation"
+        );
+        let desired = runtime.pane_layout_desired().unwrap();
+        assert_eq!(
+            desired.invocation.columns.len(),
+            2,
+            "focusing a stashed document must replace a live column, never grow the layout"
+        );
+        assert_eq!(desired.invocation.focus.as_deref(), Some(stashed.as_str()));
+        assert!(desired.invocation.columns.contains(&first));
+        assert!(desired.invocation.columns.contains(&stashed));
+        assert!(
+            !desired.invocation.columns.contains(&second),
+            "the uncovered focus replaces the rightmost live column when no retained focus exists"
+        );
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains(
+                "controller_editor_surface_focus_merge_basis source=live_tmux_observation \
+                 reason=positive_observation session_source=test_hook columns=2 (GH #166)"
+            ),
+            "the live merge basis must be explicit and diagnosable: {ops_log}"
+        );
+        assert!(
+            ops_log.contains(&format!(
+                "controller_editor_surface_focus_escalated document={stashed} \
+                 reason=actor_pane_not_visible columns=2 source=live_tmux_focus_column"
+            )),
+            "the recovered focus escalation must identify the live-tmux basis: {ops_log}"
         );
     }
 

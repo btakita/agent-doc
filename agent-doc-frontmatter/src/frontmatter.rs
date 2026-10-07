@@ -1549,6 +1549,49 @@ pub fn repair_frontmatter_yaml(yaml: &str) -> Option<String> {
     }
 }
 
+/// Repair a leading frontmatter block whose closing fence gained exactly one
+/// stray character (for example `9---`).
+///
+/// This is deliberately narrower than accepting a fuzzy fence in [`parse`]. It
+/// removes one ASCII alphanumeric prefix only when the bytes before that line
+/// already deserialize as a complete [`Frontmatter`] mapping and the resulting
+/// whole document parses cleanly. Longer prefixes and ambiguous YAML remain
+/// operator-visible failures.
+pub fn repair_single_char_prefixed_closing_fence(content: &str) -> Option<String> {
+    if parse(content).is_ok() {
+        return None;
+    }
+    let rest = content.strip_prefix("---\n")?;
+    let mut offset = 0usize;
+    for line_with_ending in rest.split_inclusive('\n') {
+        let line = line_with_ending
+            .strip_suffix('\n')
+            .unwrap_or(line_with_ending);
+        let Some(prefix) = line.strip_suffix("---") else {
+            offset += line_with_ending.len();
+            continue;
+        };
+        if prefix.len() != 1 || !prefix.as_bytes()[0].is_ascii_alphanumeric() {
+            offset += line_with_ending.len();
+            continue;
+        }
+        let yaml = rest[..offset].trim_end_matches('\n');
+        if deserialize_frontmatter_yaml(yaml).is_err() {
+            offset += line_with_ending.len();
+            continue;
+        }
+
+        let prefix_start = "---\n".len() + offset;
+        let mut repaired = content.to_string();
+        repaired.replace_range(prefix_start..prefix_start + prefix.len(), "");
+        if parse(&repaired).is_ok() {
+            return Some(repaired);
+        }
+        offset += line_with_ending.len();
+    }
+    None
+}
+
 /// Outcome of a startup-tolerant frontmatter parse: the supervisor must never
 /// silently fail to open on malformed frontmatter — it either basic-repairs the
 /// YAML or surfaces a clear, user-facing message.
@@ -3307,6 +3350,28 @@ mod tests {
     #[test]
     fn raw_frontmatter_yaml_unterminated_no_close() {
         assert_eq!(raw_frontmatter_yaml("---\nsession: abc\nBody\n"), None);
+    }
+
+    #[test]
+    fn repair_single_char_prefixed_closing_fence_recovers_valid_frontmatter() {
+        let malformed =
+            "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n9---\nBody\n";
+        let repaired = repair_single_char_prefixed_closing_fence(malformed).unwrap();
+
+        assert_eq!(
+            repaired,
+            "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n---\nBody\n"
+        );
+        let (frontmatter, body) = parse(&repaired).unwrap();
+        assert_eq!(frontmatter.session.as_deref(), Some("session-api"));
+        assert_eq!(frontmatter.agent.as_deref(), Some("codex"));
+        assert_eq!(body, "Body\n");
+    }
+
+    #[test]
+    fn repair_single_char_prefixed_closing_fence_rejects_ambiguous_prefix() {
+        let malformed = "---\nagent_doc_session: session-api\nagent: codex\noops---\nBody\n";
+        assert!(repair_single_char_prefixed_closing_fence(malformed).is_none());
     }
 
     #[test]

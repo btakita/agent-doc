@@ -72,6 +72,13 @@
   live harness; bounded retries may reload after the document becomes valid. It
   must not strand the preserved child at a bare shell by failing during reentry
   or poll editor authority on every idle-watch tick while the text stays invalid.
+- Ordinary startup may repair an unterminated leading frontmatter block only
+  when its would-be closing fence has exactly one stray ASCII alphanumeric
+  prefix, the preceding YAML already forms a valid typed frontmatter mapping,
+  and removing that prefix makes the entire document parse. Longer or ambiguous
+  prefixes remain fail-closed. The repair is persisted through document
+  authority before route-owned resume admission continues, using the same live
+  current text startup will parse rather than a stale disk projection.
 - A deliberately terminated supervisor is not a crash (`#gh133sigterm`, GH #133
   follow-up). The supervisor's `SIGTERM` handler (and a requested self-kill)
   records a durable `supervisor_intentional_exit` marker in `state.db` naming its

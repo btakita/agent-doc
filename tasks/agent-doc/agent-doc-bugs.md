@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -245,19 +244,19 @@ Fixed and released in `v0.35.477`. Matching live-buffer and post-publication ret
 ### Re: GitHub issue 179 fixed — gpt-5 · 2026-10-07T19:55-04:00
 
 Fixed and released in `v0.35.477`. Explicit sends now require positive live-owner evidence, and ownerless empty-preflight reclaim runs independently of transient recycle state with live-turn and authority guards. All focused and final release tests passed.
-<!-- agent:boundary:e62912d0 -->
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/180
+
+### Re: GitHub issue 180 fixed — gpt-5 · 2026-10-07T19:56-04:00
+
+Fixed and released in `v0.35.477`. JetBrains installed and staged evidence is now scoped to the actual live IDE plugins directory, staging destinations are respected, and permanent dynamic-upgrade decline reasons survive staging reuse. Focused regressions and the final release gates passed.
+<!-- agent:boundary:b1c61212 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~api.md had duplication issues in the queue item when run.~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/178~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/179~~ — auto-struck: answered this cycle (#ftstrike)
-- #gh-fix https://github.com/btakita/agent-doc/issues/180
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

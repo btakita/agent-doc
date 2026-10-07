@@ -5,6 +5,7 @@
 //! IO, tmux queries, controller projection, or log writes.
 
 use std::path::Path;
+use std::{error::Error, fmt};
 
 use tmux_router::registry::{
     canonical_registry_key_in as tmux_canonical_registry_key_in, entry_session_id,
@@ -53,6 +54,33 @@ pub struct SessionIdentityObservation {
     pub file: String,
     pub session_id: String,
 }
+
+/// A session UUID is durably owned by a different document.
+///
+/// Kept as a typed error so effect adapters can distinguish this terminal
+/// ownership refusal from retryable tmux and transport failures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionIdentityConflict {
+    pub session_id: String,
+    pub attempted_file: String,
+    pub owner: SessionIdentityOwner,
+}
+
+impl fmt::Display for SessionIdentityConflict {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "refusing duplicate session identity {} for {}: first durable owner is {}",
+            self.session_id, self.attempted_file, self.owner.file
+        )?;
+        if !self.owner.pane.trim().is_empty() {
+            write!(formatter, " in pane {}", self.owner.pane)?;
+        }
+        write!(formatter, " (registered {})", self.owner.started)
+    }
+}
+
+impl Error for SessionIdentityConflict {}
 
 pub fn canonical_registry_key_in(base_dir: &Path, file: &str) -> String {
     tmux_canonical_registry_key_in(base_dir, file)
@@ -109,13 +137,17 @@ pub fn session_identity_claim(
 /// `None` means this identity predates the typed event stream and callers may
 /// use the registry only as a one-time compatibility bootstrap. Once any
 /// observation exists, registry pruning and supervisor recycling are irrelevant.
+/// The first observation owns both its canonical path and its document hash:
+/// pre-0.35.461 rename handling could update only the hash, so either match
+/// proves the same moved document while a copy matches neither.
 pub fn durable_session_identity_claim(
     base_dir: &Path,
     observations: &[SessionIdentityObservation],
     session_id: &str,
     file: &str,
+    document_hash: &str,
 ) -> Option<SessionIdentityClaim> {
-    let owner = observations
+    let owner_observation = observations
         .iter()
         .filter(|observation| observation.session_id == session_id)
         .min_by(|left, right| {
@@ -124,13 +156,13 @@ pub fn durable_session_identity_claim(
                 .then_with(|| left.file.cmp(&right.file))
         })?;
     let owner = SessionIdentityOwner {
-        registry_key: canonical_registry_key_in(base_dir, &owner.file),
-        file: owner.file.clone(),
+        registry_key: canonical_registry_key_in(base_dir, &owner_observation.file),
+        file: owner_observation.file.clone(),
         pane: String::new(),
-        started: format!("state-event:{}", owner.sequence),
+        started: format!("state-event:{}", owner_observation.sequence),
     };
     let document_key = canonical_registry_key_in(base_dir, file);
-    if owner.registry_key == document_key {
+    if owner.registry_key == document_key || owner_observation.document_hash == document_hash {
         Some(SessionIdentityClaim::OwnedByDocument(owner))
     } else {
         Some(SessionIdentityClaim::Conflicting(owner))
@@ -314,7 +346,8 @@ mod tests {
                 dir.path(),
                 &observations,
                 "copied-session",
-                "original.md"
+                "original.md",
+                "owner-hash",
             ),
             Some(SessionIdentityClaim::OwnedByDocument(_))
         ));
@@ -323,7 +356,8 @@ mod tests {
                 dir.path(),
                 &observations,
                 "copied-session",
-                "copy.md"
+                "copy.md",
+                "copy-hash",
             ),
             Some(SessionIdentityClaim::Conflicting(SessionIdentityOwner {
                 file,
@@ -336,9 +370,67 @@ mod tests {
                 dir.path(),
                 &observations,
                 "unobserved-session",
-                "copy.md"
+                "copy.md",
+                "copy-hash",
             ),
             None
+        );
+    }
+
+    #[test]
+    fn durable_session_identity_claim_accepts_half_rekeyed_rename_but_not_copy() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let observations = vec![SessionIdentityObservation {
+            sequence: 41,
+            document_hash: "moved-document-hash".to_string(),
+            file: "old/location.md".to_string(),
+            session_id: "moved-session".to_string(),
+        }];
+
+        assert!(matches!(
+            durable_session_identity_claim(
+                dir.path(),
+                &observations,
+                "moved-session",
+                "new/location.md",
+                "moved-document-hash",
+            ),
+            Some(SessionIdentityClaim::OwnedByDocument(SessionIdentityOwner {
+                file,
+                started,
+                ..
+            })) if file == "old/location.md" && started == "state-event:41"
+        ));
+        assert!(matches!(
+            durable_session_identity_claim(
+                dir.path(),
+                &observations,
+                "moved-session",
+                "copy.md",
+                "different-document-hash",
+            ),
+            Some(SessionIdentityClaim::Conflicting(_))
+        ));
+    }
+
+    #[test]
+    fn durable_conflict_message_omits_an_empty_pane() {
+        let conflict = SessionIdentityConflict {
+            session_id: "duplicate-session".to_string(),
+            attempted_file: "copy.md".to_string(),
+            owner: SessionIdentityOwner {
+                registry_key: "owner-key".to_string(),
+                file: "owner.md".to_string(),
+                pane: String::new(),
+                started: "state-event:41".to_string(),
+            },
+        };
+
+        let rendered = conflict.to_string();
+        assert!(!rendered.contains(" in pane "));
+        assert_eq!(
+            rendered,
+            "refusing duplicate session identity duplicate-session for copy.md: first durable owner is owner.md (registered state-event:41)"
         );
     }
 

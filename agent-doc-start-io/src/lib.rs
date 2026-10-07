@@ -2541,6 +2541,62 @@ mod tests {
     }
 
     #[test]
+    fn half_rekeyed_renamed_document_keeps_its_session_for_start_and_registration() {
+        let dir = tempfile::tempdir().unwrap();
+        let old_file = dir.path().join("old-location.md");
+        let moved_file = dir.path().join("nested/moved.md");
+        std::fs::create_dir_all(moved_file.parent().unwrap()).unwrap();
+        let session_id = "c51d5cb2-2db0-488b-9a39-2d41477eec37";
+        let content =
+            format!("---\nagent_doc_session: {session_id}\nagent: codex\n---\n\n# Moved\n");
+        std::fs::write(&moved_file, &content).unwrap();
+        assert!(!old_file.exists());
+
+        let document_hash = agent_doc_hash::document_id_for_path(&moved_file);
+        let legacy_observation = agent_doc_state_backbone::StateEvent::new(
+            "legacy-half-rekeyed-session-identity",
+            agent_doc_state_backbone::StateFact::DocumentSessionIdentityObserved {
+                document_hash,
+                canonical_path: old_file.display().to_string(),
+                session_id: session_id.to_string(),
+            },
+        );
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
+            dir.path(),
+            &legacy_observation,
+        )
+        .unwrap();
+
+        let resolved = resolve_start_session_identity_with_publisher(
+            dir.path(),
+            &moved_file,
+            content,
+            session_id.to_string(),
+            agent_doc_controller_io::project_controller::append_state_event_for_test,
+        )
+        .unwrap();
+        assert_eq!(resolved.session_id, session_id);
+        assert!(resolved.rekey.is_none());
+
+        agent_doc_session_registry_io::registration::register_start_supervisor_in(
+            dir.path(),
+            session_id,
+            "%174",
+            &moved_file.display().to_string(),
+            174,
+            "@174",
+            &dir.path().display().to_string(),
+            "supervisor-174",
+        )
+        .unwrap();
+        let registered =
+            agent_doc_session_registry_io::lookup_file_entry_in(dir.path(), &moved_file)
+                .unwrap()
+                .expect("the moved document should retain its registration");
+        assert_eq!(registered.session_id, session_id);
+    }
+
+    #[test]
     fn start_console_status_suppresses_route_owned_stderr_by_default() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("session.log");

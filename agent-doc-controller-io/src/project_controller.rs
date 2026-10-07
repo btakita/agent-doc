@@ -840,6 +840,7 @@ pub(crate) enum PaneLayoutEffectPhase {
     Idle,
     InFlight,
     RetryPending,
+    Refused,
     Converged,
 }
 
@@ -879,6 +880,7 @@ pub(crate) enum PaneLayoutProjection {
     NeedsEffect(PaneLayoutDesired),
     Applying(PaneLayoutDesired),
     RetryPending(PaneLayoutDesired),
+    Refused(PaneLayoutDesired),
     OperatorOwned(PaneLayoutDesired),
     Converged(PaneLayoutDesired),
 }
@@ -900,6 +902,7 @@ pub(crate) fn pane_layout_projection_desired(
         PaneLayoutProjection::NeedsEffect(desired)
         | PaneLayoutProjection::Applying(desired)
         | PaneLayoutProjection::RetryPending(desired)
+        | PaneLayoutProjection::Refused(desired)
         | PaneLayoutProjection::OperatorOwned(desired)
         | PaneLayoutProjection::Converged(desired) => Some(desired),
     }
@@ -938,7 +941,9 @@ pub(crate) fn pane_layout_route_readiness(
         PaneLayoutProjection::NeedsEffect(_)
         | PaneLayoutProjection::Applying(_)
         | PaneLayoutProjection::RetryPending(_) => PaneLayoutRouteReadiness::Wait,
-        PaneLayoutProjection::Absent | PaneLayoutProjection::OperatorOwned(_) => {
+        PaneLayoutProjection::Absent
+        | PaneLayoutProjection::Refused(_)
+        | PaneLayoutProjection::OperatorOwned(_) => {
             PaneLayoutRouteReadiness::Refused
         }
     }
@@ -950,6 +955,7 @@ pub enum ControllerPaneLayoutPhase {
     NeedsEffect,
     Applying,
     RetryPending,
+    Refused,
     OperatorOwned,
     Converged,
 }
@@ -965,6 +971,7 @@ pub enum ControllerPaneLayoutReasonCode {
     ActiveDispatchOutsideSurface,
     TmuxUnavailable,
     EffectFailed,
+    EffectRefused,
     ObservationFailed,
     RetryScheduled,
 }
@@ -1053,6 +1060,9 @@ pub(crate) fn derive_pane_layout_projection(
             }
             PaneLayoutEffectPhase::RetryPending => {
                 return PaneLayoutProjection::RetryPending(desired);
+            }
+            PaneLayoutEffectPhase::Refused => {
+                return PaneLayoutProjection::Refused(desired);
             }
             PaneLayoutEffectPhase::Idle | PaneLayoutEffectPhase::Converged => {}
         }
@@ -1755,6 +1765,7 @@ impl ControllerPaneLayoutGraph {
             PaneLayoutProjection::NeedsEffect(_) => ControllerPaneLayoutPhase::NeedsEffect,
             PaneLayoutProjection::Applying(_) => ControllerPaneLayoutPhase::Applying,
             PaneLayoutProjection::RetryPending(_) => ControllerPaneLayoutPhase::RetryPending,
+            PaneLayoutProjection::Refused(_) => ControllerPaneLayoutPhase::Refused,
             PaneLayoutProjection::OperatorOwned(_) => ControllerPaneLayoutPhase::OperatorOwned,
             PaneLayoutProjection::Converged(_) => ControllerPaneLayoutPhase::Converged,
         };
@@ -1780,6 +1791,7 @@ impl ControllerPaneLayoutGraph {
             }
             ControllerPaneLayoutPhase::Applying => ControllerPaneLayoutReasonCode::EffectInFlight,
             ControllerPaneLayoutPhase::NeedsEffect => ControllerPaneLayoutReasonCode::Unobserved,
+            ControllerPaneLayoutPhase::Refused => ControllerPaneLayoutReasonCode::EffectRefused,
             ControllerPaneLayoutPhase::OperatorOwned => {
                 ControllerPaneLayoutReasonCode::ActiveDispatchOutsideSurface
             }
@@ -1960,7 +1972,9 @@ impl ControllerPaneLayoutGraph {
             let terminal = match &projection {
                 // A terminal projection for another generation is supersession,
                 // not work this caller can keep waiting to converge.
-                PaneLayoutProjection::OperatorOwned(_) | PaneLayoutProjection::Converged(_) => true,
+                PaneLayoutProjection::Refused(_)
+                | PaneLayoutProjection::OperatorOwned(_)
+                | PaneLayoutProjection::Converged(_) => true,
                 PaneLayoutProjection::NeedsEffect(desired)
                 | PaneLayoutProjection::Applying(desired)
                 | PaneLayoutProjection::RetryPending(desired) => desired.generation != generation,
@@ -11485,6 +11499,24 @@ mod tests {
                 },
             ),
             PaneLayoutProjection::RetryPending(desired.clone())
+        );
+        assert_eq!(
+            derive_pane_layout_projection(
+                Some(desired.clone()),
+                actor_bindings.clone(),
+                Some(mismatched.clone()),
+                PaneLayoutEffectReceipt {
+                    generation: 7,
+                    actor_bindings: actor_bindings.clone(),
+                    attempt: 1,
+                    phase: PaneLayoutEffectPhase::Refused,
+                    reason: "duplicate_session_identity".to_string(),
+                    file_panes: Vec::new(),
+                    focus_required: true,
+                    focus_applied: false,
+                },
+            ),
+            PaneLayoutProjection::Refused(desired.clone())
         );
         let dispatched_document = "tasks/lazily.md".to_string();
         let dispatch_actor_bindings = vec![

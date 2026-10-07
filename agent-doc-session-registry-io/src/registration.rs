@@ -471,12 +471,12 @@ fn register_full_internal(
         session_registry::session_identity_claim(base_dir, registry, session_id, file)
     });
     if let session_registry::SessionIdentityClaim::Conflicting(owner) = identity_claim {
-        anyhow::bail!(
-            "refusing duplicate session identity {session_id} for {file}: first durable owner is {} in pane {} (registered {})",
-            owner.file,
-            owner.pane,
-            owner.started,
-        );
+        return Err(session_registry::SessionIdentityConflict {
+            session_id: session_id.to_string(),
+            attempted_file: file.to_string(),
+            owner,
+        }
+        .into());
     }
 
     // Enforce single session per pane: remove stale entries pointing to same pane
@@ -822,6 +822,11 @@ mod tests {
         )
         .unwrap_err();
 
+        assert!(
+            error
+                .downcast_ref::<session_registry::SessionIdentityConflict>()
+                .is_some()
+        );
         assert!(
             error
                 .to_string()

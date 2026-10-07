@@ -3685,6 +3685,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         // src/haiven-dev documents every 30s under its retired identity after the
         // 2026-09-29 18:12:38 reload. Only the live generation retries.
         if (PluginGeneration.retired) return
+        if (projection.failureCount == 1 && retainedProjectionHoldNeedsOperatorSurfaceUtil(reason)) {
+            recordRetainedProjectionHold(filePath, reason)
+        }
         if (registerFailureNeedsLivenessRepublishUtil(reason)) {
             // The owning controller never received this generation's open report, so it
             // still names another generation as the live endpoint. Republish, then retry
@@ -3694,6 +3697,42 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return
         }
         scheduleRegisterRetry(filePath, projection.backoffMs)
+    }
+
+    /** Persist and surface a fail-closed attach hold without waiting for an editor action. */
+    private fun recordRetainedProjectionHold(filePath: String, reason: String) {
+        val root = resolveProjectRoot(filePath)
+        if (root == null) {
+            log.warn("[crdt-replica] cannot record retained projection hold: project root unavailable; reason=$reason")
+        } else {
+            val lib = AgentDocLib.get()
+            if (lib == null) {
+                log.warn("[crdt-replica] cannot record retained projection hold: native library unavailable; reason=$reason")
+            } else {
+                val status = "attach_refused_${attachFailureStatusToken(reason)}"
+                try {
+                    if (!lib.agent_doc_record_editor_surface_event(
+                            root,
+                            "jetbrains",
+                            filePath,
+                            "replica_registration",
+                            "replica_attach",
+                            "automatic_attach",
+                            null,
+                            status,
+                        )) {
+                        log.warn("[crdt-replica] retained projection hold event rejected: status=$status")
+                    }
+                } catch (t: Throwable) {
+                    log.warn("[crdt-replica] retained projection hold event ABI failed: ${t.message}", t)
+                }
+            }
+        }
+
+        val message = retainedProjectionHoldMessageUtil(File(filePath).name, reason, attachFailureRemedy(reason))
+        ApplicationManager.getApplication().invokeLater {
+            if (!project.isDisposed) TerminalUtil.notifyError(project, message)
+        }
     }
 
     private fun clearRegisterFailure(filePath: String) {
@@ -5023,9 +5062,14 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
         RetainedRegistrationProjectionAction.DeferCanonicalProjection
     } else if (retainedReplicaReseedPending) {
         // A fresh controller's empty hub is a synchronization placeholder, not
-        // a document projection. A retained editor may seed it only from a live
-        // buffer with an independently settled controller-accepted ancestor.
-        if (publishedShadow != null && bufferText != null) {
+        // a document projection. register() has already durably published the
+        // retained replica before this decision. Exact equality between that
+        // post-publication replica and the live buffer is therefore convergence,
+        // even when an earlier attach never produced a JVM-local settled shadow.
+        // Divergent text still needs the independently settled ancestor.
+        if (bufferText != null && canonicalText == bufferText) {
+            RetainedRegistrationProjectionAction.ApplyCanonical
+        } else if (publishedShadow != null && bufferText != null) {
             RetainedRegistrationProjectionAction.PublishOperatorBuffer
         } else {
             RetainedRegistrationProjectionAction.HoldOperatorBuffer
@@ -5105,6 +5149,26 @@ internal fun retainedRegistrationProjectionActionUtil(
         cleanMergeAvailable == true -> RetainedRegistrationProjectionAction.MergeForward
         else -> RetainedRegistrationProjectionAction.HoldOperatorBuffer
     }
+
+internal fun retainedProjectionHoldNeedsOperatorSurfaceUtil(reason: String): Boolean =
+    reason.contains("retained-reseed-missing-settled-shadow") ||
+        reason.contains("ambiguous-retained-projection") ||
+        reason.contains("ambiguous-reregister-projection")
+
+internal fun retainedProjectionHoldMessageUtil(fileName: String, reason: String, remedy: String?): String =
+    buildString {
+        append("Agent Doc could not attach the open editor replica for $fileName. Cause: $reason.")
+        if (remedy != null) append(" $remedy")
+        append(" The editor buffer and disk were left unchanged.")
+    }
+
+internal fun attachFailureStatusToken(reason: String): String =
+    reason
+        .substringBefore(':')
+        .lowercase()
+        .replace(Regex("[^a-z0-9_-]+"), "_")
+        .trim('_')
+        .ifEmpty { "unknown" }
 
 private val BINARY_OWNED_BOUNDARY_LINE =
     Regex("""(?m)^[ \t]*<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->[ \t]*(?:\r?\n|$)""")

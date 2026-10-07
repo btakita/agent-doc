@@ -63,6 +63,45 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     @Test
+    fun `restart unsettled attach and native reload accept matching retained reseed`() {
+        val retainedReplicaAfterDurablePublication = "# Session\n\noperator-visible text\n"
+
+        assertEquals(
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            retainedRegistrationProjectionActionForAttachUtil(
+                deferCanonicalProjectionForPendingLocal = false,
+                canonicalProjectionRetained = false,
+                retainedReplicaReseedPending = true,
+                publishedShadow = null,
+                bufferText = retainedReplicaAfterDurablePublication,
+                canonicalText = retainedReplicaAfterDurablePublication,
+            ),
+        )
+    }
+
+    @Test
+    fun `remaining retained projection hold is recorded and surfaced without compact exchange`() {
+        val reason = "retained-reseed-missing-settled-shadow"
+        assertTrue(retainedProjectionHoldNeedsOperatorSurfaceUtil(reason))
+        assertEquals("retained-reseed-missing-settled-shadow", attachFailureStatusToken("$reason: details"))
+        assertEquals(
+            "Agent Doc could not attach the open editor replica for plan.md. Cause: $reason. " +
+                "Repair the detached document. The editor buffer and disk were left unchanged.",
+            retainedProjectionHoldMessageUtil("plan.md", reason, "Repair the detached document."),
+        )
+
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt",
+        ).toFile().readText()
+        val failurePath = source
+            .substringAfter("private fun recordRegisterFailure")
+            .substringBefore("private fun scheduleRegisterRetry")
+        assertTrue(failurePath.contains("recordRetainedProjectionHold(filePath, reason)"))
+        assertTrue(failurePath.contains("agent_doc_record_editor_surface_event("))
+        assertTrue(failurePath.contains("TerminalUtil.notifyError(project, message)"))
+    }
+
+    @Test
     fun `missing restart shadow diagnostic never dereferences the absent ancestor`() {
         val source = Paths.get(
             "src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt",

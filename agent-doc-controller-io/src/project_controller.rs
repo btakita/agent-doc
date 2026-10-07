@@ -8573,10 +8573,26 @@ impl ControllerRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct ControllerEnvelope<T> {
     ok: bool,
+    /// Preserve the wire-level difference between a missing payload and an
+    /// explicitly null optional result. Serde normally maps both shapes to
+    /// `None` for `Option<T>`; wrapping every present value lets a payload type
+    /// of `Option<U>` decode JSON null as `Some(None)` at the envelope layer.
+    #[serde(default, deserialize_with = "deserialize_present_controller_data")]
     data: Option<T>,
     error: Option<String>,
+}
+
+fn deserialize_present_controller_data<'de, D, T>(
+    deserializer: D,
+) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 pub struct LaunchClaim {

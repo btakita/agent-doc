@@ -662,25 +662,43 @@ fn observe_pre_dispatch_stranded_draft(
 ) -> PreDispatchStrandedDraftAction {
     let capture = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane).ok();
     let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
+    classify_pre_dispatch_stranded_draft_capture(capture.as_deref(), cursor_y, harness, trigger)
+}
+
+/// Classify only text that the harness composer projection owns as an operator
+/// draft. A trigger-shaped Claude autosuggestion is rendered in the composer
+/// line too, but its faint ANSI style means the input buffer is empty. Treating
+/// that ghost text as a stranded trigger makes every bare `Enter` a no-op and
+/// prevents route from ever typing the real trigger (`#routeghostdraft`).
+fn classify_pre_dispatch_stranded_draft_capture(
+    capture: Option<&str>,
+    cursor_y: Option<usize>,
+    harness: &HarnessConfig,
+    trigger: &str,
+) -> PreDispatchStrandedDraftAction {
+    let operator_draft = capture.is_some_and(|content| {
+        matches!(
+            agent_doc_harness::project_pane_composer_at_cursor(content, harness, cursor_y),
+            agent_doc_harness::PaneComposerProjection::OperatorDraft { .. }
+        )
+    });
+    // Preserve the raw capture for wrapped-path matching, but only after the
+    // composer policy owner proves those glyphs are real input rather than a
+    // faint autosuggestion.
+    let trigger_drafted = operator_draft
+        && capture.is_some_and(|content| {
+            route_trigger_visible_in_current_draft(content, trigger, |line| {
+                harness.is_prompt_line(line)
+            })
+        });
     classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
         pane_captured: capture.is_some(),
-        trigger_drafted: capture.as_deref().is_some_and(|content| {
-            agent_doc_harness::ready_prompt_candidate_at_cursor(content, harness, cursor_y)
-                .is_some()
-                && route_trigger_visible_in_current_draft(content, trigger, |line| {
-                    harness.is_prompt_line(line)
-                })
-        }),
-        pane_busy: capture
-            .as_deref()
-            .is_some_and(|content| harness.has_busy_cue(content)),
+        trigger_drafted,
+        pane_busy: capture.is_some_and(|content| harness.has_busy_cue(content)),
         // `#concatdraftinject`: the composer projection already distinguishes an
         // empty ready composer from one holding a draft. A draft that is not this
         // trigger is exactly the state that concatenates.
-        foreign_draft: capture.as_deref().is_some_and(|content| {
-            agent_doc_harness::pane_composer_draft_at_cursor(harness, content, cursor_y)
-                .is_some_and(|preview| !preview.trim().is_empty())
-        }),
+        foreign_draft: operator_draft && !trigger_drafted,
     })
 }
 
@@ -1229,4 +1247,75 @@ pub struct DirectPaneDispatchOptions {
     pub await_start_proof: bool,
     pub print_unproven_progress: bool,
     pub submit_policy: DirectPaneSubmitPolicy,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TRIGGER: &str =
+        "/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md";
+
+    fn claude_pane(prompt: &str) -> String {
+        format!(
+            "completed response\n\
+             ────────\n\
+             {prompt}\n\
+             ────────\n\
+               Fable 5.1 ctx:16% ~/src/haiven-dev main brian@host\n\
+               ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
+        )
+    }
+
+    #[test]
+    fn dim_exact_trigger_autosuggestion_is_an_empty_composer() {
+        let harness = HarnessConfig::claude();
+        let pane = claude_pane(&format!(
+            "\x1b[39m❯\u{a0}\x1b[2m/agent-doc\x1b[0m \x1b[2m{}\x1b[0m",
+            "/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md"
+        ));
+
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_capture(
+                Some(&pane),
+                Some(2),
+                &harness,
+                TRIGGER,
+            ),
+            PreDispatchStrandedDraftAction::DispatchFresh,
+            "faint trigger-shaped ghost text must not absorb repeated bare Enter submits"
+        );
+    }
+
+    #[test]
+    fn real_exact_trigger_draft_is_resubmitted_without_retyping() {
+        let harness = HarnessConfig::claude();
+        let pane = claude_pane(&format!("❯\u{a0}{TRIGGER}"));
+
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_capture(
+                Some(&pane),
+                Some(2),
+                &harness,
+                TRIGGER,
+            ),
+            PreDispatchStrandedDraftAction::ResubmitStrandedDraft,
+        );
+    }
+
+    #[test]
+    fn real_foreign_draft_remains_protected() {
+        let harness = HarnessConfig::claude();
+        let pane = claude_pane("❯\u{a0}do not overwrite this operator draft");
+
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_capture(
+                Some(&pane),
+                Some(2),
+                &harness,
+                TRIGGER,
+            ),
+            PreDispatchStrandedDraftAction::DeferForeignDraft,
+        );
+    }
 }

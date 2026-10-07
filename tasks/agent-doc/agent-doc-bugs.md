@@ -162,7 +162,6 @@ The `#subagents` entry inside `preset` is redundant—the attribute controls dis
 ```md
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 ```
-
 ### Re: subagent scaling, queue recovery, editor layout fixes, and v0.35.475 — gpt-6.1-sol · 2026-10-07T14:59:33-04:00
 
 > **Chat prompt (#chatprompt):** cont

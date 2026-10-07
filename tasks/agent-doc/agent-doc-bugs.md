@@ -19,7 +19,6 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -42,6 +41,19 @@ Compacted content:
 - Prior summary/context: prior compacted content: Archived 42 response topic(s): do #steerbaselineabsorb; preflight refused on its own repair ...
 
 ### Re: release and delegated fixes — gpt-6.1-sol · 2026-10-07T05:06:55-04:00
+
+> **Queue prompt:**
+>
+> Run Agent Doc on this file; then interrupt the Codex turn; agent-doc should detect if the turn is interrupted. I ran Compact Exchange and got an error. Compact Exchange should work even if a turn is running/interrupted. Run Agent Doc again caused the enqueued Compact Exchange to run.
+>
+> #gh-fix https://github.com/btakita/agent-doc/issues/166
+>
+> #gh-fix https://github.com/btakita/agent-doc/issues/169
+>
+> #gh-fix https://github.com/btakita/agent-doc/issues/170
+>
+> #gh-fix https://github.com/btakita/agent-doc/issues/171
+
 
 > **Chat prompt (#chatprompt):** In a subagent: Fix agent-doc background processes thrashing
 
@@ -86,12 +98,6 @@ The one-time remote observation found CI and the `v0.35.473` Release workflow st
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
-- Run Agent Doc on this file; then interrupt the Codex turn; agent-doc should detect if the turn is interrupted. I ran Compact Exchange and got an error. Compact Exchange should work even if a turn is running/interrupted. Run Agent Doc again caused the enqueued Compact Exchange to run.
-- #gh-fix https://github.com/btakita/agent-doc/issues/166
-- #gh-fix https://github.com/btakita/agent-doc/issues/169
-- #gh-fix https://github.com/btakita/agent-doc/issues/170
-- #gh-fix https://github.com/btakita/agent-doc/issues/171
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

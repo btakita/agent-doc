@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-sim-net"
-version = "0.35.469"
+version = "0.35.470"
 edition = "2024"
 description = "Seeded deterministic network-conditions layer for agent-doc SimWorld simulators"
 license = "MIT"

@@ -2,6 +2,13 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.470
+
+- **Explicitly sent queue work preserves the active turn (GH #162).** Run Agent Doc upgrades ordinary queue edits to
+  current-turn steering, keeps the visibly in-progress head position-locked through priority and dependency
+  maintenance, suppresses false committed-closeout wording while that head remains live, retries refused maintenance
+  writes from a fresh authority cut, and seeds steering from the same document cut admitted by preflight.
+
 ## 0.35.469
 
 - **Partial registry cleanup no longer closes live tmux actors (GH #160).** tmux-router treats registry saves as

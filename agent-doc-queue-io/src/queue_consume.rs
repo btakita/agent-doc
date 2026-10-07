@@ -4402,9 +4402,10 @@ mod core_tests {
     }
 
     #[test]
-    fn answered_marker_head_not_struck_when_absent_from_baseline() {
-        // Exact response evidence still respects the #qstrikeexplain Phase 2
-        // baseline gate: a 🚧 head that first appeared this turn is deferred.
+    fn answered_selected_marker_head_struck_when_absent_from_baseline() {
+        // A 🚧 head is already selected, so exact current-response evidence may
+        // consume it atomically even when it arrived after the pre-turn baseline.
+        // Unselected baseline-late operator drafts remain protected above.
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:queue go -->\n",
@@ -4419,9 +4420,10 @@ mod core_tests {
         );
         let gated =
             answered_free_text_head_node_keys(content, FTSTRIKE_RESPONSE, Some(baseline)).unwrap();
-        assert!(
-            gated.is_empty(),
-            "a 🚧 marker head absent from the pre-turn baseline must not be struck: {gated:?}"
+        assert_eq!(
+            gated.len(),
+            1,
+            "an exactly answered 🚧 head may close atomically despite a late baseline: {gated:?}"
         );
     }
 

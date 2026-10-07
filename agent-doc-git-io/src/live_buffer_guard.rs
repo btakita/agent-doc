@@ -172,8 +172,8 @@ mod tests {
 
     /// A fail-closed path that states only a fact is what makes an agent invent
     /// recovery, and every recovery it invents here perturbs the capture being
-    /// awaited. So the refusal has to carry both halves: the one command to run,
-    /// and the ones not to.
+    /// awaited. So the refusal has to carry both halves: the keyed owner edge
+    /// to await, and the actions not to take.
     #[test]
     fn the_owned_deferral_names_the_next_step_and_forbids_the_invented_ones() {
         let message = crdt_relay_pending_refusal(
@@ -182,8 +182,13 @@ mod tests {
         );
 
         assert!(
-            message.contains("agent-doc session-check plan.md"),
-            "the refusal must name the exact command that observes the outcome: {message}"
+            message.contains("this exact retained intent")
+                && message.contains("controller-owned terminal state edge"),
+            "the refusal must keep observation with the keyed owner: {message}"
+        );
+        assert!(
+            !message.contains("Run `agent-doc session-check plan.md`"),
+            "a document-wide status check can observe a successor cycle: {message}"
         );
         assert!(
             message.contains("deferral, not a lost response"),

@@ -530,11 +530,13 @@ pub fn retained_write_remedy(ownership: RetainedWriteOwnership, file: &str) -> S
 fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) -> String {
     match ownership.verdict() {
         RetainedWriteVerdict::Deferred => format!(
-            "The retained capture or projection is already durable and the same intent commits itself once delivery \
-             converges — this is a deferral, not a lost response. Run \
-             `agent-doc session-check {file}` once to observe the terminal state; do NOT \
-             re-send the response, force disk, or `admin recycle`, which disturb the capture \
-             being awaited. Do not reach for `admin reload-lib` on your own either: {}",
+            "The retained capture or projection is already durable and this exact retained \
+             intent commits itself once delivery converges — this is a deferral, not a lost \
+             response. Wait for its controller-owned terminal state edge; do not use the \
+             document's current-cycle status as proof because queue continuation can advance \
+             to a different cycle. Do NOT re-send the response, force disk, or `admin recycle`, \
+             which disturb the capture being awaited. Do not reach for `admin reload-lib` on \
+             your own either: {}",
             EDITOR_REPLICA_RELOAD_SANCTION
         ),
         RetainedWriteVerdict::CaptureResumeUnowned => format!(
@@ -1475,13 +1477,17 @@ mod tests {
         assert!(RetainedWriteOwnership::UNOWNED.is_stranded());
     }
 
-    /// The owned case keeps the 2026-07-26 guidance verbatim: two sessions
-    /// invented recoveries that each perturbed the capture being awaited.
+    /// The owned case keeps the 2026-07-26 safety boundary: two sessions
+    /// invented recoveries that each perturbed the capture being awaited. Its
+    /// observation instruction remains keyed so queue continuation cannot
+    /// switch the subject to a successor cycle.
     #[test]
     fn the_owned_remedy_still_forbids_every_invented_recovery() {
         let remedy = retained_write_remedy(RetainedWriteOwnership::new(true, false), "plan.md");
 
-        assert!(remedy.contains("agent-doc session-check plan.md"));
+        assert!(remedy.contains("this exact retained intent"));
+        assert!(remedy.contains("controller-owned terminal state edge"));
+        assert!(!remedy.contains("Run `agent-doc session-check plan.md`"));
         assert!(remedy.contains("deferral, not a lost response"));
         for invented in ["force disk", "admin recycle", "admin reload-lib", "re-send"] {
             assert!(
@@ -1537,7 +1543,9 @@ mod tests {
         assert_eq!(captured.verdict(), RetainedWriteVerdict::Deferred);
 
         let remedy = retained_write_remedy(captured, "plan.md");
-        assert!(remedy.contains("agent-doc session-check plan.md"));
+        assert!(remedy.contains("this exact retained intent"));
+        assert!(remedy.contains("controller-owned terminal state edge"));
+        assert!(!remedy.contains("Run `agent-doc session-check plan.md`"));
         assert!(remedy.contains("commits itself"));
         assert!(
             !remedy.contains("Finish it from the pane"),
@@ -1868,6 +1876,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `#retainedobservationrace`: a durable keyed capture can commit and let
+    /// auto-queue advance before an operator runs a document-wide status
+    /// command. That command then describes the successor cycle rather than
+    /// the retained intent, so the deferral must keep observation with its
+    /// keyed controller owner.
+    #[test]
+    fn deferred_remedy_observes_the_exact_intent_through_its_owner() {
+        let owned = RetainedWriteOwnership::new_with_phase(true, true, false)
+            .with_retained_projection(true);
+        assert_eq!(owned.verdict(), RetainedWriteVerdict::Deferred);
+        let remedy = retained_write_remedy(owned, "plan.md");
+        assert!(remedy.contains("this exact retained intent"), "{remedy}");
+        assert!(
+            remedy.contains("controller-owned terminal state edge"),
+            "{remedy}"
+        );
+        assert!(remedy.contains("different cycle"), "{remedy}");
+        assert!(
+            !remedy.contains("Run `agent-doc session-check plan.md`"),
+            "an unkeyed current-cycle check can observe a successor: {remedy}"
+        );
     }
 
     /// GH #131 shape 1: `session-check` named `write --done <id> --pending-only

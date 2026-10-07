@@ -4078,6 +4078,12 @@ Done.\n\
         );
         assert!(rendered.contains("Do not reopen or recapture the cycle"));
         assert!(rendered.contains("Wait for the existing controller state edge"));
+        assert!(rendered.contains("this exact retained intent"));
+        assert!(rendered.contains("different cycle"));
+        assert!(
+            !rendered.contains("Run `agent-doc session-check /p/fpe.md`"),
+            "an unkeyed current-cycle check can race queue advancement: {rendered}"
+        );
         assert!(rendered.contains("needs_operator"));
         assert!(!rendered.contains("run `agent-doc repair"));
     }

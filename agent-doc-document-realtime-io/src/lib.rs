@@ -6707,8 +6707,16 @@ mod retained_refusal_token_tests {
             "and stay the typed retained-write error"
         );
         assert!(
-            rendered.contains("same intent commits itself once delivery converges"),
+            rendered.contains("this exact retained intent commits itself once delivery converges"),
             "the write that created this projection owns it even without a cycle or capture: {rendered}"
+        );
+        assert!(
+            rendered.contains("controller-owned terminal state edge"),
+            "a deferred projection stays observable through its keyed owner: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Run `agent-doc session-check"),
+            "a document-wide status check can race into a successor cycle: {rendered}"
         );
         assert!(
             !rendered.contains("visible edits are STRANDED"),
@@ -6772,8 +6780,16 @@ mod retained_refusal_token_tests {
             "{owned}"
         );
         assert!(
-            owned.contains("same intent commits itself once delivery converges"),
+            owned.contains("this exact retained intent commits itself once delivery converges"),
             "a durable intent owns the write: {owned}"
+        );
+        assert!(
+            owned.contains("controller-owned terminal state edge"),
+            "the exact intent remains the observation subject: {owned}"
+        );
+        assert!(
+            !owned.contains("Run `agent-doc session-check"),
+            "a successor cycle must not become the observation subject: {owned}"
         );
         assert!(!owned.contains("STRANDED"), "{owned}");
 

@@ -234,7 +234,12 @@ mod tests {
         );
 
         let err = blocked_error(captured);
-        assert!(err.contains("`agent-doc session-check plan.md`"));
+        assert!(err.contains("this exact retained intent"), "{err}");
+        assert!(err.contains("controller-owned terminal state edge"), "{err}");
+        assert!(
+            !err.contains("Run `agent-doc session-check plan.md`"),
+            "a document-wide status check can observe a successor cycle: {err}"
+        );
         assert!(
             !err.contains("Replay the captured response with `agent-doc write --commit")
                 && !err.contains("Finish it from the pane"),
@@ -249,10 +254,12 @@ mod tests {
         let unowned = RetainedWriteOwnership::UNOWNED;
         let err = blocked_error(unowned);
         assert!(
-            err.contains("`agent-doc session-check plan.md`")
+            err.contains("this exact retained intent")
+                && err.contains("controller-owned terminal state edge")
                 && err.contains("deferral, not a lost response"),
             "the loaded capture must retain recovery ownership: {err}"
         );
+        assert!(!err.contains("Run `agent-doc session-check plan.md`"));
         assert!(err.contains("captured response body is not present"));
     }
 

@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.477
+
+- **Retained closeouts and queue replay converge without duplicate work.** Retained editor-write observations stay
+  keyed through their terminal commit edge, reconnecting CRDT replicas do not replay already-consumed queue prompts,
+  and newer explicitly gated continuation items remain distinct from semantically similar completed work.
+- **Resumed captures settle after an editor replica returns.** Stop-hook recovery re-observes the retained capture
+  against the serving replica and completes the existing intent instead of leaving the response durably captured but
+  indefinitely deferred after the editor reconnects.
+- **JetBrains replica reseeds preserve the matching canonical generation (GH #178).** A reconnect attaches only the
+  retained reseed for its own document generation, preventing stale or cross-generation canonical text from replacing
+  the live editor buffer; the editor package advances once to 0.2.505 for the integrated release batch.
+- **JetBrains upgrade state follows the live IDE lifecycle (GH #180).** Upgrade markers are scoped to current IDE
+  processes and plugin generations, so stale installation evidence cannot keep later sessions in a false upgrade or
+  recovery state.
+- **Ownerless empty preflights recover through authoritative dispatch (GH #179).** Controller routing now detects and
+  closes abandoned no-work preflight cycles while preserving real owners and queued work, avoiding a durable admission
+  wedge after interrupted startup.
+
 ## 0.35.476
 
 - **Queue answers settle atomically even when they arrive late.** Selected preset and free-text heads are consumed with

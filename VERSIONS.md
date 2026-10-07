@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.474
+
+- **Deferred free-text queue heads survive closeout (GH #172).** Every queue-completion signal now honors the
+  documented `**Deferred:**` veto, including explicit prompt echoes, synthetic targets, and completion IDs, while the
+  pre-write evidence gate retains its existing semantics.
+- **Mid-turn steering reads live editor authority (GH #173).** Attached documents bypass stale disk-stat shortcuts,
+  diff against controller/CRDT content, debounce unsaved revisions without borrowing disk mtime, and bind explicit
+  sends to the exact authoritative content hash.
+- **Delayed replica registration stays inside bounded re-observation.** A temporary no-route observation no longer
+  skips the existing liveness window and falls into terminal document-model ensure; definitive refusal still exits
+  immediately.
+- **Stop-hook maintenance precedes adjacent queue replay.** A committed cycle with completed tracked residue reaps
+  that residue before any assistant capture, preventing stale predecessor text from consuming the next queue head and
+  handing genuine follow-up work back to the owner pane.
+
 ## 0.35.473
 
 - **Route-owned resume survives transient malformed live frontmatter.** Supervisor hot re-exec validates the

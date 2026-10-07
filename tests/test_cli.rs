@@ -21087,7 +21087,7 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
     let supervisor_detached_child =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/detached_child.rs"))
             .unwrap();
-    for required in ["pub fn reap_detached(", "fn spawn_reaper("] {
+    for required in ["pub fn reap_detached(", "fn spawn_reaper<"] {
         assert!(
             supervisor_detached_child.contains(required),
             "agent-doc-supervisor-process should own detached child reaping: {required}"
@@ -21134,7 +21134,7 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
-            source.contains("agent_doc_supervisor_process::detached_child::reap_detached("),
+            source.contains("agent_doc_supervisor_process::detached_child::reap_detached"),
             "{relative} should call focused supervisor-process detached-child reaping directly"
         );
         assert!(

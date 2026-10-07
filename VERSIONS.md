@@ -2,6 +2,26 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.472
+
+- **Supervisor replacement settles instead of thrashing.** Per-session recycle latches are monotonic across
+  concurrent health writes, delayed causal recycle requests are revalidated after their triggering condition clears,
+  and capture resume depends on actual running-image staleness rather than any pending recycle marker.
+- **Compact Exchange defers raced editor drains without replaying partial input.** A retryable
+  `doc_advanced_during_drain` refreshes the durable editor-operation epoch, preserving every pending operation while
+  the existing active-typing quiet window waits for a structurally valid cut.
+- **Fresh-controller focus escalation observes live tmux layout (GH #166).** Focus-only routing can recover retained
+  columns from a positive live observation while preserving the fixed-width replacement invariant and failing closed
+  when no observation exists.
+- **Warm supervisors refresh durable replica liveness (GH #169).** Incremental journal cursors expose newly opened,
+  closed, and registered routes; no-route and definitively dead endpoints stop bounded recovery until a new liveness
+  witness arrives.
+- **Optional controller RPC results preserve present JSON null (GH #170).** Successful `data: null` envelopes decode
+  as typed absent values instead of malformed missing-data errors, restoring cold-editor baseline capture.
+- **Concurrent Preparing handoff successors survive duplicate cleanup (GH #171).** Reaping protects the exact causal
+  successor tuple, tracks replacement PIDs, records stderr/exit/signal evidence, and fails socket waits immediately
+  when the launched child exits.
+
 ## 0.35.471
 
 - **Runtime updates avoid redundant controller recycle (GH #164).** Upgrade and live-plugin install fanout now target

@@ -19,7 +19,6 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -458,14 +457,7 @@ GH #160 and #161 were also confirmed released in v0.35.469 and are now closed wi
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/160~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/161~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/162~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/164~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 do [#chatpromptmulti]
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

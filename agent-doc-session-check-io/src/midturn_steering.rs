@@ -6,14 +6,16 @@
 //! envelope.
 //!
 //! **Why a stateless compare and not a Lazily actor edge.** The delivery
-//! surface is a harness `PostToolUse` hook: a one-shot process spawned after
-//! every tool call, with no long-lived scope of its own and a hard latency
-//! budget. Joining the controller's `TurnScope` would cost an IPC round trip
-//! per tool call and couple every tool call to controller liveness. So the
-//! hook is the narrow actorless boundary `#lazily-reactive-first` allows: it
-//! compares the document against durable, cycle-scoped state (the watermark
-//! preflight seeds in `state.db` when it admits the cycle) and writes the
-//! advanced watermark back. The cycle itself is consulted only on the rare
+//! surface is a harness `PostToolUse` event: a one-shot process spawned after
+//! every tool call, with no long-lived scope of its own. That makes it the
+//! narrow actorless trigger `#lazily-reactive-first` allows, but not a second
+//! document authority: an attached editor's current text still comes from the
+//! controller-owned CRDT projection. Detached documents retain the cheap file-
+//! stat gate; attached documents resolve the live projection on every event so
+//! an unsaved operator edit invalidates the comparison even while disk metadata
+//! is unchanged. The hook compares that observation against durable,
+//! cycle-scoped state (the watermark preflight seeds in `state.db`) and writes
+//! the advanced watermark back. The cycle itself is consulted only on the rare
 //! path where something is ready to surface, which is also where a closed or
 //! superseded cycle silences the watermark for good.
 //!
@@ -153,15 +155,34 @@ pub const EXPLICIT_SEND_SAVE_GRACE_MS: u64 = 5_000;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct ExplicitSend {
     pub sent_at_ms: u64,
+    /// Authoritative document bytes at send time. Attached-editor sends must
+    /// match this hash: disk mtime cannot distinguish a later unsaved edit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
 }
 
 impl ExplicitSend {
-    /// Whether a document last changed at `document_changed_ms` is covered:
-    /// every edit up to the send (plus the save grace) was sent; anything typed
-    /// later goes back through the passive typing gate.
-    pub fn covers(&self, document_changed_ms: Option<u64>) -> bool {
-        document_changed_ms
-            .is_none_or(|changed| changed <= self.sent_at_ms + EXPLICIT_SEND_SAVE_GRACE_MS)
+    /// Whether the current authoritative document is covered by this send.
+    ///
+    /// New records carry a content identity and therefore remain correct when
+    /// an editor is ahead of disk. Detached documents retain the native-save
+    /// grace because disk mtime identifies their current replica; attached
+    /// documents require an exact content match.
+    pub fn covers(
+        &self,
+        document_changed_ms: Option<u64>,
+        content_hash: &str,
+        editor_attached: bool,
+    ) -> bool {
+        if self.content_hash.as_deref() == Some(content_hash) {
+            return true;
+        }
+        if editor_attached {
+            return false;
+        }
+        document_changed_ms.is_none_or(|changed| {
+            changed <= self.sent_at_ms.saturating_add(EXPLICIT_SEND_SAVE_GRACE_MS)
+        })
     }
 }
 
@@ -178,8 +199,28 @@ pub fn record_explicit_send(file: &Path) -> Result<()> {
         return Ok(());
     };
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let content_hash = match crate::resolve_current_document_content(file, "steering_explicit_send")
+    {
+        Ok(content) => Some(core::content_hash(&content)),
+        Err(error) => {
+            eprintln!(
+                "[steering] warning: could not capture authoritative content for explicit send {}: {error:#}",
+                file.display()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "steering_explicit_send_content_unavailable file={} error={}",
+                    file.display(),
+                    format!("{error:#}").replace('\n', "\\n")
+                ),
+            );
+            None
+        }
+    };
     let send = ExplicitSend {
         sent_at_ms: now_ms(),
+        content_hash,
     };
     agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
         &conn,
@@ -515,17 +556,22 @@ fn prepare_with_gate(
         }))
     };
 
-    // Hot-path gate: unchanged file stat and nothing settling → no read.
+    // Hot-path gate for detached documents: unchanged file stat and nothing
+    // settling → no read. An attached editor can change authoritative text
+    // without changing disk metadata, so it must resolve the CRDT projection
+    // before applying the content-hash gate below (`#gh173`).
     let meta = std::fs::metadata(file).with_context(|| format!("stat {}", file.display()))?;
     let fingerprint = stat_fingerprint(&meta);
+    let editor_attached = agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached();
     if unchanged_gate
         && watermark.pending.is_empty()
         && watermark.last_observed_stat.as_deref() == Some(fingerprint.as_str())
+        && !editor_attached
     {
         return prepared(None, None, boundary, None);
     }
-    let content =
-        std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
+    let content = crate::resolve_current_document_content(file, "midturn_steering")?;
+    let content_hash = core::content_hash(&content);
     let selected_head_open = core::current_item_is_present(&watermark, &content);
     // `#openheadsteering`: stale-lock repair can terminalize the cycle record
     // while the selected queue head and its owning harness turn are still live.
@@ -539,15 +585,15 @@ fn prepare_with_gate(
     }
     if unchanged_gate
         && watermark.pending.is_empty()
-        && watermark.last_observed_content_hash.as_deref()
-            == Some(core::content_hash(&content).as_str())
+        && watermark.last_observed_content_hash.as_deref() == Some(content_hash.as_str())
     {
         watermark.last_observed_stat = Some(fingerprint);
         return prepared(Some(watermark), None, boundary, None);
     }
 
-    let explicit_send =
-        load_explicit_send(&conn, file).is_some_and(|send| send.covers(mtime_ms(&meta)));
+    let disk_changed_ms = mtime_ms(&meta);
+    let explicit_send = load_explicit_send(&conn, file)
+        .is_some_and(|send| send.covers(disk_changed_ms, &content_hash, editor_attached));
     // The turn boundary is the last chance before the loop re-enters: an
     // item that is complete surfaces now rather than waiting out the window.
     let debounce_ms = if policy == ClosedCyclePolicy::ForceBoundary || explicit_send {
@@ -563,6 +609,14 @@ fn prepare_with_gate(
     let empty = BTreeSet::new();
     let owned = cycle.as_ref().map(binary_owned_ids).unwrap_or_default();
     let observed_at_ms = now_ms();
+    // The relay currently exposes content identity, not an editor edit
+    // timestamp. `None` makes the settle gate use per-item stability instead of
+    // pretending the stale disk mtime is the live edit time (`#gh173`).
+    let document_changed_ms = if editor_attached {
+        None
+    } else {
+        disk_changed_ms
+    };
     let document = crate::steering_gate_log::document_key(&root, file);
     // `#steergateperceptron`: the online-learned gate answers first when
     // enabled; the deterministic floors stay inside the settle decision, and
@@ -581,7 +635,7 @@ fn prepare_with_gate(
     };
     let ctx = ObserveContext {
         now_ms: observed_at_ms,
-        document_changed_ms: mtime_ms(&meta),
+        document_changed_ms,
         debounce_ms,
         binary_owned_queue_ids: if boundary { &owned } else { &empty },
         explicit_send,
@@ -1133,6 +1187,62 @@ pub fn handle_post_tool_use() -> Result<()> {
 mod tests {
     use super::*;
 
+    struct LiveEditorFixture {
+        file: PathBuf,
+        identity: String,
+        replica: agent_doc_merge::crdt_sync::ReplicaState,
+    }
+
+    impl LiveEditorFixture {
+        fn new(file: &Path, editor_id: &str, content: &str) -> Self {
+            let file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+            agent_doc_test_support::seed_reliable_sync_editor_registration(
+                &file,
+                editor_id,
+                &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+            );
+            let identity = format!("{editor_id}:{}", file.display());
+            let (client_id, bootstrap) =
+                agent_doc_crdt_relay_io::register_replica_for_file(&file, &identity)
+                    .expect("test editor should register through the CRDT relay")
+                    .expect("test editor should remain attached");
+            let replica =
+                agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
+                    .expect("test editor should decode the relay bootstrap");
+            let fixture = Self {
+                file,
+                identity,
+                replica,
+            };
+            fixture.publish(content);
+            fixture
+        }
+
+        fn publish(&self, content: &str) {
+            let current = self.replica.text();
+            self.replica
+                .apply_local_edit(0, current.len() as u32, content);
+            agent_doc_crdt_relay_io::relay_replica_update_for_file(
+                &self.file,
+                &self.identity,
+                &self.replica.encode_state(),
+            )
+            .expect("test editor should publish through the CRDT relay")
+            .expect("test editor update should be accepted");
+        }
+    }
+
+    impl Drop for LiveEditorFixture {
+        fn drop(&mut self) {
+            agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
+                &self.file,
+                &self.identity,
+                std::process::id(),
+            )
+            .expect("test editor should deregister from the CRDT relay");
+        }
+    }
+
     #[test]
     fn hook_envelope_matches_the_harness_contract() {
         let value = post_tool_use_output("steer");
@@ -1202,6 +1312,85 @@ mod tests {
             rerun.as_ref().is_none_or(|report| report.items.is_empty()),
             "{rerun:?}"
         );
+    }
+
+    /// GH #173: preflight seeded the watermark from the live editor, but the
+    /// PostToolUse hook compared it with stale disk. That fabricated a removal;
+    /// after native save caught up, the same queue head appeared newly added.
+    /// The live CRDT revision must also bypass the disk-stat gate so later
+    /// unsaved edits remain observable while the file metadata is unchanged.
+    #[test]
+    fn live_editor_text_drives_steering_while_disk_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let stale_disk = "---\nagent_doc_steering_debounce_ms: 2500\n---\n# S\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        let live = stale_disk.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue priority go -->\n- 🚧 #actionable-review\n",
+        );
+        std::fs::write(&file, stale_disk).unwrap();
+        let editor = LiveEditorFixture::new(&file, "jetbrains-gh173", &live);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&live), Some(&live)).unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &live,
+            Some("#actionable-review"),
+            Vec::new(),
+        )
+        .unwrap();
+
+        let first = observe(&file, CONSUMER_HOOK, true).unwrap();
+        assert!(
+            first.as_ref().is_none_or(|report| report.items.is_empty()),
+            "the stale disk copy must not fabricate removal of the live head: {first:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), stale_disk);
+
+        let live_with_addition = live.replace(
+            "- 🚧 #actionable-review\n",
+            "- 🚧 #actionable-review\n- follow-up task\n",
+        );
+        editor.publish(&live_with_addition);
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            stale_disk,
+            "the regression requires an unchanged disk stat and stale disk text"
+        );
+
+        let held = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("the unsaved live-editor addition should be observed");
+        assert!(
+            held.items.is_empty(),
+            "a fresh live edit must debounce: {held:?}"
+        );
+        assert_eq!(held.pending, 1, "{held:?}");
+        assert!(held.recheck_after_ms.is_some_and(|ms| ms <= 2500));
+
+        record_explicit_send(&file).unwrap();
+        let report = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("explicit send should flush the same authoritative bytes");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        assert_eq!(report.items[0].verbatim, "follow-up task");
+        assert!(report.items[0].explicit, "{report:?}");
+
+        let after_send = live_with_addition.replace(
+            "- follow-up task\n",
+            "- follow-up task\n- later unfinished\n",
+        );
+        editor.publish(&after_send);
+        let passive = observe(&file, CONSUMER_HOOK, false)
+            .unwrap()
+            .expect("the post-send live edit should be observed");
+        assert!(
+            passive.items.is_empty(),
+            "an older explicit send must not cover later unsaved bytes: {passive:?}"
+        );
+        assert_eq!(passive.pending, 1, "{passive:?}");
     }
 
     fn close_cycle(file: &Path, content: &str) {
@@ -1528,7 +1717,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
-        let baseline = "---\nagent_doc_steering_debounce_ms: 2500\nprompt_presets:\n  '#subagents': 'run the remaining items in subagents'\n---\n# S\n\n<!-- agent:queue go -->\n- current task\n- release + publish\n<!-- /agent:queue -->\n";
+        let baseline = "---\nagent_doc_steering_debounce_ms: 600000\nprompt_presets:\n  '#subagents': 'run the remaining items in subagents'\n---\n# S\n\n<!-- agent:queue go -->\n- current task\n- release + publish\n<!-- /agent:queue -->\n";
         std::fs::write(&file, baseline).unwrap();
         let cycle =
             agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
@@ -1562,7 +1751,7 @@ mod tests {
         let typing = observe_for_wake(&file).unwrap();
         assert!(typing.items.is_empty(), "{typing:?}");
         assert_eq!(typing.pending, 2);
-        assert!(typing.recheck_after_ms.is_some_and(|ms| ms <= 2500));
+        assert!(typing.recheck_after_ms.is_some_and(|ms| ms <= 600_000));
 
         backdate(&file);
         let wake = observe_for_wake(&file).unwrap();

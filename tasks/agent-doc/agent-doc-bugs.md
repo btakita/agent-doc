@@ -234,7 +234,7 @@ Release results:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 api.md had duplication issues in the queue item when run.
+- ~~api.md had duplication issues in the queue item when run.~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/178
 - #gh-fix https://github.com/btakita/agent-doc/issues/179
 - #gh-fix https://github.com/btakita/agent-doc/issues/180

@@ -13,7 +13,7 @@ presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#agent-doc-causes': Fix agent-doc causes
   '#do-backlog': /goal do backlog items
-  '#gh-fix': fix then closerelease
+  '#gh-fix': fix then close
   '#release': release + publish
   '#self': agent-doc-bugs.md
   '#subagents': 'run the remaining items in subagents'
@@ -148,6 +148,22 @@ Completed and released `agent-doc v0.35.474` at commit `397b6a6e5`.
 - Release CI was in progress during the single inspection; the GitHub Release object was not yet available.
 
 The agent-doc workflow enforced isolated subagent worktrees and committed closeout; tsift provided bounded navigation and test evidence. See [agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md) and [sdk.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md).
+
+### Re: recovered response
+
+Yes. The current declaration is correct:
+
+```md
+<!-- agent:queue subagents preset="#subagents #spec-test-build-install-commit-push" priority go -->
+```
+
+Bare `subagents` now means “dispatch every currently eligible, dependency-ready, unclaimed head,” scaling up to the runtime’s concurrency limit. Use `subagents=N` only when you want a fixed cap.
+
+The `#subagents` entry inside `preset` is redundant—the attribute controls dispatch—but it is harmless. For clearer separation, you could simplify it to:
+
+```md
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+```
 <!-- agent:boundary:d2a9ba1d -->
 <!-- /agent:exchange -->
 
@@ -155,10 +171,13 @@ The agent-doc workflow enforced isolated subagent worktrees and committed closeo
 -->
 
 ## Pending / Not Built
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue subagents preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#subagentsattributescale]
-- 🚧 The last 2 responses in sdk.md have been unescaped.
-- release + publish9<!-- /agent:queue -->
+- The last 2 responses in sdk.md have been unescaped.
+- #gh-fix https://github.com/btakita/agent-doc/issues/174
+- #gh-fix https://github.com/btakita/agent-doc/issues/175
+- 🚧 release + publish
+<!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->

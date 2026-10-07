@@ -5,8 +5,9 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 ## 0.35.476
 
 - **Queue answers settle atomically even when they arrive late.** Selected preset and free-text heads are consumed with
-  their response after mid-turn steering, while bare `subagents` queues and replay repairs converge without duplicating
-  work or leaving the Stop hook on an already-answered head.
+  their response after mid-turn steering, and a registered preset may prove completion from its resolved expansion
+  without a literal prompt echo. Bare `subagents` queues and replay repairs converge without duplicating work or leaving
+  the Stop hook on an already-answered head.
 - **Operator backlog deletions remain authoritative.** A shared typed deletion outcome distinguishes a visible operator
   cut from stale or ambiguous projections, so preflight, session checks, and operation capture no longer resurrect or
   duplicate work the operator removed.
@@ -18,6 +19,8 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   plugin sources under a reused version before publishing plugin 0.2.504 (GH #176).
 - **Repository navigation now relies on the user-local tsift skill.** The generated repository-level tsift navigation
   block was removed from `AGENTS.md`, avoiding a stale checked-in instruction copy while preserving local tsift usage.
+- **`annotate --history` now emits real Git attribution.** Each current line carries blame commit, author, timestamp,
+  and summary metadata, while the cache also keys on the latest document-history revision and rejects untracked files.
 
 ## 0.35.475
 

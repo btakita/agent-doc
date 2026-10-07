@@ -849,6 +849,9 @@ fn run_with_options_to_writer_in_pass(
     }
 
     crate::progress::enter("pending_maintenance")?;
+    // Preserve the command-entry cut. Pending maintenance runs below, so only
+    // this cached observation can prove a backlog deletion predated binary work.
+    let operator_entry_content = rc.doc_content();
     // Step 1c: Pending component maintenance — lazy backfill, reap, archive, and
     // reorder detection. MUST run BEFORE step 2 commit so the single step-2
     // commit bundles the pending mutations with the previous-cycle response,
@@ -904,7 +907,11 @@ fn run_with_options_to_writer_in_pass(
         });
     }
     enforce_no_shadow_open_backlog(file)?;
-    enforce_no_dropped_backlog(file, rc.head_content().as_deref().map(String::as_str))?;
+    enforce_no_dropped_backlog(
+        file,
+        rc.head_content().as_deref().map(String::as_str),
+        &operator_entry_content,
+    )?;
     if !options.probe && remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
         recovered = true;
     }

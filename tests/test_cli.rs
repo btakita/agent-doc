@@ -23136,6 +23136,7 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
         "pub fn malformed_tracked_item_guard",
         "pub fn dropped_from_history_guard",
         "pub fn dropped_from_history_report",
+        "pub fn dropped_from_history_report_guard_with_authority",
     ] {
         assert!(
             guard_policy.contains(required),
@@ -23168,7 +23169,7 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
         backlog_guards.contains("agent_doc_element_backlog::guard_policy::{")
             && backlog_guards.contains("malformed_tracked_item_guard")
             && backlog_guards.contains("shadow_backlog_guard")
-            && backlog_guards.contains("dropped_from_history_guard")
+            && backlog_guards.contains("dropped_from_history_report_guard_with_authority")
             && backlog_guards.contains("agent_doc_snapshot_io::load_document_baseline("),
         "session_check backlog guards should call focused backlog policy and baseline path helpers directly"
     );

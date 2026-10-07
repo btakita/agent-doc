@@ -582,6 +582,20 @@ pub fn last_editor_text_for_base(doc: &Path, base_text: &str) -> Result<Option<S
     ))
 }
 
+/// Reconstruct the newest operator-authored document cut for `base_text`.
+///
+/// The active epoch is preferred. The retained checkpoint is a fallback for an
+/// epoch already fenced by a non-operator projection. Neither source is
+/// evidence unless its base hash matches `base_text` exactly.
+pub fn operator_text_for_base(doc: &Path, base_text: &str) -> Result<Option<String>> {
+    if let Some(ops) = editor_ops_for_base(doc, base_text)?
+        && let Some(text) = agent_doc_merge::crdt::replay_editor_ops(base_text, &ops)
+    {
+        return Ok(Some(text));
+    }
+    last_editor_text_for_base(doc, base_text)
+}
+
 /// `#unstrikelost`: queue items struck in `base_text` that the operator's OWN
 /// captured editor ops un-struck, keyed for
 /// [`agent_doc_merge::crdt::with_operator_rearmed_queue_items`].
@@ -594,11 +608,7 @@ pub fn operator_rearmed_queue_item_keys(
     doc: &Path,
     base_text: &str,
 ) -> std::collections::HashSet<String> {
-    let operator_cut = editor_ops_for_base(doc, base_text)
-        .ok()
-        .flatten()
-        .and_then(|ops| agent_doc_merge::crdt::replay_editor_ops(base_text, &ops))
-        .or_else(|| last_editor_text_for_base(doc, base_text).ok().flatten());
+    let operator_cut = operator_text_for_base(doc, base_text).ok().flatten();
     operator_cut
         .map(|cut| agent_doc_merge::crdt::operator_rearmed_queue_item_keys(base_text, &cut))
         .unwrap_or_default()

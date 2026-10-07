@@ -237,6 +237,15 @@ On every preflight run:
   resurrect an archived id implicitly.
 - Same-cycle resurrection invariant: once a cycle reaps a tracked `[#id]`, closeout must fail closed if that same id reappears in live tracked work before commit. Do not silently treat the stale rewrite as generic local drift.
 - Same-cycle completion invariant: when preflight/repair reap a user-authored `[x]` tracked item directly from the document, that id counts as intentionally resolved for the current cycle's history-replay guards even if no explicit `--done <id>` flag was recorded. Do not restore the older `[ ]` or `[/]` history entry just because the completion came from a manual document edit.
+- Operator-deletion invariant: removing an open backlog row from the visible
+  document is authoritative when captured editor operations reproduce that cut
+  exactly, or when the row was already absent at command entry while no
+  response cycle was open and committed history still retained it. Preflight
+  and session-check log that provenance and continue. A disappearance first
+  observed during an open response cycle, or one already absent from committed
+  history without completion/transfer proof, remains an interruption; this
+  preserves accidental-loss protection without permanently restoring work the
+  operator deliberately deleted.
 - External archive invariant: preflight and session-check must treat IDs found
 in the `agent:done archive=...done.md` target as completed-history proof for
 backlog replay and as known identifiers for the coined-ID guard after inline

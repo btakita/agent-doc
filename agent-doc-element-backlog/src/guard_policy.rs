@@ -22,6 +22,15 @@ pub enum BacklogGuardOutcome {
     Interrupt(String),
 }
 
+/// Provenance for open backlog rows that disappeared from the current
+/// document. The visible operator cut is authoritative only when an adapter can
+/// prove that ownership; otherwise the historical-loss guard stays fail-closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DroppedBacklogAuthority {
+    Operator,
+    Unproven,
+}
+
 pub fn shadow_backlog_guard(doc: &str) -> Result<BacklogGuardOutcome> {
     Ok(shadow_backlog_report_guard(&detect_shadow_open_items(doc)?))
 }
@@ -87,7 +96,17 @@ pub fn dropped_from_history_report(
 }
 
 pub fn dropped_from_history_report_guard(report: &DroppedBacklogReport) -> BacklogGuardOutcome {
+    dropped_from_history_report_guard_with_authority(report, DroppedBacklogAuthority::Unproven)
+}
+
+pub fn dropped_from_history_report_guard_with_authority(
+    report: &DroppedBacklogReport,
+    authority: DroppedBacklogAuthority,
+) -> BacklogGuardOutcome {
     if report.dropped.is_empty() {
+        return BacklogGuardOutcome::Pass;
+    }
+    if authority == DroppedBacklogAuthority::Operator {
         return BacklogGuardOutcome::Pass;
     }
     BacklogGuardOutcome::Interrupt(format!(
@@ -185,6 +204,31 @@ mod tests {
 
         assert!(matches!(outcome, BacklogGuardOutcome::Interrupt(message)
             if message.contains("#gone1") && message.contains("recent history")));
+    }
+
+    #[test]
+    fn dropped_history_guard_accepts_operator_authoritative_deletion() {
+        let report = DroppedBacklogReport {
+            dropped: vec![crate::backlog::DroppedBacklogItem {
+                id: "gone1".to_string(),
+                text: "operator removed this".to_string(),
+            }],
+        };
+
+        assert_eq!(
+            dropped_from_history_report_guard_with_authority(
+                &report,
+                DroppedBacklogAuthority::Operator,
+            ),
+            BacklogGuardOutcome::Pass
+        );
+        assert!(matches!(
+            dropped_from_history_report_guard_with_authority(
+                &report,
+                DroppedBacklogAuthority::Unproven,
+            ),
+            BacklogGuardOutcome::Interrupt(message) if message.contains("#gone1")
+        ));
     }
 
     #[test]

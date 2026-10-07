@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use agent_doc_element_backlog::guard_policy::{
-    dropped_from_history_guard, dropped_from_history_report, malformed_tracked_item_guard,
-    shadow_backlog_guard,
+    dropped_from_history_report, dropped_from_history_report_guard_with_authority,
+    malformed_tracked_item_guard, shadow_backlog_guard,
 };
 use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 use agent_doc_workflow::session_check::GuardResult;
@@ -59,11 +59,113 @@ pub fn check_backlog_replay_guard(file: &Path, rc: &CycleContext) -> Result<Guar
         )?;
         external_current_ids.extend(transfer_evidence.ids());
     }
-    Ok(dropped_from_history_guard(
+    let report = dropped_from_history_report(
         &current_content,
         &baseline,
         &resolved_ids,
         &external_current_ids,
-    )?
-    .into())
+    )?;
+    let head_content = rc.head_content();
+    let evidence = agent_doc_element_backlog_io::deletion_authority::classify_operator_deletion(
+        file,
+        &baseline,
+        &current_content,
+        head_content.as_deref().map(String::as_str),
+        &report,
+    )?;
+    if !report.dropped.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "backlog_deletion_authority file={} ids={} evidence={}",
+                file.display(),
+                report
+                    .dropped
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                evidence.as_str(),
+            ),
+        );
+    }
+    Ok(dropped_from_history_report_guard_with_authority(&report, evidence.authority()).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use agent_doc_run_context_io::AgentDocContextExt;
+
+    use super::*;
+
+    #[test]
+    fn replay_guard_accepts_idle_operator_cut_but_rejects_open_cycle_loss() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let file = dir.path().join("session.md");
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me\n",
+            "- [ ] [#remove1] Operator may remove me\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let operator_cut = baseline.replace("- [ ] [#remove1] Operator may remove me\n", "");
+
+        for args in [
+            &["init"][..],
+            &["config", "user.email", "test@example.com"],
+            &["config", "user.name", "Test"],
+        ] {
+            assert!(
+                Command::new("git")
+                    .current_dir(dir.path())
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        std::fs::write(&file, baseline).unwrap();
+        assert!(
+            Command::new("git")
+                .current_dir(dir.path())
+                .args(["add", "session.md"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .current_dir(dir.path())
+                .args(["commit", "-m", "baseline", "--no-verify"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        std::fs::write(&file, &operator_cut).unwrap();
+
+        let idle_context = agent_doc_run_context_io::cycle_context(file.clone());
+        idle_context.set_doc_content(operator_cut.clone());
+        assert_eq!(
+            check_backlog_replay_guard(&file, &idle_context).unwrap(),
+            GuardResult::None
+        );
+
+        agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(&operator_cut))
+            .unwrap();
+        let open_context = agent_doc_run_context_io::cycle_context(file.clone());
+        open_context.set_doc_content(operator_cut);
+        assert!(matches!(
+            check_backlog_replay_guard(&file, &open_context).unwrap(),
+            GuardResult::Error(message) if message.contains("#remove1")
+        ));
+    }
 }

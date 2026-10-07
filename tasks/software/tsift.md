@@ -63,6 +63,20 @@ Fixed, integrated, pushed, and closed all three issues.
 - Verification passed: focused status/instruction tests, all combined init_workspace_* tests, git diff --check, and the full make check gate.
 - Main was pushed and verified at d26d1ab61902f464567611acc398b10b0cbb2708; GitHub issues #26, #27, and #28 are closed.
 - The active queue is large/restart-heavy, but it remains drainable; continuing to release + publish without compacting.
+
+### Re: v0.1.104 release — gpt-5 · 2026-10-07T12:11:45-04:00
+
+> **Queue prompt:** release + publish
+
+Released and published tsift v0.1.104 successfully.
+
+- Release commit: f1f39fb260c01e0f45c516238baca7c76d7b156c; annotated tag v0.1.104 resolves to that commit on origin.
+- GitHub release: https://github.com/btakita/tsift/releases/tag/v0.1.104 with Linux, macOS, Windows, and checksum assets.
+- crates.io: https://crates.io/crates/tsift/0.1.104 verified by downloading registry metadata.
+- npm: opencode-tsift reports version 0.1.104.
+- Local CLI: tsift 0.1.104 installed from the locked release tree.
+- Verification: focused issue regressions and full local make check passed; GitHub Actions release run 37645547218 completed successfully, including release-input CI, all platform builds, crates.io publish, GitHub release, and npm publish.
+- Non-blocking workflow annotations note upstream Node.js 20 action deprecation and the upcoming ubuntu-latest runner migration.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
@@ -72,7 +86,8 @@ Fixed, integrated, pushed, and closed all three issues.
 - ~~#gh-fix https://github.com/btakita/tsift/issues/26~~
 - ~~#gh-fix https://github.com/btakita/tsift/issues/27~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/tsift/issues/28~~ — auto-struck: answered this cycle (#ftstrike)
-- release + publish
+- Make the tsift skill upgrade friendly? Can the skill in the harness refer to the package tsift skill/runbook?
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

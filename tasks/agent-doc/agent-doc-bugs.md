@@ -226,7 +226,16 @@ Release results:
 - Single `install-full`: passed in 426.150 seconds.
 - Installed CLI/library: `0.35.477`; JetBrains `0.2.505`; VS Code `0.2.80`.
 - One hosted snapshot: Release `37703925181`, PyPI `37703924773`, and CI `37703915232` were in progress; Book and Pages were successful. The GitHub Release object was not yet visible, and policy-required no further polling.
-<!-- agent:boundary:6d674bdd -->
+> **Queue prompt:** release + publish
+
+### Re: v0.35.477 release complete — gpt-5 · 2026-10-07T19:53-04:00
+
+Released and published `agent-doc v0.35.477`.
+
+Release commit, `main`, and tag are `cf20ed9bcc575108c81d74cc553ce9032fff8183`. The full 9,652-test suite, all secondary gates, and tmux CI passed. The single installation completed with CLI/library 0.35.477, JetBrains 0.2.505, and VS Code 0.2.80.
+
+At the required one-time hosted snapshot, Release, PyPI, and CI workflows were in progress; Book and Pages had succeeded. No additional polling was performed.
+<!-- agent:boundary:acdfe8a0 -->
 <!-- /agent:exchange -->
 
 <!--

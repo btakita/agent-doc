@@ -156,13 +156,13 @@ The agent-doc workflow enforced isolated subagent worktrees and committed closeo
 
 ## Pending / Not Built
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- do [#subagentsattributescale]
+- 🚧 do [#subagentsattributescale]
 - 🚧 The last 2 responses in sdk.md have been unescaped.
-<!-- /agent:queue -->
+- release + publish9<!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#subagentsattributescale] In `agent:queue`, can we have the subagents attribute scale to as many as needed?
+- [ ] 🚧 [#subagentsattributescale] In `agent:queue`, can we have the subagents attribute scale to as many as needed?
 <!-- /agent:backlog -->
 
 ## Review

@@ -11,10 +11,11 @@ use std::time::Duration;
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativeActorDispatchIntent, CloseoutBlockDispatchDecision, DispatchOnlyBusyRefusalFacts,
-    DispatchOnlyReopenDelivery, ReopenMode, RouteCloseoutDrainOutcome, RoutedDispatchStartProof,
-    RoutedReopenFacts, RoutedReopenGuardReason, StartingTimeoutActorFacts,
-    actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
-    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
+    DispatchOnlyReopenDelivery, ReopenMode, RouteCloseoutBlockContext, RouteCloseoutDrainOutcome,
+    RouteExplicitSendDecision, RouteOwnerTurnEvidence, RoutedDispatchStartProof, RoutedReopenFacts,
+    RoutedReopenGuardReason, StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
+    actor_dispatch_blocker_reason, busy_projection_repaired_by_ready_prompt,
+    classify_authoritative_actor_dispatch_action, classify_route_explicit_send,
     decide_authoritative_reopen,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
@@ -25,7 +26,10 @@ use agent_doc_controller::dispatch::{
 use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
-use agent_doc_turn::closeout_recovery::blocked_closeout_recovery_command;
+use agent_doc_turn::closeout_recovery::{
+    CloseoutRecoveryCommandInput, CloseoutRecoveryState, blocked_closeout_recovery_command,
+    closeout_recovery_command, short_recovery_command_from_recommendation,
+};
 use agent_doc_turn::prompt_bearing_route::PromptBearingRouteContext;
 use tmux_router::Tmux;
 
@@ -180,20 +184,38 @@ pub fn closeout_wait_route_outcome(
     blocker: &str,
     outcome_fields: &str,
     explicit_items: usize,
+    owner_turn: RouteOwnerTurnEvidence,
 ) -> CloseoutWaitRouteOutcome {
-    if explicit_items > 0 {
-        return CloseoutWaitRouteOutcome::SteeringDelivered(format!(
-            "[route] explicit send for {}: delivered {explicit_items} pending steering item(s) to the owning turn (sent=explicit); its next tool call, its turn-boundary report, or the idle wake surfaces them. No second trigger was injected: the open closeout still owns the pane (blocker: {blocker}). steering_delivered={explicit_items} sent=explicit {outcome_fields}",
+    match classify_route_explicit_send(explicit_items, owner_turn) {
+        RouteExplicitSendDecision::DeliverToLiveOwner => {
+            CloseoutWaitRouteOutcome::SteeringDelivered(format!(
+                "[route] explicit send for {}: delivered {explicit_items} pending steering item(s) to the owning turn (sent=explicit); its next tool call, its turn-boundary report, or the idle wake surfaces them. No second trigger was injected: the open closeout still owns the pane (blocker: {blocker}). steering_delivered={explicit_items} sent=explicit {outcome_fields}",
+                file.display(),
+            ))
+        }
+        RouteExplicitSendDecision::BlockOwnerAbsent => CloseoutWaitRouteOutcome::Deferred(format!(
+            "[route] explicit send for {} is blocked: {explicit_items} pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: {blocker}). steering_delivered=0 sent=explicit {outcome_fields}",
             file.display(),
-        ));
+        )),
+        RouteExplicitSendDecision::DeferNoExplicitItems => {
+            CloseoutWaitRouteOutcome::Deferred(format!(
+                "[route] active closeout for {} could not be drained before reroute; nothing was dispatched and existing queue head {:?} remains queued behind the closeout (blocker: {}) {}",
+                file.display(),
+                head,
+                blocker,
+                outcome_fields
+            ))
+        }
     }
-    CloseoutWaitRouteOutcome::Deferred(format!(
-        "[route] active closeout for {} could not be drained before reroute; nothing was dispatched and existing queue head {:?} remains queued behind the closeout (blocker: {}) {}",
-        file.display(),
-        head,
-        blocker,
-        outcome_fields
-    ))
+}
+
+fn open_empty_preflight_recovery_command(file: &Path) -> Option<String> {
+    closeout_recovery_command(CloseoutRecoveryCommandInput {
+        document: file.display().to_string(),
+        state: CloseoutRecoveryState::OpenEmptyPreflight,
+        open_cycle: None,
+    })
+    .and_then(|recommendation| short_recovery_command_from_recommendation(&recommendation))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -282,16 +304,31 @@ pub fn route_via_authoritative_actor(
                 "route refused for {}: the open closeout can never drain, so nothing was dispatched. {} {}",
                 file.display(),
                 report,
-                route_closeout_user_outcome_fields(Some(&recovery_command))
+                route_closeout_user_outcome_fields(
+                    Some(&recovery_command),
+                    RouteOwnerTurnEvidence::Absent,
+                )
             );
         }
-        RouteCloseoutDrainOutcome::Blocked(reason) => {
+        RouteCloseoutDrainOutcome::Blocked { reason, context } => {
             let (decision, dispatch_decision) = classify_route_closeout_block(
                 file,
                 reason,
                 prompt_context.is_some(),
                 effects.closeout_drain_effects,
             );
+            let owner_turn =
+                if agent_doc_turn_status_io::turn_active_for_pane_for_file(file, &dispatch_pane) {
+                    RouteOwnerTurnEvidence::Live
+                } else {
+                    RouteOwnerTurnEvidence::Absent
+                };
+            let blocked_recovery_command =
+                blocked_closeout_recovery_command(&decision).or_else(|| {
+                    matches!(context, RouteCloseoutBlockContext::OpenEmptyPreflight)
+                        .then(|| open_empty_preflight_recovery_command(file))
+                        .flatten()
+                });
             match dispatch_decision {
                 CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout => {
                     let Some(context) = prompt_context else {
@@ -321,7 +358,8 @@ pub fn route_via_authoritative_actor(
                         queued.already_present,
                         queued.superseded,
                         route_closeout_user_outcome_fields(
-                            blocked_closeout_recovery_command(&decision).as_deref(),
+                            blocked_recovery_command.as_deref(),
+                            owner_turn,
                         )
                     );
                     eprintln!("{deferral}");
@@ -340,7 +378,8 @@ pub fn route_via_authoritative_actor(
                         ),
                     );
                     let fields = route_closeout_user_outcome_fields(
-                        blocked_closeout_recovery_command(&decision).as_deref(),
+                        blocked_recovery_command.as_deref(),
+                        owner_turn,
                     );
                     // `#claimedsteerwake`: this route is the operator's
                     // explicit send. Pending steering goes to the owning turn
@@ -357,6 +396,7 @@ pub fn route_via_authoritative_actor(
                         &agent_doc_secret_redact::redact(&blocker),
                         &fields,
                         explicit,
+                        owner_turn,
                     );
                     eprintln!("{}", outcome.message());
                     match outcome {
@@ -1467,13 +1507,23 @@ mod tests {
             Path::new("/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md");
         let head = "#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/126";
         let blocker = "closeout recovery replay_safe [open_empty_preflight]: agent-doc session cancel-turn tasks/agent-doc/agent-doc-bugs.md — first interrupt the owning harness run";
-        let fields = agent_doc_controller::dispatch::route_closeout_user_outcome_fields(None);
+        let fields = agent_doc_controller::dispatch::route_closeout_user_outcome_fields(
+            None,
+            RouteOwnerTurnEvidence::Live,
+        );
         assert!(
             fields.contains("ui_outcome=queued_behind_owner"),
             "{fields}"
         );
 
-        let delivered = closeout_wait_route_outcome(file, head, blocker, &fields, 2);
+        let delivered = closeout_wait_route_outcome(
+            file,
+            head,
+            blocker,
+            &fields,
+            2,
+            RouteOwnerTurnEvidence::Live,
+        );
         let CloseoutWaitRouteOutcome::SteeringDelivered(message) = &delivered else {
             panic!("an explicit send with pending steering is a delivery: {delivered:?}");
         };
@@ -1495,10 +1545,53 @@ mod tests {
         );
 
         // Nothing pending: the existing deferral is unchanged.
-        let deferred = closeout_wait_route_outcome(file, head, blocker, &fields, 0);
+        let deferred = closeout_wait_route_outcome(
+            file,
+            head,
+            blocker,
+            &fields,
+            0,
+            RouteOwnerTurnEvidence::Live,
+        );
         let CloseoutWaitRouteOutcome::Deferred(message) = &deferred else {
             panic!("{deferred:?}");
         };
         assert!(message.contains("nothing was dispatched"), "{message}");
+    }
+
+    #[test]
+    fn explicit_send_without_a_live_owner_is_blocked() {
+        let file = Path::new("/tmp/sample-session.md");
+        let blocker = "closeout recovery replay_safe [open_empty_preflight]";
+        let fields = agent_doc_controller::dispatch::route_closeout_user_outcome_fields(
+            Some("agent-doc session cancel-turn /tmp/sample-session.md"),
+            RouteOwnerTurnEvidence::Absent,
+        );
+        let outcome = closeout_wait_route_outcome(
+            file,
+            "do [#sample]",
+            blocker,
+            &fields,
+            1,
+            RouteOwnerTurnEvidence::Absent,
+        );
+        let CloseoutWaitRouteOutcome::Deferred(message) = outcome else {
+            panic!("ownerless explicit send must be blocked");
+        };
+        assert!(
+            message.contains("no live owning turn was proven"),
+            "{message}"
+        );
+        assert!(message.contains("no second send is required"), "{message}");
+        assert!(message.contains("ui_outcome_class=blocked"), "{message}");
+        assert!(!message.contains("steering_delivered=1"), "{message}");
+    }
+
+    #[test]
+    fn open_empty_preflight_block_names_the_exact_recovery_command() {
+        assert_eq!(
+            open_empty_preflight_recovery_command(Path::new("/tmp/sample-session.md")),
+            Some("agent-doc session cancel-turn /tmp/sample-session.md".to_string())
+        );
     }
 }

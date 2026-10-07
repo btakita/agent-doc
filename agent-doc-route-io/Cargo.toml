@@ -64,6 +64,7 @@ agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.476" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.476" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.476" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.476" }
+agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.476" }
 agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.476" }
 agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.35.476" }
 anyhow = "1"

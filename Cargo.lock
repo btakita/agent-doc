@@ -1972,6 +1972,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
+ "agent-doc-turn-status-io",
  "agent-doc-write-converge-io",
  "anyhow",
  "fs2",

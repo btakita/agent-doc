@@ -3568,12 +3568,51 @@ pub fn direct_pane_can_enter_existing_draft(facts: DirectPaneExistingDraftSubmit
 pub enum RouteCloseoutDrainOutcome {
     NoOpenCycle,
     Recovered(String),
-    Blocked(String),
+    Blocked {
+        reason: String,
+        context: RouteCloseoutBlockContext,
+    },
     /// GH 91: the open cycle's durable capture is deterministically
     /// unlandable (GH 90's structural/marker refusal). No retained-write or
     /// commit recovery can clear it, so the route fails closed with the
     /// operator report instead of waiting behind it.
     Unlandable(String),
+}
+
+/// Typed context retained when a closeout drain blocks. Route adapters use this
+/// instead of parsing operator-facing recovery text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteCloseoutBlockContext {
+    OpenEmptyPreflight,
+    Other,
+}
+
+/// Positive evidence that a route's durable steering has a live turn which can
+/// consume it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteOwnerTurnEvidence {
+    Live,
+    Absent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteExplicitSendDecision {
+    DeliverToLiveOwner,
+    BlockOwnerAbsent,
+    DeferNoExplicitItems,
+}
+
+pub const fn classify_route_explicit_send(
+    explicit_items: usize,
+    owner_turn: RouteOwnerTurnEvidence,
+) -> RouteExplicitSendDecision {
+    if explicit_items == 0 {
+        RouteExplicitSendDecision::DeferNoExplicitItems
+    } else if matches!(owner_turn, RouteOwnerTurnEvidence::Live) {
+        RouteExplicitSendDecision::DeliverToLiveOwner
+    } else {
+        RouteExplicitSendDecision::BlockOwnerAbsent
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3605,11 +3644,20 @@ pub fn classify_closeout_block_dispatch(
 /// closeout block. When route/turn recovery supplied a concrete command for a
 /// stuck cycle, surface the exact unblocker instead of the queue-behind-owner
 /// wait outcome.
-pub fn route_closeout_user_outcome_fields(blocked_recovery_command: Option<&str>) -> String {
+pub fn route_closeout_user_outcome_fields(
+    blocked_recovery_command: Option<&str>,
+    owner_turn: RouteOwnerTurnEvidence,
+) -> String {
     if let Some(command) = blocked_recovery_command {
         return format!(
             "ui_outcome_contract={} ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command={}",
             DISPATCH_BLOCKED_USER_FACING_OUTCOME_CONTRACT_VERSION, command
+        );
+    }
+    if matches!(owner_turn, RouteOwnerTurnEvidence::Absent) {
+        return format!(
+            "ui_outcome_contract={} ui_outcome=blocked_owner_absent ui_outcome_class=blocked next_action=retry_after_closeout_recovery",
+            DISPATCH_BLOCKED_USER_FACING_OUTCOME_CONTRACT_VERSION
         );
     }
     format!(
@@ -7418,8 +7466,10 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         // (captured-response baseline drift / IPC no_ack) must surface the
         // specific recovery command via BlockedWithExactUnblocker instead of
         // the misleading `wait_for_owner_turn_to_drain` (no live owner turn).
-        let fields =
-            route_closeout_user_outcome_fields(Some("agent-doc finalize /abs/path/session.md"));
+        let fields = route_closeout_user_outcome_fields(
+            Some("agent-doc finalize /abs/path/session.md"),
+            RouteOwnerTurnEvidence::Absent,
+        );
         assert!(
             fields.contains("ui_outcome=blocked_with_exact_unblocker"),
             "stuck-cycle decision must surface BlockedWithExactUnblocker, not QueuedBehindOwner: {fields}"
@@ -7447,7 +7497,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         // #routedrainnextaction: a non-Blocked recovery decision (the operator's
         // turn is genuinely running, prompt is queued behind it) keeps the
         // historical QueuedBehindOwner / wait_for_owner_turn_to_drain wording.
-        let fields = route_closeout_user_outcome_fields(None);
+        let fields = route_closeout_user_outcome_fields(None, RouteOwnerTurnEvidence::Live);
         assert!(
             fields.contains("ui_outcome=queued_behind_owner"),
             "genuine queue-behind must keep QueuedBehindOwner: {fields}"
@@ -7455,6 +7505,33 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(
             fields.contains("next_action=wait_for_owner_turn_to_drain"),
             "genuine queue-behind must keep the live-owner-turn next_action: {fields}"
+        );
+    }
+
+    #[test]
+    fn route_closeout_user_outcome_blocks_when_owner_turn_is_absent() {
+        let fields = route_closeout_user_outcome_fields(None, RouteOwnerTurnEvidence::Absent);
+        assert!(
+            fields.contains("ui_outcome=blocked_owner_absent"),
+            "{fields}"
+        );
+        assert!(fields.contains("ui_outcome_class=blocked"), "{fields}");
+        assert!(!fields.contains("wait_for_owner_turn_to_drain"), "{fields}");
+    }
+
+    #[test]
+    fn explicit_send_requires_positive_live_owner_evidence() {
+        assert_eq!(
+            classify_route_explicit_send(1, RouteOwnerTurnEvidence::Live),
+            RouteExplicitSendDecision::DeliverToLiveOwner
+        );
+        assert_eq!(
+            classify_route_explicit_send(1, RouteOwnerTurnEvidence::Absent),
+            RouteExplicitSendDecision::BlockOwnerAbsent
+        );
+        assert_eq!(
+            classify_route_explicit_send(0, RouteOwnerTurnEvidence::Live),
+            RouteExplicitSendDecision::DeferNoExplicitItems
         );
     }
 

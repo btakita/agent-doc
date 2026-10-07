@@ -535,14 +535,27 @@ pub fn queue_consumption_allowed_for_response(
         return Ok(true);
     }
     if let Some(head_text) = active_free_text_head {
-        return Ok(crate::queue_response::free_text_head_answered_by_response(
-            response_body,
-            &head_text,
-        ) && !cycle_answered_foreign_exchange_prompt(
-            baseline,
-            current_content,
-            &head_text,
-        ));
+        // A registered `#preset` head is a resolved prompt, not ordinary free
+        // text. Its expansion is the response contract and the literal token
+        // quote is optional. Keep the free-text classification only as the
+        // strike/reap transport for preset heads that have no tracked-work row.
+        let answered =
+            if crate::queue_response::queue_prompt_preset_expansions(current_content, &head_text)
+                .is_empty()
+            {
+                crate::queue_response::free_text_head_answered_by_response(
+                    response_body,
+                    &head_text,
+                )
+            } else {
+                crate::queue_response::prompt_preset_head_answered_by_response(
+                    current_content,
+                    response_body,
+                    &head_text,
+                )
+            };
+        return Ok(answered
+            && !cycle_answered_foreign_exchange_prompt(baseline, current_content, &head_text));
     }
     Ok(false)
 }
@@ -1729,6 +1742,7 @@ mod tests {
     use super::*;
     use crate::document_queue;
     use agent_doc_document::queue_projection::IN_PROGRESS_MARKER;
+    use std::path::Path;
 
     fn entries(body: &str) -> Vec<QueueEntry> {
         document_queue::parse(body).unwrap()
@@ -1742,6 +1756,76 @@ mod tests {
 
     fn queue_doc(body: &str) -> String {
         format!("<!-- agent:queue -->\n{body}<!-- /agent:queue -->\n")
+    }
+
+    #[test]
+    fn resolved_preset_head_completion_uses_expansion_without_literal_quote() {
+        let content = concat!(
+            "---\nqueue_active: true\n",
+            "prompt_presets:\n",
+            "  '#actionable-review': Add actionable review items into backlog + queue\n",
+            "---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #actionable-review\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: actionable review\n\n",
+            "Add actionable review items into backlog + queue. Added three items.\n",
+        );
+
+        assert!(
+            queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(content),
+                content,
+                response,
+                &[],
+            )
+            .unwrap(),
+            "resolved preset expansion should complete without a literal queue-prompt quote"
+        );
+    }
+
+    #[test]
+    fn ordinary_free_text_head_still_requires_exact_queue_prompt_evidence() {
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Add actionable review items into backlog + queue\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let unquoted_response =
+            "### Re: actionable review\n\nAdded actionable review items into backlog + queue.\n";
+
+        assert!(
+            !queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(content),
+                content,
+                unquoted_response,
+                &[],
+            )
+            .unwrap(),
+            "ordinary free text must not inherit prompt-preset expansion semantics"
+        );
+
+        let quoted_response = concat!(
+            "### Re: actionable review\n\n",
+            "> **Queue prompt:** Add actionable review items into backlog + queue\n\n",
+            "Added the items.\n",
+        );
+        assert!(
+            queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(content),
+                content,
+                quoted_response,
+                &[],
+            )
+            .unwrap(),
+            "ordinary free text should retain exact quoted-prompt completion"
+        );
     }
 
     /// `#closeoutstrandedmsg`: the observed late shape — the id head struck

@@ -296,6 +296,18 @@ Verification and installation are complete:
 - `make install-full` installed CLI/native `0.35.475`, JetBrains `0.2.504`, and VS Code `0.2.80`. The active document endpoint deferred native reload to the safe idle boundary, preserving this turn.
 - Book and Pages checks for `3158f3c80` are green; the main CI run was still in progress at the required one-shot observation.
 - All queue claims were released before this response.
+❯ Completed and committed the agent-doc cycle.
+
+- Bare `subagents` usage is correct; `#subagents` preset is redundant.
+- Current capacity is three worker subagents plus the root agent.
+- Published and installed `v0.35.475`.
+- Pushed subsequent fixes through `3158f3c80`.
+- Closed GitHub issues #174–#177.
+- Full `make check` passed; full install succeeded.
+- Preserved the corrected sentence: “I'm skeptical about the reported 63.2% Not Flagged rate.”
+- Terminal `session-check` passed for cycle `cycle-1791395961104`; supervisor continuation requires no operator action.
+
+❯ The check emitted only a non-blocking coined-ID warning from verbatim historical prompt text.
 <!-- agent:boundary:d2a9ba1d -->
 <!-- /agent:exchange -->
 
@@ -304,13 +316,13 @@ Verification and installation are complete:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#subagentsattributescale]
-- 🚧 The last 2 responses in sdk.md have been unescaped.
-- #gh-fix https://github.com/btakita/agent-doc/issues/174
-- #gh-fix https://github.com/btakita/agent-doc/issues/175
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/176
+- ~~⏭️ do [#subagentsattributescale]~~
+- ~~The last 2 responses in sdk.md have been unescaped.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/174~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/175~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/176~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/177
-- release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

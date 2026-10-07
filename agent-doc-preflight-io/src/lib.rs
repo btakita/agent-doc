@@ -14,8 +14,8 @@ use agent_doc_element::element::{
     is_backlog_component, is_review_component, is_tracked_work_component,
 };
 use agent_doc_element_backlog::backlog::{
-    component_matches_tracked_surface, ensure_no_completed_tracked_items, format_dropped_refs,
-    format_shadow_refs, maintenance_surface_label, review_counts, should_reap_already_done_mirrors,
+    component_matches_tracked_surface, ensure_no_completed_tracked_items, format_shadow_refs,
+    maintenance_surface_label, review_counts, should_reap_already_done_mirrors,
     should_reap_ops_proof_completions, tracked_body_for_reorder,
 };
 use agent_doc_frontmatter::frontmatter;
@@ -2428,7 +2428,11 @@ pub fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn enforce_no_dropped_backlog(file: &Path, head_content: Option<&str>) -> Result<()> {
+pub fn enforce_no_dropped_backlog(
+    file: &Path,
+    head_content: Option<&str>,
+    operator_entry_content: &str,
+) -> Result<()> {
     let head_content = match head_content {
         Some(content) => content,
         None => return Ok(()),
@@ -2479,10 +2483,42 @@ pub fn enforce_no_dropped_backlog(file: &Path, head_content: Option<&str>) -> Re
         &external_current_ids,
     )?;
     if !report.dropped.is_empty() {
-        anyhow::bail!(
-            "open backlog item(s) from recent committed history are completely absent from the project: {}. Restore them to the live backlog, move them to another project document's tracked work or icebox, or mark them done before continuing",
-            format_dropped_refs(&report.dropped)
+        let evidence =
+            agent_doc_element_backlog_io::deletion_authority::classify_operator_deletion(
+                file,
+                head_content,
+                operator_entry_content,
+                Some(head_content),
+                &report,
+            )?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "backlog_deletion_authority file={} ids={} evidence={}",
+                file.display(),
+                report
+                    .dropped
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                evidence.as_str(),
+            ),
         );
+        match agent_doc_element_backlog::guard_policy::dropped_from_history_report_guard_with_authority(
+            &report,
+            evidence.authority(),
+        ) {
+            agent_doc_element_backlog::guard_policy::BacklogGuardOutcome::Pass => {}
+            agent_doc_element_backlog::guard_policy::BacklogGuardOutcome::Warn(lines) => {
+                for line in lines {
+                    eprintln!("{line}");
+                }
+            }
+            agent_doc_element_backlog::guard_policy::BacklogGuardOutcome::Interrupt(message) => {
+                anyhow::bail!(message);
+            }
+        }
     }
     Ok(())
 }
@@ -13162,9 +13198,46 @@ mod tests {
         assert!(!report.reordered);
         assert_eq!(report.backlog_gated_count, 0);
         let head_content = agent_doc_git_io::revision::show_head(&doc).unwrap();
-        enforce_no_dropped_backlog(&doc, head_content.as_deref())
+        enforce_no_dropped_backlog(&doc, head_content.as_deref(), current)
             .expect("same-cycle reap should count as intentional completion");
     }
+
+    #[test]
+    fn preflight_accepts_idle_operator_backlog_deletion_but_not_open_cycle_loss() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me\n",
+            "- [ ] [#remove1] Operator may remove me\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "baseline", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let current = baseline.replace("- [ ] [#remove1] Operator may remove me\n", "");
+        std::fs::write(&doc, &current).unwrap();
+        let head_content = agent_doc_git_io::revision::show_head(&doc).unwrap();
+        enforce_no_dropped_backlog(&doc, head_content.as_deref(), &current)
+            .expect("an idle visible deletion is operator-authoritative");
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(&current)).unwrap();
+        let err = enforce_no_dropped_backlog(&doc, head_content.as_deref(), &current).expect_err(
+            "the same absence without operator-op proof must fail during an open cycle",
+        );
+        assert!(err.to_string().contains("#remove1"), "{err:#}");
+    }
+
     #[test]
     fn preflight_allows_open_backlog_item_moved_to_another_project_document() {
         let dir = setup_project();
@@ -13201,11 +13274,11 @@ mod tests {
             "<!-- agent:backlog -->\n",
             "<!-- agent:backlog -->\n- [ ] [#moved1] Continue this work elsewhere\n",
         );
-        std::fs::write(&source, current_source).unwrap();
+        std::fs::write(&source, &current_source).unwrap();
         std::fs::write(&destination, current_destination).unwrap();
 
         let head_content = agent_doc_git_io::revision::show_head(&source).unwrap();
-        enforce_no_dropped_backlog(&source, head_content.as_deref())
+        enforce_no_dropped_backlog(&source, head_content.as_deref(), &current_source)
             .expect("a unique open destination should prove the transfer");
     }
     #[test]

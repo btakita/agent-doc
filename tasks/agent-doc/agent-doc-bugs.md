@@ -19,6 +19,7 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -155,6 +156,7 @@ The agent-doc workflow enforced isolated subagent worktrees and committed closeo
 
 ## Pending / Not Built
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- The last 2 responses in sdk.md have been unescaped.
 <!-- /agent:queue -->
 
 

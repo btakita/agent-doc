@@ -3119,8 +3119,16 @@ pub struct PassThroughStrandedDraftFacts {
 
 /// `#runsubmitclaude`: consecutive idle-and-empty observations required before
 /// an idle pane may be called cleared.
-pub const fn pass_through_stranded_draft_required_clear_observations() -> usize {
-    2
+///
+/// The pass-through repair samples more frequently than the ordinary direct-pane
+/// acceptance window so it can repair a visible draft quickly. The empty verdict
+/// must nevertheless cover that whole established window: a fixed sample count
+/// let two 150ms observations report success while Codex was still rendering the
+/// trigger into its composer.
+pub fn pass_through_stranded_draft_required_clear_observations(settle: Duration) -> usize {
+    let settle_nanos = settle.as_nanos().max(1);
+    let stable_nanos = DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR.as_nanos();
+    stable_nanos.div_ceil(settle_nanos).max(1) as usize
 }
 
 /// `#runfilesubmit`: the pass-through single-submit path sends text and the
@@ -3151,13 +3159,14 @@ pub const fn pass_through_stranded_draft_required_clear_observations() -> usize 
 /// `outcome=cleared enters_sent=0 elapsed_ms=153` while the operator watched
 /// the trigger sit unsubmitted in the composer; the same pane at 16:22:28Z saw
 /// the draft on its first observation and repaired it (`enters_sent=1
-/// elapsed_ms=306`). So an IDLE-and-empty verdict must be confirmed by a second
-/// observation before it counts as cleared.
+/// elapsed_ms=306`). So an IDLE-and-empty verdict must remain provisional for
+/// the same 900ms window as ordinary direct-pane acceptance; counting just two
+/// 150ms samples reproduced the strand on Codex in a split pane.
 ///
 /// A BUSY pane showing no draft needs no confirmation: the harness working is
 /// positive evidence that the trigger crossed the composer and started a turn.
 /// That keeps the fast success path free — only the genuinely ambiguous
-/// idle-and-empty case pays one extra settle window.
+/// idle-and-empty case pays the stable-empty acceptance window.
 pub const fn classify_pass_through_stranded_draft_action(
     facts: PassThroughStrandedDraftFacts,
 ) -> PassThroughStrandedDraftAction {
@@ -6776,6 +6785,26 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         );
     }
 
+    #[test]
+    fn pass_through_clear_observations_span_direct_pane_stability_window() {
+        assert_eq!(
+            pass_through_stranded_draft_required_clear_observations(Duration::from_millis(150)),
+            6
+        );
+        assert_eq!(
+            pass_through_stranded_draft_required_clear_observations(Duration::from_millis(500)),
+            2
+        );
+        assert_eq!(
+            pass_through_stranded_draft_required_clear_observations(Duration::from_millis(900)),
+            1
+        );
+        assert_eq!(
+            pass_through_stranded_draft_required_clear_observations(Duration::from_secs(1)),
+            1
+        );
+    }
+
     /// Replays the whole pass-through repair against a scripted pane, exactly
     /// as `repair_pass_through_stranded_draft` drives it: observe, classify,
     /// act, re-observe. `pane[i]` is `(draft_visible, pane_busy)` for the i-th
@@ -6784,6 +6813,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         pane: &[(bool, bool)],
         max_enters: usize,
     ) -> (Vec<&'static str>, usize) {
+        let settle = PASS_THROUGH_STRANDED_DRAFT_SETTLE;
         let mut actions = Vec::new();
         let mut enters_sent = 0usize;
         let mut clear_observations = 0usize;
@@ -6798,7 +6828,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                     max_enters,
                     clear_observations,
                     required_clear_observations:
-                        pass_through_stranded_draft_required_clear_observations(),
+                        pass_through_stranded_draft_required_clear_observations(settle),
                 });
             actions.push(pass_through_stranded_draft_action_label(action));
             if pass_through_stranded_draft_action_is_terminal(action) {
@@ -6837,31 +6867,50 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     #[test]
     fn pass_through_repair_confirms_an_idle_empty_composer_before_calling_it_cleared() {
-        // #runsubmitclaude (second pass): an IDLE pane showing no draft is
-        // ambiguous — the turn may already be over, or the keystrokes may not
-        // have rendered. One 150ms window is not proof, so the verdict waits for
-        // a second consecutive idle-and-empty look.
-        let (actions, enters) =
-            replay_pass_through_repair(&[(false, false), (false, false), (false, false)], 3);
+        // #runsubmitclaude: an IDLE pane showing no draft is ambiguous — the
+        // turn may already be over, or the keystrokes may not have rendered.
+        // Empty observations must span the ordinary 900ms direct-pane
+        // acceptance window before the verdict becomes terminal.
+        let mut pane = vec![(false, false); 7];
+        let (actions, enters) = replay_pass_through_repair(&pane, 3);
         assert_eq!(
             actions,
-            vec!["settle_and_reobserve", "settle_and_reobserve", "cleared"]
+            vec![
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "cleared",
+            ]
         );
         assert_eq!(enters, 0);
+
+        pane.pop();
+        let observations = pane
+            .into_iter()
+            .chain([(true, false), (false, true)])
+            .collect::<Vec<_>>();
+        let (actions, enters) = replay_pass_through_repair(&observations, 3);
+        assert_eq!(enters, 1);
+        assert!(actions.contains(&"enter_resubmit"));
     }
 
     #[test]
-    fn pass_through_repair_catches_a_draft_that_renders_after_the_first_window() {
-        // The live repro. Observed 2026-08-08 16:23:39Z on
-        // `tasks/agent-doc/agent-doc-bugs2.md` pane `%25`: the repair logged
-        // `outcome=cleared enters_sent=0 elapsed_ms=153` on a single settled
-        // look, and the operator then watched the trigger sit unsubmitted in the
-        // composer. The confirming observation sees the render and repairs it.
+    fn pass_through_repair_catches_a_draft_after_the_305ms_false_clear_regression() {
+        // The live regression: a split-pane Codex route logged
+        // `outcome=cleared enters_sent=0 elapsed_ms=305` after the pre-settle
+        // capture plus two idle-empty observations. The trigger rendered only
+        // after that false terminal verdict and remained drafted until the
+        // operator pressed Enter. The established 900ms empty window keeps the
+        // third empty frame non-terminal, so the next frame repairs the draft.
         let (actions, enters) = replay_pass_through_repair(
             &[
                 (false, false), // pre-settle: nothing observed yet
-                (false, false), // 153ms: render still has not landed
-                (true, false),  // it lands — the strand the old verdict missed
+                (false, false), // 150ms: render still has not landed
+                (false, false), // 300ms: still empty, not proof of submission
+                (true, false),  // 450ms: the strand becomes visible
                 (false, true),  // the bare submit key started the turn
             ],
             3,
@@ -6869,6 +6918,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert_eq!(
             actions,
             vec![
+                "settle_and_reobserve",
                 "settle_and_reobserve",
                 "settle_and_reobserve",
                 "enter_resubmit",
@@ -6923,11 +6973,29 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         // A draft sighted before the settle window and gone after it was render
         // lag behind a submit that already crossed — never press a key for it.
         // The window gates both verdicts, so neither pre-settle frame decides.
-        let (actions, enters) =
-            replay_pass_through_repair(&[(true, false), (false, false), (false, false)], 3);
+        let (actions, enters) = replay_pass_through_repair(
+            &[
+                (true, false),
+                (false, false),
+                (false, false),
+                (false, false),
+                (false, false),
+                (false, false),
+                (false, false),
+            ],
+            3,
+        );
         assert_eq!(
             actions,
-            vec!["settle_and_reobserve", "settle_and_reobserve", "cleared"]
+            vec![
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "settle_and_reobserve",
+                "cleared",
+            ]
         );
         assert_eq!(enters, 0);
     }

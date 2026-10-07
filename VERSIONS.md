@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.475
+
+- **Strict closeout repairs provably escaped response payloads.** A one-line response containing literal `\\n` /
+  `\\r` transport escapes is decoded before heading canonicalization only when it proves exactly one complete
+  `patch:exchange`, no unmatched text, and a real `Re:` heading; ambiguous prose and literal escape examples remain
+  byte-exact instead of being committed under a synthetic `Re: Response` heading.
+- **Bare queue subagent mode scales to all eligible work.** `agent:queue subagents` and its `fan-out` alias now offer
+  every dependency-ready, unclaimed head, while an explicit `subagents=N` remains a positive concurrency cap and
+  claims, inline/operator opt-outs, and dependency holds preserve their existing behavior.
+
 ## 0.35.474
 
 - **Deferred free-text queue heads survive closeout (GH #172).** Every queue-completion signal now honors the

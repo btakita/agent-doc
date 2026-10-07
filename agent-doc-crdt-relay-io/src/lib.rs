@@ -222,6 +222,65 @@ fn restore_durable_liveness(file: &Path, document_hash: &str) -> Result<()> {
     for cursor in &snapshot.cursors {
         plane.restore_cursor(&cursor.document_hash, cursor.ack_through);
     }
+    if let Some(rowid) = snapshot.liveness.last().map(|record| record.rowid) {
+        DURABLE_LIVENESS_ROWIDS
+            .lock()
+            .entry(database_path)
+            .and_modify(|current| *current = (*current).max(rowid))
+            .or_insert(rowid);
+    }
+    Ok(())
+}
+
+/// Per-process durable journal cursor for non-controller readers.
+///
+/// The controller receives liveness pushes directly. Supervisors and short-lived
+/// CLIs share the same in-process projection but have no push subscription, so a
+/// warm projection must advance from the journal before it selects an editor IPC
+/// route. Tracking the last restored SQLite row keeps that refresh incremental.
+static DURABLE_LIVENESS_ROWIDS: std::sync::LazyLock<Mutex<HashMap<std::path::PathBuf, i64>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn refresh_durable_liveness(file: &Path) -> Result<()> {
+    let Some(project_root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(());
+    };
+    let database_path = agent_doc_sqlite::state_store::state_db_path(&project_root);
+    let after_rowid = DURABLE_LIVENESS_ROWIDS
+        .lock()
+        .get(&database_path)
+        .copied()
+        .unwrap_or(0);
+    let records =
+        agent_doc_sqlite::reliable_sync_inbox::load_liveness_after(&database_path, after_rowid)?;
+    if records.is_empty() {
+        return Ok(());
+    }
+    let batches = records
+        .iter()
+        .map(|record| {
+            serde_json::from_str::<Vec<agent_doc_reliable_sync_io::liveness::LivenessOp>>(
+                &record.ops_json,
+            )
+            .with_context(|| {
+                format!(
+                    "decode durable reliable-sync liveness source={} epoch={}",
+                    record.source_key, record.epoch
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
+    for batch in &batches {
+        plane.restore_liveness(batch);
+    }
+    drop(plane);
+    let rowid = records.last().expect("non-empty records").rowid;
+    DURABLE_LIVENESS_ROWIDS
+        .lock()
+        .entry(database_path)
+        .and_modify(|current| *current = (*current).max(rowid))
+        .or_insert(rowid);
     Ok(())
 }
 
@@ -3870,6 +3929,21 @@ const fn recovering_send_error_is_definitive(
     receipt_rejected || build_mismatch_recovery_failed
 }
 
+/// A missing PID-scoped socket is conclusive only when the process is gone too.
+/// A live process may be between listener generations, so `ENOENT` alone remains
+/// retryable; pairing it with OS process death proves this endpoint cannot serve.
+fn ipc_socket_absent_for_dead_process(error: &anyhow::Error, editor_pid: u64) -> bool {
+    let socket_absent = error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
+    });
+    let process_dead = u32::try_from(editor_pid)
+        .ok()
+        .is_none_or(|pid| !agent_doc_reliable_sync_io::process_pid_is_live(pid));
+    socket_absent && process_dead
+}
+
 /// Ask the editor host to discard and rebuild a replica that stopped making
 /// visible-delivery progress.
 ///
@@ -5103,6 +5177,10 @@ pub struct ReplicaSignalOutcome {
     /// left the authority resolver holding an attachment latch it could never
     /// open. See `formal/tla/EditorReplicaStrand.tla`.
     pub definitive_refusals: usize,
+    /// Routes whose socket pathname was absent and whose owning process no
+    /// longer exists. Unlike a generic missing socket, this pair is proof that
+    /// the endpoint cannot still serve the document.
+    pub dead_endpoints: Vec<ReplicaSignalRoute>,
     /// Delivery was intentionally not attempted because the shared durable
     /// transport-health policy currently treats this endpoint as unregistered.
     /// The bounded probe window will later admit one request; until then this
@@ -5186,6 +5264,7 @@ fn suppressed_native_save_outcome(
         build_mismatch_refusals: Vec::new(),
         generation_mismatches,
         definitive_refusals: 0,
+        dead_endpoints: Vec::new(),
         endpoint_unregistered: true,
     })
 }
@@ -5263,6 +5342,11 @@ pub fn request_native_save_for_current_projection(
 ) -> Result<ReplicaSignalOutcome> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let _ = reliable_sync_editor_live_for_file(&canonical);
+    // A supervisor can outlive the editor backend that was current when its
+    // process-local projection was first hydrated. Advance from the shared
+    // durable journal before every delivery attempt so route selection observes
+    // backend closes/restarts without requiring a supervisor re-exec (#169).
+    refresh_durable_liveness(&canonical)?;
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     // GH 90: re-resolved on every attempt, and filtered on pid liveness BEFORE
     // the generation fence. A long-lived process's liveness projection can
@@ -5390,6 +5474,7 @@ pub fn request_native_save_for_current_projection(
         build_mismatch_refusals: Vec::new(),
         generation_mismatches: generation_mismatches.len(),
         definitive_refusals: native_save_definitive_refusals,
+        dead_endpoints: Vec::new(),
         endpoint_unregistered: false,
     };
     record_replica_signal_transport_health(
@@ -5422,6 +5507,9 @@ pub enum ReplicaSignalClass {
     EndpointUnregistered(usize),
     /// Every live route ANSWERED and refused.
     DefinitivelyRefusedByAll(usize),
+    /// Every discovered route is proven not to serve: its listener refused, or
+    /// its socket is absent and its owning process no longer exists.
+    DefinitivelyUnservedByAll(usize),
     /// Routes exist but none could be reached: a delivery fault.
     DeliveryFailedToAll(usize),
     /// Some, but not all, routes were reached.
@@ -5441,12 +5529,14 @@ pub enum NonconvergingReplicaDisposition {
     /// the replica alone; a later signal may reach it.
     ///
     /// Must never collapse into [`Self::DropFromDeliveryCut`]: a timeout or a
-    /// missing socket is not proof the endpoint stopped serving, and treating
-    /// it as one would turn this into a silent `--force-disk`.
+    /// missing socket owned by a still-live process is not proof the endpoint
+    /// stopped serving, and treating it as one would turn this into a silent
+    /// `--force-disk`. A missing socket paired with OS process death is classified
+    /// separately as definitive unserviceability.
     Retry,
-    /// Every live route answered and refused. Retrying cannot succeed, so stop
-    /// treating the endpoint as serving this document and drop it from the
-    /// delivery cut. Modelled as `DropRefusedFromDeliveryCut` in
+    /// Every route is proven not to serve (answered refusal or dead process).
+    /// Retrying cannot succeed, so stop treating the endpoint as serving this
+    /// document and drop it from the delivery cut. Modelled as `DropRefusedFromDeliveryCut` in
     /// `formal/tla/VisibleDeliveryReceipt.tla`.
     DropFromDeliveryCut,
 }
@@ -5470,6 +5560,9 @@ impl ReplicaSignalOutcome {
             (found, 0) if self.definitive_refusals == found => {
                 ReplicaSignalClass::DefinitivelyRefusedByAll(found)
             }
+            (found, 0) if self.definitive_refusals + self.dead_endpoints.len() == found => {
+                ReplicaSignalClass::DefinitivelyUnservedByAll(found)
+            }
             (found, 0) => ReplicaSignalClass::DeliveryFailedToAll(found),
             (found, notified) if notified < found => {
                 ReplicaSignalClass::PartiallyRequested { notified, found }
@@ -5492,6 +5585,9 @@ impl ReplicaSignalOutcome {
             }
             ReplicaSignalClass::DefinitivelyRefusedByAll(found) => {
                 format!("definitively_refused_by_all:{found}")
+            }
+            ReplicaSignalClass::DefinitivelyUnservedByAll(found) => {
+                format!("definitively_unserved_by_all:{found}")
             }
             ReplicaSignalClass::DeliveryFailedToAll(found) => {
                 format!("delivery_failed_to_all:{found}")
@@ -5531,7 +5627,8 @@ impl ReplicaSignalClass {
             | Self::PluginGenerationMismatch(_)
             | Self::EndpointUnregistered(_)
             | Self::DeliveryFailedToAll(_)
-            | Self::DefinitivelyRefusedByAll(_) => true,
+            | Self::DefinitivelyRefusedByAll(_)
+            | Self::DefinitivelyUnservedByAll(_) => true,
             Self::PartiallyRequested { .. } | Self::Requested(_) => false,
         }
     }
@@ -5566,6 +5663,9 @@ impl ReplicaSignalClass {
                 Some(Self::EndpointUnregistered(counts(rest)?.0))
             }
             "definitively_refused_by_all" => Some(Self::DefinitivelyRefusedByAll(counts(rest)?.0)),
+            "definitively_unserved_by_all" => {
+                Some(Self::DefinitivelyUnservedByAll(counts(rest)?.0))
+            }
             "delivery_failed_to_all" => Some(Self::DeliveryFailedToAll(counts(rest)?.0)),
             "requested" => match counts(rest)? {
                 (notified, Some(found)) => Some(Self::PartiallyRequested { notified, found }),
@@ -5580,7 +5680,8 @@ impl ReplicaSignalOutcome {
     /// What to do with the non-converging replica this signal was sent for.
     pub fn nonconverging_disposition(&self) -> NonconvergingReplicaDisposition {
         match self.classify() {
-            ReplicaSignalClass::DefinitivelyRefusedByAll(_) => {
+            ReplicaSignalClass::DefinitivelyRefusedByAll(_)
+            | ReplicaSignalClass::DefinitivelyUnservedByAll(_) => {
                 NonconvergingReplicaDisposition::DropFromDeliveryCut
             }
             ReplicaSignalClass::PartiallyRequested { .. } | ReplicaSignalClass::Requested(_) => {
@@ -5635,6 +5736,10 @@ fn signal_crdt_replica_event_counting_inner(
 ) -> Result<ReplicaSignalOutcome> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let _ = reliable_sync_editor_live_for_file(&canonical);
+    // Long-lived supervisors do not receive controller liveness pushes. Advance
+    // their process-local projection from the shared durable journal before
+    // every signal attempt so a backend restart replaces its old PID route.
+    refresh_durable_liveness(&canonical)?;
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let registrations = agent_doc_reliable_sync_io::global_liveness_plane()
         .lock()
@@ -5660,6 +5765,7 @@ fn signal_crdt_replica_event_counting_inner(
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let mut notified = 0usize;
     let mut definitive_refusals = 0usize;
+    let mut dead_endpoints = Vec::new();
     let mut build_mismatches = Vec::new();
     let mut build_mismatch_refusals = Vec::new();
     for route in routes {
@@ -5727,10 +5833,16 @@ fn signal_crdt_replica_event_counting_inner(
                 if definitive {
                     definitive_refusals += 1;
                 }
+                let dead_endpoint = ipc_socket_absent_for_dead_process(&error, route.editor_pid);
+                // Count each route once in the terminal union. A wrapped error
+                // can carry both refusal and transport causes.
+                if dead_endpoint && !definitive {
+                    dead_endpoints.push(route.clone());
+                }
                 agent_doc_ops_log_io::log_op(
                     &canonical,
                     &format!(
-                        "crdt_replica_notify_deferred reason={} editor_pid={} definitive_refusal={definitive} error={error:#}",
+                        "crdt_replica_notify_deferred reason={} editor_pid={} definitive_refusal={definitive} dead_endpoint={dead_endpoint} error={error:#}",
                         reason.token(),
                         route.editor_pid,
                     ),
@@ -5745,6 +5857,7 @@ fn signal_crdt_replica_event_counting_inner(
         build_mismatch_refusals,
         generation_mismatches: 0,
         definitive_refusals,
+        dead_endpoints,
         endpoint_unregistered: false,
     };
     record_replica_signal_transport_health(
@@ -5903,6 +6016,7 @@ mod tests {
                 found,
                 notified,
                 definitive_refusals: refusals,
+                dead_endpoints: Vec::new(),
                 generation_mismatches: mismatches,
                 build_mismatches: Vec::new(),
                 build_mismatch_refusals: Vec::new(),
@@ -5934,6 +6048,7 @@ mod tests {
             found: 1,
             notified: 0,
             definitive_refusals: 0,
+            dead_endpoints: Vec::new(),
             generation_mismatches: 0,
             build_mismatches: Vec::new(),
             build_mismatch_refusals: Vec::new(),
@@ -6358,6 +6473,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches,
                 definitive_refusals,
+                dead_endpoints: Vec::new(),
                 endpoint_unregistered: false,
             };
 
@@ -6461,6 +6577,7 @@ mod tests {
                             build_mismatch_refusals: Vec::new(),
                             generation_mismatches,
                             definitive_refusals,
+                            dead_endpoints: Vec::new(),
                             endpoint_unregistered: false,
                         };
                         let drops = outcome.nonconverging_disposition()
@@ -6491,6 +6608,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
+                dead_endpoints: Vec::new(),
                 endpoint_unregistered: false,
             }
             .diagnosis(),
@@ -6505,6 +6623,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
+                dead_endpoints: Vec::new(),
                 endpoint_unregistered: false,
             }
             .diagnosis(),
@@ -6519,6 +6638,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
+                dead_endpoints: Vec::new(),
                 endpoint_unregistered: false,
             }
             .diagnosis(),
@@ -6533,6 +6653,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
+                dead_endpoints: Vec::new(),
                 endpoint_unregistered: false,
             }
             .diagnosis(),
@@ -6546,6 +6667,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 1,
                 definitive_refusals: 0,
+                dead_endpoints: Vec::new(),
                 endpoint_unregistered: false,
             }
             .diagnosis(),
@@ -6650,6 +6772,7 @@ mod tests {
             build_mismatch_refusals: Vec::new(),
             generation_mismatches: mismatches.len(),
             definitive_refusals: 0,
+            dead_endpoints: Vec::new(),
             endpoint_unregistered: false,
         };
         assert_eq!(outcome.diagnosis(), "no_live_registration");
@@ -6709,6 +6832,128 @@ mod tests {
         assert!(
             routes.contains(&route("vscode-84-replica-only", 84)),
             "a CRDT member must remain routable when the liveness journal missed its registration"
+        );
+    }
+
+    #[test]
+    fn warm_supervisor_refreshes_routes_from_appended_durable_liveness() {
+        use agent_doc_reliable_sync_io::liveness::{EditorRegistration, LivenessOp};
+
+        let (dir, doc) = temp_doc("warm-liveness-refresh.md");
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let database_path = agent_doc_sqlite::state_store::state_db_path(dir.path());
+        let old_pid = 4_000_001u64;
+        let new_pid = u64::from(std::process::id());
+        let old_tag = "old-backend-open".to_string();
+        let registration = |pid, editor_id: &str, timestamp_ms| EditorRegistration {
+            document_hash: document_hash.clone(),
+            pid,
+            path: doc.display().to_string(),
+            editor_id: editor_id.to_string(),
+            editor_kind: "jetbrains".to_string(),
+            editor_version: "test".to_string(),
+            capabilities: Vec::new(),
+            timestamp_ms,
+        };
+        let initial = vec![
+            LivenessOp::Open {
+                document_hash: document_hash.clone(),
+                pid: old_pid,
+                tag: old_tag.clone(),
+            },
+            LivenessOp::Register(registration(old_pid, "jetbrains-old", 1)),
+        ];
+        agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
+            &database_path,
+            "editor-old",
+            1,
+            &serde_json::to_string(&initial).unwrap(),
+        )
+        .unwrap();
+
+        assert!(reliable_sync_editor_live_for_file(&doc));
+        assert_eq!(
+            reliable_sync_editor_registrations_for_file(&doc)[0].editor_id,
+            "jetbrains-old"
+        );
+
+        let replacement = vec![
+            LivenessOp::Close {
+                document_hash: document_hash.clone(),
+                pid: old_pid,
+                observed_tags: vec![old_tag],
+            },
+            LivenessOp::Open {
+                document_hash: document_hash.clone(),
+                pid: new_pid,
+                tag: "new-backend-open".to_string(),
+            },
+            LivenessOp::Register(registration(new_pid, "jetbrains-new", 2)),
+        ];
+        agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
+            &database_path,
+            "editor-new",
+            1,
+            &serde_json::to_string(&replacement).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = signal_crdt_replica_event_reporting(
+            &doc,
+            CrdtReplicaEventReason::EditorReplicaReregister,
+            0,
+        )
+        .unwrap();
+        let registrations = reliable_sync_editor_registrations_for_file(&doc);
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].editor_id, "jetbrains-new");
+        assert_eq!(registrations[0].pid, new_pid);
+        assert_eq!(outcome.found, 1);
+        assert!(outcome.dead_endpoints.is_empty());
+    }
+
+    #[test]
+    fn absent_socket_is_definitive_only_when_its_process_is_dead() {
+        let missing_socket = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::NotFound));
+        let dead_pid = 2_000_000_000u64;
+        assert!(!agent_doc_reliable_sync_io::process_pid_is_live(
+            dead_pid as u32
+        ));
+        assert!(ipc_socket_absent_for_dead_process(
+            &missing_socket,
+            dead_pid
+        ));
+        assert!(!ipc_socket_absent_for_dead_process(
+            &missing_socket,
+            u64::from(std::process::id())
+        ));
+
+        let route = ReplicaSignalRoute {
+            editor_id: "dead-editor".to_string(),
+            editor_pid: dead_pid,
+        };
+        let outcome = ReplicaSignalOutcome {
+            found: 1,
+            notified: 0,
+            build_mismatches: Vec::new(),
+            build_mismatch_refusals: Vec::new(),
+            generation_mismatches: 0,
+            definitive_refusals: 0,
+            dead_endpoints: vec![route],
+            endpoint_unregistered: false,
+        };
+        assert_eq!(
+            outcome.classify(),
+            ReplicaSignalClass::DefinitivelyUnservedByAll(1)
+        );
+        assert_eq!(
+            outcome.nonconverging_disposition(),
+            NonconvergingReplicaDisposition::DropFromDeliveryCut
+        );
+        assert!(outcome.classify().needs_operator_inspection());
+        assert_eq!(
+            ReplicaSignalClass::from_diagnosis_token(&outcome.diagnosis()),
+            Some(ReplicaSignalClass::DefinitivelyUnservedByAll(1))
         );
     }
 
@@ -10560,6 +10805,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 1,
+                dead_endpoints: Vec::new(),
                 endpoint_unregistered: false,
             };
             for attempt in 0..agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD {
@@ -10592,6 +10838,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
+                dead_endpoints: Vec::new(),
                 endpoint_unregistered: false,
             };
             record_replica_signal_transport_health(&file, Some("success"), transport, &success)

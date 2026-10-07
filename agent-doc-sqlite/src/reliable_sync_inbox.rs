@@ -33,6 +33,9 @@ pub struct ReliableSyncCursor {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReliableSyncLivenessRecord {
+    /// Monotonic SQLite journal position used by warm readers to ingest only
+    /// facts appended since their last durable refresh.
+    pub rowid: i64,
     pub source_key: String,
     pub epoch: u64,
     pub ops_json: String,
@@ -165,19 +168,21 @@ pub fn load(path: &Path) -> Result<ReliableSyncInboxSnapshot> {
     };
     let liveness = {
         let mut statement = connection.prepare(
-            "SELECT source_key, epoch, ops_json FROM reliable_sync_liveness_journal \
+            "SELECT rowid, source_key, epoch, ops_json FROM reliable_sync_liveness_journal \
              ORDER BY rowid",
         )?;
         let rows = statement.query_map([], |row| {
             Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
             ))
         })?;
         rows.map(|row| {
-            let (source_key, epoch, ops_json) = row?;
+            let (rowid, source_key, epoch, ops_json) = row?;
             Ok(ReliableSyncLivenessRecord {
+                rowid,
                 source_key,
                 epoch: rust_epoch(epoch)?,
                 ops_json,
@@ -186,6 +191,40 @@ pub fn load(path: &Path) -> Result<ReliableSyncInboxSnapshot> {
         .collect::<Result<Vec<_>>>()?
     };
     Ok(ReliableSyncInboxSnapshot { cursors, liveness })
+}
+
+/// Load liveness facts appended after `rowid`.
+///
+/// Long-lived non-controller processes use this as a durable subscription
+/// cursor. Replaying the returned rows is idempotent, while avoiding a full
+/// journal decode before every editor-replica recovery attempt.
+pub fn load_liveness_after(path: &Path, rowid: i64) -> Result<Vec<ReliableSyncLivenessRecord>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let connection = open(path)?;
+    let mut statement = connection.prepare(
+        "SELECT rowid, source_key, epoch, ops_json FROM reliable_sync_liveness_journal \
+         WHERE rowid > ?1 ORDER BY rowid",
+    )?;
+    let rows = statement.query_map(params![rowid], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (rowid, source_key, epoch, ops_json) = row?;
+        Ok(ReliableSyncLivenessRecord {
+            rowid,
+            source_key,
+            epoch: rust_epoch(epoch)?,
+            ops_json,
+        })
+    })
+    .collect()
 }
 
 /// Rows deleted per write transaction while compacting the liveness journal.
@@ -246,6 +285,7 @@ pub fn compact_liveness_journal(
             let (rowid, source_key, epoch, ops_json) = row?;
             rowids.push(rowid);
             records.push(ReliableSyncLivenessRecord {
+                rowid,
                 source_key,
                 epoch: rust_epoch(epoch)?,
                 ops_json,
@@ -336,6 +376,27 @@ mod tests {
         let snapshot = load(&path).unwrap();
         assert_eq!(snapshot.liveness.len(), 1);
         assert_eq!(snapshot.liveness[0].ops_json, ops);
+    }
+
+    #[test]
+    fn warm_reader_loads_only_liveness_appended_after_its_rowid() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reliable-sync.db");
+        record_remote_frame(&path, "doc", 1, Some("[1]")).unwrap();
+        record_local_liveness(&path, "controller-alive:7", 1, "[2]").unwrap();
+
+        let initial = load_liveness_after(&path, 0).unwrap();
+        assert_eq!(initial.len(), 2);
+        let cursor = initial.last().unwrap().rowid;
+        assert!(load_liveness_after(&path, cursor).unwrap().is_empty());
+
+        record_remote_frame(&path, "doc", 2, Some("[3]")).unwrap();
+        let appended = load_liveness_after(&path, cursor).unwrap();
+        assert_eq!(appended.len(), 1);
+        assert_eq!(appended[0].source_key, "doc");
+        assert_eq!(appended[0].epoch, 2);
+        assert_eq!(appended[0].ops_json, "[3]");
+        assert!(appended[0].rowid > cursor);
     }
 
     #[test]

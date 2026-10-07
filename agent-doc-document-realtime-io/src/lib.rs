@@ -7782,9 +7782,10 @@ static EDITOR_REPLICA_SELF_HEAL_EXHAUSTED: std::sync::LazyLock<
 #[derive(Clone, PartialEq, Eq)]
 struct SelfHealExhaustion {
     witness: EditorReplicaLivenessWitness,
-    /// `None`: the endpoint ANSWERED inside the budget (accepted or refused),
-    /// so the exhaustion is a fact about the endpoint and pauses until the
-    /// witness changes. `Some`: NOTHING answered, see [`UnansweredSelfHeal`].
+    /// `None`: recovery reached a conclusive state at this witness (an endpoint
+    /// answered, a dead endpoint was proven, or no live route exists), so retry
+    /// pauses until liveness changes. `Some`: NOTHING answered, see
+    /// [`UnansweredSelfHeal`].
     unanswered: Option<UnansweredSelfHeal>,
 }
 
@@ -8122,7 +8123,13 @@ fn reobserve_missing_editor_replica_with_reregistration(
     let mut accepted_requests = 0usize;
     // `#netadv3` ERS-1: whether ANY attempt was answered (accepted or refused).
     let mut answered = false;
+    let mut definitively_unserved = false;
+    // A refreshed durable projection with no route cannot make progress by
+    // spending attempts 2/3 and 3/3 at the same liveness witness (#169).
+    let mut no_live_routes = false;
+    let mut attempts_run = 0u32;
     for attempt in 1..=attempts {
+        attempts_run = attempt;
         let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event_reporting(
             file,
             agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
@@ -8132,7 +8139,12 @@ fn reobserve_missing_editor_replica_with_reregistration(
             // current liveness witness so the authority resolver can stop holding
             // an attachment latch for an endpoint that will not serve this
             // document. Retrying is what never converged.
-            Ok(outcome) if outcome.notified == 0 && outcome.definitive_refusals > 0 => {
+            Ok(outcome)
+                if outcome.notified == 0
+                    && outcome.found > 0
+                    && outcome.definitive_refusals + outcome.dead_endpoints.len()
+                        == outcome.found =>
+            {
                 let build_mismatch_refusal = outcome.build_mismatch_refusals.first().map(|refused| {
                     match refused.refusal {
                         agent_doc_ipc_io::BuildMismatchRecoveryRefusal::SenderExecutableReplaced => {
@@ -8147,6 +8159,7 @@ fn reobserve_missing_editor_replica_with_reregistration(
                     .build_mismatch_refusals
                     .iter()
                     .map(|refused| refused.route.editor_pid)
+                    .chain(outcome.dead_endpoints.iter().map(|route| route.editor_pid))
                     .collect();
                 record_editor_endpoint_definitive_refusal(
                     file,
@@ -8155,7 +8168,12 @@ fn reobserve_missing_editor_replica_with_reregistration(
                     editor_pids,
                 );
                 answered = true;
-                format!("definitively_refused:{}", outcome.definitive_refusals)
+                definitively_unserved = true;
+                outcome.diagnosis()
+            }
+            Ok(outcome) if outcome.found == 0 => {
+                no_live_routes = true;
+                "no_live_routes".to_string()
             }
             Ok(outcome) if outcome.notified == 0 => "not_delivered".to_string(),
             Ok(outcome) => {
@@ -8176,6 +8194,9 @@ fn reobserve_missing_editor_replica_with_reregistration(
                 reregister
             ),
         );
+        if no_live_routes || definitively_unserved {
+            break;
+        }
         std::thread::sleep(EDITOR_REPLICA_REOBSERVE_BACKOFF);
         let reobserved = if require_model_ensure {
             query_live_editor_authority_after_model_ensure(file, source)
@@ -8238,7 +8259,18 @@ fn reobserve_missing_editor_replica_with_reregistration(
             ),
         );
     }
-    if answered {
+    if no_live_routes {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "editor_replica_reregister_no_live_routes file={} source={} attempts={} recovery=await_liveness_change (#gh169)",
+                file.display(),
+                source,
+                attempts_run,
+            ),
+        );
+        record_editor_replica_self_heal_exhausted(file, witness);
+    } else if answered {
         record_editor_replica_self_heal_exhausted(file, witness);
     } else {
         // Nothing answered: the requests or their receipts were lost, which
@@ -8250,7 +8282,7 @@ fn reobserve_missing_editor_replica_with_reregistration(
                 "editor_replica_self_heal_unanswered file={} source={} attempts={} recovery=rearm_with_backoff (#netadv3)",
                 file.display(),
                 source,
-                attempts,
+                attempts_run,
             ),
         );
         record_editor_replica_self_heal_unanswered(file, witness);

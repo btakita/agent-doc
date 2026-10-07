@@ -3343,6 +3343,69 @@ fn finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id(
 }
 
 #[test]
+fn finalize_consumes_resolved_preset_from_expansion_without_literal_quote() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "queue_active: true\n",
+        "prompt_presets:\n",
+        "  '#actionable-review': Add actionable review items into backlog + queue\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: older\nOld response.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- #actionable-review\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), content);
+
+    let response = concat!(
+        "<!-- patch:exchange -->\n",
+        "### Re: actionable review — gpt-5\n\n",
+        "Add actionable review items into backlog + queue. Added three items.\n",
+        "<!-- /patch:exchange -->\n",
+    );
+    assert!(
+        !response.contains("> **Queue prompt:**"),
+        "the regression requires completion without a literal queue-prompt quote"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(response)
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] consumed"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let queue_section = content
+        .split_once("<!-- agent:queue")
+        .and_then(|(_, rest)| rest.split_once("<!-- /agent:queue -->"))
+        .map(|(body, _)| body.to_string())
+        .unwrap_or_default();
+    assert!(
+        !queue_section.contains("#actionable-review"),
+        "the resolved preset head should drain after its expansion is answered:\n{content}"
+    );
+    assert!(
+        !content.contains("queue_active: true"),
+        "draining the only preset head should deactivate the queue:\n{content}"
+    );
+}
+
+#[test]
 fn finalize_echoes_consumed_free_text_queue_prompt_into_response() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();

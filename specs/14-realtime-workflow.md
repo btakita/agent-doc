@@ -1228,13 +1228,18 @@ replica before it routes. Every failed proof records an `editor_surface_event`
 with `surface=compact_exchange`, `action=replica_attach`, and a single-token
 `attach_refused_*` status, and the notification names the same causal reason plus
 an actionable remedy. A full IDE restart intentionally has no JVM-local settled
-shadow. When a controller asks that editor to reseed a retained projection, the
-plugin must deregister the provisional member and report
+shadow. When a controller asks that editor to reseed a retained projection, an
+exact match between the live buffer and the retained replica after its durable
+publication is sufficient convergence: the plugin attaches it and publishes the
+visible-state receipt, without requiring the missing JVM shadow. If those texts
+differ, the plugin must deregister the provisional member and report
 `retained-reseed-missing-settled-shadow`; diagnostic formatting must not
-dereference the absent shadow or leave the provisional member flapping. The
-lossless recovery is to preserve/copy any operator-only text, detach the editor,
-repair against disk authority, and reopen it. Repeating the restart cannot
-manufacture the missing causal ancestor.
+dereference the absent shadow or leave the provisional member flapping. Every
+remaining ambiguity hold records an `editor_surface_event` immediately and shows
+its remedy in the IDE without waiting for Compact Exchange. The lossless recovery
+is to preserve/copy any operator-only text, detach the editor, repair against disk
+authority, and reopen it. Repeating the restart cannot manufacture the missing
+causal ancestor.
 
 JetBrains document-command failures retain the complete subprocess output in the
 IDE log, but the operator-facing notification must fit the small notification

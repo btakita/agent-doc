@@ -160,11 +160,3 @@ class CompactExchangeAction : AnAction(), DumbAware {
         const val COMPACTING_EXCHANGE_LABEL = "⟳ agent-doc: Compacting Exchange"
     }
 }
-
-internal fun attachFailureStatusToken(reason: String): String =
-    reason
-        .substringBefore(':')
-        .lowercase()
-        .replace(Regex("[^a-z0-9_-]+"), "_")
-        .trim('_')
-        .ifEmpty { "unknown" }

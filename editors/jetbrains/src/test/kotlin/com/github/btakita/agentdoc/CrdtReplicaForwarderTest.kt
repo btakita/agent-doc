@@ -340,6 +340,45 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `retained reseed publication supplies convergence proof after restart and reload`() {
+        val retained =
+            ReplicaResumeState(
+                encodedState = "VISIBLE".toByteArray(),
+                stateVector = "VISIBLE-SV".toByteArray(),
+            )
+        val node = FakeNode()
+        val transport =
+            CapturingTransport(
+                bootstrapKind = ReplicaBootstrapKind.Delta,
+                canonicalStateVector = ByteArray(0),
+                retainedReplicaReseedPending = true,
+            )
+        val fwd =
+            CrdtReplicaForwarder(
+                "plan.md",
+                "intellij:post-reload-retained-reseed",
+                node,
+                transport,
+                resumeState = retained,
+            )
+
+        assertTrue(fwd.register())
+        assertTrue(transport.sentUpdates.isNotEmpty())
+        assertEquals("VISIBLE", fwd.replicaText())
+        assertEquals(
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            retainedRegistrationProjectionActionForAttachUtil(
+                deferCanonicalProjectionForPendingLocal = false,
+                canonicalProjectionRetained = false,
+                retainedReplicaReseedPending = true,
+                publishedShadow = null,
+                bufferText = "VISIBLE",
+                canonicalText = fwd.replicaText(),
+            ),
+        )
+    }
+
+    @Test
     fun `local retirement closes native node without deregistering editor authority`() {
         val node = FakeNode()
         val transport = CapturingTransport()

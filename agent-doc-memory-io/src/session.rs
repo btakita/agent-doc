@@ -565,6 +565,56 @@ Shipped cache repair.
     }
 
     #[test]
+    fn semantic_completion_ignores_newer_regated_continuation() {
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            "- 2026-10-03 [#steergatenamodata] [agent-doc] Rerun the #steergatenamo model evaluation on real pause points: once >= 200 labelled steering_gate_log rows carry text_tail (0 today; field shipped 2f5da61df), run src/agent-doc/scripts/steergate-model-eval --dataset from the project root. Integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Unblocked by data accumulating (the script exits with insufficient_data until then). Proxy results + decision: tasks/agent-doc/eval-steergatenamo.md.\n",
+        )
+        .unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:backlog -->
+- [/] [#steergatemodelrerun] [agent-doc] Rerun the steergatenamo model evaluation on real pause points. Gate: at least 200 labelled steering_gate_log rows with a text_tail (66 as of 2026-10-06); src/agent-doc/scripts/steergate-model-eval --dataset currently exits insufficient_data. Then integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Proxy results and decision: tasks/agent-doc/eval-steergatenamo.md
+<!-- /agent:backlog -->
+
+<!-- agent:done archive=tasks.done.md -->
+<!-- /agent:done -->
+"#,
+        );
+
+        let session = collect_session_events(&doc).unwrap();
+        let candidates = collect_completion_candidates(&doc).unwrap();
+        let done_events = session
+            .events
+            .iter()
+            .filter(|event| {
+                event
+                    .metadata
+                    .get("state")
+                    .is_some_and(|state| state == "done")
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let ranked = rank_events(&candidates[0].text, &done_events);
+        assert!(
+            ranked.first().is_some_and(|result| {
+                result.item_id.as_deref() == Some("steergatenamodata") && result.score >= 0.8
+            }),
+            "the exact predecessor pair must reproduce the semantic false positive: {ranked:?}"
+        );
+
+        let db = tmp.path().join(".tsift/memory.db");
+        let matches = semantic_completion_matches(&doc, Some(&db), 5).unwrap();
+
+        assert!(
+            matches.is_empty(),
+            "a newer explicitly re-gated continuation must not be treated as resolved: {matches:?}"
+        );
+    }
+
+    #[test]
     fn queue_strike_matches_done_archive_above_threshold() {
         // #qftbklgstrike case (a): a free-text queue head that restates a
         // completed `agent:done` archive item matches with kind=Done above the

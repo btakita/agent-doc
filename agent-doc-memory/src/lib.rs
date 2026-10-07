@@ -139,6 +139,9 @@ pub fn semantic_completion_matches(
             if candidate.item_id.is_some() && candidate.item_id == result.item_id {
                 continue;
             }
+            if is_newer_regated_continuation(candidate, &result) {
+                continue;
+            }
             let key = (
                 candidate.source_ref.clone(),
                 result.source_ref.clone(),
@@ -170,6 +173,59 @@ pub fn semantic_completion_matches(
     });
     matches.truncate(limit.max(1));
     matches
+}
+
+/// A completed item can be superseded by a newly identified continuation under
+/// a different id. An explicit gate with a newer dated observation is evidence
+/// that the current item is still unresolved, not a duplicate of the archived
+/// predecessor.
+fn is_newer_regated_continuation(
+    candidate: &CompletionCandidate,
+    result: &MemorySearchResult,
+) -> bool {
+    if candidate.item_id.is_none()
+        || result.item_id.is_none()
+        || candidate.item_id == result.item_id
+        || !candidate.text.to_ascii_lowercase().contains("gate:")
+    {
+        return false;
+    }
+
+    match (
+        latest_iso_date(&candidate.text),
+        latest_iso_date(&result.text),
+    ) {
+        (Some(candidate_date), Some(done_date)) => candidate_date > done_date,
+        _ => false,
+    }
+}
+
+fn latest_iso_date(text: &str) -> Option<(u16, u8, u8)> {
+    let bytes = text.as_bytes();
+    bytes
+        .windows(10)
+        .enumerate()
+        .filter_map(|(index, window)| {
+            if (index > 0 && bytes[index - 1].is_ascii_digit())
+                || (index + 10 < bytes.len() && bytes[index + 10].is_ascii_digit())
+                || window[4] != b'-'
+                || window[7] != b'-'
+                || !window[..4].iter().all(u8::is_ascii_digit)
+                || !window[5..7].iter().all(u8::is_ascii_digit)
+                || !window[8..].iter().all(u8::is_ascii_digit)
+            {
+                return None;
+            }
+
+            let year = u16::from(window[0] - b'0') * 1_000
+                + u16::from(window[1] - b'0') * 100
+                + u16::from(window[2] - b'0') * 10
+                + u16::from(window[3] - b'0');
+            let month = (window[5] - b'0') * 10 + (window[6] - b'0');
+            let day = (window[8] - b'0') * 10 + (window[9] - b'0');
+            (month > 0 && month <= 12 && day > 0 && day <= 31).then_some((year, month, day))
+        })
+        .max()
 }
 
 pub fn semantic_queue_strike_matches(
@@ -770,6 +826,24 @@ mod tests {
             semantic_completion_matches(&candidates, &events, 5).is_empty(),
             "a completed parent that merely led to a new child obligation is not completion proof"
         );
+    }
+
+    #[test]
+    fn semantic_completion_preserves_true_cross_id_duplicate_warning() {
+        let text = "2026-10-03 Rerun model evaluation. Gate: collect 200 labelled rows.";
+        let candidates = vec![completion_candidate(
+            "backlog",
+            "doc#backlog:modelrerun",
+            Some("modelrerun"),
+            text,
+        )];
+        let events = vec![done_event("doc#done:modeldata", "modeldata", text)];
+
+        let matches = semantic_completion_matches(&candidates, &events, 5);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].candidate_id.as_deref(), Some("modelrerun"));
+        assert_eq!(matches[0].matched_done_id.as_deref(), Some("modeldata"));
     }
 
     #[test]

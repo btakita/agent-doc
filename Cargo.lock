@@ -1272,6 +1272,7 @@ dependencies = [
  "agent-doc-element-registry",
  "agent-doc-frontmatter",
  "agent-doc-project-config-io",
+ "agent-doc-queue",
  "anyhow",
  "tagpath",
  "tempfile",

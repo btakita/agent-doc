@@ -24606,6 +24606,14 @@ fn pane_layout_projection_converged(
     report_synced && (!focus_required || focus_target_observed || focus_applied)
 }
 
+/// A durable ownership conflict cannot change by replaying the same layout
+/// effect. A later document/session edit publishes a new generation instead.
+fn pane_layout_effect_failure_is_terminal(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<agent_doc_session_registry_io::SessionIdentityConflict>()
+        .is_some()
+}
+
 /// Resolve the window this pane-layout generation is arranging its columns in.
 ///
 /// `#panewindowdrift`: the focus guard needs an explicit *visible window*
@@ -24887,7 +24895,8 @@ fn pane_layout_effect_worker(
         }
         let already_terminal = matches!(
             runtime.pane_layout_projection(),
-            PaneLayoutProjection::OperatorOwned(ref terminal)
+            PaneLayoutProjection::Refused(ref terminal)
+                | PaneLayoutProjection::OperatorOwned(ref terminal)
                 | PaneLayoutProjection::Converged(ref terminal)
                 if terminal.generation == desired.generation
         );
@@ -25286,6 +25295,10 @@ fn pane_layout_effect_worker(
                 &effect_file_panes,
             )
         };
+        let terminal_effect_refusal = effect_result
+            .as_ref()
+            .err()
+            .is_some_and(pane_layout_effect_failure_is_terminal);
         let (report, effect_reason) = match (report, effect_result) {
             (Ok(report), Ok(receipt)) => (report, receipt.reason),
             (Ok(report), Err(error)) => (report, format!("tmux_effect_failed:{error:#}")),
@@ -25328,6 +25341,7 @@ fn pane_layout_effect_worker(
             observation_invocation.focus.is_some(),
             focus_receipt.applied,
         );
+        let effect_refused = !synced && terminal_effect_refusal;
         let observation_reason = report.reason.clone();
         let focus_reason = focus_receipt.reason.clone();
         let logged_expected_documents = report.expected_documents.clone();
@@ -25362,6 +25376,8 @@ fn pane_layout_effect_worker(
             attempt,
             phase: if synced {
                 PaneLayoutEffectPhase::Converged
+            } else if effect_refused {
+                PaneLayoutEffectPhase::Refused
             } else {
                 PaneLayoutEffectPhase::RetryPending
             },
@@ -25384,7 +25400,13 @@ fn pane_layout_effect_worker(
             &bootstrap.project_root,
             desired.generation,
             attempt,
-            if synced { "converged" } else { "retry_pending" },
+            if synced {
+                "converged"
+            } else if effect_refused {
+                "refused"
+            } else {
+                "retry_pending"
+            },
             &logged_expected_documents,
             &logged_actual_documents,
         );
@@ -25395,7 +25417,13 @@ fn pane_layout_effect_worker(
                 desired.generation,
                 attempt,
                 pane_layout_projection_provenance(&desired),
-                if synced { "converged" } else { "retry_pending" },
+                if synced {
+                    "converged"
+                } else if effect_refused {
+                    "refused"
+                } else {
+                    "retry_pending"
+                },
                 observation_reason,
                 effect_reason,
                 focus_reason,
@@ -25456,7 +25484,9 @@ fn pane_layout_attempt_completion(
         return PaneLayoutAttemptCompletion::Superseded;
     }
     match projection {
-        PaneLayoutProjection::OperatorOwned(desired) | PaneLayoutProjection::Converged(desired)
+        PaneLayoutProjection::Refused(desired)
+        | PaneLayoutProjection::OperatorOwned(desired)
+        | PaneLayoutProjection::Converged(desired)
             if desired.generation == completed_generation =>
         {
             PaneLayoutAttemptCompletion::Retire
@@ -27386,6 +27416,7 @@ fn pane_layout_route_await_outcome(
         },
         PaneLayoutRouteReadiness::Refused => match projection {
             PaneLayoutProjection::Absent => (false, "desired_layout_state_absent"),
+            PaneLayoutProjection::Refused(_) => (false, "layout_effect_refused"),
             PaneLayoutProjection::OperatorOwned(_) => (false, "operator_owned_layout"),
             _ => (false, PANE_LAYOUT_SUPERSEDED_REASON),
         },
@@ -27400,6 +27431,7 @@ fn pane_layout_await_outcome(
     let (current, applied, reason) = match projection {
         PaneLayoutProjection::Absent => return (false, "desired_layout_state_absent"),
         PaneLayoutProjection::Converged(current) => (current, true, "observed_convergence"),
+        PaneLayoutProjection::Refused(current) => (current, false, "layout_effect_refused"),
         PaneLayoutProjection::OperatorOwned(current) => (current, false, "operator_owned_layout"),
         PaneLayoutProjection::NeedsEffect(current) => {
             (current, false, "projection_effect_not_started")
@@ -28094,6 +28126,14 @@ mod pane_layout_projection_dispatch_tests {
                 desired.generation,
             ),
             PaneLayoutAttemptCompletion::RetryCurrent
+        );
+        assert_eq!(
+            pane_layout_attempt_completion(
+                Some(desired.generation),
+                &PaneLayoutProjection::Refused(desired.clone()),
+                desired.generation,
+            ),
+            PaneLayoutAttemptCompletion::Retire
         );
         assert_eq!(
             pane_layout_attempt_completion(
@@ -29808,6 +29848,26 @@ mod tests {
     #![allow(unused_imports)]
 
     use super::*;
+
+    #[test]
+    fn duplicate_session_identity_is_a_terminal_pane_layout_effect_refusal() {
+        let error = Err::<(), _>(anyhow::Error::new(
+            agent_doc_session_registry_io::SessionIdentityConflict {
+                session_id: "duplicate-session".to_string(),
+                attempted_file: "copy.md".to_string(),
+                owner: agent_doc_session_registry_io::SessionIdentityOwner {
+                    registry_key: "owner-key".to_string(),
+                    file: "owner.md".to_string(),
+                    pane: String::new(),
+                    started: "state-event:41".to_string(),
+                },
+            },
+        ))
+        .context("manual sync failed to create and route pane")
+        .unwrap_err();
+
+        assert!(pane_layout_effect_failure_is_terminal(&error));
+    }
 
     /// `#netadv5` R1: a busy controller whose status receipt exceeds the 5s
     /// budget must never be reaped. The ensure call defers with a retryable

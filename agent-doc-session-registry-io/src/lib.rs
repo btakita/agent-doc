@@ -11,7 +11,7 @@ use tmux_router::registry::normalize_registry;
 use tmux_router::{Registry, RegistryEntry, RegistryLock};
 
 pub use agent_doc_session_registry::{
-    SessionIdentityClaim, SessionIdentityObservation, SessionIdentityOwner,
+    SessionIdentityClaim, SessionIdentityConflict, SessionIdentityObservation, SessionIdentityOwner,
 };
 
 pub mod dispatch_registry;
@@ -125,12 +125,21 @@ pub fn session_identity_claim_in(
 /// Project session identity ownership from the immutable typed event stream.
 ///
 /// `None` is the compatibility state for identities first registered before
-/// `document_session_identity_observed` existed.
+/// `document_session_identity_observed` existed. The adapter supplies the
+/// current canonical path hash so the pure policy can recognize legacy
+/// half-rekeyed rename observations without consulting the filesystem itself.
 pub fn durable_session_identity_claim_in(
     base_dir: &Path,
     session_id: &str,
     file: &Path,
 ) -> Result<Option<SessionIdentityClaim>> {
+    let resolved_file = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        base_dir.join(file)
+    };
+    let canonical_file = std::fs::canonicalize(&resolved_file).unwrap_or(resolved_file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical_file);
     let conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(
         base_dir,
         Duration::from_secs(2),
@@ -167,6 +176,7 @@ pub fn durable_session_identity_claim_in(
         &observations,
         session_id,
         &file.display().to_string(),
+        &document_hash,
     ))
 }
 

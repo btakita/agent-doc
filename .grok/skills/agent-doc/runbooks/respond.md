@@ -129,9 +129,9 @@ rule. This runbook carries the rest.
   subagent-intent queue items under `queue_subagent_dispatch` (never in
   `selected_queue_prompts`): run each `claim_command`, then dispatch it.
 - **Queue subagents coordinator (`#queuesubagents`).** Under
-  `<!-- agent:queue subagents -->` (alias `fan-out`; `=N` caps concurrent
-  claims, default 3), the in-session agent is the coordinator, and
-  `queue_subagent_dispatch` is the list to dispatch THIS cycle. Preflight
+  `<!-- agent:queue subagents -->` (alias `fan-out`; bare dispatches every
+  eligible head and `=N` caps concurrent claims), the in-session agent is the
+  coordinator, and `queue_subagent_dispatch` is the list to dispatch THIS cycle. Preflight
   recomputes it every cycle, so a missed claim is offered again. Heads held by
   the cap or by a still-queued `after=` / ordered-list predecessor are already
   excluded from the loop; do not drain them inline. Lines tagged `[inline]` or

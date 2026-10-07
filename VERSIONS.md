@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.476
+
+- **Queue answers settle atomically even when they arrive late.** Selected preset and free-text heads are consumed with
+  their response after mid-turn steering, while bare `subagents` queues and replay repairs converge without duplicating
+  work or leaving the Stop hook on an already-answered head.
+- **Operator backlog deletions remain authoritative.** A shared typed deletion outcome distinguishes a visible operator
+  cut from stale or ambiguous projections, so preflight, session checks, and operation capture no longer resurrect or
+  duplicate work the operator removed.
+- **Routing and session recovery tolerate real transition states.** Run Agent Doc keeps submit verification open through
+  delayed admission, queued reroutes coalesce after supervisor refresh, passive layouts retain observed columns, and
+  half-rekeyed session identities from renamed documents are repaired or safely tolerated (GH #174).
+- **Remote Dev layout evidence and plugin delivery are release-fenced.** The JetBrains adapter keeps tmux width aligned
+  with visible editor splits (GH #175), prefers client layout evidence during tab capture (GH #177), and rejects changed
+  plugin sources under a reused version before publishing plugin 0.2.504 (GH #176).
+- **Repository navigation now relies on the user-local tsift skill.** The generated repository-level tsift navigation
+  block was removed from `AGENTS.md`, avoiding a stale checked-in instruction copy while preserving local tsift usage.
+
 ## 0.35.475
 
 - **Strict closeout repairs provably escaped response payloads.** A one-line response containing literal `\\n` /

@@ -31,6 +31,13 @@ pub fn controller_recycle_safe_to_handoff(handoff_stable: bool) -> bool {
 /// Reason an install fan-out attaches to its `recycle` request.
 pub const INSTALL_FANOUT_RECYCLE_REASON: &str = "install_fanout";
 
+/// Reason a live editor-plugin replacement attaches to its `recycle` request.
+///
+/// Unlike an install fan-out, this remains meaningful when the controller is
+/// already running the installed binary: the live editor may have replaced the
+/// plugin generation from which the controller derived state.
+pub const LIVE_PLUGIN_UPDATE_RECYCLE_REASON: &str = "live_plugin_update";
+
 /// An install fan-out `recycle` is redundant when the controller is provably
 /// already executing the installed binary — typically because it self-detected
 /// the stale binary and restarted onto the new build between `binary-install`
@@ -206,6 +213,26 @@ pub fn install_fanout_root_action(evidence: ProjectRootUseEvidence) -> InstallFa
     }
 }
 
+/// What a live plugin-update fan-out may do to a project root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LivePluginUpdateRootAction {
+    /// A live editor endpoint can hold state from the replaced plugin.
+    Recycle,
+    /// No live editor is attached, so this controller cannot hold state from a
+    /// plugin generation replaced in a running editor.
+    SkipNoLiveEditor,
+}
+
+pub fn live_plugin_update_root_action(
+    evidence: ProjectRootUseEvidence,
+) -> LivePluginUpdateRootAction {
+    if evidence.live_editor_endpoints > 0 {
+        LivePluginUpdateRootAction::Recycle
+    } else {
+        LivePluginUpdateRootAction::SkipNoLiveEditor
+    }
+}
+
 /// How an install-time `reload_library` fan-out may reach a project's
 /// controller for its reliable-sync status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,6 +394,29 @@ pub fn self_recycle_outcome(
             SelfRecycleOutcome::SameImage
         }
         _ => SelfRecycleOutcome::Escaped,
+    }
+}
+
+/// Whether a completed handoff should be reported as success or failure.
+///
+/// A stale-binary recycle exists specifically to escape the predecessor image,
+/// so a same-image successor is a failure. An explicit recycle may deliberately
+/// refresh runtime/plugin-derived state on the same image; promotion completed
+/// its requested transition and must not be mislabeled as a failed recycle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelfRecycleLogDisposition {
+    Completed,
+    FailedSameImage,
+}
+
+pub fn self_recycle_log_disposition(
+    reason: &str,
+    outcome: SelfRecycleOutcome,
+) -> SelfRecycleLogDisposition {
+    if reason == "stale_binary" && outcome == SelfRecycleOutcome::SameImage {
+        SelfRecycleLogDisposition::FailedSameImage
+    } else {
+        SelfRecycleLogDisposition::Completed
     }
 }
 
@@ -553,6 +603,22 @@ mod tests {
     }
 
     #[test]
+    fn live_plugin_update_recycles_only_roots_with_live_editors() {
+        assert_eq!(
+            live_plugin_update_root_action(idle()),
+            LivePluginUpdateRootAction::SkipNoLiveEditor,
+        );
+        assert_eq!(
+            live_plugin_update_root_action(with_supervisor()),
+            LivePluginUpdateRootAction::SkipNoLiveEditor,
+        );
+        assert_eq!(
+            live_plugin_update_root_action(with_editor()),
+            LivePluginUpdateRootAction::Recycle,
+        );
+    }
+
+    #[test]
     fn install_fanout_reload_launches_only_for_in_use_or_seeded_roots() {
         assert_eq!(
             install_fanout_controller_access(idle(), false),
@@ -699,6 +765,29 @@ mod tests {
             Some(&current),
             Some(&current)
         ));
+    }
+
+    #[test]
+    fn same_image_is_failure_only_for_stale_binary_recovery() {
+        assert_eq!(
+            self_recycle_log_disposition("stale_binary", SelfRecycleOutcome::SameImage),
+            SelfRecycleLogDisposition::FailedSameImage,
+        );
+        assert_eq!(
+            self_recycle_log_disposition("operator_request", SelfRecycleOutcome::SameImage),
+            SelfRecycleLogDisposition::Completed,
+        );
+        assert_eq!(
+            self_recycle_log_disposition(
+                LIVE_PLUGIN_UPDATE_RECYCLE_REASON,
+                SelfRecycleOutcome::SameImage,
+            ),
+            SelfRecycleLogDisposition::Completed,
+        );
+        assert_eq!(
+            self_recycle_log_disposition("stale_binary", SelfRecycleOutcome::Escaped),
+            SelfRecycleLogDisposition::Completed,
+        );
     }
 
     #[test]

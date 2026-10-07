@@ -616,10 +616,13 @@ fn jetbrains_install_success_message(target_dir: &Path) -> Result<String> {
     ))
 }
 
-fn install_jetbrains(release: &Value, plugins_dir: Option<&Path>) -> Result<()> {
+fn install_jetbrains(
+    release: &Value,
+    plugins_dir: Option<&Path>,
+) -> Result<JetbrainsLocalInstallOutcome> {
     let dirs = jetbrains_plugin_dirs();
     let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
-    install_jetbrains_into(release, &target_dir).map(|_| ())
+    install_jetbrains_into(release, &target_dir)
 }
 
 // --- VS Code ---
@@ -728,24 +731,28 @@ pub fn install(editor: &str) -> Result<()> {
 }
 
 pub fn install_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
-    let result = match editor {
+    let live_plugin_replaced = match editor {
         "jetbrains" | "jb" | "idea" => {
             let release = fetch_release_for_asset("agent-doc-jetbrains", "zip")?;
-            install_jetbrains(&release, plugins_dir)
+            matches!(
+                install_jetbrains(&release, plugins_dir)?,
+                JetbrainsLocalInstallOutcome::HotUpgraded { .. }
+            )
         }
         "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
             if plugins_dir.is_some() {
                 bail!("--plugins-dir is only supported for JetBrains installs");
             }
             let release = fetch_release_for_asset("agent-doc", "vsix")?;
-            install_vscode(&release)
+            install_vscode(&release)?;
+            false
         }
         _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
     };
-    if result.is_ok() {
-        crate::runtime_update::recycle_existing_runtimes_after_update("plugin-install");
+    if live_plugin_replaced {
+        crate::runtime_update::recycle_existing_runtimes_after_live_plugin_update("plugin-install");
     }
-    result
+    Ok(())
 }
 
 pub fn install_local(editor: &str) -> Result<()> {
@@ -753,20 +760,26 @@ pub fn install_local(editor: &str) -> Result<()> {
 }
 
 pub fn install_local_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
-    let result = match editor {
-        "jetbrains" | "jb" | "idea" => install_jetbrains_local(plugins_dir),
+    let live_plugin_replaced = match editor {
+        "jetbrains" | "jb" | "idea" => matches!(
+            install_jetbrains_local(plugins_dir)?,
+            JetbrainsLocalInstallOutcome::HotUpgraded { .. }
+        ),
         "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
             if plugins_dir.is_some() {
                 bail!("--plugins-dir is only supported for JetBrains installs");
             }
-            install_vscode_local()
+            install_vscode_local()?;
+            false
         }
         _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
     };
-    if result.is_ok() {
-        crate::runtime_update::recycle_existing_runtimes_after_update("plugin-install-local");
+    if live_plugin_replaced {
+        crate::runtime_update::recycle_existing_runtimes_after_live_plugin_update(
+            "plugin-install-local",
+        );
     }
-    result
+    Ok(())
 }
 
 fn find_local_build_dir() -> Result<PathBuf> {
@@ -789,11 +802,12 @@ fn find_local_build_dir() -> Result<PathBuf> {
     }
 }
 
-fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<()> {
+fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalInstallOutcome> {
     let dirs = jetbrains_plugin_dirs();
     let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
     let zip_path = local_jetbrains_zip()?;
-    match install_jetbrains_local_zip_into(&zip_path, &target_dir)? {
+    let outcome = install_jetbrains_local_zip_into(&zip_path, &target_dir)?;
+    match &outcome {
         JetbrainsLocalInstallOutcome::Installed => {
             eprintln!("Plugin installed to {}", target_dir.display());
             eprintln!("No live IDE owned this installation; the next IDE start loads it.");
@@ -805,13 +819,13 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<()> {
         JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
             eprintln!(
                 "WARNING: {}",
-                restart_required_message(&target_dir, &reason)
+                restart_required_message(&target_dir, reason)
             );
         }
         JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
             eprintln!(
                 "WARNING: {}",
-                staged_for_restart_message(&target_dir, &reason)
+                staged_for_restart_message(&target_dir, reason)
             );
         }
         JetbrainsLocalInstallOutcome::Unchanged => {
@@ -822,7 +836,7 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<()> {
             eprintln!("No JetBrains restart is required; no installed plugin bytes changed.");
         }
     }
-    Ok(())
+    Ok(outcome)
 }
 
 /// Install the current local JetBrains build into every IDE that already has
@@ -830,17 +844,19 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<()> {
 /// `make install`: it updates all existing installations instead of choosing
 /// one arbitrary IDE and silently leaving the others stale.
 pub fn install_local_all_existing(editor: &str) -> Result<()> {
-    let result = match editor {
+    let hot_upgraded = match editor {
         "jetbrains" | "jb" | "idea" => install_jetbrains_local_all_existing(),
         _ => bail!("--all-installed is currently supported only for JetBrains installs"),
-    };
-    if result.is_ok() {
-        crate::runtime_update::recycle_existing_runtimes_after_update("plugin-install-local");
+    }?;
+    if hot_upgraded > 0 {
+        crate::runtime_update::recycle_existing_runtimes_after_live_plugin_update(
+            "plugin-install-local",
+        );
     }
-    result
+    Ok(())
 }
 
-fn install_jetbrains_local_all_existing() -> Result<()> {
+fn install_jetbrains_local_all_existing() -> Result<usize> {
     let targets = existing_jetbrains_agent_doc_dirs(&jetbrains_plugin_dirs());
     if targets.is_empty() {
         bail!(
@@ -901,7 +917,7 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
         "{}",
         jetbrains_convergence_restart_summary(installed, hot_upgraded, restart_pending)
     );
-    Ok(())
+    Ok(hot_upgraded)
 }
 
 /// The closing line of a local JetBrains convergence. It used to say "no IDE
@@ -2520,7 +2536,7 @@ pub fn update(editor: &str) -> Result<()> {
 }
 
 pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
-    let result = match editor {
+    let live_plugin_replaced = match editor {
         "jetbrains" | "jb" | "idea" => {
             let dirs = jetbrains_plugin_dirs();
             let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
@@ -2533,7 +2549,10 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
                 eprintln!("JetBrains plugin is already at v{version}.");
                 return Ok(());
             }
-            install_jetbrains_into(&release, &target_dir).map(|_| ())
+            matches!(
+                install_jetbrains_into(&release, &target_dir)?,
+                JetbrainsLocalInstallOutcome::HotUpgraded { .. }
+            )
         }
         "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
             if plugins_dir.is_some() {
@@ -2541,14 +2560,15 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
             }
             let release = fetch_release_for_asset("agent-doc", "vsix")?;
             // VS Code/Cursor handles update-in-place via --install-extension
-            install_vscode(&release)
+            install_vscode(&release)?;
+            false
         }
         _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
     };
-    if result.is_ok() {
-        crate::runtime_update::recycle_existing_runtimes_after_update("plugin-update");
+    if live_plugin_replaced {
+        crate::runtime_update::recycle_existing_runtimes_after_live_plugin_update("plugin-update");
     }
-    result
+    Ok(())
 }
 
 /// GH #114: which editor family a reconciled plugin target belongs to.
@@ -2626,6 +2646,11 @@ impl PluginReconcileReport {
     /// Targets whose bytes or staged package changed in this reconciliation.
     pub fn changed(&self) -> usize {
         self.count(|outcome| *outcome != PluginTargetOutcome::Unchanged)
+    }
+
+    /// Targets that proved a running editor replaced its plugin generation.
+    pub fn hot_upgraded(&self) -> usize {
+        self.count(|outcome| *outcome == PluginTargetOutcome::HotUpgraded)
     }
 
     fn counts(&self) -> [(usize, &'static str, &'static str); 5] {
@@ -2854,14 +2879,12 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
         }
     }
 
-    if report
-        .targets
-        .iter()
-        .any(|target| target.outcome != PluginTargetOutcome::Unchanged)
-    {
-        // Recycle even when a later target failed: an earlier target may
-        // already have replaced a live plugin generation.
-        crate::runtime_update::recycle_existing_runtimes_after_update("plugin-update-all");
+    if report.hot_upgraded() > 0 {
+        // Recycle even when a later target failed: an earlier target already
+        // proved that it replaced a live plugin generation.
+        crate::runtime_update::recycle_existing_runtimes_after_live_plugin_update(
+            "plugin-update-all",
+        );
     }
     if errors.is_empty() {
         Ok(report)
@@ -4636,6 +4659,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             "{summary}"
         );
         assert_eq!(report.changed(), 5);
+        assert_eq!(report.hot_upgraded(), 2);
         // A transient decline still needs a restart now, but must not claim the
         // restart-free path is gone for good.
         assert!(
@@ -4690,6 +4714,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let summary = report.summary("0.35.442");
         assert_eq!(summary, "Installed editor plugins already match v0.35.442.");
         assert_eq!(report.changed(), 0);
+        assert_eq!(report.hot_upgraded(), 0);
         assert_eq!(
             super::PluginReconcileReport::default().summary("0.35.442"),
             summary

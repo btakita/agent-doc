@@ -589,9 +589,12 @@ pub fn dropped_exchange_prompt_guard_result(file: &str, still_missing: &[String]
     ))
 }
 
+pub const COMPLETED_PENDING_REAP_GUARD_PREFIX: &str =
+    "[session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout:";
+
 pub fn completed_pending_reap_guard_message(refs: &str) -> String {
     format!(
-        "[session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout: {refs}. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary"
+        "{COMPLETED_PENDING_REAP_GUARD_PREFIX} {refs}. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary"
     )
 }
 

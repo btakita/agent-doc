@@ -1131,6 +1131,104 @@ fn apply_bound_stop(
         // report from an older binary took; nothing below treats it as a failure.
         agent_doc_session_check_io::SessionCheckStatus::SteeringPending(reason)
         | agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
+            // `#stopterminalreapfirst`: a completed-item guard after a committed
+            // cycle is residue from that terminal cycle, not proof that Codex's
+            // latest chat text belongs to a new response cycle. Reopening here
+            // used a predecessor's closing status as the response to an adjacent
+            // auto-queue head when that status merely mentioned the head. Finish
+            // the idempotent terminal maintenance first and never capture the
+            // predecessor payload on this branch.
+            if agent_doc_session_check_io::is_completed_pending_reap_interruption(&reason)
+                && agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    "codex_stop_terminal_reap_maintenance_started capture_skipped=true",
+                );
+                let closeout_result =
+                    agent_doc_closeout_runtime_io::complete_required_closeout(file, false);
+                invalidate_stop_document_cache();
+                let status = agent_doc_session_check_io::inspect(
+                    file,
+                    &agent_doc_closeout_runtime_io::session_check_effects(),
+                )?;
+                let completed_reap_still_pending = matches!(
+                    &status,
+                    agent_doc_session_check_io::SessionCheckStatus::Interrupted(message)
+                        | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message)
+                        if agent_doc_session_check_io::is_completed_pending_reap_interruption(message)
+                );
+                if !completed_reap_still_pending {
+                    let closeout_outcome = if closeout_result.is_ok() {
+                        "closed"
+                    } else {
+                        "advanced_to_followup_guard"
+                    };
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "codex_stop_terminal_reap_maintenance_settled capture_skipped=true outcome={closeout_outcome}"
+                        ),
+                    );
+
+                    // This is a fresh selection boundary even on recursive Stop:
+                    // the predecessor text was deliberately excluded above, so
+                    // repeated-head recovery must not reinterpret it as an answer.
+                    let mut fresh_queue_input = input.clone();
+                    fresh_queue_input.stop_hook_active = false;
+                    if let Some(response) = auto_queue_continuation_response(
+                        file,
+                        cleanup_roots,
+                        loaded_root,
+                        state,
+                        &fresh_queue_input,
+                    )? {
+                        return Ok(response);
+                    }
+
+                    return match status {
+                        agent_doc_session_check_io::SessionCheckStatus::Ok(_) => apply_stop(input),
+                        agent_doc_session_check_io::SessionCheckStatus::Interrupted(message)
+                        | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(
+                            message,
+                        ) => Ok(StopResponse::Block {
+                            decision: "block",
+                            reason: format!(
+                                "agent-doc Stop hook finished terminal completed-item maintenance for {}, but newer work still needs its owning turn. {} The predecessor assistant text was not replayed. Continue in-pane and do not send the final answer yet.",
+                                file.display(),
+                                message,
+                            ),
+                        }),
+                    };
+                }
+
+                let closeout_note = closeout_result
+                    .err()
+                    .map(|err| format!(" Closeout maintenance reported: {err}."))
+                    .unwrap_or_default();
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    "codex_stop_terminal_reap_maintenance_still_pending capture_skipped=true",
+                );
+                let message = format!(
+                    "agent-doc Stop hook could not persist terminal completed-item maintenance for {}. {}{} The predecessor assistant text was not captured or replayed. Run `agent-doc repair {}` and then `agent-doc session-check {}`. Do not send the final answer yet.",
+                    file.display(),
+                    reason,
+                    closeout_note,
+                    file.display(),
+                    file.display(),
+                );
+                if input.stop_hook_active {
+                    return Ok(StopResponse::Stop {
+                        continue_: false,
+                        stop_reason: message,
+                    });
+                }
+                return Ok(StopResponse::Block {
+                    decision: "block",
+                    reason: message,
+                });
+            }
             // A durable retained intent whose endpoint explicitly refused is
             // no longer an automatic-retry state. On the first Stop, hand the
             // exact operator remedy back to the agent so it can report the
@@ -4952,6 +5050,120 @@ Done.\n\
             }
             other => panic!("late done should need no preflight/repair cycle, got {other:?}"),
         }
+    }
+
+    /// `#stopterminalreapfirst`: the Stop payload still holds the predecessor
+    /// turn's closing text when terminal reap residue is the first guard. That
+    /// text may name the next queue head while explicitly saying it is pending;
+    /// it must not be captured as the head's response or consume the head.
+    #[test]
+    fn stop_reaps_committed_residue_before_handing_off_adjacent_queue_head() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(
+            &dir,
+            &[
+                "do https://haiven-inc.atlassian.net/browse/HAVN-1489",
+                "do https://haiven-inc.atlassian.net/browse/HAVN-1490",
+            ],
+        );
+        let with_completed = fs::read_to_string(&doc).unwrap()
+            + concat!(
+                "\n## Pending / Not Built\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [x] [#sdkjira1361] Complete predecessor SDK work.\n",
+                "<!-- /agent:backlog -->\n",
+            );
+        fs::write(&doc, &with_completed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &with_completed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        let terminal_cycle = agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some(&with_completed),
+            Some(&with_completed),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&with_completed),
+            Some(&with_completed),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => assert!(
+                agent_doc_session_check_io::is_completed_pending_reap_interruption(&message),
+                "{message}"
+            ),
+            other => panic!("expected terminal reap interruption, got {other:?}"),
+        }
+
+        let stale_predecessor_text = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: SDK queue progress — gpt-5\n\n",
+            "HAVN-1489 and HAVN-1490 remain queued for their owning turns.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: stale_predecessor_text.to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert!(
+            matches!(&response, StopResponse::Block { reason, .. }
+                if reason.contains("HAVN-1489") && reason.contains("in-pane")),
+            "the untouched next head must be handed to its owner: {response:?}"
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            !content.contains("HAVN-1489 and HAVN-1490 remain queued"),
+            "predecessor text must not be replayed:\n{content}"
+        );
+        assert!(
+            content.contains("- do https://haiven-inc.atlassian.net/browse/HAVN-1489"),
+            "the adjacent head must remain active:\n{content}"
+        );
+        assert!(
+            !content.contains("- ~~do https://haiven-inc.atlassian.net/browse/HAVN-1489~~"),
+            "the adjacent head must not be consumed:\n{content}"
+        );
+        assert!(
+            !content.contains("- [x] [#sdkjira1361]"),
+            "terminal maintenance must reap the completed row:\n{content}"
+        );
+        let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            cycle.cycle_id, terminal_cycle.cycle_id,
+            "no response cycle may reopen"
+        );
+        assert_eq!(cycle.phase.as_str(), "committed");
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_terminal_reap_maintenance_settled"),
+            "{ops}"
+        );
+        assert!(
+            !ops.contains("codex_stop_post_commit_prompt_cycle_reopened"),
+            "{ops}"
+        );
+        assert!(!ops.contains("codex_stop_capture_saved"), "{ops}");
     }
 
     #[test]

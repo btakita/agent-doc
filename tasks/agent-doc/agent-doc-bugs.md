@@ -19,6 +19,7 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -89,15 +90,61 @@ Validation and installation completed:
 - `make install-full` installed CLI/library `0.35.473`, JetBrains `0.2.503`, and VS Code `0.2.80`. Runtime processes were marked for safe idle-boundary handoff; none were forcibly recycled.
 
 The one-time remote observation found CI and the `v0.35.473` Release workflow still in progress; the GitHub release object was not yet available. Per release policy, I did not poll or wait for those asynchronous jobs.
-<!-- agent:boundary:e0f2b885 -->
+> **Chat prompt (#chatprompt):** also fix in subagent: • Blocked by hook
+>   └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
+> dev/tasks/sdk.md. [session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout:
+> #sdkjira1361. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary The latest
+> assistant text was captured into the pending/capture ledger before auto-close. The hook replayed the response through
+> the normal write path. The hook wrote or recovered the response but could not finish the required commit boundary:
+> [session-check] INTERRUPTED: free-text agent:queue head(s) "do https://haiven-inc.atlassian.net/browse/HAVN-1489" were
+> seen at preflight but have no committed response/echo or explicit deferral proof in the closeout — the prompt may have
+> been silently lost
+>     [session-check] hint: either respond to the unresolved head(s) and run `agent-doc finalize /home/brian/work/
+> btakita/agent-loop/src/haiven-dev/tasks/sdk.md`, or add `<!-- no-free-text-queue-head-guard -->` if the removal was
+> intentional (see #lr-queue-patchback-miss). Do not send the final answer yet. If the response is missing from the
+> document, run `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` first. Then finish the
+> commit boundary for this turn and end with `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/
+> tasks/sdk.md`.
+
+> **Chat prompt (#chatprompt):** also fix in subagent: • Blocked by hook
+>   └ agent-doc Stop hook kept an active `agent:queue auto` moving for /home/brian/work/btakita/agent-loop/src/haiven-
+> dev/tasks/sdk.md. The next queue prompt is "do https://haiven-inc.atlassian.net/browse/HAVN-1490". Continue THIS turn
+> in-pane: answer that prompt in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md and persist with `agent-
+> doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` (or `agent-doc write --commit /home/
+> brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md`). Do NOT run `agent-doc /home/brian/work/btakita/agent-loop/
+> src/haiven-dev/tasks/sdk.md` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation
+> deadlock guard, and do not send the final answer yet.
+
+### Re: GH #172, GH #173, SDK Stop-hook recovery, and release — gpt-6.1-sol · 2026-10-07T07:07:25-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/172
+
+Fixed and closed. A top-level `**Deferred:**` response now vetoes automatic queue consumption consistently in both queue-consume layers. Predicate coverage and a real finalize regression prove the head remains queued instead of being silently struck.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/173
+
+Fixed and closed. Attached mid-turn steering now reads CRDT/editor authority instead of stale disk state, applies authority-aware debounce, and content-hashes explicit sends. This prevents a live queue head from being falsely reported removed and then re-added.
+
+The requested SDK Stop-hook incident was also repaired. Completed tracked residue is now a typed interruption: Stop performs terminal maintenance/reaping before dispatching the next fresh queue head, and repeated-head recovery cannot replay stale assistant text as evidence for a different head. The owner pane supplied the real HAVN-1489 and HAVN-1490 responses; the final SDK `session-check` reports committed cycle `cycle-1791367513679`, no continuation required, and only three operator-verification heads deferred.
+
+During integration, the clean baseline exposed a deterministic delayed-replica preflight failure. The bounded observer loop now waits through the configured registration window while preserving definitive refusal behavior. Focused regressions and the affected package suites pass.
+
+> **Queue prompt:** release + publish
+
+Released `v0.35.474` from commit `397b6a6e54bc493513cb0d01316e19b4ce7943ac`. The tag and `main` are pushed, the installed CLI reports `agent-doc 0.35.474`, the native library and editor packages were installed, and both GitHub issues were closed with release notes. The final version-projected `make check` and release-owned tmux CI gate passed. The one-shot GitHub Actions inspection found CI run 37611054867 in progress for the release commit; the GitHub Release object was not yet present, so it was not polled. The release parity audit records all four changes.
+
+The implementation was isolated in subagent worktrees, reviewed and integrated serially into one release tree. `tsift` bounded navigation and test-digest evidence, while the agent-doc workflow enforced claim ownership, the single response write, and the commit/session-check boundary.
+<!-- agent:boundary:d2a9ba1d -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- #gh-fix https://github.com/btakita/agent-doc/issues/172
+- #gh-fix https://github.com/btakita/agent-doc/issues/173
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 

@@ -45,15 +45,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 10 response topic(s): [#haivenrootsync] dispatched to a subagent; [#haivenrootsync] done; [#jaicratepublish] approved; 7 more
 - Prior summary/context: prior compacted content: Archived 25 response topic(s): recovered response; Should we release + publish?; #releasepub...
+
+### Re: GitHub issues 26–28 — gpt-5 · 2026-10-07T11:30-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/tsift/issues/26
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/tsift/issues/27
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/tsift/issues/28
+
+Fixed, integrated, pushed, and closed all three issues.
+
+- #26 now reports the actual stale-instruction cause in both human and structured output, including the missing reference path, without a misleading equal-version comparison.
+- #27 now preserves each workspace scope persisted personal/off policy; unconfigured scopes inherit the root resolved mode.
+- #28 now sweeps scopes in personal and off modes as well as shared mode, so the printed workspace remedy converges.
+- Integration reconciled the overlapping #27/#28 mode semantics and retained both regression families.
+- Verification passed: focused status/instruction tests, all combined init_workspace_* tests, git diff --check, and the full make check gate.
+- Main was pushed and verified at d26d1ab61902f464567611acc398b10b0cbb2708; GitHub issues #26, #27, and #28 are closed.
+- The active queue is large/restart-heavy, but it remains drainable; continuing to release + publish without compacting.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue subagents=3 preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/tsift/issues/26
-- #gh-fix https://github.com/btakita/tsift/issues/27
-- #gh-fix https://github.com/btakita/tsift/issues/28
+- ~~#gh-fix https://github.com/btakita/tsift/issues/26~~
+- ~~#gh-fix https://github.com/btakita/tsift/issues/27~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/tsift/issues/28~~ — auto-struck: answered this cycle (#ftstrike)
 - release + publish
 <!-- /agent:queue -->
 <!--

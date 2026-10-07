@@ -125,7 +125,45 @@ Completed.
 - Preserved the prior configuration at `/etc/fstab.agent-doc-before-tmp-128g-20261007`.
 
 The temporary staging directory was removed after verification.
-<!-- agent:boundary:55dff4f7 -->
+> **Chat prompt (#chatprompt):** also fix in subagent: • Blocked by hook
+  └ agent-doc Stop hook retained the exact closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+under its durable keyed retry. The latest assistant text was captured into the pending/capture ledger before auto-
+close. The hook could not finish the required commit boundary: recovery=await_editor_replica_no_disk_write: the
+captured response for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md is already carried by retained
+editor-owned write 1791409567721444878-2-c276decdafba2017c6f73e8c25e821767f6a67493a32edc6cb85301cbb810045
+(target_hash=c276decdafba2017c6f73e8c25e821767f6a67493a32edc6cb85301cbb810045); repair does not re-send it, the
+retained intent delivers it once the editor replica converges. The retained capture or projection is already durable
+and the same intent commits itself once delivery converges — this is a deferral, not a lost response. Run `agent-doc
+session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md` once to observe the terminal state; do
+NOT re-send the response, force disk, or `admin recycle`, which disturb the capture being awaited. Do not reach for
+`admin reload-lib` on your own either: `admin reload-lib` is the sanctioned recovery only when `agent-doc session-
+check` reports that the editor holding the document is not serving its replica, and then its remedy governs. The
+controller owns delivery, the editor-native save receipt, and the terminal commit. Do not reopen or recapture the
+cycle, rerun finalize/write/repair, force disk, recycle the supervisor, or resend the response. Wait for the existing
+controller state edge unless it explicitly reports `needs_operator`; do not send the final answer yet.
+
+• The closeout is durably retained but awaiting the editor replica’s commit edge. I’m checking that existing delivery
+  once, without resending or forcing a disk write.
+
+### Re: retained closeout observation race fixed — gpt-5 · 2026-10-07T18:29-04:00
+
+Fixed in the requested subagent and integrated into `agent-doc` main.
+
+The single permitted `session-check` returned exit 1 because it observed successor cycle `cycle-1791409608495` in `preflight_started`. Read-only logs proved the original retained cycle `cycle-1791409564191` and retained intent `1791409567721444878-2-c276…` had already reached `commit_success`. No second check or prohibited recovery action was run.
+
+Root cause: Deferred retained-write guidance prescribed an unkeyed document-wide `session-check <file>`. Auto-queue could advance the document after the exact retained intent committed, causing that check to report the unrelated successor cycle.
+
+The fix now requires observation of the controller-owned exact retained-intent terminal edge and explicitly rejects document current-cycle status as proof for this case.
+
+- Commit: `927b4003ab02c11e5a8be15fc9da7a48d238016a`
+- Branch: `fix/retained-editor-preflight`
+- Integrated and verified on `origin/main` at the same SHA.
+- `make check-fast` passed on current main, including 7,999/7,999 nextest cases and all follow-on batches/doc tests.
+- Focused write-ownership, git-guard, realtime-refusal, and Stop-rendering regressions passed.
+- No response resend, recapture, finalize/write/repair, force-disk, recycle, reload, install, release, or publish action was performed.
+
+The source fix is on main after `v0.35.476`; it is not yet in a newly released binary.
+<!-- agent:boundary:16826575 -->
 <!-- /agent:exchange -->
 
 <!--

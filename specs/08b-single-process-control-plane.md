@@ -296,6 +296,14 @@ race class instead of papering over each symptom.
   only until exact canonical promotion, which performs the same retirement.
   CRDT-only endpoints belonging to other PIDs remain routable so a missed
   liveness-journal registration cannot strand their delivery.
+  A non-controller process MUST incrementally refresh its process-local liveness
+  projection from the durable journal before selecting each re-registration
+  route; cold-miss hydration alone is insufficient because a supervisor may
+  outlive several editor backends. A refreshed zero-route result is a distinct
+  terminal outcome at that liveness witness and MUST NOT spend the remaining
+  bounded retry attempts. Likewise, `ENOENT` from a PID-scoped editor socket is
+  definitive only when OS liveness also proves that PID is gone; `ENOENT` for a
+  live process remains retryable across listener replacement.
 - **Completed controller promotion is a one-way process fact.** Once a handoff
   replacement observes durable `Stable`/public-path state and the temporary
   listener has been renamed onto the public socket, it retires its local

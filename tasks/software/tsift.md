@@ -3,7 +3,7 @@ agent_doc_session: tsift-v0.1
 resume:
   claude: 03da93b9-58a8-4aa3-b530-ca5405b2ea0b
   codex: 01a0ca63-49bb-7040-a638-a80239e1503e
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -14,6 +14,7 @@ prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#bugs-observed': Please add any bugs from observed behavior to the backlog.,
   '#code-review': Please review tsift codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
+  '#gh-fix': fix then close
   '#mermaid': Include explanatory mermaid diagram(s).
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#subagent': 'run in a subagent'
@@ -49,6 +50,10 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue subagents=3 preset="#spec-test-build-install-commit-push" priority -->
+- #gh-fix https://github.com/btakita/tsift/issues/26
+- #gh-fix https://github.com/btakita/tsift/issues/27
+- #gh-fix https://github.com/btakita/tsift/issues/28
+- release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

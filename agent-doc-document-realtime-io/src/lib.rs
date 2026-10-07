@@ -8124,12 +8124,16 @@ fn reobserve_missing_editor_replica_with_reregistration(
     // `#netadv3` ERS-1: whether ANY attempt was answered (accepted or refused).
     let mut answered = false;
     let mut definitively_unserved = false;
-    // A refreshed durable projection with no route cannot make progress by
-    // spending attempts 2/3 and 3/3 at the same liveness witness (#169).
+    // A refreshed durable projection with no route cannot request a
+    // re-registration, but a route may still appear during the bounded
+    // backoff. Keep the final attempt's route state for exhaustion handling
+    // while allowing the existing re-observation window to see that liveness
+    // change.
     let mut no_live_routes = false;
     let mut attempts_run = 0u32;
     for attempt in 1..=attempts {
         attempts_run = attempt;
+        no_live_routes = false;
         let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event_reporting(
             file,
             agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
@@ -8194,7 +8198,7 @@ fn reobserve_missing_editor_replica_with_reregistration(
                 reregister
             ),
         );
-        if no_live_routes || definitively_unserved {
+        if definitively_unserved {
             break;
         }
         std::thread::sleep(EDITOR_REPLICA_REOBSERVE_BACKOFF);

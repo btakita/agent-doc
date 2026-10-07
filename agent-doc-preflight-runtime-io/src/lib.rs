@@ -823,6 +823,14 @@ mod tests {
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
+            ops_log.lines().any(|line| {
+                line.contains("editor_replica_reobserved")
+                    && line.contains("source=test_preflight_recover")
+                    && line.contains("status=current")
+            }),
+            "preflight must recover through the bounded replica re-observation window:\n{ops_log}"
+        );
+        assert!(
             !ops_log.contains("realtime_doc_resolve_disk_fallback"),
             "preflight must not use disk while the attached model is recovering:\n{ops_log}"
         );

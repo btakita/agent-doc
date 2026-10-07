@@ -15,15 +15,32 @@ pub(crate) fn recycle_on_update_enabled() -> bool {
     }
 }
 
-/// Finish an update by recycling every extant supervisor and controller.
+/// Finish a binary/native-library update by recycling extant supervisors and
+/// controllers that still need the installed generation.
 ///
-/// This deliberately uses the generic all-controller fan-out rather than the
-/// install-optimized fan-out: an editor-plugin update can leave a stale
-/// endpoint in an otherwise idle project, and its controller may run the same
-/// binary while still owning state derived from the replaced plugin generation.
-/// Both handoffs are non-forcing and therefore wait for their safe idle/turn
-/// boundaries.
+/// The controller request uses the install-fanout reason, so a controller that
+/// already restarted onto the installed binary declines a redundant second
+/// handoff. Both handoffs are non-forcing and therefore wait for their safe
+/// idle/turn boundaries.
 pub(crate) fn recycle_existing_runtimes_after_update(surface: &str) {
+    recycle_existing_runtimes_with(surface, || {
+        agent_doc_controller_io::project_controller::recycle_controllers_all_projects()
+    });
+}
+
+/// Finish a proven live editor-plugin replacement. This is deliberately a
+/// distinct path: same-binary controllers may still hold state derived from the
+/// old plugin, but only roots with a live editor endpoint can hold that state.
+pub(crate) fn recycle_existing_runtimes_after_live_plugin_update(surface: &str) {
+    recycle_existing_runtimes_with(surface, || {
+        agent_doc_controller_io::project_controller::recycle_controllers_after_live_plugin_update()
+    });
+}
+
+fn recycle_existing_runtimes_with(
+    surface: &str,
+    recycle_controllers: impl FnOnce() -> RecycleResult,
+) {
     if !recycle_on_update_enabled() {
         eprintln!(
             "[{surface}] note: automatic runtime recycle opted out (AGENT_DOC_RECYCLE_ON_INSTALL falsey)"
@@ -37,11 +54,7 @@ pub(crate) fn recycle_existing_runtimes_after_update(surface: &str) {
                 false,
             )
         },
-        || {
-            agent_doc_controller_io::project_controller::recycle_controllers_all_projects_force(
-                false,
-            )
-        },
+        recycle_controllers,
     );
     match supervisors {
         Ok((marked, skipped)) => eprintln!(

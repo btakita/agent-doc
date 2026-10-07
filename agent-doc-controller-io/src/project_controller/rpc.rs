@@ -6800,6 +6800,60 @@ fn recycle_controllers_install_fanout(
     (recycled, skipped)
 }
 
+/// Recycle only controllers whose roots have a live editor endpoint after that
+/// editor dynamically replaced its plugin generation. The distinct reason is
+/// intentionally not covered by the installed-binary redundancy guard: a
+/// same-image controller can still hold state derived from the old plugin.
+pub fn recycle_controllers_after_live_plugin_update() -> Result<(usize, usize)> {
+    let roots = crate::process::controller_project_roots(std::process::id());
+    let supervisor_documents = crate::process::open_supervisor_documents(std::process::id());
+    Ok(recycle_controllers_live_plugin_fanout(
+        roots,
+        |root| project_root_use_evidence(root, &supervisor_documents),
+        |root| {
+            recycle_controller_with_reason(
+                root,
+                agent_doc_controller::recycle::LIVE_PLUGIN_UPDATE_RECYCLE_REASON,
+            )
+        },
+    ))
+}
+
+fn recycle_controllers_live_plugin_fanout(
+    roots: BTreeSet<PathBuf>,
+    evidence: impl Fn(&Path) -> agent_doc_controller::recycle::ProjectRootUseEvidence,
+    mut recycle: impl FnMut(&Path) -> Result<bool>,
+) -> (usize, usize) {
+    use agent_doc_controller::recycle::{
+        LivePluginUpdateRootAction, live_plugin_update_root_action,
+    };
+    let mut recycled = 0;
+    let mut skipped = 0;
+    for root in roots {
+        let observed = evidence(&root);
+        if live_plugin_update_root_action(observed) == LivePluginUpdateRootAction::SkipNoLiveEditor
+        {
+            skipped += 1;
+            if root.join(".agent-doc").is_dir() {
+                agent_doc_ops_log_io::log_op(
+                    &root,
+                    &format!(
+                        "live_plugin_update_recycle_skipped project_root={} reason=no_live_editor {}",
+                        root.display(),
+                        observed.as_log_fields(),
+                    ),
+                );
+            }
+            continue;
+        }
+        match recycle(&root) {
+            Ok(true) => recycled += 1,
+            _ => skipped += 1,
+        }
+    }
+    (recycled, skipped)
+}
+
 /// `#installworktreecontrollers`: observe whether anybody uses `project_root`
 /// without asking (or launching) its controller: listening PID-scoped editor
 /// sockets plus open `agent-doc start` supervisors whose document resolves to
@@ -15981,7 +16035,9 @@ fn log_self_recycle_outcome(
     recorded: Option<&ControllerBinaryIdentity>,
     replacement: &ControllerStatus,
 ) {
-    use agent_doc_controller::recycle::{SelfRecycleOutcome, self_recycle_outcome};
+    use agent_doc_controller::recycle::{
+        SelfRecycleLogDisposition, self_recycle_log_disposition, self_recycle_outcome,
+    };
     let old_version = identity_version_label(recorded);
     let new_version = identity_version_label(replacement.controller_binary.as_ref());
     let new_path = replacement
@@ -15989,9 +16045,12 @@ fn log_self_recycle_outcome(
         .as_ref()
         .map(|identity| identity.path.display().to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let event = match self_recycle_outcome(recorded, replacement.controller_binary.as_ref()) {
-        SelfRecycleOutcome::Escaped | SelfRecycleOutcome::Unknown => "controller_self_recycled",
-        SelfRecycleOutcome::SameImage => "controller_self_recycle_failed cause=same_image",
+    let outcome = self_recycle_outcome(recorded, replacement.controller_binary.as_ref());
+    let event = match self_recycle_log_disposition(reason, outcome) {
+        SelfRecycleLogDisposition::Completed => "controller_self_recycled",
+        SelfRecycleLogDisposition::FailedSameImage => {
+            "controller_self_recycle_failed cause=same_image"
+        }
     };
     agent_doc_ops_log_io::log_op(
         project_root,
@@ -34139,8 +34198,8 @@ mod tests {
     }
 
     /// GH #128 ask 1: `new_version` is the version the replacement reports for
-    /// itself, and a replacement on the predecessor's exact image is a failed
-    /// recycle, not a completed one.
+    /// itself. A stale-binary replacement on the predecessor's exact image is a
+    /// failed recycle; an explicit same-image refresh is completed successfully.
     #[test]
     fn gh128_self_recycle_outcome_reports_the_replacement_image() {
         let dir = async_handoff_test_project();
@@ -34167,6 +34226,14 @@ mod tests {
             Some(&recorded),
             &replacement,
         );
+        log_self_recycle_outcome(
+            dir.path(),
+            1223695,
+            35,
+            "operator_request",
+            Some(&recorded),
+            &replacement,
+        );
 
         let log = gh128_ops_log(&dir);
         assert!(
@@ -34178,6 +34245,12 @@ mod tests {
         assert!(
             log.contains(
                 "controller_self_recycle_failed cause=same_image pid=1223695 generation=35 reason=stale_binary old_version=0.35.448 new_version=0.35.448"
+            ),
+            "{log}"
+        );
+        assert!(
+            log.contains(
+                "controller_self_recycled pid=1223695 generation=35 reason=operator_request old_version=0.35.448 new_version=0.35.448"
             ),
             "{log}"
         );
@@ -44216,6 +44289,24 @@ mod install_fanout_idle_root_tests {
                 && idle_log.contains("reason=idle_project_root"),
             "{idle_log}"
         );
+    }
+
+    #[test]
+    fn live_plugin_recycle_fanout_targets_only_roots_with_live_editors() {
+        let world = world();
+        let (recycled, skipped) = recycle_controllers_live_plugin_fanout(
+            world.roots.keys().cloned().collect(),
+            |root| world.evidence(root),
+            |root| world.recycle(root),
+        );
+        assert_eq!(
+            world.recycled.borrow().clone(),
+            vec![world.root("edited")],
+            "a supervisor without a live editor cannot hold live-plugin state",
+        );
+        assert_eq!((recycled, skipped), (1, 3));
+        assert!(!world.launched().contains(&world.root("idle-worktree")));
+        assert!(!world.launched().contains(&world.root("supervised")));
     }
 
     #[test]

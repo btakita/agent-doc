@@ -4177,6 +4177,39 @@ mod core_tests {
     }
 
     #[test]
+    fn consume_decision_keeps_deferred_free_text_head_despite_completion_signals() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: older\n\nOld response.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- #upgrade\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let response = concat!(
+            "### Re: #upgrade to 0.35.471\n\n",
+            "> **Queue prompt:** #upgrade\n\n",
+            "**Deferred:** claimed as `subagent:upgrade471`. It starts after this response commits.",
+        );
+
+        assert!(
+            !queue_consumption_allowed_for_response(
+                &doc,
+                Some(content),
+                content,
+                response,
+                &["upgrade".to_string()],
+            )
+            .unwrap(),
+            "a documented deferral must veto echo- and completion-id-based consumption"
+        );
+    }
+
+    #[test]
     fn consume_decision_keeps_free_text_head_without_exact_response_proof() {
         // #qstrikework: a generic repair/recovery response must not consume the
         // current free-text queue head merely because the response body is non-empty.

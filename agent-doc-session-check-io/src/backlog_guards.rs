@@ -1,8 +1,7 @@
 use std::path::Path;
 
 use agent_doc_element_backlog::guard_policy::{
-    dropped_from_history_report, dropped_from_history_report_guard_with_authority,
-    malformed_tracked_item_guard, shadow_backlog_guard,
+    dropped_from_history_report, malformed_tracked_item_guard, shadow_backlog_guard,
 };
 use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 use agent_doc_workflow::session_check::GuardResult;
@@ -89,7 +88,12 @@ pub fn check_backlog_replay_guard(file: &Path, rc: &CycleContext) -> Result<Guar
             ),
         );
     }
-    Ok(dropped_from_history_report_guard_with_authority(&report, evidence.authority()).into())
+    Ok(
+        agent_doc_element_backlog_io::deletion_authority::operator_deletion_outcome(
+            &report, evidence,
+        )
+        .into(),
+    )
 }
 
 #[cfg(test)]

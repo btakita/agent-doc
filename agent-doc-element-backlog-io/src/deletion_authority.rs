@@ -10,8 +10,12 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use agent_doc_element_backlog::backlog::DroppedBacklogReport;
-use agent_doc_element_backlog::guard_policy::DroppedBacklogAuthority;
+use agent_doc_element_backlog::guard_policy::{
+    BacklogGuardOutcome, DroppedBacklogAuthority, dropped_from_history_report_guard_with_authority,
+};
 use anyhow::Result;
+
+pub type OperatorDeletionOutcome = BacklogGuardOutcome;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorDeletionEvidence {
@@ -35,6 +39,14 @@ impl OperatorDeletionEvidence {
             Self::Unproven => "unproven",
         }
     }
+}
+
+/// Apply the pure tracked-work policy to the path-aware authority evidence.
+pub fn operator_deletion_outcome(
+    report: &DroppedBacklogReport,
+    evidence: OperatorDeletionEvidence,
+) -> OperatorDeletionOutcome {
+    dropped_from_history_report_guard_with_authority(report, evidence.authority())
 }
 
 /// Classify the authority for the rows in `report`.

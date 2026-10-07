@@ -14586,9 +14586,8 @@ fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
     assert!(
         release_driver.contains("tag-publish-handoff")
             && release_driver.contains("local-install-full")
-            && release_driver.contains(
-                "tag_publish_handoff=complete local_install_full={install.status}"
-            )
+            && release_driver
+                .contains("tag_publish_handoff=complete local_install_full={install.status}")
             && release_driver.contains("elapsed={elapsed:.3f}s"),
         "release must time and report publication independently from the one local full install"
     );
@@ -23169,7 +23168,7 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
         backlog_guards.contains("agent_doc_element_backlog::guard_policy::{")
             && backlog_guards.contains("malformed_tracked_item_guard")
             && backlog_guards.contains("shadow_backlog_guard")
-            && backlog_guards.contains("dropped_from_history_report_guard_with_authority")
+            && backlog_guards.contains("deletion_authority::operator_deletion_outcome")
             && backlog_guards.contains("agent_doc_snapshot_io::load_document_baseline("),
         "session_check backlog guards should call focused backlog policy and baseline path helpers directly"
     );
@@ -33680,7 +33679,9 @@ fn every_wedge_recording_site_classifies_rejections_too() {
 fn captured_splice_live_recipe_holds_delivery_and_uses_disposable_commit_boundary() {
     let script = std::fs::read_to_string("scripts/xdotool-live-verify.sh")
         .expect("read xdotool live verifier");
-    let case_start = script.find("case_captured_splice() {").expect("captured-splice case");
+    let case_start = script
+        .find("case_captured_splice() {")
+        .expect("captured-splice case");
     let case_end = script[case_start..]
         .find("\ncase_lvbatch_markers() {")
         .map(|offset| case_start + offset)

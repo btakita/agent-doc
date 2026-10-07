@@ -2505,17 +2505,20 @@ pub fn enforce_no_dropped_backlog(
                 evidence.as_str(),
             ),
         );
-        match agent_doc_element_backlog::guard_policy::dropped_from_history_report_guard_with_authority(
-            &report,
-            evidence.authority(),
+        match agent_doc_element_backlog_io::deletion_authority::operator_deletion_outcome(
+            &report, evidence,
         ) {
-            agent_doc_element_backlog::guard_policy::BacklogGuardOutcome::Pass => {}
-            agent_doc_element_backlog::guard_policy::BacklogGuardOutcome::Warn(lines) => {
+            agent_doc_element_backlog_io::deletion_authority::OperatorDeletionOutcome::Pass => {}
+            agent_doc_element_backlog_io::deletion_authority::OperatorDeletionOutcome::Warn(
+                lines,
+            ) => {
                 for line in lines {
                     eprintln!("{line}");
                 }
             }
-            agent_doc_element_backlog::guard_policy::BacklogGuardOutcome::Interrupt(message) => {
+            agent_doc_element_backlog_io::deletion_authority::OperatorDeletionOutcome::Interrupt(
+                message,
+            ) => {
                 anyhow::bail!(message);
             }
         }
@@ -4500,10 +4503,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     // precedence when an id intentionally names both a preset and open work.
     eligible_ids.retain(|id| {
         !done_ids.contains(id)
-            || !agent_doc_queue::queue_response::head_id_is_registered_preset(
-                &current_content,
-                id,
-            )
+            || !agent_doc_queue::queue_response::head_id_is_registered_preset(&current_content, id)
     });
     // `activation.entries_after` already reflects start-fence consumption and
     // the duplicate-prompt collapse above, so it is the authoritative current
@@ -7088,8 +7088,7 @@ mod tests {
             .unwrap(),
             vec!["#upgrade".to_string()],
         );
-        agent_doc_queue_io::queue_claim::claim(&doc, "#upgrade", "subagent:test", 600)
-            .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, "#upgrade", "subagent:test", 600).unwrap();
     }
 
     /// GH #161: downstream dispatch consumes maintenance's settled projection,

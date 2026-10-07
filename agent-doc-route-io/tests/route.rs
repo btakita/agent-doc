@@ -2486,7 +2486,16 @@ mod tests {
         )
         .unwrap();
 
-        assert!(matches!(outcome, DrainOutcome::Blocked(_)), "{outcome:?}");
+        assert!(
+            matches!(
+                outcome,
+                DrainOutcome::Blocked {
+                    context: agent_doc_controller::dispatch::RouteCloseoutBlockContext::OpenEmptyPreflight,
+                    ..
+                }
+            ),
+            "{outcome:?}"
+        );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
@@ -2653,7 +2662,16 @@ mod tests {
             super::route_closeout_drain_effects(super::route_repair_closeout),
         )
         .unwrap();
-        assert!(matches!(outcome, DrainOutcome::Blocked(_)), "{outcome:?}");
+        assert!(
+            matches!(
+                outcome,
+                DrainOutcome::Blocked {
+                    context: agent_doc_controller::dispatch::RouteCloseoutBlockContext::OpenEmptyPreflight,
+                    ..
+                }
+            ),
+            "{outcome:?}"
+        );
         assert!(
             agent_doc_cycle_state_io::load(&doc)
                 .unwrap()

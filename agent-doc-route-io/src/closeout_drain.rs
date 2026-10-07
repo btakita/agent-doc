@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use agent_doc_controller::dispatch::{
     AuthoritativeActorDispatchIntent, CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts,
-    CloseoutDrainProjection, CloseoutProjectionChange, ReopenMode, RouteCloseoutDrainOutcome,
-    RouteCloseoutDrainPolicy, classify_closeout_block_dispatch,
+    CloseoutDrainProjection, CloseoutProjectionChange, ReopenMode, RouteCloseoutBlockContext,
+    RouteCloseoutDrainOutcome, RouteCloseoutDrainPolicy, classify_closeout_block_dispatch,
     classify_route_closeout_drain_policy, project_closeout_drain,
 };
 use agent_doc_controller_io::project_controller::CloseoutCycleWaitOutcome;
@@ -222,7 +222,14 @@ pub fn drain_open_closeout_before_routed_dispatch(
             agent_doc_secret_redact::redact(&last_reason)
         ),
     );
-    Ok(RouteCloseoutDrainOutcome::Blocked(last_reason))
+    Ok(RouteCloseoutDrainOutcome::Blocked {
+        reason: last_reason,
+        context: if cycle.is_empty_preflight() {
+            RouteCloseoutBlockContext::OpenEmptyPreflight
+        } else {
+            RouteCloseoutBlockContext::Other
+        },
+    })
 }
 
 pub fn apply_routed_dispatch_closeout_policy(

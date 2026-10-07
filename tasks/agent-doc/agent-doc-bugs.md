@@ -171,17 +171,18 @@ The `#subagents` entry inside `preset` is redundant—the attribute controls dis
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#subagentsattributescale]
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ⏭️ do [#subagentsattributescale]
 - The last 2 responses in sdk.md have been unescaped.
-- #gh-fix https://github.com/btakita/agent-doc/issues/174
-- #gh-fix https://github.com/btakita/agent-doc/issues/175
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/174
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/175
+- #gh-fix https://github.com/btakita/agent-doc/issues/176
 - 🚧 release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] 🚧 [#subagentsattributescale] In `agent:queue`, can we have the subagents attribute scale to as many as needed?
+- [ ] [#subagentsattributescale] In `agent:queue`, can we have the subagents attribute scale to as many as needed?
 <!-- /agent:backlog -->
 
 ## Review

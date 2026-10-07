@@ -2305,14 +2305,16 @@ fn closeout_repair_retained_note(
     ownership: agent_doc_turn::write_ownership::RetainedWriteOwnership,
     file: &Path,
 ) -> String {
-    format!(
-        " The hook could not finish the required commit boundary: {}. {}.",
-        format!("{err:#}").replace('\n', " "),
-        agent_doc_turn::write_ownership::retained_write_remedy(
-            ownership,
-            &file.display().to_string()
-        ),
-    )
+    let error = format!("{err:#}").replace('\n', " ");
+    let remedy = agent_doc_turn::write_ownership::retained_write_remedy(
+        ownership,
+        &file.display().to_string(),
+    );
+    if error.contains(&remedy) {
+        format!(" The hook could not finish the required commit boundary: {error}.")
+    } else {
+        format!(" The hook could not finish the required commit boundary: {error}. {remedy}.")
+    }
 }
 
 fn durable_owner_repair_deferral_response(
@@ -4361,6 +4363,27 @@ Done.\n\
             "{note}"
         );
         assert!(!note.contains('\n'), "one line: {note}");
+    }
+
+    #[test]
+    fn closeout_repair_failure_note_does_not_repeat_an_embedded_remedy() {
+        let owned = agent_doc_turn::write_ownership::RetainedWriteOwnership {
+            cycle_open: true,
+            retained_capture: true,
+            write_applied: false,
+            retained_projection: true,
+            unanswered_edit: false,
+            capture_resume_unowned: false,
+            delivery_rejected: false,
+            editor_route_unowned: false,
+            replica_unserved: false,
+        };
+        let remedy = agent_doc_turn::write_ownership::retained_write_remedy(owned, "/p/fpe.md");
+        let err = anyhow::anyhow!("editor projection pending. {remedy}");
+
+        let note = closeout_repair_retained_note(&err, owned, Path::new("/p/fpe.md"));
+
+        assert_eq!(note.matches(&remedy).count(), 1, "{note}");
     }
 
     #[test]

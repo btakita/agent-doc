@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.471
+
+- **Runtime updates avoid redundant controller recycle (GH #164).** Upgrade and live-plugin install fanout now target
+  roots with live editor state, label install-fanout requests so controllers already on the current binary skip a
+  second handoff, and reserve same-image failure reporting for stale-binary recovery.
+- **Multiline chat-prompt records remain atomic.** Quoted blank separators inside a newly recorded `#chatprompt`
+  block no longer end the record early and expose its following paragraph as operator steering.
+- **Routed reopens distinguish faint autosuggestions from real drafts.** Route consults the harness composer
+  projection before treating trigger-shaped pane text as submitted input, while still resubmitting a real matching
+  draft and preserving unrelated operator drafts.
+
 ## 0.35.470
 
 - **Explicitly sent queue work preserves the active turn (GH #162).** Run Agent Doc upgrades ordinary queue edits to

@@ -699,6 +699,7 @@ interface ReplicaTransport {
 class CpSocketReplicaTransport(
     private val projectRoot: String,
     private val flushRetainedOpsBeforePull: Boolean = true,
+    private val ensureControllerRunning: ((String) -> Int)? = null,
 ) : ReplicaTransport {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CpSocketReplicaTransport::class.java)
 
@@ -1014,9 +1015,10 @@ class CpSocketReplicaTransport(
         val now = System.currentTimeMillis()
         if (!shouldAttemptControllerLaunch(now, controllerEnsuredAtMs)) return false
         controllerEnsuredAtMs = now
-        val lib = AgentDocLib.get() ?: return false
         return try {
-            val ensured = lib.agent_doc_ensure_controller_running(projectRoot)
+            val ensured = ensureControllerRunning?.invoke(projectRoot)
+                ?: AgentDocLib.get()?.agent_doc_ensure_controller_running(projectRoot)
+                ?: return false
             if (ensured == 1) {
                 log.info("[crdt-replica] launched a controller for $projectRoot (#rebootselfheal)")
             }

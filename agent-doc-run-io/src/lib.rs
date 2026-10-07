@@ -164,7 +164,10 @@ pub fn repair_document_frontmatter_on_disk(file: &Path) -> Result<bool> {
                 "repair_document_frontmatter_on_disk",
             )
         },
-        agent_doc_document_realtime_io::atomic_write_through_authority,
+        |file, repaired| {
+            let repaired = repaired.to_owned();
+            agent_doc_document_realtime_io::atomic_write_through_authority(file, &repaired)
+        },
     )
 }
 
@@ -198,37 +201,6 @@ fn repair_document_frontmatter_with(
         file.display()
     );
     Ok(true)
-}
-
-#[cfg(test)]
-mod frontmatter_repair_tests {
-    use super::*;
-
-    #[test]
-    fn startup_repair_uses_live_current_text_when_disk_is_already_valid() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let doc = dir.path().join("api.md");
-        let valid = "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n---\nBody\n";
-        let live_malformed =
-            "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n9---\nBody\n";
-        std::fs::write(&doc, valid).unwrap();
-        let persisted = std::cell::RefCell::new(None);
-
-        assert!(
-            repair_document_frontmatter_with(
-                &doc,
-                |_| Ok(live_malformed.to_string()),
-                |_, content| {
-                    persisted.replace(Some(content.to_string()));
-                    Ok(())
-                },
-            )
-            .unwrap()
-        );
-
-        assert_eq!(persisted.into_inner().as_deref(), Some(valid));
-        assert_eq!(std::fs::read_to_string(&doc).unwrap(), valid);
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2168,5 +2140,36 @@ fn build_prompt_volatile_suffix(
              </agent_doc_prompt_volatile_suffix>",
             active_format_requirements, content
         ),
+    }
+}
+
+#[cfg(test)]
+mod frontmatter_repair_tests {
+    use super::*;
+
+    #[test]
+    fn startup_repair_uses_live_current_text_when_disk_is_already_valid() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("api.md");
+        let valid = "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n---\nBody\n";
+        let live_malformed =
+            "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n9---\nBody\n";
+        std::fs::write(&doc, valid).unwrap();
+        let persisted = std::cell::RefCell::new(None);
+
+        assert!(
+            repair_document_frontmatter_with(
+                &doc,
+                |_| Ok(live_malformed.to_string()),
+                |_, content| {
+                    persisted.replace(Some(content.to_string()));
+                    Ok(())
+                },
+            )
+            .unwrap()
+        );
+
+        assert_eq!(persisted.into_inner().as_deref(), Some(valid));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), valid);
     }
 }

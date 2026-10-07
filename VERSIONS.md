@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.473
+
+- **Route-owned resume survives transient malformed live frontmatter.** Supervisor hot re-exec validates the
+  editor-authoritative document before replacing the serving image, retries invalid authority at a bounded cadence,
+  and reports cold-start failure instead of false replacement acceptance.
+- **Startup repairs the observed single-character fence corruption conservatively.** When live authority—but not
+  necessarily disk—contains exactly one stray ASCII alphanumeric before an otherwise valid closing frontmatter fence,
+  startup proves the typed YAML and repaired full document before persisting through document authority; ambiguous or
+  longer corruption remains fail-closed.
+
 ## 0.35.472
 
 - **Supervisor replacement settles instead of thrashing.** Per-session recycle latches are monotonic across

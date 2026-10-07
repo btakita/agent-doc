@@ -28896,6 +28896,7 @@ fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Resul
 /// result. A dead supervisor has accepted nothing, so its replacement receipt
 /// cannot become successful until the controller has actually submitted the
 /// successor start command.
+#[cfg(any(test, not(feature = "test-support")))]
 fn complete_deferred_supervisor_replacement_admission<T>(
     admission_sender: &std::sync::mpsc::SyncSender<Result<(), String>>,
     result: Result<T>,

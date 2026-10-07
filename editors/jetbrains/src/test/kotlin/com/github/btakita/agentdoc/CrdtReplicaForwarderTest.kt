@@ -852,12 +852,14 @@ class CrdtReplicaForwarderTest {
                 CpSocketReplicaTransport(
                     projectRoot = projectRoot.absolutePath,
                     flushRetainedOpsBeforePull = false,
+                    ensureControllerRunning = { 0 },
                 )
 
             val delivery = transport.pullDelivery("plan.md", "intellij:lost-controller")
 
             assertTrue(delivery is ReplicaPullDelivery.Unavailable)
-            assertTrue((delivery as ReplicaPullDelivery.Unavailable).reason.contains("controller.sock"))
+            val reason = (delivery as ReplicaPullDelivery.Unavailable).reason
+            assertTrue("unexpected unavailable reason: $reason", reason.contains("controller.sock"))
         } finally {
             projectRoot.deleteRecursively()
         }

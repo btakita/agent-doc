@@ -381,7 +381,30 @@ The requested cross-document subagent checks also completed safely:
 
 - The PR #99 explanation was already committed in `sdk.md`, so the worker did not duplicate it or force the live owner cycle. PR #99 fixes the GitHub Actions HTTP 422 native-stack base-change failure—not a 401—by preserving the direct PR base, using `stack.base.sha` as the logical patch boundary, rebasing exactly, and pushing with force-with-lease.
 - Pane `%87` had already submitted its valuable `docs.md` draft intact. The intended `do [#closeassociatedhaiven]` turn is active in the correct owner pane, so the worker correctly did not clear the composer, send duplicate keys, or re-inject the trigger.
-<!-- agent:boundary:4776da79 -->
+> **Chat prompt (#chatprompt):** fix in a subagent: • Blocked by hook
+>   └ agent-doc Stop hook kept an active `agent:queue auto` moving for /home/brian/work/btakita/agent-loop/tasks/agent-
+> doc/agent-doc-bugs.md. The next queue prompt is "#gh-fix https://github.com/btakita/agent-doc/issues/162". Continue THIS
+> turn in-pane: answer that prompt in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md and persist
+> with `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` (or `agent-doc write
+> --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`). Do NOT run `agent-doc /home/brian/
+> work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` from this pane — that re-invokes the owner pane and hits the
+> recursive-direct-invocation deadlock guard, and do not send the final answer yet. A background context reset was
+> requested because session accretion is warn (exchange_lines=349, response_sections=12, recent_committed_cycles=3,
+> recent_noop_closeouts=2), but automatic context clearing is disabled; only an explicit operator clear may reset the
+> session.
+
+> **Chat prompt (#chatprompt):** Is PR 160 + 161 done? They are both still open on github.
+
+### Re: GH #160 and #161 closure — gpt-5 · 2026-10-06T20:09:46-04:00
+
+Yes—the fixes were complete and released in agent-doc v0.35.469, but the GitHub issues had been left open after the independent audits. They are issues rather than pull requests.
+
+I closed [GH #160](https://github.com/btakita/agent-doc/issues/160) and [GH #161](https://github.com/btakita/agent-doc/issues/161) with their release and regression evidence. Both now report CLOSED.
+
+The queued #162 work remains delegated. Its fix is merged through PR #163 and issue #162 is closed; the v0.35.470 release gate is still running after correcting an editor-parity record omission and a deterministic controller-test timing flaw. No premature tag or publication has occurred.
+
+The newly queued #164 item is claimed by a separate background worker in an isolated worktree. The #chatpromptmulti fix is also complete on pushed branch `fix/chatpromptmulti-quoted-blank-lines` at `040410cf2`, with 418 affected tests and `make check-fast` passing; it remains outside the already-sealed v0.35.470 batch.
+<!-- agent:boundary:8ef49f52 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -392,15 +415,16 @@ The requested cross-document subagent checks also completed safely:
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/160~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/161~~ — auto-struck: answered this cycle (#ftstrike)
-- #gh-fix https://github.com/btakita/agent-doc/issues/162
-- do [#chatpromptmulti]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/162
+- #gh-fix https://github.com/btakita/agent-doc/issues/164
+- 🚧 do [#chatpromptmulti]
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#chatpromptmulti] [agent-doc] Preserve multi-paragraph #chatprompt recordings as one prompt when quoted blank lines separate paragraphs; add regression coverage so committed chat prompt bodies are not reclassified as fresh exchange steering.
+- [ ] 🚧 [#chatpromptmulti] [agent-doc] Preserve multi-paragraph #chatprompt recordings as one prompt when quoted blank lines separate paragraphs; add regression coverage so committed chat prompt bodies are not reclassified as fresh exchange steering.
 <!-- /agent:backlog -->
 
 ## Review

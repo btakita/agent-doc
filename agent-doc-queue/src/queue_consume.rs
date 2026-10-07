@@ -506,6 +506,22 @@ pub fn queue_consumption_allowed_for_response(
     response_body: &str,
     completion_ids: &[String],
 ) -> Result<bool> {
+    let has_response = !response_body.trim().is_empty();
+    let active_free_text_head = if has_response
+        && crate::queue_response::queue_head_is_free_text_prompt(current_content)?
+    {
+        crate::queue_heads::active_queue_head_text(current_content)?
+    } else {
+        None
+    };
+    // `#deferstrike-closeout`: deferral is a veto over every completion signal.
+    // In particular, the explicit queue-prompt echo below is also the documented
+    // way to quote deferred work, so it cannot authorize consumption first.
+    if active_free_text_head.as_ref().is_some_and(|head_text| {
+        crate::queue_response::response_defers_free_text_head(response_body, head_text)
+    }) {
+        return Ok(false);
+    }
     if should_consume_queue_prompt_for_write(file, baseline, current_content, completion_ids)? {
         return Ok(true);
     }
@@ -515,14 +531,10 @@ pub fn queue_consumption_allowed_for_response(
     )? {
         return Ok(true);
     }
-    let has_response = !response_body.trim().is_empty();
     if has_response && response_targets_synthetic_queue_head_id(current_content, response_body)? {
         return Ok(true);
     }
-    if has_response
-        && crate::queue_response::queue_head_is_free_text_prompt(current_content)?
-        && let Some(head_text) = crate::queue_heads::active_queue_head_text(current_content)?
-    {
+    if let Some(head_text) = active_free_text_head {
         return Ok(crate::queue_response::free_text_head_answered_by_response(
             response_body,
             &head_text,

@@ -3399,6 +3399,56 @@ fn finalize_echoes_consumed_free_text_queue_prompt_into_response() {
 }
 
 #[test]
+fn finalize_keeps_deferred_leading_free_text_queue_head() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n",
+        "<!-- agent:exchange -->\n### Re: older\nOld response.\n",
+        "<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue preset=\"#subagents #auth\" priority go -->\n",
+        "- #upgrade\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--force-disk",
+        ])
+        .write_stdin(concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: #upgrade to 0.35.471 — gpt-5\n\n",
+            "> **Queue prompt:** #upgrade\n\n",
+            "**Deferred:** claimed as `subagent:upgrade471`. It starts after this response commits.\n",
+            "<!-- /patch:exchange -->\n",
+        ))
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("\n- #upgrade\n"),
+        "the deferred leading head must remain live after closeout:\n{content}"
+    );
+    assert!(
+        !content.contains("\n- ~~#upgrade~~\n"),
+        "the deferred leading head must not be struck:\n{content}"
+    );
+    assert!(
+        content.contains("queue_active: true"),
+        "a queue retaining its only head must stay active:\n{content}"
+    );
+}
+
+#[test]
 fn finalize_skips_queue_consumption_when_user_prompt_diff_targets_other_work() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();

@@ -1554,10 +1554,11 @@ mod tests {
             .find("let col_args: &[String] = &router_col_args;")
             .expect("the router must receive the gated column set");
         let guard = sync
-            .find("if router_col_args.is_empty() && !col_args.is_empty() {")
-            .expect("sync must guard an all-excluded column set");
+            .find("if gated_layout_decision(")
+            .expect("sync must consult the typed gated-layout decision");
         let router = sync.find("tmux_router::sync_with_options(").unwrap();
         assert!(guard < rebind && rebind < router);
+        assert!(sync[guard..rebind].contains("== GatedLayoutDecision::PreserveCurrent"));
         assert!(sync[guard..rebind].contains("return Ok(());"));
     }
 

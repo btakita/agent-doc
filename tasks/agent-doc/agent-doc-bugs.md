@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -170,7 +171,8 @@ The source fix is on main after `v0.35.476`; it is not yet in a newly released b
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- api.md had duplication issues in the queue item when run.
 <!-- /agent:queue -->
 
 ## Backlog

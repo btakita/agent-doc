@@ -44,28 +44,50 @@ pub fn carries_subagent_intent_tag(text: &str) -> bool {
 /// not have to tag each line. Plan: `tasks/agent-doc/plan-queue-subagents-attribute.md`.
 pub const QUEUE_SUBAGENTS_ATTRS: [&str; 2] = ["subagents", "fan-out"];
 
-/// Concurrent-claim cap when the attribute is a bare flag.
-pub const DEFAULT_QUEUE_SUBAGENTS_CAP: usize = 3;
-
 /// Line tags that keep one queue line out of the queue-level attribute.
 pub const QUEUE_SUBAGENTS_OPT_OUT_TAGS: [&str; 2] = ["[inline]", "[operator-verify]"];
+
+/// How many dependency-ready queue heads the coordinator may dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueSubagentsCapacity {
+    /// A bare `subagents` / `fan-out` marker dispatches every eligible head.
+    AllEligible,
+    /// An explicit `=N` value bounds concurrent claims.
+    Limited(std::num::NonZeroUsize),
+}
+
+impl QueueSubagentsCapacity {
+    fn most_restrictive(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::AllEligible, capacity) | (capacity, Self::AllEligible) => capacity,
+            (Self::Limited(left), Self::Limited(right)) => Self::Limited(left.min(right)),
+        }
+    }
+
+    fn remaining_after(self, in_flight: usize) -> Option<usize> {
+        match self {
+            Self::AllEligible => None,
+            Self::Limited(limit) => Some(limit.get().saturating_sub(in_flight)),
+        }
+    }
+}
 
 /// The queue-level subagent dispatch mode declared on the `agent:queue` marker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QueueSubagentsMode {
-    /// Maximum number of heads in flight at once (`subagents=N`).
-    pub max_concurrent: usize,
+    /// Bare markers scale to all eligible work; `=N` selects a fixed bound.
+    pub capacity: QueueSubagentsCapacity,
 }
 
-/// Parse one attribute value: empty (bare flag) is the default cap, otherwise
-/// a positive integer.
-pub fn parse_queue_subagents_value(value: &str) -> Result<usize, String> {
+/// Parse one attribute value: empty (bare flag) means every eligible head;
+/// otherwise the value is a positive concurrency limit.
+pub fn parse_queue_subagents_value(value: &str) -> Result<QueueSubagentsCapacity, String> {
     let value = value.trim();
     if value.is_empty() {
-        return Ok(DEFAULT_QUEUE_SUBAGENTS_CAP);
+        return Ok(QueueSubagentsCapacity::AllEligible);
     }
-    match value.parse::<usize>() {
-        Ok(n) if n > 0 => Ok(n),
+    match value.parse::<std::num::NonZeroUsize>() {
+        Ok(limit) => Ok(QueueSubagentsCapacity::Limited(limit)),
         _ => Err(format!(
             "expected a positive concurrency cap, got `{value}`"
         )),
@@ -75,7 +97,7 @@ pub fn parse_queue_subagents_value(value: &str) -> Result<usize, String> {
 /// The queue-level subagent mode from the queue marker attributes. `None`
 /// when neither spelling is present, or when every present spelling has an
 /// invalid value (the attribute warning reports it; the queue drains inline).
-/// When both spellings are present, the smaller valid cap wins.
+/// When both spellings are present, the most restrictive valid capacity wins.
 pub fn queue_subagents_mode<'a, I>(attrs: I) -> Option<QueueSubagentsMode>
 where
     I: IntoIterator<Item = (&'a String, &'a String)>,
@@ -84,8 +106,8 @@ where
         .into_iter()
         .filter(|(key, _)| is_queue_subagents_attr(key))
         .filter_map(|(_, value)| parse_queue_subagents_value(value).ok())
-        .min()
-        .map(|max_concurrent| QueueSubagentsMode { max_concurrent })
+        .reduce(QueueSubagentsCapacity::most_restrictive)
+        .map(|capacity| QueueSubagentsMode { capacity })
 }
 
 /// True when `key` is a spelling of the queue-level subagents attribute.
@@ -105,12 +127,12 @@ pub fn opts_out_of_queue_subagents(line: &str) -> bool {
 /// What the queue-level subagents attribute does with the current queue.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct QueueSubagentPlan {
-    /// Heads to dispatch now, in queue order (within the concurrency cap).
+    /// Heads to dispatch now, in queue order (within the declared capacity).
     pub dispatch: Vec<String>,
-    /// Subagent-eligible heads held back, either because the cap is full or
-    /// because an `after=` predecessor is still live in the queue. They are
-    /// neither dispatched nor drained inline; a later cycle offers them once
-    /// a slot frees or the predecessor closes.
+    /// Subagent-eligible heads held back, either because an explicit cap is
+    /// full or because an `after=` predecessor is still live in the queue.
+    /// They are neither dispatched nor drained inline; a later cycle offers
+    /// them once a slot frees or the predecessor closes.
     pub held: Vec<String>,
 }
 
@@ -136,7 +158,7 @@ pub fn plan_queue_subagent_dispatch(
         .iter()
         .filter(|head| claimed.claims(head))
         .count();
-    let mut slots = mode.max_concurrent.saturating_sub(in_flight);
+    let mut remaining = mode.capacity.remaining_after(in_flight);
     let mut plan = QueueSubagentPlan::default();
     for head in eligible {
         if claimed.claims(head) {
@@ -153,11 +175,13 @@ pub fn plan_queue_subagent_dispatch(
                         })
                 })
             });
-        if blocked || slots == 0 {
+        if blocked || remaining == Some(0) {
             plan.held.push(head.clone());
         } else {
             plan.dispatch.push(head.clone());
-            slots -= 1;
+            if let Some(slots) = &mut remaining {
+                *slots -= 1;
+            }
         }
     }
     plan
@@ -198,20 +222,30 @@ mod tests {
     }
 
     #[test]
-    fn queue_subagents_attr_spellings_and_caps() {
+    fn queue_subagents_attr_spellings_and_capacities() {
         assert_eq!(
             mode(&[("subagents", "")]),
             Some(QueueSubagentsMode {
-                max_concurrent: DEFAULT_QUEUE_SUBAGENTS_CAP
+                capacity: QueueSubagentsCapacity::AllEligible,
             })
         );
         assert_eq!(
             mode(&[("fan-out", "5")]),
-            Some(QueueSubagentsMode { max_concurrent: 5 })
+            Some(QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::Limited(std::num::NonZeroUsize::new(5).unwrap()),
+            })
         );
         assert_eq!(
             mode(&[("subagents", "4"), ("fan-out", "2")]),
-            Some(QueueSubagentsMode { max_concurrent: 2 })
+            Some(QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::Limited(std::num::NonZeroUsize::new(2).unwrap()),
+            })
+        );
+        assert_eq!(
+            mode(&[("subagents", ""), ("fan-out", "2")]),
+            Some(QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::Limited(std::num::NonZeroUsize::new(2).unwrap()),
+            })
         );
         assert_eq!(mode(&[("preset", "#subagents"), ("go", "")]), None);
         assert_eq!(mode(&[("subagents", "0")]), None);
@@ -238,7 +272,9 @@ mod tests {
             crate::queue_claim::claim_identity("do [#a]"),
         ]);
         let plan = plan_queue_subagent_dispatch(
-            QueueSubagentsMode { max_concurrent: 2 },
+            QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::Limited(std::num::NonZeroUsize::new(2).unwrap()),
+            },
             &heads,
             &heads,
             &claimed,
@@ -249,12 +285,33 @@ mod tests {
     }
 
     #[test]
+    fn bare_attr_dispatches_every_eligible_head() {
+        let heads = strings(&["do [#a]", "do [#b]", "do [#c]", "do [#d]"]);
+        let claimed = crate::queue_claim::ClaimedQueueItems::from_identities([
+            crate::queue_claim::claim_identity("do [#a]"),
+        ]);
+        let plan = plan_queue_subagent_dispatch(
+            QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::AllEligible,
+            },
+            &heads,
+            &heads,
+            &claimed,
+            &Default::default(),
+        );
+        assert_eq!(plan.dispatch, strings(&["do [#b]", "do [#c]", "do [#d]"]));
+        assert!(plan.held.is_empty());
+    }
+
+    #[test]
     fn plan_holds_a_head_whose_predecessor_is_still_queued() {
         let heads = strings(&["do [#a]", "do [#b]"]);
         let deps = std::collections::HashMap::from([("b".to_string(), strings(&["a"]))]);
         let none = crate::queue_claim::ClaimedQueueItems::none();
         let plan = plan_queue_subagent_dispatch(
-            QueueSubagentsMode { max_concurrent: 3 },
+            QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::AllEligible,
+            },
             &heads,
             &heads,
             &none,
@@ -266,7 +323,9 @@ mod tests {
         // Once `a` closes (leaves the queue), `b` is dispatched.
         let remaining = strings(&["do [#b]"]);
         let plan = plan_queue_subagent_dispatch(
-            QueueSubagentsMode { max_concurrent: 3 },
+            QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::AllEligible,
+            },
             &remaining,
             &remaining,
             &none,

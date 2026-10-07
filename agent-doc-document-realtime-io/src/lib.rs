@@ -3750,11 +3750,14 @@ file,
                         // Buffer authority and delivery health are separate:
                         // keep the live IDE PID as the disk fence, but do not
                         // issue a canonical delivery to a component whose
-                        // replica/ACK worker stopped heartbeating. Retain the
-                        // exact merged target and refresh the supervisor/plugin
-                        // bridge at the next safe capture-backed checkpoint.
-                        let editor_delivery_worker_stale =
-                            agent_doc_controller_io::project_controller::
+                        // replica/ACK worker stopped heartbeating. A positive
+                        // relay recipient count is the freshest evidence here:
+                        // registration metadata can lag a just-reregistered
+                        // replica by one projection edge. Treating that lag as
+                        // a stale worker retains a second intent even though the
+                        // live recipient can already accept this write.
+                        let editor_delivery_worker_stale = live_editors == 0
+                            && agent_doc_controller_io::project_controller::
                                 reliable_sync_editor_live_for_file(file)
                                 && agent_doc_controller_io::project_controller::
                                     live_editor_registration_for_file(file)
@@ -12680,55 +12683,27 @@ mod tests {
     }
 
     #[test]
-    fn stale_delivery_worker_retains_target_without_ack_wait_or_disk_write() {
+    fn fresh_relay_recipient_overrides_lagging_registration_index() {
         let baseline = "# Session\n\nvesting question\n";
         let target = "# Session\n\nvesting question\n\nagent response\n";
-        let (dir, file, _canonical) = temp_doc(baseline);
-        let identity = "test-stale-delivery-worker";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-fresh-relay-lagging-registration";
         seed_reliable_sync_open_without_registration(&file, identity);
         test_support_register_replica_for_file(&file, identity)
             .unwrap()
             .expect("editor replica should attach");
 
+        let ack = project_next_crdt_delivery(file.clone(), identity);
         let started = std::time::Instant::now();
-        let err = atomic_write_through_authority(&file, target).unwrap_err();
-        // Same fail-fast bound as the sibling stale-path tests: 1s flaked at
-        // 1.28s under a loaded parallel `make check`, while the path itself
-        // takes ~0.03s.
+        atomic_write_through_authority(&file, target)
+            .expect("the fresh relay recipient must win over lagging registration metadata");
+        ack.join().unwrap();
         assert!(
             started.elapsed() < std::time::Duration::from_secs(3),
-            "a stale component must fail fast instead of burning the ACK deadline",
+            "a fresh relay recipient must not burn the stale-worker recovery deadline",
         );
-        let message = format!("{err:#}");
-        assert!(
-            message.contains("delivery worker heartbeat is stale"),
-            "{message}"
-        );
-        assert!(
-            message.contains("delivery cannot converge on its own"),
-            "an uncovered document must not advertise an automatic terminal path: {message}"
-        );
-        assert!(
-            message.contains("agent-doc repair"),
-            "an already-materialized response needs an actionable terminal path: {message}"
-        );
-        assert!(
-            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
-                .is_some(),
-            "the closeout classifier must retain the no-disk recovery branch: {message}"
-        );
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
-
-        let projection =
-            agent_doc_controller_io::project_controller::load_state_backbone_projection(dir.path())
-                .unwrap();
-        let document_id = agent_doc_hash::document_id_for_path(&file);
-        let pending = projection
-            .document(&document_id)
-            .and_then(|document| document.document.pending_write.as_ref())
-            .expect("the exact target must remain retained");
-        assert_eq!(pending.target_content, target);
-        assert_eq!(pending.reason, "editor_delivery_worker_stale");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        assert!(pending_document_write(&file).is_none());
     }
 
     /// GH #131 shape 2, on the real refusal builder: an attached editor whose

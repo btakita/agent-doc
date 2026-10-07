@@ -117,6 +117,29 @@ pub fn args_have_preparing_handoff(args: &[String]) -> bool {
         .any(|window| window[0] == "--handoff-state" && window[1] == "preparing")
 }
 
+/// True only for the controller process that can legitimately replace
+/// `previous_controller_pid` at `generation` during a two-phase handoff.
+///
+/// Duplicate-controller cleanup runs concurrently with handoff startup.  It
+/// must distinguish this one `Preparing` successor from unrelated same-project
+/// controllers before sending a signal.
+pub fn preparing_handoff_successor_args_match(
+    args: &[String],
+    project_root: &Path,
+    previous_controller_pid: u32,
+    generation: u64,
+) -> bool {
+    same_project_controller_args_match_project_root(args, project_root)
+        && args_have_preparing_handoff(args)
+        && args.windows(2).any(|window| {
+            window[0] == "--previous-controller-pid"
+                && window[1] == previous_controller_pid.to_string()
+        })
+        && args.windows(2).any(|window| {
+            window[0] == "--controller-generation" && window[1] == generation.to_string()
+        })
+}
+
 /// True when `cmdline` is a long-lived agent-doc/harness owner invocation for
 /// some document, regardless of which document.
 pub fn cmdline_is_agent_doc_owner_session(cmdline: &str) -> bool {
@@ -715,6 +738,49 @@ mod tests {
             "preparing".to_string(),
             "--handoff-state".to_string(),
         ]));
+    }
+
+    #[test]
+    fn preparing_handoff_successor_requires_exact_identity_tuple() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let args = vec![
+            "agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            dir.path().display().to_string(),
+            "--controller-generation".to_string(),
+            "8".to_string(),
+            "--previous-controller-pid".to_string(),
+            "4242".to_string(),
+            "--handoff-state".to_string(),
+            "preparing".to_string(),
+        ];
+        assert!(preparing_handoff_successor_args_match(
+            &args,
+            dir.path(),
+            4242,
+            8
+        ));
+        assert!(!preparing_handoff_successor_args_match(
+            &args,
+            dir.path(),
+            4243,
+            8
+        ));
+        assert!(!preparing_handoff_successor_args_match(
+            &args,
+            dir.path(),
+            4242,
+            9
+        ));
+        let other = tempfile::TempDir::new().unwrap();
+        assert!(!preparing_handoff_successor_args_match(
+            &args,
+            other.path(),
+            4242,
+            8
+        ));
     }
 
     #[test]

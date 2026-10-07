@@ -19,6 +19,7 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -39,6 +40,43 @@ Released agent-doc v0.35.460; fixed and closed GH #139–#143; restored this doc
 Compacted content:
 - Archived 14 response topic(s): GH #148, GH #149, releases, and release speed; release fast path; continuation; 11 more
 - Prior summary/context: prior compacted content: Archived 42 response topic(s): do #steerbaselineabsorb; preflight refused on its own repair ...
+
+### Re: release and delegated fixes — gpt-6.1-sol · 2026-10-07T05:06:55-04:00
+
+> **Chat prompt (#chatprompt):** In a subagent: Fix agent-doc background processes thrashing
+
+> **Chat prompt (#chatprompt):** also fix in subagent: api.md session crashed
+
+> **Chat prompt (#chatprompt):** fix in subagent: ~/work/btakita/agent-loop/src/haiven-dev docs/fpe-ser…emporal-plan ⇡802 +1 !7                                 04:02:15
+>
+> ❯ /home/brian/.cargo/bin/agent-doc start --route-owned --route-owned-reap-policy auto --resume=01a0eaeb-c65f-7241-adde-93f0934ccc02 -- /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md
+> Error: Unterminated frontmatter block
+
+> **Queue prompt:** release + publish
+
+Completed the delegated bug batch and published it in two patch releases:
+
+- `v0.35.472` contains the Compact/interruption race fix, background-process thrash fix, and GH #166, #169, #170, and #171. The issues are closed and the release was installed locally.
+- `v0.35.473` contains the `api.md` crash fix. Source and tag are pushed at `2b6c74ebb`; the generated JetBrains `0.2.503` install revision is recorded on `main` at `5d3187301`.
+
+The fixes are:
+
+- **Run/interruption + Compact Exchange:** a document advance during drain now refreshes the durable op-capture epoch, so Compact Exchange defers through the active-typing window instead of treating partial input as quiescent. The interrupted/rerun flow no longer strands the queued compact operation.
+- **Background-process thrashing:** recycle attempts are monotonic per session, causal recycle markers are validated, and capture-resume occurs only for proven binary staleness. Repaired supervisors/controllers settle instead of repeatedly recycling.
+- **GH #166:** fresh-controller focus escalation now requires positive live tmux layout evidence.
+- **GH #169:** warm supervisors refresh the incremental liveness journal, distinguish no-route from dead-route state, and use bounded recovery.
+- **GH #170:** optional `data: null` controller envelopes preserve the typed outer-success/inner-null result.
+- **GH #171:** concurrent `Preparing` successors are protected by exact identity, and failed handoffs retain observable exit/signal evidence.
+- **`api.md` crash:** route-owned hot re-exec was parsing malformed editor-authoritative text containing a literal `9---` closing fence even though disk was already valid. Startup now validates the live authority before exec, retries transient invalid authority at a bounded cadence, propagates cold-start failure synchronously, and repairs only a proven one-character-prefixed closing fence after both the YAML and repaired full document validate. The live `api.md` session converged to its already-valid disk content; the document itself was not edited by the worker.
+
+Validation and installation completed:
+
+- Full `make check` passed, including 9,615 Rust tests, editor suites, and formal-model checks.
+- `make tmux-ci` passed.
+- Post-install editor parity passed: 193 VS Code tests plus the native cross-editor simulation.
+- `make install-full` installed CLI/library `0.35.473`, JetBrains `0.2.503`, and VS Code `0.2.80`. Runtime processes were marked for safe idle-boundary handoff; none were forcibly recycled.
+
+The one-time remote observation found CI and the `v0.35.473` Release workflow still in progress; the GitHub release object was not yet available. Per release policy, I did not poll or wait for those asynchronous jobs.
 <!-- agent:boundary:e0f2b885 -->
 <!-- /agent:exchange -->
 
@@ -48,12 +86,12 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
-- Run Agent Doc on this file; then interrupt the Codex turn; agent-doc should detect if the turn is interrupted. I ran Compact Exchange and got an error. Compact Exchange should work even if a turn is running/interrupted.
+- Run Agent Doc on this file; then interrupt the Codex turn; agent-doc should detect if the turn is interrupted. I ran Compact Exchange and got an error. Compact Exchange should work even if a turn is running/interrupted. Run Agent Doc again caused the enqueued Compact Exchange to run.
 - #gh-fix https://github.com/btakita/agent-doc/issues/166
 - #gh-fix https://github.com/btakita/agent-doc/issues/169
 - #gh-fix https://github.com/btakita/agent-doc/issues/170
 - #gh-fix https://github.com/btakita/agent-doc/issues/171
-- release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

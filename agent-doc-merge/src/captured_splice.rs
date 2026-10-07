@@ -50,25 +50,17 @@ pub fn rebase(
     let current: Vec<char> = canonical.chars().collect();
     // Another editor observation can publish this same burst before recovery,
     // while canonical also advances elsewhere. Prove every net captured change
-    // against the same base rather than requiring whole-document equality.
-    let captured_changes = char_diff(&old, &captured_result);
-    let canonical_changes = char_diff(&old, &current);
-    if captured_changes
-        .iter()
-        .filter(|op| op.tag() != DiffTag::Equal)
-        .all(|captured| {
-            canonical_changes.iter().any(|observed| {
-                observed.tag() != DiffTag::Equal
-                    && observed.old_range() == captured.old_range()
-                    && current[observed.new_range()] == captured_result[captured.new_range()]
-            })
-        })
-    {
+    // against the same base rather than requiring whole-document equality. The
+    // containment helper also recognizes an insertion retained beside the same
+    // stable neighbour after the controller consumed the preceding queue head.
+    if canonical_contains_captured(base, canonical, batch)? {
         return Ok(CapturedSpliceBatch {
             edits: Vec::new(),
             resulting_text: canonical.to_owned(),
         });
     }
+    let captured_changes = char_diff(&old, &captured_result);
+    let canonical_changes = char_diff(&old, &current);
     // `#steerreplicachurn`: a captured change that touches a canonical change
     // is never translated splice by splice. Equal-span translation beside an
     // overlapping canonical insert is exactly how a burst canonical already
@@ -625,7 +617,7 @@ pub fn canonical_contains_captured(
     let current: Vec<char> = canonical.chars().collect();
     let captured_changes = char_diff(&old, &captured);
     let canonical_changes = char_diff(&old, &current);
-    Ok(captured_changes
+    let exact_range_containment = captured_changes
         .iter()
         .filter(|op| op.tag() != DiffTag::Equal)
         .all(|change| {
@@ -637,7 +629,65 @@ pub fn canonical_contains_captured(
                     && (observed_inserted.starts_with(inserted)
                         || observed_inserted.ends_with(inserted))
             })
+        });
+    if exact_range_containment {
+        return Ok(true);
+    }
+
+    // `#apiqueuedup`: queue consumption can delete the selected head immediately
+    // before an operator insertion. The insertion is then present in canonical
+    // beside the same queue-close marker, but its base offset moved, so the
+    // exact-range proof above misses it. A three-way line merge treated the two
+    // spellings as independent and emitted the prompt twice. Prove this narrow
+    // case by an unchanged neighbour: every net operator change must be a pure
+    // insertion found next to the same non-whitespace base prefix or suffix.
+    // This is deliberately not a document-wide substring/multiplicity heuristic;
+    // repeated text at another location remains distinct operator intent.
+    let non_equal: Vec<_> = captured_changes
+        .iter()
+        .filter(|op| op.tag() != DiffTag::Equal)
+        .collect();
+    Ok(!non_equal.is_empty()
+        && non_equal.iter().all(|change| {
+            change.old_range().is_empty()
+                && anchored_insertion_is_present(&old, &captured, &current, change)
         }))
+}
+
+const CONTAINMENT_ANCHOR_CHARS: usize = 32;
+
+fn anchored_insertion_is_present(
+    base: &[char],
+    captured: &[char],
+    canonical: &[char],
+    change: &DiffOp,
+) -> bool {
+    let inserted = &captured[change.new_range()];
+    if inserted.is_empty() {
+        return false;
+    }
+    let at = change.old_range().start;
+    let right_end = (at + CONTAINMENT_ANCHOR_CHARS).min(base.len());
+    let right = &base[at..right_end];
+    if anchor_is_meaningful(right) && contains_joined(canonical, inserted, right) {
+        return true;
+    }
+    let left_start = at.saturating_sub(CONTAINMENT_ANCHOR_CHARS);
+    let left = &base[left_start..at];
+    anchor_is_meaningful(left) && contains_joined(canonical, left, inserted)
+}
+
+fn anchor_is_meaningful(anchor: &[char]) -> bool {
+    anchor.iter().any(|ch| !ch.is_whitespace())
+}
+
+fn contains_joined(haystack: &[char], left: &[char], right: &[char]) -> bool {
+    let needle_len = left.len() + right.len();
+    needle_len <= haystack.len()
+        && haystack.windows(needle_len).any(|window| {
+            let (window_left, window_right) = window.split_at(left.len());
+            window_left == left && window_right == right
+        })
 }
 
 fn apply(text: &mut Vec<char>, edit: &CapturedSplice) -> Result<()> {
@@ -687,7 +737,10 @@ mod tests {
         let canonical = "<!-- agent:exchange -->\n*Compacted 004013*\nFix api.md issue\n```\n• Failed (exit 1) write --commit\n```\n\n### Re: infra.md — opus\n\nReplayed.\n<!-- /agent:exchange -->\n";
         let prefix = shadow.find("<!-- /agent:exchange").unwrap();
         let pasted = &buffer[prefix..buffer.len() - (shadow.len() - prefix)];
-        let edits = batch(shadow, vec![edit(shadow[..prefix].chars().count(), 0, pasted)]);
+        let edits = batch(
+            shadow,
+            vec![edit(shadow[..prefix].chars().count(), 0, pasted)],
+        );
         assert_eq!(edits.resulting_text, buffer);
         assert!(canonical_contains_captured(shadow, canonical, &edits).unwrap());
 
@@ -695,7 +748,10 @@ mod tests {
         let without_paste = canonical.replace("```\n• Failed (exit 1) write --commit\n```\n", "");
         assert!(!canonical_contains_captured(shadow, &without_paste, &edits).unwrap());
         // Control: a different operator edit at the same anchor is not contained.
-        let other = batch(shadow, vec![edit(shadow[..prefix].chars().count(), 0, "other text\n")]);
+        let other = batch(
+            shadow,
+            vec![edit(shadow[..prefix].chars().count(), 0, "other text\n")],
+        );
         assert!(!canonical_contains_captured(shadow, canonical, &other).unwrap());
         // Control: an edit elsewhere that canonical never saw is not contained.
         let elsewhere = batch(shadow, vec![edit(0, 0, "operator header\n")]);
@@ -805,7 +861,10 @@ mod tests {
             suffix += 1;
         }
         let insert: String = new[prefix..new.len() - suffix].iter().collect();
-        batch(base, vec![edit(prefix, old.len() - prefix - suffix, &insert)])
+        batch(
+            base,
+            vec![edit(prefix, old.len() - prefix - suffix, &insert)],
+        )
     }
 
     /// `#ambiguousholdforever2`: the fpe.md hold (2026-09-29). The buffer was
@@ -822,7 +881,8 @@ mod tests {
         let canonical = "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\nIncrease CPU first.\n60c81193 -->\n";
 
         assert!(
-            !canonical_contains_captured(shadow, canonical, &single_splice(shadow, buffer)).unwrap(),
+            !canonical_contains_captured(shadow, canonical, &single_splice(shadow, buffer))
+                .unwrap(),
             "the raw proof must reproduce the hold"
         );
 
@@ -831,11 +891,20 @@ mod tests {
             without_binary_owned_markers(buffer),
             without_binary_owned_markers(canonical),
         );
-        assert!(canonical_contains_captured(&shadow, &canonical, &single_splice(&shadow, &buffer)).unwrap());
+        assert!(
+            canonical_contains_captured(&shadow, &canonical, &single_splice(&shadow, &buffer))
+                .unwrap()
+        );
 
         // Control: normalization does not excuse an operator edit canonical lacks.
-        let unseen = buffer.replace("- PR #194 is merged. Continue.\n", "- typed while detached\n");
-        assert!(!canonical_contains_captured(&shadow, &canonical, &single_splice(&shadow, &unseen)).unwrap());
+        let unseen = buffer.replace(
+            "- PR #194 is merged. Continue.\n",
+            "- typed while detached\n",
+        );
+        assert!(
+            !canonical_contains_captured(&shadow, &canonical, &single_splice(&shadow, &unseen))
+                .unwrap()
+        );
     }
 
     /// `#replayafterack`: fpe.md 2026-09-29. The retained write's delta (the
@@ -849,7 +918,10 @@ mod tests {
         let cut = "<!-- agent:exchange -->\nprompt\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- slow?\n- PR #194 is merged.\n<!-- /agent:queue -->\n";
         assert!(current_contains_delta(base, target, cut));
         // Control: a cut without the response does not contain the delta.
-        let without = cut.replace("### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n", "");
+        let without = cut.replace(
+            "### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n",
+            "",
+        );
         assert!(!current_contains_delta(base, target, &without));
         // Control: a different response body under the same heading is not the delta.
         let other = cut.replace("Increase CPU first.", "Buy GPUs.");
@@ -1016,9 +1088,58 @@ mod tests {
     #[test]
     fn binary_owned_markers_are_normalized_but_operator_mentions_are_kept() {
         assert_eq!(
-            without_binary_owned_markers("a\n  <!-- agent:boundary:ab12 -->\n### Re: x (HEAD)\nb (HEAD)\n"),
+            without_binary_owned_markers(
+                "a\n  <!-- agent:boundary:ab12 -->\n### Re: x (HEAD)\nb (HEAD)\n"
+            ),
             "a\n### Re: x\nb (HEAD)\n"
         );
-        assert_eq!(without_binary_owned_markers("t\n<!-- agent:boundary:ab12 -->"), "t\n");
+        assert_eq!(
+            without_binary_owned_markers("t\n<!-- agent:boundary:ab12 -->"),
+            "t\n"
+        );
+    }
+
+    #[test]
+    fn queue_prompt_moved_by_consume_is_not_replayed_beside_itself() {
+        let old_prompt = "Is PR #666 merged into dev?";
+        let next_prompt = "Make another PR to merge #666 into `dev`.";
+        let base =
+            format!("exchange\n<!-- agent:queue go -->\n{old_prompt}\n<!-- /agent:queue -->\n");
+        let buffer = base.replace(old_prompt, &format!("{old_prompt}\n{next_prompt}"));
+        let canonical = format!(
+            "exchange\nanswer to old prompt\n<!-- agent:queue -->\n{next_prompt}\n<!-- /agent:queue -->\n"
+        );
+        let at = base.find("\n<!-- /agent:queue -->").unwrap();
+        let captured = batch(
+            &base,
+            vec![edit(
+                base[..at].chars().count(),
+                0,
+                &format!("\n{next_prompt}"),
+            )],
+        );
+
+        let line_merge = crate::conflict_reconcile::reconcile(&base, &buffer, &canonical, None)
+            .expect("line merge fixture should remain conflict-free");
+        assert_eq!(line_merge.conflicts, 0);
+        assert_eq!(line_merge.text.matches(next_prompt).count(), 2);
+
+        assert!(canonical_contains_captured(&base, &canonical, &captured).unwrap());
+        let rebased = rebase(&base, &canonical, &captured)
+            .expect("capture-aware rebase should recognize the moved prompt");
+        assert_eq!(rebased.resulting_text, canonical);
+        assert_eq!(rebased.resulting_text.matches(next_prompt).count(), 1);
+
+        let elsewhere = format!(
+            "{next_prompt}\nexchange\nanswer to old prompt\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
+        );
+        assert!(
+            !canonical_contains_captured(&base, &elsewhere, &captured).unwrap(),
+            "the same text away from its stable queue neighbour is not containment"
+        );
+        assert!(
+            rebase(&base, &elsewhere, &captured).is_err(),
+            "an unrelated equal string cannot consume operator intent"
+        );
     }
 }

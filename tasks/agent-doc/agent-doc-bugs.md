@@ -164,7 +164,69 @@ The fix now requires observation of the controller-owned exact retained-intent t
 - No response resend, recapture, finalize/write/repair, force-disk, recycle, reload, install, release, or publish action was performed.
 
 The source fix is on main after `v0.35.476`; it is not yet in a newly released binary.
-<!-- agent:boundary:16826575 -->
+> **Chat prompt (#chatprompt):** Also fix in subagent:   agent-doc repair tasks/frontend.md --resume-capture
+
+• Blocked by hook
+  └ agent-doc Stop hook retained the exact closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+frontend.md under its durable keyed retry. The latest assistant text was captured into the pending/capture ledger
+before auto-close. The hook could not finish the required commit boundary: serialized_atomic_write: retained editor-
+owned write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md before retrying live model
+reconciliation (intent_id=1791414584971796762-4-5465bf86491f4940ac4220b0bca4e12d8f1a4737005a0ea26f87e948eab4023d):
+serialized_atomic_write: retained the canonical write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+frontend.md in CRDT + Lazily state (intent_id=1791414583459198123-3-
+6ea1036129230c1e365f08713d727c085334107a71de3302e82bf95b1184465d), but the live editor delivery worker heartbeat is
+stale; disk was not written; recycle_status=request_skipped reason=editor_reregister_primary
+editor_replica_reregister=requested:1. No live editor registration covers this document, so delivery cannot converge on
+its own. If the response is already visible, run `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/
+tasks/frontend.md` to finish the terminal commit; otherwise open the document in an editor so its replica registers.
+The retained capture or projection is already durable and the same intent commits itself once delivery converges — this
+is a deferral, not a lost response. Run `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/
+tasks/frontend.md` once to observe the terminal state; do NOT re-send the response, force disk, or `admin recycle`,
+which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own either: `admin reload-lib` is
+the sanctioned recovery only when `agent-doc session-check` reports that the editor holding the document is not serving
+its replica, and then its remedy governs [recovery=await_editor_replica_no_disk_write]. The retained capture or
+projection is already durable and the same intent commits itself once delivery converges — this is a deferral, not a
+lost response. Run `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md` once
+to observe the terminal state; do NOT re-send the response, force disk, or `admin recycle`, which disturb the capture
+being awaited. Do not reach for `admin reload-lib` on your own either: `admin reload-lib` is the sanctioned recovery
+only when `agent-doc session-check` reports that the editor holding the document is not serving its replica, and then
+its remedy governs. The controller owns delivery, the editor-native save receipt, and the terminal commit. Do not
+reopen or recapture the cycle, rerun finalize/write/repair, force disk, recycle the supervisor, or resend the response.
+Wait for the existing controller state edge unless it explicitly reports `needs_operator`; do not send the final answer
+yet.
+
+• The closeout is durably retained and the controller now owns delivery. I’m checking its terminal state once as
+  instructed; I won’t resend, repair, force-write, or recycle anything.
+
+> **Queue prompt:** api.md had duplication issues in the queue item when run.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/178
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/179
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/180
+
+> **Queue prompt:** release + publish
+
+### Re: queue fixes and v0.35.477 release — gpt-5 · 2026-10-07T19:51-04:00
+
+Completed the full subagent batch and released `agent-doc v0.35.477`.
+
+- `api.md` duplication: fixed shifted pure-insertion containment during JetBrains reconnect without globally deduplicating intentional repeated text. Source commit `aaef57cd9`; integrated as `45b12230e`.
+- GH #178: matching live-buffer and post-publication retained replica now attaches through the settled path; divergent state remains fail-closed and unresolved holds are surfaced. Integrated as `48dcc0c5c`.
+- GH #179: explicit sends require positive live-owner evidence, and ownerless empty-preflight reclaim now runs independently of transient recycle state. Integrated as `1e75c2d66`.
+- GH #180: JetBrains installed/staged evidence is scoped to the actual live IDE plugins directory, destination-specific staging is respected, and permanent decline reasons are preserved. Integrated as `fff7bd2fc`.
+- `frontend.md`: the single permitted `session-check` returned `unclosed component: <!-- agent:queue --> without matching close` and authorized no recovery, so no repair/resend/force/recycle/reload was run. Logs proved the retained closeout later committed. The source fix makes stale-worker classification honor fresh CRDT relay recipients and removes duplicated Stop-hook remedy text. Integrated as `8fe2818f6`.
+
+Release results:
+
+- Release commit, `main`, and tag `v0.35.477`: `cf20ed9bcc575108c81d74cc553ce9032fff8183`.
+- `make check`: 9,652/9,652 passed, 141 skipped; all editor, bootstrap, documentation/version, Lean, and TLA gates passed.
+- `make tmux-ci`: passed.
+- Single `install-full`: passed in 426.150 seconds.
+- Installed CLI/library: `0.35.477`; JetBrains `0.2.505`; VS Code `0.2.80`.
+- One hosted snapshot: Release `37703925181`, PyPI `37703924773`, and CI `37703915232` were in progress; Book and Pages were successful. The GitHub Release object was not yet visible, and policy-required no further polling.
+<!-- agent:boundary:6d674bdd -->
 <!-- /agent:exchange -->
 
 <!--
@@ -172,7 +234,11 @@ The source fix is on main after `v0.35.476`; it is not yet in a newly released b
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- api.md had duplication issues in the queue item when run.
+- 🚧 api.md had duplication issues in the queue item when run.
+- #gh-fix https://github.com/btakita/agent-doc/issues/178
+- #gh-fix https://github.com/btakita/agent-doc/issues/179
+- #gh-fix https://github.com/btakita/agent-doc/issues/180
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

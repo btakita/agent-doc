@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -103,19 +102,25 @@ The actionable review is complete:
 The requested tsift Code Navigation marker block was removed from agent-doc’s `AGENTS.md`; navigation now relies on local/user-scoped tsift usage.
 
 Yes, the no-space error was caused specifically by `/tmp`’s separate 94 GB tmpfs reaching 100%, not by the main filesystem. `/home` still had about 1.3 TB free. Removing only generated Rust build artifacts restored roughly 58 GB in `/tmp`, and subsequent builds used dedicated target directories on `/home`.
-<!-- agent:boundary:1a9ad1d2 -->
+> **Chat prompt (#chatprompt):** Should we make /tmp bigger?
+
+### Re: `/tmp` sizing — gpt-5 · 2026-10-07T17:41-04:00
+
+Not yet. Keep the current 94 GiB limit for now.
+
+`/tmp` is a tmpfs with the default cap of roughly half of physical RAM. It currently uses 35.5 GiB and has 57.6 GiB free. The earlier failure was a burst of multiple generated build trees, while the root-backed filesystem still has about 1.2 TiB free. The host also already has about 124 GiB of its 186 GiB zram swap in use, so enlarging tmpfs would let builds consume still more RAM/swap and would mask the build-artifact lifecycle problem.
+
+The better first move is to keep large Cargo/Gradle targets and temporary worktrees on `/var/tmp` or another root-backed build directory, clean them at lifecycle boundaries, and reserve `/tmp` for genuinely short-lived data. If normal parallel builds still need more than 94 GiB after that, raise the cap cautiously to 128 GiB and monitor memory and swap pressure. The size setting is a ceiling rather than an up-front allocation, but it still increases the amount tmpfs may consume.
+
+No mount change was made.
+<!-- agent:boundary:1ab78e64 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #actionable-review
-- do [#releasepost475fixes]
-- do [#annotatehistorynoop]
-- do [#semanticcontinuationfalsepositive]
-- release + publish
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

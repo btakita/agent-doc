@@ -467,23 +467,40 @@ fn run_with_options_to_writer_in_pass(
                 "preflight_response_replay_dedup",
             )?;
         }
-        retain_preflight_controller_projection(
+        let retained = retain_preflight_controller_projection(
             file,
             &normalized,
             &content,
             "preflight_response_replay_dedup",
         )?;
         content = resolve_current_preflight_document(file, "after_response_replay_dedup")?;
+        let settlement =
+            agent_doc_document_realtime_io::classify_response_replay_repair_settlement_for_file(
+                file,
+                &normalized,
+                &content,
+                "preflight_response_replay_settlement",
+            )?;
         anyhow::ensure!(
-            content == normalized,
-            "response-replay semantic recovery did not converge live authority to the exact target (target_hash={}, observed_hash={})",
+            settlement
+                != agent_doc_document_realtime::write_policy::SemanticRepairSettlement::RepairStillPresent,
+            "response-replay semantic recovery remains pending in live authority (target_hash={}, observed_hash={})",
             agent_doc_hash::content_hash(&normalized),
             agent_doc_hash::content_hash(&content),
         );
+        if settlement
+            == agent_doc_document_realtime::write_policy::SemanticRepairSettlement::AdvancedCanonicalAuthority
+        {
+            agent_doc_document_realtime_io::reconcile_deferred_write_to_canonical_cut_if_needed(
+                file,
+                &content,
+                "preflight_response_replay_advanced_authority",
+            )?;
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "preflight_response_replay_duplication_self_healed file={} content_hash={}",
+                "preflight_response_replay_duplication_self_healed file={} content_hash={} settlement={settlement:?} projection_retained={retained}",
                 file.display(),
                 agent_doc_hash::content_hash(&content),
             ),

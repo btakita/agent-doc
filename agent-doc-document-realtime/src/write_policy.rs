@@ -97,6 +97,32 @@ pub const fn decide_crdt_write_completion(
     }
 }
 
+/// Semantic settlement of a repair effect after authority is observed again.
+///
+/// The repair target is a generation-fenced proposal, not permanent authority.
+/// A live editor may publish a newer operator cut after that proposal is
+/// applied. Exact byte equality therefore proves the common case, while a
+/// newer cut is equally settled when the semantic defect is absent from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticRepairSettlement {
+    ExactTarget,
+    AdvancedCanonicalAuthority,
+    RepairStillPresent,
+}
+
+pub const fn decide_semantic_repair_settlement(
+    exact_target_observed: bool,
+    observed_still_requires_repair: bool,
+) -> SemanticRepairSettlement {
+    if exact_target_observed {
+        SemanticRepairSettlement::ExactTarget
+    } else if observed_still_requires_repair {
+        SemanticRepairSettlement::RepairStillPresent
+    } else {
+        SemanticRepairSettlement::AdvancedCanonicalAuthority
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CrdtRetryAdmission {
     StartDrain,
@@ -2822,6 +2848,27 @@ pub fn classify_committed_historical_agent_doc_mutation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semantic_repair_settlement_accepts_a_newer_canonical_editor_cut() {
+        assert_eq!(
+            decide_semantic_repair_settlement(false, false),
+            SemanticRepairSettlement::AdvancedCanonicalAuthority,
+        );
+    }
+
+    #[test]
+    fn semantic_repair_settlement_retries_only_when_the_defect_remains() {
+        assert_eq!(
+            decide_semantic_repair_settlement(true, true),
+            SemanticRepairSettlement::ExactTarget,
+            "exact convergence wins even when stale classifier evidence says retry",
+        );
+        assert_eq!(
+            decide_semantic_repair_settlement(false, true),
+            SemanticRepairSettlement::RepairStillPresent,
+        );
+    }
 
     fn complete_session_projection(body: &str) -> String {
         format!(

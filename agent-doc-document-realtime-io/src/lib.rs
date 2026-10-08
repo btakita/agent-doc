@@ -4319,6 +4319,30 @@ pub fn normalize_recoverable_response_replay_duplication_for_file(
     Ok(normalize_recoverable_response_replay_duplication(content))
 }
 
+/// Classify one post-repair authority observation without treating a newer
+/// operator cut as a failed write. The file-aware normalizer is the semantic
+/// proof: only an observation that still normalizes to different bytes needs
+/// another repair effect.
+pub fn classify_response_replay_repair_settlement_for_file(
+    file: &Path,
+    target: &str,
+    observed: &str,
+    source: &str,
+) -> Result<agent_doc_document_realtime::write_policy::SemanticRepairSettlement> {
+    let observed_repair = normalize_recoverable_response_replay_duplication_for_file(
+        file, observed, source,
+    )?;
+    let observed_still_requires_repair = observed_repair
+        .as_deref()
+        .is_some_and(|repaired| repaired != observed);
+    Ok(
+        agent_doc_document_realtime::write_policy::decide_semantic_repair_settlement(
+            observed == target,
+            observed_still_requires_repair,
+        ),
+    )
+}
+
 /// Retire legacy whole-document reconnect intents only when the current
 /// authority is an exact repetition of a trusted, structurally valid target
 /// and every retained payload is itself only that target (or repetitions of
@@ -11045,6 +11069,46 @@ mod tests {
         assert!(normalized.contains("agent:boundary:latest"));
         assert!(normalized.contains("❯ operator prompt"));
         assert!(normalized.contains("Retained response."));
+    }
+
+    #[test]
+    fn response_replay_settlement_accepts_operator_edit_after_canonical_projection() {
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "<!-- agent:boundary:stale -->\n",
+            "### Re: retained — gpt-5\n\nRetained response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let normalized = normalize_recoverable_response_replay_duplication(duplicated)
+            .expect("duplicate response replay must produce a canonical target");
+        let advanced = normalized.replacen("operator prompt", "operator promt", 1);
+        let (_dir, file, _) = temp_doc(&advanced);
+
+        assert_eq!(
+            classify_response_replay_repair_settlement_for_file(
+                &file,
+                &normalized,
+                &advanced,
+                "test_advanced_response_replay_settlement",
+            )
+            .unwrap(),
+            agent_doc_document_realtime::write_policy::SemanticRepairSettlement::AdvancedCanonicalAuthority,
+            "a newer editor cut is authoritative once the replay defect is absent",
+        );
+        assert_eq!(
+            classify_response_replay_repair_settlement_for_file(
+                &file,
+                &normalized,
+                duplicated,
+                "test_pending_response_replay_settlement",
+            )
+            .unwrap(),
+            agent_doc_document_realtime::write_policy::SemanticRepairSettlement::RepairStillPresent,
+            "an authority cut that still has the duplicate boundary remains pending",
+        );
     }
 
     #[test]

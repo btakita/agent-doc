@@ -125,9 +125,16 @@ class CrdtReplicaForwarderTest {
      * a remote op landed).
      */
     private class FakeNode(private val openSucceeds: Boolean = true) : ReplicaNode {
+        data class LocalEdit(
+            val offset: Int,
+            val deleteLen: Int,
+            val insert: String,
+        )
+
         var opened = false
         var openedWith: ByteArray? = null
         val buffer = StringBuilder()
+        val localEdits = mutableListOf<LocalEdit>()
         var closed = false
         var textReads = 0
 
@@ -139,6 +146,7 @@ class CrdtReplicaForwarderTest {
         }
 
         override fun applyLocal(clientId: Long, offset: Int, deleteLen: Int, insert: String): Boolean {
+            localEdits.add(LocalEdit(offset, deleteLen, insert))
             val pos = offset.coerceIn(0, buffer.length)
             if (deleteLen > 0) buffer.delete(pos, (pos + deleteLen).coerceAtMost(buffer.length))
             buffer.insert(pos.coerceAtMost(buffer.length), insert)
@@ -501,6 +509,35 @@ class CrdtReplicaForwarderTest {
         assertEquals("BUFFER", node.text())
         assertEquals(1, transport.sentUpdates.size)
         assertEquals("BUFFER", String(transport.sentUpdates[0]))
+    }
+
+    @Test
+    fun `replacement alignment does not reauthor an unchanged queue item`() {
+        val queueItem = "Make another PR to merge #666 into `dev`."
+        val canonical =
+            """
+            <!-- agent:queue subagents priority -->
+            $queueItem
+            <!-- /agent:queue -->
+
+            <!-- agent:status -->
+            old
+            <!-- /agent:status -->
+            """.trimIndent()
+        val editor = canonical.replace("\nold\n", "\nnew\n")
+        val node = FakeNode()
+        val transport = CapturingTransport(bootstrap = canonical.toByteArray())
+        val fwd = CrdtReplicaForwarder("api.md", "intellij:replacement", node, transport)
+        assertTrue(fwd.register())
+
+        assertTrue(fwd.ensureEditorText(editor))
+
+        assertEquals(editor, node.text())
+        assertEquals(
+            listOf(FakeNode.LocalEdit(canonical.indexOf("old"), 3, "new")),
+            node.localEdits,
+        )
+        assertEquals(1, node.text()!!.split(queueItem).size - 1)
     }
 
     @Test

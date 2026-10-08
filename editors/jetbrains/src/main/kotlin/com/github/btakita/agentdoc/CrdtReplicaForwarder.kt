@@ -354,11 +354,35 @@ class CrdtReplicaForwarder(
             knownReplicaText = editorText
             return true
         }
-        val deleteLen = current.codePointCount(0, current.length)
+        // Keep alignment edits bounded to the bytes that actually differ. A
+        // replacement replica can be registered while queue consumption is
+        // projecting through another live generation. Re-authoring the whole
+        // document here used to tombstone and recreate unchanged operator queue
+        // text; a late same-lineage delta from the predecessor could then
+        // resurrect the original insertion beside the recreated one
+        // (`itemitem`). The exact one-splice diff preserves the same target text
+        // without assigning new CRDT identity to unchanged components.
+        val alignment = singleSpliceBatchUtil(current, editorText)
         val applyStarted = System.nanoTime()
-        if (!node.applyLocal(clientId, 0, deleteLen, editorText)) return false
+        for (edit in alignment.edits) {
+            if (
+                !node.applyLocal(
+                    clientId,
+                    edit.offsetCodePoints,
+                    edit.deleteCodePoints,
+                    edit.insert,
+                )
+            ) return false
+        }
         knownReplicaText = editorText
-        logSlow("native.applyLocal", applyStarted, details = "reason=ensureEditorText delete_cp=$deleteLen insert_chars=${editorText.length}")
+        logSlow(
+            "native.applyLocal",
+            applyStarted,
+            details =
+                "reason=ensureEditorText splices=${alignment.edits.size} " +
+                    "delete_cp=${alignment.edits.sumOf { it.deleteCodePoints }} " +
+                    "insert_chars=${alignment.edits.sumOf { it.insert.length }}",
+        )
         // Incremental from the bootstrap frontier. Callers may only use this
         // after proving the editor shadow matches the controller bootstrap.
         val publish = publishIncremental("ensure-editor-text")

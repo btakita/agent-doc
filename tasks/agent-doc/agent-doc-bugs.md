@@ -196,6 +196,14 @@ Completed: PR #194 merged as `8b90b77fa9a4abe9087e22c1d03c3981c9b82f76`; its ful
 PR #191 contains the editor-authority/replay-settlement drift fix and is still in CI. PR #193 and PR #195 have review-driven race remediations in isolated full gates. The infra layout-convergence fix is implemented and awaiting its own uncontended gate. Issue #188 remains open until PR #191 proves the second half of that failure chain.
 
 No release was published in this cycle. The remaining queue heads are claimed or waiting for a free subagent slot; they are intentionally left open. The exchange is over the size warning threshold, but the active queue is not being stalled for compaction.
+
+### Re: tmux pane title document identity — gpt-5 · 2026-10-08T14:55:20-04:00
+
+> **Queue prompt:** Make the tmux pane title contain the document name in all states.
+
+Completed on current `main` by commit `e23876c3d` (`fix: keep document name in tmux pane titles`). The shared title policy and registered-document lookup cover all four controlled states: idle (`sample.md`), active (`⟳ sample.md — turn in progress`), stale (`⚠ STALE SUPERVISOR — sample.md`), and stale-active (`⚠ STALE SUPERVISOR — sample.md — turn in progress`).
+
+Focused verification passed 16 tests with zero failures: the 14 `agent-doc-turn` turn-status tests, `registered_document_name_is_resolved_by_pane`, and `stale_title_marker_is_recognised_in_every_title_shape`. The only tmux `select-pane -T` producers are routed through this policy. The current-main worktree was clean, so no duplicate commit or no-op PR was created.
 <!-- agent:boundary:72f38ede -->
 <!-- /agent:exchange -->
 

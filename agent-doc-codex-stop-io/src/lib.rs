@@ -2219,7 +2219,7 @@ fn auto_queue_continuation_response(
     Ok(Some(StopResponse::Block {
         decision: "block",
         reason: format!(
-            "agent-doc Stop hook kept an active `agent:queue auto` moving for {disp}. The next queue prompt is {prompt:?}. {instruction}",
+            "Queue continuation, not an error: agent-doc kept the active `agent:queue auto` moving for {disp}. Codex labels every Stop continuation `Blocked by hook`; here that label means the next queue item is being handed back to this turn. The next queue prompt is {prompt:?}. {instruction}",
             disp = file.display(),
             prompt = prompt,
             instruction = {
@@ -5874,6 +5874,10 @@ Reviewed the gated items.\n\
 
         match response {
             StopResponse::Block { reason, .. } => {
+                assert!(
+                    reason.starts_with("Queue continuation, not an error:"),
+                    "Codex renders every Stop continuation as `Blocked by hook`; the payload must immediately disambiguate a healthy queue continuation: {reason}"
+                );
                 assert!(reason.contains("agent:queue auto"), "{reason}");
                 assert!(reason.contains("do #fix1"), "{reason}");
                 assert!(reason.contains("send the final answer"), "{reason}");

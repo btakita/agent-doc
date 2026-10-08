@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -45,12 +46,40 @@ Compacted content:
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#fixsubagent]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/181
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/182
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/183
+- #gh-fix https://github.com/btakita/agent-doc/issues/184
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#fixsubagent] Fix in a subagent:
+  ```
+  • Blocked by hook
+  └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
+  dev/tasks/frontend.md. [session-check] INTERRUPTED: binary-owned captured closeout for `/home/brian/work/btakita/agent-
+  loop/src/haiven-dev/tasks/frontend.md` remains pending: response_captured: captured response is waiting for exact
+  authority/disk convergence before write-applied. The same capture is durable; do not issue another closeout payload and
+  do not force disk. Retry only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+  frontend.md`. The latest assistant text was captured into the pending/capture ledger before auto-close. The hook could
+  not finish the required commit boundary: refused editor IPC for /home/brian/work/btakita/agent-loop/src/haiven-dev/
+  tasks/frontend.md because reliable document liveness has no matching editor registration (reliable_editor_live=true,
+  registration_available=false); refresh or update the editor integration before retrying closeout. The retained capture
+  or projection is already durable and this exact retained intent commits itself once delivery converges — this is a
+  deferral, not a lost response. Wait for its controller-owned terminal state edge; do not use the document's current-
+  cycle status as proof because queue continuation can advance to a different cycle. Do NOT re-send the response, force
+  disk, or `admin recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own
+  either: `admin reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor
+  holding the document is not serving its replica, and then its remedy governs. Do not send the final answer yet. If the
+  response is missing from the document, run `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+  frontend.md` first. Then finish the commit boundary for this turn and end with `agent-doc session-check /home/brian/
+  work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md`.
+  ```
 <!-- /agent:backlog -->
 
 ## Review

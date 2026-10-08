@@ -2722,7 +2722,16 @@ fn run_command_inner_within_pass(
                 );
                 return Ok(());
             }
-            return Err(error);
+            if !await_settled_pending_only_mutation(
+                file,
+                &error,
+                options.force_disk,
+                &options.pending_done,
+                &options.pending_gate,
+                &pending_kept_open_ids,
+            )? {
+                return Err(error);
+            }
         }
         complete_queue_prompts_for_pending_only_done(
             file,
@@ -3545,6 +3554,80 @@ fn absorb_retained_pending_only_mutation(
         }
         _ => Ok(None),
     }
+}
+
+/// Finish a pending-only mutation whose retained intent settled between the
+/// write refusal and the synchronous error handler's retained-intent lookup.
+///
+/// The delivery-projection token is necessary but not sufficient: this path
+/// marks the exact tracked-work envelope as retained, awaits controller delivery
+/// convergence, and reuses the ordinary tracked-work landing witness before it
+/// allows the commit tail to continue. A rejecting or unserved editor never
+/// carries the converging-projection token and remains refused.
+fn await_settled_pending_only_mutation(
+    file: &Path,
+    error: &anyhow::Error,
+    force_disk: bool,
+    pending_done: &[String],
+    pending_gate: &[String],
+    pending_kept_open_ids: &[String],
+) -> Result<bool> {
+    let message = format!("{error:#}");
+    // This is only the settled-before-inspection race. A retained intent that
+    // is still observable belongs to the ordinary absorption/refusal path;
+    // treating it as already settled would broaden the narrow token into an
+    // unconditional wait and hide a real ownership failure.
+    if agent_doc_document_realtime_io::pending_document_write(file).is_some() {
+        return Ok(false);
+    }
+    let response_committed = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .ok()
+        .flatten()
+        .is_some_and(|state| !state.phase.is_open());
+    if agent_doc_turn::write_ownership::pending_only_retention(
+        &message,
+        response_committed,
+        false,
+        false,
+    ) != agent_doc_turn::write_ownership::PendingOnlyRetention::AwaitSettledDelivery
+    {
+        return Ok(false);
+    }
+
+    agent_doc_cycle_state_io::mark_tracked_work_mutations_retained(file)
+        .context("failed to record settled pending-only tracked-work delivery")?;
+    await_deferred_tracked_work_commit(file, force_disk)?;
+    finish_settled_pending_only_mutation(
+        file,
+        pending_done,
+        pending_gate,
+        pending_kept_open_ids,
+    )?;
+    Ok(true)
+}
+
+/// Record the structured outcome only after the shared delivery/landing witness
+/// has admitted a pending-only envelope that settled during error handling.
+fn finish_settled_pending_only_mutation(
+    file: &Path,
+    pending_done: &[String],
+    pending_gate: &[String],
+    pending_kept_open_ids: &[String],
+) -> Result<()> {
+    record_landed_retained_tracked_work_outcomes(
+        file,
+        pending_done,
+        pending_gate,
+        pending_kept_open_ids,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "pending_only_mutation_settled_before_error_inspection file={} response_committed=true recovery=continue_commit_after_delivery_and_landing_proof",
+            file.display(),
+        ),
+    );
+    Ok(())
 }
 
 fn guard_historical_retained_write_before_new_capture(

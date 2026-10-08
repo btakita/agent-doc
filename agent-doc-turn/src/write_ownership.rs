@@ -671,6 +671,11 @@ pub enum PendingOnlyRetention {
     /// write cannot add anything, so the write reports the retention and exits
     /// successfully.
     Absorbed,
+    /// The retained intent already settled before the synchronous error
+    /// handler inspected it. The refusal token proves this was a converging
+    /// delivery projection, but the caller must still prove delivery and the
+    /// tracked-work landing before it continues to commit.
+    AwaitSettledDelivery,
     /// Not proven absorbable: keep the refusal and its derived remedy.
     Refused,
 }
@@ -699,6 +704,12 @@ pub fn pending_only_retention(
         && continuation_recorded
     {
         PendingOnlyRetention::Absorbed
+    } else if is_retained_delivery_projection_pending(message)
+        && response_committed
+        && !own_intent_retained
+        && !continuation_recorded
+    {
+        PendingOnlyRetention::AwaitSettledDelivery
     } else {
         PendingOnlyRetention::Refused
     }
@@ -1968,5 +1979,17 @@ mod tests {
         let notice = pending_only_absorbed_notice("plan.md", "abc");
         assert!(notice.contains("agent-doc session-check plan.md"), "{notice}");
         assert!(!notice.contains("deferral, not a lost response"), "{notice}");
+    }
+
+    #[test]
+    fn a_pending_only_retention_that_settled_before_inspection_is_awaited() {
+        let pending = format!(
+            "visible write deferred [{AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN}] \
+             [{RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN}]"
+        );
+        assert_eq!(
+            pending_only_retention(&pending, true, false, false),
+            PendingOnlyRetention::AwaitSettledDelivery,
+        );
     }
 }

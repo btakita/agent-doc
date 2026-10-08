@@ -42921,8 +42921,7 @@ mod tests {
     }
 
     fn reliable_sync_env_lock() -> parking_lot::MutexGuard<'static, ()> {
-        static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-        LOCK.lock()
+        super::super::reliable_sync_test_env_lock()
     }
 
     fn reliable_sync_open_request(document_hash: &str) -> ControllerRequest {

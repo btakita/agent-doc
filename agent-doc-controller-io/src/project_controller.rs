@@ -10440,6 +10440,12 @@ pub(crate) fn write_preparing_bootstrap(
 }
 
 #[cfg(test)]
+fn reliable_sync_test_env_lock() -> parking_lot::MutexGuard<'static, ()> {
+    static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    LOCK.lock()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     // `rusqlite` is a dev-dependency: these tests open the controller state DB
@@ -12367,36 +12373,87 @@ mod tests {
         }
     }
 
-    fn seed_reliable_sync_editor_open(doc: &std::path::Path, tag: &str) {
+    struct ReliableSyncOpenFixture {
+        document_hash: String,
+        pid: u64,
+        tag: String,
+    }
+
+    impl Drop for ReliableSyncOpenFixture {
+        fn drop(&mut self) {
+            agent_doc_reliable_sync_io::global_liveness_plane()
+                .lock()
+                .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Close {
+                    document_hash: self.document_hash.clone(),
+                    pid: self.pid,
+                    observed_tags: vec![self.tag.clone()],
+                }]);
+        }
+    }
+
+    fn seed_reliable_sync_editor_open(
+        doc: &std::path::Path,
+        tag: &str,
+    ) -> ReliableSyncOpenFixture {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        // The reliable-sync plane is process-global, while Rust tests execute
+        // concurrently in one process. A test that exercises crash handling may
+        // correctly mark the binary's real pid dead; reusing that pid here then
+        // makes unrelated document-model tests depend on scheduling order.
+        static NEXT_FIXTURE_PID: AtomicU64 = AtomicU64::new(2_200_000_000);
+        let fixture_pid = NEXT_FIXTURE_PID.fetch_add(1, Ordering::Relaxed);
         let document_hash = agent_doc_hash::document_id_for_path(doc);
+        let tag = format!("{tag}:{}", doc.display());
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
-                document_hash,
-                pid: std::process::id().into(),
-                tag: format!("{tag}:{}", doc.display()),
-            }]);
+            .restore_liveness(&[
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                    document_hash: document_hash.clone(),
+                    pid: fixture_pid,
+                    tag: tag.clone(),
+                },
+                // The synthetic pid is scoped to this fixture. Publish explicit
+                // positive liveness at a terminal test stamp so the real
+                // process-exit watcher cannot race the intended editor-open
+                // state by observing that no such OS process exists.
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Alive {
+                    pid: fixture_pid,
+                    value: true,
+                    stamp: lazily::WireStamp {
+                        wall_time: u64::MAX,
+                        logical: fixture_pid,
+                        peer: fixture_pid,
+                    },
+                },
+            ]);
+        ReliableSyncOpenFixture {
+            document_hash,
+            pid: fixture_pid,
+            tag,
+        }
     }
 
     #[test]
     fn crdt_projection_is_unavailable_without_controller_model() {
+        let _liveness = super::reliable_sync_test_env_lock();
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/editor.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
-        seed_reliable_sync_editor_open(&doc, "jetbrains-test-deferred");
+        let _editor_open = seed_reliable_sync_editor_open(&doc, "jetbrains-test-deferred");
         let mut record = actor_record(&document_id, "%41", "@1");
         record.state = agent_doc_controller::actor::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
         let summary =
             checkpoint_route_owned_documents_for_project(dir.path(), "test_recycle").unwrap();
-        assert_eq!(summary.failed, 0);
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert_eq!(summary.failed, 0, "checkpoint summary={summary:?}\n{ops_log}");
         assert_eq!(summary.detached, 0);
         assert_eq!(summary.skipped, 1);
-        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("controller_crdt_checkpoint"));
         assert!(ops_log.contains("status=unavailable"));
         assert!(ops_log.contains("recovery=retained_lazily_projection"));
@@ -12405,13 +12462,14 @@ mod tests {
 
     #[test]
     fn recycle_controller_continues_when_projection_is_unavailable() {
+        let _liveness = super::reliable_sync_test_env_lock();
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/recycle-editor.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
-        seed_reliable_sync_editor_open(&doc, "jetbrains-test-recycle");
+        let _editor_open = seed_reliable_sync_editor_open(&doc, "jetbrains-test-recycle");
         let mut record = actor_record(&document_id, "%41", "@1");
         record.state = agent_doc_controller::actor::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
@@ -12428,13 +12486,14 @@ mod tests {
 
     #[test]
     fn crdt_checkpoint_uses_controller_document_model_directly() {
+        let _liveness = super::reliable_sync_test_env_lock();
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/editor-current.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
-        seed_reliable_sync_editor_open(&doc, "jetbrains-test-current");
+        let _editor_open = seed_reliable_sync_editor_open(&doc, "jetbrains-test-current");
         agent_doc_crdt_relay_io::register_replica_for_file(&doc, "intellij:test")
             .unwrap()
             .expect("editor-attached register should allocate model");

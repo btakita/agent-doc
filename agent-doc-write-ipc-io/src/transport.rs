@@ -1180,6 +1180,15 @@ mod gh131nonipc_tests {
     fn exact_rejected_registration_is_not_sent_the_retained_payload_again() {
         use agent_doc_reliable_sync_io::liveness::{EditorRegistration, LivenessOp};
 
+        struct TestEditorProcess(std::process::Child);
+
+        impl Drop for TestEditorProcess {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let file = dir.path().join("rejected.md");
@@ -1187,7 +1196,16 @@ mod gh131nonipc_tests {
         std::fs::write(&file, content).unwrap();
         let canonical = file.canonicalize().unwrap();
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-        let pid = std::process::id();
+        // Registration admission uses real OS liveness. Give this fixture its
+        // own process rather than borrowing the test binary's shared pid, which
+        // another concurrent liveness test may legitimately mark dead.
+        let editor_process = TestEditorProcess(
+            std::process::Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .expect("spawn isolated editor-liveness fixture"),
+        );
+        let pid = editor_process.0.id();
         let editor_id = format!("jetbrains-{pid}-rejected-generation");
         let registration = EditorRegistration {
             document_hash: document_hash.clone(),

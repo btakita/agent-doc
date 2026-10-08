@@ -313,10 +313,21 @@ pub fn reliable_sync_editor_registrations_for_file(
 ) -> Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration> {
     let document_hash = agent_doc_hash::document_id_for_path(file);
     let _ = reliable_sync_editor_live_for_file(file);
-    agent_doc_reliable_sync_io::global_liveness_plane()
+    let registrations = agent_doc_reliable_sync_io::global_liveness_plane()
         .lock()
         .projection()
-        .live_registrations(&document_hash)
+        .live_registrations(&document_hash);
+    // A rejection fences one immutable endpoint generation, not a document or
+    // editor process forever. Retire fences as soon as the reliable liveness
+    // projection closes or supersedes that generation. Besides bounding the
+    // process-local cache, this ensures a controller that observes a plugin
+    // re-registration can admit it without retaining stale negative evidence.
+    rejected_editor_endpoint_quarantines()
+        .lock()
+        .retain(|quarantined| {
+            quarantined.document_hash != document_hash || registrations.contains(quarantined)
+        });
+    registrations
 }
 
 /// Number of relay memberships currently attached to `file` in this controller.
@@ -6178,6 +6189,34 @@ mod tests {
         assert!(!rejected_editor_endpoint_is_quarantined(
             &replacement_registration
         ));
+    }
+
+    #[test]
+    fn newer_liveness_generation_retires_the_rejected_generation_fence() {
+        let _guard = rejected_quarantine_test_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (_dir, doc) = temp_doc("rejected-generation-fence-lifecycle.md");
+        let editor_pid = 2_100_000_005;
+        let editor_id = format!("jetbrains-{editor_pid}-fence-lifecycle");
+        let rejected = seed_rejected_endpoint_fixture(&doc, &editor_id, editor_pid, 30);
+
+        assert_eq!(
+            quarantine_rejected_editor_endpoint(&doc, &rejected).unwrap(),
+            RejectedEndpointQuarantine::Quarantined { replicas: 0 }
+        );
+        assert!(rejected_editor_endpoint_is_quarantined(&rejected));
+
+        let replacement = seed_rejected_endpoint_fixture(&doc, &editor_id, editor_pid, 31);
+        assert_eq!(
+            reliable_sync_editor_registrations_for_file(&doc),
+            vec![replacement.clone()]
+        );
+        assert!(
+            !rejected_editor_endpoint_is_quarantined(&rejected),
+            "observing a newer live generation must retire stale rejection state"
+        );
+        assert!(!rejected_editor_endpoint_is_quarantined(&replacement));
     }
 
     #[test]

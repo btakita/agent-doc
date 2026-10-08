@@ -423,7 +423,7 @@ mod tests {
             .expect("focused component-attr policy should feed a preflight warning");
         assert_eq!(warning.code, "misplaced_component_attr");
         assert!(warning.message.starts_with("session.md: "));
-        assert!(warning.message.contains("queue-only"));
+        assert!(warning.message.contains("prompt-component"));
         assert!(warning.message.contains("no mutation"));
     }
 

@@ -1288,7 +1288,34 @@ pub fn start_preflight(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
-    start_preflight_with_task(file, snapshot_content, file_content, None, None)
+    start_preflight_with_task_and_queue_selection_authority(
+        file,
+        snapshot_content,
+        file_content,
+        None,
+        None,
+        QueueSelectionAuthority::LegacyUnknown,
+    )
+}
+
+/// Open a closeout-only cycle whose queue selection is authoritatively empty.
+///
+/// Unlike a normal preflight, this producer has no queue-selection pass. Stamp
+/// that fact in the opening checkpoint itself so no observable intermediate
+/// `LegacyUnknown` cycle can fall back to transient visible queue markers.
+pub fn start_out_of_band_closeout_preflight(
+    file: &Path,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<CycleState> {
+    start_preflight_with_task_and_queue_selection_authority(
+        file,
+        snapshot_content,
+        file_content,
+        None,
+        None,
+        QueueSelectionAuthority::OutOfBandCloseout,
+    )
 }
 
 /// (#reentrant-finalize Phase 5) Start preflight with optional queue task
@@ -1302,6 +1329,45 @@ pub fn start_preflight_with_task(
     file_content: Option<&str>,
     queue_task_id: Option<&str>,
     turn_id: Option<&str>,
+) -> Result<CycleState> {
+    start_preflight_with_task_and_queue_selection_authority(
+        file,
+        snapshot_content,
+        file_content,
+        queue_task_id,
+        turn_id,
+        QueueSelectionAuthority::LegacyUnknown,
+    )
+}
+
+fn start_preflight_with_task_and_queue_selection_authority(
+    file: &Path,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    queue_task_id: Option<&str>,
+    turn_id: Option<&str>,
+    queue_selection_authority: QueueSelectionAuthority,
+) -> Result<CycleState> {
+    start_preflight_with_task_queue_selection_and_after_checkpoint(
+        file,
+        snapshot_content,
+        file_content,
+        queue_task_id,
+        turn_id,
+        queue_selection_authority,
+        || {},
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_preflight_with_task_queue_selection_and_after_checkpoint(
+    file: &Path,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    queue_task_id: Option<&str>,
+    turn_id: Option<&str>,
+    queue_selection_authority: QueueSelectionAuthority,
+    after_checkpoint: impl FnOnce(),
 ) -> Result<CycleState> {
     let now = now_secs();
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
@@ -1394,7 +1460,7 @@ pub fn start_preflight_with_task(
             .map(agent_doc_queue::queue_heads::active_free_text_queue_heads)
             .unwrap_or_default(),
         selected_free_text_queue_heads: Vec::new(),
-        queue_selection_authority: QueueSelectionAuthority::LegacyUnknown,
+        queue_selection_authority,
         queue_selection_preempted: false,
         // A re-entrant preflight of the same open cycle keeps the chat prompts
         // the first admission carried; the hook ledger was cleared by then.
@@ -1415,6 +1481,7 @@ pub fn start_preflight_with_task(
         projected_in_progress_queue_heads: carried_projected_in_progress_queue_heads,
     };
     save(file, &state)?;
+    after_checkpoint();
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::PreflightStarted)?;
     append_phase_event_to_session_log(file, &state, file_content);
     Ok(state)
@@ -1476,24 +1543,6 @@ pub fn record_selected_free_text_queue_heads(
     {
         state.selected_free_text_queue_heads = normalized;
         state.queue_selection_authority = QueueSelectionAuthority::Preflight;
-        state.updated_at = now_secs();
-        save(file, &state)?;
-    }
-    Ok(Some(state))
-}
-
-/// Record that an out-of-band closeout opened a cycle without selecting queue
-/// work. This is intentionally distinct from `record_selected_*`: there was no
-/// preflight selection pass whose absence closeout may fill from editor UI.
-pub fn record_empty_out_of_band_queue_selection(file: &Path) -> Result<Option<CycleState>> {
-    let Some(mut state) = load(file)? else {
-        return Ok(None);
-    };
-    if !state.selected_free_text_queue_heads.is_empty()
-        || state.queue_selection_authority != QueueSelectionAuthority::OutOfBandCloseout
-    {
-        state.selected_free_text_queue_heads.clear();
-        state.queue_selection_authority = QueueSelectionAuthority::OutOfBandCloseout;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -5057,7 +5106,7 @@ mod tests {
     }
 
     #[test]
-    fn queue_selection_authority_distinguishes_legacy_from_authoritative_empty() {
+    fn queue_selection_authority_distinguishes_legacy_from_atomic_out_of_band_empty() {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
@@ -5077,15 +5126,70 @@ mod tests {
         );
         assert!(selected.selected_free_text_queue_heads.is_empty());
 
-        record_selected_free_text_queue_heads(&doc, &["stale head".to_string()]).unwrap();
-        let out_of_band = record_empty_out_of_band_queue_selection(&doc)
-            .unwrap()
-            .unwrap();
+        mark_committed(&doc, "commit", Some("body"), Some("body")).unwrap();
+        let out_of_band =
+            start_out_of_band_closeout_preflight(&doc, Some("body"), Some("body")).unwrap();
         assert_eq!(
             out_of_band.queue_selection_authority,
             QueueSelectionAuthority::OutOfBandCloseout
         );
         assert!(out_of_band.selected_free_text_queue_heads.is_empty());
+    }
+
+    #[test]
+    fn real_preflight_selection_after_out_of_band_open_is_not_cleared_or_reclassified() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        let checkpoint = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let resume = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writer_checkpoint = checkpoint.clone();
+        let writer_resume = resume.clone();
+        let writer_doc = doc.clone();
+        let writer = std::thread::spawn(move || {
+            start_preflight_with_task_queue_selection_and_after_checkpoint(
+                &writer_doc,
+                Some("body"),
+                Some("body"),
+                None,
+                None,
+                QueueSelectionAuthority::OutOfBandCloseout,
+                || {
+                    writer_checkpoint.wait();
+                    writer_resume.wait();
+                },
+            )
+            .unwrap()
+        });
+
+        // Pause the out-of-band producer after its single opening checkpoint.
+        // A real preflight now re-enters the cycle and records its selected cut
+        // before the first producer returns. Resuming it must not perform a
+        // second blind write that clears or reclassifies that newer selection.
+        checkpoint.wait();
+        let real = start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        let selected =
+            record_selected_free_text_queue_heads(&doc, &["run the real queue head".to_string()])
+                .unwrap()
+                .unwrap();
+        resume.wait();
+        let out_of_band = writer.join().expect("out-of-band preflight writer");
+        assert_eq!(real.cycle_id, out_of_band.cycle_id);
+        assert_eq!(
+            out_of_band.queue_selection_authority,
+            QueueSelectionAuthority::OutOfBandCloseout,
+            "the opening checkpoint itself must carry out-of-band authority",
+        );
+        assert_eq!(
+            selected.queue_selection_authority,
+            QueueSelectionAuthority::Preflight
+        );
+        assert_eq!(
+            selected.selected_free_text_queue_heads,
+            vec!["run the real queue head".to_string()]
+        );
+        assert_eq!(load(&doc).unwrap().unwrap(), selected);
     }
 
     #[test]

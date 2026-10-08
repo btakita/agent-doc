@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn ff_only_push_advances_only_the_configured_upstream_branch() {
         let remote_dir = tempfile::TempDir::new().unwrap();
-        git(remote_dir.path(), &["init", "--bare"]);
+        git(remote_dir.path(), &["init", "--bare", "-b", "main"]);
         let local_dir = tempfile::TempDir::new().unwrap();
         init_repo(local_dir.path());
         git(
@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn rejected_non_fast_forward_is_advisory_and_never_rewrites_remote() {
         let remote_dir = tempfile::TempDir::new().unwrap();
-        git(remote_dir.path(), &["init", "--bare"]);
+        git(remote_dir.path(), &["init", "--bare", "-b", "main"]);
         let local_dir = tempfile::TempDir::new().unwrap();
         init_repo(local_dir.path());
         git(

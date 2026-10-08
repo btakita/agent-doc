@@ -170,6 +170,20 @@ The sdk.md current markers are drifted from the actual work state. Same with thi
 - In https://github.com/haiven-dev/haiven-tools/pull/2, describe what Mise is and how it will be used. Add docs which includes installing and usage. Copy the haiven-contracts pin logic from haiven-contracts. This will be the first tool. Setup .mise.toml which includes Python 3.14 and other dependencies.
 - 🚧 After a successful test of [#testhttpsgithub], squash merge the entire https://github.com/haiven-dev/haiven-sdk/pull/57 stack
 ```
+
+### Re: GH #185 remote replacement column slot — gpt-6.1-sol · 2026-10-08T12:30-04:00
+
+> **Queue prompt:** Make the tmux pane title contain the document name in all states.
+
+**Deferred:** This remains queued for its dedicated implementation cycle; this closeout is scoped only to GH #185.
+
+> **Queue prompt:** release + publish
+
+**Deferred:** This remains queued until the outstanding release-bound fixes finish; this closeout is scoped only to GH #185.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/185
+
+Completed and closed GitHub issue #185. The fix is commit `422c4847522d88ed5ad0e93050a66b80303297fe`, included in v0.35.479: one-for-one remote editor replacements inherit the dropped document's column slot, retained ordering is no longer mislabeled as editor geometry, and tmux preserves that upstream order. Focused editor-surface and tmux regressions passed, the JetBrains `LayoutDetectorTest` and `SyncLayoutActionTest` classes passed, and CI run 37746172117 succeeded at current `origin/main`.
 <!-- agent:boundary:72f38ede -->
 <!-- /agent:exchange -->
 
@@ -181,7 +195,7 @@ The sdk.md current markers are drifted from the actual work state. Same with thi
 - ~~do [#correspondingsubagentspr]~~
 - 🚧 do [#possibletellclaude]
 - 🚧 Make the tmux pane title contain the document name in all states.
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/185
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/185~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/186
 - 🚧 release + publish
 - #gh-fix https://github.com/btakita/agent-doc/issues/187

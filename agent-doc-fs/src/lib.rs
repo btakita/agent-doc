@@ -212,8 +212,9 @@ pub struct BinaryBuild {
     pub inode: u64,
     /// Modification time in nanoseconds since the Unix epoch, when readable.
     pub modified_nanos: Option<u128>,
-    /// `/proc/<pid>/exe` names a file that was unlinked — the bytes this
-    /// process runs are no longer on disk at that path.
+    /// `/proc/<pid>/exe` resolves to an inode with no remaining links (or names
+    /// it with the compatible ` (deleted)` suffix) — the bytes this process
+    /// runs are no longer on disk at that path.
     pub unlinked: bool,
 }
 
@@ -223,6 +224,15 @@ fn modified_nanos(meta: &std::fs::Metadata) -> Option<u128> {
         .duration_since(std::time::UNIX_EPOCH)
         .ok()
         .map(|elapsed| elapsed.as_nanos())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_exe_is_unlinked(target: Option<&Path>, link_count: u64) -> bool {
+    // procfs normally annotates an unlinked executable with ` (deleted)`, but
+    // that presentation is not guaranteed across every backing filesystem.
+    // The mapped inode's zero link count is the kernel-level identity proof.
+    link_count == 0
+        || target.is_some_and(|target| target.to_string_lossy().ends_with(" (deleted)"))
 }
 
 /// Build identity of the executable at `path`.
@@ -255,9 +265,8 @@ pub fn running_exe_build_for_pid(pid: u32) -> Option<BinaryBuild> {
 
         let exe = format!("/proc/{pid}/exe");
         let meta = std::fs::metadata(&exe).ok()?;
-        let unlinked = std::fs::read_link(&exe)
-            .map(|target| target.to_string_lossy().ends_with(" (deleted)"))
-            .unwrap_or(false);
+        let target = std::fs::read_link(&exe).ok();
+        let unlinked = linux_exe_is_unlinked(target.as_deref(), meta.nlink());
         Some(BinaryBuild {
             inode: meta.ino(),
             modified_nanos: modified_nanos(&meta),
@@ -735,6 +744,24 @@ mod tests {
             running_exe_inode_for_pid(std::process::id()),
             Some(expected)
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_exe_unlinked_detection_uses_inode_link_count_as_primary_proof() {
+        assert!(crate::linux_exe_is_unlinked(
+            Some(Path::new("/tmp/agent-doc")),
+            0
+        ));
+        assert!(crate::linux_exe_is_unlinked(
+            Some(Path::new("/tmp/agent-doc (deleted)")),
+            1
+        ));
+        assert!(!crate::linux_exe_is_unlinked(
+            Some(Path::new("/tmp/agent-doc")),
+            1
+        ));
+        assert!(!crate::linux_exe_is_unlinked(None, 1));
     }
 
     #[test]

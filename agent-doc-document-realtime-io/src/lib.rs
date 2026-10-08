@@ -271,8 +271,8 @@ fn retained_refusal(file: &Path, message: String) -> anyhow::Error {
 /// that has not settled yet.
 fn retained_intent_refusal(file: &Path, intent_id: &str, message: String) -> anyhow::Error {
     // An empty id proves nothing, so it adds no ownership.
-    let ownership =
-        observed_retained_write_ownership(file).with_retained_projection(!intent_id.is_empty());
+    let ownership = observed_retained_write_ownership(file)
+        .with_retained_projection(!intent_id.is_empty());
     await_editor_replica_no_disk_write(format!(
         "{message}. {}",
         agent_doc_turn::write_ownership::retained_write_remedy(
@@ -4329,17 +4329,17 @@ pub fn classify_response_replay_repair_settlement_for_file(
     observed: &str,
     source: &str,
 ) -> Result<agent_doc_document_realtime::write_policy::SemanticRepairSettlement> {
-    let observed_repair =
-        normalize_recoverable_response_replay_duplication_for_file(file, observed, source)?;
+    let observed_repair = normalize_recoverable_response_replay_duplication_for_file(
+        file, observed, source,
+    )?;
     // `Some(observed)` still means replay was recognized but could not be
     // advanced to different canonical bytes. Likewise an invalid projection
     // with no narrow repair candidate is unresolved, not successful.
-    let observed_still_requires_repair =
-        observed_repair.is_some() || !agent_projection_integrity_valid(observed);
-    let advanced_authority_proven =
-        agent_doc_document_realtime::write_policy::buffer_proves_reference_response(
-            target, observed,
-        );
+    let observed_still_requires_repair = observed_repair.is_some()
+        || !agent_projection_integrity_valid(observed);
+    let advanced_authority_proven = agent_doc_document_realtime::write_policy::buffer_proves_reference_response(
+        target, observed,
+    );
     Ok(
         agent_doc_document_realtime::write_policy::decide_semantic_repair_settlement(
             observed == target,
@@ -6506,7 +6506,8 @@ pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<(
                     "visible document write for {} is retained by the lazy delivery projection; the attached editor replica is not registered, so no snapshot or commit effect is eligible. {}",
                     file.display(),
                     agent_doc_turn::write_ownership::retained_write_remedy(
-                        observed_retained_write_ownership(file).with_replica_unserved(true),
+                        observed_retained_write_ownership(file)
+                            .with_replica_unserved(true),
                         &file.display().to_string(),
                     ),
                 )));
@@ -8056,14 +8057,16 @@ fn record_editor_endpoint_definitive_refusal(
     build_mismatch_refusal: Option<agent_doc_turn::authority_recovery::BuildMismatchRefusal>,
     editor_pids: Vec<u64>,
 ) {
-    EDITOR_ENDPOINT_DEFINITIVELY_REFUSED.lock().insert(
-        file.to_path_buf(),
-        EditorEndpointRecoveryRefusal {
-            witness,
-            build_mismatch_refusal,
-            editor_pids,
-        },
-    );
+    EDITOR_ENDPOINT_DEFINITIVELY_REFUSED
+        .lock()
+        .insert(
+            file.to_path_buf(),
+            EditorEndpointRecoveryRefusal {
+                witness,
+                build_mismatch_refusal,
+                editor_pids,
+            },
+        );
 }
 
 fn clear_editor_endpoint_definitive_refusal(file: &std::path::Path) {
@@ -8132,7 +8135,12 @@ fn reobserve_missing_editor_replica_with_reregistration(
                 editor_replica_accepted_unserved_corroborated(file, &paused_witness),
             )
         {
-            record_editor_endpoint_definitive_refusal(file, paused_witness, None, Vec::new());
+            record_editor_endpoint_definitive_refusal(
+                file,
+                paused_witness,
+                None,
+                Vec::new(),
+            );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -9833,8 +9841,13 @@ mod tests {
     /// the holding editor instead of only the mechanism.
     #[test]
     fn attached_editor_refusal_names_a_remedy_without_superseded_bytes() {
-        let remedy =
-            attached_editor_refusal_remedy_from(&[], &[("jetbrains".into(), 7)], &[], None, None);
+        let remedy = attached_editor_refusal_remedy_from(
+            &[],
+            &[("jetbrains".into(), 7)],
+            &[],
+            None,
+            None,
+        );
         assert!(remedy.contains("jetbrains pid 7"), "{remedy}");
         assert!(remedy.contains("agent-doc admin reload-lib"), "{remedy}");
         let unnamed = attached_editor_refusal_remedy_from(&[], &[], &[], None, None);
@@ -9857,10 +9870,7 @@ mod tests {
         );
 
         assert!(remedy.contains("sender_executable_replaced"), "{remedy}");
-        assert!(
-            remedy.contains("safe-boundary supervisor recycle"),
-            "{remedy}"
-        );
+        assert!(remedy.contains("safe-boundary supervisor recycle"), "{remedy}");
         assert!(remedy.contains("other-open-cycle.md"), "{remedy}");
         assert!(remedy.contains("route-owned supervisor"), "{remedy}");
         assert!(
@@ -9875,7 +9885,9 @@ mod tests {
             &[],
             &[("jetbrains".into(), 4242)],
             &[],
-            Some(agent_doc_turn::authority_recovery::BuildMismatchRefusal::ReloadAlreadyRequested),
+            Some(
+                agent_doc_turn::authority_recovery::BuildMismatchRefusal::ReloadAlreadyRequested,
+            ),
             None,
         );
 
@@ -10546,18 +10558,11 @@ mod tests {
             let mut skipped = 0;
             while should_pause_editor_replica_self_heal(file, &observed) {
                 skipped += 1;
-                assert!(
-                    skipped <= UNANSWERED_SELF_HEAL_MAX_SKIP,
-                    "never pauses forever"
-                );
+                assert!(skipped <= UNANSWERED_SELF_HEAL_MAX_SKIP, "never pauses forever");
             }
             pauses.push(skipped);
         }
-        assert_eq!(
-            pauses,
-            vec![1, 2, 4, 8],
-            "the backoff doubles per unanswered budget"
-        );
+        assert_eq!(pauses, vec![1, 2, 4, 8], "the backoff doubles per unanswered budget");
 
         // An answered budget at the same witness is a fact about the endpoint.
         record_editor_replica_self_heal_exhausted(file, observed.clone());
@@ -10947,8 +10952,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         let current = "In sample-app, describe setup and add installation usage docs with Python 3.14 and other dependencies.";
-        let stale =
-            "In sample-app, describe setup and add installation usage docs with Python 3.14.";
+        let stale = "In sample-app, describe setup and add installation usage docs with Python 3.14.";
         let raced_projection = base.replacen(
             "<!-- /agent:queue -->",
             &format!("- 🚧 {current}\n- {stale}\n<!-- /agent:queue -->"),
@@ -11237,9 +11241,11 @@ mod tests {
             .unwrap();
         })
         .unwrap();
-        let observed =
-            try_resolve_current_document_content(&file, "response_replay_repair_race_observed")
-                .unwrap();
+        let observed = try_resolve_current_document_content(
+            &file,
+            "response_replay_repair_race_observed",
+        )
+        .unwrap();
         assert_eq!(observed, editor_cut);
         assert_eq!(
             classify_response_replay_repair_settlement_for_file(
@@ -11260,10 +11266,7 @@ mod tests {
         .unwrap();
         let pending = pending_document_write(&file)
             .expect("advanced editor authority must remain the retained delivery target");
-        assert_eq!(
-            pending.expected_content.as_deref(),
-            Some(repair_target.as_str())
-        );
+        assert_eq!(pending.expected_content.as_deref(), Some(repair_target.as_str()));
         assert_eq!(pending.target_content, editor_cut);
         assert_eq!(
             try_resolve_current_document_content(
@@ -13173,8 +13176,9 @@ mod tests {
     /// caller names `agent-doc commit` instead of waiting forever.
     #[test]
     fn unregistered_endpoint_with_zero_live_replicas_is_an_unowned_route() {
-        let (dir, file, _canonical) =
-            temp_doc("---\nsession: gh144-unowned-route\n---\n\n# Session\n");
+        let (dir, file, _canonical) = temp_doc(
+            "---\nsession: gh144-unowned-route\n---\n\n# Session\n",
+        );
         drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).expect("state db"));
         let identity = "test-gh144-unowned-route";
         seed_reliable_sync_open(&file, identity);
@@ -13215,7 +13219,8 @@ mod tests {
         }
 
         assert!(editor_route_unowned(&file));
-        let ownership = observed_retained_write_ownership(&file).with_retained_projection(true);
+        let ownership = observed_retained_write_ownership(&file)
+            .with_retained_projection(true);
         assert!(ownership.delivery_rejected, "{ownership:?}");
         assert!(ownership.editor_route_unowned, "{ownership:?}");
         assert_eq!(

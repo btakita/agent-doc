@@ -238,7 +238,38 @@ The original tag-bound PyPI workflow was then rerun; its build, publish, and ver
 Dispatched immediately to a dedicated subagent. The worker is reproducing the failure from read-only session evidence and state, without running recovery or mutation commands against live `tasks/fpe.md`. Its implementation scope is the agent-doc producer/recovery path that allowed canonical editor authority and the disk projection to diverge after response self-healing, with deterministic regression coverage and a full focused gate before a separate PR.
 
 The previously assigned #196 worker was paused—not discarded—to free the execution slot; its queue claim remains intact for resumption after this urgent fix.
-<!-- agent:boundary:5a01832e -->
+> **Chat prompt (#chatprompt):** • Agent-doc now reports needs_operator: the JetBrains endpoint rejected the save receipt and cannot converge.
+>
+>   Please restart or reload the editor that has tasks/fpe.md open. Do not manually save or edit the document; the
+>   response is retained and will resume automatically.
+>
+> • Hook stopped
+>   └ agent-doc Stop hook found a binary-owned closeout still converging for /home/brian/work/btakita/agent-loop/src/
+> haiven-dev/tasks/fpe.md. [session-check] INTERRUPTED: binary-owned response delivery `1791486890557754463-1-
+> cba5f428f43547873b1e4470a0af6ac735f3d2a86a68be22c92c9818e72ec6a1` is retained for `/home/brian/work/btakita/agent-loop/
+> src/haiven-dev/tasks/fpe.md` (reason=editor_projection_pending, source=pending_write,
+> target_hash=cba5f428f43547873b1e4470a0af6ac735f3d2a86a68be22c92c9818e72ec6a1); the same capture will resume
+> automatically after editor/controller delivery converges. Same-capture recovery remains pending: retained target has
+> not reached exact canonical/disk convergence. Do not issue another closeout payload and do not force disk; retry only
+> `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md`. The captured response is
+> retained and the agent-doc binary/supervisor owns the keyed editor/CRDT retry and terminal commit. Do not recapture the
+> response, rerun finalize, kill the controller, or use `--force-disk`; only re-check session status after the binary
+> reports recovery, unless it explicitly reports `needs_operator`. Do not send the final answer yet.
+>
+>   Worked for 6m 28s • 3:18 PM
+
+> **Chat prompt (#chatprompt):** Should I restart now or do you need to diagnose?
+
+> **Chat prompt (#chatprompt):** restarted
+
+### Re: FPE editor restart and retained delivery — gpt-5 · 2026-10-08T15:20:49-04:00
+
+The editor restart completed and the old JetBrains process exited; a new backend process is running. The first post-restart observation still received `IPC receipt rejected` for the retained FPE delivery, so no response was resent and no disk/editor mutation was attempted. The diagnostic evidence needed for the code fix is already preserved and the assigned subagent continues in an isolated worktree.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/197
+
+**Deferred:** All three worker slots are occupied by the FPE convergence fix and the already-running #189/#190 fixes. Issue #197 is the next subagent dispatch when a slot returns; it is not being treated as complete or executed inline.
+<!-- agent:boundary:26678c74 -->
 <!-- /agent:exchange -->
 
 <!--

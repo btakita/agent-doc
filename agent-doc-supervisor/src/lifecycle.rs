@@ -100,6 +100,28 @@ pub fn generation_transition_admission(
     GenerationTransitionAdmission::Permit
 }
 
+/// Whether an already-durable captured response should drive a supervisor
+/// generation refresh at this checkpoint.
+///
+/// `#gh181`: the durable capture is itself the replay checkpoint named by
+/// [`generation_transition_admission`]. It must not depend on a second,
+/// incidental producer (a fresh editor-replica request, a one-shot IPC wedge,
+/// or a resume retry that happened to latch `needs_operator`) before a stale or
+/// explicitly requested generation may cross the open cycle. Auto-refresh
+/// still honors its opt-in, and every path still requires drained supervisor
+/// IPC.
+pub fn captured_cycle_generation_refresh_due(
+    generation_stale: bool,
+    auto_recycle: bool,
+    explicit_admin: bool,
+    supervisor_ipc_drained: bool,
+    durable_response_captured: bool,
+) -> bool {
+    supervisor_ipc_drained
+        && durable_response_captured
+        && (explicit_admin || (generation_stale && auto_recycle))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BootResumeAction {
     None,
@@ -424,8 +446,10 @@ pub fn supervisor_recycle_action(
     // `capture_backed_refresh` has the same liveness shape as a proven write
     // wedge: the open closeout cycle cannot reach its boundary until this
     // generation is replaced. It is raised for a typed stale editor-delivery
-    // request (the replica worker must be refreshed) and for a stale
-    // generation whose own captured-response resume latched `needs_operator`
+    // request (the replica worker must be refreshed), for a stale/requested
+    // generation whose open cycle already owns a typed durable response
+    // capture (`#gh181`), and for a stale generation whose own
+    // captured-response resume latched `needs_operator`
     // (`#stalesupresumedeadlock`, see
     // [`stale_generation_capture_resume_needs_recycle`]). The caller only raises
     // it at a capture-backed safe checkpoint, so deferring on `cycle_open` would
@@ -703,6 +727,28 @@ mod tests {
                 false,
             ),
             RecycleDebounced
+        );
+    }
+
+    #[test]
+    fn durable_captured_cycle_drives_stale_or_requested_generation_refresh() {
+        assert!(captured_cycle_generation_refresh_due(
+            true, true, false, true, true,
+        ));
+        assert!(captured_cycle_generation_refresh_due(
+            false, false, true, true, true,
+        ));
+        assert!(
+            !captured_cycle_generation_refresh_due(true, false, false, true, true),
+            "automatic generation refresh must still honor the opt-in"
+        );
+        assert!(
+            !captured_cycle_generation_refresh_due(true, true, false, false, true),
+            "an in-flight supervisor IPC handler is never a safe generation boundary"
+        );
+        assert!(
+            !captured_cycle_generation_refresh_due(true, true, false, true, false),
+            "an uncaptured preflight has no replay checkpoint"
         );
     }
 

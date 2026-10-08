@@ -34,7 +34,8 @@ use agent_doc_supervisor::{
     },
     lifecycle::{
         MAX_REEXEC_ESCALATIONS, SupervisorInstallAction, SupervisorRecycleAction,
-        SupervisorRecycleCheckpoint, SupervisorRestartAction, reexec_escalation_within_bound,
+        SupervisorRecycleCheckpoint, SupervisorRestartAction,
+        captured_cycle_generation_refresh_due, reexec_escalation_within_bound,
         supervisor_install_action, supervisor_recycle_action, supervisor_restart_action,
     },
 };
@@ -3459,11 +3460,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // observe it but must not infer abandonment from elapsed time or a
                 // scraped prompt: both api.md and fpe.md disproved that inference.
                 let inflight = agent_doc_ipc_io::inflight_connection_handlers();
-                let cycle_open = agent_doc_cycle_state_io::load_with_closeout_projection(&path)
+                let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(&path)
                     .ok()
-                    .flatten()
-                    .is_some_and(|state| state.is_open())
+                    .flatten();
+                let cycle_open = cycle_state.as_ref().is_some_and(|state| state.is_open())
                     || inflight > 0;
+                let durable_response_captured = cycle_state
+                    .as_ref()
+                    .is_some_and(|state| state.has_durable_response_capture());
                 // A durable open cycle is the generation-transition interlock. Prompt
                 // idleness, supervisor staleness, and elapsed watch ticks cannot weaken
                 // it: an uncaptured preflight has no replay point after exec fallback.
@@ -3769,9 +3773,35 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         supervisor_stale || own_binary_replaced,
                         resume_retry.as_ref().is_some_and(|retry| retry.needs_operator),
                     );
-                let editor_delivery_stale = (stale_editor_replica_requested
+                // `#gh181`: the cycle's own typed durable capture is already the
+                // replay checkpoint accepted by generation-transition policy. A
+                // stale/install-requested generation must not wait for a second
+                // incidental signal after the one-shot wedge latch was spent or
+                // when no editor replica exists to emit a stale-delivery request.
+                let captured_cycle_refresh = captured_cycle_generation_refresh_due(
+                    supervisor_stale || own_binary_replaced,
+                    recycle_auto_enabled,
+                    explicit_admin_recycle,
+                    at_safe_checkpoint,
+                    durable_response_captured,
+                );
+                let capture_backed_refresh = ((stale_editor_replica_requested
                     || stale_capture_resume_latched)
-                    && at_safe_checkpoint;
+                    && at_safe_checkpoint)
+                    || captured_cycle_refresh;
+                if captured_cycle_refresh {
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "supervisor_stale_captured_cycle_recycle file={} pane={} stale={} recycle_requested={} inflight={} action=recycle_at_safe_checkpoint reason=durable_response_capture_generation_transition (#gh181)",
+                            path.display(),
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            supervisor_stale || own_binary_replaced,
+                            explicit_admin_recycle,
+                            inflight_handlers,
+                        ),
+                    );
+                }
                 if stale_capture_resume_latched {
                     agent_doc_ops_log_io::log_op(
                         &path,
@@ -3809,7 +3839,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             path.display(),
                             shared.inject_pane.as_deref().unwrap_or("<pty>"),
                             inflight_handlers,
-                            if editor_delivery_stale {
+                            if capture_backed_refresh {
                                 "recycle_at_safe_checkpoint"
                             } else {
                                 "defer_until_safe_checkpoint"
@@ -3824,7 +3854,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     head_pending,
                     explicit_admin_recycle,
                     write_wedged,
-                    editor_delivery_stale,
+                    capture_backed_refresh,
                     reexec_failed,
                     effective_cycle_open,
                 );
@@ -3834,11 +3864,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
-                                    "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open reclaim_scheduled_independently=true (#midturn-recycle-resume) (#gh179)",
+                                    "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} durable_response_captured={} reason=agent_doc_cycle_open reclaim_scheduled_independently=true (#midturn-recycle-resume) (#gh179)",
                                     path.display(),
                                     shared.inject_pane.as_deref().unwrap_or("<pty>"),
                                     supervisor_stale,
                                     inflight_handlers,
+                                    durable_response_captured,
                                 ),
                             );
                         }
@@ -3935,7 +3966,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             head_pending,
                             explicit_admin_recycle,
                             write_wedged,
-                            editor_delivery_stale,
+                            capture_backed_refresh,
                             reexec_failed,
                             false,
                         ),
@@ -6302,6 +6333,45 @@ mod tests {
             ),
             SupervisorRecycleAction::DeferCycleOpen,
             "an open cycle must defer the execve recycle so it cannot sever the live finalize"
+        );
+
+        // GH #181: once that same cycle durably captures its complete response,
+        // the capture itself is the replay checkpoint. There is no editor
+        // registration in this test and the wedge producer is false, so this
+        // proves the idle-watch producer does not require either incidental
+        // signal before a stale generation can refresh.
+        let captured = agent_doc_cycle_state_io::mark_response_captured(
+            &file,
+            "response_captured",
+            Some("# plan\n"),
+            Some("# plan\n"),
+            "response-sha",
+            Some(&opened.cycle_id),
+        )
+        .unwrap();
+        assert!(captured.has_durable_response_capture());
+        let captured_cycle_refresh = captured_cycle_generation_refresh_due(
+            /* generation_stale */ true,
+            /* auto_recycle */ true,
+            /* explicit_admin */ false,
+            /* supervisor_ipc_drained */ true,
+            captured.has_durable_response_capture(),
+        );
+        assert!(captured_cycle_refresh);
+        assert_eq!(
+            supervisor_recycle_action(
+                /* stale */ true,
+                /* auto_recycle */ true,
+                /* checkpoint */ SupervisorRecycleCheckpoint::SafeIntraTurn,
+                /* head_pending */ false,
+                /* explicit_admin */ false,
+                /* write_wedged */ false,
+                /* capture_backed_refresh */ captured_cycle_refresh,
+                /* reexec_failed */ false,
+                /* cycle_open */ captured.is_open(),
+            ),
+            SupervisorRecycleAction::RecycleImmediate,
+            "a stale generation must cross an open durable capture without an editor or fresh wedge"
         );
 
         // A stale editor delivery worker is different: the open cycle is waiting

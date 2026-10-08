@@ -117,7 +117,10 @@ flowchart LR
 An ordinary open preflight has no replay checkpoint and therefore cannot cross
 a supervisor generation boundary. Binary staleness and elapsed polling ticks
 never weaken that edge. Captured-response recovery is the sole open-cycle
-exception, and it still requires drained supervisor IPC.
+exception, and it still requires drained supervisor IPC. The open cycle's own
+typed durable capture is sufficient replay evidence: a stale or explicitly
+requested generation does not also require a fresh editor-replica request, an
+unspent IPC-wedge latch, or a resume retry that reached `needs_operator`.
 
 ## Removed race classes
 

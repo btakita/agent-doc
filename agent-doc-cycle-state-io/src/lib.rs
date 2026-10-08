@@ -422,6 +422,18 @@ impl CycleState {
         !matches!(self.phase, CyclePhase::Committed | CyclePhase::Abandoned)
     }
 
+    /// Whether this open cycle has a typed, durable replay checkpoint for its
+    /// complete response. A capture id without its response hash is not enough
+    /// to cross a process-generation boundary, and terminal captures are no
+    /// longer active recovery work.
+    pub fn has_durable_response_capture(&self) -> bool {
+        matches!(
+            self.phase,
+            CyclePhase::ResponseCaptured | CyclePhase::WriteApplied
+        ) && self.capture_id.is_some()
+            && self.response_sha256.is_some()
+    }
+
     /// `#suprecyclespin` — whether this open cycle has stalled past
     /// `deadline_secs`: still open, no IPC advisory connection in flight, and untouched
     /// (`now_secs - updated_at > deadline_secs`). A stalled open cycle is an
@@ -3907,6 +3919,10 @@ mod tests {
         assert_eq!(state.phase, CyclePhase::ResponseCaptured);
         assert_eq!(state.capture_id.as_deref(), Some(state.cycle_id.as_str()));
         assert_eq!(state.response_sha256.as_deref(), Some("abc"));
+        assert!(
+            state.has_durable_response_capture(),
+            "a complete typed capture is the replay checkpoint for generation transition"
+        );
     }
 
     #[test]

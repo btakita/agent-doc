@@ -1019,29 +1019,50 @@ pub fn repair_prompt_tail_outside_exchange(doc: &str) -> Result<Option<String>> 
 /// even though the document still has the real opening exchange marker. When the
 /// text between the first and second close markers is safe exchange content, move
 /// that text back into the real exchange block and drop the stray second close.
-pub fn repair_duplicate_exchange_close_tail(doc: &str) -> Result<Option<String>> {
-    let open_tag = "<!-- agent:exchange";
-    let close_tag = "<!-- /agent:exchange -->";
+fn structural_exchange_marker_span(doc: &str) -> Option<(usize, usize, usize)> {
+    let mut open_end = None;
+    let mut close_starts = Vec::new();
 
-    let Some(open_start) = doc.find(open_tag) else {
-        return Ok(None);
-    };
-    let Some(open_end) = doc[open_start..]
-        .find("-->")
-        .map(|idx| open_start + idx + 3)
+    for occurrence in element::structural_marker_occurrences(doc)
+        .into_iter()
+        .filter(|occurrence| occurrence.line_anchored)
+    {
+        let line_end = doc[occurrence.start..]
+            .find('\n')
+            .map_or(doc.len(), |relative| occurrence.start + relative);
+        let marker = doc[occurrence.start..line_end]
+            .trim_end_matches('\r')
+            .trim_end();
+
+        if open_end.is_none()
+            && marker.starts_with("<!-- agent:exchange")
+            && marker.ends_with("-->")
+        {
+            open_end = Some(occurrence.start + marker.len());
+        } else if marker == "<!-- /agent:exchange -->" {
+            close_starts.push(occurrence.start);
+        }
+    }
+
+    let open_end = open_end?;
+    let mut closes_after_open = close_starts
+        .into_iter()
+        .filter(|close_start| *close_start >= open_end);
+    Some((
+        open_end,
+        closes_after_open.next()?,
+        closes_after_open.next()?,
+    ))
+}
+
+pub fn repair_duplicate_exchange_close_tail(doc: &str) -> Result<Option<String>> {
+    let close_tag = "<!-- /agent:exchange -->";
+    let Some((open_end, first_close_start, second_close_start)) =
+        structural_exchange_marker_span(doc)
     else {
-        return Ok(None);
-    };
-    let Some(first_close_start) = doc[open_end..].find(close_tag).map(|idx| open_end + idx) else {
         return Ok(None);
     };
     let first_close_end = first_close_start + close_tag.len();
-    let Some(second_close_start) = doc[first_close_end..]
-        .find(close_tag)
-        .map(|idx| first_close_end + idx)
-    else {
-        return Ok(None);
-    };
     let second_close_end = second_close_start + close_tag.len();
 
     let escaped = &doc[first_close_end..second_close_start];
@@ -1088,28 +1109,12 @@ pub fn repair_duplicate_exchange_close_tail(doc: &str) -> Result<Option<String>>
 /// etc.) that should be dropped while preserving the first close marker and
 /// the real scaffold after the second close marker.
 pub fn repair_duplicate_exchange_close_scaffold(doc: &str) -> Result<Option<String>> {
-    let open_tag = "<!-- agent:exchange";
     let close_tag = "<!-- /agent:exchange -->";
-
-    let Some(open_start) = doc.find(open_tag) else {
-        return Ok(None);
-    };
-    let Some(open_end) = doc[open_start..]
-        .find("-->")
-        .map(|idx| open_start + idx + 3)
+    let Some((_, first_close_start, second_close_start)) = structural_exchange_marker_span(doc)
     else {
-        return Ok(None);
-    };
-    let Some(first_close_start) = doc[open_end..].find(close_tag).map(|idx| open_end + idx) else {
         return Ok(None);
     };
     let first_close_end = first_close_start + close_tag.len();
-    let Some(second_close_start) = doc[first_close_end..]
-        .find(close_tag)
-        .map(|idx| first_close_end + idx)
-    else {
-        return Ok(None);
-    };
     let second_close_end = second_close_start + close_tag.len();
 
     let duplicate_scaffold = &doc[first_close_end..second_close_start];
@@ -1131,28 +1136,12 @@ pub fn repair_duplicate_exchange_close_scaffold(doc: &str) -> Result<Option<Stri
 /// prompt text stranded in that duplicate segment still belongs in the live
 /// exchange.
 pub fn repair_duplicate_exchange_close_mixed_scaffold_tail(doc: &str) -> Result<Option<String>> {
-    let open_tag = "<!-- agent:exchange";
     let close_tag = "<!-- /agent:exchange -->";
-
-    let Some(open_start) = doc.find(open_tag) else {
-        return Ok(None);
-    };
-    let Some(open_end) = doc[open_start..]
-        .find("-->")
-        .map(|idx| open_start + idx + 3)
+    let Some((_, first_close_start, second_close_start)) = structural_exchange_marker_span(doc)
     else {
-        return Ok(None);
-    };
-    let Some(first_close_start) = doc[open_end..].find(close_tag).map(|idx| open_end + idx) else {
         return Ok(None);
     };
     let first_close_end = first_close_start + close_tag.len();
-    let Some(second_close_start) = doc[first_close_end..]
-        .find(close_tag)
-        .map(|idx| first_close_end + idx)
-    else {
-        return Ok(None);
-    };
     let second_close_end = second_close_start + close_tag.len();
 
     let duplicate_segment = &doc[first_close_end..second_close_start];
@@ -1673,6 +1662,42 @@ mod tests {
             "unexpected error: {err}"
         );
     }
+
+    #[test]
+    fn duplicate_close_repairs_ignore_markers_inside_markdown_code_nodes() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: marker examples — gpt-6\n\n",
+            "Inline artifact: `<!-- agent:boundary:abc123 --><!-- /agent:exchange -->`.\n\n",
+            "```markdown\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n",
+            "```\n",
+            "<!-- agent:boundary:def456 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- keep working\n",
+            "<!-- /agent:queue -->\n"
+        );
+
+        assert!(repair_duplicate_exchange_close_tail(doc).unwrap().is_none());
+        assert!(
+            repair_duplicate_exchange_close_scaffold(doc)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            repair_duplicate_exchange_close_mixed_scaffold_tail(doc)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            normalize_editor_visible_template_structure(doc).unwrap(),
+            doc
+        );
+    }
+
     #[test]
     fn guard_no_conversation_tail_outside_exchange_passes_for_normal_content() {
         let doc = concat!(

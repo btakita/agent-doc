@@ -250,7 +250,9 @@ pub use pending::{clear_pending, save_pending};
 /// pane enters or leaves a harness turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreflightTurnFence {
-    pub actor_epoch: Option<String>,
+    pub session_id: Option<String>,
+    pub pane_id: Option<String>,
+    pub generation: Option<u64>,
     pub active: bool,
 }
 
@@ -4337,7 +4339,9 @@ mod tests {
     impl RepairIoEffects for TestRepairIoEffects {
         fn preflight_turn_fence(&self, _file: &Path) -> Result<PreflightTurnFence> {
             Ok(PreflightTurnFence {
-                actor_epoch: Some(format!("actor:{}", self.actor_epoch.get())),
+                session_id: Some("test-session".to_string()),
+                pane_id: Some(format!("pane-{}", self.actor_epoch.get())),
+                generation: Some(self.actor_epoch.get()),
                 active: self.preflight_turn_active.get(),
             })
         }

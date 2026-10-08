@@ -300,6 +300,23 @@ pub struct StateEventInsert<'a> {
     pub payload_json: &'a str,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalTurnFenceCheck<'a> {
+    pub document_id: &'a str,
+    pub document_hash: &'a str,
+    pub expected_cycle_id: &'a str,
+    pub session_id: Option<&'a str>,
+    pub pane_id: Option<&'a str>,
+    pub generation: Option<u64>,
+    pub active_after_secs: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FencedStateEventInsert {
+    Applied(Vec<bool>),
+    FenceChanged,
+}
+
 /// Result of moving one document's typed event history to a new path identity.
 ///
 /// Editor acknowledgement cursors are intentionally retired instead of moved:
@@ -3937,6 +3954,92 @@ pub fn insert_state_event_in_db(conn: &Connection, event: &StateEventInsert<'_>)
     Ok(changed > 0)
 }
 
+/// Append terminal closeout facts only if cycle, actor binding, and inactive
+/// turn status still match one observation. All predicates and inserts share a
+/// single `BEGIN IMMEDIATE` transaction, so actor/turn writers either land
+/// first (and defeat the fence) or wait until the terminal transition commits.
+pub fn insert_state_events_if_terminal_turn_fence_in_db(
+    conn: &mut Connection,
+    fence: &TerminalTurnFenceCheck<'_>,
+    events: &[StateEventInsert<'_>],
+) -> Result<FencedStateEventInsert> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let checkpoint_payload: Option<String> = tx
+        .query_row(
+            "SELECT payload_json FROM state_events \
+             WHERE document_hash = ?1 AND fact_type = 'turn_intent_checkpointed' \
+             ORDER BY document_version DESC, id DESC LIMIT 1",
+            [fence.document_hash],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let current_cycle_id = checkpoint_payload
+        .as_deref()
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+        .and_then(|event| {
+            event
+                .get("fact")?
+                .get("cycle_id")?
+                .as_str()
+                .map(str::to_string)
+        });
+    if current_cycle_id.as_deref() != Some(fence.expected_cycle_id) {
+        return Ok(FencedStateEventInsert::FenceChanged);
+    }
+
+    let actor: Option<(String, String, u64)> = tx
+        .query_row(
+            "SELECT session_id, pane_id, generation FROM documents WHERE document_id = ?1",
+            [fence.document_id],
+            |row| {
+                let generation: i64 = row.get(2)?;
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    u64::try_from(generation).unwrap_or_default(),
+                ))
+            },
+        )
+        .optional()?;
+    let actor_matches = match (
+        fence.session_id,
+        fence.pane_id,
+        fence.generation,
+        actor.as_ref(),
+    ) {
+        (None, None, None, None) => true,
+        (Some(session), Some(pane), Some(generation), Some(current)) => {
+            current.0 == session && current.1 == pane && current.2 == generation
+        }
+        _ => false,
+    };
+    if !actor_matches {
+        return Ok(FencedStateEventInsert::FenceChanged);
+    }
+
+    if let Some(pane) = fence.pane_id {
+        let live_turn_count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM coordination_leases \
+             WHERE scope_kind = 'turn_active' \
+               AND heartbeat_secs > ?1 \
+               AND ((scope_id = ?2 AND holder = ?2) \
+                    OR (scope_id = 'project' AND holder = ?2))",
+            params![fence.active_after_secs as i64, pane],
+            |row| row.get(0),
+        )?;
+        if live_turn_count > 0 {
+            return Ok(FencedStateEventInsert::FenceChanged);
+        }
+    }
+
+    let inserted = events
+        .iter()
+        .map(|event| insert_state_event_in_db(&tx, event))
+        .collect::<Result<Vec<_>>>()?;
+    tx.commit()?;
+    Ok(FencedStateEventInsert::Applied(inserted))
+}
+
 /// Rekey one document's typed state history after a path rename.
 ///
 /// This is a cold-start schema transaction, not a compatibility read path.
@@ -5245,6 +5348,118 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_turn_fence_loses_to_activation_at_pre_cas_barrier() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let document_id = "tasks/fenced.md";
+        let document_hash = "fenced-document-hash";
+        let cycle_id = "cycle-before-activation";
+        let actor = ActorRecord {
+            document_id: document_id.to_string(),
+            session_id: "session-fenced".to_string(),
+            generation: 7,
+            pane_id: "%77".to_string(),
+            window_id: "@7".to_string(),
+            harness: "codex".to_string(),
+            state: ActorState::Ready,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "initial_binding".to_string(),
+                timestamp: 100,
+                prior_generation: 6,
+                new_generation: 7,
+            },
+        };
+        let conn = open_state_db(dir.path())?;
+        let transition = insert_actor_transition(&conn, None, &actor)?;
+        upsert_actor_document(&conn, &actor, transition, None, None)?;
+        let checkpoint = serde_json::json!({
+            "event_id": "checkpoint-before-activation",
+            "fact": {
+                "type": "turn_intent_checkpointed",
+                "document_hash": document_hash,
+                "cycle_id": cycle_id,
+                "checkpoint_sequence": 1,
+                "state_sha256": "state",
+                "state_json": "{}"
+            }
+        })
+        .to_string();
+        insert_state_event_in_db(
+            &conn,
+            &StateEventInsert {
+                event_id: "checkpoint-before-activation",
+                document_hash,
+                domain: "closeout",
+                fact_type: "turn_intent_checkpointed",
+                payload_json: &checkpoint,
+            },
+        )?;
+        drop(conn);
+
+        // The caller has completed its final non-atomic observation here. Hold
+        // it at the pre-CAS barrier while the turn-active writer commits first.
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writer_barrier = barrier.clone();
+        let project_root = dir.path().to_path_buf();
+        let writer = std::thread::spawn(move || -> Result<()> {
+            writer_barrier.wait();
+            let conn = open_state_db(&project_root)?;
+            upsert_coordination_lease_in_db(
+                &conn,
+                &CoordinationLeaseRecord {
+                    scope_kind: "turn_active".to_string(),
+                    scope_id: "%77".to_string(),
+                    holder: "%77".to_string(),
+                    holder_pid: Some(std::process::id()),
+                    heartbeat_secs: 200,
+                },
+            )
+        });
+        barrier.wait();
+        writer.join().expect("activation writer")?;
+
+        let terminal = serde_json::json!({
+            "event_id": "terminal-after-activation",
+            "fact": {
+                "type": "commit_observed",
+                "document_hash": document_hash,
+                "cycle_id": cycle_id,
+                "commit": "deadbeef"
+            }
+        })
+        .to_string();
+        let mut conn = open_state_db(dir.path())?;
+        let outcome = insert_state_events_if_terminal_turn_fence_in_db(
+            &mut conn,
+            &TerminalTurnFenceCheck {
+                document_id,
+                document_hash,
+                expected_cycle_id: cycle_id,
+                session_id: Some("session-fenced"),
+                pane_id: Some("%77"),
+                generation: Some(7),
+                active_after_secs: 150,
+            },
+            &[StateEventInsert {
+                event_id: "terminal-after-activation",
+                document_hash,
+                domain: "closeout",
+                fact_type: "commit_observed",
+                payload_json: &terminal,
+            }],
+        )?;
+
+        assert_eq!(outcome, FencedStateEventInsert::FenceChanged);
+        assert!(
+            load_state_events_from_db(&conn, Some(document_hash))?
+                .iter()
+                .all(|event| event.event_id != "terminal-after-activation"),
+            "activation at the barrier must win and leave the cycle open",
+        );
+        Ok(())
+    }
 
     #[test]
     fn stale_health_writer_cannot_rearm_a_recycle_attempted_episode() -> Result<()> {

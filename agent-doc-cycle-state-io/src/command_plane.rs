@@ -175,6 +175,16 @@ pub enum CommitObservation {
     CommitAlreadyCurrent,
 }
 
+/// Exact actor binding sampled while stale-preflight recovery still observed
+/// no live turn. The controller consumes this together with `cycle_id_hint` in
+/// one state.db transaction; a rebind or active-turn lease wins the CAS.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalTurnFence {
+    pub session_id: Option<String>,
+    pub pane_id: Option<String>,
+    pub generation: Option<u64>,
+}
+
 impl CommitObservation {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -230,6 +240,8 @@ pub struct CloseoutAdvancePayload {
     pub file_content: Option<String>,
     pub response_sha256: Option<String>,
     pub cycle_id_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_turn_fence: Option<TerminalTurnFence>,
 }
 
 impl CloseoutAdvancePayload {

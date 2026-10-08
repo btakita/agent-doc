@@ -20027,6 +20027,16 @@ fn closeout_advance_outcome(
 ) -> Result<(), String> {
     use super::command_plane::{CloseoutPhaseEvent, decode_closeout_advance_payload};
     let payload = decode_closeout_advance_payload(submit).map_err(|e| format!("{e:#}"))?;
+    // Keep the controller's projected closeout decision stable until the
+    // fenced state.db append commits. Turn-active/actor writers do not use
+    // this lock, so the transaction below remains their serialization point.
+    let _terminal_ingress = payload.terminal_turn_fence.as_ref().map(|_| {
+        runtime.lock_state_event_ingress(
+            &bootstrap.project_root,
+            "closeout_advance_terminal_turn_fence",
+            "terminal_turn_fence",
+        )
+    });
     let file = std::path::PathBuf::from(&payload.document_path);
     let document_hash = agent_doc_hash::document_id_for_path(&file);
     let document = runtime
@@ -20139,23 +20149,79 @@ fn closeout_advance_outcome(
         return Ok(());
     }
 
+    let mut terminal_events = Vec::new();
     if checkpoint {
-        let checkpoint_event = agent_doc_cycle_state_io::build_turn_intent_checkpoint_event(
+        terminal_events.push(agent_doc_cycle_state_io::build_turn_intent_checkpoint_event(
             &document_hash,
             checkpoint_sequence,
             &state,
         )
-        .map_err(|e| format!("{e:#}"))?;
-        append_apply_state_event(bootstrap, runtime, checkpoint_event)
-            .map_err(|e| format!("{e:#}"))?;
+        .map_err(|e| format!("{e:#}"))?);
     }
     for fact in &facts {
         if let Some(phase_event) =
             agent_doc_cycle_state_io::build_closeout_projection_event(&document_hash, &state, *fact)
         {
-            append_apply_state_event(bootstrap, runtime, phase_event)
-                .map_err(|e| format!("{e:#}"))?;
+            terminal_events.push(phase_event);
         }
+    }
+
+    if let Some(turn_fence) = payload.terminal_turn_fence.as_ref() {
+        let expected_cycle_id = payload.cycle_id_hint.as_deref().ok_or_else(|| {
+            "closeout_advance: terminal turn fence requires cycle_id_hint".to_string()
+        })?;
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &file.to_string_lossy(),
+        );
+        let encoded = terminal_events
+            .iter()
+            .map(|event| serde_json::to_string(event).map(|json| (event, json)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("serialize fenced closeout event: {e}"))?;
+        let inserts = encoded
+            .iter()
+            .map(|(event, json)| agent_doc_sqlite::state_store::StateEventInsert {
+                event_id: &event.event_id,
+                document_hash: event.document_hash(),
+                domain: event.domain().label(),
+                fact_type: event.fact.label(),
+                payload_json: json,
+            })
+            .collect::<Vec<_>>();
+        let mut conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root)
+            .map_err(|e| format!("{e:#}"))?;
+        let active_after_secs = timestamp_secs()
+            .saturating_sub(agent_doc_turn::turn_status::TURN_ACTIVE_TTL_SECS);
+        match agent_doc_sqlite::state_store::insert_state_events_if_terminal_turn_fence_in_db(
+            &mut conn,
+            &agent_doc_sqlite::state_store::TerminalTurnFenceCheck {
+                document_id: &document_id,
+                document_hash: &document_hash,
+                expected_cycle_id,
+                session_id: turn_fence.session_id.as_deref(),
+                pane_id: turn_fence.pane_id.as_deref(),
+                generation: turn_fence.generation,
+                active_after_secs,
+            },
+            &inserts,
+        )
+        .map_err(|e| format!("{e:#}"))?
+        {
+            agent_doc_sqlite::state_store::FencedStateEventInsert::FenceChanged => return Ok(()),
+            agent_doc_sqlite::state_store::FencedStateEventInsert::Applied(inserted) => {
+                for (event, inserted) in terminal_events.iter().zip(inserted) {
+                    if inserted {
+                        runtime.apply_state_event(event).map_err(|e| format!("{e:#}"))?;
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    for event in terminal_events {
+        append_apply_state_event(bootstrap, runtime, event).map_err(|e| format!("{e:#}"))?;
     }
     Ok(())
 }
@@ -37494,6 +37560,7 @@ mod tests {
                 file_content: Some("body".to_string()),
                 response_sha256: None,
                 cycle_id_hint: None,
+                terminal_turn_fence: None,
             },
         )
         .unwrap();
@@ -37735,6 +37802,7 @@ mod tests {
                 file_content: Some("body".to_string()),
                 response_sha256: None,
                 cycle_id_hint: None,
+                terminal_turn_fence: None,
             },
         )
         .unwrap();
@@ -37784,6 +37852,7 @@ mod tests {
                     file_content: Some("body".to_string()),
                     response_sha256: None,
                     cycle_id_hint: None,
+                    terminal_turn_fence: None,
                 },
             )
             .unwrap()
@@ -37833,6 +37902,7 @@ mod tests {
                 file_content: None,
                 response_sha256: None,
                 cycle_id_hint: None,
+                terminal_turn_fence: None,
             },
         )
         .unwrap();
@@ -37843,6 +37913,109 @@ mod tests {
             .unwrap()
             .and_then(|d| d.closeout.phase);
         assert_eq!(phase2, Some(agent_doc_turn::CyclePhase::Abandoned));
+    }
+
+    #[test]
+    fn closeout_advance_terminal_fence_preserves_cycle_after_turn_activation() {
+        use super::command_plane::{
+            CloseoutAdvancePayload, CloseoutPhaseEvent, CommitObservation,
+            build_closeout_advance_submit,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/fenced.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let bootstrap = runtime.bootstrap_snapshot().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+
+        let open = build_closeout_advance_submit(
+            "fenced-open",
+            "cycle_state",
+            "doc:cycle:fenced-open",
+            1,
+            CloseoutAdvancePayload {
+                document_path: doc.to_string_lossy().to_string(),
+                event: CloseoutPhaseEvent::WriteApplied,
+                event_label: None,
+                reason: None,
+                snapshot_content: None,
+                file_content: Some("body".to_string()),
+                response_sha256: None,
+                cycle_id_hint: None,
+                terminal_turn_fence: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            service_closeout_advance(&bootstrap, &runtime, &open).outcome,
+            lazily::ReceiptOutcome::Applied,
+        );
+        let projected = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        let cycle_id = agent_doc_cycle_state_io::reconstruct_cycle_state(&projected)
+            .unwrap()
+            .unwrap()
+            .cycle_id;
+
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-fenced",
+            "%91",
+            "@9",
+            1,
+        )
+        .unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        agent_doc_sqlite::state_store::upsert_coordination_lease_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+                scope_kind: "turn_active".to_string(),
+                scope_id: "%91".to_string(),
+                holder: "%91".to_string(),
+                holder_pid: Some(std::process::id()),
+                heartbeat_secs: timestamp_secs(),
+            },
+        )
+        .unwrap();
+        let terminal = build_closeout_advance_submit(
+            "fenced-terminal",
+            "cycle_state",
+            "doc:cycle:fenced-terminal",
+            1,
+            CloseoutAdvancePayload {
+                document_path: doc.to_string_lossy().to_string(),
+                event: CloseoutPhaseEvent::Committed(CommitObservation::CommitSuccess),
+                event_label: None,
+                reason: None,
+                snapshot_content: None,
+                file_content: Some("body".to_string()),
+                response_sha256: None,
+                cycle_id_hint: Some(cycle_id),
+                terminal_turn_fence: Some(
+                    agent_doc_cycle_state_io::command_plane::TerminalTurnFence {
+                    session_id: Some("session-fenced".to_string()),
+                    pane_id: Some("%91".to_string()),
+                    generation: Some(1),
+                    },
+                ),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            service_closeout_advance(&bootstrap, &runtime, &terminal).outcome,
+            lazily::ReceiptOutcome::Applied,
+            "a lost terminal CAS is an applied no-op on the command plane",
+        );
+        let phase = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .and_then(|document| document.closeout.phase);
+        assert_eq!(phase, Some(agent_doc_turn::CyclePhase::WriteApplied));
     }
 
     #[test]

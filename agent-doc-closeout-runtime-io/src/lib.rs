@@ -165,7 +165,9 @@ impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
     ) -> Result<agent_doc_repair_io::PreflightTurnFence> {
         let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
             return Ok(agent_doc_repair_io::PreflightTurnFence {
-                actor_epoch: None,
+                session_id: None,
+                pane_id: None,
+                generation: None,
                 active: false,
             });
         };
@@ -175,16 +177,17 @@ impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
         )?
         else {
             return Ok(agent_doc_repair_io::PreflightTurnFence {
-                actor_epoch: None,
+                session_id: None,
+                pane_id: None,
+                generation: None,
                 active: false,
             });
         };
         let active = agent_doc_turn_status_io::turn_active_for_pane_for_file(file, &actor.pane_id);
         Ok(agent_doc_repair_io::PreflightTurnFence {
-            actor_epoch: Some(format!(
-                "{}:{}:{}",
-                actor.session_id, actor.pane_id, actor.generation
-            )),
+            session_id: Some(actor.session_id),
+            pane_id: Some(actor.pane_id),
+            generation: Some(actor.generation),
             active,
         })
     }
@@ -198,14 +201,15 @@ impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
         snapshot_content: Option<&str>,
         file_content: Option<&str>,
     ) -> Result<Option<agent_doc_cycle_state_io::CycleState>> {
-        let current = self.preflight_turn_fence(file)?;
-        if current.active || current != *turn_fence {
-            return Ok(None);
-        }
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed_if_cycle(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed_if_cycle_and_turn_fence(
             &PIPELINE_FRONTMATTER_EFFECTS,
             file,
             expected_cycle_id,
+            &agent_doc_cycle_state_io::command_plane::TerminalTurnFence {
+                session_id: turn_fence.session_id.clone(),
+                pane_id: turn_fence.pane_id.clone(),
+                generation: turn_fence.generation,
+            },
             event,
             snapshot_content,
             file_content,
@@ -221,14 +225,15 @@ impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
         snapshot_content: Option<&str>,
         file_content: Option<&str>,
     ) -> Result<Option<agent_doc_cycle_state_io::CycleState>> {
-        let current = self.preflight_turn_fence(file)?;
-        if current.active || current != *turn_fence {
-            return Ok(None);
-        }
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned_if_cycle(
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned_if_cycle_and_turn_fence(
             &PIPELINE_FRONTMATTER_EFFECTS,
             file,
             expected_cycle_id,
+            &agent_doc_cycle_state_io::command_plane::TerminalTurnFence {
+                session_id: turn_fence.session_id.clone(),
+                pane_id: turn_fence.pane_id.clone(),
+                generation: turn_fence.generation,
+            },
             event,
             snapshot_content,
             file_content,

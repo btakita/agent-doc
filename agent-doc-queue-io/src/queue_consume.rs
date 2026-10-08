@@ -1104,6 +1104,50 @@ fn projected_capture_response_body(file: &Path) -> Option<String> {
     None
 }
 
+/// Return an optional response locator unless the owning cycle is known closed.
+///
+/// An explicit `agent-doc queue consume` may run after the response cycle has
+/// already committed.  In that shape the queue mutation is new binary-owned
+/// bookkeeping; it must not retroactively splice a queue-prompt quote into the
+/// committed exchange response (#gh188). Missing legacy cycle state retains the
+/// established last-exchange fallback, represented by `Some(None)`.
+fn response_embedding_locator(file: &Path) -> Result<Option<Option<String>>> {
+    if file.exists()
+        && let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+        && !state.phase.is_open()
+    {
+        return Ok(None);
+    }
+    Ok(Some(projected_capture_response_body(file).and_then(
+        |body| first_nonempty_line(&body).map(str::to_string),
+    )))
+}
+
+/// Whether an empty queue projection will be refilled by an explicit
+/// `agent-doc queue sync` from currently active tracked work.
+///
+/// Queue consume and queue sync are separate commands, but clearing the
+/// operator's `queue: go` intent in the transient empty state makes the second
+/// command refill a stopped queue. Preserve activation when the same document
+/// already proves syncable work remains (#gh188).
+fn one_shot_queue_refill_pending(
+    content: &str,
+    post_consume_entries: &[agent_doc_queue::document_queue::QueueEntry],
+) -> Result<bool> {
+    let components = element::parse(content)?;
+    let Some(request) =
+        agent_doc_queue::backlog_sync::collect_one_shot_backlog_queue_sync(&components, content)
+    else {
+        return Ok(false);
+    };
+    Ok(agent_doc_queue::document_queue::sync_backlog_into_queue(
+        post_consume_entries,
+        &request.ids,
+        request.mode,
+    )
+    .is_some())
+}
+
 /// Strike every active queue head that is non-drainable **noise**, at ANY position
 /// (`#goqstall2`). Unlike `queue consume` — which strikes only a contiguous LEADING
 /// free-text run and stops at the first id-backed head — this clears noise
@@ -1630,8 +1674,11 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
 
             let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
             let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
-            let drained = remaining == 0;
-            let new_entries = if drained {
+            let queue_empty = remaining == 0;
+            let refill_pending =
+                queue_empty && one_shot_queue_refill_pending(content, &completed_entries)?;
+            let drained = queue_empty && !refill_pending;
+            let new_entries = if queue_empty {
                 Vec::new()
             } else {
                 completed_entries
@@ -1670,13 +1717,14 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                 current = frontmatter::merge_queue_state(&current, false)?;
             }
 
-            let response_first_line = projected_capture_response_body(file)
-                .and_then(|body| first_nonempty_line(&body).map(str::to_string));
-            current = embed_consumed_prompt_in_response(
-                &current,
-                &consumed_texts,
-                response_first_line.as_deref(),
-            );
+            let response_locator = response_embedding_locator(file)?;
+            if let Some(response_first_line) = response_locator.as_ref() {
+                current = embed_consumed_prompt_in_response(
+                    &current,
+                    &consumed_texts,
+                    response_first_line.as_deref(),
+                );
+            }
             let mut new_snap = snapshot_content.unwrap_or(content).to_string();
             let mut save_snapshot = false;
             if let Some(snap) = snapshot_content {
@@ -1763,11 +1811,17 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                         }
                         new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
                     }
-                    Ok(Some(embed_consumed_prompt_in_response(
-                        &new_snap,
-                        &consumed_texts,
-                        response_first_line.as_deref(),
-                    )))
+                    Ok(Some(
+                        if let Some(response_first_line) = response_locator.as_ref() {
+                            embed_consumed_prompt_in_response(
+                                &new_snap,
+                                &consumed_texts,
+                                response_first_line.as_deref(),
+                            )
+                        } else {
+                            new_snap
+                        },
+                    ))
                 })() {
                     Ok(Some(snapshot)) => {
                         save_snapshot = snapshot != snap;
@@ -1953,8 +2007,10 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
 
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
     let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
-    let drained = remaining == 0;
-    let new_entries = if drained {
+    let queue_empty = remaining == 0;
+    let refill_pending = queue_empty && one_shot_queue_refill_pending(content, &completed_entries)?;
+    let drained = queue_empty && !refill_pending;
+    let new_entries = if queue_empty {
         Vec::new()
     } else {
         completed_entries
@@ -1997,13 +2053,14 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     // and the snapshot, so the selective-commit boundary stays consistent) when
     // the prompt is not already present in the exchange. Fail-safe: any locator
     // miss leaves the content unchanged rather than risk corrupting the exchange.
-    let response_first_line = projected_capture_response_body(file)
-        .and_then(|body| first_nonempty_line(&body).map(str::to_string));
-    current = embed_consumed_prompt_in_response(
-        &current,
-        &consumed_texts,
-        response_first_line.as_deref(),
-    );
+    let response_locator = response_embedding_locator(file)?;
+    if let Some(response_first_line) = response_locator.as_ref() {
+        current = embed_consumed_prompt_in_response(
+            &current,
+            &consumed_texts,
+            response_first_line.as_deref(),
+        );
+    }
     let mut new_snap = snapshot_content.unwrap_or(content).to_string();
     let mut save_snapshot = false;
     if let Some(snap) = snapshot_content {
@@ -2119,11 +2176,17 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                 }
                 new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
             }
-            Ok(Some(embed_consumed_prompt_in_response(
-                &new_snap,
-                &consumed_texts,
-                response_first_line.as_deref(),
-            )))
+            Ok(Some(
+                if let Some(response_first_line) = response_locator.as_ref() {
+                    embed_consumed_prompt_in_response(
+                        &new_snap,
+                        &consumed_texts,
+                        response_first_line.as_deref(),
+                    )
+                } else {
+                    new_snap
+                },
+            ))
         })() {
             Ok(Some(snapshot)) => {
                 save_snapshot = snapshot != snap;
@@ -2789,6 +2852,90 @@ mod core_tests {
         );
         assert_eq!(plan.new_document.matches("> **Queue prompt:**").count(), 1);
     }
+
+    #[test]
+    fn gh188_post_commit_consume_preserves_go_for_pending_one_shot_refill() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let content = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: actionable-review applied\n\n",
+            "Review triage applied.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents preset=\"#auth\" priority go -->\n",
+            "- #actionable-review\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue -->\n",
+            "- [ ] [#follow-up-a] First follow-up.\n",
+            "- [ ] [#follow-up-b] Second follow-up.\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+
+        let original_exchange = element::parse(content)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(content)
+            .to_string();
+        let plan = plan_queue_prompt_consumption(&doc, content, &[])
+            .unwrap()
+            .expect("the free-text head should be consumable");
+
+        assert_eq!(plan.remaining, 0);
+        assert!(
+            !plan.drained,
+            "syncable tracked work means the queue is only transiently empty"
+        );
+        assert!(
+            plan.new_document.contains("queue: go"),
+            "the operator's active queue intent must survive the consume"
+        );
+        assert!(
+            !plan.new_document.contains("> **Queue prompt:**"),
+            "post-commit consume must not splice provenance into the closed response"
+        );
+        let projected_exchange = element::parse(&plan.new_document)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&plan.new_document)
+            .to_string();
+        assert_eq!(projected_exchange, original_exchange);
+
+        crate::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot(
+            &doc,
+            &plan.new_document,
+            |path, _current, target| {
+                fs::write(path, target)?;
+                Ok(())
+            },
+            |_path, _target| Ok(()),
+        )
+        .expect("the immediate one-shot sync should refill the queue");
+        let refilled = fs::read_to_string(&doc).unwrap();
+        assert!(refilled.contains("queue: go"));
+        assert!(refilled.contains("- do [#follow-up-a]"));
+        assert!(refilled.contains("- do [#follow-up-b]"));
+        assert!(!refilled.contains("> **Queue prompt:**"));
+    }
+
     #[test]
     fn done_head_consumes_despite_bundled_pending_add() {
         // #pending-add-suppresses-queue-consume: a finalize that completes the

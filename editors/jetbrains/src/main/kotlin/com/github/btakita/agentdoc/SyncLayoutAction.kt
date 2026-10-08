@@ -228,7 +228,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
                 LayoutColumn(files)
             }
             return if (normalizedColumns.any { it.files.isNotEmpty() }) {
-                EditorLayout(normalizedColumns)
+                EditorLayout(normalizedColumns, layout.columnOrder)
             } else {
                 null
             }
@@ -250,7 +250,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
                 LayoutColumn(files)
             }
             return if (absoluteColumns.any { it.files.isNotEmpty() }) {
-                EditorLayout(absoluteColumns)
+                EditorLayout(absoluteColumns, layout.columnOrder)
             } else {
                 null
             }
@@ -296,8 +296,10 @@ class SyncLayoutAction : AnAction(), DumbAware {
             visibleMdFiles.filter(String::isNotBlank).distinct()
 
         /**
-         * GH #112: the order source of [buildSyncColumns] / route `--col` lists.
-         * Only a detected multi-column layout carries a left-to-right split order.
+         * GH #112/#185: the order source of [buildSyncColumns] / route `--col` lists.
+         * Only local detected geometry carries an `editor` left-to-right split order.
+         * Remote Dev's native fold labels memory-derived order `retained`; its editor
+         * collections expose membership and tab-open order, not split geometry.
          * The undetected fallback lists `selectedFiles`, which IntelliJ orders
          * focused-window first, so its order is `unknown` and the controller keeps
          * the order it already retains for those documents. On a Remote Dev
@@ -305,7 +307,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
          * multi-file split set (GH #97), so pane order there is stable, not mirrored.
          */
         internal fun syncColumnOrder(editorLayout: EditorLayout?): String =
-            if (editorLayout != null && editorLayout.columns.size > 1) "editor" else "unknown"
+            if (editorLayout != null && editorLayout.columns.size > 1) editorLayout.columnOrder else "unknown"
 
         internal fun buildSyncColumns(
             visibleMdFiles: List<String>,
@@ -523,7 +525,10 @@ class SyncLayoutAction : AnAction(), DumbAware {
  * Represents a detected 2D editor layout.
  */
 data class LayoutColumn(val files: List<String>)
-data class EditorLayout(val columns: List<LayoutColumn>)
+data class EditorLayout(
+    val columns: List<LayoutColumn>,
+    val columnOrder: String = "editor",
+)
 
 internal sealed interface ExactVisibleSyncDecision {
     data class Publish(val columns: List<String>) : ExactVisibleSyncDecision
@@ -778,6 +783,7 @@ object LayoutDetector {
     internal data class RemoteLayoutResolution(
         val columns: List<LayoutColumn>,
         val source: String,
+        val columnOrder: String,
         val reason: String?,
     )
 
@@ -905,7 +911,7 @@ object LayoutDetector {
                 snapshot.clients,
             ),
         )
-        return EditorLayout(resolution.columns)
+        return EditorLayout(resolution.columns, resolution.columnOrder)
     }
 
     /** GH #175: successful Remote Dev observations retain the raw evidence needed to audit width. */
@@ -947,6 +953,7 @@ object LayoutDetector {
         return RemoteLayoutResolution(
             columns = buildColumnsFromSnapshots(headlessSelectionSnapshots(fallback)),
             source = "remote_client_split_without_native",
+            columnOrder = "unknown",
             reason = null,
         )
     }
@@ -977,6 +984,7 @@ object LayoutDetector {
         RemoteLayoutResolution(
             columns = columns,
             source = root.get("source")?.takeIf { !it.isJsonNull }?.asString ?: "unknown",
+            columnOrder = root.get("column_order")?.takeIf { !it.isJsonNull }?.asString ?: "unknown",
             reason = root.get("reason")?.takeIf { !it.isJsonNull }?.asString,
         )
     } catch (e: Exception) {

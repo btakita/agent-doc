@@ -115,12 +115,28 @@ impl RemoteLayoutSource {
     }
 }
 
+/// How much left-to-right authority the Remote Dev fold has for its columns.
+///
+/// Remote client collections expose membership and tab-open order, not split
+/// geometry. A cold observation is therefore `Unknown`; once the fold preserves
+/// surviving columns or replaces a document in a remembered slot, the resulting
+/// order is `Retained`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteLayoutColumnOrder {
+    #[default]
+    Unknown,
+    Retained,
+}
+
 /// The columns to publish, and why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteLayoutResolution {
     /// Empty only for [`RemoteLayoutSource::Unknown`].
     pub columns: Vec<SurfaceColumn>,
     pub source: RemoteLayoutSource,
+    #[serde(default)]
+    pub column_order: RemoteLayoutColumnOrder,
     /// Machine-readable explanation for retained/unknown answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -166,9 +182,11 @@ impl RemoteLayoutMemory {
         let ambiguous = candidates.len() > 1;
         match candidates.as_slice() {
             [(files, source)] if !self.selection_only_change(files, evidence) => {
+                let (columns, column_order) = self.ordered_columns(files);
                 return RemoteLayoutResolution {
-                    columns: self.ordered_columns(files),
+                    columns,
                     source: *source,
+                    column_order,
                     reason: None,
                 };
             }
@@ -217,6 +235,7 @@ impl RemoteLayoutMemory {
             return RemoteLayoutResolution {
                 columns: retained,
                 source: RemoteLayoutSource::RetainedRemoteColumns,
+                column_order: RemoteLayoutColumnOrder::Retained,
                 reason: Some(reason.to_string()),
             };
         }
@@ -225,6 +244,7 @@ impl RemoteLayoutMemory {
         RemoteLayoutResolution {
             columns: Vec::new(),
             source: RemoteLayoutSource::Unknown,
+            column_order: RemoteLayoutColumnOrder::Unknown,
             reason: Some(
                 if ambiguous {
                     "ambiguous_remote_clients"
@@ -237,23 +257,58 @@ impl RemoteLayoutMemory {
     }
 
     /// One column per file; files from the previous layout keep its order.
-    fn ordered_columns(&self, files: &[String]) -> Vec<SurfaceColumn> {
-        let previous: Vec<&String> = self.columns.iter().flat_map(|c| c.files.iter()).collect();
-        let mut ordered: Vec<&String> = previous
+    /// A same-width one-out/one-in observation gives the added file the exact
+    /// slot of the dropped file instead of appending it (GH #185).
+    fn ordered_columns(&self, files: &[String]) -> (Vec<SurfaceColumn>, RemoteLayoutColumnOrder) {
+        let previous = distinct(self.columns.iter().flat_map(|column| column.files.iter()));
+        let added: Vec<&String> = files
             .iter()
-            .copied()
-            .filter(|file| files.contains(file))
+            .filter(|file| !previous.contains(file))
             .collect();
-        ordered.dedup();
+        let dropped: Vec<String> = previous
+            .iter()
+            .filter(|file| !files.contains(file))
+            .cloned()
+            .collect();
+
+        if previous.len() == files.len() && added.len() == 1 && dropped.len() == 1 {
+            let mut ordered = previous;
+            let dropped_index = ordered
+                .iter()
+                .position(|file| file == &dropped[0])
+                .expect("the dropped file came from the previous layout");
+            ordered[dropped_index] = added[0].clone();
+            return (
+                ordered
+                    .into_iter()
+                    .map(|file| SurfaceColumn::new([file]))
+                    .collect(),
+                RemoteLayoutColumnOrder::Retained,
+            );
+        }
+
+        let mut ordered: Vec<String> = previous
+            .iter()
+            .filter(|file| files.contains(file))
+            .cloned()
+            .collect();
+        let retained_order = !ordered.is_empty();
         for file in files {
-            if !ordered.contains(&file) {
-                ordered.push(file);
+            if !ordered.contains(file) {
+                ordered.push(file.clone());
             }
         }
-        ordered
-            .into_iter()
-            .map(|file| SurfaceColumn::new([file.clone()]))
-            .collect()
+        (
+            ordered
+                .into_iter()
+                .map(|file| SurfaceColumn::new([file]))
+                .collect(),
+            if retained_order {
+                RemoteLayoutColumnOrder::Retained
+            } else {
+                RemoteLayoutColumnOrder::Unknown
+            },
+        )
     }
 
     /// GH #175: `EditorTracker.activeEditors` may retain the hidden text half
@@ -396,6 +451,29 @@ mod tests {
             resolution.source,
             RemoteLayoutSource::RemoteClientVisibleEditors
         );
+        assert_eq!(resolution.column_order, RemoteLayoutColumnOrder::Unknown);
+        assert_eq!(
+            columns(&resolution),
+            vec![vec![A.to_string()], vec![B.to_string()]]
+        );
+    }
+
+    /// GH #185: Remote Dev exposes membership but not split geometry. When one
+    /// visible document replaces another at the same retained width, the new
+    /// document inherits the dropped document's slot instead of appending.
+    #[test]
+    fn gh185_same_width_replacement_inherits_the_dropped_column_slot() {
+        let memory = RemoteLayoutMemory {
+            columns: vec![SurfaceColumn::new([C]), SurfaceColumn::new([B])],
+            focused: Some(C.to_string()),
+        };
+        let (_, resolution) = memory.advance(&evidence(vec![client(&[A, B], &[A], &[A, B])], &[A]));
+
+        assert_eq!(
+            resolution.source,
+            RemoteLayoutSource::RemoteClientVisibleEditors
+        );
+        assert_eq!(resolution.column_order, RemoteLayoutColumnOrder::Retained);
         assert_eq!(
             columns(&resolution),
             vec![vec![A.to_string()], vec![B.to_string()]]

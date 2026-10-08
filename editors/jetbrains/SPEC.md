@@ -182,9 +182,14 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   evidence and no retained split does the observation stay `unknown`. The controller's coalesced ingress receipt joins
   `layout=unknown|observed|focus_only` to `pane_action=none|focus_only|structural_sync` on one
   line so every pane effect names its authority.
+- When a Remote Dev observation has the same width as retained memory and exactly one document
+  leaves while one enters, the new document inherits the dropped document's column slot. The
+  client `visible`/`open` lists prove membership, not geometry, so this memory-derived result is
+  published as `column_order=retained`, never `editor` (GH #185). A retained publication is
+  already resolved and passes through controller ordering unchanged.
 - Explicit layout publications (`Sync Tmux Pane`, claim, resync, and the Run Agent Doc route's
-  `--col` list) name their order source as `column_order` (GH #112). Only a detected
-  multi-column split is `editor`; the undetected fallback lists `selectedFiles`, which IntelliJ
+  `--col` list) name their order source as `column_order` (GH #112). Only locally detected
+  multi-column geometry is `editor`; the undetected fallback lists `selectedFiles`, which IntelliJ
   orders focused-window first, so it is `unknown`. The controller resolves an `unknown` order
   against the order it already retains for those documents (`agent_doc_tmux::order_layout_columns`):
   focus never reorders columns, and a newly visible document appends. On a Remote Dev backend

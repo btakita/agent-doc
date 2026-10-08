@@ -12,6 +12,7 @@ use agent_doc_document::queue_projection::strip_priority_markers;
 use agent_doc_element::element;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::{
+    document_queue::{QueueEntry, QueuePrompt},
     queue_consume::{
         IpcNodeOp, QueueConsumptionPlan, consume_queue_nodes_by_key,
         consume_queue_prompts_by_exact_spans, first_n_queue_prompt_texts,
@@ -429,10 +430,31 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
     else {
         return Ok(None);
     };
-    let entries = agent_doc_queue::document_queue::parse(queue.content(&content))
+    let queue_body = queue.content(&content);
+    let entries = agent_doc_queue::document_queue::parse(queue_body)
         .context("queue consume --ack-text: failed to parse document queue")?;
-    let Some(observed_head) =
-        agent_doc_queue::document_queue::first_prompt(&entries).map(|prompt| prompt.text.clone())
+    let observed_prompt =
+        agent_doc_queue::document_queue::first_prompt(&entries).map(|prompt| prompt.text.clone());
+    // A CRDT/editor projection failure can leave an otherwise valid queue head
+    // without its Markdown list marker. The tolerant queue parser intentionally
+    // classifies that row as inert `Freeform`, so ordinary dispatch and consume
+    // must continue to ignore it. `--ack-text` is different: the operator
+    // supplies the exact row as an explicit recovery proof. Admit only the first
+    // freeform row, only when there is no canonical prompt to address, and retain
+    // its exact parser span so the repair cannot drift onto neighboring work.
+    let observed_freeform = if observed_prompt.is_none() {
+        agent_doc_queue::document_queue::parse_spans(queue_body)?
+            .into_iter()
+            .find_map(|(entry, range)| match entry {
+                QueueEntry::Freeform(text) => Some((text, range)),
+                _ => None,
+            })
+    } else {
+        None
+    };
+    let Some(observed_head) = observed_prompt
+        .clone()
+        .or_else(|| observed_freeform.as_ref().map(|(text, _)| text.clone()))
     else {
         return Ok(None);
     };
@@ -445,9 +467,12 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
         );
     }
 
+    let exact_freeform_match = observed_freeform.is_some();
     let expected = strip_priority_markers(expected_head);
     let observed = strip_priority_markers(&observed_head);
-    if expected.trim() != observed.trim() {
+    if (exact_freeform_match && expected_head != observed_head)
+        || (!exact_freeform_match && expected.trim() != observed.trim())
+    {
         anyhow::bail!(
             "{}: --ack-text does not exactly match the paused queue head; no change \
              was applied. expected={:?} observed={:?}",
@@ -457,28 +482,45 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
         );
     }
 
-    let node_keys = queue_prompt_node_keys_for_count(&content, 1)?;
-    if node_keys.keys.len() != 1 {
-        anyhow::bail!(
-            "{}: refusing --ack-text because the paused queue head is not uniquely \
-             addressable (#qconsumenostrike).",
-            file.display()
+    let (node_ops, remaining, mut target) = if let Some((text, range)) = observed_freeform {
+        let mut target = content.clone();
+        let completed = agent_doc_queue::document_queue::render(&[QueueEntry::Completed(
+            QueuePrompt::new(text),
+        )]);
+        target.replace_range(
+            (queue.open_end + range.start)..(queue.open_end + range.end),
+            &completed,
         );
-    }
-
-    let completed_entries =
-        agent_doc_queue::document_queue::mark_first_n_prompts_completed(&entries, 1);
-    let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
-    let mut target = if node_keys.ast_backed {
-        consume_queue_nodes_by_key(&content, &node_keys.keys)?
+        (Vec::new(), 0, target)
     } else {
-        consume_queue_prompts_by_exact_spans(&content, std::slice::from_ref(&observed_head))?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "{}: refusing --ack-text because the parser could not prove the exact paused queue-head span (#qconsumenostrike).",
-                    file.display()
-                )
-            })?
+        let node_keys = queue_prompt_node_keys_for_count(&content, 1)?;
+        if node_keys.keys.len() != 1 {
+            anyhow::bail!(
+                "{}: refusing --ack-text because the paused queue head is not uniquely \
+                 addressable (#qconsumenostrike).",
+                file.display()
+            );
+        }
+        let completed_entries =
+            agent_doc_queue::document_queue::mark_first_n_prompts_completed(&entries, 1);
+        let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
+        let target = if node_keys.ast_backed {
+            consume_queue_nodes_by_key(&content, &node_keys.keys)?
+        } else {
+            consume_queue_prompts_by_exact_spans(&content, std::slice::from_ref(&observed_head))?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "{}: refusing --ack-text because the parser could not prove the exact paused queue-head span (#qconsumenostrike).",
+                        file.display()
+                    )
+                })?
+        };
+        let node_ops = if node_keys.ast_backed {
+            queue_consume_node_ops(&node_keys.keys)
+        } else {
+            Vec::new()
+        };
+        (node_ops, remaining, target)
     };
     let response_first_line = projected_capture_response_body(file)
         .and_then(|body| first_nonempty_line(&body).map(str::to_string));
@@ -491,11 +533,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
     let plan = QueueConsumptionPlan {
         consumed_text: observed_head.clone(),
         consumed_texts: vec![observed_head.clone()],
-        node_ops: if node_keys.ast_backed {
-            queue_consume_node_ops(&node_keys.keys)
-        } else {
-            Vec::new()
-        },
+        node_ops,
         remaining,
         drained: remaining == 0,
         auto: agent_doc_queue::document_queue::has_auto_attr(&queue.attrs),
@@ -2325,6 +2363,68 @@ mod core_tests {
             updated.contains(
                 "> **Queue prompt:**\n>\n> The pictures are not currently on the mrh website. Please fix. Please diagnose what happened."
             ),
+            "{updated}"
+        );
+    }
+
+    #[test]
+    fn exact_text_ack_repairs_inactive_subagents_queue_with_bare_head() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let head =
+            "Make another PR to merge #666 into `dev`.Make another PR to merge #666 into `dev`.";
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_format: template\n",
+                "---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: Response\n\n",
+                "Promoted PR #666 through replacement PR #669.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents priority -->\n",
+                "{}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            head
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let mismatch = super::acknowledge_paused_free_text_queue_head_with_outcome(
+            &doc,
+            "Make another PR to merge #666 into `dev`.",
+            &TEST_EFFECTS,
+        )
+        .unwrap_err();
+        assert!(
+            mismatch.to_string().contains("does not exactly match"),
+            "{mismatch}"
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+
+        let outcome =
+            super::acknowledge_paused_free_text_queue_head_with_outcome(&doc, head, &TEST_EFFECTS)
+                .unwrap()
+                .expect("exact bare subagent head should be acknowledged");
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.remaining, 0);
+        assert!(
+            updated.contains("<!-- agent:queue subagents priority -->"),
+            "{updated}"
+        );
+        assert!(updated.contains(&format!("- ~~{head}~~")), "{updated}");
+        assert!(!updated.contains("queue_active: true"), "{updated}");
+        assert!(
+            updated.contains(&format!("> **Queue prompt:**\n>\n> {head}")),
             "{updated}"
         );
     }

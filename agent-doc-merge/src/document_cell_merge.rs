@@ -1073,18 +1073,18 @@ fn merge_exchange_inner(
             // Emit everything before the boundary line, then the appended turns,
             // then the boundary line and any trailing content verbatim.
             for l in &flat[..idx] {
-                out.push_str(l);
+                push_exchange_segment(&mut out, l);
             }
-            out.push_str(&appended);
+            push_exchange_segment(&mut out, &appended);
             for l in &flat[idx..] {
-                out.push_str(l);
+                push_exchange_segment(&mut out, l);
             }
         }
         None => {
             for l in &flat {
-                out.push_str(l);
+                push_exchange_segment(&mut out, l);
             }
-            out.push_str(&appended);
+            push_exchange_segment(&mut out, &appended);
         }
     }
     // `#exchangeconverge`: with `document_cell_merge_enabled` (default ON) this is the
@@ -1100,6 +1100,22 @@ fn merge_exchange_inner(
     } else {
         out
     }
+}
+
+/// Join distinct exchange segments without allowing one Markdown node to absorb
+/// the next when an upstream projection omitted a trailing line terminator.
+fn push_exchange_segment(out: &mut String, segment: &str) {
+    if segment.is_empty() {
+        return;
+    }
+    if !out.is_empty()
+        && !out.ends_with('\n')
+        && !segment.starts_with('\n')
+        && !segment.starts_with('\r')
+    {
+        out.push('\n');
+    }
+    out.push_str(segment);
 }
 
 /// Recognize an `<!-- agent:boundary:HASH -->` marker line.
@@ -2338,6 +2354,117 @@ New turn B.
             b_idx < boundary_idx,
             "new turn must precede the boundary marker: {}",
             m.merged_doc
+        );
+    }
+
+    #[test]
+    fn exchange_append_separates_new_turn_from_unterminated_retained_tail() {
+        // A retained projection may hand the cell merge a final exchange fragment
+        // without its line terminator. Appending the agent-new turn must restore
+        // the Markdown node boundary instead of producing `tail.### Re:`.
+        let theirs_inner = vec!["Retained operator tail.".to_string()];
+        let ours = "\
+<!-- agent:exchange -->
+### Re: new turn — opus-4-8
+
+Fresh response.
+<!-- /agent:exchange -->
+";
+        let mut outcomes = Vec::new();
+        let mut advisories = Vec::new();
+
+        let merged = merge_exchange_inner(
+            &theirs_inner,
+            None,
+            None,
+            None,
+            ours,
+            &mut outcomes,
+            &mut advisories,
+        );
+
+        assert_eq!(
+            merged,
+            "Retained operator tail.\n### Re: new turn — opus-4-8\n\nFresh response.\n"
+        );
+    }
+
+    #[test]
+    fn exchange_rebuild_separates_retained_chat_prompt_from_unterminated_tail() {
+        // Regression for the observed stranded-steering shape: the document
+        // model retained two distinct line records, but the preceding response
+        // tail had lost its terminator. Rebuilding the exchange must not turn
+        // those records into `compaction.> **Chat prompt`.
+        let theirs_inner = vec![
+            "### Re: prior turn — opus-4-8\n".to_string(),
+            "\n".to_string(),
+            "The exchange is oversized, but the active queue was not stalled for compaction."
+                .to_string(),
+            "> **Chat prompt (#chatprompt):** Fix the cause of the error\n".to_string(),
+        ];
+        let ours = "\
+<!-- agent:exchange -->
+### Re: prior turn — opus-4-8
+
+The exchange is oversized, but the active queue was not stalled for compaction.
+> **Chat prompt (#chatprompt):** Fix the cause of the error
+<!-- /agent:exchange -->
+";
+        let mut outcomes = Vec::new();
+        let mut advisories = Vec::new();
+
+        let merged = merge_exchange_inner(
+            &theirs_inner,
+            None,
+            None,
+            None,
+            ours,
+            &mut outcomes,
+            &mut advisories,
+        );
+
+        assert!(
+            merged.contains(
+                "compaction.\n> **Chat prompt (#chatprompt):** Fix the cause of the error"
+            ),
+            "retained Markdown nodes must keep a line boundary:\n{merged}"
+        );
+        assert!(!merged.contains("compaction.> **Chat prompt"));
+    }
+
+    #[test]
+    fn exchange_append_separates_new_turn_before_boundary_from_unterminated_tail() {
+        // The canonical response boundary is structural trailing content. Its
+        // presence must not let an unterminated retained tail absorb the first
+        // agent-new heading when the turn is inserted before that boundary.
+        let theirs_inner = vec![
+            "Retained operator tail.".to_string(),
+            "<!-- agent:boundary:abc123 -->\n".to_string(),
+        ];
+        let ours = "\
+<!-- agent:exchange -->
+### Re: new turn — opus-4-8
+
+Fresh response.
+<!-- agent:boundary:abc123 -->
+<!-- /agent:exchange -->
+";
+        let mut outcomes = Vec::new();
+        let mut advisories = Vec::new();
+
+        let merged = merge_exchange_inner(
+            &theirs_inner,
+            None,
+            None,
+            None,
+            ours,
+            &mut outcomes,
+            &mut advisories,
+        );
+
+        assert_eq!(
+            merged,
+            "Retained operator tail.\n### Re: new turn — opus-4-8\n\nFresh response.\n<!-- agent:boundary:abc123 -->\n"
         );
     }
 

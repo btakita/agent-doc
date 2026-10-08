@@ -461,6 +461,15 @@ by `agent_doc_markdown_ast::exchange_tree::response_identity_digest` and is used
 consistently by the append filter and the convergence dedup in
 `agent-doc-merge`.
 
+Every distinct exchange line or append segment is a Markdown boundary. If the
+preceding retained segment does not end in a line terminator and the next segment
+does not begin with one, the cell merge inserts exactly one newline. This applies
+between retained line records and before an agent-new response turn, whether the
+turn lands at the end of the exchange or immediately before a trailing
+`agent:boundary` marker. Already terminated segments and empty appends remain
+byte-verbatim. This prevents retained exchange prose from being concatenated
+with an operator prompt or newly appended response node into one malformed node.
+
 A whole-document replay is transport corruption, not a prompt the agent must
 repair. Preflight and route preparation may coalesce two structurally complete
 copies only when they have byte-identical frontmatter and either are identical

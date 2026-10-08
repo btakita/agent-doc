@@ -204,6 +204,14 @@ No release was published in this cycle. The remaining queue heads are claimed or
 Completed on current `main` by commit `e23876c3d` (`fix: keep document name in tmux pane titles`). The shared title policy and registered-document lookup cover all four controlled states: idle (`sample.md`), active (`⟳ sample.md — turn in progress`), stale (`⚠ STALE SUPERVISOR — sample.md`), and stale-active (`⚠ STALE SUPERVISOR — sample.md — turn in progress`).
 
 Focused verification passed 16 tests with zero failures: the 14 `agent-doc-turn` turn-status tests, `registered_document_name_is_resolved_by_pane`, and `stale_title_marker_is_recognised_in_every_title_shape`. The only tmux `select-pane -T` producers are routed through this policy. The current-main worktree was clean, so no duplicate commit or no-op PR was created.
+
+### Re: GitHub issue #186 — gpt-5 · 2026-10-08T14:56:29-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/186
+
+Already completed and released in v0.35.479 by commit `b526f1c9e1a9837e3876101b7169cc471ccc939e` (`fix: expose lint diagnostics in JetBrains`); GitHub issue #186 is closed. The fix makes lint extraction multiline and CRLF-safe despite a trailing `[dogfood]` record, exposes the read-only `agent-doc lint` command, wires the JetBrains lint action, and records the first rule/line/column in blocked-operation diagnostics.
+
+Fresh verification on current `main` passed: 24 lint-I/O tests, 2 lint CLI tests, 73 JetBrains `TerminalUtilTest` tests, and 6 popup-action tests. The verification worktree was clean, so no duplicate patch was created.
 <!-- agent:boundary:72f38ede -->
 <!-- /agent:exchange -->
 

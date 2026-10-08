@@ -161,13 +161,8 @@ For `frontend.md`, the retained response is present and supervisor/editor conver
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixsubagent]
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/181~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/182~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/183~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/184: Removing the Context Chip makes Run Agent Doc work. agent-doc should support Claude Code's context chip.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+- Make the tmux pane title contain the document name in all states.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -178,7 +173,7 @@ For `frontend.md`, the retained response is present and supervisor/editor conver
 ## Review
 
 <!-- agent:review -->
-- [/] 🚧 [#fixsubagent] Fix in a subagent:
+- [/] [#fixsubagent] Fix in a subagent:
   ```
   • Blocked by hook
   └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-

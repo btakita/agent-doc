@@ -40,6 +40,7 @@ agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.35.479" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.479" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.479" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.479" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.479" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.479" }
 agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.479" }
 agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.479" }

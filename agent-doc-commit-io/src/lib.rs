@@ -55,6 +55,55 @@ pub struct CommitOutcome {
     pub vcs_refresh_signaled: Option<bool>,
 }
 
+fn report_post_closeout_push(
+    file: &Path,
+    outcome: &agent_doc_git_io::post_closeout_push::PostCloseoutPushOutcome,
+) {
+    use agent_doc_git_io::post_closeout_push::PostCloseoutPushOutcome;
+
+    let message = match outcome {
+        PostCloseoutPushOutcome::Disabled => return,
+        PostCloseoutPushOutcome::Pushed(target) => format!(
+            "post_closeout_push status=pushed mode=ff-only remote={} ref={}",
+            target.remote, target.branch_ref
+        ),
+        PostCloseoutPushOutcome::Skipped { reason, detail } => format!(
+            "post_closeout_push status=skipped mode=ff-only reason={} detail={}",
+            reason,
+            detail.replace(['\n', '\r'], " ")
+        ),
+        PostCloseoutPushOutcome::Rejected { target, detail } => format!(
+            "post_closeout_push status=rejected mode=ff-only remote={} ref={} detail={}",
+            target.remote,
+            target.branch_ref,
+            detail.replace(['\n', '\r'], " ")
+        ),
+        PostCloseoutPushOutcome::Failed { phase, detail } => format!(
+            "post_closeout_push status=failed mode=ff-only phase={} detail={}",
+            phase,
+            detail.replace(['\n', '\r'], " ")
+        ),
+    };
+    agent_doc_ops_log_io::log_op(file, &message);
+    match outcome {
+        PostCloseoutPushOutcome::Pushed(target) => eprintln!(
+            "[commit] pushed closeout commit to {} {} (fast-forward only)",
+            target.remote, target.branch_ref
+        ),
+        PostCloseoutPushOutcome::Skipped { reason, detail } => eprintln!(
+            "[commit] warning: post-closeout push skipped ({reason}): {detail}; committed cycle remains valid"
+        ),
+        PostCloseoutPushOutcome::Rejected { target, detail } => eprintln!(
+            "[commit] warning: post-closeout push to {} {} was rejected: {}; committed cycle remains valid",
+            target.remote, target.branch_ref, detail
+        ),
+        PostCloseoutPushOutcome::Failed { phase, detail } => eprintln!(
+            "[commit] warning: post-closeout push failed during {phase}: {detail}; committed cycle remains valid"
+        ),
+        PostCloseoutPushOutcome::Disabled => {}
+    }
+}
+
 /// A typed refusal to commit a retained write whose lifecycle verdict names a
 /// different transition. Callers must preserve the refusal unless they own
 /// that exact transition.
@@ -2949,6 +2998,15 @@ where
 
         if in_submodule {
             update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+        }
+
+        if did_commit {
+            let push_mode = agent_doc_project_config_io::load_project_for_doc(file)
+                .commit
+                .push;
+            let push_outcome =
+                agent_doc_git_io::post_closeout_push::push_after_closeout(&git_root, push_mode);
+            report_post_closeout_push(file, &push_outcome);
         }
     }
 

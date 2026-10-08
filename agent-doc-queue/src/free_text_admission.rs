@@ -928,6 +928,57 @@ mod tests {
     }
 
     #[test]
+    fn admission_keeps_fenced_backlog_examples_literal() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "~~~prompt\n",
+            "Run Agent Doc on tools.md duplicated my queue item:\n",
+            "```\n",
+            "- do - do [#crossplatformmise]\n",
+            "```\n",
+            "```\n",
+            "- [ ] [#crossplatformmise-txpw] Re: Cross-platform mise bootstrap\n",
+            "- [ ] [#crossplatformmise] Re: Cross-platform mise bootstrap\n",
+            "```\n",
+            "~~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "tools-doc",
+        )
+        .unwrap()
+        .unwrap();
+        let components = agent_doc_element::element::parse(&prepared.content).unwrap();
+        let backlog = components
+            .iter()
+            .find(|component| component.name == "backlog")
+            .unwrap();
+        let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(
+            backlog.content(&prepared.content),
+        );
+
+        assert_eq!(prepared.admitted_count, 1);
+        assert_eq!(items.len(), 1, "fenced examples became backlog siblings");
+        assert_eq!(items[0].id, prepared.unique_ids[0]);
+        assert!(items[0].continuation.contains("[#crossplatformmise-txpw]"));
+
+        let admission = prepared
+            .finish(FreeTextAdmissionExecution::Queue)
+            .unwrap();
+        let queue_entries = queue_entries_from_content(&admission.content);
+        let queue_prompts = crate::document_queue::prompts(&queue_entries);
+        assert_eq!(queue_prompts.len(), 1);
+        assert_eq!(queue_prompts[0].text, format!("do [#{}]", items[0].id));
+    }
+
+    #[test]
     fn midline_existing_id_mention_is_coined_as_fresh_free_text_work() {
         let content = concat!(
             "<!-- agent:backlog priority queue -->\n",

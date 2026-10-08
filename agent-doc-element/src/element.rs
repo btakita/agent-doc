@@ -69,7 +69,7 @@
 //! - append_with_boundary_skips_code_block: boundary inside code block skipped, real boundary used
 
 use anyhow::Result;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -1028,6 +1028,58 @@ pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
         eprintln!("[perf] find_code_ranges: {}ms", elapsed);
     }
     ranges
+}
+
+/// Byte ranges whose contents Markdown classifies as literal rather than
+/// ordinary prose: code spans/blocks and raw HTML nodes.
+///
+/// Consumers that recognize agent-doc syntax embedded in Markdown must gate
+/// that recognition on these AST ranges. In particular, line-shaped examples
+/// inside a fenced block or HTML comment/block are examples, not live queue or
+/// tracked-work records.
+pub fn find_markdown_literal_ranges(doc: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Parser::new_ext(doc, Options::empty())
+        .into_offset_iter()
+        .filter_map(|(event, range)| match event {
+            Event::Code(_) | Event::Html(_) | Event::InlineHtml(_) => {
+                Some((range.start, range.end))
+            }
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) => {
+                Some((range.start, range.end))
+            }
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_)))
+                if fenced_code_block_is_balanced(&doc[range.clone()]) =>
+            {
+                Some((range.start, range.end))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for span in find_line_local_code_spans(doc) {
+        if !ranges
+            .iter()
+            .any(|&(start, end)| span.0 >= start && span.1 <= end)
+        {
+            ranges.push(span);
+        }
+    }
+    ranges.sort_unstable();
+    ranges
+}
+
+fn fenced_code_block_is_balanced(block: &str) -> bool {
+    let mut lines = block.lines();
+    let opener = lines.next().unwrap_or_default().trim_start();
+    let Some(fence_char) = opener.chars().next().filter(|ch| matches!(ch, '`' | '~')) else {
+        return false;
+    };
+    let opener_len = opener.chars().take_while(|ch| *ch == fence_char).count();
+    if opener_len < 3 {
+        return false;
+    }
+    let closer = block.lines().last().unwrap_or_default().trim();
+    let closer_len = closer.chars().take_while(|ch| *ch == fence_char).count();
+    closer_len >= opener_len && closer[closer_len..].trim().is_empty()
 }
 
 /// Byte ranges of inline code spans found by pairing backtick runs within a
@@ -2674,6 +2726,27 @@ ok
         assert!(doc[ranges[0].0..ranges[0].1].contains("code"));
         // Inline span
         assert!(doc[ranges[1].0..ranges[1].1].contains("inline"));
+    }
+
+    #[test]
+    fn markdown_literal_ranges_cover_code_and_raw_html_nodes() {
+        let cases = [
+            "```md\n- [ ] [#fenced] example\n```\n",
+            "  ~~~md\n  - [ ] [#nested] example\n  ~~~\n",
+            "    - [ ] [#indented] example\n",
+            "<!--\n- [ ] [#commented] example\n-->\n",
+            "<pre>\n- [ ] [#html] example\n</pre>\n",
+        ];
+
+        for doc in cases {
+            let needle = doc.find("- [ ]").expect("fixture has checklist text");
+            assert!(
+                find_markdown_literal_ranges(doc)
+                    .iter()
+                    .any(|(start, end)| needle >= *start && needle < *end),
+                "Markdown AST did not classify checklist example as literal: {doc:?}"
+            );
+        }
     }
 
     #[test]

@@ -387,7 +387,6 @@ recursive-direct-invocation deadlock guard, and do not send the final answer yet
 
 <!-- agent:backlog priority -->
 - [ ] [#reviewiceboxnotes] Add agent:review + agent:icebox + agent:done + agent:notes to the Claim for Tmux Pane template.
-- [ ] [#crossplatformmise-txpw] Run Agent Doc on tools.md duplicated one queue item and created duplicate backlog rows across retries. Integrate PR #208, which replaces prefix/similarity inference with fail-closed baseline-to-projection identity proof, then verify exact-shape, opposite-CRDT-order, retry-idempotence, and ambiguous-edit regressions.
 <!-- /agent:backlog -->
 
 ## Review

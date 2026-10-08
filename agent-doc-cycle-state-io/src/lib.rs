@@ -98,6 +98,30 @@ pub struct SemanticMergeConflictAdvisory {
     pub recorded_cycle_id: Option<String>,
 }
 
+/// Names the boundary that authoritatively selected queue work for a cycle.
+///
+/// Older persisted cycles have no such witness and deserialize as
+/// `LegacyUnknown`; only those cycles may recover selection from transient
+/// visible `🚧` markers at closeout.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueSelectionAuthority {
+    #[default]
+    LegacyUnknown,
+    Preflight,
+    OutOfBandCloseout,
+}
+
+impl QueueSelectionAuthority {
+    pub const fn is_legacy_unknown(&self) -> bool {
+        matches!(self, Self::LegacyUnknown)
+    }
+
+    pub const fn is_authoritative(self) -> bool {
+        !matches!(self, Self::LegacyUnknown)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockedCloseout {
     pub kind: String,
@@ -314,10 +338,17 @@ pub struct CycleState {
     /// `> **Queue prompt:**` response echo.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_free_text_queue_heads: Vec<String>,
+    /// Which admission boundary owns `selected_free_text_queue_heads`.
+    /// Authoritative empty is materially different from a missing legacy
+    /// witness: it means this cycle admitted no free-text queue work.
+    #[serde(
+        default,
+        skip_serializing_if = "QueueSelectionAuthority::is_legacy_unknown"
+    )]
+    pub queue_selection_authority: QueueSelectionAuthority,
     /// A fresh exchange/chat prompt preempted queue selection for this cycle.
-    /// This distinguishes an authoritative empty selection from legacy/direct
-    /// cycles that never recorded a durable selection and must still fall back
-    /// to the transient visible `🚧` marker.
+    /// Retained as a compatibility witness for persisted cycles written before
+    /// `queue_selection_authority` existed.
     #[serde(default, skip_serializing_if = "is_false")]
     pub queue_selection_preempted: bool,
     /// `#chatprompt` (GH #125): operator prompts that reached the harness chat
@@ -1363,6 +1394,7 @@ pub fn start_preflight_with_task(
             .map(agent_doc_queue::queue_heads::active_free_text_queue_heads)
             .unwrap_or_default(),
         selected_free_text_queue_heads: Vec::new(),
+        queue_selection_authority: QueueSelectionAuthority::LegacyUnknown,
         queue_selection_preempted: false,
         // A re-entrant preflight of the same open cycle keeps the chat prompts
         // the first admission carried; the hook ledger was cleared by then.
@@ -1439,8 +1471,29 @@ pub fn record_selected_free_text_queue_heads(
             normalized.push(head);
         }
     }
-    if state.selected_free_text_queue_heads != normalized {
+    if state.selected_free_text_queue_heads != normalized
+        || state.queue_selection_authority != QueueSelectionAuthority::Preflight
+    {
         state.selected_free_text_queue_heads = normalized;
+        state.queue_selection_authority = QueueSelectionAuthority::Preflight;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// Record that an out-of-band closeout opened a cycle without selecting queue
+/// work. This is intentionally distinct from `record_selected_*`: there was no
+/// preflight selection pass whose absence closeout may fill from editor UI.
+pub fn record_empty_out_of_band_queue_selection(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.selected_free_text_queue_heads.is_empty()
+        || state.queue_selection_authority != QueueSelectionAuthority::OutOfBandCloseout
+    {
+        state.selected_free_text_queue_heads.clear();
+        state.queue_selection_authority = QueueSelectionAuthority::OutOfBandCloseout;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -3514,6 +3567,7 @@ fn synthetic_state_with_id(
         active_queue_heads: Vec::new(),
         active_free_text_queue_heads: Vec::new(),
         selected_free_text_queue_heads: Vec::new(),
+        queue_selection_authority: QueueSelectionAuthority::LegacyUnknown,
         queue_selection_preempted: false,
         chat_prompts: Vec::new(),
         absorbed_steering_prompts: Vec::new(),
@@ -5000,6 +5054,38 @@ mod tests {
         let state = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         assert!(state.queue_task_id.is_none());
         assert!(state.turn_id.is_none());
+    }
+
+    #[test]
+    fn queue_selection_authority_distinguishes_legacy_from_authoritative_empty() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        let opened = start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        assert_eq!(
+            opened.queue_selection_authority,
+            QueueSelectionAuthority::LegacyUnknown
+        );
+
+        let selected = record_selected_free_text_queue_heads(&doc, &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            selected.queue_selection_authority,
+            QueueSelectionAuthority::Preflight
+        );
+        assert!(selected.selected_free_text_queue_heads.is_empty());
+
+        record_selected_free_text_queue_heads(&doc, &["stale head".to_string()]).unwrap();
+        let out_of_band = record_empty_out_of_band_queue_selection(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            out_of_band.queue_selection_authority,
+            QueueSelectionAuthority::OutOfBandCloseout
+        );
+        assert!(out_of_band.selected_free_text_queue_heads.is_empty());
     }
 
     #[test]

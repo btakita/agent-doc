@@ -1221,6 +1221,7 @@ fn guard_no_baseline_replay_after_committed_cycle(
             return guard_no_baseline_replay_after_committed_cycle_inner(file, commit_mode);
         };
         agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&head))?;
+        agent_doc_cycle_state_io::record_empty_out_of_band_queue_selection(file)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -1301,6 +1302,7 @@ fn guard_no_baseline_replay_after_committed_cycle_inner(
     // and hand the caller the HEAD baseline so the new response diffs against the
     // actual committed state (the stale explicit baseline is discarded).
     agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&head))?;
+    agent_doc_cycle_state_io::record_empty_out_of_band_queue_selection(file)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(

@@ -610,6 +610,26 @@ mod tests {
     }
 
     #[test]
+    fn build_prompt_names_session_document_below_cache_boundary() {
+        let fm = frontmatter::Frontmatter::default();
+        let prompt = build_prompt(
+            Path::new("tasks/focused.md"),
+            RunMode::from_frontmatter(&fm),
+            &fm,
+            "diff",
+            "doc",
+            None,
+        );
+        let boundary = prompt.find(PROMPT_CACHE_BOUNDARY).unwrap();
+        let document_path = prompt
+            .find("<session_document_path>tasks/focused.md</session_document_path>")
+            .unwrap();
+
+        assert!(document_path > boundary);
+        assert!(prompt.contains("Treat this path as the primary document context for this turn."));
+    }
+
+    #[test]
     fn build_prompt_append_mode_uses_inline_contract() {
         let fm = frontmatter::Frontmatter {
             format: Some(frontmatter::AgentDocFormat::Append),

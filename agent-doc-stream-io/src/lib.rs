@@ -250,6 +250,7 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
     );
     let prompt =
         agent_doc_prompt_context::render_streaming_agent_prompt(StreamingAgentPromptContext {
+            document_path: file,
             resuming: resume_id.is_some(),
             diff_text: &the_diff,
             doc: &content_original,

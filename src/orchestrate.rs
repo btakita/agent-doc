@@ -460,6 +460,7 @@ fn build_agent_prompt(
     };
 
     let mut prompt = agent_doc_prompt_context::render_agent_prompt(AgentPromptContext {
+        document_path: file,
         template_mode: mode.is_template(),
         diff_text,
         doc,

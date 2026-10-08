@@ -3817,6 +3817,12 @@ pub fn run_queue_maintenance_with_coin_gate(
         !queue_active_for_free_text && !queue_paused_by_operator,
         &document_id,
     )? {
+        queue_warnings.extend(prepared_admission.warnings.iter().map(|message| PreflightWarning {
+            code: "free_text_admission_item_skipped".to_string(),
+            message: message.clone(),
+            document_agent: None,
+            active_harness: None,
+        }));
         let (execution, warnings) = resolve_free_text_execution(
             file,
             &prepared_admission.content,
@@ -14871,6 +14877,58 @@ mod tests {
             !updated.contains("#qftbklgstrike"),
             "no #qftbklgstrike annotation should appear for an unrelated prompt:\n{updated}"
         );
+    }
+
+    #[test]
+    fn active_go_maintenance_coins_midline_id_mention_and_plain_sibling() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#existing]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#existing] Existing work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let current = baseline.replace(
+            "- do [#existing]\n",
+            "- do [#existing]\n- verify [#existing] yourself\n- Why is the sibling missing?\n",
+        );
+        std::fs::write(&doc, current).unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("verify [#existing] yourself"), "{updated}");
+        assert!(updated.contains("Why is the sibling missing?"), "{updated}");
+        assert_eq!(updated.matches("[#existing] Existing work").count(), 1);
+        let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(
+            agent_doc_element::element::parse(&updated)
+                .unwrap()
+                .iter()
+                .find(|component| component.name == "backlog")
+                .unwrap()
+                .content(&updated),
+        );
+        assert_eq!(items.len(), 3, "{items:?}");
+        assert!(items.iter().any(|item| item.text == "verify [#existing] yourself"));
+        assert!(items.iter().any(|item| item.text == "Why is the sibling missing?"));
+        assert_eq!(items.iter().filter(|item| item.id == "existing").count(), 1);
     }
 
     #[test]

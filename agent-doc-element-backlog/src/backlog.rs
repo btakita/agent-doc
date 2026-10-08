@@ -1610,15 +1610,23 @@ pub struct PendingAddOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingAddBatchItemOutcome {
+    pub text: String,
     pub id: String,
     pub inserted: bool,
     pub deduped_key: Option<SymptomDedupeKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAddBatchItemFailure {
+    pub text: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingAddBatchOutcome {
     pub body: String,
     pub outcomes: Vec<PendingAddBatchItemOutcome>,
+    pub failures: Vec<PendingAddBatchItemFailure>,
 }
 
 pub fn symptom_dedupe_key_from_text(text: &str) -> Result<Option<SymptomDedupeKey>> {
@@ -3894,19 +3902,47 @@ pub fn op_prepend_many_with_outcomes(
     doc_id: &str,
     gated: bool,
 ) -> Result<PendingAddBatchOutcome> {
+    op_prepend_many_with_outcomes_reserved(body, items, doc_id, gated, &HashSet::new())
+}
+
+/// [`op_prepend_many_with_outcomes`] with ids reserved by every active identity
+/// source in the containing document (`#idcollisionnamespace`). A malformed or
+/// conflicting item is reported in [`PendingAddBatchOutcome::failures`] without
+/// discarding successful siblings from the same maintenance pass.
+pub fn op_prepend_many_with_outcomes_reserved(
+    body: &str,
+    items: &[String],
+    doc_id: &str,
+    gated: bool,
+    reserved: &HashSet<String>,
+) -> Result<PendingAddBatchOutcome> {
     let mut body = body.to_string();
     let mut outcomes = Vec::with_capacity(items.len());
+    let mut failures = Vec::new();
     for item in items.iter().rev() {
-        let outcome = op_add_with_outcome(&body, item, doc_id, gated)?;
-        body = outcome.body;
-        outcomes.push(PendingAddBatchItemOutcome {
-            id: outcome.id,
-            inserted: outcome.inserted,
-            deduped_key: outcome.deduped_key,
-        });
+        match op_add_with_outcome_reserved(&body, item, doc_id, gated, reserved) {
+            Ok(outcome) => {
+                body = outcome.body;
+                outcomes.push(PendingAddBatchItemOutcome {
+                    text: item.clone(),
+                    id: outcome.id,
+                    inserted: outcome.inserted,
+                    deduped_key: outcome.deduped_key,
+                });
+            }
+            Err(error) => failures.push(PendingAddBatchItemFailure {
+                text: item.clone(),
+                error: format!("{error:#}"),
+            }),
+        }
     }
     outcomes.reverse();
-    Ok(PendingAddBatchOutcome { body, outcomes })
+    failures.reverse();
+    Ok(PendingAddBatchOutcome {
+        body,
+        outcomes,
+        failures,
+    })
 }
 
 /// Position-aware variant of [`op_add`] (`#ah0s`). Assigns/validates the id and
@@ -6138,6 +6174,41 @@ mod tests {
         assert!(lines[2].contains("existing item"), "{}", outcome.body);
         assert_eq!(outcome.outcomes.len(), 2);
         assert!(outcome.outcomes.iter().all(|item| item.inserted));
+        assert!(outcome.failures.is_empty());
+    }
+
+    #[test]
+    fn reserved_batch_keeps_midline_id_as_text_and_skips_only_invalid_sibling() {
+        let body = "- [ ] [#existing] Existing work\n";
+        let reserved = HashSet::from(["existing".to_string()]);
+        let outcome = op_prepend_many_with_outcomes_reserved(
+            body,
+            &[
+                "verify [#existing] yourself".to_string(),
+                "[ ] invalid state marker".to_string(),
+                "plain sibling work".to_string(),
+            ],
+            DOC_ID,
+            false,
+            &reserved,
+        )
+        .unwrap();
+
+        assert_eq!(outcome.outcomes.len(), 2, "{outcome:?}");
+        assert_eq!(outcome.failures.len(), 1, "{outcome:?}");
+        assert_eq!(outcome.failures[0].text, "[ ] invalid state marker");
+        assert!(outcome.body.contains("verify [#existing] yourself"));
+        assert!(outcome.body.contains("plain sibling work"));
+        assert!(outcome.body.contains("[#existing] Existing work"));
+        assert_eq!(
+            outcome
+                .outcomes
+                .iter()
+                .filter(|item| item.id == "existing")
+                .count(),
+            0,
+            "the mention must receive a fresh identity: {outcome:?}"
+        );
     }
 
     #[test]

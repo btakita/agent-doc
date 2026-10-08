@@ -380,6 +380,16 @@ pub fn claim_identity(item: &str) -> QueueItemIdentity {
     queue_head_identity(item.trim())
 }
 
+/// The stable CLI handle for a queue claim. Only a structurally id-backed head
+/// collapses to `#id`; an id mentioned later in free text remains verbatim so
+/// dispatch, admission, and closeout agree on the line's identity (GH #182).
+pub fn claim_item_handle(item: &str) -> String {
+    match claim_identity(item) {
+        QueueItemIdentity::Id(id) => format!("#{id}"),
+        QueueItemIdentity::FreeText(_) => item.trim().to_string(),
+    }
+}
+
 /// Whether `new` is the same free-text work as `old` with a note appended,
 /// prepended, or removed at a word boundary (`#claimfollowsedit`): one
 /// normalized text is a prefix or suffix of the other, and the join is not
@@ -828,6 +838,16 @@ mod tests {
         assert_eq!(
             referenced_queue_ids("#subagents do [#A] and do #b-2"),
             vec!["a", "b-2"]
+        );
+    }
+
+    #[test]
+    fn claim_handle_uses_only_the_structural_head_identity() {
+        assert_eq!(claim_item_handle("do [#work] with notes"), "#work");
+        assert_eq!(claim_item_handle("[#work] verify it"), "#work");
+        assert_eq!(
+            claim_item_handle("verify [#work] yourself"),
+            "verify [#work] yourself"
         );
     }
 

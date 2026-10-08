@@ -836,7 +836,20 @@ fn add_many_to_list(
     }
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
-    let outcome = backlog::op_prepend_many_with_outcomes(existing, items, &doc_id, gated)?;
+    let reserved = backlog::document_reserved_identity_ids(&full_content);
+    let outcome = backlog::op_prepend_many_with_outcomes_reserved(
+        existing,
+        items,
+        &doc_id,
+        gated,
+        &reserved,
+    )?;
+    for failure in &outcome.failures {
+        eprintln!(
+            "warning: skipped tracked-work item {:?}: {}",
+            failure.text, failure.error
+        );
+    }
     let canonical = backlog::canonicalize_tracked_work_body(&outcome.body, &doc_id);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;

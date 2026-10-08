@@ -1411,14 +1411,10 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
 pub const CLOSEOUT_STEERING_MARKER: &str =
     "[agent-doc] operator steering arrived during this turn and was not yet surfaced";
 
-/// The `--item` handle to claim a queue line with: its single `[#id]` (or
-/// `do #id`) reference when it has exactly one, else the verbatim line.
+/// The `--item` handle to claim a queue line. Only a structurally id-backed
+/// head collapses to `#id`; a later `[#id]` mention remains verbatim (GH #182).
 pub fn claim_item_handle(verbatim: &str) -> String {
-    let ids = referenced_queue_ids(verbatim);
-    match ids.as_slice() {
-        [id] => format!("#{id}"),
-        _ => verbatim.trim().to_string(),
-    }
+    agent_doc_queue::queue_claim::claim_item_handle(verbatim)
 }
 
 /// Tracked ids a queue line references (`[#id]` / `do #id`).
@@ -2359,6 +2355,10 @@ mod tests {
         assert_eq!(
             claim_item_handle("#gh-fix https://x/issues/1"),
             "#gh-fix https://x/issues/1"
+        );
+        assert_eq!(
+            claim_item_handle("verify [#existing] yourself"),
+            "verify [#existing] yourself"
         );
         assert_eq!(shell_single_quote("it's"), "'it'\\''s'");
     }

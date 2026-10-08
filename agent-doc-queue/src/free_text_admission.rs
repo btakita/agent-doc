@@ -329,6 +329,7 @@ pub struct PreparedFreeTextAdmission {
     pub content: String,
     pub unique_ids: Vec<String>,
     pub admitted_count: usize,
+    pub warnings: Vec<String>,
     queue_entries: Vec<crate::document_queue::QueueEntry>,
     queue_start_required: bool,
 }
@@ -507,16 +508,26 @@ pub fn prepare_free_text_admission(
         }
         prompt_keys.push(key);
     }
+    let mut warnings = Vec::new();
     if !texts_to_add.is_empty() {
-        let outcome = agent_doc_element_backlog::backlog::op_prepend_many_with_outcomes(
+        let reserved =
+            agent_doc_element_backlog::backlog::document_reserved_identity_ids(&current);
+        let outcome = agent_doc_element_backlog::backlog::op_prepend_many_with_outcomes_reserved(
             &backlog_body,
             &texts_to_add,
             document_id,
             false,
+            &reserved,
         )?;
-        for (text, item_outcome) in texts_to_add.iter().zip(outcome.outcomes) {
-            let key = crate::queue_response::normalize_for_answer_match(text);
+        for item_outcome in outcome.outcomes {
+            let key = crate::queue_response::normalize_for_answer_match(&item_outcome.text);
             id_by_text.insert(key, item_outcome.id.clone());
+        }
+        for failure in outcome.failures {
+            warnings.push(format!(
+                "skipped free-text queue item {:?}: {}",
+                failure.text, failure.error
+            ));
         }
         backlog_body = outcome.body;
     }
@@ -526,8 +537,8 @@ pub fn prepare_free_text_admission(
 
     let mut unique_ids = Vec::new();
     let mut seen_ids = HashSet::new();
-    for key in prompt_keys {
-        let Some(id) = id_by_text.get(&key) else {
+    for key in &prompt_keys {
+        let Some(id) = id_by_text.get(key) else {
             continue;
         };
         let normalized = id.trim().to_ascii_lowercase();
@@ -544,16 +555,33 @@ pub fn prepare_free_text_admission(
         .iter()
         .find(|c| c.name == "queue")
         .context("free-text admission: queue component missing")?;
+    let admitted_keys = prompt_keys
+        .iter()
+        .filter(|key| id_by_text.contains_key(*key))
+        .cloned()
+        .collect::<HashSet<_>>();
     let queue_entries = entries
         .iter()
-        .filter(|entry| !queue_entry_is_admitted_free_text(entry, queue_scope))
+        .filter(|entry| {
+            if !queue_entry_is_admitted_free_text(entry, queue_scope) {
+                return true;
+            }
+            let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
+                return true;
+            };
+            let key = crate::queue_response::normalize_for_answer_match(
+                &normalize_admitted_free_text(&prompt.text),
+            );
+            !admitted_keys.contains(&key)
+        })
         .cloned()
         .collect();
 
     Ok(Some(PreparedFreeTextAdmission {
         content: current,
         unique_ids,
-        admitted_count: prompts.prompts.len(),
+        admitted_count: admitted_keys.len(),
+        warnings,
         queue_entries,
         queue_start_required,
     }))
@@ -897,6 +925,51 @@ mod tests {
             crate::document_queue::QueueEntry::Prompt(prompt)
                 if prompt.text == "Implement checkout setup"
         )));
+    }
+
+    #[test]
+    fn midline_existing_id_mention_is_coined_as_fresh_free_text_work() {
+        let content = concat!(
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#existing] Existing work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- verify [#existing] yourself\n",
+            "- Why is the sibling missing?\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(prepared.admitted_count, 2);
+        assert_eq!(prepared.unique_ids.len(), 2);
+        assert!(prepared.warnings.is_empty(), "{:?}", prepared.warnings);
+        assert!(!prepared.unique_ids.iter().any(|id| id == "existing"));
+        assert!(prepared.content.contains("verify [#existing] yourself"));
+        assert!(prepared.content.contains("Why is the sibling missing?"));
+
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let queue_entries = queue_entries_from_content(&admission.content);
+        assert!(!queue_entries.iter().any(|entry| matches!(
+            entry,
+            crate::document_queue::QueueEntry::Prompt(prompt)
+                if prompt.text == "verify [#existing] yourself"
+                    || prompt.text == "Why is the sibling missing?"
+        )));
+        assert!(crate::queue_response::queue_prompt_text_is_free_text(
+            content,
+            "verify [#existing] yourself"
+        ));
     }
 
     #[test]

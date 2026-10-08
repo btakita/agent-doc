@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
-  codex: 01a11229-37c1-78e2-9044-2a7ef441955c
+  codex: 01a119cd-0320-7880-9e60-acef5cf54bc8
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -184,6 +184,18 @@ The sdk.md current markers are drifted from the actual work state. Same with thi
 > **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/185
 
 Completed and closed GitHub issue #185. The fix is commit `422c4847522d88ed5ad0e93050a66b80303297fe`, included in v0.35.479: one-for-one remote editor replacements inherit the dropped document's column slot, retained ordering is no longer mislabeled as editor geometry, and tmux preserves that upstream order. Focused editor-surface and tmux regressions passed, the JetBrains `LayoutDetectorTest` and `SyncLayoutActionTest` classes passed, and CI run 37746172117 succeeded at current `origin/main`.
+
+### Re: release-critical drift and admission fixes — gpt-5 · 2026-10-08T14:45:50-04:00
+
+Two independently green fixes are now merged into `main`: PR #192 preserves queued work across post-commit sync, and PR #194 records real operation-log actor provenance. GitHub automatically closed issue #187 from the merged fix.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/187
+
+Completed: PR #194 merged as `8b90b77fa9a4abe9087e22c1d03c3981c9b82f76`; its full CI passed, and issue #187 is closed.
+
+PR #191 contains the editor-authority/replay-settlement drift fix and is still in CI. PR #193 and PR #195 have review-driven race remediations in isolated full gates. The infra layout-convergence fix is implemented and awaiting its own uncontended gate. Issue #188 remains open until PR #191 proves the second half of that failure chain.
+
+No release was published in this cycle. The remaining queue heads are claimed or waiting for a free subagent slot; they are intentionally left open. The exchange is over the size warning threshold, but the active queue is not being stalled for compaction.
 <!-- agent:boundary:72f38ede -->
 <!-- /agent:exchange -->
 
@@ -193,15 +205,18 @@ Completed and closed GitHub issue #185. The fix is commit `422c4847522d88ed5ad0e
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#correspondingsubagentspr]~~
-- 🚧 do [#possibletellclaude]
-- 🚧 Make the tmux pane title contain the document name in all states.
+- do [#possibletellclaude]
+- Make the tmux pane title contain the document name in all states.
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/185~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/186
-- 🚧 release + publish
-- #gh-fix https://github.com/btakita/agent-doc/issues/187
+- #gh-fix https://github.com/btakita/agent-doc/issues/186
+- release + publish
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/187~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/188
 - #gh-fix https://github.com/btakita/agent-doc/issues/189
 - #gh-fix https://github.com/btakita/agent-doc/issues/190
+- #gh-fix https://github.com/btakita/agent-doc/issues/196
+- #gh-fix https://github.com/btakita/agent-doc/issues/197
+- #gh-fix https://github.com/btakita/agent-doc/issues/198
 - After release, add support for multiple `agent:queue` tags. Should we have a `id=...` attribute to distinguish between queues? I want to have different queues to allow different attributes. Some queues may be a subagents queue and others may be ordered. This post-release queue is a perfect example use case. If you can start the subagent now and keep it out of the upcoming release, do that. I want to be able to have different queues and even allow a queue to depend on another queue. Perhaps a release B queue can organize release B after the release A queue is complete.
 - Give queues an auto-dag like queue items. So a queue id=B must run after queue id=A ends, should we have an after=A in queue id=B? If we want to make a reoccurring sequence, perhaps queue id=A could be later filled again by queue id=B once complete? I wonder if you have suggestions on how we can have an interface algorithm on adding queue items defined in the md file.
 - release + publish

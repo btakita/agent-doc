@@ -10,15 +10,10 @@ use crate::document_queue::BacklogQueueSyncMode;
 
 /// Attributes that are only meaningful on the `agent:queue` component. Seeing
 /// one of these on any other component is a misplaced-attribute mistake.
-const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
-    "auto",
-    "preset",
-    "start",
-    "go",
-    "stop",
-    "subagents",
-    "fan-out",
-];
+const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto", "start", "go", "stop"];
+
+/// Prompt defaults shared by `agent:queue` and `agent:exchange`.
+const PROMPT_COMPONENT_ATTRS: &[&str] = &["preset", "subagents", "fan-out"];
 
 /// Whether `key` is a flag/value attribute owned by `agent:queue`.
 ///
@@ -30,12 +25,31 @@ pub fn is_queue_only_component_attr(key: &str) -> bool {
     QUEUE_ONLY_COMPONENT_ATTRS.contains(&key)
 }
 
+/// Whether `key` is meaningful on both prompt-bearing components.
+pub fn is_prompt_component_attr(key: &str) -> bool {
+    PROMPT_COMPONENT_ATTRS.contains(&key)
+}
+
 /// Whether `key` is valid on `agent:queue` without an explicit value.
 pub fn is_queue_bare_flag_attr(key: &str) -> bool {
     matches!(
         key,
         "auto" | "start" | "go" | "stop" | "subagents" | "fan-out"
     )
+}
+
+/// Whether tagpath's generic missing-value finding is expected for this
+/// component/attribute pair. Misplaced bare flags stay warning-only so
+/// preflight can report the component-specific mistake without lint failing
+/// first.
+pub fn is_recognized_bare_flag_attr(component: &str, key: &str) -> bool {
+    if is_queue_only_component_attr(key) {
+        return component != "agent:queue" || is_queue_bare_flag_attr(key);
+    }
+    if !is_prompt_component_attr(key) || key == "preset" {
+        return false;
+    }
+    !matches!(component, "agent:queue" | "agent:exchange") || matches!(key, "subagents" | "fan-out")
 }
 
 /// Component attribute keys recognized anywhere in the document, excluding the
@@ -75,11 +89,26 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
                         "`{key}` is a queue-only attribute but appears on `agent:{}` (did you mean `<!-- agent:queue {key} -->`?)",
                         component.name
                     ));
+                }
+            } else if is_prompt_component_attr(key) {
+                if !matches!(component.name.as_str(), "queue" | "exchange") {
+                    issues.push(format!(
+                        "`{key}` is a prompt-component attribute but appears on `agent:{}` (use it on `agent:queue` or `agent:exchange`)",
+                        component.name
+                    ));
                 } else if crate::subagent_intent::is_queue_subagents_attr(key)
+                    && component.name == "queue"
                     && let Err(reason) = crate::subagent_intent::parse_queue_subagents_value(value)
                 {
                     issues.push(format!(
                         "`{key}={value}` on `agent:queue`: {reason} (use a bare `{key}` to dispatch every eligible head)"
+                    ));
+                } else if crate::subagent_intent::is_queue_subagents_attr(key)
+                    && component.name == "exchange"
+                    && !value.trim().is_empty()
+                {
+                    issues.push(format!(
+                        "`{key}={value}` on `agent:exchange`: expected a bare `{key}` flag because exchange prompts dispatch one at a time"
                     ));
                 }
             } else if key == "queue" && matches!(component.name.as_str(), "backlog" | "pending") {
@@ -253,15 +282,38 @@ mod tests {
     }
 
     #[test]
-    fn component_attr_warning_flags_preset_on_non_queue() {
+    fn component_attr_warning_allows_exchange_prompt_attrs() {
+        for marker in [
+            "<!-- agent:exchange subagents preset=\"#review\" -->",
+            "<!-- agent:exchange fan-out preset=#review -->",
+        ] {
+            let content = format!("{marker}\nfix it\n<!-- /agent:exchange -->\n");
+            assert!(
+                component_attr_warning(&content).is_none(),
+                "valid exchange prompt attrs must not warn: {marker}"
+            );
+        }
+    }
+
+    #[test]
+    fn component_attr_warning_rejects_valued_exchange_subagents() {
+        let content = "<!-- agent:exchange subagents=2 -->\nfix it\n<!-- /agent:exchange -->\n";
+        let body = component_attr_warning(content)
+            .expect("exchange concurrency is meaningless")
+            .message_body();
+        assert!(body.contains("expected a bare `subagents` flag"), "{body}");
+    }
+
+    #[test]
+    fn component_attr_warning_flags_preset_on_non_prompt_component() {
         let content = concat!(
             "<!-- agent:backlog preset=\"#spec-test-build-install-commit-push\" -->\n",
             "- [ ] [#x1] keep this\n",
             "<!-- /agent:backlog -->\n",
         );
         let warning = component_attr_warning(content)
-            .expect("`preset` on backlog should warn as a queue-only attribute");
-        assert!(warning.message_body().contains("queue-only"));
+            .expect("`preset` on backlog should warn as a prompt-component attribute");
+        assert!(warning.message_body().contains("prompt-component"));
     }
 
     #[test]
@@ -289,7 +341,7 @@ mod tests {
         let body = component_attr_warning(misplaced)
             .expect("fan-out on backlog warns")
             .message_body();
-        assert!(body.contains("queue-only attribute"), "{body}");
+        assert!(body.contains("prompt-component attribute"), "{body}");
         assert!(body.contains("fan-out"), "{body}");
     }
 }

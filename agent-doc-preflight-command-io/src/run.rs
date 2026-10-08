@@ -1721,7 +1721,14 @@ fn run_with_options_to_writer_in_pass(
         agent_doc_model_tier::component_value_to_tier(v, &harness, &global_config.model)
     });
 
-    let prompt_preset_resolution = agent_doc_prompt_contract::resolve_prompt_preset_requests(
+    let exchange_prompt_attrs = agent_doc_queue::prompt_component_attrs::prompt_component_attrs(
+        &model_source_content,
+        "exchange",
+    );
+    let has_exchange_prompt_target = document_user_intent_prompt_changes
+        .iter()
+        .any(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget);
+    let mut prompt_preset_resolution = agent_doc_prompt_contract::resolve_prompt_preset_requests(
         prompt_diff_result.as_deref(),
         raw_diff
             .as_ref()
@@ -1731,6 +1738,15 @@ fn run_with_options_to_writer_in_pass(
         &added_diff_lines,
         &frontmatter_prompt_presets,
     );
+    if has_exchange_prompt_target
+        && let Some(marker_preset) = exchange_prompt_attrs.preset.as_deref()
+    {
+        agent_doc_prompt_contract::extend_prompt_preset_resolution(
+            &mut prompt_preset_resolution,
+            [marker_preset.to_string()],
+            &frontmatter_prompt_presets,
+        );
+    }
     if !prompt_preset_resolution.missing.is_empty() {
         anyhow::bail!(
             "document references missing prompt preset(s): {}",
@@ -2119,13 +2135,12 @@ fn run_with_options_to_writer_in_pass(
     // structure: prose is `❯`-prefixed, headings keep their `#` syntax and
     // carry `❯ 🚧` inside the heading text, and list/fenced regions are never
     // decorated. Probe mode remains side-effect-free.
-    if !options.probe {
-        let active_exchange_prompt_targets = document_user_intent_prompt_changes
-            .iter()
-            .filter(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
-            .map(|change| change.text.clone())
-            .collect::<Vec<_>>();
-        if !active_exchange_prompt_targets.is_empty() {
+    let active_exchange_prompt_targets = document_user_intent_prompt_changes
+        .iter()
+        .filter(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
+        .map(|change| change.text.clone())
+        .collect::<Vec<_>>();
+    if !options.probe && !active_exchange_prompt_targets.is_empty() {
             let projection = match resolve_current_preflight_document(
                 file,
                 "active_exchange_prompt_marker",
@@ -2186,7 +2201,6 @@ fn run_with_options_to_writer_in_pass(
                     "[preflight] warning: active exchange prompt marker projection {status}; continuing because the marker is transient"
                 );
             }
-        }
     }
     // `#qgoalstall`: only a prompt authored OUTSIDE the active queue preempts the
     // drain. An operator adding a directive to `agent:queue` under go mode is
@@ -2229,6 +2243,11 @@ fn run_with_options_to_writer_in_pass(
             queue_authoritative_content,
         ),
     );
+    let exchange_subagent_dispatch = if exchange_prompt_attrs.subagents {
+        agent_doc_preflight_io::exchange_subagent_dispatch_entries(&active_exchange_prompt_targets)
+    } else {
+        Vec::new()
+    };
     if !queue_subagent_dispatch.is_empty() {
         agent_doc_ops_log_io::log_op(
             file,
@@ -2576,6 +2595,9 @@ fn run_with_options_to_writer_in_pass(
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts,
+        exchange_subagent_dispatch_guidance: (!exchange_subagent_dispatch.is_empty())
+            .then(|| agent_doc_preflight_io::EXCHANGE_SUBAGENT_DISPATCH_GUIDANCE.to_string()),
+        exchange_subagent_dispatch,
         queue_subagent_dispatch_guidance: (!queue_subagent_dispatch.is_empty())
             .then(|| agent_doc_preflight_io::QUEUE_SUBAGENT_DISPATCH_GUIDANCE.to_string()),
         queue_subagent_dispatch,

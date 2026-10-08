@@ -128,6 +128,13 @@ rule. This runbook carries the rest.
   turn or scheduling the next re-entry. The next preflight lists new
   subagent-intent queue items under `queue_subagent_dispatch` (never in
   `selected_queue_prompts`): run each `claim_command`, then dispatch it.
+- **Exchange subagents coordinator.** Under `<!-- agent:exchange subagents -->`
+  (alias `fan-out`), preflight lists each new exchange prompt under
+  `exchange_subagent_dispatch`. Dispatch every listed prompt immediately, one
+  background subagent per prompt and a dedicated worktree for repository work.
+  Exchange prompts have no queue claim/release lifecycle. The parent retains
+  the response cycle: review the worker result, answer the exchange prompt, and
+  perform the normal binary-owned closeout.
 - **Queue subagents coordinator (`#queuesubagents`).** Under
   `<!-- agent:queue subagents -->` (alias `fan-out`; bare dispatches every
   eligible head and `=N` caps concurrent claims), the in-session agent is the

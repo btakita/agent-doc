@@ -610,6 +610,27 @@ a repository). Do NOT execute them inline in queue order; they are excluded from
 `selected_queue_prompts`. Run `agent-doc queue release <FILE> --item <item>` when a subagent \
 reports back, then close the item normally.";
 
+/// One exchange prompt delegated by `<!-- agent:exchange subagents -->`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExchangeSubagentDispatch {
+    /// The exchange prompt, verbatim.
+    pub item: String,
+}
+
+pub fn exchange_subagent_dispatch_entries(items: &[String]) -> Vec<ExchangeSubagentDispatch> {
+    items
+        .iter()
+        .map(|item| ExchangeSubagentDispatch { item: item.clone() })
+        .collect()
+}
+
+/// Guidance for a non-empty `exchange_subagent_dispatch`.
+pub const EXCHANGE_SUBAGENT_DISPATCH_GUIDANCE: &str = "The `agent:exchange` marker declares \
+subagent intent. For EACH listed exchange prompt, dispatch it NOW to its own background subagent \
+(and use a dedicated worktree outside the IDE-watched project if it touches a repository). The \
+parent retains this response cycle: review the worker result, answer the prompt in the exchange, \
+and perform the normal binary-owned closeout. No queue claim/release applies to exchange prompts.";
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightOutput {
     /// Non-blocking warnings the skill should surface before responding.
@@ -779,6 +800,12 @@ pub struct PreflightOutput {
     /// instead of executing it inline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queue_subagent_dispatch: Vec<QueueSubagentDispatch>,
+    /// Exchange prompt targets delegated by the exchange marker's `subagents`
+    /// / `fan-out` attribute.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exchange_subagent_dispatch: Vec<ExchangeSubagentDispatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exchange_subagent_dispatch_guidance: Option<String>,
     /// How to handle `queue_subagent_dispatch`; present only when non-empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_subagent_dispatch_guidance: Option<String>,
@@ -6596,6 +6623,35 @@ mod tests {
             json.get("queue_head_annotation_guidance").is_none(),
             "{json}"
         );
+    }
+
+    #[test]
+    fn exchange_subagent_dispatch_contract_has_no_queue_lifecycle() {
+        let entries = exchange_subagent_dispatch_entries(&[
+            "fix the parser".to_string(),
+            "add a regression test".to_string(),
+        ]);
+        let output = PreflightOutput {
+            exchange_subagent_dispatch: entries,
+            exchange_subagent_dispatch_guidance: Some(
+                EXCHANGE_SUBAGENT_DISPATCH_GUIDANCE.to_string(),
+            ),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(output).unwrap();
+        assert_eq!(
+            json["exchange_subagent_dispatch"][0]["item"],
+            "fix the parser"
+        );
+        assert_eq!(
+            json["exchange_subagent_dispatch"][1]["item"],
+            "add a regression test"
+        );
+        let guidance = json["exchange_subagent_dispatch_guidance"]
+            .as_str()
+            .unwrap();
+        assert!(guidance.contains("parent retains this response cycle"));
+        assert!(guidance.contains("No queue claim/release"));
     }
 
     // `#qdonestrike-durable`: a not-ready Lazily head used to discard the whole

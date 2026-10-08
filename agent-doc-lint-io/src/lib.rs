@@ -291,8 +291,11 @@ pub fn run_prewrite_dialect_gate_on_content_with_logger(
     ))
 }
 
-/// Byte spans the closeout may rewrite: frontmatter, plus every component
-/// (markers included) whose name `closeout_may_rewrite` accepts. A document
+/// Byte spans the closeout may rewrite: frontmatter, plus every component body
+/// and closing marker whose name `closeout_may_rewrite` accepts. Opening
+/// markers are excluded because ordinary closeout patching does not rewrite
+/// their attributes; a pre-existing attribute finding must therefore refuse
+/// before the response is applied. A document
 /// whose component tree does not parse is treated as wholly rewritable, so the
 /// pre-write gate never refuses on a tree the integrity gate has not vetted.
 fn closeout_rewritable_spans(
@@ -305,7 +308,7 @@ fn closeout_rewritable_spans(
     let mut spans: Vec<(usize, usize)> = components
         .iter()
         .filter(|component| closeout_may_rewrite(&component.name))
-        .map(|component| (component.open_start, component.close_end))
+        .map(|component| (component.open_end, component.close_end))
         .collect();
     if let Some(rest) = content.strip_prefix("---\n") {
         let end = rest
@@ -502,16 +505,19 @@ fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec
         .into_iter()
         .filter(|finding| {
             !is_registry_known_unknown_component_finding(finding)
-                && !is_queue_subagents_bare_flag_finding(finding)
+                && !is_agent_doc_queue_bare_flag_finding(finding)
         })
         .collect()
 }
 
-/// Tagpath's generic attribute grammar predates the queue scheduler's
-/// `subagents`/`fan-out` flags. Reconcile that external finding at the adapter
-/// boundary through the queue domain's vocabulary; do not broadly forgive
-/// bare attributes, because value-bearing attributes still fail closed.
-fn is_queue_subagents_bare_flag_finding(finding: &LintFinding) -> bool {
+/// Tagpath's generic attribute grammar requires values for attributes that the
+/// queue scheduler accepts as bare flags. It therefore reports a misplaced
+/// queue-only flag preserved on another component as malformed even though
+/// preflight deliberately treats that token as ignored, warning-only input.
+/// Reconcile the external finding against the queue domain's complete
+/// vocabulary; unknown bare attributes and malformed value syntax still fail
+/// closed.
+fn is_agent_doc_queue_bare_flag_finding(finding: &LintFinding) -> bool {
     if finding.rule != "agent-doc/malformed-attr" {
         return false;
     }
@@ -522,9 +528,9 @@ fn is_queue_subagents_bare_flag_finding(finding: &LintFinding) -> bool {
     let Some(component) = quoted.nth(1) else {
         return false;
     };
-    component == "agent:queue"
-        && agent_doc_queue::subagent_intent::is_queue_subagents_attr(attribute)
-        && agent_doc_queue::subagent_intent::parse_queue_subagents_value("").is_ok()
+    agent_doc_queue::component_attrs::is_queue_only_component_attr(attribute)
+        && (component != "agent:queue"
+            || agent_doc_queue::component_attrs::is_queue_bare_flag_attr(attribute))
 }
 
 fn is_registry_known_unknown_component_finding(finding: &LintFinding) -> bool {
@@ -799,6 +805,34 @@ mod tests {
         .expect_err("the same finding refuses when no component is rewritten");
     }
 
+    /// GH #183: component-body patching does not rewrite the opening marker.
+    /// A pre-existing malformed attribute must therefore refuse before the
+    /// response is applied even when that component's body is a patch target.
+    #[test]
+    fn prewrite_dialect_gate_does_not_defer_open_marker_findings() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:backlog auot -->\n\
+            - [ ] [#b] tracked work\n\
+            <!-- /agent:backlog -->\n";
+        let file = write_doc(&dir, "open-marker-attr.md", doc);
+        let only_backlog = |name: &str| name == "backlog";
+        let error = run_prewrite_dialect_gate_on_content_with_logger(
+            &file,
+            doc,
+            None,
+            &only_backlog,
+            noop_ops_logger,
+        )
+        .expect_err("a finding on an unchanged opening marker must refuse before write");
+        let message = format!("{error:#}");
+        assert!(message.contains("INTERRUPTED before write"), "{message}");
+        assert!(message.contains("agent-doc/malformed-attr"), "{message}");
+    }
+
     #[test]
     fn notes_component_reconciles_against_agent_doc_registry() {
         let dir = TempDir::new().unwrap();
@@ -983,6 +1017,37 @@ operator-owned scratch state\n\
             let file = write_doc(&dir, &format!("{attribute}.md"), &doc);
             run(&file, None).unwrap_or_else(|error| {
                 panic!("bare queue flag `{attribute}` must pass lint: {error:#}")
+            });
+        }
+    }
+
+    /// GH #183: preflight warns that queue-only attributes on another
+    /// component are ignored. The final tagpath adapter must not reinterpret
+    /// the same preserved bare tokens as blocking malformed syntax.
+    #[test]
+    fn misplaced_bare_queue_attributes_match_preflight_warning_only_policy() {
+        let dir = TempDir::new().unwrap();
+        for attribute in [
+            "auto",
+            "preset",
+            "start",
+            "go",
+            "stop",
+            "subagents",
+            "fan-out",
+        ] {
+            let doc = format!(
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange -->\n\
+                 prompt\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:backlog {attribute} -->\n\
+                 - [ ] [#b] tracked work\n\
+                 <!-- /agent:backlog -->\n"
+            );
+            let file = write_doc(&dir, &format!("misplaced-{attribute}.md"), &doc);
+            run(&file, None).unwrap_or_else(|error| {
+                panic!("ignored bare queue attribute `{attribute}` must pass lint: {error:#}")
             });
         }
     }

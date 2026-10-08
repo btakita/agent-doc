@@ -20,6 +20,24 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
     "fan-out",
 ];
 
+/// Whether `key` is a flag/value attribute owned by `agent:queue`.
+///
+/// The parser intentionally preserves these attributes on other components so
+/// preflight can report them as ignored without mutating operator text. Lint
+/// adapters use the same vocabulary to avoid reclassifying a preserved bare
+/// flag as malformed syntax.
+pub fn is_queue_only_component_attr(key: &str) -> bool {
+    QUEUE_ONLY_COMPONENT_ATTRS.contains(&key)
+}
+
+/// Whether `key` is valid on `agent:queue` without an explicit value.
+pub fn is_queue_bare_flag_attr(key: &str) -> bool {
+    matches!(
+        key,
+        "auto" | "start" | "go" | "stop" | "subagents" | "fan-out"
+    )
+}
+
 /// Component attribute keys recognized anywhere in the document, excluding the
 /// queue-only set above.
 const KNOWN_COMPONENT_ATTRS: &[&str] = &[
@@ -51,7 +69,7 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
     let mut issues: Vec<String> = Vec::new();
     for component in &components {
         for (key, value) in &component.attrs {
-            if QUEUE_ONLY_COMPONENT_ATTRS.contains(&key.as_str()) {
+            if is_queue_only_component_attr(key) {
                 if component.name != "queue" {
                     issues.push(format!(
                         "`{key}` is a queue-only attribute but appears on `agent:{}` (did you mean `<!-- agent:queue {key} -->`?)",

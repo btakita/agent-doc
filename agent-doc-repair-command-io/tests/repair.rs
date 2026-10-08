@@ -4174,6 +4174,118 @@ mod tests {
     }
 
     #[test]
+    fn committed_capture_is_not_replayed_after_operator_edits_inside_its_response() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please handle the backlog demo\n",
+            "<!-- agent:boundary:baseline -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: backlog demo — gpt-5\n\n",
+            "**Done.** Added the first backlog item.\n\n",
+            "> **Queue prompt:** Add the review transition\n\n",
+            "Added the review transition.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        let committed = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please handle the backlog demo\n",
+            "### Re: backlog demo — gpt-5\n\n",
+            "**Done.** Added the first backlog item.\n\n",
+            "> **Queue prompt:** Add the review transition\n\n",
+            "Added the review transition.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, committed).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(dir.path())
+            .args(["add", "test.md"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "committed response", "--no-verify"])
+            .status()
+            .unwrap();
+
+        let operator_edited = committed
+            .replace(
+                "**Done.** Added the first backlog item.\n\n> **Queue prompt:**",
+                "**Done.** Added the first backlog item.\nDid you pick up the inline exchange prompt? What is the context of this prompt from the position in the exchange?\n> **Queue prompt:**",
+            )
+            .replace(
+                "<!-- agent:boundary:committed -->",
+                "<!-- agent:boundary:committed -->\nDid you pick up the exchange prompt?",
+            );
+        std::fs::write(&doc, &operator_edited).unwrap();
+
+        assert!(
+            agent_doc_turn::response_replay::response_materialized_in_content(response, committed),
+            "the capture must be durably landed in HEAD"
+        );
+        assert!(
+            !agent_doc_turn::response_replay::response_materialized_in_content(
+                response,
+                &operator_edited,
+            ),
+            "the live operator edit must break exact response matching"
+        );
+
+        let admission = agent_doc_session_check_io::turn_admission(&doc, false).unwrap();
+        assert_eq!(
+            admission.admission,
+            agent_doc_turn::turn_admission::TurnAdmission::ContinueWithSteering,
+        );
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => {
+                assert!(message.contains("Did you pick up the exchange prompt?"), "{message}");
+            }
+            status => panic!("session-check must preserve and admit the operator steering: {status:?}"),
+        }
+
+        let recovered = run(&doc).expect("a landed capture must not enter replay recovery");
+        assert_eq!(recovered, RepairOutcome::Noop);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), operator_edited);
+    }
+
+    #[test]
     fn recover_replays_latest_committed_capture_when_matching_prompt_was_left_orphaned() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");

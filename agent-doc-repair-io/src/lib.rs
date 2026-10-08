@@ -2598,6 +2598,9 @@ fn historical_committed_capture_replay_candidate(
     {
         return Ok(None);
     }
+    if historical_capture_materialized_in_committed_authority(file, &capture)? {
+        return Ok(None);
+    }
     let has_matching_prompt =
         agent_doc_turn::response_replay::first_response_heading_line(&capture.response_body)
             .is_some_and(|response_heading| {
@@ -2636,6 +2639,47 @@ fn historical_committed_capture_replay_candidate(
         ),
     );
     Ok(Some(capture))
+}
+
+/// A committed capture cannot become replayable merely because newer operator
+/// text changes the live response cell. HEAD is the primary durable proof. The
+/// cycle's exact checkpointed snapshot is a second proof only when its hash and
+/// capture lineage still match the terminal cycle projection.
+fn historical_capture_materialized_in_committed_authority(
+    file: &Path,
+    capture: &HistoricalCommittedCapture,
+) -> Result<bool> {
+    // Pure selector unit fixtures intentionally use a sentinel path. A real
+    // repair invocation has already canonicalized an existing document.
+    if !file.exists() {
+        return Ok(false);
+    }
+    let head = agent_doc_git_io::revision::show_head(file)?;
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let committed_snapshot = if state.as_ref().is_some_and(|state| {
+        state.phase == agent_doc_turn::CyclePhase::Committed
+            && state.cycle_id == capture.cycle_id
+            && state.capture_id.as_deref() == Some(capture.capture_id.as_str())
+            && state.response_sha256.as_deref() == Some(capture.response_sha256.as_str())
+    }) {
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(file)?;
+        snapshot.filter(|snapshot| {
+            state
+                .as_ref()
+                .and_then(|state| state.snapshot_hash.as_deref())
+                == Some(agent_doc_hash::content_hash(snapshot).as_str())
+        })
+    } else {
+        None
+    };
+
+    Ok(
+        agent_doc_turn::response_replay::response_materialized_in_committed_authority(
+            &capture.response_body,
+            head.as_deref(),
+            committed_snapshot.as_deref(),
+        ),
+    )
 }
 
 fn historical_capture_has_partial_response_proof(

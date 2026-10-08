@@ -6312,6 +6312,112 @@ mod tests {
     }
 
     #[test]
+    fn preflight_admits_steering_over_a_capture_already_landed_in_head() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please handle the backlog demo\n",
+            "<!-- agent:boundary:baseline -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .status()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .status()
+            .unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: backlog demo — gpt-5\n\n",
+            "**Done.** Added the first backlog item.\n\n",
+            "> **Queue prompt:** Add the review transition\n\n",
+            "Added the review transition.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please handle the backlog demo\n",
+            "### Re: backlog demo — gpt-5\n\n",
+            "**Done.** Added the first backlog item.\n\n",
+            "> **Queue prompt:** Add the review transition\n\n",
+            "Added the review transition.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let committed_cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline))
+                .unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        std::fs::write(&doc, committed).unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .status()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed response", "--no-verify"])
+            .status()
+            .unwrap();
+
+        let operator_edited = committed
+            .replace(
+                "**Done.** Added the first backlog item.\n\n> **Queue prompt:**",
+                "**Done.** Added the first backlog item.\nDid you pick up the inline exchange prompt? What is the context of this prompt from the position in the exchange?\n> **Queue prompt:**",
+            )
+            .replace(
+                "<!-- agent:boundary:committed -->",
+                "<!-- agent:boundary:committed -->\nDid you pick up the exchange prompt?",
+            );
+        std::fs::write(&doc, &operator_edited).unwrap();
+
+        let verdict = agent_doc_session_check_io::turn_admission(&doc, false).unwrap();
+        assert!(verdict.continues_with_steering(), "{verdict:?}");
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions::default(), &mut output)
+            .expect("preflight must not replay an already-landed capture");
+        let contract: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(contract["no_changes"], false, "{contract:#}");
+        let current = std::fs::read_to_string(&doc).unwrap();
+        assert!(current.contains("Did you pick up the inline exchange prompt?"));
+        assert!(current.contains("Did you pick up the exchange prompt?"));
+        let next_cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(next_cycle.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+        assert_ne!(next_cycle.cycle_id, committed_cycle.cycle_id);
+    }
+
+    #[test]
     fn stuck_capture_detection_uses_committed_ledger_projection() {
         let dir = setup_project();
         let root = dir.path();

@@ -725,8 +725,9 @@ pub fn run_once(
         } else {
             eprintln!(
                 "{}",
-                agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content(
-                    &queue_guard_content
+                agent_doc_queue::queue_heads::queue_skip_diagnostic_for_response(
+                    &queue_guard_content,
+                    &response_text,
                 )?
             );
         }

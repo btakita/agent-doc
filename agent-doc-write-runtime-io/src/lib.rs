@@ -315,13 +315,17 @@ fn queue_consume_writeback_effects(force_disk: bool) -> &'static dyn QueueConsum
     }
 }
 
-fn queue_skip_diagnostic_for_current_document(file: &Path, force_disk: bool) -> Result<String> {
+fn queue_skip_diagnostic_for_current_document(
+    file: &Path,
+    force_disk: bool,
+    response: &str,
+) -> Result<String> {
     let content = if force_disk {
         resolve_force_disk_document(file, "queue_skip_diagnostic")?.into_content()
     } else {
         resolve_current_document(file, "queue_skip_diagnostic")?.into_content()
     };
-    agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content(&content)
+    agent_doc_queue::queue_heads::queue_skip_diagnostic_for_response(&content, response)
 }
 
 pub struct RuntimeRepairReplayWriteEffects;
@@ -3340,7 +3344,8 @@ fn run_command_inner_within_pass(
                                 "{}",
                                 queue_skip_diagnostic_for_current_document(
                                     file,
-                                    options.force_disk
+                                    options.force_disk,
+                                    &response_body,
                                 )?
                             )
                         }
@@ -3372,7 +3377,11 @@ fn run_command_inner_within_pass(
                     if marked == 0 {
                         eprintln!(
                             "{}",
-                            queue_skip_diagnostic_for_current_document(file, options.force_disk)?
+                            queue_skip_diagnostic_for_current_document(
+                                file,
+                                options.force_disk,
+                                &response_body,
+                            )?
                         );
                     }
                 }

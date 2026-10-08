@@ -5026,6 +5026,7 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
         "pub fn normalize_for_answer_match",
         "pub fn free_text_head_match_prose",
         "pub fn free_text_head_answered_by_response",
+        "pub fn queue_head_answered_by_response",
         "pub fn free_text_head_present_in_baseline",
     ] {
         assert!(
@@ -5063,7 +5064,7 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
     let queue_consume_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_consume.rs")).unwrap();
     assert!(
-        queue_consume_policy.contains("free_text_head_answered_by_response")
+        queue_consume_policy.contains("queue_head_answered_by_response")
             && queue_consume_policy.contains("free_text_head_present_in_baseline")
             && !queue_consume_policy.contains("head_carries_in_progress_marker")
             && !queue_consume_policy.contains("free_text_head_match_prose")
@@ -29999,10 +30000,10 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
             && run_io.contains(
                 "agent_doc_queue::queue_consume::should_consume_queue_prompt_for_diff_content"
             )
-            && run_io.contains("agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content")
+            && run_io.contains("agent_doc_queue::queue_heads::queue_skip_diagnostic_for_response")
             && write_runtime.contains("fn queue_skip_diagnostic_for_current_document(")
             && write_runtime
-                .contains("agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content"),
+                .contains("agent_doc_queue::queue_heads::queue_skip_diagnostic_for_response"),
         "runtime callers should resolve current document content before queue skip/diff diagnostics"
     );
 

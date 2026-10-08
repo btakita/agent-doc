@@ -9,6 +9,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   archive is neutral to the prompt-bearing diff classifier. A Codex Stop hook observing that proven projection keeps
   the committed cycle closed instead of capturing its console restatement into a new cycle. Unproven clears, body
   additions/revisions, marker/attribute changes, and inline `agent:done` edits remain visible.
+- **Preset closeout evidence is consistent from admission through strike (GH #190).** Pre-write admission and queue consumption now share one predicate: either the exact labeled queue-head echo or every resolved preset expansion proves the response. Deferral detection is anchored to the quoted head instead of incidental short words elsewhere in the response, kept-head diagnostics name the actual preset predicate, and supervisor handoff messages report the head's real cycle tag instead of always claiming `[focused-cycle]`.
 - **Response recovery is structural and replay-safe.** Exchange-close repair now reads Markdown structure instead of
   matching marker-looking text inside inline code or fenced blocks, and checkpoint-proven repeated response tails are
   collapsed without losing concurrent operator edits, component attributes, queue rows, or the newest boundary.

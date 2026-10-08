@@ -851,15 +851,41 @@ pub fn supervisor_drain_unavailable_message(
     file: &Path,
     readiness: agent_doc_controller::status::SupervisorDrainReadiness,
 ) -> String {
+    supervisor_drain_unavailable_message_for_description(
+        file,
+        readiness,
+        "a supervisor-scope queue head",
+    )
+}
+
+fn supervisor_drain_unavailable_message_for_description(
+    file: &Path,
+    readiness: agent_doc_controller::status::SupervisorDrainReadiness,
+    head_description: &str,
+) -> String {
     let who = match readiness.supervisor_pid() {
         Some(pid) => format!("the supervisor (pid {pid})"),
         None => "no live supervisor".to_string(),
     };
     format!(
-        "[session-check] queue continues IN-SESSION: a [focused-cycle] head remains for the supervisor clear-and-continue path, but {who} cannot drain it (supervisor_drain_readiness={}). Yielding would leave it undrained, so drain it in this session now; do not hand it back to the operator or ask for a re-trigger ({}; #supdrainlive, #focusedfallback).",
+        "[session-check] queue continues IN-SESSION: {head_description} remains for the supervisor clear-and-continue path, but {who} cannot drain it (supervisor_drain_readiness={}). Yielding would leave it undrained, so drain it in this session now; do not hand it back to the operator or ask for a re-trigger ({}; #supdrainlive, #focusedfallback).",
         readiness.reason(),
         file.display(),
     )
+}
+
+/// Describe the actual execution-context tag on a supervisor-scope head.
+///
+/// Supervisor scope is broader than `[focused-cycle]`: subagent and preset
+/// routing can hand it ordinary or `[clean-session]` heads as well.
+pub fn supervisor_drain_head_description(content: &str, head: &str) -> &'static str {
+    if agent_doc_queue::queue_continuation::head_requires_focused_cycle_in(content, head) {
+        "a `[focused-cycle]` head"
+    } else if agent_doc_queue::queue_continuation::head_requires_clean_session_in(content, head) {
+        "a `[clean-session]` head"
+    } else {
+        "an untagged queue head"
+    }
 }
 
 pub fn log_supervisor_drain_handoff(
@@ -2008,11 +2034,11 @@ fn run_with_options_inner(
                     .map(agent_doc_queue::queue_continuation::queue_stale_noise_lines)
                     .unwrap_or(0);
                 // #qfocsup: the in-session loop has no drainable head, but a
-                // `[focused-cycle]` head may still remain that the SUPERVISOR
-                // clear-and-continue path will drain. In this branch the in-session
-                // `detect` already returned None, so a `Some` supervisor head ⟺ a
-                // focused-cycle head — the queue is NOT operator-stalled; the agent
-                // yields and the supervisor force-`/clear`s + re-dispatches it.
+                // supervisor-scope head may still remain for the SUPERVISOR
+                // clear-and-continue path. This includes tagged focused/clean heads
+                // and untagged subagent or preset heads. The queue is NOT
+                // operator-stalled; the agent yields and the supervisor
+                // force-`/clear`s + re-dispatches it.
                 let supervisor_head = content
                     .as_deref()
                     .and_then(|content| supervisor_scope_unclaimed_head(file, content));
@@ -2035,6 +2061,10 @@ fn run_with_options_inner(
                     );
                 }
                 if let Some((supervisor_head, readiness)) = supervisor_drain {
+                    let head_description = supervisor_drain_head_description(
+                        content.as_deref().unwrap_or_default(),
+                        &supervisor_head,
+                    );
                     let kind = supervisor_drain_outcome_kind(readiness);
                     let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(kind)
                         .expect("static supervisor-drain outcome is valid")
@@ -2060,7 +2090,7 @@ fn run_with_options_inner(
                             &supervisor_head,
                         );
                         eprintln!(
-                            "[session-check] queue continues via supervisor: a [focused-cycle] head remains that the CP/supervisor clear-and-continue path drains (force /clear + re-dispatch to a fresh session). End this turn so the supervisor takes over — NOT an operator stall ({}; #qfocsup). {}",
+                            "[session-check] queue continues via supervisor: {head_description} remains for the CP/supervisor clear-and-continue path (force /clear + re-dispatch to a fresh session). End this turn so the supervisor takes over — NOT an operator stall ({}; #qfocsup). {}",
                             file.display(),
                             outcome_fields
                         );
@@ -2078,7 +2108,11 @@ fn run_with_options_inner(
                         );
                         eprintln!(
                             "{} {}",
-                            supervisor_drain_unavailable_message(file, readiness),
+                            supervisor_drain_unavailable_message_for_description(
+                                file,
+                                readiness,
+                                head_description,
+                            ),
                             outcome_fields
                         );
                         let stall_cycle_id =

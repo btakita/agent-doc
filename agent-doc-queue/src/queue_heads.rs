@@ -198,6 +198,32 @@ pub fn queue_skip_diagnostic_for_content(content: &str) -> Result<String> {
     Ok(GENERIC.to_string())
 }
 
+/// Operator-facing closeout diagnostic that names the response predicate which
+/// kept a free-text or resolved preset head queued.
+pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Result<String> {
+    let Some(queue_head) = active_queue_head_text(content)? else {
+        return queue_skip_diagnostic_for_content(content);
+    };
+    let expansions = crate::queue_response::queue_prompt_preset_expansions(content, &queue_head);
+    if expansions.is_empty() {
+        return queue_skip_diagnostic_for_content(content);
+    }
+    let queue_head_display = display_queue_prompt_text(&queue_head);
+    if crate::queue_response::response_defers_free_text_head(response, &queue_head) {
+        return Ok(format!(
+            "[queue] kept prompt-preset head `{queue_head_display}` because the response explicitly defers that quoted head; remove the adjacent deferral marker only after the work is complete."
+        ));
+    }
+    if crate::queue_response::queue_head_answered_by_response(content, response, &queue_head) {
+        return Ok(format!(
+            "[queue] kept prompt-preset head `{queue_head_display}` even though its canonical response evidence matched; another closeout guard vetoed consumption."
+        ));
+    }
+    Ok(format!(
+        "[queue] kept prompt-preset head `{queue_head_display}` because the response supplied neither an exact `> **Queue prompt:**` echo nor every resolved preset expansion."
+    ))
+}
+
 /// `#queueidtypo`: an id-backed head whose id is not an active tracked item,
 /// where exactly one active tracked id is a near spelling of it.
 ///
@@ -990,5 +1016,36 @@ mod tests {
                 .contains("[queue] kept free-text head `Review the queue diagnostics`")
         );
         assert!(free_text_message.contains("`> **Queue prompt:**` echo"));
+    }
+
+    #[test]
+    fn prompt_preset_skip_diagnostic_names_the_actual_response_contract() {
+        let content = concat!(
+            "---\nqueue_active: true\nprompt_presets:\n",
+            "  '#upgrade': Upgrade agent-doc and check the current issues.\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- #upgrade\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let missing = queue_skip_diagnostic_for_response(
+            content,
+            "### Re: status\n\nChecked an unrelated item.\n",
+        )
+        .unwrap();
+        assert!(missing.contains("kept prompt-preset head `#upgrade`"));
+        assert!(missing.contains("exact `> **Queue prompt:**` echo"));
+        assert!(missing.contains("resolved preset expansion"));
+        assert!(!missing.contains("Add a `> **Queue prompt:**` echo"));
+
+        let deferred = queue_skip_diagnostic_for_response(
+            content,
+            concat!(
+                "> **Queue prompt:** #upgrade\n\n",
+                "**Deferred:** waiting for the release build.\n",
+            ),
+        )
+        .unwrap();
+        assert!(deferred.contains("explicitly defers that quoted head"));
     }
 }

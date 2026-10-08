@@ -587,6 +587,7 @@ pub fn managed_capability_contract_required_for_doc_and_harness(
         return true;
     }
     harness == "codex"
+        && fm.managed_proof == Some(true)
         && (!workspace_access_dirs_for_doc(file).is_empty()
             || fm.agent_args.as_deref().is_some_and(args_contain_add_dir)
             || fm.codex_args.as_deref().is_some_and(args_contain_add_dir)
@@ -2361,7 +2362,7 @@ printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_messa
     }
 
     #[test]
-    fn managed_capability_contract_for_doc_requires_auto_submodule_gitdirs() {
+    fn managed_capability_contract_for_doc_requires_opt_in_for_auto_submodule_gitdirs() {
         let outer_dir = TempDir::new().unwrap();
         let outer = outer_dir.path();
         init_repo(outer);
@@ -2377,12 +2378,48 @@ printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_messa
         fs::create_dir_all(doc.parent().unwrap()).unwrap();
         fs::write(&doc, "test\n").unwrap();
 
-        let fm = Frontmatter::default();
+        let mut fm = Frontmatter::default();
+        assert!(!managed_capability_contract_required_for_doc_and_harness(
+            &doc,
+            &fm,
+            &agent_doc_config::Config::default(),
+            "codex"
+        ));
+
+        fm.managed_proof = Some(true);
         assert!(managed_capability_contract_required_for_doc_and_harness(
             &doc,
             &fm,
             &agent_doc_config::Config::default(),
             "codex"
+        ));
+    }
+
+    #[test]
+    fn managed_capability_contract_for_doc_preserves_opted_in_remote_and_write_guards() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        let config = agent_doc_config::Config::default();
+        let mut fm = Frontmatter {
+            managed_proof: Some(true),
+            codex_network_access: Some(CodexNetworkAccess::Enabled),
+            ..Frontmatter::default()
+        };
+
+        assert!(managed_capability_contract_required_for_doc_and_harness(
+            &doc, &fm, &config, "codex"
+        ));
+
+        fm.codex_network_access = None;
+        fm.required_ssh_targets = vec!["example-host".to_string()];
+        assert!(managed_capability_contract_required_for_doc_and_harness(
+            &doc, &fm, &config, "codex"
+        ));
+
+        fm.required_ssh_targets.clear();
+        fm.codex_args = Some("--add-dir /srv/example".to_string());
+        assert!(managed_capability_contract_required_for_doc_and_harness(
+            &doc, &fm, &config, "codex"
         ));
     }
 

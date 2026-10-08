@@ -2212,6 +2212,42 @@ mod tests {
             ManagedCapabilityProofStatus::Failed
         );
     }
+
+    #[test]
+    fn managed_capability_proof_status_does_not_invent_an_unrequested_codex_contract() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let session_id = "route-unrequested-proof-status";
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let writable = dir.path().join("writable-root");
+        std::fs::create_dir_all(&writable).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: route-unrequested-proof-status\nagent: codex\ncodex_args: \"--add-dir {}\"\n---\n",
+                writable.display()
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path()
+                .join(".agent-doc/logs")
+                .join(format!("{session_id}.log")),
+            format!(
+                "[1] session_start file={} pane=%46 session={}\n[2] codex_capability_proof status=not_required\n",
+                doc.display(),
+                session_id
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
+            ManagedCapabilityProofStatus::NotRequired
+        );
+    }
+
     #[test]
     fn managed_capability_proof_status_requires_matching_writable_root_contract() {
         let dir = tempfile::tempdir().unwrap();

@@ -77,6 +77,31 @@ fn remaining_ready_wait(deadline: Instant, now: Instant) -> Duration {
     deadline.saturating_duration_since(now)
 }
 
+fn require_dispatch_only_capability_proof(
+    status: ManagedCapabilityProofStatus,
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+) -> Result<()> {
+    match status {
+        ManagedCapabilityProofStatus::NotRequired
+        | ManagedCapabilityProofStatus::Proven
+        | ManagedCapabilityProofStatus::Pending => Ok(()),
+        ManagedCapabilityProofStatus::Failed => anyhow::bail!(
+            "dispatch-only {} reopen for {} on pane {} is disabled because managed capability proof failed",
+            harness.binary,
+            file.display(),
+            pane,
+        ),
+        ManagedCapabilityProofStatus::Missing => anyhow::bail!(
+            "dispatch-only {} reopen for {} on pane {} is disabled because this network/SSH/write-root session has no current capability proof",
+            harness.binary,
+            file.display(),
+            pane,
+        ),
+    }
+}
+
 fn dispatch_only_starting_pane_blocker(
     projection: &PaneComposerProjection,
     trigger: &str,
@@ -1044,23 +1069,12 @@ pub fn dispatch_only_reopen_existing_pane(
         // the reopen dispatch proceed while the proof runs in the background, and a
         // later FAILURE is surfaced asynchronously by the supervisor. Only an
         // already-failed/missing proof disables the reopen.
-        match managed_capability_proof_status(file, session_id, harness)? {
-            ManagedCapabilityProofStatus::NotRequired
-            | ManagedCapabilityProofStatus::Proven
-            | ManagedCapabilityProofStatus::Pending => {}
-            ManagedCapabilityProofStatus::Failed => anyhow::bail!(
-                "dispatch-only {} reopen for {} on pane {} is disabled because managed capability proof failed",
-                harness.binary,
-                file.display(),
-                dispatch_pane
-            ),
-            ManagedCapabilityProofStatus::Missing => anyhow::bail!(
-                "dispatch-only {} reopen for {} on pane {} is disabled because this network/SSH/write-root session has no current capability proof",
-                harness.binary,
-                file.display(),
-                dispatch_pane
-            ),
-        }
+        require_dispatch_only_capability_proof(
+            managed_capability_proof_status(file, session_id, harness)?,
+            file,
+            &dispatch_pane,
+            harness,
+        )?;
     } else {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1411,6 +1425,50 @@ pub fn retry_dispatch_only_after_busy_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_run_agent_doc_keeps_missing_proof_refusal_typed_and_exact() {
+        let file = Path::new("/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md");
+        let err = require_dispatch_only_capability_proof(
+            ManagedCapabilityProofStatus::Missing,
+            file,
+            "%46",
+            &HarnessConfig::codex(),
+        )
+        .expect_err("an opted-in unproven capability contract must refuse dispatch");
+
+        assert_eq!(
+            err.to_string(),
+            "dispatch-only codex reopen for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md on pane %46 is disabled because this network/SSH/write-root session has no current capability proof"
+        );
+    }
+
+    #[test]
+    fn dispatch_only_capability_gate_preserves_proven_pending_and_failure_boundaries() {
+        let file = Path::new("tasks/infra.md");
+        let harness = HarnessConfig::codex();
+
+        for status in [
+            ManagedCapabilityProofStatus::NotRequired,
+            ManagedCapabilityProofStatus::Proven,
+            ManagedCapabilityProofStatus::Pending,
+        ] {
+            require_dispatch_only_capability_proof(status, file, "%46", &harness)
+                .expect("safe typed proof states must remain dispatchable");
+        }
+
+        let err = require_dispatch_only_capability_proof(
+            ManagedCapabilityProofStatus::Failed,
+            file,
+            "%46",
+            &harness,
+        )
+        .expect_err("a failed managed proof must remain fail-closed");
+        assert_eq!(
+            err.to_string(),
+            "dispatch-only codex reopen for tasks/infra.md on pane %46 is disabled because managed capability proof failed"
+        );
+    }
 
     #[test]
     fn send_edge_coalesces_an_open_cycle_that_started_after_the_outer_drain() {

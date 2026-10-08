@@ -102,6 +102,18 @@ fn pending_only_retention_beside_committed_response_is_absorbed() {
         None,
         "an intent this envelope did not create proves nothing"
     );
+    assert!(
+        !await_settled_pending_only_mutation(
+            &file,
+            &error,
+            false,
+            &["turnleasesweep".to_string()],
+            &[],
+            &[],
+        )
+        .unwrap(),
+        "an intent that is still observable must not masquerade as the settled race"
+    );
 
     let absorbed = absorb_retained_pending_only_mutation(
         &file,
@@ -123,6 +135,81 @@ fn pending_only_retention_beside_committed_response_is_absorbed() {
     let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
     assert!(
         log.contains("pending_only_mutation_absorbed_by_retained_continuation"),
+        "{log}"
+    );
+}
+
+/// The controller may settle and remove the retained intent in the narrow
+/// interval between the delivery barrier constructing its refusal and the
+/// pending-only error handler inspecting that intent. The refusal still proves
+/// the envelope reached a converging delivery projection; once the ordinary
+/// delivery and tracked-work witnesses agree it landed, the command must
+/// continue its commit tail instead of returning that stale refusal.
+#[test]
+fn pending_only_retention_settled_before_inspection_continues_after_landing_proof() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let file = dir.path().join("session.md");
+    let landed = "---\nagent_doc_session: gh131-settled\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n### Re: sweep — gpt-5\n\nThe committed response.\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
+    std::fs::write(&file, landed).unwrap();
+    let file = file.canonicalize().unwrap();
+
+    agent_doc_cycle_state_io::start_preflight(&file, Some(landed), Some(landed)).unwrap();
+    agent_doc_cycle_state_io::mark_committed(
+        &file,
+        "commit_success",
+        Some(landed),
+        Some(landed),
+    )
+    .unwrap();
+    agent_doc_cycle_state_io::record_requested_tracked_work(
+        &file,
+        &["turnleasesweep".to_string()],
+        &[],
+    )
+    .unwrap();
+    agent_doc_cycle_state_io::record_requested_tracked_work_mutations(&file).unwrap();
+
+    assert!(
+        agent_doc_document_realtime_io::pending_document_write(&file).is_none(),
+        "test setup: the controller already settled and removed the intent"
+    );
+    let error = anyhow::anyhow!(format!(
+        "{}; {}",
+        agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+        agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+    ));
+
+    assert_eq!(
+        agent_doc_turn::write_ownership::pending_only_retention(
+            &format!("{error:#}"),
+            true,
+            false,
+            false,
+        ),
+        agent_doc_turn::write_ownership::PendingOnlyRetention::AwaitSettledDelivery,
+    );
+    agent_doc_cycle_state_io::mark_tracked_work_mutations_retained(&file).unwrap();
+    assert_eq!(
+        recorded_tracked_work_unlanded_now(&file, false, true),
+        Some(false),
+        "the shared landing witness accepts the retained envelope only after delivery"
+    );
+    finish_settled_pending_only_mutation(
+        &file,
+        &["turnleasesweep".to_string()],
+        &[],
+        &[],
+    )
+    .unwrap();
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+        .unwrap()
+        .expect("cycle state");
+    assert!(state.tracked_work_mutations_retained);
+    assert_eq!(state.pending_done_ids, ["turnleasesweep"]);
+    let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        log.contains("pending_only_mutation_settled_before_error_inspection"),
         "{log}"
     );
 }

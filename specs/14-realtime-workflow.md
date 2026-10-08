@@ -386,6 +386,17 @@ re-decided at a site:
   retained `--done` had nothing that would ever commit it. A rejecting endpoint
   or an unserved replica withholds the narrow marker, so those stay refused
   with the recovery above.
+- **Settlement racing synchronous inspection continues through the same
+  witnesses.** The controller may converge and retire the retained intent after
+  the delivery barrier constructs its `retained=delivery_projection_pending`
+  refusal but before the pending-only error handler looks the intent up. With a
+  committed response, that exact token and an absent new intent classify as
+  `AwaitSettledDelivery`: the handler records the retained tracked-work
+  envelope, performs the ordinary bounded delivery and
+  `recorded_tracked_work_is_unlanded` checks, then continues through queue
+  maintenance and commit only after both prove the mutation landed. It must not
+  return the now-stale refusal and require a second `session-check`. An unserved
+  or rejecting editor lacks the narrow token and remains fail-closed.
 - **Ownership of a captured response belongs to the transition that introduces
   it.** `DocumentStateProjection::retained_captured_response_write` no longer
   attributes the capture to an intent whose own base (`expected_content`)

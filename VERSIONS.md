@@ -24,6 +24,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **Exchange prompts can declare presets and subagent dispatch.** AST-backed component policy now accepts persistent
   `preset` and bare `subagents` / `fan-out` attributes on `agent:exchange`, applies their defaults through canonical
   preset resolution, and emits a typed exchange delegation contract while the parent retains cycle ownership.
+- **Pending-only closeouts no longer report a stale delivery failure after convergence.** If the controller settles a
+  retained tracked-work intent between delivery-refusal construction and synchronous inspection, the write now awaits
+  the existing delivery and tracked-work landing witnesses and continues its commit tail. Unserved and rejecting editor
+  endpoints still fail closed. The strict pending-capture gate remains explicit: mentioning or leaving existing work
+  open does not replace `--no-followups` when the response intentionally creates no new tracked work.
 
 ## 0.35.478
 

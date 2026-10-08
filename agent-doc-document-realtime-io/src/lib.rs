@@ -4320,9 +4320,9 @@ pub fn normalize_recoverable_response_replay_duplication_for_file(
 }
 
 /// Classify one post-repair authority observation without treating a newer
-/// operator cut as a failed write. The file-aware normalizer is the semantic
-/// proof: only an observation that still normalizes to different bytes needs
-/// another repair effect.
+/// operator cut as a failed write. Structural validity only proves that the
+/// observation is a document; a non-exact settlement additionally has to prove
+/// that the repair target's response survived in the newer authority cut.
 pub fn classify_response_replay_repair_settlement_for_file(
     file: &Path,
     target: &str,
@@ -4332,13 +4332,19 @@ pub fn classify_response_replay_repair_settlement_for_file(
     let observed_repair = normalize_recoverable_response_replay_duplication_for_file(
         file, observed, source,
     )?;
-    let observed_still_requires_repair = observed_repair
-        .as_deref()
-        .is_some_and(|repaired| repaired != observed);
+    // `Some(observed)` still means replay was recognized but could not be
+    // advanced to different canonical bytes. Likewise an invalid projection
+    // with no narrow repair candidate is unresolved, not successful.
+    let observed_still_requires_repair = observed_repair.is_some()
+        || !agent_projection_integrity_valid(observed);
+    let advanced_authority_proven = agent_doc_document_realtime::write_policy::buffer_proves_reference_response(
+        target, observed,
+    );
     Ok(
         agent_doc_document_realtime::write_policy::decide_semantic_repair_settlement(
             observed == target,
             observed_still_requires_repair,
+            advanced_authority_proven,
         ),
     )
 }
@@ -11108,6 +11114,65 @@ mod tests {
             .unwrap(),
             agent_doc_document_realtime::write_policy::SemanticRepairSettlement::RepairStillPresent,
             "an authority cut that still has the duplicate boundary remains pending",
+        );
+    }
+
+    #[test]
+    fn response_replay_settlement_rejects_recognized_but_unrepairable_projection() {
+        let target = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "### Re: retained — gpt-5\n\nRetained response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let malformed = format!("{target}<!-- /agent:done -->\n");
+        let (_dir, file, _) = temp_doc(&malformed);
+
+        assert_eq!(
+            classify_response_replay_repair_settlement_for_file(
+                &file,
+                target,
+                &malformed,
+                "test_unrepairable_response_replay_settlement",
+            )
+            .unwrap(),
+            agent_doc_document_realtime::write_policy::SemanticRepairSettlement::RepairStillPresent,
+            "invalid replay-shaped authority is unresolved even when the narrow normalizer cannot produce bytes",
+        );
+    }
+
+    #[test]
+    fn response_replay_settlement_rejects_valid_non_descendant_projection() {
+        let target = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ original prompt\n\n",
+            "### Re: retained — gpt-5\n\nRetained response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let unrelated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ unrelated prompt\n\n",
+            "### Re: unrelated — gpt-5\n\nDifferent response.\n",
+            "<!-- agent:boundary:other -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, file, _) = temp_doc(unrelated);
+
+        assert_eq!(
+            classify_response_replay_repair_settlement_for_file(
+                &file,
+                target,
+                unrelated,
+                "test_unproven_response_replay_settlement",
+            )
+            .unwrap(),
+            agent_doc_document_realtime::write_policy::SemanticRepairSettlement::UnprovenAdvancedAuthority,
+            "structural validity alone cannot prove that an unrelated cut descends from the repair target",
         );
     }
 

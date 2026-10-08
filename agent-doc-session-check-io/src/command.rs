@@ -2689,8 +2689,11 @@ fn self_heal_response_replay_duplication(
             "session_check_response_replay_repaired_settlement",
         )?;
     anyhow::ensure!(
-        repaired_settlement
-            != agent_doc_document_realtime::write_policy::SemanticRepairSettlement::RepairStillPresent,
+        matches!(
+            repaired_settlement,
+            agent_doc_document_realtime::write_policy::SemanticRepairSettlement::ExactTarget
+                | agent_doc_document_realtime::write_policy::SemanticRepairSettlement::AdvancedCanonicalAuthority
+        ),
         "[session-check] response replay deduplication for {} returned an authority projection that still contains the replay",
         file.display(),
     );
@@ -2706,8 +2709,11 @@ fn self_heal_response_replay_duplication(
             "session_check_response_replay_terminal_settlement",
         )?;
     anyhow::ensure!(
-        settled_decision
-            != agent_doc_document_realtime::write_policy::SemanticRepairSettlement::RepairStillPresent,
+        matches!(
+            settled_decision,
+            agent_doc_document_realtime::write_policy::SemanticRepairSettlement::ExactTarget
+                | agent_doc_document_realtime::write_policy::SemanticRepairSettlement::AdvancedCanonicalAuthority
+        ),
         "[session-check] response replay deduplication for {} returned while the replay remained in authority",
         file.display(),
     );

@@ -482,8 +482,11 @@ fn run_with_options_to_writer_in_pass(
                 "preflight_response_replay_settlement",
             )?;
         anyhow::ensure!(
-            settlement
-                != agent_doc_document_realtime::write_policy::SemanticRepairSettlement::RepairStillPresent,
+            matches!(
+                settlement,
+                agent_doc_document_realtime::write_policy::SemanticRepairSettlement::ExactTarget
+                    | agent_doc_document_realtime::write_policy::SemanticRepairSettlement::AdvancedCanonicalAuthority
+            ),
             "response-replay semantic recovery remains pending in live authority (target_hash={}, observed_hash={})",
             agent_doc_hash::content_hash(&normalized),
             agent_doc_hash::content_hash(&content),

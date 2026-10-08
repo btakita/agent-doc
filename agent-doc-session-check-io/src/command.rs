@@ -2681,24 +2681,55 @@ fn self_heal_response_replay_duplication(
         &current,
         "session_check_response_replay_dedup",
     )?;
+    let repaired_settlement =
+        agent_doc_document_realtime_io::classify_response_replay_repair_settlement_for_file(
+            file,
+            &normalized,
+            &repaired,
+            "session_check_response_replay_repaired_settlement",
+        )?;
     anyhow::ensure!(
-        repaired == normalized,
-        "[session-check] response replay deduplication for {} returned a non-exact repair projection",
+        matches!(
+            repaired_settlement,
+            agent_doc_document_realtime::write_policy::SemanticRepairSettlement::ExactTarget
+                | agent_doc_document_realtime::write_policy::SemanticRepairSettlement::AdvancedCanonicalAuthority
+        ),
+        "[session-check] response replay deduplication for {} returned an authority projection that still contains the replay",
         file.display(),
     );
     let settled = crate::resolve_current_document_content(
         file,
         "session_check_response_replay_dedup_settled",
     )?;
+    let settled_decision =
+        agent_doc_document_realtime_io::classify_response_replay_repair_settlement_for_file(
+            file,
+            &normalized,
+            &settled,
+            "session_check_response_replay_terminal_settlement",
+        )?;
     anyhow::ensure!(
-        settled == normalized,
-        "[session-check] response replay deduplication for {} returned without exact authority convergence",
+        matches!(
+            settled_decision,
+            agent_doc_document_realtime::write_policy::SemanticRepairSettlement::ExactTarget
+                | agent_doc_document_realtime::write_policy::SemanticRepairSettlement::AdvancedCanonicalAuthority
+        ),
+        "[session-check] response replay deduplication for {} returned while the replay remained in authority",
         file.display(),
     );
+    if settled_decision
+        == agent_doc_document_realtime::write_policy::SemanticRepairSettlement::AdvancedCanonicalAuthority
+    {
+        agent_doc_document_realtime_io::reconcile_deferred_write_to_canonical_cut_if_needed(
+            file,
+            &settled,
+            "session_check_response_replay_advanced_authority",
+        )?;
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "session_check_response_replay_duplication_self_healed file={} content_hash={}",
+            "session_check_response_replay_duplication_self_healed file={} content_hash={} settlement={settled_decision:?}",
             file.display(),
             agent_doc_hash::content_hash(&settled),
         ),
@@ -4652,6 +4683,96 @@ mod terminal_convergence_tests {
         assert!(healed.contains("agent:boundary:latest"));
         assert!(healed.contains("❯ operator prompt"));
         assert!(healed.contains("Retained response."));
+        agent_doc_lint_io::validate_structure_on_content(&file, &healed).unwrap();
+    }
+
+    #[test]
+    fn session_check_accepts_operator_edit_after_response_replay_repair() {
+        struct AdvancedRepairEffects;
+
+        impl SessionCheckEffects for AdvancedRepairEffects {
+            fn closeout_recovery_hint(&self, file: &Path) -> String {
+                TestEffects.closeout_recovery_hint(file)
+            }
+            fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+                anyhow::bail!("proof-bearing replay repair used generic semantic write")
+            }
+            fn atomic_repair_write_if_current(
+                &self,
+                file: &Path,
+                content: &str,
+                _expected_current: &str,
+                _source: &str,
+            ) -> Result<String> {
+                let advanced = content.replacen("operator prompt", "operator promt", 1);
+                std::fs::write(file, &advanced)?;
+                Ok(advanced)
+            }
+            fn settle_committed_projection(
+                &self,
+                file: &Path,
+                committed_content: &str,
+                expected_current: &str,
+            ) -> Result<()> {
+                TestEffects.settle_committed_projection(
+                    file,
+                    committed_content,
+                    expected_current,
+                )
+            }
+            fn settle_retained_committed_projection(
+                &self,
+                file: &Path,
+                committed_content: &str,
+                expected_disk: &str,
+            ) -> Result<bool> {
+                TestEffects.settle_retained_committed_projection(
+                    file,
+                    committed_content,
+                    expected_disk,
+                )
+            }
+            fn repair_committed_historical_snapshot_drift(
+                &self,
+                file: &Path,
+            ) -> Result<Option<&'static str>> {
+                TestEffects.repair_committed_historical_snapshot_drift(file)
+            }
+            fn recover_missing_commit_boundary(
+                &self,
+                file: &Path,
+                event: &str,
+            ) -> Result<Option<&'static str>> {
+                TestEffects.recover_missing_commit_boundary(file, event)
+            }
+            fn resume_captured_finalize(
+                &self,
+                file: &Path,
+            ) -> Result<CapturedFinalizeResumeOutcome> {
+                TestEffects.resume_captured_finalize(file)
+            }
+        }
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- agent:boundary:stale -->\n",
+            "### Re: retained — gpt-5\n\nRetained response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, duplicated).unwrap();
+
+        assert!(
+            self_heal_response_replay_duplication(&file, &AdvancedRepairEffects).unwrap(),
+            "the newer editor revision must settle the semantic replay repair",
+        );
+        let healed = std::fs::read_to_string(&file).unwrap();
+        assert!(healed.contains("operator promt"));
+        assert_eq!(healed.matches("agent:boundary:").count(), 1);
         agent_doc_lint_io::validate_structure_on_content(&file, &healed).unwrap();
     }
 

@@ -97,6 +97,39 @@ pub const fn decide_crdt_write_completion(
     }
 }
 
+/// Semantic settlement of a repair effect after authority is observed again.
+///
+/// The repair target is a generation-fenced proposal, not permanent authority.
+/// A live editor may publish a newer operator cut after that proposal is
+/// applied. Exact byte equality therefore proves the common case, while a
+/// newer cut is equally settled when the semantic defect is absent from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticRepairSettlement {
+    ExactTarget,
+    AdvancedCanonicalAuthority,
+    RepairStillPresent,
+    /// The observation is structurally valid, but carries no proof that it is
+    /// descended from the repair target. Treating arbitrary valid bytes as a
+    /// successful repair would let a concurrent replacement erase the target.
+    UnprovenAdvancedAuthority,
+}
+
+pub const fn decide_semantic_repair_settlement(
+    exact_target_observed: bool,
+    observed_still_requires_repair: bool,
+    advanced_authority_proven: bool,
+) -> SemanticRepairSettlement {
+    if exact_target_observed {
+        SemanticRepairSettlement::ExactTarget
+    } else if observed_still_requires_repair {
+        SemanticRepairSettlement::RepairStillPresent
+    } else if advanced_authority_proven {
+        SemanticRepairSettlement::AdvancedCanonicalAuthority
+    } else {
+        SemanticRepairSettlement::UnprovenAdvancedAuthority
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CrdtRetryAdmission {
     StartDrain,
@@ -965,6 +998,15 @@ pub fn buffer_presents_reference_response(reference: &str, buffer: &str) -> bool
         Some(heading) => response_heading_has_body(&exchange_component_text(buffer), &heading),
         None => visible_write_contains_latest_response(reference, buffer),
     }
+}
+
+/// Strong settlement proof for a repair target: unlike
+/// [`buffer_presents_reference_response`], a reference without a response does
+/// not prove lineage. Replay repair may accept a newer editor cut only when the
+/// repaired response is demonstrably still present in that cut.
+pub fn buffer_proves_reference_response(reference: &str, buffer: &str) -> bool {
+    latest_exchange_response_block(reference).is_some()
+        && buffer_presents_reference_response(reference, buffer)
 }
 
 /// True when `exchange` contains `heading` on its own trimmed line followed by
@@ -2822,6 +2864,31 @@ pub fn classify_committed_historical_agent_doc_mutation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semantic_repair_settlement_accepts_a_newer_canonical_editor_cut() {
+        assert_eq!(
+            decide_semantic_repair_settlement(false, false, true),
+            SemanticRepairSettlement::AdvancedCanonicalAuthority,
+        );
+        assert_eq!(
+            decide_semantic_repair_settlement(false, false, false),
+            SemanticRepairSettlement::UnprovenAdvancedAuthority,
+        );
+    }
+
+    #[test]
+    fn semantic_repair_settlement_retries_only_when_the_defect_remains() {
+        assert_eq!(
+            decide_semantic_repair_settlement(true, true, false),
+            SemanticRepairSettlement::ExactTarget,
+            "exact convergence wins even when stale classifier evidence says retry",
+        );
+        assert_eq!(
+            decide_semantic_repair_settlement(false, true, true),
+            SemanticRepairSettlement::RepairStillPresent,
+        );
+    }
 
     fn complete_session_projection(body: &str) -> String {
         format!(

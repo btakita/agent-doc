@@ -31,12 +31,14 @@ agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.479" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.479" }
 agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.35.479" }
 agent-doc-preflight-runtime-io = { path = "../agent-doc-preflight-runtime-io", version = "0.35.479" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.479" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.479" }
 agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.479" }
 agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.479" }
 agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.35.479" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.479" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.479" }
+agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.479" }
 anyhow = "1"
 
 [dev-dependencies]

@@ -389,6 +389,7 @@ mod tests {
             file_content: Some("body".to_string()),
             response_sha256: None,
             cycle_id_hint: None,
+            terminal_turn_fence: None,
         };
         let submit = build_closeout_advance_submit(
             "cmd-adv-1",
@@ -419,6 +420,7 @@ mod tests {
             file_content: None,
             response_sha256: None,
             cycle_id_hint: None,
+            terminal_turn_fence: None,
         };
         assert_eq!(write.last_event_label(), "write_applied");
 
@@ -441,6 +443,7 @@ mod tests {
                 file_content: None,
                 response_sha256: None,
                 cycle_id_hint: None,
+                terminal_turn_fence: None,
             };
             assert_eq!(committed.last_event_label(), label);
         }
@@ -455,6 +458,7 @@ mod tests {
             file_content: None,
             response_sha256: None,
             cycle_id_hint: None,
+            terminal_turn_fence: None,
         };
         assert_eq!(abandoned.last_event_label(), "stalled_preflight");
     }
@@ -475,6 +479,7 @@ mod tests {
                 file_content: None,
                 response_sha256: None,
                 cycle_id_hint: None,
+                terminal_turn_fence: None,
             },
         )
         .unwrap();
@@ -502,6 +507,7 @@ mod tests {
                 file_content: Some("body".to_string()),
                 response_sha256: None,
                 cycle_id_hint: None,
+                terminal_turn_fence: None,
             },
         )
         .unwrap();
@@ -534,6 +540,7 @@ mod tests {
                 file_content: None,
                 response_sha256: None,
                 cycle_id_hint: None,
+                terminal_turn_fence: None,
             },
         )
         .unwrap();

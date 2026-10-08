@@ -1665,6 +1665,7 @@ pub fn mark_write_applied(
         file_content,
         None,
         None,
+        None,
     )? {
         let state = load(file)?.context(
             "closeout_advance WriteApplied applied through the command plane but no cycle state \
@@ -1734,6 +1735,7 @@ pub fn mark_response_captured(
         file_content,
         Some(response_sha256),
         cycle_id_hint,
+        None,
     )? {
         let state = load(file)?.context(
             "closeout_advance ResponseCaptured applied through the command plane but no cycle \
@@ -2637,6 +2639,72 @@ pub fn mark_committed(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
+    mark_committed_inner(file, event, snapshot_content, file_content, None)?
+        .context("unconditional committed transition returned no state")
+}
+
+/// Commit only while `expected_cycle_id` is still the controller's current
+/// cycle. A newer preflight wins the compare-and-swap and leaves its state
+/// untouched.
+pub fn mark_committed_if_cycle(
+    file: &Path,
+    expected_cycle_id: &str,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<Option<CycleState>> {
+    mark_committed_inner(
+        file,
+        event,
+        snapshot_content,
+        file_content,
+        Some(expected_cycle_id),
+    )
+}
+
+fn mark_committed_inner(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    expected_cycle_id: Option<&str>,
+) -> Result<Option<CycleState>> {
+    mark_committed_inner_with_turn_fence(
+        file,
+        event,
+        snapshot_content,
+        file_content,
+        expected_cycle_id,
+        None,
+    )
+}
+
+pub fn mark_committed_if_cycle_and_turn_fence(
+    file: &Path,
+    expected_cycle_id: &str,
+    turn_fence: &command_plane::TerminalTurnFence,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<Option<CycleState>> {
+    mark_committed_inner_with_turn_fence(
+        file,
+        event,
+        snapshot_content,
+        file_content,
+        Some(expected_cycle_id),
+        Some(turn_fence),
+    )
+}
+
+fn mark_committed_inner_with_turn_fence(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    expected_cycle_id: Option<&str>,
+    turn_fence: Option<&command_plane::TerminalTurnFence>,
+) -> Result<Option<CycleState>> {
     let observation = command_plane::commit_observation_from_event_label(event);
     if submit_closeout_advance_via_socket(
         file,
@@ -2646,16 +2714,36 @@ pub fn mark_committed(
         snapshot_content,
         file_content,
         None,
-        None,
+        expected_cycle_id,
+        turn_fence,
     )? {
         let state = load(file)?.context(
             "closeout_advance Committed applied through the command plane but no cycle state was \
              read back",
         )?;
         append_phase_event_to_session_log(file, &state, file_content);
-        return Ok(state);
+        return Ok(expected_cycle_id
+            .is_none_or(|expected| {
+                state.cycle_id == expected
+                    && state.phase == agent_doc_turn::CyclePhase::Committed
+            })
+            .then_some(state));
     }
-    let decision = decide_committed(load(file)?, file, event, snapshot_content, file_content);
+    // A terminal turn fence is authoritative only when the controller can
+    // validate it and append the terminal fact in the same state.db
+    // transaction. Never degrade a fenced transition to the cold local path.
+    if turn_fence.is_some() {
+        return Ok(None);
+    }
+    let current = load(file)?;
+    if expected_cycle_id.is_some_and(|expected| {
+        current
+            .as_ref()
+            .is_none_or(|state| state.cycle_id != expected)
+    }) {
+        return Ok(None);
+    }
+    let decision = decide_committed(current, file, event, snapshot_content, file_content);
     if decision.checkpoint {
         save(file, &decision.state)?;
     }
@@ -2665,7 +2753,7 @@ pub fn mark_committed(
     if decision.session_log {
         append_phase_event_to_session_log(file, &decision.state, file_content);
     }
-    Ok(decision.state)
+    Ok(Some(decision.state))
 }
 
 /// Pure decision core of `mark_abandoned` (see [`CloseoutDecision`]). Tri-state:
@@ -2729,6 +2817,70 @@ pub fn mark_abandoned(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
+    mark_abandoned_inner(file, event, snapshot_content, file_content, None)?
+        .context("unconditional abandoned transition returned no state")
+}
+
+/// Abandon only while `expected_cycle_id` is still current.
+pub fn mark_abandoned_if_cycle(
+    file: &Path,
+    expected_cycle_id: &str,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<Option<CycleState>> {
+    mark_abandoned_inner(
+        file,
+        event,
+        snapshot_content,
+        file_content,
+        Some(expected_cycle_id),
+    )
+}
+
+fn mark_abandoned_inner(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    expected_cycle_id: Option<&str>,
+) -> Result<Option<CycleState>> {
+    mark_abandoned_inner_with_turn_fence(
+        file,
+        event,
+        snapshot_content,
+        file_content,
+        expected_cycle_id,
+        None,
+    )
+}
+
+pub fn mark_abandoned_if_cycle_and_turn_fence(
+    file: &Path,
+    expected_cycle_id: &str,
+    turn_fence: &command_plane::TerminalTurnFence,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<Option<CycleState>> {
+    mark_abandoned_inner_with_turn_fence(
+        file,
+        event,
+        snapshot_content,
+        file_content,
+        Some(expected_cycle_id),
+        Some(turn_fence),
+    )
+}
+
+fn mark_abandoned_inner_with_turn_fence(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    expected_cycle_id: Option<&str>,
+    turn_fence: Option<&command_plane::TerminalTurnFence>,
+) -> Result<Option<CycleState>> {
     // `#lazily-hot-path`: submit over the command plane when a controller is
     // live. The abandon `event` is descriptive, so it rides the command-plane
     // `reason` field (the typed event is `Abandoned`); the authority stamps it
@@ -2741,16 +2893,36 @@ pub fn mark_abandoned(
         snapshot_content,
         file_content,
         None,
-        None,
+        expected_cycle_id,
+        turn_fence,
     )? {
         let state = load(file)?.context(
             "closeout_advance Abandoned applied through the command plane but no cycle state was \
              read back",
         )?;
         append_phase_event_to_session_log(file, &state, file_content);
-        return Ok(state);
+        return Ok(expected_cycle_id
+            .is_none_or(|expected| {
+                state.cycle_id == expected
+                    && state.phase == agent_doc_turn::CyclePhase::Abandoned
+            })
+            .then_some(state));
     }
-    let decision = decide_abandoned(load(file)?, file, event, snapshot_content, file_content);
+    // A terminal turn fence is authoritative only when the controller can
+    // validate it and append the terminal fact in the same state.db
+    // transaction. Never degrade a fenced transition to the cold local path.
+    if turn_fence.is_some() {
+        return Ok(None);
+    }
+    let current = load(file)?;
+    if expected_cycle_id.is_some_and(|expected| {
+        current
+            .as_ref()
+            .is_none_or(|state| state.cycle_id != expected)
+    }) {
+        return Ok(None);
+    }
+    let decision = decide_abandoned(current, file, event, snapshot_content, file_content);
     if decision.checkpoint {
         save(file, &decision.state)?;
     }
@@ -2760,7 +2932,7 @@ pub fn mark_abandoned(
     if decision.session_log {
         append_phase_event_to_session_log(file, &decision.state, file_content);
     }
-    Ok(decision.state)
+    Ok(Some(decision.state))
 }
 
 /// Restore the exact cycle that was incorrectly abandoned by the
@@ -3268,7 +3440,8 @@ fn append_state_fact(
 /// - `Ok(true)` — a controller was live and the terminal `CausalReceipt` was
 ///   `applied` (an idempotent no-op at the current phase folds as `applied`).
 /// - `Ok(false)` — no controller socket exists (actorless bootstrap / cold
-///   start); the caller must use the local `load→decide→save→append` fallback.
+///   start); an unfenced caller may use the local `load→decide→save→append`
+///   fallback, while a terminal-turn-fenced caller must fail closed.
 /// - `Err(_)` — the controller was live but the transport/decode failed or the
 ///   terminal receipt was `rejected` (fail closed; never silently fall back).
 #[allow(clippy::too_many_arguments)]
@@ -3281,6 +3454,7 @@ fn submit_closeout_advance_via_socket(
     file_content: Option<&str>,
     response_sha256: Option<&str>,
     cycle_id_hint: Option<&str>,
+    terminal_turn_fence: Option<&command_plane::TerminalTurnFence>,
 ) -> Result<bool> {
     use command_plane::{CloseoutAdvancePayload, build_closeout_advance_submit};
 
@@ -3300,6 +3474,7 @@ fn submit_closeout_advance_via_socket(
         file_content: file_content.map(str::to_string),
         response_sha256: response_sha256.map(str::to_string),
         cycle_id_hint: cycle_id_hint.map(str::to_string),
+        terminal_turn_fence: terminal_turn_fence.cloned(),
     };
     // Stable, replay-safe command id / idempotency key derived from
     // (document, event, content) so a duplicate advance dedupes onto the same
@@ -4142,6 +4317,62 @@ mod tests {
         let state = mark_committed(&doc, "commit", Some("new"), Some("new")).unwrap();
         assert_eq!(state.phase, CyclePhase::Committed);
         assert!(!state.is_open());
+    }
+
+    #[test]
+    fn terminal_cycle_cas_does_not_close_a_newer_preflight() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let stale = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_committed(&doc, "commit", Some("body"), Some("body")).unwrap();
+        let current = start_preflight(&doc, Some("body"), Some("body")).unwrap();
+
+        assert!(
+            mark_committed_if_cycle(
+                &doc,
+                &stale.cycle_id,
+                "repair_preflight_stale_lock",
+                Some("body"),
+                Some("body"),
+            )
+            .unwrap()
+            .is_none(),
+            "the stale recovery transition must lose to the newer cycle",
+        );
+        let after = load(&doc).unwrap().unwrap();
+        assert_eq!(after.cycle_id, current.cycle_id);
+        assert_eq!(after.phase, CyclePhase::PreflightStarted);
+    }
+
+    #[test]
+    fn terminal_turn_fence_fails_closed_without_controller_authority() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let current = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let fence = command_plane::TerminalTurnFence {
+            session_id: None,
+            pane_id: None,
+            generation: None,
+        };
+
+        assert!(
+            mark_committed_if_cycle_and_turn_fence(
+                &doc,
+                &current.cycle_id,
+                &fence,
+                "repair_preflight_stale_lock",
+                Some("body"),
+                Some("body"),
+            )
+            .unwrap()
+            .is_none(),
+            "a fenced transition cannot degrade to the non-atomic cold path",
+        );
+        let after = load(&doc).unwrap().unwrap();
+        assert_eq!(after.cycle_id, current.cycle_id);
+        assert_eq!(after.phase, CyclePhase::PreflightStarted);
     }
 
     #[test]

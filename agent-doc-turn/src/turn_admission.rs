@@ -29,6 +29,9 @@ pub struct TurnAdmissionFacts {
     /// The visible document carries unanswered operator steering relative to the
     /// closed cycle's baseline (`closed_cycle_steering_between`).
     pub steering_pending: bool,
+    /// An explicit route submitted this exact editor-authoritative document cut.
+    /// This is one-shot transport provenance, not snapshot/HEAD inference.
+    pub explicit_route_pending: bool,
 }
 
 /// The single answer to "may this turn continue?" for a closed cycle.
@@ -41,6 +44,10 @@ pub enum TurnAdmission {
     /// is carried by that turn's commit, and no recovery that rebuilds the
     /// baseline from — or restores over — the visible file may run first.
     ContinueWithSteering,
+    /// The operator explicitly submitted the exact live editor cut. Git and
+    /// snapshot lineage remain closeout bookkeeping; they cannot veto this
+    /// realtime steering event.
+    ContinueWithExplicitRoute,
     /// No steering is pending, so closeout drift must be proven clean or recovered
     /// before the turn may be admitted.
     RequireCleanCloseout,
@@ -52,6 +59,8 @@ impl TurnAdmission {
             Self::OpenCycle
         } else if facts.steering_pending {
             Self::ContinueWithSteering
+        } else if facts.explicit_route_pending {
+            Self::ContinueWithExplicitRoute
         } else {
             Self::RequireCleanCloseout
         }
@@ -61,6 +70,7 @@ impl TurnAdmission {
         match self {
             Self::OpenCycle => "open_cycle",
             Self::ContinueWithSteering => "continue_with_steering",
+            Self::ContinueWithExplicitRoute => "continue_with_explicit_route",
             Self::RequireCleanCloseout => "require_clean_closeout",
         }
     }
@@ -73,6 +83,13 @@ impl TurnAdmission {
 
     pub const fn continues_with_steering(self) -> bool {
         matches!(self, Self::ContinueWithSteering)
+    }
+
+    pub const fn continues_with_operator_intent(self) -> bool {
+        matches!(
+            self,
+            Self::ContinueWithSteering | Self::ContinueWithExplicitRoute
+        )
     }
 }
 
@@ -137,6 +154,7 @@ mod tests {
         let admission = TurnAdmission::decide(TurnAdmissionFacts {
             cycle_open: false,
             steering_pending: true,
+            explicit_route_pending: false,
         });
         assert_eq!(admission, TurnAdmission::ContinueWithSteering);
         assert!(!admission.requires_clean_closeout());
@@ -148,6 +166,7 @@ mod tests {
         let admission = TurnAdmission::decide(TurnAdmissionFacts {
             cycle_open: false,
             steering_pending: false,
+            explicit_route_pending: false,
         });
         assert_eq!(admission, TurnAdmission::RequireCleanCloseout);
         assert!(admission.requires_clean_closeout());
@@ -159,11 +178,25 @@ mod tests {
             let admission = TurnAdmission::decide(TurnAdmissionFacts {
                 cycle_open: true,
                 steering_pending,
+                explicit_route_pending: false,
             });
             assert_eq!(admission, TurnAdmission::OpenCycle);
             assert!(!admission.requires_clean_closeout());
             assert!(!admission.continues_with_steering());
         }
+    }
+
+    #[test]
+    fn exact_explicit_route_cut_admits_without_inferred_steering() {
+        let admission = TurnAdmission::decide(TurnAdmissionFacts {
+            cycle_open: false,
+            steering_pending: false,
+            explicit_route_pending: true,
+        });
+        assert_eq!(admission, TurnAdmission::ContinueWithExplicitRoute);
+        assert!(admission.continues_with_operator_intent());
+        assert!(!admission.continues_with_steering());
+        assert!(!admission.requires_clean_closeout());
     }
 
     #[test]

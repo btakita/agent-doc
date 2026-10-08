@@ -11177,6 +11177,113 @@ mod tests {
     }
 
     #[test]
+    fn retained_replay_repair_rolls_forward_over_one_byte_editor_publication() {
+        let duplicated = concat!(
+            "---\nagent_doc_session: replay-race\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "<!-- agent:boundary:stale -->\n",
+            "### Re: retained — gpt-5\n\nRetained response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let repair_target = normalize_recoverable_response_replay_duplication(duplicated)
+            .expect("fixture must have a canonical replay-repair target");
+        let editor_cut = repair_target.replacen("prompt", "promt", 1);
+        assert_eq!(repair_target.len(), editor_cut.len() + 1);
+
+        let (dir, file, _canonical) = temp_doc(duplicated);
+        let identity = "test-retained-replay-one-byte-editor-race";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        ensure_deferred_document_write_intent(
+            &file,
+            duplicated,
+            &repair_target,
+            "response_replay_repair_race",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+        agent_doc_crdt_relay_io::apply_cp_write_for_file(
+            &file,
+            duplicated,
+            &repair_target,
+            "response_replay_repair_race",
+        )
+        .unwrap()
+        .expect("stale repair target should enter canonical authority");
+        let pull = test_support_pull_replica_updates_for_file(&file, identity)
+            .unwrap()
+            .expect("editor remains attached");
+        let update = pull.updates.last().expect("repair delivery update");
+        assert_eq!(
+            test_support_observe_replica_projection_for_file(
+                &file,
+                identity,
+                &update.expected_content_hash,
+            )
+            .unwrap(),
+            Some(true),
+        );
+
+        // The editor publishes one byte after the repair target was retained
+        // but before repair settlement samples authority.
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            hub.apply_local(
+                client_id,
+                0,
+                repair_target.chars().count() as u32,
+                &editor_cut,
+            )
+            .unwrap();
+        })
+        .unwrap();
+        let observed = try_resolve_current_document_content(
+            &file,
+            "response_replay_repair_race_observed",
+        )
+        .unwrap();
+        assert_eq!(observed, editor_cut);
+        assert_eq!(
+            classify_response_replay_repair_settlement_for_file(
+                &file,
+                &repair_target,
+                &observed,
+                "response_replay_repair_race_settlement",
+            )
+            .unwrap(),
+            agent_doc_document_realtime::write_policy::SemanticRepairSettlement::AdvancedCanonicalAuthority,
+        );
+
+        reconcile_deferred_write_to_canonical_cut_if_needed(
+            &file,
+            &observed,
+            "response_replay_repair_race_advanced_authority",
+        )
+        .unwrap();
+        let pending = pending_document_write(&file)
+            .expect("advanced editor authority must remain the retained delivery target");
+        assert_eq!(pending.expected_content.as_deref(), Some(repair_target.as_str()));
+        assert_eq!(pending.target_content, editor_cut);
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "response_replay_repair_race_final_authority",
+            )
+            .unwrap(),
+            editor_cut,
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("captured response baseline no longer matches current document"),
+            "{log}",
+        );
+    }
+
+    #[test]
     fn captured_replay_recovery_collapses_fourfold_tail_and_preserves_operator_edits() {
         let captured_response = concat!(
             "<!-- patch:exchange -->\n",

@@ -11015,6 +11015,88 @@ mod tests {
     }
 
     #[test]
+    fn captured_replay_recovery_collapses_fourfold_tail_and_preserves_operator_edits() {
+        let captured_response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: marker handling — gpt-5\n\n",
+            "The artifact is `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ original operator prompt\n\n",
+            "### Re: marker handling — gpt-5\n\n",
+            "The artifact is `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- [ ] Existing work.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let replayed_tail = concat!(
+            "\n#subagent: Fix sample-sdk queue replay.\n\n",
+            "Preserve this newer operator edit.\n\n",
+            "```text\n",
+            "sample output\n",
+            "```\n",
+        );
+        let current = format!(
+            concat!(
+                "---\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append subagents -->\n",
+                "❯ original operator prompt\n\n",
+                "### Re: marker handling — gpt-5\n\n",
+                "The artifact is `...`.\n",
+                "{replayed_tail}{replayed_tail}{replayed_tail}{replayed_tail}",
+                "<!-- agent:boundary:new -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- [ ] Existing work.\n",
+                "- [ ] Add corresponding subagent attributes.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            replayed_tail = replayed_tail,
+        );
+        let (_dir, file, _) = temp_doc(baseline);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        let response_sha = agent_doc_hash::content_hash(captured_response);
+        agent_doc_cycle_state_io::append_response_captured_body(
+            &file,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &cycle.cycle_id,
+                capture_id: &cycle.cycle_id,
+                response_sha256: &response_sha,
+                response_body: captured_response,
+                intent_body: Some(captured_response),
+                mutation_plan_json: None,
+                file_hash: Some(&agent_doc_hash::content_hash(baseline)),
+                snapshot_hash: Some(&agent_doc_hash::content_hash(baseline)),
+                baseline_content: Some(baseline),
+            },
+        )
+        .unwrap();
+
+        let normalized = normalize_recoverable_response_replay_duplication_for_file(
+            &file,
+            &current,
+            "test_preflight",
+        )
+        .unwrap()
+        .expect("the durable capture should prove the repeated tail repair");
+
+        assert_eq!(normalized.matches(replayed_tail).count(), 1);
+        assert!(normalized.contains("The artifact is `...`."));
+        assert!(!normalized.contains("f4405030"));
+        assert!(normalized.contains("<!-- agent:exchange patch=append subagents -->"));
+        assert!(normalized.contains("- [ ] Add corresponding subagent attributes."));
+        assert_eq!(normalized.matches("agent:boundary:").count(), 1);
+        assert!(normalized.contains("agent:boundary:new"));
+    }
+
+    #[test]
     fn stranded_duplicate_response_heading_is_recoverable_before_integrity_gate() {
         let interrupted = concat!(
             "---\nagent_doc_format: template\n---\n\n",

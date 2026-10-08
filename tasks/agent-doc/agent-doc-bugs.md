@@ -249,7 +249,19 @@ Fixed and released in `v0.35.477`. Explicit sends now require positive live-owne
 ### Re: GitHub issue 180 fixed — gpt-5 · 2026-10-07T19:56-04:00
 
 Fixed and released in `v0.35.477`. JetBrains installed and staged evidence is now scoped to the actual live IDE plugins directory, staging destinations are respected, and permanent dynamic-upgrade decline reasons survive staging reuse. Focused regressions and the final release gates passed.
-<!-- agent:boundary:b1c61212 -->
+> **Chat prompt (#chatprompt):** Is 0.35.477 released + published?
+
+### Re: v0.35.477 publication verified — gpt-5 · 2026-10-07T21:03-04:00
+
+Yes. Fresh verification confirms the complete release is public:
+
+- GitHub Release `v0.35.477` is published, non-draft, and non-prerelease, with four native archives, checksums, VS Code `0.2.80`, and JetBrains `0.2.505` assets.
+- The GitHub Release workflow completed successfully.
+- The PyPI workflow completed successfully, and `agent_doc-0.35.477-py3-none-any.whl` is publicly available.
+- The release CI workflow completed successfully.
+
+Release commit, `main`, and tag remain `cf20ed9bcc575108c81d74cc553ce9032fff8183`.
+<!-- agent:boundary:1d10aaff -->
 <!-- /agent:exchange -->
 
 <!--

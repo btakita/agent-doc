@@ -3144,17 +3144,43 @@ fn disk_edit_newer_than_registered_authority(
     let Some(baseline) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(None);
     };
+    let editor_ops = agent_doc_op_capture_io::editor_ops_for_base_or_retained(file, &baseline)
+        .ok()
+        .flatten();
+    disk_edit_newer_than_registered_authority_with_lineage(
+        file,
+        authority,
+        &baseline,
+        authority,
+        editor_ops.as_deref(),
+    )
+}
+
+fn disk_edit_newer_than_registered_authority_with_lineage(
+    file: &Path,
+    authority: &str,
+    baseline: &str,
+    op_replayed_authority: &str,
+    editor_ops: Option<&[agent_doc_merge::crdt::EditorOp]>,
+) -> Result<Option<String>> {
     let disk = std::fs::read_to_string(file)?;
     let assessment =
-        agent_doc_document::admission_divergence::assess(Some(&baseline), Some(authority), &disk);
-    log_admission_divergence_assessment(file, &baseline, authority, &disk, assessment);
+        agent_doc_document::admission_divergence::assess(Some(baseline), Some(authority), &disk);
+    log_admission_divergence_assessment(file, baseline, authority, &disk, assessment);
     match assessment.adoption {
         agent_doc_document::admission_divergence::DiskAdoption::ProceedOnAuthority => Ok(None),
         agent_doc_document::admission_divergence::DiskAdoption::FastForwardAuthorityToDisk => {
             Ok(Some(disk))
         }
         agent_doc_document::admission_divergence::DiskAdoption::MergeDiskIntoAuthority => {
-            merge_admission_three_way_split(file, &baseline, authority, &disk)
+            merge_admission_three_way_split(
+                file,
+                baseline,
+                authority,
+                &disk,
+                op_replayed_authority,
+                editor_ops,
+            )
         }
     }
 }
@@ -3230,16 +3256,42 @@ fn merge_admission_three_way_split(
     baseline: &str,
     authority: &str,
     disk: &str,
+    op_replayed_authority: &str,
+    authority_ops: Option<&[agent_doc_merge::crdt::EditorOp]>,
 ) -> Result<Option<String>> {
     let durable = agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
     let durable_authority = durable(authority);
-    let durable_disk = durable(disk);
+    let lineage_projection = authority_ops
+        .map(|ops| {
+            agent_doc_merge::document_cell::suppress_superseded_disk_queue_revisions(
+                baseline,
+                disk,
+                authority,
+                op_replayed_authority,
+                ops,
+            )
+        })
+        .unwrap_or_else(
+            || agent_doc_merge::document_cell::AdmissionDiskLineageProjection {
+                disk_text: disk.to_string(),
+                suppressed_queue_revisions: 0,
+                authority_lineage_proven: false,
+            },
+        );
+    let merge_disk = lineage_projection.disk_text.as_str();
+    let durable_disk = durable(merge_disk);
 
     let mut adopted = None;
     let mut rungs = Vec::new();
+    if lineage_projection.suppressed_queue_revisions > 0 {
+        rungs.push(format!(
+            "EditorOpLineage=suppressed_queue_revisions({})",
+            lineage_projection.suppressed_queue_revisions
+        ));
+    }
     for engine in [
-        agent_doc_merge::MergeRequest::cell(baseline, disk, authority),
-        agent_doc_merge::MergeRequest::semantic(baseline, disk, authority),
+        agent_doc_merge::MergeRequest::cell(baseline, merge_disk, authority),
+        agent_doc_merge::MergeRequest::semantic(baseline, merge_disk, authority),
     ] {
         let plan = agent_doc_merge::merge(engine);
         let durable_merged = durable(&plan.merged_doc);
@@ -3260,7 +3312,7 @@ fn merge_admission_three_way_split(
             // Nothing from disk survived: the compare-and-swap write is a no-op.
             "equals_authority"
         } else if let Some(invented) =
-            merge_invents_list_items(baseline, authority, disk, &plan.merged_doc)
+            merge_invents_list_items(baseline, authority, merge_disk, &plan.merged_doc)
         {
             // `#admissionmergedup`: count conservation. A merge may not hold more
             // items than baseline + each side's additions; formal model
@@ -3441,16 +3493,47 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     let attempts = attempts.max(1);
     let mut observed = observe(file);
+    // Preserve one exact-base operation epoch across this bounded reconciliation.
+    // The first CP projection fences the active epoch, but subsequent observations
+    // are still retries of the same admission split and must use the same durable
+    // lineage proof rather than reclassifying stale disk as an independent writer.
+    let initial_operator_cut = match &observed {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => Some(text.clone()),
+        _ => None,
+    };
+    let admission_lineage = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten()
+        .and_then(|baseline| {
+            agent_doc_op_capture_io::editor_ops_for_base_or_retained(file, &baseline)
+                .ok()
+                .flatten()
+                .zip(initial_operator_cut)
+                .map(|(ops, operator_cut)| (baseline, operator_cut, ops))
+        });
     for attempt in 1..=attempts {
         let newer_disk = match &observed {
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
                 text, live_editors, ..
-            })) if *live_editors > 0 => disk_edit_newer_than_registered_authority(file, text)
-                .map_err(|err| {
+            })) if *live_editors > 0 => {
+                let assessed =
+                    if let Some((baseline, operator_cut, ops)) = admission_lineage.as_ref() {
+                        disk_edit_newer_than_registered_authority_with_lineage(
+                            file,
+                            text,
+                            baseline,
+                            operator_cut,
+                            Some(ops),
+                        )
+                    } else {
+                        disk_edit_newer_than_registered_authority(file, text)
+                    };
+                assessed.map_err(|err| {
                     QueueAuthorityUnavailable::new(format!(
                         "could not verify retained queue authority: {err:#}"
                     ))
-                })?,
+                })?
+            }
             _ => return observed,
         };
         let Some(disk) = newer_disk else {
@@ -8790,9 +8873,10 @@ mod tests {
         let dir = setup_project();
         let doc = dir.path().join("infra.md");
         let (baseline, authority, disk) = admission_both_edited_docs();
-        let merged = merge_admission_three_way_split(&doc, &baseline, &authority, &disk)
-            .unwrap()
-            .unwrap_or_else(|| authority.clone());
+        let merged =
+            merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
+                .unwrap()
+                .unwrap_or_else(|| authority.clone());
         let body = component_body(&merged, "queue");
         assert_eq!(
             body.matches("Create a PR to fix the SBX + STG drift")
@@ -8868,6 +8952,113 @@ mod tests {
             std::fs::read_to_string(&doc).unwrap(),
             disk,
             "admission reconciles the live authority and never writes disk"
+        );
+    }
+
+    /// GH #198: disk can be an intermediate save from the same editor-op
+    /// lineage while also carrying an independent addition. Admission must
+    /// suppress only the superseded intermediate row and retain the addition.
+    #[test]
+    fn admission_merge_drops_an_op_proven_stale_queue_revision_only() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let insert_at = baseline.find("<!-- /agent:queue -->").unwrap();
+        let stale_row = "- Add me to channen under team.\n";
+        let suffix = " Also verify membership.";
+        let typo_at = insert_at + stale_row.find("channen").unwrap() + "channe".len();
+        let append_at = insert_at + stale_row.len() - 1;
+        let ops = vec![
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: insert_at,
+                text: stale_row.to_string(),
+            },
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: append_at,
+                text: suffix.to_string(),
+            },
+            agent_doc_merge::crdt::EditorOp::Delete {
+                offset: typo_at,
+                len: 1,
+            },
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: typo_at,
+                text: "l".to_string(),
+            },
+        ];
+        let authority = agent_doc_merge::crdt::replay_editor_ops(baseline, &ops).unwrap();
+        assert!(authority.contains("- Add me to channel under team. Also verify membership.\n"));
+        let (identity, replica) = publish_test_live_buffer(&doc, "jetbrains-op-lineage", baseline);
+        replica.apply_local_edit(0, baseline.len() as u32, &authority);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &doc,
+            &identity,
+            &replica.encode_state(),
+        )
+        .unwrap();
+        agent_doc_op_capture_io::record_editor_ops(
+            &doc,
+            &agent_doc_hash::content_hash(baseline),
+            ops,
+        )
+        .unwrap();
+        assert!(
+            agent_doc_op_capture_io::editor_ops_for_base(&doc, baseline)
+                .unwrap()
+                .is_some(),
+            "the exact baseline-keyed editor-op epoch must be available to admission"
+        );
+
+        let disk = baseline.replace(
+            "<!-- agent:queue -->\n",
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- Add me to channen under team.\n",
+                "- independent disk addition\n",
+            ),
+        );
+        std::fs::write(&doc, &disk).unwrap();
+        let first_projection = disk_edit_newer_than_registered_authority(&doc, &authority)
+            .unwrap()
+            .expect("the split requires a reconciled authority projection");
+        assert!(!first_projection.contains(stale_row));
+
+        let observed = observe_queue_authority_after_native_save_with_bounded_retry(
+            &doc,
+            "test_op_lineage_admission_merge",
+            3,
+            |file| agent_doc_crdt_relay_io::current_text_for_file(file).map(Some),
+        )
+        .unwrap()
+        .expect("live authority remains available");
+        let text = match observed {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+            other => panic!("expected current live authority, got {other:?}"),
+        };
+        assert!(
+            text.contains("- Add me to channel under team. Also verify membership.\n"),
+            "the final operator revision must survive:\n{text}"
+        );
+        assert!(
+            text.contains("- independent disk addition\n"),
+            "the unrelated disk addition must survive:\n{text}"
+        );
+        assert!(
+            !text.contains("- Add me to channen under team.\n"),
+            "the op-proven intermediate revision must not be re-added:\n{text}"
         );
     }
 

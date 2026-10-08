@@ -1832,6 +1832,162 @@ fn log_conflicts(conflicts: &[CellConflict]) {
     }
 }
 
+/// Admission-time projection of a disk branch after editor-op lineage removes
+/// queue revisions that the same operator subsequently edited away.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmissionDiskLineageProjection {
+    /// Disk text with only op-proven superseded queue rows removed.
+    pub disk_text: String,
+    /// Number of exact queue-row occurrences suppressed.
+    pub suppressed_queue_revisions: usize,
+    /// Whether replaying every captured op reconstructed
+    /// `op_replayed_authority` exactly.
+    pub authority_lineage_proven: bool,
+}
+
+fn queue_item_spans(doc: &str) -> Vec<ItemSpan> {
+    project_document_spans(doc)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|item| item.component == "queue" && item.value.trim_start().starts_with("- "))
+        .collect()
+}
+
+fn queue_item_counts(doc: &str) -> std::collections::HashMap<String, usize> {
+    let mut counts = std::collections::HashMap::new();
+    for item in queue_item_spans(doc) {
+        *counts.entry(item.value).or_insert(0) += 1;
+    }
+    counts
+}
+
+/// Suppress stale disk queue revisions proven to be intermediate states of the
+/// live authority's captured editor-op lineage (`#admissionopancestor`).
+///
+/// This is deliberately occurrence-conservative. A disk row is eligible only
+/// when it is excess relative to both the common base and current authority,
+/// and the exact row appeared in an intermediate replay revision before
+/// disappearing from `op_replayed_authority`. The two authority inputs differ
+/// on a bounded retry: `authority` may already include an independent disk
+/// addition, while `op_replayed_authority` remains the original operator cut
+/// proved by the ops. At most the lineage-proven occurrence count is removed,
+/// so unrelated disk additions (including additional identical rows) survive
+/// for the ordinary three-way merge.
+pub fn suppress_superseded_disk_queue_revisions(
+    base: &str,
+    disk: &str,
+    authority: &str,
+    op_replayed_authority: &str,
+    authority_ops: &[EditorOp],
+) -> AdmissionDiskLineageProjection {
+    let unchanged = || AdmissionDiskLineageProjection {
+        disk_text: disk.to_string(),
+        suppressed_queue_revisions: 0,
+        authority_lineage_proven: false,
+    };
+    if authority_ops.is_empty() {
+        return unchanged();
+    }
+
+    let base_counts = queue_item_counts(base);
+    let authority_counts = queue_item_counts(authority);
+    let op_replayed_authority_counts = queue_item_counts(op_replayed_authority);
+    let disk_items = queue_item_spans(disk);
+    let mut disk_counts = std::collections::HashMap::<String, usize>::new();
+    for item in &disk_items {
+        *disk_counts.entry(item.value.clone()).or_insert(0) += 1;
+    }
+    let candidates: std::collections::HashSet<String> = disk_counts
+        .iter()
+        .filter_map(|(text, disk_count)| {
+            let retained_count = base_counts
+                .get(text)
+                .copied()
+                .unwrap_or(0)
+                .max(authority_counts.get(text).copied().unwrap_or(0));
+            (*disk_count > retained_count).then(|| text.clone())
+        })
+        .collect();
+    if candidates.is_empty() {
+        return AdmissionDiskLineageProjection {
+            authority_lineage_proven: crate::crdt::replay_editor_ops(base, authority_ops)
+                .is_some_and(|replayed| replayed == op_replayed_authority),
+            ..unchanged()
+        };
+    }
+
+    let mut running = base.to_string();
+    let mut intermediate_max = std::collections::HashMap::<String, usize>::new();
+    for op in authority_ops {
+        if crate::crdt::apply_editor_op_to_text(&mut running, op).is_none() {
+            return unchanged();
+        }
+        if candidates
+            .iter()
+            .any(|candidate| running.contains(candidate))
+        {
+            let counts = queue_item_counts(&running);
+            for candidate in &candidates {
+                let count = counts.get(candidate).copied().unwrap_or(0);
+                intermediate_max
+                    .entry(candidate.clone())
+                    .and_modify(|seen| *seen = (*seen).max(count))
+                    .or_insert(count);
+            }
+        }
+    }
+    if running != op_replayed_authority {
+        return unchanged();
+    }
+
+    let mut quotas = std::collections::HashMap::<String, usize>::new();
+    for candidate in candidates {
+        let disk_count = disk_counts.get(&candidate).copied().unwrap_or(0);
+        let retained_count = base_counts
+            .get(&candidate)
+            .copied()
+            .unwrap_or(0)
+            .max(authority_counts.get(&candidate).copied().unwrap_or(0));
+        let excess_disk = disk_count.saturating_sub(retained_count);
+        let disappeared_from_lineage = intermediate_max
+            .get(&candidate)
+            .copied()
+            .unwrap_or(0)
+            .saturating_sub(
+                op_replayed_authority_counts
+                    .get(&candidate)
+                    .copied()
+                    .unwrap_or(0),
+            );
+        let suppress = excess_disk.min(disappeared_from_lineage);
+        if suppress > 0 {
+            quotas.insert(candidate, suppress);
+        }
+    }
+
+    let mut removals = Vec::new();
+    for item in disk_items {
+        let Some(remaining) = quotas.get_mut(&item.value) else {
+            continue;
+        };
+        if *remaining == 0 {
+            continue;
+        }
+        removals.push(item.span);
+        *remaining -= 1;
+    }
+    removals.sort_by_key(|span| std::cmp::Reverse(span.start));
+    let mut disk_text = disk.to_string();
+    for span in &removals {
+        disk_text.replace_range(span.start..span.end, "");
+    }
+    AdmissionDiskLineageProjection {
+        disk_text,
+        suppressed_queue_revisions: removals.len(),
+        authority_lineage_proven: true,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Op-capture rung (`#qcellmerge1` op routing): route captured editor ops to the
 // cell whose span contains them, replay per cell, then run the SAME per-cell
@@ -4125,6 +4281,124 @@ working on it
             route_ops_to_cells(OPDOC, &framing).is_none(),
             "framing op must bail to None"
         );
+    }
+
+    #[test]
+    fn admission_lineage_suppresses_only_the_intermediate_queue_revision() {
+        let base = "<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        let insert_at = base.find("<!-- /agent:queue -->").unwrap();
+        let stale = "- Add me to channen under team.\n";
+        let append_at = insert_at + stale.len() - 1;
+        let typo_at = insert_at + stale.find("channen").unwrap() + "channe".len();
+        let ops = vec![
+            EditorOp::Insert {
+                offset: insert_at,
+                text: stale.to_string(),
+            },
+            EditorOp::Insert {
+                offset: append_at,
+                text: " Also verify membership.".to_string(),
+            },
+            EditorOp::Delete {
+                offset: typo_at,
+                len: 1,
+            },
+            EditorOp::Insert {
+                offset: typo_at,
+                text: "l".to_string(),
+            },
+        ];
+        let authority = crate::crdt::replay_editor_ops(base, &ops).unwrap();
+        let disk = base.replace(
+            "<!-- agent:queue -->\n",
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- Add me to channen under team.\n",
+                "- independent disk addition\n",
+            ),
+        );
+
+        let projection =
+            suppress_superseded_disk_queue_revisions(base, &disk, &authority, &authority, &ops);
+        assert!(projection.authority_lineage_proven);
+        assert_eq!(projection.suppressed_queue_revisions, 1);
+        assert!(!projection.disk_text.contains(stale));
+        assert!(
+            projection
+                .disk_text
+                .contains("- independent disk addition\n")
+        );
+
+        let advanced_authority = authority.replace(
+            "<!-- /agent:queue -->",
+            "- independent disk addition\n<!-- /agent:queue -->",
+        );
+        let retry_projection = suppress_superseded_disk_queue_revisions(
+            base,
+            &disk,
+            &advanced_authority,
+            &authority,
+            &ops,
+        );
+        assert!(retry_projection.authority_lineage_proven);
+        assert_eq!(retry_projection.suppressed_queue_revisions, 1);
+        assert!(!retry_projection.disk_text.contains(stale));
+        assert!(
+            retry_projection
+                .disk_text
+                .contains("- independent disk addition\n")
+        );
+    }
+
+    #[test]
+    fn admission_lineage_keeps_disk_additions_without_exact_prefix_proof() {
+        let base = "<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        let insert_at = base.find("<!-- /agent:queue -->").unwrap();
+        let ops = vec![EditorOp::Insert {
+            offset: insert_at,
+            text: "- operator addition\n".to_string(),
+        }];
+        let authority = crate::crdt::replay_editor_ops(base, &ops).unwrap();
+        let disk = base.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue -->\n- independent disk addition\n",
+        );
+
+        let projection =
+            suppress_superseded_disk_queue_revisions(base, &disk, &authority, &authority, &ops);
+        assert!(projection.authority_lineage_proven);
+        assert_eq!(projection.suppressed_queue_revisions, 0);
+        assert_eq!(projection.disk_text, disk);
+    }
+
+    #[test]
+    fn admission_lineage_keeps_disk_revision_when_ops_do_not_reconstruct_operator_cut() {
+        let base = "<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        let insert_at = base.find("<!-- /agent:queue -->").unwrap();
+        let stale = "- draft request\n";
+        let ops = vec![EditorOp::Insert {
+            offset: insert_at,
+            text: stale.to_string(),
+        }];
+        let disk = base.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue -->\n- draft request\n",
+        );
+        let unrelated_cut = base.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue -->\n- unrelated request\n",
+        );
+
+        let projection = suppress_superseded_disk_queue_revisions(
+            base,
+            &disk,
+            &unrelated_cut,
+            &unrelated_cut,
+            &ops,
+        );
+        assert!(!projection.authority_lineage_proven);
+        assert_eq!(projection.suppressed_queue_revisions, 0);
+        assert_eq!(projection.disk_text, disk);
     }
 
     /// The real-op path reconstructs `theirs` from captured ops and merges via

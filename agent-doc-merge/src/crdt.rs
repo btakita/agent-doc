@@ -2452,23 +2452,32 @@ pub fn summarize_editor_ops_for_log(ops: &[EditorOp]) -> String {
 pub fn replay_editor_ops(base: &str, ops: &[EditorOp]) -> Option<String> {
     let mut buf = base.to_string();
     for op in ops {
-        match op {
-            EditorOp::Insert { offset, text } => {
-                if *offset > buf.len() || !buf.is_char_boundary(*offset) {
-                    return None;
-                }
-                buf.insert_str(*offset, text);
-            }
-            EditorOp::Delete { offset, len } => {
-                let end = offset.checked_add(*len)?;
-                if end > buf.len() || !buf.is_char_boundary(*offset) || !buf.is_char_boundary(end) {
-                    return None;
-                }
-                buf.replace_range(*offset..end, "");
-            }
-        }
+        apply_editor_op_to_text(&mut buf, op)?;
     }
     Some(buf)
+}
+
+/// Apply one captured editor operation to its running text revision.
+///
+/// Kept crate-visible so lineage-sensitive merge policy can inspect the exact
+/// intermediate revisions without reimplementing editor offset semantics.
+pub(crate) fn apply_editor_op_to_text(buf: &mut String, op: &EditorOp) -> Option<()> {
+    match op {
+        EditorOp::Insert { offset, text } => {
+            if *offset > buf.len() || !buf.is_char_boundary(*offset) {
+                return None;
+            }
+            buf.insert_str(*offset, text);
+        }
+        EditorOp::Delete { offset, len } => {
+            let end = offset.checked_add(*len)?;
+            if end > buf.len() || !buf.is_char_boundary(*offset) || !buf.is_char_boundary(end) {
+                return None;
+            }
+            buf.replace_range(*offset..end, "");
+        }
+    }
+    Some(())
 }
 
 /// Apply captured editor ops directly to a Yrs text type, in order, as

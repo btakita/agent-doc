@@ -567,6 +567,27 @@ pub fn editor_ops_for_base(doc: &Path, base_text: &str) -> Result<Option<Vec<Edi
     }
 }
 
+/// Return exact-base editor ops across a non-operator projection boundary.
+///
+/// The active epoch is authoritative while present. Once a compare-and-swap
+/// projection fences that epoch, its durable retained checkpoint remains the
+/// same operator lineage evidence for retries against the original base.
+pub fn editor_ops_for_base_or_retained(
+    doc: &Path,
+    base_text: &str,
+) -> Result<Option<Vec<EditorOp>>> {
+    if let Some(ops) = editor_ops_for_base(doc, base_text)? {
+        return Ok(Some(ops));
+    }
+    let Some(capture) = load_last_op_capture(doc)? else {
+        return Ok(None);
+    };
+    if capture.ops.is_empty() || capture.base_hash != content_hash(base_text) {
+        return Ok(None);
+    }
+    Ok(Some(capture.ops))
+}
+
 /// Replay the newest durable editor operation checkpoint when, and only when,
 /// it was captured against `base_text` exactly.
 pub fn last_editor_text_for_base(doc: &Path, base_text: &str) -> Result<Option<String>> {
@@ -1043,6 +1064,11 @@ mod tests {
             .unwrap()
             .expect("cleared checkpoint remains durable recovery evidence");
         assert_eq!(retained.base_hash, h);
+        assert_eq!(
+            editor_ops_for_base_or_retained(&doc, "b\n").unwrap(),
+            Some(retained.ops.clone()),
+            "bounded projection retries retain the exact-base operation lineage"
+        );
         assert_eq!(
             last_editor_text_for_base(&doc, "b\n").unwrap(),
             Some("\n".to_string())

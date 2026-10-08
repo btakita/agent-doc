@@ -221,6 +221,18 @@ impl PreflightInvocation {
     }
 }
 
+/// Whether this pass is the existing harness event for an explicit agent-doc
+/// trigger against a live editor-owned document (`#explicitrouteadmission`).
+///
+/// The hook invocation is already the typed event emitted by `Run Agent Doc`;
+/// the preflight document resolve above reads the controller-owned CRDT cut.
+/// Feeding that event directly into turn admission avoids inventing a second
+/// receipt store or polling loop. Direct/background preflight remains false.
+fn explicit_live_editor_route_pending(file: &Path, invocation: PreflightInvocation) -> bool {
+    invocation.explicit_harness().is_some()
+        && agent_doc_session_check_io::live_editor_authority(file)
+}
+
 pub(crate) fn response_contract_for_content(content: &str) -> Option<PreflightResponseContract> {
     frontmatter::parse(content)
         .ok()
@@ -268,11 +280,12 @@ fn log_turn_admission(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "preflight_turn_admission file={} stage={} admission={} steering_pending={}",
+            "preflight_turn_admission file={} stage={} admission={} steering_pending={} explicit_route={}",
             file.display(),
             stage,
             verdict.admission.as_str(),
             verdict.steering.is_some(),
+            verdict.explicit_route,
         ),
     );
 }
@@ -670,7 +683,13 @@ fn run_with_options_to_writer_in_pass(
     let entry_admission = if options.probe {
         None
     } else {
-        let verdict = agent_doc_session_check_io::turn_admission(file, open_cycle)?;
+        let explicit_route =
+            !open_cycle && explicit_live_editor_route_pending(file, options.invocation);
+        let verdict = agent_doc_session_check_io::turn_admission_with_explicit_route(
+            file,
+            open_cycle,
+            explicit_route,
+        )?;
         log_turn_admission(file, "closeout_drift_check", &verdict);
         Some(verdict)
     };
@@ -836,10 +855,10 @@ fn run_with_options_to_writer_in_pass(
     if !options.probe {
         let verdict = agent_doc_session_check_io::turn_admission(file, false)?;
         log_turn_admission(file, "post_repair_closeout_drift_check", &verdict);
-        let steering_at_entry = entry_admission
-            .as_ref()
-            .is_some_and(agent_doc_session_check_io::TurnAdmissionVerdict::continues_with_steering);
-        if verdict.requires_clean_closeout() && !steering_at_entry {
+        let operator_intent_at_entry = entry_admission.as_ref().is_some_and(
+            agent_doc_session_check_io::TurnAdmissionVerdict::continues_with_operator_intent,
+        );
+        if verdict.requires_clean_closeout() && !operator_intent_at_entry {
             agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
                 file,
                 &rc,
@@ -2994,6 +3013,43 @@ mod tests {
             Some("claude-code")
         );
         assert_eq!(PreflightInvocation::Direct.explicit_harness(), None);
+    }
+
+    #[test]
+    fn only_hook_event_plus_live_editor_authority_projects_explicit_route() {
+        let _lock = agent_doc_test_support::env_lock();
+        let temp = TempDir::new().unwrap();
+        Command::new("git")
+            .current_dir(temp.path())
+            .args(["init", "-q"])
+            .output()
+            .unwrap();
+        std::fs::create_dir(temp.path().join(".agent-doc")).unwrap();
+        let file = temp.path().join("session.md");
+        let content = "live operator cut\n";
+        std::fs::write(&file, content).unwrap();
+
+        assert!(!explicit_live_editor_route_pending(
+            &file,
+            PreflightInvocation::CodexHook
+        ));
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &file,
+            "explicit-route-preflight-test",
+            content,
+        );
+        assert!(explicit_live_editor_route_pending(
+            &file,
+            PreflightInvocation::CodexHook
+        ));
+        assert!(explicit_live_editor_route_pending(
+            &file,
+            PreflightInvocation::ClaudeCodeHook
+        ));
+        assert!(!explicit_live_editor_route_pending(
+            &file,
+            PreflightInvocation::Direct
+        ));
     }
 
     #[test]

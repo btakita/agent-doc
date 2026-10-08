@@ -175,6 +175,31 @@ fn preflight_does_not_decide_admission_from_the_raw_steering_detector() {
 }
 
 #[test]
+fn explicit_route_admission_uses_the_existing_hook_event_without_a_second_store() {
+    assert!(
+        calls(
+            "agent-doc-preflight-command-io/src/run.rs",
+            "explicit_live_editor_route_pending("
+        ),
+        "hook preflight must project the existing explicit event into the shared admission predicate"
+    );
+
+    let admission_adapter = production_lines("agent-doc-preflight-command-io/src/run.rs");
+    for forbidden in [
+        "explicit_route_admission:",
+        "upsert_project_runtime_state",
+        "load_project_runtime_state",
+    ] {
+        assert!(
+            admission_adapter
+                .iter()
+                .all(|(_, line)| !line.contains(forbidden)),
+            "explicit route admission must be the existing hook event, not a second durable/polled state machine: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn the_steering_preserving_recovery_token_has_one_author() {
     let root = workspace_root();
     let mut stack = vec![root.clone()];

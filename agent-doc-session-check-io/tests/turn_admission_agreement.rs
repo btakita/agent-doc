@@ -204,6 +204,116 @@ fn without_steering_both_surfaces_require_a_clean_closeout() {
     );
 }
 
+#[test]
+fn explicit_route_admits_exact_live_cut_while_background_stays_fail_closed() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "test@example.com"]);
+    git(root, &["config", "user.name", "Test"]);
+    let doc = root.join("doc.md");
+    let base_head = head_doc().replace(
+        "<!-- /agent:exchange -->",
+        concat!(
+            "Marker example: `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`\n\n",
+            "<!-- /agent:exchange -->"
+        ),
+    );
+    let head_padding_len = 18_411usize
+        .checked_sub(base_head.len() + "historical_padding: \n".len())
+        .unwrap();
+    let head = base_head.replacen(
+        "agent_doc_format: template\n",
+        &format!(
+            "agent_doc_format: template\nhistorical_padding: {}\n",
+            "h".repeat(head_padding_len)
+        ),
+        1,
+    );
+    assert_eq!(head.len(), 18_411);
+    fs::write(&doc, &head).unwrap();
+    git(root, &["add", "doc.md"]);
+    git(
+        root,
+        &["commit", "-q", "-m", "prior closeout", "--no-verify"],
+    );
+
+    // Exact reproduction shape: HEAD is 18,411 bytes; the abandoned snapshot
+    // and live editor cut are 18,830 bytes. The operator replaced the inline
+    // marker artifact, retained an opener attribute, and added a queue row.
+    // The abandoned cycle already observed that cut, so ordinary/background
+    // admission cannot infer fresh steering from it.
+    let edited = head
+        .replace(
+            "<!-- agent:exchange patch=append -->",
+            "<!-- agent:exchange patch=append subagents -->",
+        )
+        .replace(
+            "Marker example: `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`",
+            "Marker example: ...",
+        )
+        .replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue -->\n- do [#operator-run] preserve this operator queue row\n",
+        );
+    let live_padding_len = 18_830usize
+        .checked_sub(edited.len() + "operator_padding: \n".len())
+        .unwrap();
+    let live = edited.replacen(
+        "agent_doc_format: template\n",
+        &format!(
+            "agent_doc_format: template\noperator_padding: {}\n",
+            "x".repeat(live_padding_len)
+        ),
+        1,
+    );
+    assert_eq!(live.len(), 18_830);
+    agent_doc_snapshot_io::checkpoint_document_baseline(&doc, &live, agent_doc_ops_log_io::log_op)
+        .unwrap();
+    fs::write(&doc, &live).unwrap();
+    agent_doc_cycle_state_io::start_preflight(&doc, Some(&live), Some(&live)).unwrap();
+    agent_doc_cycle_state_io::mark_abandoned(
+        &doc,
+        "repair_preflight_stale_prompt_cycle_abandoned",
+        Some(&live),
+        Some(&live),
+    )
+    .unwrap();
+    agent_doc_test_support::publish_editor_text_via_crdt_relay(
+        &doc,
+        "explicit-route-admission-agreement",
+        &live,
+    );
+
+    let background = agent_doc_session_check_io::turn_admission(&doc, false).unwrap();
+    assert_eq!(background.admission, TurnAdmission::RequireCleanCloseout);
+    assert_eq!(background.steering, None);
+
+    let explicit = agent_doc_session_check_io::turn_admission_with_explicit_route(
+        &doc,
+        false,
+        agent_doc_session_check_io::live_editor_authority(&doc),
+    )
+    .unwrap();
+    assert_eq!(explicit.admission, TurnAdmission::ContinueWithExplicitRoute);
+    assert!(explicit.continues_with_operator_intent());
+    assert_eq!(fs::read_to_string(&doc).unwrap(), live);
+    assert_eq!(
+        String::from_utf8(
+            Command::new("git")
+                .current_dir(root)
+                .args(["show", "HEAD:doc.md"])
+                .output()
+                .unwrap()
+                .stdout
+        )
+        .unwrap(),
+        head,
+        "admission must not reconcile historical Git lineage by mutating bytes"
+    );
+}
+
 /// The exact recovery GH #118 refused to run: snapshot == HEAD, and the visible
 /// file differs only outside the content signature — here an operator revision
 /// of a queue item, which the recovery classifier counts as metadata and

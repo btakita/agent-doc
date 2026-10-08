@@ -1425,7 +1425,7 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
             "a new operator prompt aimed at the current turn. Address it in THIS turn, together \
              with the current work."
         }
-        (SteeringDispatch::Subagent, _, _, _) => {
+        (SteeringDispatch::Subagent, SteeringSource::Queue, _, _) => {
             "subagent intent: dispatch this item NOW to a NEW background subagent (one \
              subagent per item). If it touches a repository, give that subagent its own git \
              worktree outside the IDE-watched project; never run two subagents against one \
@@ -1433,6 +1433,14 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              <id-or-line> --owner subagent:<label>` so the loop and Stop hook do not re-enter for \
              it; run `agent-doc queue release` when the subagent reports back. Keep working the \
              current item yourself; record the item as dispatched in your response."
+        }
+        (SteeringDispatch::Subagent, SteeringSource::Exchange, _, _) => {
+            "subagent intent: dispatch this exchange prompt NOW to a NEW background subagent \
+             (one subagent per prompt). Exchange prompts have no queue claim/release lifecycle. \
+             If it touches a repository, give that subagent its own git worktree outside the \
+             IDE-watched project; never run two subagents against one checkout. Keep working the \
+             current item yourself; review the worker result and answer the exchange prompt in \
+             this response cycle, then perform the normal closeout."
         }
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Deleted, _) => FORWARD_DELETED,
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Added, _) => FORWARD_ADDED,
@@ -1479,9 +1487,11 @@ pub fn claim_command_for(document: &str, verbatim: &str) -> String {
 ///
 /// Unlike [`render_steering_context`] the current item is already closed, so
 /// queue work is framed for the NEXT cycle, and a `subagent` item is an
-/// explicit dispatch-now directive with its claim command: a harness whose
-/// PostToolUse hook never ran still gets it here, before the loop schedules
-/// its next re-entry (`#closeout-steering`).
+/// explicit dispatch-now directive. Queue-sourced items carry their claim
+/// command; exchange-sourced prompts explicitly have no queue claim/release
+/// lifecycle. A harness whose PostToolUse hook never ran still gets the
+/// source-appropriate directive here, before the loop schedules its next
+/// re-entry (`#closeout-steering`).
 pub fn render_closeout_steering_context(
     document: &str,
     ready: &[SteeringItem],
@@ -1533,7 +1543,7 @@ pub fn render_closeout_steering_context(
         }
         let action = match (item.dispatch, item.source) {
             (SteeringDispatch::ForwardToOwner, _) => instruction_for(item).to_string(),
-            (SteeringDispatch::Subagent, _) => format!(
+            (SteeringDispatch::Subagent, SteeringSource::Queue) => format!(
                 "DISPATCH NOW to a NEW background subagent (one per item). Claim it first with \
                  `{}` so the loop and Stop hook do not drain it inline, then dispatch; if it \
                  touches a repository, give the subagent its own git worktree outside the \
@@ -1541,6 +1551,14 @@ pub fn render_closeout_steering_context(
                  back.",
                 claim_command_for(document, &item.verbatim)
             ),
+            (SteeringDispatch::Subagent, SteeringSource::Exchange) => {
+                "DISPATCH NOW to a NEW background subagent (one per prompt). Exchange prompts \
+                 have no queue claim/release lifecycle. If it touches a repository, give the \
+                 subagent its own git worktree outside the IDE-watched project. When the worker \
+                 reports back, carry its result into the next response cycle; the current \
+                 response is already committed."
+                    .to_string()
+            }
             (SteeringDispatch::AddressNow, SteeringSource::Exchange) => format!(
                 "a new operator prompt: answer it in the next cycle (`agent-doc {document}`); do \
                  not re-answer prompts already committed."
@@ -2393,6 +2411,58 @@ mod tests {
                 .iter()
                 .any(|item| item.change == SteeringChange::Deleted && item.current_item)
         );
+    }
+
+    #[test]
+    fn subagent_instruction_is_source_aware_about_queue_lifecycle() {
+        let item = |source| SteeringItem {
+            source,
+            change: SteeringChange::Added,
+            dispatch: SteeringDispatch::Subagent,
+            current_item: false,
+            verbatim: "fix the parser".to_string(),
+            previous: None,
+            presets: Vec::new(),
+            possibly_partial: false,
+            owner: None,
+            explicit: false,
+        };
+
+        let queue =
+            render_steering_context("tasks/bugs.md", &[item(SteeringSource::Queue)], 0).unwrap();
+        assert!(queue.contains("agent-doc queue claim"), "{queue}");
+        assert!(queue.contains("agent-doc queue release"), "{queue}");
+
+        let exchange =
+            render_steering_context("tasks/bugs.md", &[item(SteeringSource::Exchange)], 0).unwrap();
+        assert!(
+            exchange.contains("no queue claim/release lifecycle"),
+            "{exchange}"
+        );
+        assert!(!exchange.contains("agent-doc queue claim"), "{exchange}");
+        assert!(!exchange.contains("agent-doc queue release"), "{exchange}");
+    }
+
+    #[test]
+    fn closeout_exchange_subagent_has_no_queue_lifecycle() {
+        let item = SteeringItem {
+            source: SteeringSource::Exchange,
+            change: SteeringChange::Added,
+            dispatch: SteeringDispatch::Subagent,
+            current_item: false,
+            verbatim: "fix the parser".to_string(),
+            previous: None,
+            presets: Vec::new(),
+            possibly_partial: false,
+            owner: None,
+            explicit: false,
+        };
+
+        let text = render_closeout_steering_context("tasks/bugs.md", &[item], 0).unwrap();
+        assert!(text.contains("DISPATCH NOW"), "{text}");
+        assert!(text.contains("no queue claim/release lifecycle"), "{text}");
+        assert!(!text.contains("agent-doc queue claim"), "{text}");
+        assert!(!text.contains("agent-doc queue release"), "{text}");
     }
 
     #[test]

@@ -100,7 +100,9 @@ prompt admitted at preflight and prompts surfaced as realtime steering. A bare
 background subagent while the parent retains ownership of the response cycle,
 reviews the worker result, and performs closeout. Unlike queue dispatch,
 exchange dispatch has no claim/release lifecycle and no concurrency-valued
-form: `subagents=N` / `fan-out=N` on `agent:exchange` is invalid.
+form: `subagents=N` / `fan-out=N` on `agent:exchange` is invalid. Mid-turn and
+closeout steering guidance MUST preserve that source distinction: it MUST NOT
+render a queue claim or release instruction for an exchange prompt.
 
 Tracked backlog/review items may carry a machine-readable symptom de-duplication marker in their text: `[symptom-key invariant=<id> document=<doc-id> component=<component> content_hash=<hash>]`. `--backlog-add` (legacy `--pending-add`) and `--review-add` use this key to attach a repeated symptom as an indented `evidence:` continuation on the existing open/gated backlog or review item instead of inserting another tracked item. The key fields are field-safe tokens and intentionally match the binary outcome vocabulary: invariant id, document id, component, and content hash.
 

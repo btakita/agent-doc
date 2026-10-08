@@ -1501,6 +1501,99 @@ fn finalize_stream_auto_reopens_committed_cycle_for_new_response() {
 }
 
 #[test]
+fn finalize_late_claimed_response_ignores_unrelated_visible_queue_heads() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let issue_186 = "#gh-fix https://github.com/btakita/agent-doc/issues/186";
+    let issue_187 = "#gh-fix https://github.com/btakita/agent-doc/issues/187";
+    let tmux = "Make the tmux pane title contain the document name in all states.";
+    let release = "release + publish";
+    let original = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- agent:backlog -->",
+        &format!(
+            "<!-- agent:queue go -->\n- 🚧 {tmux}\n- 🚧 {issue_186}\n- 🚧 {release}\n- {issue_187}\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->"
+        ),
+    );
+    fs::write(&doc, &original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), &original);
+
+    // The setup response is unrelated to the queue. Temporarily claim every
+    // selected head so the first cycle can commit without consuming the queue.
+    for (item, owner) in [
+        (tmux, "subagent:tmux"),
+        (issue_186, "subagent:issue186"),
+        (release, "coordinator:release"),
+        (issue_187, "subagent:issue187"),
+    ] {
+        agent_doc_queue_io::queue_claim::claim(&doc, item, owner, 3600).unwrap();
+    }
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: setup — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    agent_doc_queue_io::queue_claim::release(&doc, tmux).unwrap();
+    agent_doc_queue_io::queue_claim::release(&doc, release).unwrap();
+    let claims_before = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+
+    // A worker result can arrive after the setup cycle committed. Its replay
+    // reopen has an authoritative empty queue selection; stale visible markers
+    // for unrelated work must not be reinterpreted as this response's scope.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: GH #186 — gpt-5\n\nFixed and verified issue #186.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let head = head_blob(tmp.path());
+    for queue_line in [
+        format!("- 🚧 {tmux}"),
+        format!("- 🚧 {issue_186}"),
+        format!("- 🚧 {release}"),
+        format!("- {issue_187}"),
+    ] {
+        assert!(
+            head.contains(&queue_line),
+            "late-response admission must leave unrelated queue text untouched:\n{head}"
+        );
+    }
+    assert!(head.contains("### Re: GH #186 — gpt-5"));
+    let cycle = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+        .unwrap()
+        .expect("late-response cycle state");
+    assert_eq!(
+        cycle.queue_selection_authority,
+        agent_doc_cycle_state_io::QueueSelectionAuthority::OutOfBandCloseout,
+        "the replay reopen must durably own its empty queue selection"
+    );
+    assert!(cycle.selected_free_text_queue_heads.is_empty());
+    assert_eq!(
+        agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap(),
+        claims_before,
+        "late-response closeout must preserve sibling claims"
+    );
+}
+
+#[test]
 fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
     // The auto-reopen does NOT weaken duplicate protection: a true replay (the
     // incoming response is already materialized in HEAD) must still fail closed so

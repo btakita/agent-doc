@@ -2635,7 +2635,11 @@ fn reopen_terminal_cycle_before_stop_capture(
         );
     }
 
-    let reopened = agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&current))?;
+    let reopened = agent_doc_cycle_state_io::start_out_of_band_closeout_preflight(
+        file,
+        Some(&head),
+        Some(&current),
+    )?;
     anyhow::ensure!(
         reopened.cycle_id != previous_cycle_id,
         "post-commit Stop closeout failed to mint a fresh cycle: terminal cycle {} was reused",
@@ -7508,6 +7512,12 @@ Reviewed the gated items.\n\
             Some(agent_doc_hash::content_hash(&current).as_str())
         );
         assert_ne!(reopened.snapshot_hash, reopened.file_hash);
+        assert_eq!(
+            reopened.queue_selection_authority,
+            agent_doc_cycle_state_io::QueueSelectionAuthority::OutOfBandCloseout,
+            "Stop auto-reopen must not inherit unrelated visible queue markers",
+        );
+        assert!(reopened.selected_free_text_queue_heads.is_empty());
     }
 
     #[test]

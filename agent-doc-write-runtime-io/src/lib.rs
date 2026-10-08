@@ -1220,7 +1220,11 @@ fn guard_no_baseline_replay_after_committed_cycle(
             // non-git / empty-repo case keeps its existing fail-closed behavior.
             return guard_no_baseline_replay_after_committed_cycle_inner(file, commit_mode);
         };
-        agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&head))?;
+        agent_doc_cycle_state_io::start_out_of_band_closeout_preflight(
+            file,
+            Some(&head),
+            Some(&head),
+        )?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -1300,7 +1304,7 @@ fn guard_no_baseline_replay_after_committed_cycle_inner(
     // `preflight_started` cycle from HEAD instead of forcing a manual preflight,
     // and hand the caller the HEAD baseline so the new response diffs against the
     // actual committed state (the stale explicit baseline is discarded).
-    agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&head))?;
+    agent_doc_cycle_state_io::start_out_of_band_closeout_preflight(file, Some(&head), Some(&head))?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(

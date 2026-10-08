@@ -44,16 +44,13 @@ fn enforce_selected_queue_response_contract(
     let mut missing;
     if let Some(file) = file {
         let cycle_state = agent_doc_cycle_state_io::load(file)?;
-        missing = if cycle_state
-            .as_ref()
-            .is_some_and(|state| state.queue_selection_preempted)
-        {
+        missing = if cycle_state.as_ref().is_some_and(|state| {
+            state.queue_selection_authority.is_authoritative() || state.queue_selection_preempted
+        }) {
             let state = cycle_state.as_ref().expect("checked above");
-            // `#qpromptpreemptguard`: preflight is the authority for whether this
-            // cycle selected a free-text queue prompt. A fresh exchange/chat
-            // prompt deliberately records an empty selection while leaving the
-            // prior transient `🚧` marker visible. Do not reinterpret that UI
-            // marker as work owed by the preempting response.
+            // A typed cycle authority owns the exact queue scope, including an
+            // empty selection. `queue_selection_preempted` keeps old persisted
+            // cycles compatible when they predate the typed authority field.
             agent_doc_queue::queue_closeout_guard::
                 selected_free_text_prompts_missing_response_evidence_for_closeout(
                     baseline,
@@ -63,8 +60,8 @@ fn enforce_selected_queue_response_contract(
                     explicit_id_completion,
                 )?
         } else {
-            // Legacy/direct callers without cycle state still use the visible
-            // selection marker as their only available witness.
+            // Only legacy/direct callers without an authoritative cycle witness
+            // use the visible selection marker as their compatibility fallback.
             let mut visible = agent_doc_queue::queue_closeout_guard::
                 selected_free_text_heads_missing_response_evidence_for_closeout(
                     baseline,
@@ -3407,6 +3404,48 @@ mod tests {
             &flags,
         )
         .expect("an unselected paused queue head is not owed by the preempting response");
+    }
+
+    /// A durable empty preflight selection is authoritative even when stale
+    /// editor projection still shows unrelated free-text heads as selected.
+    /// Claims are read-only evidence at this gate and must survive admission.
+    #[test]
+    fn durable_empty_selection_does_not_fall_back_to_visible_queue_heads() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("agent-doc-bugs.md");
+        let issue_186 = "#gh-fix https://github.com/btakita/agent-doc/issues/186";
+        let issue_187 = "#gh-fix https://github.com/btakita/agent-doc/issues/187";
+        let current = format!(
+            "<!-- agent:queue go -->\n- 🚧 Make the tmux pane title contain the document name in all states.\n- 🚧 {issue_186}\n- 🚧 release + publish\n- {issue_187}\n<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &current).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(&doc, &[]).unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, issue_186, "subagent:issue186", 3600).unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, issue_187, "subagent:issue187", 3600).unwrap();
+        let claims_before = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+        let flags = WriteFlags {
+            strict_closeout: true,
+            commit_requested: true,
+            ..Default::default()
+        };
+
+        enforce_selected_queue_response_contract(
+            Some(&doc),
+            Some(&current),
+            &current,
+            "### Re: GH #186\n\nFixed and verified issue #186.",
+            &flags,
+        )
+        .expect("durable empty selection must not inherit stale visible markers");
+
+        assert_eq!(fs::read_to_string(&doc).unwrap(), current);
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap(),
+            claims_before,
+            "admission must preserve every existing queue claim"
+        );
     }
 
     #[test]

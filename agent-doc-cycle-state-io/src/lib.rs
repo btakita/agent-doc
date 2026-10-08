@@ -98,6 +98,30 @@ pub struct SemanticMergeConflictAdvisory {
     pub recorded_cycle_id: Option<String>,
 }
 
+/// Names the boundary that authoritatively selected queue work for a cycle.
+///
+/// Older persisted cycles have no such witness and deserialize as
+/// `LegacyUnknown`; only those cycles may recover selection from transient
+/// visible `🚧` markers at closeout.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueSelectionAuthority {
+    #[default]
+    LegacyUnknown,
+    Preflight,
+    OutOfBandCloseout,
+}
+
+impl QueueSelectionAuthority {
+    pub const fn is_legacy_unknown(&self) -> bool {
+        matches!(self, Self::LegacyUnknown)
+    }
+
+    pub const fn is_authoritative(self) -> bool {
+        !matches!(self, Self::LegacyUnknown)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockedCloseout {
     pub kind: String,
@@ -314,10 +338,17 @@ pub struct CycleState {
     /// `> **Queue prompt:**` response echo.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_free_text_queue_heads: Vec<String>,
+    /// Which admission boundary owns `selected_free_text_queue_heads`.
+    /// Authoritative empty is materially different from a missing legacy
+    /// witness: it means this cycle admitted no free-text queue work.
+    #[serde(
+        default,
+        skip_serializing_if = "QueueSelectionAuthority::is_legacy_unknown"
+    )]
+    pub queue_selection_authority: QueueSelectionAuthority,
     /// A fresh exchange/chat prompt preempted queue selection for this cycle.
-    /// This distinguishes an authoritative empty selection from legacy/direct
-    /// cycles that never recorded a durable selection and must still fall back
-    /// to the transient visible `🚧` marker.
+    /// Retained as a compatibility witness for persisted cycles written before
+    /// `queue_selection_authority` existed.
     #[serde(default, skip_serializing_if = "is_false")]
     pub queue_selection_preempted: bool,
     /// `#chatprompt` (GH #125): operator prompts that reached the harness chat
@@ -1257,7 +1288,34 @@ pub fn start_preflight(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
-    start_preflight_with_task(file, snapshot_content, file_content, None, None)
+    start_preflight_with_task_and_queue_selection_authority(
+        file,
+        snapshot_content,
+        file_content,
+        None,
+        None,
+        QueueSelectionAuthority::LegacyUnknown,
+    )
+}
+
+/// Open a closeout-only cycle whose queue selection is authoritatively empty.
+///
+/// Unlike a normal preflight, this producer has no queue-selection pass. Stamp
+/// that fact in the opening checkpoint itself so no observable intermediate
+/// `LegacyUnknown` cycle can fall back to transient visible queue markers.
+pub fn start_out_of_band_closeout_preflight(
+    file: &Path,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<CycleState> {
+    start_preflight_with_task_and_queue_selection_authority(
+        file,
+        snapshot_content,
+        file_content,
+        None,
+        None,
+        QueueSelectionAuthority::OutOfBandCloseout,
+    )
 }
 
 /// (#reentrant-finalize Phase 5) Start preflight with optional queue task
@@ -1271,6 +1329,45 @@ pub fn start_preflight_with_task(
     file_content: Option<&str>,
     queue_task_id: Option<&str>,
     turn_id: Option<&str>,
+) -> Result<CycleState> {
+    start_preflight_with_task_and_queue_selection_authority(
+        file,
+        snapshot_content,
+        file_content,
+        queue_task_id,
+        turn_id,
+        QueueSelectionAuthority::LegacyUnknown,
+    )
+}
+
+fn start_preflight_with_task_and_queue_selection_authority(
+    file: &Path,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    queue_task_id: Option<&str>,
+    turn_id: Option<&str>,
+    queue_selection_authority: QueueSelectionAuthority,
+) -> Result<CycleState> {
+    start_preflight_with_task_queue_selection_and_after_checkpoint(
+        file,
+        snapshot_content,
+        file_content,
+        queue_task_id,
+        turn_id,
+        queue_selection_authority,
+        || {},
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_preflight_with_task_queue_selection_and_after_checkpoint(
+    file: &Path,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    queue_task_id: Option<&str>,
+    turn_id: Option<&str>,
+    queue_selection_authority: QueueSelectionAuthority,
+    after_checkpoint: impl FnOnce(),
 ) -> Result<CycleState> {
     let now = now_secs();
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
@@ -1363,6 +1460,7 @@ pub fn start_preflight_with_task(
             .map(agent_doc_queue::queue_heads::active_free_text_queue_heads)
             .unwrap_or_default(),
         selected_free_text_queue_heads: Vec::new(),
+        queue_selection_authority,
         queue_selection_preempted: false,
         // A re-entrant preflight of the same open cycle keeps the chat prompts
         // the first admission carried; the hook ledger was cleared by then.
@@ -1383,6 +1481,7 @@ pub fn start_preflight_with_task(
         projected_in_progress_queue_heads: carried_projected_in_progress_queue_heads,
     };
     save(file, &state)?;
+    after_checkpoint();
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::PreflightStarted)?;
     append_phase_event_to_session_log(file, &state, file_content);
     Ok(state)
@@ -1439,8 +1538,11 @@ pub fn record_selected_free_text_queue_heads(
             normalized.push(head);
         }
     }
-    if state.selected_free_text_queue_heads != normalized {
+    if state.selected_free_text_queue_heads != normalized
+        || state.queue_selection_authority != QueueSelectionAuthority::Preflight
+    {
         state.selected_free_text_queue_heads = normalized;
+        state.queue_selection_authority = QueueSelectionAuthority::Preflight;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -3689,6 +3791,7 @@ fn synthetic_state_with_id(
         active_queue_heads: Vec::new(),
         active_free_text_queue_heads: Vec::new(),
         selected_free_text_queue_heads: Vec::new(),
+        queue_selection_authority: QueueSelectionAuthority::LegacyUnknown,
         queue_selection_preempted: false,
         chat_prompts: Vec::new(),
         absorbed_steering_prompts: Vec::new(),
@@ -5231,6 +5334,93 @@ mod tests {
         let state = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         assert!(state.queue_task_id.is_none());
         assert!(state.turn_id.is_none());
+    }
+
+    #[test]
+    fn queue_selection_authority_distinguishes_legacy_from_atomic_out_of_band_empty() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        let opened = start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        assert_eq!(
+            opened.queue_selection_authority,
+            QueueSelectionAuthority::LegacyUnknown
+        );
+
+        let selected = record_selected_free_text_queue_heads(&doc, &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            selected.queue_selection_authority,
+            QueueSelectionAuthority::Preflight
+        );
+        assert!(selected.selected_free_text_queue_heads.is_empty());
+
+        mark_committed(&doc, "commit", Some("body"), Some("body")).unwrap();
+        let out_of_band =
+            start_out_of_band_closeout_preflight(&doc, Some("body"), Some("body")).unwrap();
+        assert_eq!(
+            out_of_band.queue_selection_authority,
+            QueueSelectionAuthority::OutOfBandCloseout
+        );
+        assert!(out_of_band.selected_free_text_queue_heads.is_empty());
+    }
+
+    #[test]
+    fn real_preflight_selection_after_out_of_band_open_is_not_cleared_or_reclassified() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        let checkpoint = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let resume = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writer_checkpoint = checkpoint.clone();
+        let writer_resume = resume.clone();
+        let writer_doc = doc.clone();
+        let writer = std::thread::spawn(move || {
+            start_preflight_with_task_queue_selection_and_after_checkpoint(
+                &writer_doc,
+                Some("body"),
+                Some("body"),
+                None,
+                None,
+                QueueSelectionAuthority::OutOfBandCloseout,
+                || {
+                    writer_checkpoint.wait();
+                    writer_resume.wait();
+                },
+            )
+            .unwrap()
+        });
+
+        // Pause the out-of-band producer after its single opening checkpoint.
+        // A real preflight now re-enters the cycle and records its selected cut
+        // before the first producer returns. Resuming it must not perform a
+        // second blind write that clears or reclassifies that newer selection.
+        checkpoint.wait();
+        let real = start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        let selected =
+            record_selected_free_text_queue_heads(&doc, &["run the real queue head".to_string()])
+                .unwrap()
+                .unwrap();
+        resume.wait();
+        let out_of_band = writer.join().expect("out-of-band preflight writer");
+        assert_eq!(real.cycle_id, out_of_band.cycle_id);
+        assert_eq!(
+            out_of_band.queue_selection_authority,
+            QueueSelectionAuthority::OutOfBandCloseout,
+            "the opening checkpoint itself must carry out-of-band authority",
+        );
+        assert_eq!(
+            selected.queue_selection_authority,
+            QueueSelectionAuthority::Preflight
+        );
+        assert_eq!(
+            selected.selected_free_text_queue_heads,
+            vec!["run the real queue head".to_string()]
+        );
+        assert_eq!(load(&doc).unwrap().unwrap(), selected);
     }
 
     #[test]

@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.478
+
+- **Durably captured cycles recover onto a fresh supervisor (GH #181).** Stale, install-requested, and explicitly
+  recycled supervisors now use the capture identity already recorded in cycle state, so a no-editor or rejected-editor
+  closeout cannot remain deferred forever after its one-shot wedge recycle is consumed.
+- **Queue identity is structural and batch failures are isolated (GH #182).** Mid-line `[#id]` text remains free-form
+  work, admission reserves identities already present in the document, and one invalid item no longer discards valid
+  siblings from the same maintenance batch.
+- **Queue-attribute validation is consistent before and after response writes (GH #183).** Misplaced bare queue-only
+  flags receive the same warning-only verdict in preflight and final lint, while genuine opening-marker errors block
+  before closeout mutates the exchange.
+- **Editor recovery preserves durable intent without replay or duplication.** Registration-lagged live editors recover
+  through document authority, rejected endpoint generations are quarantined until a newer registration arrives, and
+  exact answered bare queue residue can be acknowledged without activating its inactive queue.
+- **JetBrains replica alignment preserves CRDT identity.** Replacement replicas apply a bounded code-point splice
+  instead of deleting and reinserting the whole document, preventing late operations from duplicating queue text;
+  the JetBrains plugin advances to 0.2.506.
+- **Claude context chips no longer masquerade as operator drafts (GH #184).** Routing and prompt-state detection
+  remove only Claude Code's leading file-context chip, including its non-breaking-space rendering, while preserving
+  and blocking on real composer text that follows it.
+- **Release worktrees publish the bytes they verified.** The release driver pushes `HEAD` to remote `main`, avoiding a
+  stale checked-out local `main` when a release is cut from an isolated integration worktree.
+
 ## 0.35.477
 
 - **Retained closeouts and queue replay converge without duplicate work.** Retained editor-write observations stay

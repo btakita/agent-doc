@@ -224,7 +224,7 @@ Fresh verification on current `main` passed: 24 lint-I/O tests, 2 lint CLI tests
 - do [#possibletellclaude]
 - ~~Make the tmux pane title contain the document name in all states.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/185~~ — auto-struck: answered this cycle (#ftstrike)
-- #gh-fix https://github.com/btakita/agent-doc/issues/186
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/186~~ — auto-struck: answered this cycle (#ftstrike)
 - release + publish
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/187~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/188

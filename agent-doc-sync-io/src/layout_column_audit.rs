@@ -1978,11 +1978,19 @@ mod tests {
     #[test]
     fn stale_title_marker_is_recognised_in_every_title_shape() {
         for (active, stale) in [(true, true), (false, true)] {
-            let title = agent_doc_turn::turn_status::pane_title_for_status(active, stale);
+            let title = agent_doc_turn::turn_status::pane_title_for_status(
+                Some("sample-session.md"),
+                active,
+                stale,
+            );
             assert!(title_has_stale_supervisor_marker(&title), "{title}");
         }
         for active in [true, false] {
-            let title = agent_doc_turn::turn_status::pane_title_for_status(active, false);
+            let title = agent_doc_turn::turn_status::pane_title_for_status(
+                Some("sample-session.md"),
+                active,
+                false,
+            );
             assert!(!title_has_stale_supervisor_marker(&title), "{title}");
         }
         assert!(!title_has_stale_supervisor_marker("custom title"));

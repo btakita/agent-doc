@@ -332,6 +332,13 @@ the turn went active). `TURN_ACTIVE_TTL_SECS` (3600s, owned by
 `agent_doc_turn::turn_status`) governs both how a lease is read and when it is
 deleted:
 
+The same hook projects a pane-border title from three display facts: the
+registry-bound document basename, the pane-scoped active lease, and the
+supervisor-stale marker. The document basename remains present across all four
+active/stale combinations; lifecycle markers decorate that identity instead of
+replacing it. Registry lookup is display evidence only and never participates in
+turn admission, lease ownership, or recycle authority.
+
 - **Read.** A lease is fresh while `now - heartbeat_secs < TURN_ACTIVE_TTL_SECS`
   (`turn_active_marker_is_fresh`). An expired lease reads as absent, so a missed
   idle hook never wedges the session busy.

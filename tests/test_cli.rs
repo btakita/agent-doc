@@ -7035,6 +7035,7 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/turn_status.rs")).unwrap();
     for required in [
         "pub const TURN_ACTIVE_PANE_TITLE",
+        "pub const TURN_ACTIVE_PANE_SUFFIX",
         "pub const STALE_SUPERVISOR_PANE_MARKER",
         "pub const TURN_ACTIVE_TTL_SECS",
         "pub struct TurnActiveMarker",
@@ -7083,6 +7084,10 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
     assert!(
         turn_status_io_dependencies.contains_key("agent-doc-sqlite"),
         "turn-status IO should persist coordination facts in state.db"
+    );
+    assert!(
+        turn_status_io_dependencies.contains_key("agent-doc-session-registry-io"),
+        "turn-status IO should resolve pane titles from the canonical document registry"
     );
     assert!(
         !turn_status_io_dependencies.contains_key("agent-doc-fs"),

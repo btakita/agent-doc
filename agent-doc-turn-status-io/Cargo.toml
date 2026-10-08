@@ -13,6 +13,7 @@ name = "agent_doc_turn_status_io"
 [dependencies]
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.478" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.478" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.478" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.478" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.478" }
 anyhow = "1"

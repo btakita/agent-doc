@@ -1548,15 +1548,16 @@ const TURN_STATUS_IDLE_COMMAND: &str = "agent-doc turn-status idle";
 ///
 /// `UserPromptSubmit` → `turn-status active` (turn start); `Stop` runs both the
 /// consequential queue-continuation guard and `turn-status idle`; `SessionStart`
-/// → `turn-status idle`. The title clear remains trivial and idempotent, while
-/// the queue guard is exact-session scoped and consults durable closeout state.
+/// → `turn-status idle`. The status clear keeps the registered document name,
+/// while the queue guard is exact-session scoped and consults durable closeout
+/// state.
 /// OpenCode plugin that drives the monitor: `chat.message` (a new user message =
 /// turn start) → `turn-status active`; the `session.idle` bus event (turn end) →
 /// `turn-status idle`. Best-effort — `agent-doc turn-status` no-ops outside tmux.
 const OPENCODE_TURN_STATUS_PLUGIN: &str = r#"// agent-doc turn-in-progress pane monitor (#claude-busy-status-during-active-turn).
 // Auto-installed by `agent-doc turn-status install`. Sets the agent's own tmux
-// pane border title on turn start (chat.message) and clears it on turn end
-// (session.idle). Best-effort: agent-doc turn-status no-ops outside tmux.
+// pane border title on turn start (chat.message) and keeps the document name on
+// turn end (session.idle). Best-effort: agent-doc turn-status no-ops outside tmux.
 export const AgentDocTurnStatus = async ({ $ }) => ({
   "chat.message": async () => {
     try { await $`agent-doc turn-status active` } catch {}

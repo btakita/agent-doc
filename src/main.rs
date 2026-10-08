@@ -1692,9 +1692,9 @@ enum ExchangeAction {
 /// (#claude-busy-status-during-active-turn).
 #[derive(Subcommand)]
 pub enum TurnStatusAction {
-    /// A turn just started (UserPromptSubmit hook): show "turn in progress".
+    /// A turn just started: keep the document name and show "turn in progress".
     Active,
-    /// The turn just ended (Stop hook): clear the status.
+    /// The turn just ended: clear the status while keeping the document name.
     Idle,
     /// Install the monitor's hooks for Claude, Codex, and OpenCode.
     Install {

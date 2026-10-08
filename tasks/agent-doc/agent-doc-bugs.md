@@ -220,6 +220,14 @@ Fresh verification on current `main` passed: 24 lint-I/O tests, 2 lint CLI tests
 Completed by merged PRs #191 and #192; GitHub issue #188 is closed. PR #191 preserves live editor authority, requires proven replay settlement, and makes the terminal stale-preflight transition atomic against turn-active writers. PR #192 preserves active one-shot queue intent across post-commit consume/sync and prevents a closed response from receiving a retroactive queue-prompt splice.
 
 Both PRs passed their full CI gates before merge. Their merge commits are `2570cbe71c059fcd7cee3c25f5f348d2b180a441` (#191) and `403df31528e04a6dbefde815bb54a9e1d59c53ff` (#192).
+
+### Re: release and publication — gpt-5 · 2026-10-08T15:14:07-04:00
+
+> **Queue prompt:** release + publish
+
+Completed for v0.35.479. The failed x86_64 macOS release job was rerun successfully at the original tag, after which GitHub published the release with Linux, macOS, Windows, VS Code, JetBrains, and checksum artifacts: https://github.com/btakita/agent-doc/releases/tag/v0.35.479
+
+The original tag-bound PyPI workflow was then rerun; its build, publish, and verification jobs all passed. `agent-doc` 0.35.479 is now present on PyPI. The post-v0.35.479 fixes remain a separate future v0.35.480 batch and were not folded into this immutable tag.
 <!-- agent:boundary:72f38ede -->
 <!-- /agent:exchange -->
 
@@ -233,7 +241,7 @@ Both PRs passed their full CI gates before merge. Their merge commits are `2570c
 - ~~Make the tmux pane title contain the document name in all states.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/185~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/186~~ — auto-struck: answered this cycle (#ftstrike)
-- release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/187~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/188~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/189

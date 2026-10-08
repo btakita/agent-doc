@@ -283,6 +283,20 @@ pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
             || response_already_applied_after_prefix_strip(&normalized_content, &probe))
 }
 
+/// Whether a captured response is durably landed in either committed document
+/// authority. Live editor text is intentionally excluded: operator steering
+/// may be inserted into or after an already-committed response without making
+/// that response orphaned again.
+pub fn response_materialized_in_committed_authority(
+    response: &str,
+    head: Option<&str>,
+    committed_snapshot: Option<&str>,
+) -> bool {
+    head.into_iter()
+        .chain(committed_snapshot)
+        .any(|content| response_materialized_in_exchange_response_cell(response, content))
+}
+
 /// True only when the captured response is present in a real top-level
 /// assistant response cell. This accepts both template responses inside
 /// `agent:exchange` and append-mode `## Assistant` cells, including an escaped
@@ -1482,6 +1496,43 @@ mod undo_keeps_operator_text {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn committed_authority_requires_a_real_response_cell_in_head_or_snapshot() {
+        let response = "### Re: landed — gpt-5\n\nDurable response.\n";
+        let landed = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: landed — gpt-5\n\n",
+            "Durable response.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let quoted_only = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "```text\n",
+            "### Re: landed — gpt-5\n\n",
+            "Durable response.\n",
+            "```\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_committed_authority(
+            response,
+            Some(landed),
+            None,
+        ));
+        assert!(response_materialized_in_committed_authority(
+            response,
+            None,
+            Some(landed),
+        ));
+        assert!(!response_materialized_in_committed_authority(
+            response,
+            Some(quoted_only),
+            None,
+        ));
+    }
 
     /// `#fpecapturedresponse`: the done-id closeout embeds the consumed head's
     /// echo between the heading and the response's own quote. The replay must still

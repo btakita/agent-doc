@@ -319,9 +319,28 @@ PR [#209](https://github.com/btakita/agent-doc/pull/209) addresses the reported 
 
 The separate report that a steering Run Agent Doc was never submitted remains queued; I have not conflated that dispatch failure with the wording-only PR #209.
 
-The exchange is oversized, but the active queue was not stalled for compaction.
+The exchange is oversized, but the active queue was not stalled for compaction.> **Chat prompt (#chatprompt):** Fix the cause of the error
 
-<!-- agent:boundary:fadb4605 -->
+> **Chat prompt (#chatprompt):** in a subagent
+
+### Re: retained-delivery false error — gpt-5 · 2026-10-08T17:24-04:00
+
+Fixed by a dedicated subagent in [PR #210](https://github.com/btakita/agent-doc/pull/210), commit `f6e4e9b426fc26ff69e53f2d174ef79fa05933d6`.
+
+The operation log proved a race: the controller could successfully settle and remove a retained write after the synchronous caller constructed a narrow projection refusal but before its error handler inspected `pending_document_write`. The handler then saw no pending intent and returned a stale `delivery_projection_pending` exit 1 even though delivery had already converged—the immediate successful `session-check` was the evidence of that mismatch.
+
+The fix accepts this settled-before-inspection path only when the exact converging token matches, the response is committed, no retained intent remains observable, and the existing bounded delivery plus tracked-work landing proofs both succeed. Missing or mismatched evidence still fails closed.
+
+The full authoritative gate passed: 9,728 nextest tests, the serialized controller/session-check tail, 193 VS Code tests, strict Clippy, cross-editor checks, Python tests, documentation checks, and TLA+ checks. GitHub CI is in progress.
+
+The other messages were classified rather than conflated:
+
+- The pending-capture refusal was expected because the response had no backlog mutation and omitted the explicit `--no-followups` declaration; this closeout uses that first-class declaration.
+- PRs [#207](https://github.com/btakita/agent-doc/pull/207) and [#208](https://github.com/btakita/agent-doc/pull/208) remain the owners of fenced Markdown parsing and projection identity.
+- The edited multi-queue prompt was forwarded verbatim to its existing `subagent:multi-queue-ids` owner without duplicate dispatch.
+
+The exchange remains oversized, but the active queue was not stalled for compaction.
+<!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -344,7 +363,7 @@ The exchange is oversized, but the active queue was not stalled for compaction.
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/196
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/197
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/198
-- 🚧 After release, add support for multiple `agent:queue` tags. Should we have a `id=...` attribute to distinguish between queues? I want to have different queues to allow different attributes. Some queues may be a subagents queue and others may be ordered. This post-release queue is a perfect example use case. If you can start the subagent now and keep it out of the upcoming release, do that. I want to be able to have different queues and even allow a queue to depend on another queue. Perhaps a release B queue can organize release B after the release A queue is complete.
+- 🚧 Add support for multiple `agent:queue` tags. Should we have a `id=...` attribute to distinguish between queues? I want to have different queues to allow different attributes. Some queues may be a subagents queue and others may be ordered. This post-release queue is a perfect example use case. If you can start the subagent now and keep it out of the upcoming release, do that. I want to be able to have different queues and even allow a queue to depend on another queue. Perhaps a release B queue can organize release B after the release A queue is complete.
 - Give queues an auto-dag like queue items. So a queue id=B must run after queue id=A ends, should we have an after=A in queue id=B? If we want to make a reoccurring sequence, perhaps queue id=A could be later filled again by queue id=B once complete? I wonder if you have suggestions on how we can have an interface algorithm on adding queue items defined in the md file.
 - A steering Run Agent Doc on this file was not submitted to Codex. I manually submitted it.
 - I authored a queue item which fenced backlog items that were written in tools.md. agent-doc created backlog items for the fenced backlog items. agent-doc should have used the AST to understand the content was fenced...not regexes.
@@ -368,14 +387,7 @@ recursive-direct-invocation deadlock guard, and do not send the final answer yet
 
 <!-- agent:backlog priority -->
 - [ ] [#reviewiceboxnotes] Add agent:review + agent:icebox + agent:done + agent:notes to the Claim for Tmux Pane template.
-- [ ] [#crossplatformmise-txpw] Run Agent Doc on tools.md duplicated my queue item and created duplicate backlog items. This issue has been reoccurring across several fix attempts. Use formal logic to ensure this class of error stops occurring:
-  ```
-  - [ ] [#crossplatformmise-txpw-0xfe] do - do [#crossplatformmise]
-  ```
-  ```
-  - [ ] [#crossplatformmise-txpw-44kg] Re: Cross-platform mise bootstrap: Can this be run remotely via uvx...cross platform?
-  - [ ] [#crossplatformmise] Re: Cross-platform mise bootstrap: Can this be run remotely via uvx?
-  ```
+- [ ] [#crossplatformmise-txpw] Run Agent Doc on tools.md duplicated one queue item and created duplicate backlog rows across retries. Integrate PR #208, which replaces prefix/similarity inference with fail-closed baseline-to-projection identity proof, then verify exact-shape, opposite-CRDT-order, retry-idempotence, and ambiguous-edit regressions.
 <!-- /agent:backlog -->
 
 ## Review

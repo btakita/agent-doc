@@ -3550,6 +3550,61 @@ mod tests {
     }
 
     #[test]
+    fn stale_prompt_abandonment_restores_head_after_transient_baseline_advance() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "done\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(root, &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+
+        let live = base.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            "do [#typed-while-open] preserve this prompt\n<!-- agent:boundary:abc123 -->\n",
+        );
+        std::fs::write(&doc, &live).unwrap();
+        // Reproduce queue maintenance checkpointing its open-cycle projection
+        // before the response commit refuses.
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &live,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+
+        let outcome = run(&doc).unwrap();
+        assert!(matches!(
+            outcome,
+            RepairOutcome::StalePreflightCycleAbandoned | RepairOutcome::StalePreflightLockRepaired
+        ));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), live);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
+            Some(base),
+            "empty-preflight close must not retain an uncommitted queue-maintenance baseline"
+        );
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("empty_preflight_baseline_restored_to_head"));
+    }
+
+    #[test]
     fn stale_preflight_abandonment_stops_original_partial_checkpoint_writer() {
         let dir = setup_project();
         let root = dir.path();

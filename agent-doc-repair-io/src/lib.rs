@@ -246,6 +246,14 @@ pub use pending::load_active_pending_response;
 pub use pending::{clear_pending, save_pending};
 
 pub trait RepairIoEffects {
+    /// True only when the authoritative actor's exact pane still owns a live
+    /// harness turn for this document.
+    ///
+    /// Stale-preflight recovery is timeout-based and therefore must consult
+    /// this reactive fact before it closes a cycle whose model may still be
+    /// producing a response.
+    fn preflight_turn_active(&self, file: &Path) -> Result<bool>;
+
     fn atomic_write_if_current(
         &self,
         file: &Path,
@@ -275,6 +283,54 @@ pub trait RepairIoEffects {
         file: &Path,
         mutation: agent_doc_flow_io::closeout::CloseoutRecoveryMutation<'_>,
     ) -> Result<()>;
+}
+
+/// Restore the durable merge baseline before closing an empty preflight.
+///
+/// Queue maintenance may checkpoint a transient editor projection while the
+/// cycle is open. If the response commit then refuses, carrying that projection
+/// across an abandoned/empty close would manufacture snapshot/HEAD drift and
+/// hide the operator's still-uncommitted text from the next preflight. HEAD is
+/// the committed ancestor; the visible editor document remains untouched.
+fn restore_empty_preflight_baseline_to_head(
+    file: &Path,
+    close_event: &str,
+) -> Result<Option<String>> {
+    let current_baseline = agent_doc_snapshot_io::load_document_baseline(file)?;
+    let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "empty_preflight_baseline_restore_skipped file={} event={} reason=head_unavailable",
+                file.display(),
+                close_event,
+            ),
+        );
+        return Ok(current_baseline);
+    };
+
+    if current_baseline.as_deref() != Some(head_content.as_str()) {
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &head_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "empty_preflight_baseline_restored_to_head file={} event={} prior_hash={} head_hash={}",
+                file.display(),
+                close_event,
+                current_baseline
+                    .as_deref()
+                    .map(agent_doc_hash::content_hash)
+                    .unwrap_or_else(|| "none".to_string()),
+                agent_doc_hash::content_hash(&head_content),
+            ),
+        );
+    }
+
+    Ok(Some(head_content))
 }
 
 pub trait RepairStrictReplayWriteEffects {
@@ -2913,7 +2969,20 @@ fn cancel_preflight_cycle_with_authority(
         );
         return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
     }
-    let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)?;
+    if authority.requires_stalled_cycle() && effects.preflight_turn_active(file)? {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "cancel_preflight_cycle_protected file={} cycle_id={} reason={}_live_turn",
+                file.display(),
+                state.cycle_id,
+                authority.proof(),
+            ),
+        );
+        return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
+    }
+    let snapshot_content =
+        restore_empty_preflight_baseline_to_head(file, "cancel_preflight_cycle_abandoned")?;
     let file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "cancel_preflight_cycle",
@@ -3007,14 +3076,32 @@ pub fn repair_stale_preflight_started_cycle(
         );
     }
 
+    if !cycle_capture_exists
+        && age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS
+        && effects.preflight_turn_active(file)?
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "repair_preflight_live_turn_protected file={} cycle_id={} age_secs={}",
+                file.display(),
+                state.cycle_id,
+                age_secs,
+            ),
+        );
+        return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
+    }
+
     if (raw_hashes_match || normalized_hashes_match)
         && !cycle_capture_exists
         && age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS
     {
+        let committed_baseline =
+            restore_empty_preflight_baseline_to_head(file, "repair_preflight_stale_lock")?;
         effects.mark_committed_frontmatter(
             file,
             "repair_preflight_stale_lock",
-            snapshot_content.as_deref(),
+            committed_baseline.as_deref(),
             Some(&file_content),
         )?;
         agent_doc_ops_log_io::log_op(
@@ -3097,10 +3184,14 @@ pub fn repair_stale_preflight_started_cycle(
         let steering = agent_doc_session_check_io::realtime_steering_since_turn_baseline(file)?;
         let preview = steering.preview().unwrap_or_default();
         if age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS {
+            let committed_baseline = restore_empty_preflight_baseline_to_head(
+                file,
+                "repair_preflight_stale_prompt_cycle_abandoned",
+            )?;
             effects.mark_abandoned_frontmatter(
                 file,
                 "repair_preflight_stale_prompt_cycle_abandoned",
-                snapshot_content.as_deref(),
+                committed_baseline.as_deref(),
                 Some(&file_content),
             )?;
             agent_doc_ops_log_io::log_op(
@@ -3145,10 +3236,12 @@ pub fn repair_stale_preflight_started_cycle(
     }
 
     if age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS && !cycle_capture_exists {
+        let committed_baseline =
+            restore_empty_preflight_baseline_to_head(file, "repair_preflight_stale_empty_cycle")?;
         effects.mark_committed_frontmatter(
             file,
             "repair_preflight_stale_empty_cycle",
-            snapshot_content.as_deref(),
+            committed_baseline.as_deref(),
             Some(&file_content),
         )?;
         agent_doc_ops_log_io::log_op(
@@ -3706,6 +3799,7 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::process::Command as ProcessCommand;
 
     #[test]
     fn missing_replica_adopts_an_exact_disk_visible_response() {
@@ -4128,11 +4222,16 @@ mod tests {
 
     #[derive(Default)]
     struct TestRepairIoEffects {
+        preflight_turn_active: Cell<bool>,
         committed_calls: Cell<usize>,
         abandoned_calls: Cell<usize>,
     }
 
     impl RepairIoEffects for TestRepairIoEffects {
+        fn preflight_turn_active(&self, _file: &Path) -> Result<bool> {
+            Ok(self.preflight_turn_active.get())
+        }
+
         fn atomic_write_if_current(
             &self,
             file: &Path,
@@ -4180,6 +4279,112 @@ mod tests {
         ) -> Result<()> {
             Ok(())
         }
+    }
+
+    fn init_test_git_repo(root: &Path, tracked: &Path) {
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test User"],
+            vec!["add", tracked.file_name().unwrap().to_str().unwrap()],
+            vec!["commit", "-m", "initial", "--no-verify"],
+        ] {
+            let status = ProcessCommand::new("git")
+                .current_dir(root)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+    }
+
+    #[test]
+    fn stale_preflight_repair_protects_live_authoritative_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("task.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_test_git_repo(root, &doc);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let live = base.replace(
+            "<!-- agent:boundary:test -->",
+            "do [#live-turn] keep typing\n<!-- agent:boundary:test -->",
+        );
+        std::fs::write(&doc, &live).unwrap();
+        agent_doc_cycle_state_io::age_current_cycle_for_tests(
+            &doc,
+            agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS + 1,
+        )
+        .unwrap();
+
+        let effects = TestRepairIoEffects {
+            preflight_turn_active: Cell::new(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            repair_stale_preflight_started_cycle(&effects, &doc).unwrap(),
+            agent_doc_turn::repair::RepairOutcome::Noop
+        );
+        let after = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(after.cycle_id, cycle.cycle_id);
+        assert_eq!(after.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+        assert_eq!(effects.committed_calls.get(), 0);
+        assert_eq!(effects.abandoned_calls.get(), 0);
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("repair_preflight_live_turn_protected"));
+    }
+
+    #[test]
+    fn owner_release_reclaim_protects_live_authoritative_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("task.md");
+        let content = "---\nagent_doc_session: test\n---\n\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_test_git_repo(root, &doc);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::age_current_cycle_for_tests(
+            &doc,
+            agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS + 1,
+        )
+        .unwrap();
+
+        let effects = TestRepairIoEffects {
+            preflight_turn_active: Cell::new(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            cancel_preflight_cycle_after_owner_release(&effects, &doc).unwrap(),
+            agent_doc_turn::repair::CancelOutcome::Protected
+        );
+        let after = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(after.cycle_id, cycle.cycle_id);
+        assert_eq!(after.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+        assert_eq!(effects.abandoned_calls.get(), 0);
     }
 
     fn tempdir_without_agent_doc_ancestor() -> tempfile::TempDir {

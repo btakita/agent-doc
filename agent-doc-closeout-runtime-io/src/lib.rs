@@ -159,6 +159,23 @@ fn resolve_recovery_closeout_owner_after_first_claim(
 }
 
 impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
+    fn preflight_turn_active(&self, file: &Path) -> Result<bool> {
+        let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+            return Ok(false);
+        };
+        let Some(actor) = agent_doc_controller_io::project_controller::authoritative_actor_binding(
+            &project_root,
+            file,
+        )?
+        else {
+            return Ok(false);
+        };
+        Ok(agent_doc_turn_status_io::turn_active_for_pane_for_file(
+            file,
+            &actor.pane_id,
+        ))
+    }
+
     fn atomic_write_if_current(
         &self,
         file: &Path,

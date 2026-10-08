@@ -1496,14 +1496,11 @@ fn run_with_options_to_writer_in_pass(
     // #op-scoped-drift-1: persist this cycle's node ops to the durable op log,
     // tagged with actor + causal (Lamport / session-origin) clock. Best effort:
     // the durable substrate must never block or fail a preflight cycle.
-    // `#pcc1`: `compute_with_current` ran BEFORE `run_queue_maintenance`, so any
-    // structural normalization maintenance applied is invisible to that cut. The
-    // `#qfoldedhead` re-segmentation is the case that matters: a pasted block
-    // that arrived folded is ONE node in the pre-maintenance content, so ops
-    // recorded from it cover the whole block and every id after the first never
-    // reaches the op log. That is the zero-op result observed for a sixteen-item
-    // paste on 2026-08-03, and it starves every later per-component phase of its
-    // substrate. Record ops from the document as maintenance left it.
+    // `#pcc1`: `compute_with_current` ran BEFORE `run_queue_maintenance`. Persist
+    // that snapshot-to-authority cut as the operator batch, then persist the
+    // authority-to-post-maintenance cut separately as an agent batch. This keeps
+    // attribution truthful while still recording structural normalization such
+    // as `#qfoldedhead` re-segmentation at per-item granularity.
     //
     // Deliberately scoped to the op log: `semantic_diff` still feeds the
     // preflight contract from the original cut, so this changes what is
@@ -1517,24 +1514,31 @@ fn run_with_options_to_writer_in_pass(
                 "preflight_op_log_post_maintenance",
             )
             .ok();
-        let op_summary = match post_maintenance_current.as_deref() {
-            Some(current) if current != diff_result_with_current.current => semantic_diff_summary(
-                &diff_result_with_current.previous,
-                current,
-                &prompt_bearing_changes,
-            ),
-            _ => semantic_diff.clone(),
-        };
-        if let Some(summary) = op_summary.as_ref() {
-            let document_path = file.to_string_lossy().to_string();
-            if let Err(err) = agent_doc_sqlite::op_log::append_semantic_diff_ops(
+        let document_path = file.to_string_lossy().to_string();
+        if let Some(summary) = semantic_diff.as_ref()
+            && let Err(err) = agent_doc_sqlite::op_log::append_semantic_diff_ops(
                 &project_root,
                 &document_path,
                 initial_frontmatter.session.as_deref(),
+                agent_doc_turn::op_log::OpSource::SnapshotDiff,
                 summary,
-            ) {
-                eprintln!("[preflight] op-log persist skipped: {err}");
-            }
+            )
+        {
+            eprintln!("[preflight] operator op-log persist skipped: {err}");
+        }
+        if let Some(current) = post_maintenance_current.as_deref()
+            && current != diff_result_with_current.current
+            && let Some(summary) =
+                semantic_diff_summary(&diff_result_with_current.current, current, &[])
+            && let Err(err) = agent_doc_sqlite::op_log::append_semantic_diff_ops(
+                &project_root,
+                &document_path,
+                initial_frontmatter.session.as_deref(),
+                agent_doc_turn::op_log::OpSource::AgentWrite,
+                &summary,
+            )
+        {
+            eprintln!("[preflight] maintenance op-log persist skipped: {err}");
         }
     }
 
@@ -1558,6 +1562,7 @@ fn run_with_options_to_writer_in_pass(
                 &document_path,
                 initial_frontmatter.session.as_deref(),
                 "",
+                agent_doc_turn::op_log::OpSource::SnapshotDiff,
                 summary,
             );
             Some(agent_doc_turn::turn_scope::classify_cycle(&ops, scope))
@@ -1576,6 +1581,7 @@ fn run_with_options_to_writer_in_pass(
                 &document_path,
                 initial_frontmatter.session.as_deref(),
                 "",
+                agent_doc_turn::op_log::OpSource::SnapshotDiff,
                 summary,
             );
             Some(agent_doc_turn::turn_scope::classify_cycle(&ops, scope))

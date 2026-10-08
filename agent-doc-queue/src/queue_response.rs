@@ -205,6 +205,21 @@ pub fn prompt_preset_head_answered_by_response(
     })
 }
 
+/// Canonical response-evidence rule for a free-text or resolved preset head.
+///
+/// Admission and consumption must call this same predicate: an exact labeled
+/// queue-prompt echo is sufficient evidence even for a short preset token,
+/// while a response that omits the echo may still prove a resolved preset by
+/// reproducing its full expansion.
+pub fn queue_head_answered_by_response(
+    content: &str,
+    response_body: &str,
+    head_text: &str,
+) -> bool {
+    free_text_head_answered_by_response(response_body, head_text)
+        || prompt_preset_head_answered_by_response(content, response_body, head_text)
+}
+
 /// True when the active queue head is exactly the registered prompt preset id.
 pub fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Result<bool> {
     let Some(head) = crate::queue_heads::active_queue_head_text(content)? else {
@@ -954,11 +969,15 @@ pub fn response_defers_free_text_head(response_body: &str, head_text: &str) -> b
     if head_norm.is_empty() {
         return false;
     }
+    let weak_quote_allowed = head_norm.split(' ').filter(|word| !word.is_empty()).count() >= 4;
     let blocks: Vec<&str> = response_body.split("\n\n").collect();
     for (index, block) in blocks.iter().enumerate() {
-        if !normalize_for_answer_match(block).contains(&head_norm)
-            && !response_heading_targets_distinctive_identifier(block, &head_clean)
-        {
+        let exact_labeled_echo = response_explicit_queue_prompt_echoes_head(block, &head_clean);
+        let anchored_weak_quote = weak_quote_allowed
+            && response_blockquote_entry_candidates(block)
+                .iter()
+                .any(|entry| entry.starts_with(&head_norm));
+        if !exact_labeled_echo && !anchored_weak_quote {
             continue;
         }
         if deferral_scope_has_marker(&blocks, index) {
@@ -982,10 +1001,14 @@ pub fn latest_free_text_head_echo_is_deferral(text: &str, head_text: &str) -> bo
     if head_norm.is_empty() {
         return false;
     }
+    let weak_quote_allowed = head_norm.split(' ').filter(|word| !word.is_empty()).count() >= 4;
     let blocks: Vec<&str> = text.split("\n\n").collect();
     let Some(index) = blocks.iter().rposition(|block| {
-        block.trim_start().starts_with('>')
-            && normalize_for_answer_match(block).contains(&head_norm)
+        response_explicit_queue_prompt_echoes_head(block, &head_clean)
+            || (weak_quote_allowed
+                && response_blockquote_entry_candidates(block)
+                    .iter()
+                    .any(|entry| entry.starts_with(&head_norm)))
     }) else {
         return false;
     };
@@ -1613,6 +1636,32 @@ mod tests {
             !free_text_head_answered_by_response(unlabeled, "deploy"),
             "an unlabeled blockquote is not enough proof for a short head"
         );
+    }
+
+    #[test]
+    fn short_head_words_in_an_unrelated_status_table_do_not_defer_its_exact_echo() {
+        let response = concat!(
+            "### Re: #upgrade — gpt-6.1-sol\n\n",
+            "> **Queue prompt:** #upgrade\n\n",
+            "Upgraded agent-doc and checked the current issues.\n\n",
+            "| Issue | Status |\n",
+            "| --- | --- |\n",
+            "| 164 | `upgrade` recycles controller |\n",
+            "| 172 | `**Deferred:**` leading head consumed |\n",
+        );
+
+        assert!(!response_defers_free_text_head(response, "#upgrade"));
+    }
+
+    #[test]
+    fn short_exact_echo_followed_by_a_deferral_marker_still_defers() {
+        let response = concat!(
+            "### Re: #upgrade — gpt-6.1-sol\n\n",
+            "> **Queue prompt:** #upgrade\n\n",
+            "**Deferred:** wait for the release build.\n",
+        );
+
+        assert!(response_defers_free_text_head(response, "#upgrade"));
     }
 
     #[test]

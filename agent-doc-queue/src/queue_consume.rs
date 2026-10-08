@@ -535,25 +535,11 @@ pub fn queue_consumption_allowed_for_response(
         return Ok(true);
     }
     if let Some(head_text) = active_free_text_head {
-        // A registered `#preset` head is a resolved prompt, not ordinary free
-        // text. Its expansion is the response contract and the literal token
-        // quote is optional. Keep the free-text classification only as the
-        // strike/reap transport for preset heads that have no tracked-work row.
-        let answered =
-            if crate::queue_response::queue_prompt_preset_expansions(current_content, &head_text)
-                .is_empty()
-            {
-                crate::queue_response::free_text_head_answered_by_response(
-                    response_body,
-                    &head_text,
-                )
-            } else {
-                crate::queue_response::prompt_preset_head_answered_by_response(
-                    current_content,
-                    response_body,
-                    &head_text,
-                )
-            };
+        let answered = crate::queue_response::queue_head_answered_by_response(
+            current_content,
+            response_body,
+            &head_text,
+        );
         return Ok(answered
             && !cycle_answered_foreign_exchange_prompt(baseline, current_content, &head_text));
     }
@@ -777,17 +763,8 @@ pub fn answered_free_text_head_node_keys(
         // addressed that head. Require exact quoted-prompt proof for ordinary
         // free text, or resolved-expansion proof for a prompt-preset head.
         let has_explicit_answer_evidence =
-            crate::queue_response::free_text_head_has_explicit_answer_evidence(
-                response_body,
-                text,
-            );
-        if !crate::queue_response::free_text_head_answered_by_response(response_body, text)
-            && !crate::queue_response::prompt_preset_head_answered_by_response(
-                content,
-                response_body,
-                text,
-            )
-        {
+            crate::queue_response::free_text_head_has_explicit_answer_evidence(response_body, text);
+        if !crate::queue_response::queue_head_answered_by_response(content, response_body, text) {
             continue;
         }
         // `#ftstrikedefer`: the quoted echo is the responding agent's assertion
@@ -1784,6 +1761,86 @@ mod tests {
             )
             .unwrap(),
             "resolved preset expansion should complete without a literal queue-prompt quote"
+        );
+    }
+
+    fn upgrade_preset_document() -> &'static str {
+        concat!(
+            "---\nqueue_active: true\n",
+            "prompt_presets:\n",
+            "  '#upgrade': Upgrade agent-doc. Are the current issues fixed? Check for new issues.\n",
+            "---\n\n",
+            "<!-- agent:queue subagents preset=\"#auth\" priority go -->\n",
+            "- 🚧 #upgrade\n",
+            "<!-- /agent:queue -->\n",
+        )
+    }
+
+    #[test]
+    fn preset_exact_echo_admission_and_consumption_use_the_same_evidence() {
+        let content = upgrade_preset_document();
+        let response = concat!(
+            "### Re: agent-doc upgrade report — gpt-6.1-sol\n\n",
+            "> **Queue prompt:** #upgrade\n\n",
+            "Upgraded agent-doc, checked the current issues, and filed the new defect.\n",
+        );
+
+        assert!(
+            crate::queue_closeout_guard::selected_free_text_heads_missing_response_evidence(
+                Some(content),
+                content,
+                response,
+            )
+            .unwrap()
+            .is_empty(),
+            "pre-write admission accepts the exact preset-head echo"
+        );
+        assert!(
+            queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(content),
+                content,
+                response,
+                &[],
+            )
+            .unwrap(),
+            "the same exact echo must authorize closeout consumption"
+        );
+    }
+
+    #[test]
+    fn preset_incidental_status_words_do_not_create_a_deferral_veto() {
+        let content = upgrade_preset_document();
+        let response = concat!(
+            "### Re: #upgrade — gpt-6.1-sol\n\n",
+            "> **Queue prompt:** #upgrade\n\n",
+            "Upgraded agent-doc, checked the current issues, and filed the new defect.\n\n",
+            "| Issue | Status |\n",
+            "| --- | --- |\n",
+            "| 164 | `upgrade` recycles controller |\n",
+            "| 172 | `**Deferred:**` leading head consumed |\n",
+        );
+
+        assert!(
+            queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(content),
+                content,
+                response,
+                &[],
+            )
+            .unwrap(),
+            "an unrelated status table must not defer the explicitly echoed head"
+        );
+        let projected = project_answered_free_text_strike(content, response, Some(content))
+            .unwrap()
+            .expect("the answered preset must produce a strike projection");
+        assert!(
+            projected.target_content.contains(
+                "<!-- agent:queue subagents preset=\"#auth\" priority -->\n<!-- /agent:queue -->"
+            ),
+            "the sole consumed head must leave an empty queue projection:\n{}",
+            projected.target_content
         );
     }
 

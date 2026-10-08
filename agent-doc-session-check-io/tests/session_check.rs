@@ -36,7 +36,7 @@ fn continuation_guidance_for(file: &Path) -> String {
 
 #[cfg(test)]
 use agent_doc_session_check_io::{
-    log_supervisor_drain_handoff, supervisor_drain_outcome_kind,
+    log_supervisor_drain_handoff, supervisor_drain_head_description, supervisor_drain_outcome_kind,
     supervisor_drain_unavailable_message, unmerged_editor_steering_note,
 };
 
@@ -8124,6 +8124,35 @@ Body\n\
             assert!(!message.contains("NOT an operator stall"), "{message}");
             assert!(message.contains(readiness.reason()), "{message}");
         }
+    }
+
+    #[test]
+    fn supervisor_drain_diagnostic_uses_the_heads_real_cycle_tag() {
+        let plain = concat!(
+            "---\nqueue_active: true\nprompt_presets:\n",
+            "  '#upgrade': Upgrade agent-doc.\n",
+            "---\n\n",
+            "<!-- agent:queue subagents go -->\n",
+            "- #upgrade\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            supervisor_drain_head_description(plain, "#upgrade"),
+            "an untagged queue head"
+        );
+
+        let focused = concat!(
+            "<!-- agent:queue go -->\n",
+            "- do [#isolated]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#isolated] [focused-cycle] inspect in isolation\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert_eq!(
+            supervisor_drain_head_description(focused, "do [#isolated]"),
+            "a `[focused-cycle]` head"
+        );
     }
 
     /// `#refusalsteeringverbatim` (GH #75): an operator prompt that exists only

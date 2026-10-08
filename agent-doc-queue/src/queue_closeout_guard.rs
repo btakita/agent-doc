@@ -142,8 +142,7 @@ pub fn selected_free_text_prompts_missing_response_evidence_for_closeout(
             || crate::queue_consume::cycle_answered_foreign_exchange_prompt(
                 baseline, content, &head,
             )
-            || queue_response::free_text_head_answered_by_response(response, &head)
-            || queue_response::prompt_preset_head_answered_by_response(content, response, &head)
+            || queue_response::queue_head_answered_by_response(content, response, &head)
         {
             continue;
         }

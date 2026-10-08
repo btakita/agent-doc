@@ -20,6 +20,27 @@ pub struct ResponseCellAddOutcome {
     pub applied: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapturedResponseReplayRecoveryKind {
+    DuplicateReplay,
+    InterruptedEmptyShell,
+}
+
+impl CapturedResponseReplayRecoveryKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DuplicateReplay => "capture_baseline_scoped",
+            Self::InterruptedEmptyShell => "captured_interrupted_empty_shell",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapturedResponseReplayRecovery {
+    pub content: String,
+    pub kind: CapturedResponseReplayRecoveryKind,
+}
+
 fn parse_response_cell(response: &str) -> anyhow::Result<(Vec<ExchangeNode>, String)> {
     let response = response.trim_matches(['\n', '\r']);
     if response.is_empty() {
@@ -390,18 +411,22 @@ pub fn deduplicate_response_cells(doc: &str) -> anyhow::Result<Option<String>> {
 ///   or the independently retained baseline node;
 /// - any novel line fails closed for that topic.
 ///
+/// An interrupted projection may instead leave one latest, heading-only
+/// response node. That shell is completed from the capture only when the
+/// baseline accounts exactly for every earlier same-topic sibling. Multiple
+/// shells, a non-latest shell, or novel same-topic content remain untouched.
+///
 /// A second capture-scoped shape covers one response node whose tail contains
 /// at least three exact copies of newly appended text; see
 /// [`collapse_checkpoint_proven_repeated_suffix`] for its stricter proof.
-/// A third restores a unique heading-only shell, absent from the capture
-/// baseline, from the exact durable captured node. Together these repairs retain
-/// one exact captured response, preserve a distinct earlier same-topic response,
-/// and keep every prompt, unrelated response, operator edit, and newest boundary.
-pub fn deduplicate_captured_response_replays(
+/// Together these repairs retain one exact captured response, preserve a
+/// distinct earlier same-topic response, and keep every prompt, unrelated
+/// response, operator edit, and the newest boundary.
+pub fn reconcile_captured_response_replays(
     doc: &str,
     baseline: &str,
     captured_materialization: &str,
-) -> anyhow::Result<Option<String>> {
+) -> anyhow::Result<Option<CapturedResponseReplayRecovery>> {
     let captured_nodes = parse_exchange_nodes(captured_materialization);
     let captured_responses = captured_nodes
         .iter()
@@ -437,6 +462,18 @@ pub fn deduplicate_captured_response_replays(
         return Ok(None);
     };
     let mut nodes = parse_exchange_nodes(exchange.content(doc));
+    if let Some(content) = restore_interrupted_empty_response_shell(
+        doc,
+        exchange,
+        &nodes,
+        &baseline_response_nodes,
+        &captured_responses,
+    ) {
+        return Ok(Some(CapturedResponseReplayRecovery {
+            content,
+            kind: CapturedResponseReplayRecoveryKind::InterruptedEmptyShell,
+        }));
+    }
     let mut original_boundary = None;
     let mut boundary_fence = MarkdownFence::default();
     for node in &nodes {
@@ -479,27 +516,6 @@ pub fn deduplicate_captured_response_replays(
             .collect::<Vec<_>>();
         if candidate_indices.len() == 1 {
             let index = candidate_indices[0];
-            let visible_body = |lines: &[String]| {
-                lines.iter().skip(1).any(|line| {
-                    let trimmed = line.trim();
-                    !trimmed.is_empty()
-                        && !(trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
-                })
-            };
-            // A failed two-phase partial-response repair can durably retain the
-            // response heading after stripping its body, then lose the replica
-            // before replaying the exact capture. Restore only the uniquely
-            // introduced empty shell: a same-topic response in the baseline is
-            // ambiguous and remains fail-closed, while the durable captured node
-            // supplies the exact body bytes.
-            if baseline_candidates.is_empty()
-                && !visible_body(&nodes[index].lines)
-                && visible_body(&captured.lines)
-            {
-                nodes[index].lines = captured.lines.clone();
-                removed = true;
-                continue;
-            }
             if let Some(collapsed) =
                 collapse_checkpoint_proven_repeated_suffix(&nodes[index].lines, &captured.lines)
             {
@@ -632,7 +648,89 @@ pub fn deduplicate_captured_response_replays(
         inner.push_str(&boundary);
         inner.push('\n');
     }
-    Ok(Some(exchange.replace_content(doc, &inner)))
+    Ok(Some(CapturedResponseReplayRecovery {
+        content: exchange.replace_content(doc, &inner),
+        kind: CapturedResponseReplayRecoveryKind::DuplicateReplay,
+    }))
+}
+
+/// Backward-compatible content-only adapter for callers that do not need the
+/// recovery classification.
+pub fn deduplicate_captured_response_replays(
+    doc: &str,
+    baseline: &str,
+    captured_materialization: &str,
+) -> anyhow::Result<Option<String>> {
+    Ok(
+        reconcile_captured_response_replays(doc, baseline, captured_materialization)?
+            .map(|recovery| recovery.content),
+    )
+}
+
+fn restore_interrupted_empty_response_shell(
+    doc: &str,
+    exchange: &element::Component,
+    nodes: &[ExchangeNode],
+    baseline_response_nodes: &[ExchangeNode],
+    captured_responses: &[&ExchangeNode],
+) -> Option<String> {
+    let [captured] = captured_responses else {
+        return None;
+    };
+    let captured_provenance = replay_provenance_lines(&captured.lines);
+    if captured_provenance.len() < 2 {
+        return None;
+    }
+
+    let latest_response_index = nodes
+        .iter()
+        .rposition(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))?;
+
+    let shell_candidates = nodes
+        .iter()
+        .enumerate()
+        .filter(|(index, node)| {
+            *index == latest_response_index
+                && node.kind == captured.kind
+                && replay_provenance_lines(&node.lines).len() == 1
+        })
+        .collect::<Vec<_>>();
+    let [(shell_index, shell)] = shell_candidates.as_slice() else {
+        return None;
+    };
+
+    // The capture baseline must account for every same-key response except the
+    // new empty shell. This preserves recurring-topic history and rejects novel
+    // same-topic content or a shell that was already present at capture time.
+    let mut baseline_ids = baseline_response_nodes
+        .iter()
+        .filter(|node| node.kind == captured.kind)
+        .map(ExchangeNode::node_id)
+        .collect::<Vec<_>>();
+    let mut sibling_ids = nodes
+        .iter()
+        .enumerate()
+        .filter(|(index, node)| *index != *shell_index && node.kind == captured.kind)
+        .map(|(_, node)| node.node_id())
+        .collect::<Vec<_>>();
+    baseline_ids.sort();
+    sibling_ids.sort();
+    if sibling_ids != baseline_ids || sibling_ids.contains(&captured.node_id()) {
+        return None;
+    }
+
+    let mut restored_lines = captured.lines.clone();
+    restored_lines.extend(
+        shell
+            .lines
+            .iter()
+            .filter(|line| boundary_line(line))
+            .cloned(),
+    );
+    let mut restored_nodes = nodes.to_vec();
+    restored_nodes[*shell_index].lines = restored_lines;
+    let restored_exchange = render_exchange_nodes(&restored_nodes);
+    Some(exchange.replace_content(doc, &restored_exchange))
 }
 
 fn supersede_response_tail_after_anchor(
@@ -1103,6 +1201,104 @@ mod tests {
             deduplicate_captured_response_replays(stranded, baseline, captured).unwrap(),
             None,
             "a pre-existing same-topic response makes an empty shell ambiguous"
+        );
+    }
+
+    #[test]
+    fn captured_response_replay_restores_one_interrupted_empty_head_shell() {
+        let captured = concat!(
+            "### Re: retained delivery — gpt-5 · 2026-10-08T17:24-04:00\n\n",
+            "The retained response is complete.\n",
+        );
+        let interrupted = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            concat!(
+                "### Re: retained delivery — gpt-5 · 2026-10-08T17:24-04:00 (HEAD)\n\n",
+                "<!-- agent:boundary:latest -->",
+            ),
+        );
+
+        let recovery = reconcile_captured_response_replays(&interrupted, DOC, captured)
+            .unwrap()
+            .expect("the exact captured response should complete its empty shell");
+
+        assert_eq!(
+            recovery.kind,
+            CapturedResponseReplayRecoveryKind::InterruptedEmptyShell
+        );
+        assert_eq!(
+            recovery
+                .content
+                .matches("### Re: retained delivery")
+                .count(),
+            1
+        );
+        assert_eq!(
+            recovery
+                .content
+                .matches("The retained response is complete.")
+                .count(),
+            1
+        );
+        assert_eq!(recovery.content.matches("agent:boundary:").count(), 1);
+        assert!(recovery.content.contains("agent:boundary:latest"));
+        assert!(recovery.content.contains("❯ operator prompt"));
+    }
+
+    #[test]
+    fn captured_response_replay_keeps_ambiguous_empty_head_shells_fail_closed() {
+        let captured = "### Re: retained delivery — gpt-5\n\nCaptured body.\n";
+        let ambiguous = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            concat!(
+                "### Re: retained delivery — gpt-5 (HEAD)\n\n",
+                "### Re: retained delivery — gpt-5 (HEAD)\n\n",
+                "<!-- agent:boundary:latest -->",
+            ),
+        );
+
+        assert_eq!(
+            reconcile_captured_response_replays(&ambiguous, DOC, captured).unwrap(),
+            None,
+            "multiple empty shells must not elect a repair target"
+        );
+    }
+
+    #[test]
+    fn captured_response_replay_keeps_novel_same_topic_sibling_fail_closed() {
+        let captured = "### Re: retained delivery — gpt-5\n\nCaptured body.\n";
+        let novel = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            concat!(
+                "### Re: retained delivery — gpt-5\n\nOperator-authored correction.\n\n",
+                "### Re: retained delivery — gpt-5 (HEAD)\n\n",
+                "<!-- agent:boundary:latest -->",
+            ),
+        );
+
+        assert_eq!(
+            reconcile_captured_response_replays(&novel, DOC, captured).unwrap(),
+            None,
+            "same-topic content absent from the capture baseline is ambiguous"
+        );
+    }
+
+    #[test]
+    fn captured_response_replay_keeps_nonlatest_empty_shell_fail_closed() {
+        let captured = "### Re: retained delivery — gpt-5\n\nCaptured body.\n";
+        let ambiguous = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            concat!(
+                "### Re: retained delivery — gpt-5 (HEAD)\n\n",
+                "### Re: later response — gpt-5\n\nLater body.\n",
+                "<!-- agent:boundary:latest -->",
+            ),
+        );
+
+        assert_eq!(
+            reconcile_captured_response_replays(&ambiguous, DOC, captured).unwrap(),
+            None,
+            "a non-latest shell has ambiguous response ordering"
         );
     }
 

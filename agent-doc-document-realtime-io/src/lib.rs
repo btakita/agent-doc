@@ -4271,24 +4271,34 @@ pub fn normalize_recoverable_response_replay_duplication_for_file(
             agent_doc_template::response_materialization::response_materialization_probe_from_response(
                 &checkpoint.response_body,
             );
-        if let Some(recovered) =
-            agent_doc_merge::response_cell::deduplicate_captured_response_replays(
+        if let Some(recovery) =
+            agent_doc_merge::response_cell::reconcile_captured_response_replays(
                 content,
                 baseline,
                 &materialization,
             )?
         {
+            let recovered = recovery.content;
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "{source}_captured_response_replay_candidate_prepared file={} cycle_id={} capture_id={} observed_hash={} target_hash={} strategy=capture_baseline_scoped",
+                    "{source}_captured_response_replay_candidate_prepared file={} cycle_id={} capture_id={} observed_hash={} target_hash={} strategy={}",
                     file.display(),
                     checkpoint.cycle_id,
                     checkpoint.capture_id,
                     agent_doc_hash::content_hash(content),
                     agent_doc_hash::content_hash(&recovered),
+                    recovery.kind.as_str(),
                 ),
             );
+            if recovery.kind
+                == agent_doc_merge::response_cell::CapturedResponseReplayRecoveryKind::InterruptedEmptyShell
+            {
+                eprintln!(
+                    "[recovery] WARNING: restored an interrupted empty response heading in {} from exact retained-capture and baseline evidence",
+                    file.display()
+                );
+            }
             return Ok(Some(recovered));
         }
     }

@@ -275,6 +275,16 @@ bounded send loop and adds no retry or wait.
   writeback, or a `serialized_atomic_write` whose exact editor projection was
   natively saved. A proven CRDT notification, native editor save, or
   `socket_already_applied` visible response also clears the same episode.
+- An explicit negative socket receipt also quarantines the exact reliable-sync
+  registration generation used by that send. The retained payload is not sent
+  to that generation again: its matching CRDT relay members leave the live
+  delivery cut, while the editor-open fact and canonical response remain
+  authoritative above disk. A registration with a newer timestamp is not
+  quarantined and may reconcile the retained canonical response. A late receipt
+  from an older registration is stale evidence and must not disconnect or block
+  that replacement. This per-generation transition is immediate; the broader
+  transport-health refusal threshold below remains the cross-attempt endpoint
+  degradation policy.
 - After `EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD` (3) consecutive refusals
   the endpoint counts as **unregistered** for delivery: the row is degraded
   regardless of the failure counter (`editor_endpoint_unregistered_after_refusals`),

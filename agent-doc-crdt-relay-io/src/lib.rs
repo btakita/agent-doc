@@ -50,7 +50,7 @@
 
 use agent_doc_turn::op_log::OpsLogEvent;
 use parking_lot::Mutex;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
@@ -328,6 +328,137 @@ pub fn live_replica_count_for_file(file: &Path) -> usize {
         .ok()
         .and_then(|document_hash| hub_handle(&document_hash))
         .map_or(0, |handle| handle.lock().live_count())
+}
+
+/// Result of removing the exact editor endpoint that explicitly refused a
+/// delivery from the document's CRDT delivery cut.
+///
+/// The reliable-sync registration remains live. This is deliberate: a rejected
+/// endpoint is no longer eligible to satisfy the retained delivery, but its
+/// editor may still hold unsaved operator text. Keeping editor ownership while
+/// disconnecting only the matching relay member makes the next authority pass
+/// request a replica rebuild instead of falling through to disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RejectedEndpointQuarantine {
+    Quarantined {
+        replicas: usize,
+    },
+    AlreadyQuarantined,
+    /// A newer/different registration now owns the route. The old rejection is
+    /// stale evidence and must not disconnect that replacement.
+    Superseded,
+}
+
+fn rejected_editor_endpoint_quarantines()
+-> &'static Mutex<BTreeSet<agent_doc_reliable_sync_io::liveness::EditorRegistration>> {
+    static QUARANTINES: OnceLock<
+        Mutex<BTreeSet<agent_doc_reliable_sync_io::liveness::EditorRegistration>>,
+    > = OnceLock::new();
+    QUARANTINES.get_or_init(|| Mutex::new(BTreeSet::new()))
+}
+
+/// Whether this exact editor registration generation previously answered a
+/// delivery with a terminal negative receipt.
+///
+/// The full registration value is the key, not merely the editor process. A
+/// later re-registration therefore becomes eligible immediately, while a retry
+/// of the retained intent cannot resend its payload to the rejecting endpoint.
+pub fn rejected_editor_endpoint_is_quarantined(
+    registration: &agent_doc_reliable_sync_io::liveness::EditorRegistration,
+) -> bool {
+    rejected_editor_endpoint_quarantines()
+        .lock()
+        .contains(registration)
+}
+
+/// Quarantine the exact generation-fenced editor endpoint that answered a
+/// delivery with a terminal rejected receipt.
+///
+/// `registration` is the same immutable registration used for the failed send.
+/// The current reliable-sync projection must still contain that exact value,
+/// including its timestamp. This comparison is the generation fence that keeps
+/// a late rejection from removing a replacement endpoint. Only CRDT members
+/// whose identity resolves to the same `(editor_id, pid)` are disconnected;
+/// other editor processes remain in the delivery cut.
+pub fn quarantine_rejected_editor_endpoint(
+    file: &Path,
+    registration: &agent_doc_reliable_sync_io::liveness::EditorRegistration,
+) -> Result<RejectedEndpointQuarantine> {
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let lock = replica_registration_lock(&document_hash)?;
+    let _guard = lock.lock();
+
+    let registration_is_current = reliable_sync_editor_registrations_for_file(file)
+        .iter()
+        .any(|current| current == registration);
+    if !registration_is_current {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "rejected_editor_endpoint_quarantine_refused file={} editor_id={} editor_pid={} registration_timestamp_ms={} reason=superseded_registration action=fail_closed",
+                file.display(),
+                registration.editor_id,
+                registration.pid,
+                registration.timestamp_ms,
+            ),
+        );
+        return Ok(RejectedEndpointQuarantine::Superseded);
+    }
+
+    let newly_quarantined = rejected_editor_endpoint_quarantines()
+        .lock()
+        .insert(registration.clone());
+
+    let rejected_route = ReplicaSignalRoute {
+        editor_id: registration.editor_id.clone(),
+        editor_pid: registration.pid,
+    };
+    let replica_ids = replica_identity_registry()
+        .lock()
+        .get(&document_hash)
+        .into_iter()
+        .flat_map(|members| members.iter())
+        .filter_map(|(client_id, identity)| {
+            (editor_route_from_replica_identity(identity).as_ref() == Some(&rejected_route))
+                .then_some(*client_id)
+        })
+        .collect::<Vec<_>>();
+
+    let quarantined = if let Some(handle) = hub_handle(&document_hash) {
+        let mut hub = handle.lock();
+        let live_replica_ids = hub
+            .delivery_snapshot()
+            .into_iter()
+            .filter_map(|entry| entry.live.then_some(entry.client_id))
+            .collect::<HashSet<_>>();
+        let quarantined = replica_ids
+            .into_iter()
+            .filter(|client_id| live_replica_ids.contains(client_id))
+            .filter(|client_id| hub.disconnect(*client_id))
+            .count();
+        retained_canonical_projections()
+            .retain(&document_hash, hub.retained_canonical_projection());
+        quarantined
+    } else {
+        0
+    };
+    if !newly_quarantined {
+        return Ok(RejectedEndpointQuarantine::AlreadyQuarantined);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "rejected_editor_endpoint_quarantined file={} editor_id={} editor_pid={} registration_timestamp_ms={} replicas={} reliable_editor_live=true action=disconnect_matching_delivery_members_preserve_editor_authority",
+            file.display(),
+            registration.editor_id,
+            registration.pid,
+            registration.timestamp_ms,
+            quarantined,
+        ),
+    );
+    Ok(RejectedEndpointQuarantine::Quarantined {
+        replicas: quarantined,
+    })
 }
 
 /// Resolve CRDT authority from the shared durable reliable-sync liveness plane.
@@ -5938,6 +6069,173 @@ pub fn route_disk_change_signal_with(
 
 #[cfg(test)]
 mod tests {
+    fn rejected_quarantine_test_lock() -> &'static std::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    fn seed_rejected_endpoint_fixture(
+        file: &Path,
+        editor_id: &str,
+        pid: u32,
+        timestamp_ms: u64,
+    ) -> agent_doc_reliable_sync_io::liveness::EditorRegistration {
+        use agent_doc_reliable_sync_io::liveness::{EditorRegistration, LivenessOp};
+
+        let document_hash = agent_doc_hash::document_id_for_path(file);
+        let pid = u64::from(pid);
+        let registration = EditorRegistration {
+            document_hash: document_hash.clone(),
+            pid,
+            path: file.display().to_string(),
+            editor_id: editor_id.to_string(),
+            editor_kind: "jetbrains".to_string(),
+            editor_version: "test".to_string(),
+            capabilities: Vec::new(),
+            timestamp_ms,
+        };
+        let mut plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
+        plane.apply_local(&LivenessOp::Open {
+            document_hash,
+            pid,
+            tag: format!("quarantine-{timestamp_ms}"),
+        });
+        plane.apply_local(&LivenessOp::Register(registration.clone()));
+        registration
+    }
+
+    #[test]
+    fn rejected_endpoint_quarantine_disconnects_only_the_exact_current_route() {
+        let _guard = rejected_quarantine_test_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (_dir, doc) = temp_doc("rejected-endpoint-quarantine.md");
+        let rejected_pid = 2_100_000_001;
+        let other_pid = 2_100_000_002;
+        let editor_id = format!("jetbrains-{rejected_pid}-quarantine");
+        let registration = seed_rejected_endpoint_fixture(&doc, &editor_id, rejected_pid, 1);
+        let rejected_identity = format!("{editor_id}:{}:refresh-1", doc.display());
+        register_replica_for_file_with_liveness(&doc, &rejected_identity, |pid| {
+            pid == rejected_pid
+        })
+        .unwrap()
+        .expect("current editor replica should register");
+        let other_identity = format!("jetbrains-{other_pid}-collaborator:{}", doc.display());
+        register_replica_for_file_with_liveness(&doc, &other_identity, |pid| {
+            pid == rejected_pid || pid == other_pid
+        })
+        .unwrap()
+        .expect("independent replica should register");
+        assert_eq!(live_replica_count_for_file(&doc), 2);
+
+        assert_eq!(
+            quarantine_rejected_editor_endpoint(&doc, &registration).unwrap(),
+            RejectedEndpointQuarantine::Quarantined { replicas: 1 }
+        );
+        assert_eq!(
+            live_replica_count_for_file(&doc),
+            1,
+            "the rejecting route leaves the delivery cut without removing an independent collaborator"
+        );
+        assert!(rejected_editor_endpoint_is_quarantined(&registration));
+        assert_eq!(
+            quarantine_rejected_editor_endpoint(&doc, &registration).unwrap(),
+            RejectedEndpointQuarantine::AlreadyQuarantined,
+            "the effect is idempotent for a retained retry"
+        );
+    }
+
+    #[test]
+    fn stale_rejection_cannot_quarantine_a_newer_registration_generation() {
+        let _guard = rejected_quarantine_test_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (_dir, doc) = temp_doc("stale-rejected-endpoint-quarantine.md");
+        let editor_pid = 2_100_000_003;
+        let editor_id = format!("jetbrains-{editor_pid}-stale-quarantine");
+        let rejected_registration =
+            seed_rejected_endpoint_fixture(&doc, &editor_id, editor_pid, 10);
+        let identity = format!("{editor_id}:{}:refresh-2", doc.display());
+        register_replica_for_file_with_liveness(&doc, &identity, |pid| pid == editor_pid)
+            .unwrap()
+            .expect("editor replica should register");
+        let replacement_registration =
+            seed_rejected_endpoint_fixture(&doc, &editor_id, editor_pid, 11);
+        assert_ne!(rejected_registration, replacement_registration);
+
+        assert_eq!(
+            quarantine_rejected_editor_endpoint(&doc, &rejected_registration).unwrap(),
+            RejectedEndpointQuarantine::Superseded,
+        );
+        assert_eq!(
+            live_replica_count_for_file(&doc),
+            1,
+            "a late receipt from the prior registration must not disconnect its replacement"
+        );
+        assert!(!rejected_editor_endpoint_is_quarantined(
+            &rejected_registration
+        ));
+        assert!(!rejected_editor_endpoint_is_quarantined(
+            &replacement_registration
+        ));
+    }
+
+    #[test]
+    fn rejected_endpoint_quarantine_keeps_editor_authority_fail_closed() {
+        let _guard = rejected_quarantine_test_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (_dir, doc) = temp_doc("rejected-endpoint-keeps-authority.md");
+        let editor_pid = 2_100_000_004;
+        let editor_id = format!("jetbrains-{editor_pid}-authority-quarantine");
+        let registration = seed_rejected_endpoint_fixture(&doc, &editor_id, editor_pid, 20);
+        let identity = format!("{editor_id}:{}:refresh-3", doc.display());
+        register_replica_for_file_with_liveness(&doc, &identity, |pid| pid == editor_pid)
+            .unwrap()
+            .expect("current editor replica should register");
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        let retained = format!("{disk}\nretained response not yet projected to disk\n");
+        let publication =
+            apply_cp_write_for_file(&doc, &disk, &retained, "test_rejected_endpoint_quarantine")
+                .unwrap()
+                .expect("retained canonical response should publish");
+        assert!(publication.applied);
+        assert!(!publication.delivery_converged);
+
+        assert_eq!(
+            quarantine_rejected_editor_endpoint(&doc, &registration).unwrap(),
+            RejectedEndpointQuarantine::Quarantined { replicas: 1 }
+        );
+        assert_eq!(live_replica_count_for_file(&doc), 0);
+        assert!(
+            reliable_sync_editor_live_for_file(&doc),
+            "quarantine must not demote editor authority or authorize disk fallback"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), disk);
+        match current_text_for_file(&doc).unwrap() {
+            CurrentText::Current {
+                text,
+                live_editors,
+                delivery_converged,
+                ..
+            } => {
+                assert_eq!(text, retained, "canonical retains the captured response");
+                assert_eq!(live_editors, 0);
+                assert!(
+                    delivery_converged,
+                    "the impossible rejected endpoint no longer holds the delivery cut"
+                );
+            }
+            other => panic!("expected retained canonical authority, got {other:?}"),
+        }
+        assert!(rejected_editor_endpoint_is_quarantined(&registration));
+        let replacement = seed_rejected_endpoint_fixture(&doc, &editor_id, editor_pid, 21);
+        assert!(
+            !rejected_editor_endpoint_is_quarantined(&replacement),
+            "a newer registration generation must be immediately eligible for recovery"
+        );
+    }
+
     /// `#refusedsaveopaque`: the three not-yet-served outcomes are not equally
     /// weak. "Was reached, answered, and REFUSED" is the strongest evidence that
     /// no automatic attempt can converge — stronger than "could not be reached"

@@ -524,6 +524,28 @@ fn try_ipc_inner(
             skipped_committed_cycle: false,
         });
     }
+    if agent_doc_crdt_relay_io::rejected_editor_endpoint_is_quarantined(&editor_delivery_target) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_editor_delivery_skipped file={} patch_id={} editor_pid={} editor_id={} registration_timestamp_ms={} reason=exact_endpoint_rejected action=document_authority_recovery",
+                file.display(),
+                patch_id,
+                editor_delivery_target.pid,
+                editor_delivery_target.editor_id,
+                editor_delivery_target.timestamp_ms,
+            ),
+        );
+        eprintln!(
+            "[write] exact editor endpoint generation for {} rejected this retained delivery — recovering through document authority without resending the payload",
+            file.display(),
+        );
+        return Ok(IpcResult {
+            success: false,
+            patch_id,
+            skipped_committed_cycle: false,
+        });
+    }
 
     // Delivery is a single targeted state-machine transition. The endpoint pid
     // comes from the same Lazily registration as the editor id; unavailable or
@@ -1101,6 +1123,38 @@ fn try_ipc_inner(
                         );
                         log_write_wedge_requests_supervisor_recycle(file, "socket_ipc");
                     }
+                    // A terminal receipt rejection says this exact endpoint will
+                    // never satisfy the retained delivery. Remove only the
+                    // generation-fenced registration used by this send from the
+                    // CRDT delivery cut. Reliable editor ownership remains live,
+                    // so authority still refuses disk projection until the
+                    // editor re-registers and reconciles any newer buffer edits.
+                    if failure == SocketDeliveryFailure::Rejected {
+                        match agent_doc_crdt_relay_io::quarantine_rejected_editor_endpoint(
+                            file,
+                            &editor_delivery_target,
+                        ) {
+                            Ok(agent_doc_crdt_relay_io::RejectedEndpointQuarantine::Quarantined {
+                                replicas,
+                            }) => eprintln!(
+                                "[write] quarantined {replicas} rejecting editor replica(s) for {}; retained intent will resume through document authority",
+                                file.display(),
+                            ),
+                            Ok(
+                                agent_doc_crdt_relay_io::RejectedEndpointQuarantine::AlreadyQuarantined,
+                            ) => {}
+                            Ok(agent_doc_crdt_relay_io::RejectedEndpointQuarantine::Superseded) => {
+                                eprintln!(
+                                    "[write] rejecting editor registration for {} was superseded; preserving the newer endpoint and failing closed",
+                                    file.display(),
+                                );
+                            }
+                            Err(error) => eprintln!(
+                                "[write] WARNING: could not quarantine rejecting editor endpoint for {} (retained write remains fail-closed): {error:#}",
+                                file.display(),
+                            ),
+                        }
+                    }
                 }
                 return Ok(IpcResult {
                     success: false,
@@ -1121,6 +1175,71 @@ fn try_ipc_inner(
 #[cfg(test)]
 mod gh131nonipc_tests {
     use super::*;
+
+    #[test]
+    fn exact_rejected_registration_is_not_sent_the_retained_payload_again() {
+        use agent_doc_reliable_sync_io::liveness::{EditorRegistration, LivenessOp};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("rejected.md");
+        let content = "---\nagent_doc_session: rejected-generation\n---\n\nbody\n";
+        std::fs::write(&file, content).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let pid = std::process::id();
+        let editor_id = format!("jetbrains-{pid}-rejected-generation");
+        let registration = EditorRegistration {
+            document_hash: document_hash.clone(),
+            pid: pid.into(),
+            path: canonical.display().to_string(),
+            editor_id: editor_id.clone(),
+            editor_kind: "jetbrains".to_string(),
+            editor_version: "test".to_string(),
+            capabilities: Vec::new(),
+            timestamp_ms: 42,
+        };
+        let mut plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
+        plane.apply_local(&LivenessOp::Open {
+            document_hash,
+            pid: pid.into(),
+            tag: "rejected-generation".to_string(),
+        });
+        plane.apply_local(&LivenessOp::Register(registration.clone()));
+        drop(plane);
+        let identity = format!("{editor_id}:{}", canonical.display());
+        agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
+            &canonical, &identity, None, pid,
+        )
+        .unwrap()
+        .expect("editor replica should register");
+        assert!(matches!(
+            agent_doc_crdt_relay_io::quarantine_rejected_editor_endpoint(
+                &canonical,
+                &registration,
+            )
+            .unwrap(),
+            agent_doc_crdt_relay_io::RejectedEndpointQuarantine::Quarantined { .. }
+        ));
+
+        let result = try_ipc_inner(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            &canonical,
+            &[],
+            "",
+            None,
+            Some(content),
+            Some(content),
+            None,
+            None,
+        )
+        .expect("the retained retry must recover without contacting the rejected generation");
+
+        assert!(!result.success);
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("reason=exact_endpoint_rejected"), "{ops}");
+        assert!(ops.contains("action=document_authority_recovery"), "{ops}");
+    }
 
     #[test]
     fn live_editor_without_projected_registration_recovers_through_document_authority() {

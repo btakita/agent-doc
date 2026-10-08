@@ -5,9 +5,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 ## 0.35.479
 
 - **External done-archive publication is not a fresh turn (`#donearchive-stop-race`).** Clearing the body of an
-  `agent:done archive="..."` component after the editor publishes it to the external archive is now neutral to the
-  prompt-bearing diff classifier. A Codex Stop hook observing that projection therefore keeps the committed cycle
-  closed instead of capturing its console restatement into a new cycle. Inline `agent:done` edits remain visible.
+  `agent:done archive="..."` component after the editor publishes its exact bytes as an append to the configured
+  archive is neutral to the prompt-bearing diff classifier. A Codex Stop hook observing that proven projection keeps
+  the committed cycle closed instead of capturing its console restatement into a new cycle. Unproven clears, body
+  additions/revisions, marker/attribute changes, and inline `agent:done` edits remain visible.
 - **Response recovery is structural and replay-safe.** Exchange-close repair now reads Markdown structure instead of
   matching marker-looking text inside inline code or fenced blocks, and checkpoint-proven repeated response tails are
   collapsed without losing concurrent operator edits, component attributes, queue rows, or the newest boundary.

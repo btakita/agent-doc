@@ -5,9 +5,13 @@
 //! editor owns the document.
 
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
-use agent_doc_diff::{is_stale_snapshot, strip_comments, unified_diff_from_contents};
+use agent_doc_diff::{
+    ExternalDoneArchiveDrainCandidate, archive_content_proves_exact_append,
+    external_done_archive_drain_candidates, is_stale_snapshot, strip_comments,
+    unified_diff_from_contents_with_proven_external_done_archive_drains,
+};
 
 /// Diff result plus the exact snapshot/current document content used to compute it.
 pub struct ComputeResult {
@@ -36,6 +40,62 @@ pub trait DocumentBaselineStore {
 /// model is unavailable/detached": fall back to the disk-sourced content.
 pub trait LiveCurrentSource {
     fn live_current(&self, doc: &Path, disk: &str) -> Option<String>;
+}
+
+fn resolve_external_done_archive_target(doc: &Path, archive_path: &str) -> Option<PathBuf> {
+    let relative = Path::new(archive_path);
+    if archive_path.trim().is_empty()
+        || !archive_path.ends_with(".done.md")
+        || relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return None;
+    }
+    let root = agent_doc_fs::find_project_root(doc)?;
+    let target = root.join(relative);
+    if let Ok(canonical_target) = target.canonicalize() {
+        canonical_target.starts_with(&root).then_some(target)
+    } else if let Some(parent) = target.parent()
+        && let Ok(canonical_parent) = parent.canonicalize()
+        && !canonical_parent.starts_with(&root)
+    {
+        None
+    } else {
+        Some(target)
+    }
+}
+
+fn proven_external_done_archive_drains<S: DocumentBaselineStore + ?Sized>(
+    snapshots: &S,
+    doc: &Path,
+    previous: &str,
+    current: &str,
+) -> Vec<ExternalDoneArchiveDrainCandidate> {
+    external_done_archive_drain_candidates(previous, current)
+        .into_iter()
+        .filter(|candidate| {
+            let Some(target) = resolve_external_done_archive_target(doc, &candidate.archive_path)
+            else {
+                return false;
+            };
+            let Ok(Some(previous_archive)) = snapshots.resolve(&target) else {
+                return false;
+            };
+            let Ok(current_archive) = std::fs::read_to_string(&target) else {
+                return false;
+            };
+            archive_content_proves_exact_append(
+                &previous_archive,
+                &current_archive,
+                &candidate.removed_body,
+            )
+        })
+        .collect()
 }
 
 /// Compute a unified diff between the snapshot and the current document, and
@@ -77,7 +137,13 @@ pub fn compute_with_current<S: DocumentBaselineStore + ?Sized>(
         previous_stripped.len(),
     );
 
-    let Some(output) = unified_diff_from_contents(&previous, &current) else {
+    let proven_archive_drains =
+        proven_external_done_archive_drains(snapshots, doc, &previous, &current);
+    let Some(output) = unified_diff_from_contents_with_proven_external_done_archive_drains(
+        &previous,
+        &current,
+        &proven_archive_drains,
+    ) else {
         eprintln!(
             "[diff] no changes detected between snapshot and document (after comment stripping)"
         );
@@ -256,6 +322,7 @@ mod tests {
         snap_content: &str,
     ) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, doc_content).unwrap();
 
@@ -347,6 +414,82 @@ mod tests {
         let result = compute(&TestBaselineStore, &doc).unwrap();
 
         assert!(result.is_none(), "notes-only edits must not start a turn");
+    }
+
+    #[test]
+    fn compute_neutralizes_only_a_proven_external_done_archive_append() {
+        let removed = concat!(
+            "- 2026-10-08 [#completed] Completed item.\n",
+            "  Archived detail.\n",
+        );
+        let snapshot = format!(
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n{removed}<!-- /agent:done -->\n"
+        );
+        let document = concat!(
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let (dir, doc) = setup_compute_env(document, &snapshot);
+        let archive = dir.path().join("tasks/tools.done.md");
+        std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        let archive_before = "# Agent Doc Completed Work\n\n";
+        std::fs::write(&archive, format!("{archive_before}{removed}")).unwrap();
+        save_test_snapshot(&archive, archive_before).unwrap();
+
+        assert_eq!(
+            resolve_external_done_archive_target(&doc, "tasks/tools.done.md"),
+            Some(archive.clone())
+        );
+        assert_eq!(
+            load_test_snapshot(&archive).unwrap().as_deref(),
+            Some(archive_before)
+        );
+        let proof =
+            proven_external_done_archive_drains(&TestBaselineStore, &doc, &snapshot, document);
+        assert_eq!(proof.len(), 1, "exact archive append must be proven");
+
+        assert_eq!(compute(&TestBaselineStore, &doc).unwrap(), None);
+    }
+
+    #[test]
+    fn compute_keeps_external_done_clear_visible_without_matching_archive_append() {
+        let removed = "Operator-authored completion correction.\n";
+        let snapshot = format!(
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n{removed}<!-- /agent:done -->\n"
+        );
+        let document = concat!(
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let (dir, doc) = setup_compute_env(document, &snapshot);
+        let archive = dir.path().join("tasks/tools.done.md");
+        std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        let archive_before = "# Agent Doc Completed Work\n\n";
+        std::fs::write(&archive, format!("{archive_before}Different entry.\n")).unwrap();
+        save_test_snapshot(&archive, archive_before).unwrap();
+
+        let diff = compute(&TestBaselineStore, &doc)
+            .unwrap()
+            .expect("mismatched archive publication must stay visible");
+        assert!(diff.contains("Operator-authored completion correction."));
+    }
+
+    #[test]
+    fn compute_keeps_external_done_clear_visible_when_archive_is_absent() {
+        let removed = "Operator-authored completion correction.\n";
+        let snapshot = format!(
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n{removed}<!-- /agent:done -->\n"
+        );
+        let document = concat!(
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let (_dir, doc) = setup_compute_env(document, &snapshot);
+
+        let diff = compute(&TestBaselineStore, &doc)
+            .unwrap()
+            .expect("a source clear without an archive publication must stay visible");
+        assert!(diff.contains("Operator-authored completion correction."));
     }
 
     #[test]

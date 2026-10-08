@@ -5292,6 +5292,15 @@ Done.\n\
         )
         .unwrap();
         init_git_repo(dir.path(), &doc);
+        let archive = dir.path().join("tasks/task.done.md");
+        fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        let archive_before = "# Agent Doc Completed Work\n\n";
+        fs::write(&archive, archive_before).unwrap();
+        git(dir.path(), &["add", "tasks/task.done.md"]);
+        git(
+            dir.path(),
+            &["commit", "-m", "seed done archive", "--no-verify"],
+        );
         let previous =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original))
                 .unwrap();
@@ -5325,6 +5334,11 @@ Done.\n\
             "- 2026-10-08 [#completed] Completed item.\n  Archived detail that is not shaped like a tracked-item row.\n",
             "",
         );
+        let removed_body = concat!(
+            "- 2026-10-08 [#completed] Completed item.\n",
+            "  Archived detail that is not shaped like a tracked-item row.\n",
+        );
+        fs::write(&archive, format!("{archive_before}{removed_body}")).unwrap();
         fs::write(&doc, &archived).unwrap();
 
         let response = apply_stop(&StopInput {
@@ -5344,6 +5358,15 @@ Done.\n\
         );
         assert_eq!(cycle.phase.as_str(), "committed");
         assert!(
+            agent_doc_capture_io::load_active(&doc).unwrap().is_none(),
+            "archive projection must not retain the console restatement"
+        );
+        assert_eq!(
+            fs::read_to_string(&archive).unwrap(),
+            format!("{archive_before}{removed_body}"),
+            "the test must retain the exact archive append that proves the source drain"
+        );
+        assert!(
             !fs::read_to_string(&doc)
                 .unwrap()
                 .contains("Console restatement"),
@@ -5352,6 +5375,95 @@ Done.\n\
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             !ops.contains("codex_stop_post_commit_prompt_cycle_reopened"),
+            "{ops}"
+        );
+    }
+
+    #[test]
+    fn stop_reopens_for_operator_edit_inside_external_done_component() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let original = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: completed work — gpt-5\n\n",
+            "The completed work is persisted.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done archive=\"tasks/task.done.md\" -->\n",
+            "Original operator completion note.\n",
+            "<!-- /agent:done -->\n",
+        );
+        fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        let archive = dir.path().join("tasks/task.done.md");
+        fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        fs::write(&archive, "# Agent Doc Completed Work\n\n").unwrap();
+        git(dir.path(), &["add", "tasks/task.done.md"]);
+        git(
+            dir.path(),
+            &["commit", "-m", "seed done archive", "--no-verify"],
+        );
+        let previous =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original))
+                .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(original),
+            Some(original),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let revised = original.replace(
+            "Original operator completion note.",
+            "Operator revised the completion note.",
+        );
+        fs::write(&doc, &revised).unwrap();
+
+        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
+        let previous_thread_id = std::env::var("CODEX_THREAD_ID").ok();
+        unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message:
+                "### Re: completion correction — gpt-5\n\nPreserved the operator correction."
+                    .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        if let Some(value) = previous_thread_id {
+            unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
+        } else {
+            unsafe { std::env::remove_var("CODEX_THREAD_ID") };
+        }
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("Operator revised the completion note."));
+        assert!(content.contains("Preserved the operator correction."));
+        let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_ne!(
+            cycle.cycle_id, previous.cycle_id,
+            "operator edit was hidden"
+        );
+        assert_eq!(cycle.phase.as_str(), "committed");
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_post_commit_prompt_cycle_reopened"),
             "{ops}"
         );
     }

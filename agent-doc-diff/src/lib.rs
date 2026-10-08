@@ -241,18 +241,7 @@ fn neutralize_informational_component_content(content: &str) -> String {
 
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     for component in components {
-        // `#donearchive-stop-race`: the body of an external done archive is a
-        // binary-owned staging projection. Publishing it appends the body to
-        // the configured file and clears it from the session document, often
-        // while the Stop hook is still observing the live editor. That move is
-        // not fresh prompt-bearing work. Keep ordinary inline `agent:done`
-        // changes governed by the descriptor's Trigger role so a hand-edited
-        // local completion archive still fails open.
-        let external_done_projection =
-            component.name == "done" && component.attrs.contains_key("archive");
-        if turn_role_for_component_name(&component.name).triggers_turn()
-            && !external_done_projection
-        {
+        if turn_role_for_component_name(&component.name).triggers_turn() {
             continue;
         }
 
@@ -272,6 +261,141 @@ fn neutralize_informational_component_content(content: &str) -> String {
     let mut normalized = content.to_string();
     for (start, end) in ranges.into_iter().rev() {
         normalized.replace_range(start..end, "");
+    }
+    normalized
+}
+
+/// A structurally valid external-done drain that still needs archive evidence.
+///
+/// This is deliberately only a candidate: document structure can prove that a
+/// stable `agent:done archive=...` body became empty, but only the I/O boundary
+/// can prove that the exact removed bytes were appended to that target.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExternalDoneArchiveDrainCandidate {
+    pub archive_path: String,
+    pub removed_body: String,
+}
+
+/// Find same-marker, same-attribute nonempty-to-empty external-done drains.
+///
+/// Any parse failure, component-count mismatch, marker change, body addition,
+/// or body revision fails open by returning no candidate for that component.
+pub fn external_done_archive_drain_candidates(
+    previous: &str,
+    current: &str,
+) -> Vec<ExternalDoneArchiveDrainCandidate> {
+    let (Ok(previous_components), Ok(current_components)) =
+        (element::parse(previous), element::parse(current))
+    else {
+        return Vec::new();
+    };
+    let previous_done = previous_components
+        .iter()
+        .filter(|component| component.name == "done" && component.attrs.contains_key("archive"))
+        .collect::<Vec<_>>();
+    let current_done = current_components
+        .iter()
+        .filter(|component| component.name == "done" && component.attrs.contains_key("archive"))
+        .collect::<Vec<_>>();
+    if previous_done.len() != current_done.len() {
+        return Vec::new();
+    }
+
+    previous_done
+        .into_iter()
+        .zip(current_done)
+        .filter_map(|(before, after)| {
+            let before_open = &previous[before.open_start..before.open_end];
+            let after_open = &current[after.open_start..after.open_end];
+            let before_close = &previous[before.close_start..before.close_end];
+            let after_close = &current[after.close_start..after.close_end];
+            let before_body = before.content(previous);
+            let after_body = after.content(current);
+            if before.attrs != after.attrs
+                || before_open != after_open
+                || before_close != after_close
+                || before_body.trim().is_empty()
+                || !after_body.trim().is_empty()
+            {
+                return None;
+            }
+            Some(ExternalDoneArchiveDrainCandidate {
+                archive_path: before.attrs.get("archive")?.clone(),
+                removed_body: before_body.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Prove that `appended` is the complete suffix added to an archive baseline.
+///
+/// The one permitted normalization matches the archive writer: it inserts one
+/// newline before appending when the prior archive did not end in a newline.
+pub fn archive_content_proves_exact_append(
+    previous_archive: &str,
+    current_archive: &str,
+    appended: &str,
+) -> bool {
+    if appended.trim().is_empty() {
+        return false;
+    }
+    let Some(delta) = current_archive.strip_prefix(previous_archive) else {
+        return false;
+    };
+    delta == appended
+        || (!previous_archive.is_empty()
+            && !previous_archive.ends_with('\n')
+            && delta.strip_prefix('\n') == Some(appended))
+}
+
+fn neutralize_proven_external_done_archive_drains(
+    previous: &str,
+    current: &str,
+    proven: &[ExternalDoneArchiveDrainCandidate],
+) -> String {
+    if proven.is_empty() {
+        return previous.to_string();
+    }
+    let proven = proven.iter().collect::<std::collections::HashSet<_>>();
+    let (Ok(previous_components), Ok(current_components)) =
+        (element::parse(previous), element::parse(current))
+    else {
+        return previous.to_string();
+    };
+    let previous_done = previous_components
+        .iter()
+        .filter(|component| component.name == "done" && component.attrs.contains_key("archive"))
+        .collect::<Vec<_>>();
+    let current_done = current_components
+        .iter()
+        .filter(|component| component.name == "done" && component.attrs.contains_key("archive"))
+        .collect::<Vec<_>>();
+    if previous_done.len() != current_done.len() {
+        return previous.to_string();
+    }
+
+    let mut replacements = Vec::new();
+    for (before, after) in previous_done.into_iter().zip(current_done) {
+        let candidate = ExternalDoneArchiveDrainCandidate {
+            archive_path: before.attrs.get("archive").cloned().unwrap_or_default(),
+            removed_body: before.content(previous).to_string(),
+        };
+        if proven.contains(&candidate)
+            && before.attrs == after.attrs
+            && previous[before.open_start..before.open_end]
+                == current[after.open_start..after.open_end]
+            && previous[before.close_start..before.close_end]
+                == current[after.close_start..after.close_end]
+            && !candidate.removed_body.trim().is_empty()
+            && after.content(current).trim().is_empty()
+        {
+            replacements.push((before.open_end, before.close_start, after.content(current)));
+        }
+    }
+
+    let mut normalized = previous.to_string();
+    for (start, end, replacement) in replacements.into_iter().rev() {
+        normalized.replace_range(start..end, replacement);
     }
     normalized
 }
@@ -2738,7 +2862,18 @@ pub fn detect_queue_trigger(diff: &str) -> bool {
 ///
 /// Returns `None` when there are no meaningful changes.
 pub fn unified_diff_from_contents(previous: &str, current: &str) -> Option<String> {
-    let previous_stripped = strip_comments(previous);
+    unified_diff_from_contents_with_proven_external_done_archive_drains(previous, current, &[])
+}
+
+/// Build a unified diff while suppressing only external-done drains whose
+/// archive append was proven by the file-aware caller.
+pub fn unified_diff_from_contents_with_proven_external_done_archive_drains(
+    previous: &str,
+    current: &str,
+    proven: &[ExternalDoneArchiveDrainCandidate],
+) -> Option<String> {
+    let previous = neutralize_proven_external_done_archive_drains(previous, current, proven);
+    let previous_stripped = strip_comments(&previous);
     let current_stripped = strip_comments(current);
     let diff = TextDiff::from_lines(&previous_stripped, &current_stripped);
     let has_changes = diff.iter_all_changes().any(|c| c.tag() != ChangeTag::Equal);
@@ -3916,8 +4051,77 @@ diff --git a/tests/render_test.rs b/tests/render_test.rs
             "<!-- /agent:done -->\n",
         );
 
-        assert_eq!(strip_comments(previous), strip_comments(current));
-        assert_eq!(unified_diff_from_contents(previous, current), None);
+        assert!(
+            unified_diff_from_contents(previous, current).is_some(),
+            "a source clear without archive evidence must remain visible"
+        );
+        let candidates = external_done_archive_drain_candidates(previous, current);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].archive_path, "tasks/tools.done.md");
+        let archive_before = "# Agent Doc Completed Work\n\n";
+        let archive_after = format!("{archive_before}{}", candidates[0].removed_body);
+        assert!(archive_content_proves_exact_append(
+            archive_before,
+            &archive_after,
+            &candidates[0].removed_body,
+        ));
+        assert_eq!(
+            unified_diff_from_contents_with_proven_external_done_archive_drains(
+                previous,
+                current,
+                &candidates,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn external_done_body_addition_remains_visible_without_archive_proof() {
+        let previous = concat!(
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n",
+            "Operator-authored completion note.\n",
+            "<!-- /agent:done -->\n",
+        );
+
+        assert!(unified_diff_from_contents(previous, current).is_some());
+    }
+
+    #[test]
+    fn external_done_body_revision_remains_visible_without_archive_proof() {
+        let previous = concat!(
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n",
+            "Original completion note.\n",
+            "<!-- /agent:done -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n",
+            "Operator revised the completion note.\n",
+            "<!-- /agent:done -->\n",
+        );
+
+        assert!(unified_diff_from_contents(previous, current).is_some());
+    }
+
+    #[test]
+    fn external_done_marker_and_archive_attribute_changes_remain_visible() {
+        let previous = concat!(
+            "<!-- agent:done archive=\"tasks/old.done.md\" -->\n",
+            "Completion note.\n",
+            "<!-- /agent:done -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:done archive=\"tasks/new.done.md\" owner=operator -->\n",
+            "<!-- /agent:done -->\n",
+        );
+
+        let diff = unified_diff_from_contents(previous, current).expect("marker/attribute diff");
+        assert!(diff.contains("old.done.md"));
+        assert!(diff.contains("new.done.md"));
+        assert!(diff.contains("owner=operator"));
     }
 
     #[test]

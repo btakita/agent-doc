@@ -210,7 +210,7 @@ Completed and closed GitHub issue #185. The fix is commit `422c4847522d88ed5ad0e
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] 🚧 [#possibletellclaude] Is it possible to tell Claude Code which document to focus on for context?
+- [ ] [#possibletellclaude] Is it possible to tell Claude Code which document to focus on for context?
 <!-- /agent:backlog -->
 
 ## Review

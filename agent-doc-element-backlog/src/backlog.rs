@@ -226,21 +226,41 @@ impl PendingLayout {
             };
         }
 
+        let literal_ranges = agent_doc_element::element::find_markdown_literal_ranges(body);
         let mut segments = Vec::new();
         let lines: Vec<&str> = body.split_inclusive('\n').collect();
+        let mut offset = 0usize;
+        let line_starts: Vec<usize> = lines
+            .iter()
+            .map(|raw_line| {
+                let start = offset;
+                offset += raw_line.len();
+                start
+            })
+            .collect();
         let mut index = 0usize;
         while index < lines.len() {
             let raw_line = lines[index];
             let has_newline = raw_line.ends_with('\n');
             let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
-            if let Some(mut item) = parse_item_line(line) {
+            if let Some(mut item) = parse_item_line_outside_literals(
+                line,
+                line_starts[index],
+                &literal_ranges,
+            ) {
                 index += 1;
                 let mut continuation = String::new();
                 let mut pending_blank_lines = String::new();
                 while index < lines.len() {
                     let next_raw = lines[index];
                     let next_line = next_raw.strip_suffix('\n').unwrap_or(next_raw);
-                    if parse_item_line(next_line).is_some() {
+                    if parse_item_line_outside_literals(
+                        next_line,
+                        line_starts[index],
+                        &literal_ranges,
+                    )
+                    .is_some()
+                    {
                         break;
                     }
                     if next_line.is_empty() {
@@ -495,6 +515,20 @@ impl PendingLayout {
     }
 }
 
+fn parse_item_line_outside_literals(
+    line: &str,
+    line_start: usize,
+    literal_ranges: &[(usize, usize)],
+) -> Option<PendingItem> {
+    let item = parse_item_line(line)?;
+    let marker_offset = line.len() - line.trim_start().len();
+    let marker = line_start + marker_offset;
+    (!literal_ranges
+        .iter()
+        .any(|(start, end)| marker >= *start && marker < *end))
+    .then_some(item)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShadowPendingItem {
     pub id: String,
@@ -551,14 +585,28 @@ impl MalformedTrackedItemRef {
 /// live pending items. These lines are dangerous during closeout because guards
 /// that operate on parsed items would otherwise treat the matching id as absent.
 pub fn detect_malformed_item_lines(body: &str) -> Vec<MalformedPendingItemLine> {
-    body.lines()
+    let literal_ranges = agent_doc_element::element::find_markdown_literal_ranges(body);
+    let mut offset = 0usize;
+    body.split_inclusive('\n')
         .enumerate()
-        .filter_map(|(idx, line)| {
+        .filter_map(|(idx, raw_line)| {
+            let line_start = offset;
+            offset += raw_line.len();
+            let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+            let line = line.strip_suffix('\r').unwrap_or(line);
             if parse_item_line(line).is_some() {
                 return None;
             }
             let trimmed = line.trim();
             let (id, id_start) = find_valid_hash_id(trimmed)?;
+            let trimmed_start = line.len() - line.trim_start().len();
+            let id_offset = line_start + trimmed_start + id_start;
+            if literal_ranges
+                .iter()
+                .any(|(start, end)| id_offset >= *start && id_offset < *end)
+            {
+                return None;
+            }
             let prefix = &trimmed[..id_start];
             if !prefix_contains_task_checkbox(prefix) {
                 return None;
@@ -3576,9 +3624,13 @@ fn normalize_nested_subtasks(
         return (String::new(), false);
     }
 
+    let literal_ranges = agent_doc_element::element::find_markdown_literal_ranges(continuation);
     let mut changed = false;
     let mut out = String::with_capacity(continuation.len());
+    let mut offset = 0usize;
     for raw_line in continuation.split_inclusive('\n') {
+        let line_start = offset;
+        offset += raw_line.len();
         let has_newline = raw_line.ends_with('\n');
         let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
         if !is_indented_continuation_line(line) {
@@ -3587,6 +3639,14 @@ fn normalize_nested_subtasks(
         }
 
         let (indent, trimmed) = split_indent(line);
+        let marker = line_start + indent.len();
+        if literal_ranges
+            .iter()
+            .any(|(start, end)| marker >= *start && marker < *end)
+        {
+            out.push_str(raw_line);
+            continue;
+        }
         let Some(mut child) = parse_item_line(trimmed) else {
             out.push_str(raw_line);
             continue;
@@ -5283,6 +5343,89 @@ mod tests {
             "   1. dependency one\n   2. dependency two\n"
         );
         assert_eq!(items[1].marker, PendingListMarker::Ordered(2));
+    }
+
+    #[test]
+    fn markdown_literal_checklists_are_not_tracked_items() {
+        let cases = [
+            concat!(
+                "```md\n",
+                "- [ ] [#fenced] fenced example\n",
+                "```\n",
+                "- [ ] [#real] real work\n",
+            ),
+            concat!(
+                "~~~md\n",
+                "- [ ] [#tilde] tilde example\n",
+                "~~~\n",
+                "- [ ] [#real] real work\n",
+            ),
+            concat!(
+                "    - [ ] [#indented] indented code example\n",
+                "- [ ] [#real] real work\n",
+            ),
+            concat!(
+                "<!--\n",
+                "- [ ] [#commented] HTML comment example\n",
+                "-->\n",
+                "- [ ] [#real] real work\n",
+            ),
+            concat!(
+                "<pre>\n",
+                "- [ ] [#html] raw HTML example\n",
+                "</pre>\n\n",
+                "- [ ] [#real] real work\n",
+            ),
+        ];
+
+        for body in cases {
+            let (_, items, _) = parse_items(body);
+            assert_eq!(
+                items
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["real"],
+                "literal checklist escaped into tracked work: {body:?}"
+            );
+            assert!(
+                detect_malformed_item_lines(body).is_empty(),
+                "literal checklist escaped into malformed-item detection: {body:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_fenced_backlog_examples_stay_on_the_parent() {
+        let body = concat!(
+            "- [ ] [#report] Run Agent Doc on tools.md duplicated my queue item:\n",
+            "  ```\n",
+            "  - do - do [#crossplatformmise]\n",
+            "  ```\n",
+            "  ```\n",
+            "  - [ ] [#crossplatformmise-txpw] Re: Cross-platform mise bootstrap\n",
+            "  - [ ] [#crossplatformmise] Re: Cross-platform mise bootstrap\n",
+            "  ```\n",
+            "- [ ] [#real] genuine sibling\n",
+        );
+
+        let (_, items, _) = parse_items(body);
+
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["report", "real"]
+        );
+        assert!(items[0].continuation.contains("[#crossplatformmise-txpw]"));
+
+        let (normalized, changed) = backfill(body, "doc-id", &HashSet::new());
+        assert!(
+            !changed,
+            "literal examples must not be normalized as subtasks"
+        );
+        assert_eq!(normalized, body);
     }
 
     #[test]

@@ -104,6 +104,8 @@ form: `subagents=N` / `fan-out=N` on `agent:exchange` is invalid.
 
 Tracked backlog/review items may carry a machine-readable symptom de-duplication marker in their text: `[symptom-key invariant=<id> document=<doc-id> component=<component> content_hash=<hash>]`. `--backlog-add` (legacy `--pending-add`) and `--review-add` use this key to attach a repeated symptom as an indented `evidence:` continuation on the existing open/gated backlog or review item instead of inserting another tracked item. The key fields are field-safe tokens and intentionally match the binary outcome vocabulary: invariant id, document id, component, and content hash.
 
+Tracked-work extraction is Markdown-structural. Checklist-shaped text inside fenced or indented code, inline code, HTML comments, or raw HTML blocks is literal evidence and never a live backlog/review/icebox item, even when the literal block is indented beneath a real item. The parser uses Markdown AST byte ranges for this classification; line-pattern matching must not independently promote literal examples into tracked work.
+
 ### §2.5 Queue Component
 
 The `agent:queue` component holds a batch of prompts consumed sequentially. It is scaffolded between `exchange` and `pending` in the default template.

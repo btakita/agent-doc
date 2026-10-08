@@ -393,9 +393,10 @@ pub fn deduplicate_response_cells(doc: &str) -> anyhow::Result<Option<String>> {
 /// A second capture-scoped shape covers one response node whose tail contains
 /// at least three exact copies of newly appended text; see
 /// [`collapse_checkpoint_proven_repeated_suffix`] for its stricter proof.
-/// Together these repairs retain one exact captured response, preserve a
-/// distinct earlier same-topic response, and keep every prompt, unrelated
-/// response, operator edit, and the newest boundary.
+/// A third restores a unique heading-only shell, absent from the capture
+/// baseline, from the exact durable captured node. Together these repairs retain
+/// one exact captured response, preserve a distinct earlier same-topic response,
+/// and keep every prompt, unrelated response, operator edit, and newest boundary.
 pub fn deduplicate_captured_response_replays(
     doc: &str,
     baseline: &str,
@@ -478,6 +479,27 @@ pub fn deduplicate_captured_response_replays(
             .collect::<Vec<_>>();
         if candidate_indices.len() == 1 {
             let index = candidate_indices[0];
+            let visible_body = |lines: &[String]| {
+                lines.iter().skip(1).any(|line| {
+                    let trimmed = line.trim();
+                    !trimmed.is_empty()
+                        && !(trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
+                })
+            };
+            // A failed two-phase partial-response repair can durably retain the
+            // response heading after stripping its body, then lose the replica
+            // before replaying the exact capture. Restore only the uniquely
+            // introduced empty shell: a same-topic response in the baseline is
+            // ambiguous and remains fail-closed, while the durable captured node
+            // supplies the exact body bytes.
+            if baseline_candidates.is_empty()
+                && !visible_body(&nodes[index].lines)
+                && visible_body(&captured.lines)
+            {
+                nodes[index].lines = captured.lines.clone();
+                removed = true;
+                continue;
+            }
             if let Some(collapsed) =
                 collapse_checkpoint_proven_repeated_suffix(&nodes[index].lines, &captured.lines)
             {
@@ -1018,6 +1040,70 @@ mod tests {
         assert_eq!(normalized.matches("agent:boundary:").count(), 1);
         assert!(normalized.contains("agent:boundary:latest"));
         assert!(normalized.contains("❯ operator prompt"));
+    }
+
+    #[test]
+    fn captured_response_replay_restores_unique_empty_heading_shell() {
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior turn — gpt-5\n\n",
+            "Prior response body.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let captured = concat!(
+            "### Re: retained-delivery false error — gpt-5\n\n",
+            "Exact durable captured body.\n",
+        );
+        let stranded = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior turn — gpt-5\n\n",
+            "Prior response body.\n",
+            "> **Chat prompt (#chatprompt):** Fix the cause of the error\n\n",
+            "### Re: retained-delivery false error — gpt-5 (HEAD)\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let recovered = deduplicate_captured_response_replays(stranded, baseline, captured)
+            .unwrap()
+            .expect("the durable capture should fill its unique empty heading shell");
+
+        assert!(recovered.contains("Exact durable captured body."));
+        assert!(recovered.contains("> **Chat prompt (#chatprompt):** Fix the cause of the error"));
+        assert_eq!(
+            recovered
+                .matches("### Re: retained-delivery false error — gpt-5")
+                .count(),
+            1
+        );
+        assert_eq!(recovered.matches("agent:boundary:").count(), 1);
+        assert!(recovered.contains("agent:boundary:latest"));
+    }
+
+    #[test]
+    fn captured_response_replay_keeps_empty_shell_ambiguous_when_topic_existed_in_baseline() {
+        let baseline = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: repeated topic — gpt-5\n\n",
+            "Earlier baseline body.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let captured = "### Re: repeated topic — gpt-5\n\nLater captured body.\n";
+        let stranded = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: repeated topic — gpt-5\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            deduplicate_captured_response_replays(stranded, baseline, captured).unwrap(),
+            None,
+            "a pre-existing same-topic response makes an empty shell ambiguous"
+        );
     }
 
     #[test]

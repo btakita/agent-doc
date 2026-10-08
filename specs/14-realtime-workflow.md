@@ -470,6 +470,13 @@ turn lands at the end of the exchange or immediately before a trailing
 byte-verbatim. This prevents retained exchange prose from being concatenated
 with an operator prompt or newly appended response node into one malformed node.
 
+Capture-scoped replay normalization may fill a heading-only response shell from
+the exact durable captured response only when that normalized response topic is
+unique in the captured materialization and absent from the independently hashed
+capture baseline. A same-topic baseline response or multiple captured candidates
+is ambiguous and remains fail-closed. Operator prompts and the newest response
+boundary remain byte-preserved around the restored cell.
+
 A whole-document replay is transport corruption, not a prompt the agent must
 repair. Preflight and route preparation may coalesce two structurally complete
 copies only when they have byte-identical frontmatter and either are identical

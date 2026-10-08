@@ -421,6 +421,7 @@ dependencies = [
  "agent-doc-merge",
  "agent-doc-merge-io",
  "agent-doc-ops-log-io",
+ "agent-doc-project-config-io",
  "agent-doc-project-root-io",
  "agent-doc-prompt-lines",
  "agent-doc-queue",

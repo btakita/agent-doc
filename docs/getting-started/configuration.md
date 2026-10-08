@@ -174,10 +174,25 @@ Location: `.agent-doc/config.toml` (relative to project root).
 | `tmux_session` | Tmux session name bound to this project |
 | `tmux_sessions` | Optional allow-list for multi-session projects (one editor, several tmux sessions); documents bind with `tmux_session:` frontmatter. Empty keeps single-session behavior. See `runbooks/multi-tmux-sessions.md` |
 | `[terminal]` | Project terminal policy; the same fields as global `[terminal]` except session naming remains top-level `tmux_session` |
+| `[commit] push` | Optional post-closeout publication policy. `"off"` (the default) leaves commits local; `"ff-only"` pushes `HEAD` to the current branch's configured upstream without force. Rejections are warnings and do not invalidate the committed cycle. |
 | `agent_doc_auto_compact` | Line threshold for automatic compaction opt-in |
 | `agent_doc_supervisor_stderr_log` | Supervisor stderr log path. Relative paths resolve from the project root; absolute paths are used as written. Defaults to `.agent-doc/logs/supervisor-stderr.log` |
 | `documents.include` | Project-relative globs for session document opt-in |
 | `documents.auto_session_for_all_md` | Legacy escape hatch (default `false`) |
+
+To publish each newly created closeout commit to the current branch's configured
+upstream, opt in explicitly:
+
+```toml
+[commit]
+push = "ff-only"
+```
+
+The push uses an explicit `HEAD:<upstream-branch>` refspec, disables force,
+mirror, tag, and recursive-submodule modes, and runs only after the local
+closeout transaction succeeds. A missing upstream, non-fast-forward rejection,
+or transport failure is logged as an advisory warning; the local committed
+cycle remains valid.
 
 ### SSH Config
 

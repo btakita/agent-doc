@@ -45,6 +45,31 @@ pub struct ProjectTerminalConfig {
     pub attach_command: Option<String>,
 }
 
+/// Optional publication policy for commits produced by agent-doc closeout.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CommitPushMode {
+    /// Keep closeout commits local. This is the default.
+    #[default]
+    Off,
+    /// Push the current branch to its configured upstream without force.
+    FfOnly,
+}
+
+/// Project commit policy (`[commit]` in `.agent-doc/config.toml`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitConfig {
+    /// Optional post-closeout publication. Defaults to `off`.
+    #[serde(default)]
+    pub push: CommitPushMode,
+}
+
+impl CommitConfig {
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
 /// Guard modes for `[guards]` in `.agent-doc/config.toml`.
 ///
 /// `#guardkeyalias`: each field also accepts its **frontmatter** spelling as an
@@ -333,6 +358,10 @@ pub struct ProjectConfig {
     /// Project terminal policy. Session naming stays in `tmux_session` above.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<ProjectTerminalConfig>,
+    /// Commit and publication policy. Publication is disabled unless explicitly
+    /// configured as `[commit] push = "ff-only"`.
+    #[serde(default, skip_serializing_if = "CommitConfig::is_default")]
+    pub commit: CommitConfig,
     /// Explicit opt-in for automatic compaction/reload policies.
     /// Session-accretion heuristics never compact by themselves; omit to disable.
     #[serde(default, alias = "auto_compact")]
@@ -1036,5 +1065,24 @@ free_text_execution = "goal"
             dashboard,
             &cfg(&["**/*.md"], false)
         ));
+    }
+
+    #[test]
+    fn post_closeout_push_is_off_by_default() {
+        assert_eq!(
+            ProjectConfig::default().commit.push,
+            CommitPushMode::Off
+        );
+        let serialized = toml::to_string(&ProjectConfig::default()).unwrap();
+        assert!(!serialized.contains("[commit]"));
+    }
+
+    #[test]
+    fn parses_ff_only_post_closeout_push() {
+        let parsed = parse_project_toml("[commit]\npush = \"ff-only\"\n").unwrap();
+        assert_eq!(parsed.commit.push, CommitPushMode::FfOnly);
+
+        let explicitly_off = parse_project_toml("[commit]\npush = \"off\"\n").unwrap();
+        assert_eq!(explicitly_off.commit.push, CommitPushMode::Off);
     }
 }

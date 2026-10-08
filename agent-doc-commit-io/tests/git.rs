@@ -4579,6 +4579,79 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
+        // Opt in to post-closeout publication, then make the configured
+        // upstream diverge. The closeout commit below must remain successful
+        // even though its best-effort push is rejected as non-fast-forward.
+        fs::write(
+            root.join(".agent-doc/config.toml"),
+            "[commit]\npush = \"ff-only\"\n",
+        )
+        .unwrap();
+        let remote_dir = tempfile::TempDir::new().unwrap();
+        Command::new("git")
+            .current_dir(remote_dir.path())
+            .args(["init", "--bare"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            Command::new("git")
+                .current_dir(root)
+                .args(["push", "-u", "origin", "HEAD"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let peer_dir = tempfile::TempDir::new().unwrap();
+        assert!(
+            Command::new("git")
+                .current_dir(peer_dir.path())
+                .args(["clone", remote_dir.path().to_str().unwrap(), "."])
+                .status()
+                .unwrap()
+                .success()
+        );
+        Command::new("git")
+            .current_dir(peer_dir.path())
+            .args(["config", "user.email", "peer@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(peer_dir.path())
+            .args(["config", "user.name", "Peer"])
+            .output()
+            .unwrap();
+        commit_file(
+            peer_dir.path(),
+            "peer.txt",
+            "remote advance\n",
+            "peer advance",
+        );
+        assert!(
+            Command::new("git")
+                .current_dir(peer_dir.path())
+                .args(["push", "origin", "HEAD"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let remote_before = Command::new("git")
+            .current_dir(remote_dir.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(remote_before.status.success());
+        let remote_before = String::from_utf8(remote_before.stdout).unwrap();
+
         let _listener = start_fake_listener(root);
         wait_for_listener(root);
 
@@ -4606,6 +4679,23 @@ Duplicate replay should stay live.
 
         let did_commit = commit(&doc).expect("real closeout commit should succeed");
         assert!(did_commit, "snapshot should produce a real git commit");
+
+        let remote_after = Command::new("git")
+            .current_dir(remote_dir.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(remote_after.status.success());
+        assert_eq!(
+            String::from_utf8(remote_after.stdout).unwrap(),
+            remote_before,
+            "the rejected post-closeout push must not rewrite the remote"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("post_closeout_push status=rejected mode=ff-only"),
+            "the advisory rejection should be observable without invalidating closeout:\n{log}"
+        );
 
         let head = agent_doc_git_io::revision::show_head(&doc)
             .unwrap()

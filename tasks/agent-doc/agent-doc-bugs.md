@@ -161,15 +161,18 @@ For `frontend.md`, the retained response is present and supervisor/editor conver
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
-- do [#possibletellclaude]
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#possibletellclaude]
 - 🚧 Make the tmux pane title contain the document name in all states.
+- #gh-fix https://github.com/btakita/agent-doc/issues/185
+- #gh-fix https://github.com/btakita/agent-doc/issues/186
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#possibletellclaude] Is it possible to tell Claude Code which document to focus on for context?
+- [ ] 🚧 [#possibletellclaude] Is it possible to tell Claude Code which document to focus on for context?
 <!-- /agent:backlog -->
 
 ## Review

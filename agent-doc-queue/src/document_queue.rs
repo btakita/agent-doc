@@ -2903,11 +2903,12 @@ pub fn dedup_free_text_heads(
 /// `- investigate the timeout` are three versions of one editor line, not three
 /// queue items. Callers must additionally have causal evidence of a raced
 /// non-operator projection before applying this repair. A two-item prefix pair
-/// is enough only when its first item is the single snapshot-authored version
-/// and its extension is live-only: that is the stale-baseline + completed-edit
-/// shape produced when a turn starts while the operator is still typing. Two
-/// fresh items, two snapshot-authored items, and snapshot-authored duplicates
-/// remain untouched because they are plausible independent operator intent;
+/// is enough when its first item is the single snapshot-authored version and its
+/// extension is live-only, or when two fresh high-overlap rows have normalized
+/// word sequences that form a strict prefix pair. The latter covers a retained
+/// cut with both the deleted draft and the retained revision (in either order).
+/// Short fresh pairs, two snapshot-authored items, and snapshot-authored
+/// duplicates remain untouched because they are plausible independent intent;
 /// three fresh monotonic snapshots remain the corruption signature. A
 /// non-monotonic three-snapshot run is also repairable when its final spelling
 /// contains every earlier spelling (case/whitespace normalized): this covers a
@@ -2936,6 +2937,13 @@ pub fn collapse_progressive_free_text_heads(
         };
         let initial_text = text.clone();
         let snapshot_seed_count = snapshot_counts.get(&initial_text).copied().unwrap_or(0);
+
+        if let Some(survivor) = raced_two_item_revision_survivor(entries, index, &snapshot_counts) {
+            changed = true;
+            collapsed.push(entries[survivor].clone());
+            index += 2;
+            continue;
+        }
 
         let mut survivor = index;
         let mut next = index + 1;
@@ -3009,6 +3017,52 @@ pub fn collapse_progressive_free_text_heads(
     }
 
     changed.then_some(collapsed)
+}
+
+/// Identify the two-row residue left when a raced agent projection retained an
+/// earlier spelling after the operator deleted it. This helper is called only by
+/// the causally gated raced-projection repair. Requiring a long normalized word
+/// prefix keeps short, plausibly independent prompts such as `investigate` and
+/// `investigate the timeout` distinct.
+fn raced_two_item_revision_survivor(
+    entries: &[QueueEntry],
+    index: usize,
+    snapshot_counts: &std::collections::HashMap<String, usize>,
+) -> Option<usize> {
+    let (first_prompt, first_text) = progressive_free_text_prompt(entries.get(index)?)?;
+    let (second_prompt, second_text) = progressive_free_text_prompt(entries.get(index + 1)?)?;
+    if snapshot_counts.contains_key(&first_text)
+        || snapshot_counts.contains_key(&second_text)
+        || first_prompt.indent != second_prompt.indent
+        || first_prompt.ordered_marker != second_prompt.ordered_marker
+    {
+        return None;
+    }
+
+    let first_words = progressive_revision_words(&first_text);
+    let second_words = progressive_revision_words(&second_text);
+    let shorter_len = first_words.len().min(second_words.len());
+    if shorter_len < 8
+        || first_words.len() == second_words.len()
+        || first_words[..shorter_len] != second_words[..shorter_len]
+    {
+        return None;
+    }
+    Some(if first_words.len() > second_words.len() {
+        index
+    } else {
+        index + 1
+    })
+}
+
+fn progressive_revision_words(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .map(|word| {
+            word.trim_matches(|ch: char| !ch.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|word| !word.is_empty())
+        .collect()
 }
 
 fn progressive_revision_contains(candidate: &str, revision: &str) -> bool {
@@ -4971,6 +5025,21 @@ mod tests {
             collapse_progressive_free_text_heads(&entries, &[]).is_none(),
             "two fresh prefix-shaped prompts are not enough evidence of a projection retry chain"
         );
+    }
+
+    #[test]
+    fn progressive_free_text_heads_collapse_long_raced_pair_in_either_order() {
+        let current = "In sample-app, describe setup and add installation usage docs with Python 3.14 and other dependencies.";
+        let stale = "In sample-app, describe setup and add installation usage docs with Python 3.14.";
+        for body in [
+            format!("- {current}\n- {stale}\n"),
+            format!("- {stale}\n- {current}\n"),
+        ] {
+            let entries = parse(&body).unwrap();
+            let collapsed = collapse_progressive_free_text_heads(&entries, &[])
+                .expect("the retained current spelling must replace the stale revision");
+            assert_eq!(render(&collapsed), format!("- {current}\n"));
+        }
     }
 
     #[test]

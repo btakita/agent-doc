@@ -3604,6 +3604,28 @@ working on it
         assert!(!out.merged_text.contains("revised draft"), "{out:?}");
     }
 
+    #[test]
+    fn merge_3way_honors_live_subset_after_stale_free_text_revision_deletion() {
+        let base = "<!-- agent:queue -->\n- do [#anchor]\n<!-- /agent:queue -->\n";
+        let current = "describe sample-app setup with Python 3.14 and other dependencies.";
+        let stale = "describe sample-app setup with Python 3.14.";
+        let ours = format!(
+            "<!-- agent:queue -->\n- do [#anchor]\n- {current}\n- {stale}\n<!-- /agent:queue -->\n"
+        );
+        let theirs =
+            format!("<!-- agent:queue -->\n- do [#anchor]\n- {current}\n<!-- /agent:queue -->\n");
+
+        let out = merge_3way(base, &ours, &theirs);
+        assert!(!out.fell_back, "should not fall back: {out:?}");
+        assert_eq!(out.merged_text.matches(current).count(), 1, "{out:?}");
+        assert!(
+            !out.merged_text
+                .lines()
+                .any(|line| line == format!("- {stale}")),
+            "{out:?}"
+        );
+    }
+
     /// (a) End-to-end with the opcapture gate ON: two DISJOINT-region edits to the
     /// SAME exchange item converge with BOTH present and NO conflict.
     #[test]

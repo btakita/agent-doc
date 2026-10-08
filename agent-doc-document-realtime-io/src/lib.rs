@@ -10912,6 +10912,39 @@ mod tests {
     }
 
     #[test]
+    fn post_projection_race_removes_deleted_long_queue_revision() {
+        let base = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = "In sample-app, describe setup and add installation usage docs with Python 3.14 and other dependencies.";
+        let stale = "In sample-app, describe setup and add installation usage docs with Python 3.14.";
+        let raced_projection = base.replacen(
+            "<!-- /agent:queue -->",
+            &format!("- 🚧 {current}\n- {stale}\n<!-- /agent:queue -->"),
+            1,
+        );
+
+        let collapsed = collapse_progressive_queue_projection(base, &raced_projection)
+            .expect("the raced long revision pair should collapse");
+        let queue = agent_doc_element::element::parse(&collapsed)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue_body = queue.content(&collapsed);
+        assert_eq!(queue_body.matches(current).count(), 1, "{queue_body}");
+        assert!(
+            !queue_body.lines().any(|line| line == format!("- {stale}")),
+            "{queue_body}"
+        );
+    }
+
+    #[test]
     fn post_projection_race_replaces_a_baseline_queue_prefix_with_the_completed_edit() {
         let partial_prompt = "- Review the proposed change.\n";
         let complete_prompt = "- Review the proposed change. How is the final revision handled?\n";

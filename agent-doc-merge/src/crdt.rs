@@ -1207,12 +1207,14 @@ fn keys_unique(children: &[KeyedChild]) -> bool {
     children.iter().all(|c| seen.insert(c.key.as_str()))
 }
 
-/// Detect the ambiguous id-less queue-edit shape where both sides introduced
-/// different free-text children into the same anchored insertion gap while the
-/// merge base still predates both spellings. In that shape text-derived keys
-/// cannot distinguish a progressive operator edit from independent additions.
-/// Queue text is operator-authored, so the live/editor (`theirs`) run owns that
-/// gap; agent-authored durable work must carry a `#id`.
+/// Detect the ambiguous id-less queue-edit shape where the agent projection has
+/// base-unbacked free-text children absent from the live/editor cut in the same
+/// anchored insertion gap as a live base-unbacked child. The live child may be
+/// editor-only (a progressive rewrite) or shared with ours (the operator deleted
+/// one stale revision but retained another). Text-derived keys cannot distinguish
+/// those revisions from independent additions. Queue text is operator-authored,
+/// so the live/editor (`theirs`) run owns that gap; agent-authored durable work
+/// must carry a `#id`.
 fn operator_free_text_revision_gaps(
     base: &[KeyedChild],
     ours: &[KeyedChild],
@@ -1225,15 +1227,17 @@ fn operator_free_text_revision_gaps(
     let base_keys: std::collections::HashSet<&str> =
         base.iter().map(|child| child.key.as_str()).collect();
     let shared_anchors: std::collections::HashSet<&str> =
-        ours_keys.intersection(&theirs_keys).copied().collect();
+        ours_keys
+            .intersection(&theirs_keys)
+            .copied()
+            .filter(|key| !key.starts_with("txt:") || base_keys.contains(key))
+            .collect();
 
     theirs
         .iter()
         .enumerate()
         .filter(|(_, child)| {
-            child.key.starts_with("txt:")
-                && !base_keys.contains(child.key.as_str())
-                && !ours_keys.contains(child.key.as_str())
+            child.key.starts_with("txt:") && !base_keys.contains(child.key.as_str())
         })
         .map(|(index, _)| child_anchor_gap(theirs, index, &shared_anchors))
         .collect()
@@ -1283,6 +1287,7 @@ pub(crate) fn has_operator_free_text_queue_revision(
         .iter()
         .map(|child| child.key.as_str())
         .filter(|key| theirs_keys.contains(key))
+        .filter(|key| !key.starts_with("txt:") || base_keys.contains(key))
         .collect();
     ours.iter().enumerate().any(|(index, child)| {
         child.key.starts_with("txt:")
@@ -1465,6 +1470,7 @@ fn reconcile_component_body(
             .iter()
             .map(|child| child.key.as_str())
             .filter(|key| theirs_keys.contains(key))
+            .filter(|key| !key.starts_with("txt:") || base_keys.contains(key))
             .collect();
         let stale_revision_keys: std::collections::HashSet<String> = ours_children
             .iter()
@@ -4665,6 +4671,29 @@ Second answer line three.
         assert!(!queue_body.contains("draft request"), "{queue_body}");
         assert!(
             !queue_body.contains("refined draft request"),
+            "{queue_body}"
+        );
+    }
+
+    #[test]
+    fn reconcile_queue_editor_subset_removes_stale_free_text_revision() {
+        // The retained agent cut captured both spellings before the operator
+        // deleted the shorter revision. The final live spelling is shared by
+        // both sides, so it is not an editor-only key; the operator-owned subset
+        // must still delete the stale base-unbacked row.
+        let base = doc_with_exchange_queue("Q.", "- do [#anchor]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let current = "describe sample-app setup with Python 3.14 and other dependencies.";
+        let stale = "describe sample-app setup with Python 3.14.";
+        let ours =
+            doc_with_exchange_queue("Q.", &format!("- do [#anchor]\n- {current}\n- {stale}"));
+        let theirs = doc_with_exchange_queue("Q.", &format!("- do [#anchor]\n- {current}"));
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        let queue_body = body_of(&merged, "queue");
+        assert_eq!(queue_body.matches(current).count(), 1, "{queue_body}");
+        assert!(
+            !queue_body.lines().any(|line| line == format!("- {stale}")),
             "{queue_body}"
         );
     }

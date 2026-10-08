@@ -35,7 +35,7 @@ class LayoutDetectorTest {
                         assertFalse(SwingUtilities.isEventDispatchThread())
                         assertEquals("/repo", projectRoot)
                         assertTrue(evidenceJson.contains("tasks/b.md"))
-                        """{"columns":[{"files":["tasks/a.md"]},{"files":["tasks/b.md"]}],"source":"retained_remote_columns","reason":"single_selection_within_retained_layout"}"""
+                        """{"columns":[{"files":["tasks/a.md"]},{"files":["tasks/b.md"]}],"source":"retained_remote_columns","column_order":"retained","reason":"single_selection_within_retained_layout"}"""
                     },
                 ),
             )
@@ -48,6 +48,7 @@ class LayoutDetectorTest {
                     LayoutColumn(listOf("tasks/a.md")),
                     LayoutColumn(listOf("tasks/b.md")),
                 ),
+                columnOrder = "retained",
             ),
             detected.get(),
         )
@@ -92,6 +93,7 @@ class LayoutDetectorTest {
                     LayoutColumn(listOf("tasks/a.md")),
                     LayoutColumn(listOf("tasks/b.md")),
                 ),
+                columnOrder = "unknown",
             ),
             detected,
         )

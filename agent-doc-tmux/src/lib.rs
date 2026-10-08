@@ -877,9 +877,9 @@ pub fn build_layout_state(
 /// publisher had membership but no order: on a JetBrains Remote Dev backend the
 /// detector reports `unknown`, and the plugin's fallback lists the visible
 /// documents in `FileEditorManager.selectedFiles` order, which puts the
-/// focused editor's selection first. `Retained` is the resolved label once an
-/// `Unknown` order has been replaced by the order already retained for those
-/// documents.
+/// focused editor's selection first. `Retained` means a stateful upstream fold
+/// has already resolved the order from its own retained layout, including slot
+/// replacement when one visible document replaces another (GH #185).
 ///
 /// The serde default is `Editor` so an older publisher that never names an
 /// order keeps its previous (authoritative) meaning.
@@ -927,10 +927,9 @@ pub struct OrderedLayoutColumns {
 /// per-publisher layout Sources unchanged. Membership is always the incoming
 /// publication's; this only decides ORDER.
 ///
-/// - An `Editor` order is authoritative and passes through untouched.
-/// - Otherwise (`Unknown`, or a caller that already labelled its merge
-///   `Retained`) the incoming columns are sorted by the earliest position any
-///   of their documents holds in `retained`. Columns with no retained document
+/// - `Editor` and already-resolved `Retained` orders pass through untouched.
+/// - An `Unknown` order is sorted by the earliest position any of its documents
+///   holds in `retained`. Columns with no retained document
 ///   keep their relative incoming order and are appended after the retained
 ///   ones, so a newly visible document joins at the end instead of jumping to
 ///   the front. Focus never participates: it is a focus effect, not a
@@ -946,10 +945,10 @@ pub fn order_layout_columns(
     incoming: &[String],
     incoming_order: LayoutColumnOrder,
 ) -> OrderedLayoutColumns {
-    if incoming_order.is_editor() {
+    if incoming_order != LayoutColumnOrder::Unknown {
         return OrderedLayoutColumns {
             columns: incoming.to_vec(),
-            order: LayoutColumnOrder::Editor,
+            order: incoming_order,
             reordered: false,
         };
     }
@@ -2451,7 +2450,7 @@ distinct, identical ones still dedupe"
     }
 
     #[test]
-    fn a_retained_labelled_merge_is_restabilized_idempotently() {
+    fn an_upstream_retained_order_passes_through_without_second_guessing_its_slots() {
         let retained = cols(&["a.md", "b.md"]);
         let once = order_layout_columns(
             &retained,
@@ -2459,7 +2458,9 @@ distinct, identical ones still dedupe"
             LayoutColumnOrder::Retained,
         );
         let twice = order_layout_columns(&retained, &once.columns, once.order);
-        assert_eq!(once.columns, cols(&["a.md", "b.md"]));
+        assert_eq!(once.columns, cols(&["b.md", "a.md"]));
+        assert_eq!(once.order, LayoutColumnOrder::Retained);
+        assert!(!once.reordered);
         assert_eq!(twice.columns, once.columns);
         assert!(!twice.reordered);
     }

@@ -300,7 +300,8 @@ class SyncLayoutActionTest {
                 listOf(
                     LayoutColumn(listOf("src/sample-app/tasks/one.md")),
                     LayoutColumn(listOf("src/sample-app/tasks/two.md", "tasks/ignored.md")),
-                )
+                ),
+                columnOrder = "retained",
             ),
         )
 
@@ -309,7 +310,8 @@ class SyncLayoutActionTest {
                 listOf(
                     LayoutColumn(listOf("tasks/one.md")),
                     LayoutColumn(listOf("tasks/two.md", "/repo/tasks/ignored.md")),
-                )
+                ),
+                columnOrder = "retained",
             ),
             normalized,
         )
@@ -371,7 +373,8 @@ class SyncLayoutActionTest {
                 listOf(
                     LayoutColumn(listOf("tasks/one.md")),
                     LayoutColumn(listOf("/already/absolute.md", "tasks/two.md")),
-                )
+                ),
+                columnOrder = "retained",
             ),
         )
 
@@ -380,7 +383,8 @@ class SyncLayoutActionTest {
                 listOf(
                     LayoutColumn(listOf("/repo/src/sample-app/tasks/one.md")),
                     LayoutColumn(listOf("/already/absolute.md", "/repo/src/sample-app/tasks/two.md")),
-                )
+                ),
+                columnOrder = "retained",
             ),
             absolute,
         )
@@ -577,12 +581,13 @@ class SyncLayoutActionTest {
     }
 
     /**
-     * GH #112: only a detected multi-column split carries a left-to-right order.
+     * GH #112/#185: only detected local geometry carries an `editor` order.
+     * A Remote Dev fold carries its memory-derived order as `retained`.
      * The undetected fallback is `selectedFiles` order (focused window first), so
      * it is published as `unknown` and the controller keeps the retained order.
      */
     @Test
-    fun `only a detected multi-column split publishes an editor column order`() {
+    fun `multi-column publications preserve their actual order provenance`() {
         assertEquals("unknown", SyncLayoutAction.syncColumnOrder(null))
         assertEquals(
             "unknown",
@@ -593,6 +598,15 @@ class SyncLayoutActionTest {
             SyncLayoutAction.syncColumnOrder(
                 EditorLayout(
                     listOf(LayoutColumn(listOf("/repo/a.md")), LayoutColumn(listOf("/repo/b.md"))),
+                ),
+            ),
+        )
+        assertEquals(
+            "retained",
+            SyncLayoutAction.syncColumnOrder(
+                EditorLayout(
+                    listOf(LayoutColumn(listOf("/repo/a.md")), LayoutColumn(listOf("/repo/b.md"))),
+                    columnOrder = "retained",
                 ),
             ),
         )

@@ -238,7 +238,12 @@ pub fn project_supervisor_freshness(base: &Path, pane: &str, stale: bool) -> Res
     );
     let title = String::from_utf8_lossy(&output.stdout);
     let title = title.trim_end_matches(['\r', '\n']);
-    let updated = agent_doc_turn::turn_status::pane_title_with_freshness(title, stale);
+    let document_name = document_name_for_pane(base, pane);
+    let updated = agent_doc_turn::turn_status::pane_title_with_freshness(
+        title,
+        document_name.as_deref(),
+        stale,
+    );
     if updated != title {
         let output = tmux
             .cmd()
@@ -267,10 +272,27 @@ fn set_pane_title(pane: &str, title: &str) {
     }
 }
 
+/// Resolve the registered document basename for a pane. The registry is display
+/// evidence only: failure leaves the legacy generic title in place and never
+/// affects turn or supervisor authority.
+fn document_name_for_pane(base: &Path, pane: &str) -> Option<String> {
+    agent_doc_session_registry_io::load_in(base)
+        .ok()?
+        .values()
+        .find(|entry| entry.pane == pane)
+        .and_then(|entry| Path::new(&entry.file).file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+}
+
 /// Set a specific tmux pane's border title from turn/stale-supervisor state.
 /// Best-effort: tmux failures are logged and ignored.
 pub fn set_pane_title_for_status(base: &Path, pane: &str, active: bool) {
-    let title = pane_title_for_status(active, supervisor_stale(base, pane));
+    let document_name = document_name_for_pane(base, pane);
+    let title = pane_title_for_status(
+        document_name.as_deref(),
+        active,
+        supervisor_stale(base, pane),
+    );
     set_pane_title(pane, &title);
 }
 
@@ -294,10 +316,15 @@ pub fn run(active: bool) -> anyhow::Result<()> {
     // `#suptmuxstale` — decorate the pane title with a stale-supervisor warning when
     // the route-owned supervisor has published its `binary_stale` probe on disk.
     // Read-only display; absent/unreadable marker reads as fresh.
-    let stale = resolve_marker_base()
-        .map(|base| supervisor_stale(&base, &pane))
+    let base = resolve_marker_base();
+    let stale = base
+        .as_ref()
+        .map(|base| supervisor_stale(base, &pane))
         .unwrap_or(false);
-    let title = pane_title_for_status(active, stale);
+    let document_name = base
+        .as_ref()
+        .and_then(|base| document_name_for_pane(base, &pane));
+    let title = pane_title_for_status(document_name.as_deref(), active, stale);
     set_pane_title(&pane, &title);
 
     // Also maintain the readable turn-state marker so route/supervisor can tell
@@ -305,7 +332,7 @@ pub fn run(active: bool) -> anyhow::Result<()> {
     // runs in the agent's CWD = project root; if there is no `.agent-doc`
     // ancestor, skip the marker (the pane title still updated). Best-effort —
     // never fail the turn.
-    if let Some(base) = resolve_marker_base() {
+    if let Some(base) = base {
         let result = if active {
             write_turn_active_marker(&base, &pane)
         } else {
@@ -453,6 +480,33 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         dir
+    }
+
+    #[test]
+    fn registered_document_name_is_resolved_by_pane() {
+        let dir = agent_doc_base();
+        let base = dir.path();
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "sample-session.md".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%71".to_string(),
+                pid: std::process::id(),
+                cwd: base.display().to_string(),
+                started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "session-71".to_string(),
+                file: "tasks/sample-session.md".to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: "supervisor-71".to_string(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(base, &registry).unwrap();
+
+        assert_eq!(
+            document_name_for_pane(base, "%71").as_deref(),
+            Some("sample-session.md")
+        );
+        assert_eq!(document_name_for_pane(base, "%72"), None);
     }
 
     /// GH #135: a pane that died before its idle hook leaves a row no per-pane

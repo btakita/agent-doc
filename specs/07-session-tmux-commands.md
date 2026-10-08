@@ -290,9 +290,14 @@ column converges in one attempt instead of cycling `retry_pending` for as long
 as the supervisor stays stale. An all-gated pass converges as
 `all_columns_gated_layout_preserved`. Re-admission happens on the next layout
 publication after the pane reads fresh. agent-doc's own `⚠ STALE SUPERVISOR`
-title is diagnostic only, never evidence. A pane title carries one status
-marker: a busy stale pane reads `⚠ STALE SUPERVISOR: turn in progress`, never the
-busy `⟳` marker welded behind the warning.
+title is diagnostic only, never evidence. Every registered agent-doc pane title
+contains the document basename in idle, active-turn, stale-supervisor, and
+stale-plus-active states. The four projections are respectively `sample.md`,
+`⟳ sample.md — turn in progress`, `⚠ STALE SUPERVISOR — sample.md`, and
+`⚠ STALE SUPERVISOR — sample.md — turn in progress`. A pane title carries at
+most one status marker: a busy stale pane never welds the busy `⟳` marker behind
+the warning. If registration is not yet observable, the legacy generic title is
+a best-effort bootstrap fallback until the next hook or freshness projection.
 - Explicit `--pane` remains a direct tmux selection escape hatch. `--blocking`
   keeps the legacy synchronous local actor/registry resolver and may surface a
   stashed pane before returning.

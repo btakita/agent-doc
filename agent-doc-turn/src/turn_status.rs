@@ -4,8 +4,12 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Pane-border title shown while a turn is in flight.
+/// Legacy pane-border title shown while a turn is in flight when no registered
+/// document name is available.
 pub const TURN_ACTIVE_PANE_TITLE: &str = "⟳ agent-doc: turn in progress";
+
+/// Status suffix appended after the document name while a turn is in flight.
+pub const TURN_ACTIVE_PANE_SUFFIX: &str = " — turn in progress";
 
 /// Leading marker prepended to the pane title when the route-owned supervisor is
 /// running a stale binary.
@@ -41,10 +45,17 @@ pub fn turn_active_marker_matches_pane(marker: &TurnActiveMarker, pane: &str) ->
     marker.pane == pane
 }
 
-/// Title to set for a turn state. `active` uses the busy title; `idle` clears
-/// the pane title so tmux returns to its default border title.
-pub fn pane_title_for_state(active: bool) -> &'static str {
-    if active { TURN_ACTIVE_PANE_TITLE } else { "" }
+/// Title to set for a turn state. A registered document name is retained in
+/// both active and idle states; the legacy fallback stays available for panes
+/// that have not been registered yet.
+pub fn pane_title_for_state(document_name: Option<&str>, active: bool) -> String {
+    let document_name = document_name.map(str::trim).filter(|name| !name.is_empty());
+    match (document_name, active) {
+        (Some(name), true) => format!("⟳ {name}{TURN_ACTIVE_PANE_SUFFIX}"),
+        (Some(name), false) => name.to_string(),
+        (None, true) => TURN_ACTIVE_PANE_TITLE.to_string(),
+        (None, false) => String::new(),
+    }
 }
 
 /// Single-marker title for a busy pane whose supervisor is stale (GH #124).
@@ -57,9 +68,10 @@ pub fn pane_title_for_state(active: bool) -> &'static str {
 pub const STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE: &str = "⚠ STALE SUPERVISOR: turn in progress";
 
 /// Compose the pane-border title for a turn state, decorated with the stale
-/// supervisor marker when `stale` is true. Always exactly one marker.
-pub fn pane_title_for_status(active: bool, stale: bool) -> String {
-    compose_pane_title(pane_title_for_state(active), stale)
+/// supervisor marker when `stale` is true. A known document name is present in
+/// every state and the title always carries at most one status marker.
+pub fn pane_title_for_status(document_name: Option<&str>, active: bool, stale: bool) -> String {
+    compose_pane_title(&pane_title_for_state(document_name, active), stale)
 }
 
 /// The undecorated title under any stale-supervisor decoration: the busy title,
@@ -70,7 +82,10 @@ pub fn undecorated_pane_title(title: &str) -> &str {
         return TURN_ACTIVE_PANE_TITLE;
     }
     match title.strip_prefix(STALE_SUPERVISOR_PANE_MARKER) {
-        Some(rest) => rest.strip_prefix(' ').unwrap_or(rest),
+        Some(rest) => rest
+            .strip_prefix(" — ")
+            .or_else(|| rest.strip_prefix(' '))
+            .unwrap_or(rest),
         None => title,
     }
 }
@@ -80,13 +95,28 @@ fn compose_pane_title(base: &str, stale: bool) -> String {
         (false, _) => base.to_string(),
         (true, "") => STALE_SUPERVISOR_PANE_MARKER.to_string(),
         (true, TURN_ACTIVE_PANE_TITLE) => STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE.to_string(),
-        (true, custom) => format!("{STALE_SUPERVISOR_PANE_MARKER} {custom}"),
+        (true, active) if active.starts_with("⟳ ") => format!(
+            "{STALE_SUPERVISOR_PANE_MARKER} — {}",
+            active.trim_start_matches("⟳ ")
+        ),
+        (true, custom) => format!("{STALE_SUPERVISOR_PANE_MARKER} — {custom}"),
     }
 }
 
-/// Refresh only the supervisor decoration; adoption must preserve the child turn title.
-pub fn pane_title_with_freshness(title: &str, stale: bool) -> String {
-    compose_pane_title(undecorated_pane_title(title), stale)
+fn pane_title_is_active(title: &str) -> bool {
+    title == TURN_ACTIVE_PANE_TITLE
+        || title == STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE
+        || title.ends_with(TURN_ACTIVE_PANE_SUFFIX)
+}
+
+/// Refresh only the supervisor decoration. When registration supplies the
+/// document name, regenerate the complete title so legacy/empty titles also
+/// converge to the document-bearing form.
+pub fn pane_title_with_freshness(title: &str, document_name: Option<&str>, stale: bool) -> String {
+    match document_name.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => pane_title_for_status(Some(name), pane_title_is_active(title), stale),
+        None => compose_pane_title(undecorated_pane_title(title), stale),
+    }
 }
 
 /// Number of agent-doc status markers (`⚠` stale, `⟳` busy) in a pane title.
@@ -102,22 +132,36 @@ mod tests {
     #[test]
     fn adoption_refresh_preserves_active_idle_and_custom_titles() {
         for title in ["", TURN_ACTIVE_PANE_TITLE, "custom title"] {
-            let stale = pane_title_with_freshness(title, true);
-            assert_eq!(pane_title_with_freshness(&stale, true), stale);
-            assert_eq!(pane_title_with_freshness(&stale, false), title);
-            assert_eq!(pane_title_with_freshness(title, false), title);
+            let stale = pane_title_with_freshness(title, None, true);
+            assert_eq!(pane_title_with_freshness(&stale, None, true), stale);
+            assert_eq!(pane_title_with_freshness(&stale, None, false), title);
+            assert_eq!(pane_title_with_freshness(title, None, false), title);
         }
     }
 
     #[test]
     fn pane_title_active_names_turn_in_progress() {
-        assert_eq!(pane_title_for_state(true), TURN_ACTIVE_PANE_TITLE);
-        assert!(pane_title_for_state(true).contains("turn in progress"));
+        assert_eq!(pane_title_for_state(None, true), TURN_ACTIVE_PANE_TITLE);
+        assert!(pane_title_for_state(None, true).contains("turn in progress"));
     }
 
     #[test]
-    fn pane_title_idle_clears_to_default() {
-        assert_eq!(pane_title_for_state(false), "");
+    fn pane_title_idle_without_registration_clears_to_default() {
+        assert_eq!(pane_title_for_state(None, false), "");
+    }
+
+    #[test]
+    fn document_name_is_present_in_every_status_state() {
+        for active in [false, true] {
+            for stale in [false, true] {
+                let title = pane_title_for_status(Some("sample-session.md"), active, stale);
+                assert!(title.contains("sample-session.md"), "{title}");
+                assert_eq!(
+                    pane_title_status_marker_count(&title),
+                    usize::from(active || stale)
+                );
+            }
+        }
     }
 
     #[test]
@@ -165,7 +209,7 @@ mod tests {
 
     #[test]
     fn pane_title_active_stale_leads_with_warning() {
-        let title = pane_title_for_status(true, true);
+        let title = pane_title_for_status(Some("sample-session.md"), true, true);
         assert!(
             title.contains(STALE_SUPERVISOR_PANE_MARKER),
             "stale active title must contain the warning: {title}"
@@ -184,7 +228,7 @@ mod tests {
     fn gh124_stale_busy_title_holds_exactly_one_marker() {
         // A pane already carrying the stale marker that goes busy must not weld
         // the busy marker on (`⚠ STALE SUPERVISOR ⟳ agent-doc: turn in progress`).
-        let busy_on_stale = pane_title_for_status(true, true);
+        let busy_on_stale = pane_title_for_status(Some("sample-session.md"), true, true);
         assert_eq!(
             pane_title_status_marker_count(&busy_on_stale),
             1,
@@ -194,11 +238,15 @@ mod tests {
             !busy_on_stale.contains(TURN_ACTIVE_PANE_TITLE),
             "{busy_on_stale}"
         );
-        let refreshed = pane_title_with_freshness(STALE_SUPERVISOR_PANE_MARKER, true);
+        let refreshed = pane_title_with_freshness(
+            STALE_SUPERVISOR_PANE_MARKER,
+            Some("sample-session.md"),
+            true,
+        );
         assert_eq!(pane_title_status_marker_count(&refreshed), 1, "{refreshed}");
         for active in [true, false] {
             for stale in [true, false] {
-                let title = pane_title_for_status(active, stale);
+                let title = pane_title_for_status(Some("sample-session.md"), active, stale);
                 assert!(pane_title_status_marker_count(&title) <= 1, "{title}");
             }
         }
@@ -208,36 +256,51 @@ mod tests {
     fn gh124_legacy_welded_title_normalises_to_one_marker() {
         let welded = format!("{STALE_SUPERVISOR_PANE_MARKER} {TURN_ACTIVE_PANE_TITLE}");
         assert_eq!(undecorated_pane_title(&welded), TURN_ACTIVE_PANE_TITLE);
-        let stale = pane_title_with_freshness(&welded, true);
+        let stale = pane_title_with_freshness(&welded, None, true);
         assert_eq!(stale, STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE);
         assert_eq!(pane_title_status_marker_count(&stale), 1);
         assert_eq!(
-            pane_title_with_freshness(&welded, false),
+            pane_title_with_freshness(&welded, None, false),
             TURN_ACTIVE_PANE_TITLE
         );
         assert_eq!(
-            pane_title_with_freshness(STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE, false),
+            pane_title_with_freshness(STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE, None, false),
             TURN_ACTIVE_PANE_TITLE
         );
     }
 
     #[test]
     fn pane_title_active_fresh_has_no_warning() {
-        let title = pane_title_for_status(true, false);
-        assert_eq!(title, TURN_ACTIVE_PANE_TITLE);
+        let title = pane_title_for_status(Some("sample-session.md"), true, false);
+        assert_eq!(title, "⟳ sample-session.md — turn in progress");
         assert!(!title.contains(STALE_SUPERVISOR_PANE_MARKER));
     }
 
     #[test]
     fn pane_title_idle_stale_still_warns() {
         assert_eq!(
-            pane_title_for_status(false, true),
-            STALE_SUPERVISOR_PANE_MARKER
+            pane_title_for_status(Some("sample-session.md"), false, true),
+            "⚠ STALE SUPERVISOR — sample-session.md"
         );
     }
 
     #[test]
-    fn pane_title_idle_fresh_clears() {
-        assert_eq!(pane_title_for_status(false, false), "");
+    fn pane_title_idle_fresh_keeps_document_name() {
+        assert_eq!(
+            pane_title_for_status(Some("sample-session.md"), false, false),
+            "sample-session.md"
+        );
+    }
+
+    #[test]
+    fn freshness_converges_legacy_titles_to_registered_document_name() {
+        assert_eq!(
+            pane_title_with_freshness(TURN_ACTIVE_PANE_TITLE, Some("sample-session.md"), true,),
+            "⚠ STALE SUPERVISOR — sample-session.md — turn in progress"
+        );
+        assert_eq!(
+            pane_title_with_freshness("", Some("sample-session.md"), false),
+            "sample-session.md"
+        );
     }
 }

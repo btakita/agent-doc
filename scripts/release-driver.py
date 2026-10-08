@@ -74,7 +74,7 @@ def run_release(
     tag = f"v{version}"
     publish = timed_phase(
         "tag-publish-handoff",
-        (["git", "tag", tag], ["git", "push", "origin", "main", tag]),
+        (["git", "tag", tag], ["git", "push", "origin", "HEAD:main", tag]),
         runner=runner,
         clock=clock,
         stream=stream,
@@ -121,7 +121,7 @@ def self_test() -> None:
     ) == 0
     assert commands == [
         ["git", "tag", "v1.2.3"],
-        ["git", "push", "origin", "main", "v1.2.3"],
+        ["git", "push", "origin", "HEAD:main", "v1.2.3"],
         ["gmake", "install-full"],
     ]
     assert output.getvalue().splitlines() == [
@@ -163,7 +163,7 @@ def self_test() -> None:
     ) == 17
     assert commands == [
         ["git", "tag", "v1.2.5"],
-        ["git", "push", "origin", "main", "v1.2.5"],
+        ["git", "push", "origin", "HEAD:main", "v1.2.5"],
     ]
     assert "tag_publish_handoff=failed local_install_full=not_started" in output.getvalue()
 

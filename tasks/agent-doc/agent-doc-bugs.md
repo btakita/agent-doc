@@ -261,14 +261,25 @@ Yes. Fresh verification confirms the complete release is public:
 - The release CI workflow completed successfully.
 
 Release commit, `main`, and tag remain `cf20ed9bcc575108c81d74cc553ce9032fff8183`.
-<!-- agent:boundary:1d10aaff -->
+> **Queue prompt:** Issue 178 + 179 + 180 are still open on github.
+
+### Re: GitHub issues 178–180 closed — gpt-5 · 2026-10-07T21:07-04:00
+
+Resolved. A dedicated subagent verified that each fix commit is included in the public `v0.35.477` tag at `cf20ed9bcc575108c81d74cc553ce9032fff8183`, posted an evidence-backed closure comment, closed each issue, and re-read the final state:
+
+- #178: closed; released fix `48dcc0c5`.
+- #179: closed; released fix `1e75c2d66`.
+- #180: closed; released fix `fff7bd2fc`.
+
+No source, release, installation, or unrelated GitHub state was changed. The exchange is large, but the active queue item has been drained rather than stalled for compaction.
+<!-- agent:boundary:72f38ede -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 
 ## Backlog

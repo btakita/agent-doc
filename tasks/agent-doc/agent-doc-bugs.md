@@ -228,7 +228,17 @@ Both PRs passed their full CI gates before merge. Their merge commits are `2570c
 Completed for v0.35.479. The failed x86_64 macOS release job was rerun successfully at the original tag, after which GitHub published the release with Linux, macOS, Windows, VS Code, JetBrains, and checksum artifacts: https://github.com/btakita/agent-doc/releases/tag/v0.35.479
 
 The original tag-bound PyPI workflow was then rerun; its build, publish, and verification jobs all passed. `agent-doc` 0.35.479 is now present on PyPI. The post-v0.35.479 fixes remain a separate future v0.35.480 batch and were not folded into this immutable tag.
-<!-- agent:boundary:72f38ede -->
+> **Chat prompt (#chatprompt):** subagent: fix: • Failed (exit 1) agent-doc session-check tasks/fpe.md
+>   └ [perf] session_check.operations file=tasks/fpe.md total_ms=7838 attributed_ms=7042 nested=true self_heal_response_…
+>     Error: [session-check] INTERRUPTED: canonical editor authority and disk projection diverge for tasks/fpe.md (autho…
+>     + 2 lines (^t to expand)
+
+### Re: fpe.md editor-authority divergence — gpt-5 · 2026-10-08T15:15:38-04:00
+
+Dispatched immediately to a dedicated subagent. The worker is reproducing the failure from read-only session evidence and state, without running recovery or mutation commands against live `tasks/fpe.md`. Its implementation scope is the agent-doc producer/recovery path that allowed canonical editor authority and the disk projection to diverge after response self-healing, with deterministic regression coverage and a full focused gate before a separate PR.
+
+The previously assigned #196 worker was paused—not discarded—to free the execution slot; its queue claim remains intact for resumption after this urgent fix.
+<!-- agent:boundary:5a01832e -->
 <!-- /agent:exchange -->
 
 <!--

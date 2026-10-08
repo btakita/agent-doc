@@ -35,11 +35,8 @@ build-release:
 	@agent-doc lib-install 2>/dev/null || true
 	@echo "Installed .bin/agent-doc -> target/release/agent-doc"
 
-# Release via CI: check, tag, push, then install locally. Linux and Windows
-# artifacts are available on demand; only operator-built Darwin uploads are
-# cadence-gated.
-# GitHub Actions publishes Linux and Windows assets. Darwin archives are built
-# on operator-owned Mac hardware and may be attached to the release later.
+# Release via CI: check, tag, push, then install locally. GitHub Actions builds
+# Linux, Windows, and both Darwin archives for every tag.
 # The release owns the one authoritative full-suite gate. A content-identical
 # successful `make check` and `make tmux-ci` performed after integration/version
 # projection are reused independently; source/toolchain changes invalidate both.
@@ -69,7 +66,7 @@ release-macos-cadence-check:
 release-macos-coverage-check:
 	@python3 scripts/agent-doc-dev verify-macos-release-coverage
 
-# Build both Darwin archives on a Mac and attach them to an existing release.
+# Repair both Darwin archives from a Mac and attach them to an existing release.
 # Usage: make release-macos-assets TAG=v0.35.398
 release-macos-assets:
 	@test -n "$(TAG)" || (echo "ERROR: TAG is required (for example, make release-macos-assets TAG=v0.35.398)" && exit 1)

@@ -2,13 +2,12 @@
 """Render the Homebrew formula for agent-doc from a release's SHA256SUMS (GH #31).
 
 The formula lives in the tap repo `btakita/homebrew-tap` as `Formula/agent-doc.rb`.
-The `homebrew` workflow runs this script on every tag (and again after
-`make release-macos-assets` uploads the operator-built Darwin archives), so the
-formula always pins the per-platform archives and digests of one release.
+The `homebrew` workflow runs this script after every tag's hosted builds, so the
+formula pins the per-platform archives and digests of one release.
 
 Inputs are the release's own `SHA256SUMS` manifest — the platform-archive-only
-manifest the Release workflow publishes and `scripts/release-macos-assets`
-refreshes — never digests recomputed from a second download.
+manifest the Release workflow publishes — never digests recomputed from a
+second download.
 
 Layout (GH #52): every archive carries the `agent-doc` binary AND the cdylib.
 `agent-doc lib-path` resolves the library as a SIBLING of `current_exe()`, and
@@ -16,9 +15,9 @@ macOS reports the invoked path (the Homebrew `bin/` symlink), not its target.
 So both files go into `libexec/` and `bin/agent-doc` is an exec wrapper, which
 makes `current_exe()` the `libexec/agent-doc` real path on every platform.
 
-Darwin archives are operator-built after the tag. Until they exist the formula
-declares `depends_on :linux` instead of carrying a macOS block that cannot
-resolve; a later run with the refreshed manifest adds the macOS blocks.
+The renderer still accepts a legacy or partially repaired release with no
+Darwin archives by emitting a Linux-only formula. A partial Darwin pair is
+always refused.
 
 Usage:
   bump-homebrew-formula.py --tag v0.35.451 --sums SHA256SUMS [--output Formula/agent-doc.rb]
@@ -155,8 +154,8 @@ def render_formula(version: str, digests: Dict[str, str]) -> str:
     else:
         lines.extend(
             [
-                "  # Darwin archives are operator-built after the tag (make release-macos-assets);",
-                "  # the next formula bump after they upload replaces this with macOS archives.",
+                "  # This legacy release has no complete Darwin archive pair.",
+                "  # A later repair and formula bump may add macOS archives.",
                 "  depends_on :linux",
                 "",
             ]

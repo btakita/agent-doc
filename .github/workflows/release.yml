@@ -22,6 +22,12 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             use_cross: true
+          - target: x86_64-apple-darwin
+            os: macos-14
+            use_cross: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            use_cross: false
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             use_cross: false
@@ -89,7 +95,10 @@ jobs:
         run: |
           set -euo pipefail
           release_dir="target/${{ matrix.target }}/release"
-          lib="libagent_doc.so"
+          case "${{ matrix.target }}" in
+            *-apple-darwin) lib="libagent_doc.dylib" ;;
+            *) lib="libagent_doc.so" ;;
+          esac
           if [ ! -f "$release_dir/$lib" ]; then
             echo "::error::$release_dir/$lib is missing; the release tarball cannot deliver FFI without it"
             ls -la "$release_dir"
@@ -220,8 +229,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Platform archives only. `SHA256SUMS` below is generated over this
-      # directory and is consumed by the PyPI bootstrap launcher and by
-      # `make release-macos-assets`, so the editor packages must NOT land in it
+      # directory and is consumed by the PyPI bootstrap launcher, so the editor
+      # packages must NOT land in it
       # — they are release assets, not entries in the platform-archive manifest.
       - uses: actions/download-artifact@v4
         with:
@@ -272,8 +281,7 @@ jobs:
 
   # GH #31: bump `btakita/homebrew-tap` to this tag's archives. Runs after the
   # release exists because the formula is rendered from the published
-  # `SHA256SUMS`. Darwin archives arrive later (make release-macos-assets), which
-  # dispatches this workflow again for the same tag.
+  # `SHA256SUMS`, including both Darwin archives built above.
   homebrew:
     needs: [release]
     uses: ./.github/workflows/homebrew.yml

@@ -14363,7 +14363,7 @@ fn test_every_release_publishes_the_editor_packages() {
     );
 
     // `SHA256SUMS` is generated over `artifacts/` and consumed by the PyPI
-    // bootstrap launcher and `make release-macos-assets`. The editor packages
+    // bootstrap launcher. The editor packages
     // also match `agent-doc-*`, so downloading them into that directory would
     // silently rewrite the platform-archive manifest.
     let download = &release[release.find("  release:").expect("release job")..];
@@ -14392,6 +14392,7 @@ fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
     let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
     for required in [
         "libagent_doc.so",
+        "libagent_doc.dylib",
         "agent_doc.dll",
         "tar czf agent-doc-${{ matrix.target }}.tar.gz -C \"$release_dir\" agent-doc \"$lib\"",
     ] {
@@ -14477,7 +14478,7 @@ fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
 }
 
 #[test]
-fn test_release_cadence_applies_only_to_macos_assets() {
+fn test_release_builds_both_macos_targets_on_every_tag() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let makefile = fs::read_to_string(manifest_dir.join("Makefile")).unwrap();
     assert!(
@@ -14531,35 +14532,30 @@ fn test_release_cadence_applies_only_to_macos_assets() {
     let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
     assert_eq!(
         release.matches("- target:").count(),
-        4,
-        "each on-demand tag must build the four automated Linux and Windows targets"
+        6,
+        "each on-demand tag must build all six Linux, Windows, and Darwin targets"
     );
-    // Scoped to CONFIGURATION lines. The substring check used to run over the
-    // whole file, so it also forbade *naming* the Darwin asset path in a
-    // comment — `make release-macos-assets` in a note about `SHA256SUMS`
-    // tripped it. Every real way to schedule a paid runner is still caught,
-    // because all of them are configuration, not prose.
-    let scheduling: String = release
-        .lines()
-        .filter(|line| !line.trim_start().starts_with('#'))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        !scheduling.contains("apple-darwin") && !scheduling.contains("macos-"),
-        "GitHub Actions must not schedule paid macOS release builds"
-    );
+    for required in [
+        "target: x86_64-apple-darwin",
+        "os: macos-14",
+        "target: aarch64-apple-darwin",
+        "os: macos-latest",
+        "libagent_doc.dylib",
+    ] {
+        assert!(
+            release.contains(required),
+            "hosted release builds must preserve both Darwin targets and their cdylib: {required}"
+        );
+    }
 
     let spec = fs::read_to_string(manifest_dir.join("specs/07-core-commands.md")).unwrap();
     let spec_words = spec.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        spec.contains("#weekly-macos-assets")
-            && spec_words.contains("Darwin asset upload is at least seven days old")
-            && spec_words.contains(
-                "Tags and the four automated Linux and Windows targets are publishable on demand"
-            )
-            && spec_words.contains("four automated Linux and Windows targets")
-            && spec_words.contains("Operator-built Darwin artifacts"),
-        "the on-demand hosted-release and weekly Darwin policy must remain specified"
+        spec_words.contains("Every tag publishes six hosted targets on demand")
+            && spec_words.contains("both Darwin architectures")
+            && spec_words
+                .contains("standard macOS runners are included for this public repository"),
+        "the complete on-demand hosted release policy must remain specified"
     );
 }
 

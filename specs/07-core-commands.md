@@ -362,23 +362,15 @@ reports what it would remove, and why (superseded by the current library, or not
 the installed library — in either case with no live holder), without deleting
 anything.
 
-Tags and the four automated Linux and Windows targets are publishable on demand.
-GitHub Actions must not run macOS jobs. Operator-built Darwin artifacts follow a
-weekly cadence (`#weekly-macos-assets`): `make release-macos-assets TAG=v<version>`
-must refuse to build or upload until the latest Darwin asset upload is at least
-seven days old, and it must fail closed when GitHub asset timestamps cannot be
-verified. The command builds both Darwin targets, requires the binary and `.dylib`
-in each archive, and refreshes the release's checksum manifest across every
-platform archive.
+Every tag publishes six hosted targets on demand: three Linux targets, Windows,
+and both Darwin architectures. The standard macOS runners are included for this
+public repository, so the release workflow builds each Darwin archive with its
+binary and `.dylib` and includes it in the initial checksum manifest.
 
-The cadence gate bounds only how OFTEN Darwin assets may be uploaded, so it
-cannot detect the opposite failure: a release that shipped no Darwin archive at
-all. `make release-macos-coverage-check` names every release published after the
-last Darwin-complete release that ships an incomplete pair, counting a
-half-shipped pair as a drop. It excludes drafts and fails closed on a published
-release with no timestamp, so an unorderable release cannot hide a dropped
-deliverable. Neither macOS gate is a `check` dependency: clearing them requires
-Mac hardware, and blocking the build on hardware would redden unrelated changes.
+`make release-macos-assets TAG=v<version>` remains a manual repair path for a
+legacy or failed Darwin upload. `make release-macos-coverage-check` names any
+published release that dropped either Darwin archive, counting a half-shipped
+pair as a drop.
 
 `agent-doc upgrade` checks GitHub Releases for a newer stable version and upgrades
 through the prebuilt GitHub binary / `pip` cascade. A prebuilt archive is installed
@@ -430,8 +422,8 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   disagrees with the downloaded bytes refuses the install; a release that
   publishes neither installs with an explicit warning, so `plugin update`'s
   fallback walk can still reach an older asset. `SHA256SUMS` stays
-  platform-archives-only — its consumers (the PyPI bootstrap launcher and
-  `make release-macos-assets`) parse exactly that manifest.
+  platform-archives-only — the PyPI bootstrap launcher parses exactly that
+  manifest.
 - VS Code-family installs resolve the editor CLI (`cursor`, `codium`, `code`)
   BEFORE downloading, and report an absent CLI as a missing prerequisite with
   install guidance (GH #57). Detection returning a candidate it has just proven

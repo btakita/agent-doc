@@ -1,9 +1,8 @@
 name: Homebrew
 
 # GH #31: pin `btakita/homebrew-tap` `Formula/agent-doc.rb` to one release's
-# platform archives. Called by `release.yml` on every tag, and dispatched again
-# by `scripts/release-macos-assets` after the operator-built Darwin archives
-# refresh `SHA256SUMS`, which is what adds the macOS blocks to the formula.
+# platform archives. Called by `release.yml` after all Linux, Windows, and
+# Darwin archives have been published for the tag.
 #
 # Secret: `HOMEBREW_TAP_TOKEN` — a fine-grained PAT with Contents: read & write
 # on `btakita/homebrew-tap` only. `GITHUB_TOKEN` cannot push to another repo.

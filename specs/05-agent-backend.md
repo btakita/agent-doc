@@ -49,9 +49,16 @@ Default: `opencode run`. Session handling: `--session {id}` or `--continue --for
 
 For resumed document turns, the prompt must include:
 
-1. The unified diff since the last run
-2. The full current document
-3. An ordered `user-authored prompt-bearing changes` section extracted from the diff
+1. The exact session-document path, identified as the primary document context for the turn
+2. The unified diff since the last run
+3. The full current document
+4. An ordered `user-authored prompt-bearing changes` section extracted from the diff
+
+The document path is turn-local and must remain below the prompt-cache boundary.
+Claude Code IDE open-file context and interactive `@file` mentions may provide
+additional file context, but agent-doc does not depend on that ambient UI state:
+headless launches and resumed turns receive the session document identity in the
+model-visible prompt alongside its content.
 
 That section is oldest-first and uses explicit subtypes:
 - `prompt_target` — user-authored prompts that require a response

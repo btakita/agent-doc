@@ -2085,6 +2085,7 @@ fn build_prompt_volatile_suffix(
     content: &str,
     session_accretion: Option<&SessionAccretionReport>,
 ) -> String {
+    let document_focus = agent_doc_prompt_context::render_session_document_focus(file);
     let prompt_bearing_changes = diff::format_prompt_bearing_changes(the_diff)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
@@ -2104,41 +2105,53 @@ fn build_prompt_volatile_suffix(
     match (run_mode, resuming) {
         (RunMode::Template, true) => format!(
             "<agent_doc_prompt_volatile_suffix>\n\
+             {}\
              The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
              {}\
              Respond to the user's new content.\n\
              </agent_doc_prompt_volatile_suffix>",
-            the_diff, prompt_bearing_changes, active_format_requirements, document_section
+            document_focus,
+            the_diff,
+            prompt_bearing_changes,
+            active_format_requirements,
+            document_section
         ),
         (RunMode::Template, false) => format!(
             "<agent_doc_prompt_volatile_suffix>\n\
+             {}\
              The user is starting a session document. Here is the full document:\n\n\
              {}\
              <document>\n{}\n</document>\n\n\
              Respond to the user's content.\n\
              </agent_doc_prompt_volatile_suffix>",
-            active_format_requirements, content
+            document_focus, active_format_requirements, content
         ),
         (RunMode::Append, true) => format!(
             "<agent_doc_prompt_volatile_suffix>\n\
+             {}\
              The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
              {}\
              Respond to the user's new content.\n\
              </agent_doc_prompt_volatile_suffix>",
-            the_diff, prompt_bearing_changes, active_format_requirements, document_section
+            document_focus,
+            the_diff,
+            prompt_bearing_changes,
+            active_format_requirements,
+            document_section
         ),
         (RunMode::Append, false) => format!(
             "<agent_doc_prompt_volatile_suffix>\n\
+             {}\
              The user is starting a session document. Here is the full document:\n\n\
              {}\
              <document>\n{}\n</document>\n\n\
              Respond to the user's content. If the user asked questions or prompt-bearing edits inline (e.g., in blockquotes or prior responses), address those too.\n\
              </agent_doc_prompt_volatile_suffix>",
-            active_format_requirements, content
+            document_focus, active_format_requirements, content
         ),
     }
 }

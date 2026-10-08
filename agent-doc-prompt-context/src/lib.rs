@@ -1,6 +1,7 @@
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
 use agent_doc_session_accretion::{SessionAccretionReport, level_label};
+use std::path::Path;
 
 pub mod dynamic_context;
 pub mod loaded_context;
@@ -53,6 +54,7 @@ pub struct DocumentSectionContext<'a> {
 }
 
 pub struct AgentPromptContext<'a> {
+    pub document_path: &'a Path,
     pub template_mode: bool,
     pub diff_text: &'a str,
     pub doc: &'a str,
@@ -60,6 +62,7 @@ pub struct AgentPromptContext<'a> {
 }
 
 pub struct StreamingAgentPromptContext<'a> {
+    pub document_path: &'a Path,
     pub resuming: bool,
     pub diff_text: &'a str,
     pub doc: &'a str,
@@ -67,6 +70,7 @@ pub struct StreamingAgentPromptContext<'a> {
 }
 
 pub fn render_agent_prompt(input: AgentPromptContext<'_>) -> String {
+    let document_focus = render_session_document_focus(input.document_path);
     let prompt_bearing = agent_doc_diff::format_prompt_bearing_changes(input.diff_text)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
@@ -76,30 +80,39 @@ pub fn render_agent_prompt(input: AgentPromptContext<'_>) -> String {
 
     if input.template_mode {
         format!(
-            "The user edited the session document. Here is the diff since the last run:\n\n\
+            "{}The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
              {}\
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            input.diff_text, prompt_bearing, active_format_requirements, input.document_section
+            document_focus,
+            input.diff_text,
+            prompt_bearing,
+            active_format_requirements,
+            input.document_section
         )
     } else {
         format!(
-            "The user edited the session document. Here is the diff since the last run:\n\n\
+            "{}The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
              {}\
              Respond to the user's new content. Write your response in markdown.\n\
              Do not include a ## Assistant heading — it will be added automatically.\n\
              If the user inserted prompt-bearing edits inline, classify them as prompt targets vs content edits before responding.",
-            input.diff_text, prompt_bearing, active_format_requirements, input.document_section
+            document_focus,
+            input.diff_text,
+            prompt_bearing,
+            active_format_requirements,
+            input.document_section
         )
     }
 }
 
 pub fn render_streaming_agent_prompt(input: StreamingAgentPromptContext<'_>) -> String {
+    let document_focus = render_session_document_focus(input.document_path);
     let prompt_bearing_changes = agent_doc_diff::format_prompt_bearing_changes(input.diff_text)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
@@ -109,13 +122,14 @@ pub fn render_streaming_agent_prompt(input: StreamingAgentPromptContext<'_>) -> 
 
     if input.resuming {
         format!(
-            "The user edited the session document. Here is the diff since the last run:\n\n\
+            "{}The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
              {}\
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
+            document_focus,
             input.diff_text,
             prompt_bearing_changes,
             active_format_requirements,
@@ -123,15 +137,33 @@ pub fn render_streaming_agent_prompt(input: StreamingAgentPromptContext<'_>) -> 
         )
     } else {
         format!(
-            "The user is starting a session document. Here is the full document:\n\n\
+            "{}The user is starting a session document. Here is the full document:\n\n\
              {}\
              <document>\n{}\n</document>\n\n\
              Respond to the user's content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            active_format_requirements, input.doc
+            document_focus, active_format_requirements, input.doc
         )
     }
+}
+
+/// Name the exact document that owns the turn in model-visible context.
+///
+/// Claude Code's IDE open-file chip and interactive `@file` mentions can add file
+/// context, but headless agent backends do not expose a local-file focus flag.
+/// Keep this turn-local block in the volatile prompt payload so every backend and
+/// every resumed turn receives the authoritative document identity.
+pub fn render_session_document_focus(document_path: &Path) -> String {
+    let escaped = document_path
+        .to_string_lossy()
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    format!(
+        "<session_document_path>{escaped}</session_document_path>\n\
+         Treat this path as the primary document context for this turn.\n\n"
+    )
 }
 
 pub fn render_full_document_section(doc: &str, remote_host_scope: &str) -> String {
@@ -664,6 +696,7 @@ mod tests {
         );
 
         let prompt = render_agent_prompt(AgentPromptContext {
+            document_path: Path::new("tasks/focus.md"),
             template_mode: true,
             diff_text: "diff",
             doc,
@@ -678,11 +711,13 @@ mod tests {
             "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
         ));
         assert!(prompt.contains("Format your response as patch blocks"));
+        assert!(prompt.contains("<session_document_path>tasks/focus.md</session_document_path>"));
     }
 
     #[test]
     fn render_streaming_agent_prompt_first_submit_uses_full_document_without_diff() {
         let prompt = render_streaming_agent_prompt(StreamingAgentPromptContext {
+            document_path: Path::new("tasks/first.md"),
             resuming: false,
             diff_text: "diff here",
             doc: "doc content",
@@ -692,11 +727,13 @@ mod tests {
         assert!(prompt.contains("starting a session"));
         assert!(prompt.contains("doc content"));
         assert!(!prompt.contains("diff here"));
+        assert!(prompt.contains("<session_document_path>tasks/first.md</session_document_path>"));
     }
 
     #[test]
     fn render_streaming_agent_prompt_resume_uses_diff_and_document_section() {
         let prompt = render_streaming_agent_prompt(StreamingAgentPromptContext {
+            document_path: Path::new("tasks/resume.md"),
             resuming: true,
             diff_text: "diff here",
             doc: "doc content",
@@ -717,6 +754,7 @@ ctx\n\
 +\n\
 +❯ Second unresolved question?\n";
         let prompt = render_streaming_agent_prompt(StreamingAgentPromptContext {
+            document_path: Path::new("tasks/responses.md"),
             resuming: true,
             diff_text: diff,
             doc: "doc content",
@@ -741,6 +779,7 @@ ctx\n\
         );
 
         let prompt = render_streaming_agent_prompt(StreamingAgentPromptContext {
+            document_path: Path::new("tasks/format.md"),
             resuming: true,
             diff_text: "diff",
             doc,
@@ -772,6 +811,7 @@ Done.\n\
 +do [#ctxpack]. spec-test-build-install-commit-push\n\
 <!-- /agent:exchange -->\n";
         let prompt = render_streaming_agent_prompt(StreamingAgentPromptContext {
+            document_path: Path::new("tasks/context.md"),
             resuming: true,
             diff_text: diff,
             doc: context_doc(),
@@ -781,6 +821,14 @@ Done.\n\
         assert!(prompt.contains("<response_context level=\"warn\">"));
         assert!(prompt.contains("do [#ctxpack]. spec-test-build-install-commit-push"));
         assert!(prompt.contains("No live or archived response TOC entries are available yet."));
+    }
+
+    #[test]
+    fn session_document_focus_escapes_path_markup() {
+        let focus = render_session_document_focus(Path::new("tasks/a<&>.md"));
+
+        assert!(focus.contains("tasks/a&lt;&amp;&gt;.md"));
+        assert!(!focus.contains("tasks/a<&>.md"));
     }
 
     #[test]

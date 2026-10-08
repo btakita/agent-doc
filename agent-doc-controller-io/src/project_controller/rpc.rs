@@ -20038,6 +20038,19 @@ fn closeout_advance_outcome(
         }
         None => None,
     };
+    if matches!(
+        payload.event,
+        CloseoutPhaseEvent::Committed(_) | CloseoutPhaseEvent::Abandoned
+    ) && payload.cycle_id_hint.as_deref().is_some_and(|expected| {
+        current
+            .as_ref()
+            .is_none_or(|state| state.cycle_id != expected)
+    }) {
+        // Terminal recovery transitions are cycle-CAS operations. A newer
+        // preflight is the successful competing write, so fold this stale
+        // request as an applied no-op without emitting any closeout fact.
+        return Ok(());
+    }
     // The next checkpoint sequence is the last recorded one + 1 (0 when none).
     let checkpoint_sequence = document
         .as_ref()

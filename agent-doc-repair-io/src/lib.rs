@@ -245,6 +245,15 @@ fn corrupted_materialization_is_explained_by_checkpoint(
 pub use pending::load_active_pending_response;
 pub use pending::{clear_pending, save_pending};
 
+/// Epoch-fenced observation of the authoritative turn binding. `actor_epoch`
+/// changes on pane/session/generation rebind; `active` changes when the exact
+/// pane enters or leaves a harness turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreflightTurnFence {
+    pub actor_epoch: Option<String>,
+    pub active: bool,
+}
+
 pub trait RepairIoEffects {
     /// True only when the authoritative actor's exact pane still owns a live
     /// harness turn for this document.
@@ -252,7 +261,27 @@ pub trait RepairIoEffects {
     /// Stale-preflight recovery is timeout-based and therefore must consult
     /// this reactive fact before it closes a cycle whose model may still be
     /// producing a response.
-    fn preflight_turn_active(&self, file: &Path) -> Result<bool>;
+    fn preflight_turn_fence(&self, file: &Path) -> Result<PreflightTurnFence>;
+
+    fn mark_committed_frontmatter_if_turn_fence(
+        &self,
+        file: &Path,
+        expected_cycle_id: &str,
+        turn_fence: &PreflightTurnFence,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<Option<agent_doc_cycle_state_io::CycleState>>;
+
+    fn mark_abandoned_frontmatter_if_turn_fence(
+        &self,
+        file: &Path,
+        expected_cycle_id: &str,
+        turn_fence: &PreflightTurnFence,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<Option<agent_doc_cycle_state_io::CycleState>>;
 
     fn atomic_write_if_current(
         &self,
@@ -2969,18 +2998,24 @@ fn cancel_preflight_cycle_with_authority(
         );
         return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
     }
-    if authority.requires_stalled_cycle() && effects.preflight_turn_active(file)? {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "cancel_preflight_cycle_protected file={} cycle_id={} reason={}_live_turn",
-                file.display(),
-                state.cycle_id,
-                authority.proof(),
-            ),
-        );
-        return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
-    }
+    let turn_fence = if authority.requires_stalled_cycle() {
+        let fence = effects.preflight_turn_fence(file)?;
+        if fence.active {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "cancel_preflight_cycle_protected file={} cycle_id={} reason={}_live_turn",
+                    file.display(),
+                    state.cycle_id,
+                    authority.proof(),
+                ),
+            );
+            return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
+        }
+        Some(fence)
+    } else {
+        None
+    };
     let snapshot_content =
         restore_empty_preflight_baseline_to_head(file, "cancel_preflight_cycle_abandoned")?;
     let file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
@@ -2988,12 +3023,35 @@ fn cancel_preflight_cycle_with_authority(
         "cancel_preflight_cycle",
     )
     .ok();
-    effects.mark_abandoned_frontmatter(
-        file,
-        "cancel_preflight_cycle_abandoned",
-        snapshot_content.as_deref(),
-        file_content.as_deref(),
-    )?;
+    if let Some(turn_fence) = turn_fence {
+        if effects
+            .mark_abandoned_frontmatter_if_turn_fence(
+                file,
+                &state.cycle_id,
+                &turn_fence,
+                "cancel_preflight_cycle_abandoned",
+                snapshot_content.as_deref(),
+                file_content.as_deref(),
+            )?
+            .is_none()
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "cancel_preflight_cycle_protected file={} cycle_id={} reason={}_turn_fence_changed",
+                    file.display(), state.cycle_id, authority.proof(),
+                ),
+            );
+            return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
+        }
+    } else {
+        effects.mark_abandoned_frontmatter(
+            file,
+            "cancel_preflight_cycle_abandoned",
+            snapshot_content.as_deref(),
+            file_content.as_deref(),
+        )?;
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -3076,21 +3134,26 @@ pub fn repair_stale_preflight_started_cycle(
         );
     }
 
-    if !cycle_capture_exists
+    let turn_fence = if !cycle_capture_exists
         && age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS
-        && effects.preflight_turn_active(file)?
     {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "repair_preflight_live_turn_protected file={} cycle_id={} age_secs={}",
-                file.display(),
-                state.cycle_id,
-                age_secs,
-            ),
-        );
-        return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
-    }
+        let fence = effects.preflight_turn_fence(file)?;
+        if fence.active {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "repair_preflight_live_turn_protected file={} cycle_id={} age_secs={}",
+                    file.display(),
+                    state.cycle_id,
+                    age_secs,
+                ),
+            );
+            return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
+        }
+        Some(fence)
+    } else {
+        None
+    };
 
     if (raw_hashes_match || normalized_hashes_match)
         && !cycle_capture_exists
@@ -3098,12 +3161,26 @@ pub fn repair_stale_preflight_started_cycle(
     {
         let committed_baseline =
             restore_empty_preflight_baseline_to_head(file, "repair_preflight_stale_lock")?;
-        effects.mark_committed_frontmatter(
-            file,
-            "repair_preflight_stale_lock",
-            committed_baseline.as_deref(),
-            Some(&file_content),
-        )?;
+        if effects
+            .mark_committed_frontmatter_if_turn_fence(
+                file,
+                &state.cycle_id,
+                turn_fence.as_ref().expect("stale empty cycle has a turn fence"),
+                "repair_preflight_stale_lock",
+                committed_baseline.as_deref(),
+                Some(&file_content),
+            )?
+            .is_none()
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "repair_preflight_live_turn_protected file={} cycle_id={} age_secs={} reason=turn_fence_changed",
+                    file.display(), state.cycle_id, age_secs,
+                ),
+            );
+            return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -3188,12 +3265,26 @@ pub fn repair_stale_preflight_started_cycle(
                 file,
                 "repair_preflight_stale_prompt_cycle_abandoned",
             )?;
-            effects.mark_abandoned_frontmatter(
-                file,
-                "repair_preflight_stale_prompt_cycle_abandoned",
-                committed_baseline.as_deref(),
-                Some(&file_content),
-            )?;
+            if effects
+                .mark_abandoned_frontmatter_if_turn_fence(
+                    file,
+                    &state.cycle_id,
+                    turn_fence.as_ref().expect("stale empty cycle has a turn fence"),
+                    "repair_preflight_stale_prompt_cycle_abandoned",
+                    committed_baseline.as_deref(),
+                    Some(&file_content),
+                )?
+                .is_none()
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "repair_preflight_live_turn_protected file={} cycle_id={} age_secs={} reason=turn_fence_changed",
+                        file.display(), state.cycle_id, age_secs,
+                    ),
+                );
+                return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -3238,12 +3329,26 @@ pub fn repair_stale_preflight_started_cycle(
     if age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS && !cycle_capture_exists {
         let committed_baseline =
             restore_empty_preflight_baseline_to_head(file, "repair_preflight_stale_empty_cycle")?;
-        effects.mark_committed_frontmatter(
-            file,
-            "repair_preflight_stale_empty_cycle",
-            committed_baseline.as_deref(),
-            Some(&file_content),
-        )?;
+        if effects
+            .mark_committed_frontmatter_if_turn_fence(
+                file,
+                &state.cycle_id,
+                turn_fence.as_ref().expect("stale empty cycle has a turn fence"),
+                "repair_preflight_stale_empty_cycle",
+                committed_baseline.as_deref(),
+                Some(&file_content),
+            )?
+            .is_none()
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "repair_preflight_live_turn_protected file={} cycle_id={} age_secs={} reason=turn_fence_changed",
+                    file.display(), state.cycle_id, age_secs,
+                ),
+            );
+            return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -4223,13 +4328,70 @@ mod tests {
     #[derive(Default)]
     struct TestRepairIoEffects {
         preflight_turn_active: Cell<bool>,
+        actor_epoch: Cell<u64>,
+        activate_on_fenced_transition: Cell<bool>,
         committed_calls: Cell<usize>,
         abandoned_calls: Cell<usize>,
     }
 
     impl RepairIoEffects for TestRepairIoEffects {
-        fn preflight_turn_active(&self, _file: &Path) -> Result<bool> {
-            Ok(self.preflight_turn_active.get())
+        fn preflight_turn_fence(&self, _file: &Path) -> Result<PreflightTurnFence> {
+            Ok(PreflightTurnFence {
+                actor_epoch: Some(format!("actor:{}", self.actor_epoch.get())),
+                active: self.preflight_turn_active.get(),
+            })
+        }
+
+        fn mark_committed_frontmatter_if_turn_fence(
+            &self,
+            file: &Path,
+            expected_cycle_id: &str,
+            turn_fence: &PreflightTurnFence,
+            event: &str,
+            snapshot_content: Option<&str>,
+            file_content: Option<&str>,
+        ) -> Result<Option<agent_doc_cycle_state_io::CycleState>> {
+            if self.activate_on_fenced_transition.replace(false) {
+                self.actor_epoch.set(self.actor_epoch.get() + 1);
+                self.preflight_turn_active.set(true);
+            }
+            if self.preflight_turn_fence(file)? != *turn_fence {
+                return Ok(None);
+            }
+            self.committed_calls.set(self.committed_calls.get() + 1);
+            agent_doc_cycle_state_io::mark_committed_if_cycle(
+                file,
+                expected_cycle_id,
+                event,
+                snapshot_content,
+                file_content,
+            )
+        }
+
+        fn mark_abandoned_frontmatter_if_turn_fence(
+            &self,
+            file: &Path,
+            expected_cycle_id: &str,
+            turn_fence: &PreflightTurnFence,
+            event: &str,
+            snapshot_content: Option<&str>,
+            file_content: Option<&str>,
+        ) -> Result<Option<agent_doc_cycle_state_io::CycleState>> {
+            if self.activate_on_fenced_transition.replace(false) {
+                self.actor_epoch.set(self.actor_epoch.get() + 1);
+                self.preflight_turn_active.set(true);
+            }
+            if self.preflight_turn_fence(file)? != *turn_fence {
+                return Ok(None);
+            }
+            self.abandoned_calls.set(self.abandoned_calls.get() + 1);
+            agent_doc_cycle_state_io::mark_abandoned_if_cycle(
+                file,
+                expected_cycle_id,
+                event,
+                snapshot_content,
+                file_content,
+            )
         }
 
         fn atomic_write_if_current(
@@ -4347,6 +4509,51 @@ mod tests {
         assert_eq!(effects.abandoned_calls.get(), 0);
         let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("repair_preflight_live_turn_protected"));
+    }
+
+    #[test]
+    fn stale_preflight_repair_fences_activation_after_initial_observation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("task.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_test_git_repo(root, &doc);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        agent_doc_cycle_state_io::age_current_cycle_for_tests(
+            &doc,
+            agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS + 1,
+        )
+        .unwrap();
+
+        let effects = TestRepairIoEffects {
+            activate_on_fenced_transition: Cell::new(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            repair_stale_preflight_started_cycle(&effects, &doc).unwrap(),
+            agent_doc_turn::repair::RepairOutcome::Noop,
+        );
+        let after = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(after.cycle_id, cycle.cycle_id);
+        assert_eq!(after.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+        assert_eq!(effects.committed_calls.get(), 0);
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("reason=turn_fence_changed"), "{log}");
     }
 
     #[test]

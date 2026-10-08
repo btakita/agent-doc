@@ -103,6 +103,33 @@ pub fn mark_committed(
     Ok(state)
 }
 
+pub fn mark_committed_if_cycle(
+    effects: &impl PipelineFrontmatterEffects,
+    file: &Path,
+    expected_cycle_id: &str,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<Option<crate::CycleState>> {
+    let state = crate::mark_committed_if_cycle(
+        file,
+        expected_cycle_id,
+        event,
+        snapshot_content,
+        file_content,
+    )?;
+    if state.is_some() {
+        if let Some(content) = file_content {
+            if let Err(e) = clear_pipeline_frontmatter_from_content(effects, file, content) {
+                effects.log_op(file, &format!("pipeline_clear_failed file={} err={}", file.display(), e));
+            }
+        } else {
+            clear_pipeline_frontmatter(effects, file);
+        }
+    }
+    Ok(state)
+}
+
 pub fn mark_abandoned(
     effects: &impl PipelineFrontmatterEffects,
     file: &Path,
@@ -120,6 +147,33 @@ pub fn mark_abandoned(
         }
     } else {
         clear_pipeline_frontmatter(effects, file);
+    }
+    Ok(state)
+}
+
+pub fn mark_abandoned_if_cycle(
+    effects: &impl PipelineFrontmatterEffects,
+    file: &Path,
+    expected_cycle_id: &str,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<Option<crate::CycleState>> {
+    let state = crate::mark_abandoned_if_cycle(
+        file,
+        expected_cycle_id,
+        event,
+        snapshot_content,
+        file_content,
+    )?;
+    if state.is_some() {
+        if let Some(content) = file_content {
+            if let Err(e) = clear_pipeline_frontmatter_from_content(effects, file, content) {
+                effects.log_op(file, &format!("pipeline_clear_failed file={} err={}", file.display(), e));
+            }
+        } else {
+            clear_pipeline_frontmatter(effects, file);
+        }
     }
     Ok(state)
 }

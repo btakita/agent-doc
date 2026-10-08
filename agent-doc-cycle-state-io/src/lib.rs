@@ -2637,6 +2637,36 @@ pub fn mark_committed(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
+    mark_committed_inner(file, event, snapshot_content, file_content, None)?
+        .context("unconditional committed transition returned no state")
+}
+
+/// Commit only while `expected_cycle_id` is still the controller's current
+/// cycle. A newer preflight wins the compare-and-swap and leaves its state
+/// untouched.
+pub fn mark_committed_if_cycle(
+    file: &Path,
+    expected_cycle_id: &str,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<Option<CycleState>> {
+    mark_committed_inner(
+        file,
+        event,
+        snapshot_content,
+        file_content,
+        Some(expected_cycle_id),
+    )
+}
+
+fn mark_committed_inner(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    expected_cycle_id: Option<&str>,
+) -> Result<Option<CycleState>> {
     let observation = command_plane::commit_observation_from_event_label(event);
     if submit_closeout_advance_via_socket(
         file,
@@ -2646,16 +2676,26 @@ pub fn mark_committed(
         snapshot_content,
         file_content,
         None,
-        None,
+        expected_cycle_id,
     )? {
         let state = load(file)?.context(
             "closeout_advance Committed applied through the command plane but no cycle state was \
              read back",
         )?;
         append_phase_event_to_session_log(file, &state, file_content);
-        return Ok(state);
+        return Ok(expected_cycle_id
+            .is_none_or(|expected| state.cycle_id == expected)
+            .then_some(state));
     }
-    let decision = decide_committed(load(file)?, file, event, snapshot_content, file_content);
+    let current = load(file)?;
+    if expected_cycle_id.is_some_and(|expected| {
+        current
+            .as_ref()
+            .is_none_or(|state| state.cycle_id != expected)
+    }) {
+        return Ok(None);
+    }
+    let decision = decide_committed(current, file, event, snapshot_content, file_content);
     if decision.checkpoint {
         save(file, &decision.state)?;
     }
@@ -2665,7 +2705,7 @@ pub fn mark_committed(
     if decision.session_log {
         append_phase_event_to_session_log(file, &decision.state, file_content);
     }
-    Ok(decision.state)
+    Ok(Some(decision.state))
 }
 
 /// Pure decision core of `mark_abandoned` (see [`CloseoutDecision`]). Tri-state:
@@ -2729,6 +2769,34 @@ pub fn mark_abandoned(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
+    mark_abandoned_inner(file, event, snapshot_content, file_content, None)?
+        .context("unconditional abandoned transition returned no state")
+}
+
+/// Abandon only while `expected_cycle_id` is still current.
+pub fn mark_abandoned_if_cycle(
+    file: &Path,
+    expected_cycle_id: &str,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<Option<CycleState>> {
+    mark_abandoned_inner(
+        file,
+        event,
+        snapshot_content,
+        file_content,
+        Some(expected_cycle_id),
+    )
+}
+
+fn mark_abandoned_inner(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    expected_cycle_id: Option<&str>,
+) -> Result<Option<CycleState>> {
     // `#lazily-hot-path`: submit over the command plane when a controller is
     // live. The abandon `event` is descriptive, so it rides the command-plane
     // `reason` field (the typed event is `Abandoned`); the authority stamps it
@@ -2736,7 +2804,7 @@ pub fn mark_abandoned(
     if submit_closeout_advance_via_socket(
         file,
         command_plane::CloseoutPhaseEvent::Abandoned,
-        None,
+        expected_cycle_id,
         Some(event),
         snapshot_content,
         file_content,
@@ -2748,9 +2816,19 @@ pub fn mark_abandoned(
              read back",
         )?;
         append_phase_event_to_session_log(file, &state, file_content);
-        return Ok(state);
+        return Ok(expected_cycle_id
+            .is_none_or(|expected| state.cycle_id == expected)
+            .then_some(state));
     }
-    let decision = decide_abandoned(load(file)?, file, event, snapshot_content, file_content);
+    let current = load(file)?;
+    if expected_cycle_id.is_some_and(|expected| {
+        current
+            .as_ref()
+            .is_none_or(|state| state.cycle_id != expected)
+    }) {
+        return Ok(None);
+    }
+    let decision = decide_abandoned(current, file, event, snapshot_content, file_content);
     if decision.checkpoint {
         save(file, &decision.state)?;
     }
@@ -2760,7 +2838,7 @@ pub fn mark_abandoned(
     if decision.session_log {
         append_phase_event_to_session_log(file, &decision.state, file_content);
     }
-    Ok(decision.state)
+    Ok(Some(decision.state))
 }
 
 /// Restore the exact cycle that was incorrectly abandoned by the
@@ -4142,6 +4220,32 @@ mod tests {
         let state = mark_committed(&doc, "commit", Some("new"), Some("new")).unwrap();
         assert_eq!(state.phase, CyclePhase::Committed);
         assert!(!state.is_open());
+    }
+
+    #[test]
+    fn terminal_cycle_cas_does_not_close_a_newer_preflight() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let stale = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_committed(&doc, "commit", Some("body"), Some("body")).unwrap();
+        let current = start_preflight(&doc, Some("body"), Some("body")).unwrap();
+
+        assert!(
+            mark_committed_if_cycle(
+                &doc,
+                &stale.cycle_id,
+                "repair_preflight_stale_lock",
+                Some("body"),
+                Some("body"),
+            )
+            .unwrap()
+            .is_none(),
+            "the stale recovery transition must lose to the newer cycle",
+        );
+        let after = load(&doc).unwrap().unwrap();
+        assert_eq!(after.cycle_id, current.cycle_id);
+        assert_eq!(after.phase, CyclePhase::PreflightStarted);
     }
 
     #[test]

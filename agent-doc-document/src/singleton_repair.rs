@@ -15,7 +15,6 @@ fn canonical_singleton_component_name(name: &str) -> Option<&'static str> {
     match name {
         "exchange" => Some("exchange"),
         "status" => Some("status"),
-        "queue" => Some("queue"),
         element::BACKLOG_DONE_COMPONENT => Some(element::BACKLOG_DONE_COMPONENT),
         _ if element::is_backlog_component(name) => Some(element::BACKLOG_COMPONENT),
         _ if element::is_review_component(name) => Some(element::REVIEW_COMPONENT),
@@ -111,7 +110,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn repairs_duplicate_singleton_component_from_before_content() {
+    fn repairs_duplicate_status_component_from_before_content() {
         let before = concat!(
             "<!-- agent:status -->\n",
             "ready\n",
@@ -127,17 +126,17 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         let after = before.replace(
-            "<!-- agent:backlog -->",
-            "<!-- agent:queue preset=\"#stale\" priority go -->\n- do [#stale]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->",
+            "<!-- agent:exchange patch=append -->",
+            "<!-- agent:status -->\nstale\n<!-- /agent:status -->\n\n<!-- agent:exchange patch=append -->",
         );
 
         let repair = repair_duplicate_singleton_components(Some(before), &after).expect("repair");
 
-        assert_eq!(repair.groups, vec!["queue=2"]);
+        assert_eq!(repair.groups, vec!["status=2"]);
         assert_eq!(repair.removed, 1);
         assert_eq!(repair.content.matches("<!-- agent:queue").count(), 1);
         assert!(repair.content.contains("- do [#canonical]"));
-        assert!(!repair.content.contains("- do [#stale]"));
+        assert!(!repair.content.contains("stale"));
         assert_eq!(
             agent_doc_element::element::structural_corruption_reason(&repair.content),
             None
@@ -145,17 +144,17 @@ mod tests {
     }
 
     #[test]
-    fn leaves_ambiguous_duplicates_unrepaired() {
+    fn leaves_multiple_queue_blocks_unrepaired() {
         let before = concat!(
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue id=release-a -->\n",
             "- do [#canonical]\n",
             "<!-- /agent:queue -->\n"
         );
         let after = concat!(
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue id=release-a -->\n",
             "- do [#stale]\n",
             "<!-- /agent:queue -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue id=release-b depends=release-a -->\n",
             "- do [#other]\n",
             "<!-- /agent:queue -->\n"
         );

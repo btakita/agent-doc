@@ -27,5 +27,6 @@ pub mod queue_projection;
 pub mod queue_prompt_drift;
 pub mod queue_replay;
 pub mod queue_response;
+pub mod queue_set;
 pub mod route_dispatch;
 pub mod subagent_intent;

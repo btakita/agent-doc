@@ -440,10 +440,7 @@ pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<S
 
 pub fn next_queue_head_selection(content: &str) -> Result<Option<NextQueueHeadSelection>> {
     let components = element::parse(content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let Some(queue_component) = crate::queue_set::selected_component(content, &components)? else {
         return Ok(None);
     };
     let body = &content[queue_component.open_end..queue_component.close_start];
@@ -777,10 +774,7 @@ pub fn answered_free_text_head_node_keys(
         // addressed that head. Require exact quoted-prompt proof for ordinary
         // free text, or resolved-expansion proof for a prompt-preset head.
         let has_explicit_answer_evidence =
-            crate::queue_response::free_text_head_has_explicit_answer_evidence(
-                response_body,
-                text,
-            );
+            crate::queue_response::free_text_head_has_explicit_answer_evidence(response_body, text);
         if !crate::queue_response::free_text_head_answered_by_response(response_body, text)
             && !crate::queue_response::prompt_preset_head_answered_by_response(
                 content,
@@ -942,6 +936,13 @@ pub fn queue_prompt_node_keys_for_texts(
     target_texts: &[String],
     preferred_node_keys: &[String],
 ) -> Result<Option<QueuePromptNodeKeys>> {
+    let components = element::parse(content)?;
+    let selected_occurrence = crate::queue_set::QueueSet::parse(content, &components)?
+        .selected()
+        .map(|block| block.occurrence);
+    if selected_occurrence != Some(0) {
+        return Ok(None);
+    }
     let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
         .map_err(|err| anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}"))?;
     let mut selected_indices = HashSet::new();
@@ -979,8 +980,18 @@ pub fn queue_prompt_node_keys_for_count(
     content: &str,
     count: usize,
 ) -> Result<QueuePromptNodeKeys> {
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
-        .map_err(|err| anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}"))?;
+    let components = element::parse(content)?;
+    let queue_set = crate::queue_set::QueueSet::parse(content, &components)?;
+    let selected = queue_set
+        .selected()
+        .ok_or_else(|| anyhow::anyhow!("queue consume: document has no runnable agent:queue"))?;
+    let nodes = if selected.occurrence == 0 {
+        agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
+            anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}")
+        })?
+    } else {
+        Vec::new()
+    };
     // `#qconsumenostrike`: never assume a second enumerator segments the queue
     // identically. `item_nodes` now includes canonical multiline prompt
     // surfaces, but this text correspondence remains the fail-closed proof for
@@ -991,15 +1002,8 @@ pub fn queue_prompt_node_keys_for_count(
         .filter(|node| !node.item.struck)
         .take(count)
         .collect::<Vec<_>>();
-    let parsed_heads = element::parse(content)
+    let parsed_heads = crate::document_queue::parse(selected.component.content(content))
         .ok()
-        .and_then(|components| {
-            components
-                .iter()
-                .find(|component| component.name == "queue")
-                .map(|component| component.content(content).to_string())
-        })
-        .and_then(|body| crate::document_queue::parse(&body).ok())
         .map(|entries| {
             crate::document_queue::prompts(&entries)
                 .into_iter()
@@ -1027,11 +1031,7 @@ pub fn queue_prompt_node_keys_for_count(
         });
     }
 
-    let components = element::parse(content)?;
-    let queue_component = components
-        .iter()
-        .find(|c| c.name == "queue")
-        .ok_or_else(|| anyhow::anyhow!("queue consume: document has no agent:queue component"))?;
+    let queue_component = selected.component;
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries =
         document_queue::parse(body).context("queue consume: failed to parse document queue")?;
@@ -1070,7 +1070,17 @@ pub fn queue_prompt_node_keys_for_done_ids(
         .map(|id| normalize_done_id(id))
         .collect::<HashSet<_>>();
 
-    if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue") {
+    let selected_is_first = element::parse(content)
+        .ok()
+        .and_then(|components| {
+            crate::queue_set::QueueSet::parse(content, &components)
+                .ok()
+                .and_then(|queues| queues.selected().map(|block| block.occurrence == 0))
+        })
+        .unwrap_or(false);
+    if selected_is_first
+        && let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+    {
         let keys = nodes
             .into_iter()
             .filter(|node| !node.item.struck)
@@ -1136,10 +1146,8 @@ pub fn consume_queue_prompts_by_exact_spans(
     }
 
     let components = element::parse(content)?;
-    let queue = components
-        .iter()
-        .find(|component| component.name == "queue")
-        .ok_or_else(|| anyhow::anyhow!("queue consume: document has no agent:queue component"))?;
+    let queue = crate::queue_set::selected_component(content, &components)?
+        .ok_or_else(|| anyhow::anyhow!("queue consume: document has no runnable agent:queue"))?;
     let body = &content[queue.open_end..queue.close_start];
     let mut target_index = 0usize;
     let mut replacements = Vec::with_capacity(target_texts.len());

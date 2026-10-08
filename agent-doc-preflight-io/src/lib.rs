@@ -2846,12 +2846,13 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         Ok(components) => components,
         Err(_) => return Ok(QueueState::default()),
     };
-    let comp = match components
-        .iter()
-        .find(|component| component.name == "queue")
-    {
-        Some(component) => component,
-        None => return Ok(QueueState::default()),
+    let comp = match agent_doc_queue::queue_set::selected_component(&content, &components) {
+        Ok(Some(component)) => component,
+        Err(err) => {
+            eprintln!("[preflight] queue probe topology warning: {err}");
+            return Ok(QueueState::default());
+        }
+        Ok(None) => return Ok(QueueState::default()),
     };
 
     let body = &content[comp.open_end..comp.close_start];
@@ -3482,6 +3483,21 @@ fn queue_entries_in_content(content: &str) -> Vec<agent_doc_queue::document_queu
         .unwrap_or_default()
 }
 
+fn queue_entries_for_id(
+    content: &str,
+    queue_id: &str,
+) -> Vec<agent_doc_queue::document_queue::QueueEntry> {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return Vec::new();
+    };
+    let Ok(Some(queue)) =
+        agent_doc_queue::queue_set::component_for_id(content, &components, queue_id)
+    else {
+        return Vec::new();
+    };
+    agent_doc_queue::document_queue::parse(queue.content(content)).unwrap_or_default()
+}
+
 /// `#unstrikelost`: snapshot-struck queue identities the operator re-armed.
 ///
 /// The durable editor-op epoch records only operator keystrokes, captured
@@ -3643,10 +3659,24 @@ pub fn run_queue_maintenance_with_coin_gate(
         mutated = true;
         eprintln!("[preflight] queue: created agent:queue for admitted free-text work");
     }
-    let mut comp = match components.iter().find(|c| c.name == "queue").cloned() {
-        Some(c) => c,
-        None => return Ok(QueueState::default()),
-    };
+    let selected_queue_id =
+        match agent_doc_queue::queue_set::QueueSet::parse(&current_content, &components) {
+            Ok(queues) => match queues.selected().or_else(|| queues.blocks().first()) {
+                Some(queue) => queue.id.clone(),
+                None => return Ok(QueueState::default()),
+            },
+            Err(err) => {
+                eprintln!("[preflight] queue topology warning: {err}");
+                return Ok(QueueState::default());
+            }
+        };
+    let mut comp = agent_doc_queue::queue_set::component_for_id(
+        &current_content,
+        &components,
+        &selected_queue_id,
+    )?
+    .context("queue maintenance: selected queue component vanished")?
+    .clone();
 
     let body = &current_content[comp.open_end..comp.close_start];
     let entries = match agent_doc_queue::document_queue::parse(body) {
@@ -3679,11 +3709,13 @@ pub fn run_queue_maintenance_with_coin_gate(
         current_content = rebuilt;
         content = current_content.clone();
         components = agent_doc_element::element::parse(&current_content)?;
-        comp = components
-            .iter()
-            .find(|c| c.name == "queue")
-            .context("queue maintenance: queue component vanished after tag normalization")?
-            .clone();
+        comp = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &components,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: queue component vanished after tag normalization")?
+        .clone();
         mutated = true;
         queue_tag_attrs_normalized = true;
         eprintln!("[preflight] queue: normalized malformed queue marker attributes");
@@ -3701,11 +3733,13 @@ pub fn run_queue_maintenance_with_coin_gate(
         current_content = comp.replace_content(&current_content, &new_body);
         content = current_content.clone();
         components = agent_doc_element::element::parse(&current_content)?;
-        comp = components
-            .iter()
-            .find(|c| c.name == "queue")
-            .context("queue maintenance: queue component vanished after folded-head heal")?
-            .clone();
+        comp = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &components,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: queue component vanished after folded-head heal")?
+        .clone();
         entries = healed;
         mutated = true;
         queue_warnings.push(PreflightWarning {
@@ -3738,11 +3772,13 @@ pub fn run_queue_maintenance_with_coin_gate(
         current_content = projected;
         content = current_content.clone();
         components = agent_doc_element::element::parse(&current_content)?;
-        comp = components
-            .iter()
-            .find(|c| c.name == "queue")
-            .context("queue maintenance: queue component vanished after control binding sync")?
-            .clone();
+        comp = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &components,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: queue component vanished after control binding sync")?
+        .clone();
         mutated = true;
         eprintln!("[preflight] queue: synchronized queue marker/frontmatter control binding");
     }
@@ -3754,11 +3790,13 @@ pub fn run_queue_maintenance_with_coin_gate(
         current_content = projected;
         content = current_content.clone();
         components = agent_doc_element::element::parse(&current_content)?;
-        comp = components
-            .iter()
-            .find(|c| c.name == "queue")
-            .context("queue maintenance: queue component vanished after queue-edit go inference")?
-            .clone();
+        comp = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &components,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: queue component vanished after queue-edit go inference")?
+        .clone();
         mutated = true;
         eprintln!("[preflight] queue: operator queue edit armed `queue: go` (#queueeditgo)");
         agent_doc_ops_log_io::log_op(
@@ -3817,12 +3855,17 @@ pub fn run_queue_maintenance_with_coin_gate(
         !queue_active_for_free_text && !queue_paused_by_operator,
         &document_id,
     )? {
-        queue_warnings.extend(prepared_admission.warnings.iter().map(|message| PreflightWarning {
-            code: "free_text_admission_item_skipped".to_string(),
-            message: message.clone(),
-            document_agent: None,
-            active_harness: None,
-        }));
+        queue_warnings.extend(
+            prepared_admission
+                .warnings
+                .iter()
+                .map(|message| PreflightWarning {
+                    code: "free_text_admission_item_skipped".to_string(),
+                    message: message.clone(),
+                    document_agent: None,
+                    active_harness: None,
+                }),
+        );
         let (execution, warnings) = resolve_free_text_execution(
             file,
             &prepared_admission.content,
@@ -3837,11 +3880,13 @@ pub fn run_queue_maintenance_with_coin_gate(
         current_content = admission.content;
         content = current_content.clone();
         components = agent_doc_element::element::parse(&current_content)?;
-        comp = components
-            .iter()
-            .find(|c| c.name == "queue")
-            .context("queue maintenance: queue component vanished after free-text admission")?
-            .clone();
+        comp = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &components,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: queue component vanished after free-text admission")?
+        .clone();
         let body = &current_content[comp.open_end..comp.close_start];
         entries = agent_doc_queue::document_queue::parse(body)
             .context("queue maintenance: failed to parse queue after free-text admission")?;
@@ -3932,7 +3977,12 @@ pub fn run_queue_maintenance_with_coin_gate(
                     .flatten()
                     .and_then(|snap| {
                         let comps = agent_doc_element::element::parse(&snap).ok()?;
-                        let q = comps.iter().find(|c| c.name == "queue")?;
+                        let q = agent_doc_queue::queue_set::component_for_id(
+                            &snap,
+                            &comps,
+                            &selected_queue_id,
+                        )
+                        .ok()??;
                         let body = &snap[q.open_end..q.close_start];
                         let snap_entries = agent_doc_queue::document_queue::parse(body).ok()?;
                         Some(
@@ -4124,7 +4174,12 @@ pub fn run_queue_maintenance_with_coin_gate(
             let new_body = agent_doc_queue::document_queue::render(&synced);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
-                let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                let q = agent_doc_queue::queue_set::component_for_id(
+                    &current_content,
+                    &comps,
+                    &selected_queue_id,
+                )?
+                .context("queue maintenance: selected queue vanished during backlog sync")?;
                 q.replace_content(&current_content, &new_body)
             };
             let pre_sync_prompt_count = entries
@@ -4211,7 +4266,11 @@ pub fn run_queue_maintenance_with_coin_gate(
             std::collections::HashSet::new();
         if let Ok(Some(snap_content)) = agent_doc_snapshot_io::load_document_baseline(file)
             && let Ok(snap_components) = agent_doc_element::element::parse(&snap_content)
-            && let Some(snap_queue) = snap_components.iter().find(|c| c.name == "queue")
+            && let Ok(Some(snap_queue)) = agent_doc_queue::queue_set::component_for_id(
+                &snap_content,
+                &snap_components,
+                &selected_queue_id,
+            )
         {
             let snap_body = &snap_content[snap_queue.open_end..snap_queue.close_start];
             if let Ok(snap_entries) = agent_doc_queue::document_queue::parse(snap_body) {
@@ -4224,7 +4283,14 @@ pub fn run_queue_maintenance_with_coin_gate(
                     let new_body = agent_doc_queue::document_queue::render(&pinned);
                     current_content = {
                         let comps = agent_doc_element::element::parse(&current_content)?;
-                        let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                        let q = agent_doc_queue::queue_set::component_for_id(
+                            &current_content,
+                            &comps,
+                            &selected_queue_id,
+                        )?
+                        .context(
+                            "queue maintenance: selected queue vanished during priority pin",
+                        )?;
                         q.replace_content(&current_content, &new_body)
                     };
                     eprintln!(
@@ -4307,7 +4373,12 @@ pub fn run_queue_maintenance_with_coin_gate(
             let new_body = agent_doc_queue::document_queue::render(&sorted);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
-                let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                let q = agent_doc_queue::queue_set::component_for_id(
+                    &current_content,
+                    &comps,
+                    &selected_queue_id,
+                )?
+                .context("queue maintenance: selected queue vanished during priority sort")?;
                 q.replace_content(&current_content, &new_body)
             };
             eprintln!("[preflight] queue: sorted do-prompts by {how}");
@@ -4390,7 +4461,11 @@ pub fn run_queue_maintenance_with_coin_gate(
     {
         current_content = deduped_content;
         let comps = agent_doc_element::element::parse(&current_content)?;
-        if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+        if let Some(q) = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &comps,
+            &selected_queue_id,
+        )? {
             let body = &current_content[q.open_end..q.close_start];
             activation.entries_after = agent_doc_queue::document_queue::parse(body)
                 .context("queue maintenance: failed to parse AST-deduped queue")?;
@@ -4422,7 +4497,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         .flatten();
     let snapshot_queue_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = snapshot_text
         .as_deref()
-        .map(queue_entries_in_content)
+        .map(|snapshot| queue_entries_for_id(snapshot, &selected_queue_id))
         .unwrap_or_default();
     // `#unstrikelost`: the operator's own captured ops decide whether a live copy
     // of a snapshot-struck head is a re-arm (operator unstrike) or a stale
@@ -4446,10 +4521,12 @@ pub fn run_queue_maintenance_with_coin_gate(
         let new_body = agent_doc_queue::document_queue::render(&converged_entries);
         current_content = {
             let comps = agent_doc_element::element::parse(&current_content)?;
-            let q = comps
-                .iter()
-                .find(|c| c.name == "queue")
-                .context("queue maintenance: queue component vanished before convergence")?;
+            let q = agent_doc_queue::queue_set::component_for_id(
+                &current_content,
+                &comps,
+                &selected_queue_id,
+            )?
+            .context("queue maintenance: queue component vanished before convergence")?;
             q.replace_content(&current_content, &new_body)
         };
         activation.entries_after = converged_entries;
@@ -4464,7 +4541,12 @@ pub fn run_queue_maintenance_with_coin_gate(
         let new_body = agent_doc_queue::document_queue::render(&activation.entries_after);
         current_content = {
             let comps = agent_doc_element::element::parse(&current_content)?;
-            let q = comps.iter().find(|c| c.name == "queue").unwrap();
+            let q = agent_doc_queue::queue_set::component_for_id(
+                &current_content,
+                &comps,
+                &selected_queue_id,
+            )?
+            .context("queue maintenance: selected queue vanished after start fence")?;
             q.replace_content(&current_content, &new_body)
         };
         mutated = true;
@@ -4570,7 +4652,12 @@ pub fn run_queue_maintenance_with_coin_gate(
             let new_body = agent_doc_queue::document_queue::render(&new_entries);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
-                let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                let q = agent_doc_queue::queue_set::component_for_id(
+                    &current_content,
+                    &comps,
+                    &selected_queue_id,
+                )?
+                .context("queue maintenance: selected queue vanished before done-id strike")?;
                 q.replace_content(&current_content, &new_body)
             };
             mutated = true;
@@ -4723,7 +4810,12 @@ pub fn run_queue_maintenance_with_coin_gate(
             let new_body = agent_doc_queue::document_queue::render(&new_entries);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
-                let q = comps.iter().find(|c| c.name == "queue").context(
+                let q = agent_doc_queue::queue_set::component_for_id(
+                    &current_content,
+                    &comps,
+                    &selected_queue_id,
+                )?
+                .context(
                     "queue maintenance: queue component vanished before free-text residue strike",
                 )?;
                 q.replace_content(&current_content, &new_body)
@@ -4873,7 +4965,12 @@ pub fn run_queue_maintenance_with_coin_gate(
                     let new_body = agent_doc_queue::document_queue::render(&new_entries);
                     current_content = {
                         let comps = agent_doc_element::element::parse(&current_content)?;
-                        let q = comps.iter().find(|c| c.name == "queue").context(
+                        let q = agent_doc_queue::queue_set::component_for_id(
+                            &current_content,
+                            &comps,
+                            &selected_queue_id,
+                        )?
+                        .context(
                             "queue maintenance: queue component vanished before backlog/done strike",
                         )?;
                         q.replace_content(&current_content, &new_body)
@@ -4929,7 +5026,12 @@ pub fn run_queue_maintenance_with_coin_gate(
             let new_body = agent_doc_queue::document_queue::render(&after_stop);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
-                let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                let q = agent_doc_queue::queue_set::component_for_id(
+                    &current_content,
+                    &comps,
+                    &selected_queue_id,
+                )?
+                .context("queue maintenance: selected queue vanished during stop-fence handling")?;
                 q.replace_content(&current_content, &new_body)
             };
             // Strip ephemeral activation controls and HOLD the queue: the
@@ -4949,7 +5051,11 @@ pub fn run_queue_maintenance_with_coin_gate(
             if let Ok(Some(snap)) = agent_doc_snapshot_io::load_document_baseline(file) {
                 let mut new_snap = snap.clone();
                 if let Ok(sc) = agent_doc_element::element::parse(&new_snap)
-                    && let Some(sq) = sc.iter().find(|c| c.name == "queue")
+                    && let Ok(Some(sq)) = agent_doc_queue::queue_set::component_for_id(
+                        &new_snap,
+                        &sc,
+                        &selected_queue_id,
+                    )
                 {
                     new_snap = sq.replace_content(&new_snap, &new_body);
                     new_snap = strip_queue_activation_tokens_in_content(&new_snap)?;
@@ -5034,7 +5140,11 @@ pub fn run_queue_maintenance_with_coin_gate(
         if snapshot_was_active
             && let Ok(Some(snap_content)) = agent_doc_snapshot_io::load_document_baseline(file)
             && let Ok(snap_comps) = agent_doc_element::element::parse(&snap_content)
-            && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
+            && let Ok(Some(snap_q)) = agent_doc_queue::queue_set::component_for_id(
+                &snap_content,
+                &snap_comps,
+                &selected_queue_id,
+            )
         {
             let snap_body = &snap_content[snap_q.open_end..snap_q.close_start];
             if let Ok(snap_entries) = agent_doc_queue::document_queue::parse(snap_body)
@@ -5139,7 +5249,12 @@ pub fn run_queue_maintenance_with_coin_gate(
 
     if need_clear_drained_body {
         let comps = agent_doc_element::element::parse(&current_content)?;
-        let q = comps.iter().find(|c| c.name == "queue").unwrap();
+        let q = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &comps,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: selected queue vanished before drain clear")?;
         if !q.content(&current_content).trim().is_empty() {
             current_content = q.replace_content(&current_content, "");
             mutated = true;
@@ -5187,7 +5302,12 @@ pub fn run_queue_maintenance_with_coin_gate(
     // re-trigger on the next cycle.
     if need_strip_auto || marker_stop {
         let comps = agent_doc_element::element::parse(&current_content)?;
-        let q = comps.iter().find(|c| c.name == "queue").unwrap();
+        let q = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &comps,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: selected queue vanished before control strip")?;
         let raw_tag = &current_content[q.open_start..q.open_end];
         let new_tag = agent_doc_queue::document_queue::strip_control_from_tag(
             &agent_doc_queue::document_queue::strip_auto_from_tag(raw_tag),
@@ -5418,12 +5538,15 @@ pub fn run_queue_maintenance_with_coin_gate(
         .iter()
         .filter_map(|text| agent_doc_queue::queue_response::queue_prompt_done_id(text))
         .collect::<std::collections::HashSet<_>>();
-    let marker_body = agent_doc_element::element::parse(&current_content)?
-        .iter()
-        .find(|component| component.name == "queue")
-        .context("queue maintenance: queue component vanished before in-progress marker")?
-        .content(&current_content)
-        .to_string();
+    let marker_components = agent_doc_element::element::parse(&current_content)?;
+    let marker_body = agent_doc_queue::queue_set::component_for_id(
+        &current_content,
+        &marker_components,
+        &selected_queue_id,
+    )?
+    .context("queue maintenance: queue component vanished before in-progress marker")?
+    .content(&current_content)
+    .to_string();
     if let Some((new_body, marked_entries)) =
         agent_doc_queue::document_queue::project_prompts_in_progress(
             &marker_body,
@@ -5432,10 +5555,12 @@ pub fn run_queue_maintenance_with_coin_gate(
     {
         current_content = {
             let comps = agent_doc_element::element::parse(&current_content)?;
-            let q = comps
-                .iter()
-                .find(|c| c.name == "queue")
-                .context("queue maintenance: queue component vanished before in-progress marker")?;
+            let q = agent_doc_queue::queue_set::component_for_id(
+                &current_content,
+                &comps,
+                &selected_queue_id,
+            )?
+            .context("queue maintenance: queue component vanished before in-progress marker")?;
             q.replace_content(&current_content, &new_body)
         };
         activation.entries_after = marked_entries;
@@ -5452,10 +5577,12 @@ pub fn run_queue_maintenance_with_coin_gate(
         let new_body = agent_doc_queue::document_queue::render(&skip_marked);
         current_content = {
             let comps = agent_doc_element::element::parse(&current_content)?;
-            let q = comps
-                .iter()
-                .find(|c| c.name == "queue")
-                .context("queue maintenance: queue component vanished before skip marker")?;
+            let q = agent_doc_queue::queue_set::component_for_id(
+                &current_content,
+                &comps,
+                &selected_queue_id,
+            )?
+            .context("queue maintenance: queue component vanished before skip marker")?;
             q.replace_content(&current_content, &new_body)
         };
         activation.entries_after = skip_marked;
@@ -5510,7 +5637,11 @@ pub fn run_queue_maintenance_with_coin_gate(
 
         if queue_tag_attrs_normalized
             && let Ok(snap_comps) = agent_doc_element::element::parse(&new_snap)
-            && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
+            && let Ok(Some(snap_q)) = agent_doc_queue::queue_set::component_for_id(
+                &new_snap,
+                &snap_comps,
+                &selected_queue_id,
+            )
         {
             let raw_tag = &new_snap[snap_q.open_start..snap_q.open_end];
             let normalized_tag =
@@ -5527,13 +5658,17 @@ pub fn run_queue_maintenance_with_coin_gate(
         if (need_sync_newly_activated_queue_snapshot
             || need_sync_active_queue_future_state_snapshot)
             && let Ok(current_comps) = agent_doc_element::element::parse(&current_content)
-            && let Some(current_q) = current_comps
-                .iter()
-                .find(|component| component.name == "queue")
+            && let Ok(Some(current_q)) = agent_doc_queue::queue_set::component_for_id(
+                &current_content,
+                &current_comps,
+                &selected_queue_id,
+            )
             && let Ok(snap_comps) = agent_doc_element::element::parse(&new_snap)
-            && let Some(snap_q) = snap_comps
-                .iter()
-                .find(|component| component.name == "queue")
+            && let Ok(Some(snap_q)) = agent_doc_queue::queue_set::component_for_id(
+                &new_snap,
+                &snap_comps,
+                &selected_queue_id,
+            )
         {
             let queue_region = &current_content[current_q.open_start..current_q.close_end];
             let mut rebuilt = String::with_capacity(new_snap.len() + queue_region.len());
@@ -5547,7 +5682,11 @@ pub fn run_queue_maintenance_with_coin_gate(
         if !need_sync_newly_activated_queue_snapshot
             && (activation.consumed_start_fence || need_strip_auto || need_clear_drained_body)
             && let Ok(snap_comps) = agent_doc_element::element::parse(&new_snap)
-            && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
+            && let Ok(Some(snap_q)) = agent_doc_queue::queue_set::component_for_id(
+                &new_snap,
+                &snap_comps,
+                &selected_queue_id,
+            )
         {
             let new_body = if need_clear_drained_body {
                 String::new()
@@ -5558,7 +5697,11 @@ pub fn run_queue_maintenance_with_coin_gate(
 
             if (need_strip_auto || marker_stop)
                 && let Ok(snap_comps2) = agent_doc_element::element::parse(&new_snap)
-                && let Some(snap_q2) = snap_comps2.iter().find(|c| c.name == "queue")
+                && let Ok(Some(snap_q2)) = agent_doc_queue::queue_set::component_for_id(
+                    &new_snap,
+                    &snap_comps2,
+                    &selected_queue_id,
+                )
             {
                 let raw_tag = &new_snap[snap_q2.open_start..snap_q2.open_end];
                 let new_tag = agent_doc_queue::document_queue::strip_control_from_tag(
@@ -14926,8 +15069,16 @@ mod tests {
                 .content(&updated),
         );
         assert_eq!(items.len(), 3, "{items:?}");
-        assert!(items.iter().any(|item| item.text == "verify [#existing] yourself"));
-        assert!(items.iter().any(|item| item.text == "Why is the sibling missing?"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.text == "verify [#existing] yourself")
+        );
+        assert!(
+            items
+                .iter()
+                .any(|item| item.text == "Why is the sibling missing?")
+        );
         assert_eq!(items.iter().filter(|item| item.id == "existing").count(), 1);
     }
 

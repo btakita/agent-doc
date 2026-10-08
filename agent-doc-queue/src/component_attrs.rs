@@ -18,6 +18,8 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
     "stop",
     "subagents",
     "fan-out",
+    "id",
+    "depends",
 ];
 
 /// Whether `key` is a flag/value attribute owned by `agent:queue`.
@@ -225,6 +227,19 @@ mod tests {
             "<!-- /agent:backlog -->\n\n",
             "<!-- agent:done archive=tasks/x.done.md -->\n",
             "<!-- /agent:done -->\n",
+        );
+        assert!(component_attr_warning(content).is_none());
+    }
+
+    #[test]
+    fn component_attr_warning_allows_queue_id_and_dependencies() {
+        let content = concat!(
+            "<!-- agent:queue id=release-a -->\n",
+            "- release A\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=release-b depends=release-a -->\n",
+            "- release B\n",
+            "<!-- /agent:queue -->\n",
         );
         assert!(component_attr_warning(content).is_none());
     }

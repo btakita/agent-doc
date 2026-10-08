@@ -1284,6 +1284,29 @@ fn derive_layout_actor_bindings(
     bindings
 }
 
+fn derive_owned_layout_assignments(
+    actors: &ControllerActorStore,
+    assignments: &BTreeMap<String, String>,
+) -> Vec<(String, String)> {
+    assignments
+        .iter()
+        .filter(|(document, pane)| {
+            // A later actor rebind retires the old receipt. Unknown actors are
+            // allowed for cross-root effects; the tmux adapter still proves
+            // physical visibility and ownership before moving panes.
+            actors.get(*document).is_none_or(|actor| {
+                actor.pane_id == **pane
+                    && actor.state != agent_doc_controller::actor::ActorState::Closed
+            }) && !actors.values().any(|actor| {
+                actor.pane_id == **pane
+                    && actor.document_id != **document
+                    && actor.state != agent_doc_controller::actor::ActorState::Closed
+            })
+        })
+        .map(|(document, pane)| (document.clone(), pane.clone()))
+        .collect()
+}
+
 /// Controller-lifetime Lazily graph for the pane layout projection.
 ///
 /// IDE observations set `desired`; tmux observations set `observed`; the
@@ -1296,6 +1319,7 @@ fn derive_layout_actor_bindings(
 struct ControllerPaneLayoutGraph {
     ctx: ThreadSafeContext,
     desired: Source<Option<PaneLayoutDesired>>,
+    live_actor_bindings: Computed<ControllerActorStore>,
     actor_bindings: Computed<Vec<ControllerTmuxActorBinding>>,
     observed: Source<Option<PaneLayoutObservation>>,
     receipt: Source<PaneLayoutEffectReceipt>,
@@ -1371,22 +1395,7 @@ impl ControllerPaneLayoutGraph {
         let assignments = ctx.source(BTreeMap::<String, String>::new());
         let owned_assignments = ctx.computed(move |ctx| {
             let actors = ctx.get(&live_actor_bindings);
-            ctx.get(&assignments)
-                .into_iter()
-                .filter(|(document, pane)| {
-                    // A later actor rebind retires the old receipt. Unknown actors
-                    // are allowed for cross-root effects; the tmux adapter still
-                    // proves physical visibility and ownership before moving panes.
-                    actors.get(document).is_none_or(|actor| {
-                        actor.pane_id == *pane
-                            && actor.state != agent_doc_controller::actor::ActorState::Closed
-                    }) && !actors.values().any(|actor| {
-                        actor.pane_id == *pane
-                            && actor.document_id != *document
-                            && actor.state != agent_doc_controller::actor::ActorState::Closed
-                    })
-                })
-                .collect::<Vec<_>>()
+            derive_owned_layout_assignments(&actors, &ctx.get(&assignments))
         });
         let desired_for_actor_bindings = desired;
         let structural_receipt_for_actor_bindings = structural_receipt;
@@ -1459,6 +1468,7 @@ impl ControllerPaneLayoutGraph {
         Self {
             ctx,
             desired,
+            live_actor_bindings,
             actor_bindings,
             observed,
             receipt,
@@ -1950,17 +1960,43 @@ impl ControllerPaneLayoutGraph {
             assignments.retain(|file, assigned| file == document || assigned != pane);
             assignments.insert(document.clone(), pane.clone());
         }
-        self.ctx.set(&self.assignments, assignments);
-        self.ctx.set(
-            &self.structural_receipt,
-            Some(PaneLayoutStructuralReceipt {
-                generation: desired.generation,
-                structure: PaneLayoutStructure::from(&desired.invocation),
-                actor_bindings,
-                report: report.filter(|report| report.synced),
-                file_panes,
-            }),
-        );
+        // The structural receipt itself can add a file→pane binding for a
+        // document whose actor has not published yet. That is progress from
+        // THIS effect, not a newer effect input. Publish the assignment and
+        // refresh the current receipt's applicability in one graph batch so
+        // the transient binding change cannot project NeedsEffect and
+        // supersede the worker that produced it. A genuinely independent actor
+        // change still leaves the old receipt inapplicable and schedules the
+        // latest-wins retry.
+        let actor_authority_unchanged = self.ctx.get(&self.actor_bindings) == actor_bindings;
+        let structural_receipt = PaneLayoutStructuralReceipt {
+            generation: desired.generation,
+            structure: PaneLayoutStructure::from(&desired.invocation),
+            actor_bindings,
+            report: report.filter(|report| report.synced),
+            file_panes,
+        };
+        let refreshed_actor_bindings = actor_authority_unchanged.then(|| {
+            let actors = self.ctx.get(&self.live_actor_bindings);
+            let owned_assignments = derive_owned_layout_assignments(&actors, &assignments);
+            derive_layout_actor_bindings(
+                Some(desired),
+                &actors,
+                Some(&structural_receipt),
+                &owned_assignments,
+            )
+        });
+        self.ctx.batch(|ctx| {
+            ctx.set(&self.assignments, assignments);
+            ctx.set(&self.structural_receipt, Some(structural_receipt));
+            if let Some(refreshed_actor_bindings) = refreshed_actor_bindings {
+                let mut receipt = ctx.get(&self.receipt);
+                if receipt.generation == desired.generation {
+                    receipt.actor_bindings = refreshed_actor_bindings;
+                    ctx.set(&self.receipt, receipt);
+                }
+            }
+        });
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -10929,6 +10965,107 @@ mod tests {
             pane_graph.actor_bindings().is_empty(),
             "a prior generation's structural proof must not bind a document absent from current desired state",
         );
+    }
+
+    #[test]
+    fn same_generation_structural_receipt_does_not_reschedule_its_own_effect() {
+        struct RecordingSink(Arc<Mutex<Vec<u64>>>);
+        impl PaneLayoutProjectionSink for RecordingSink {
+            fn reconcile(&self, desired: PaneLayoutDesired) {
+                self.0.lock().push(desired.generation);
+            }
+        }
+
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+        let runs = Arc::new(Mutex::new(Vec::new()));
+        graph.install_sink(Arc::new(RecordingSink(Arc::clone(&runs))));
+
+        let desired = graph.set_desired(pane_layout_desired_for_test(1).invocation, None);
+        let initial_bindings = graph.actor_bindings();
+        graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: desired.generation,
+            actor_bindings: initial_bindings.clone(),
+            attempt: 1,
+            phase: PaneLayoutEffectPhase::InFlight,
+            reason: "tmux_effect_in_flight".to_string(),
+            file_panes: Vec::new(),
+            focus_required: true,
+            focus_applied: false,
+        });
+
+        graph.record_structural_assignment(
+            &desired,
+            initial_bindings,
+            None,
+            vec![("tasks/two.md".to_string(), "%52".to_string())],
+        );
+
+        let projection = graph.projection();
+        let bindings = graph.actor_bindings();
+        let receipt = graph.ctx.get(&graph.receipt);
+        assert_eq!(
+            *runs.lock(),
+            vec![desired.generation],
+            "the effect's own structural evidence must not look like newer work; projection={projection:?} bindings={bindings:?} receipt={receipt:?}",
+        );
+        assert!(matches!(
+            projection,
+            PaneLayoutProjection::Applying(current) if current.generation == desired.generation
+        ));
+        assert!(
+            bindings
+                .iter()
+                .any(|binding| binding.document_path == "tasks/two.md" && binding.pane_id == "%52")
+        );
+    }
+
+    #[test]
+    fn independent_actor_change_still_reschedules_an_in_flight_layout() {
+        struct RecordingSink(Arc<Mutex<Vec<u64>>>);
+        impl PaneLayoutProjectionSink for RecordingSink {
+            fn reconcile(&self, desired: PaneLayoutDesired) {
+                self.0.lock().push(desired.generation);
+            }
+        }
+
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+        let runs = Arc::new(Mutex::new(Vec::new()));
+        graph.install_sink(Arc::new(RecordingSink(Arc::clone(&runs))));
+
+        let desired = graph.set_desired(pane_layout_desired_for_test(1).invocation, None);
+        graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: desired.generation,
+            actor_bindings: Vec::new(),
+            attempt: 1,
+            phase: PaneLayoutEffectPhase::InFlight,
+            reason: "tmux_effect_in_flight".to_string(),
+            file_panes: Vec::new(),
+            focus_required: true,
+            focus_applied: false,
+        });
+
+        actors.set(BTreeMap::from([(
+            "tasks/two.md".to_string(),
+            actor_record_for_test(
+                "tasks/two.md",
+                "%99",
+                agent_doc_controller::actor::ActorState::Ready,
+            ),
+        )]));
+
+        assert_eq!(
+            *runs.lock(),
+            vec![desired.generation, desired.generation],
+            "independent actor authority must still supersede stale in-flight work",
+        );
+        assert!(matches!(
+            graph.projection(),
+            PaneLayoutProjection::NeedsEffect(current) if current.generation == desired.generation
+        ));
     }
 
     fn gh130_closeout(owner_pid: u32, now: u64) -> agent_doc_state_backbone::CloseoutProjection {

@@ -5263,6 +5263,99 @@ Done.\n\
         }
     }
 
+    /// `#donearchive-stop-race`: the editor may publish `agent:done` content
+    /// into its configured archive while Stop is checking a just-committed
+    /// turn. That projection is not fresh prompt debt and must not cause Stop
+    /// to mint a response cycle for its console restatement.
+    #[test]
+    fn stop_does_not_reopen_for_done_archive_projection_after_commit() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let original = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: completed work — gpt-5\n\n",
+            "The completed work is persisted.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done archive=\"tasks/task.done.md\" -->\n",
+            "- 2026-10-08 [#completed] Completed item.\n",
+            "  Archived detail that is not shaped like a tracked-item row.\n",
+            "<!-- /agent:done -->\n",
+        );
+        fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        let previous =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original))
+                .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(original),
+            Some(original),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(original),
+            Some(original),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(original),
+            Some(original),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let archived = original.replace(
+            "- 2026-10-08 [#completed] Completed item.\n  Archived detail that is not shaped like a tracked-item row.\n",
+            "",
+        );
+        fs::write(&doc, &archived).unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Console restatement of the persisted response.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            cycle.cycle_id, previous.cycle_id,
+            "Stop minted a fresh cycle"
+        );
+        assert_eq!(cycle.phase.as_str(), "committed");
+        assert!(
+            !fs::read_to_string(&doc)
+                .unwrap()
+                .contains("Console restatement"),
+            "Stop replayed console text over an archive-only projection"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !ops.contains("codex_stop_post_commit_prompt_cycle_reopened"),
+            "{ops}"
+        );
+    }
+
     #[test]
     fn stop_auto_closes_open_cycle_across_nested_roots_and_turn_drift() {
         let dir = setup_project();

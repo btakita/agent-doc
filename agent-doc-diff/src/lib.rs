@@ -241,7 +241,18 @@ fn neutralize_informational_component_content(content: &str) -> String {
 
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     for component in components {
-        if turn_role_for_component_name(&component.name).triggers_turn() {
+        // `#donearchive-stop-race`: the body of an external done archive is a
+        // binary-owned staging projection. Publishing it appends the body to
+        // the configured file and clears it from the session document, often
+        // while the Stop hook is still observing the live editor. That move is
+        // not fresh prompt-bearing work. Keep ordinary inline `agent:done`
+        // changes governed by the descriptor's Trigger role so a hand-edited
+        // local completion archive still fails open.
+        let external_done_projection =
+            component.name == "done" && component.attrs.contains_key("archive");
+        if turn_role_for_component_name(&component.name).triggers_turn()
+            && !external_done_projection
+        {
             continue;
         }
 
@@ -3878,6 +3889,51 @@ diff --git a/tests/render_test.rs b/tests/render_test.rs
 
         assert_eq!(strip_comments(previous), strip_comments(current));
         assert_eq!(unified_diff_from_contents(previous, current), None);
+    }
+
+    /// `#donearchive-stop-race`: publishing the completed-work body to the
+    /// configured archive can race the Codex Stop hook. The projection is
+    /// binary bookkeeping, not a new operator prompt, so it must not mint a
+    /// fresh response cycle while the editor is still applying the archive.
+    #[test]
+    fn archived_done_body_change_is_not_a_turn_trigger() {
+        let previous = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: completed work — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n",
+            "- 2026-10-08 [#completed] Completed item.\n",
+            "  Archived detail that is not shaped like a tracked-item row.\n",
+            "<!-- /agent:done -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: completed work — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:done archive=\"tasks/tools.done.md\" -->\n",
+            "<!-- /agent:done -->\n",
+        );
+
+        assert_eq!(strip_comments(previous), strip_comments(current));
+        assert_eq!(unified_diff_from_contents(previous, current), None);
+    }
+
+    #[test]
+    fn inline_done_body_change_remains_visible_to_turn_dispatch() {
+        let previous = concat!(
+            "<!-- agent:done -->\n",
+            "- 2026-10-08 [#completed] Original completion record.\n",
+            "<!-- /agent:done -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:done -->\n",
+            "- 2026-10-08 [#completed] Operator revised the completion record.\n",
+            "<!-- /agent:done -->\n",
+        );
+
+        assert!(unified_diff_from_contents(previous, current).is_some());
     }
 
     #[test]

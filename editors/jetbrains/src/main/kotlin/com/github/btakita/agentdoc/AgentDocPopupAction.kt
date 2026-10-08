@@ -30,6 +30,7 @@ class AgentDocPopupAction : AnAction(), DumbAware {
             // Keep the routine, non-interrupting context reset on the first
             // numbered page. Position nine is the last single-key selection.
             "AgentDoc.ClearSessionContext",
+            "AgentDoc.LintDocument",
             "AgentDoc.CancelTurn",
             "AgentDoc.CopySessionDiagnostics",
             "AgentDoc.SyncLayout",

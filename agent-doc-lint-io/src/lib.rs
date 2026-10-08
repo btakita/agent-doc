@@ -600,8 +600,9 @@ fn classify_and_emit(
     let errors_owned: Vec<LintFinding> = errors.iter().map(|f| (*f).clone()).collect();
     let header = format!(
         "[lint-gate] INTERRUPTED: {} blocking lint finding(s) for {} (mode={}, source={}). \
-         Fix the directives below before re-running `agent-doc finalize` / \
-         `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in \
+         Error-severity findings block in every mode; strict mode also blocks warnings. \
+         Fix the directives below, then retry the interrupted command, or set \
+         `agent_doc_lint_dialect: off` in \
          frontmatter / `[lint] dialect = \"off\"` in `.agent-doc/config.toml` \
          to temporarily skip this gate.",
         errors_owned.len(),
@@ -613,12 +614,15 @@ fn classify_and_emit(
     ops_logger(
         file,
         &format!(
-            "lint_gate_blocked file={} mode={} source={} errors={} warnings={}",
+            "lint_gate_blocked file={} mode={} source={} errors={} warnings={} first_rule={} first_line={} first_col={}",
             file.display(),
             dialect_label(mode),
             source.as_str(),
             errors_owned.len(),
-            warnings.len()
+            warnings.len(),
+            errors_owned[0].rule,
+            errors_owned[0].line,
+            errors_owned[0].col,
         ),
     );
     Err(anyhow::anyhow!("{}\n{}", header, body))

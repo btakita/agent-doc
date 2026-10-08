@@ -1256,7 +1256,13 @@ IDE log, but the operator-facing notification must fit the small notification
 surface. A lint-gate failure is rendered as the attempted action, document basename
 and line, human-readable finding, suggested replacement when present, and retry
 instruction. Nested controller/CLI wrappers, configuration escape hatches, and
-absolute paths are diagnostic detail and must not dominate that notification.
+absolute paths are diagnostic detail and must not dominate that notification. The
+diagnostic extractor accepts CRLF or LF records and must stop at the diagnostic or
+its immediately following hint; later dogfood/closeout trailers cannot invalidate
+the match. `agent-doc lint <FILE>` is the read-only inspection surface for the same
+integrity and dialect policy used at closeout. The JetBrains **Inspect Document
+Directives** action invokes it and retains the complete finding output in the IDE
+Event Log, independent of compact/write notification sizing.
 
 When the deferred reconnect result differs from the open JetBrains document, a
 forced refresh must install those exact bytes into the visible `Document` before

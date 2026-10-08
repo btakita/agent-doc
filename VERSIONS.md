@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.479
+
+- **Response recovery is structural and replay-safe.** Exchange-close repair now reads Markdown structure instead of
+  matching marker-looking text inside inline code or fenced blocks, and checkpoint-proven repeated response tails are
+  collapsed without losing concurrent operator edits, component attributes, queue rows, or the newest boundary.
+- **Live queue revisions remain authoritative.** When an operator removes an older duplicated free-text revision, queue
+  reconciliation keeps the surviving live revision instead of restoring or selecting the deleted work.
+- **Agent prompts and tmux titles retain document identity.** Every prompt identifies its session document, including
+  Claude Code's interactive context-chip path, while all pane-title states retain the document basename.
+- **Remote Dev replacement tabs preserve their prior layout slot (GH #185).** Equal-width one-drop/one-add transitions
+  inherit the replaced column's position and report memory-derived order as retained evidence.
+- **Lint failures remain inspectable across CLI and JetBrains (GH #186).** Diagnostic extraction handles CRLF plus
+  trailing hint and dogfood output, `agent-doc lint` provides a read-only inspection path, and JetBrains exposes the
+  same operation with full failure output in the Event Log; the JetBrains plugin advances to 0.2.508.
+- **Exchange prompts can declare presets and subagent dispatch.** AST-backed component policy now accepts persistent
+  `preset` and bare `subagents` / `fan-out` attributes on `agent:exchange`, applies their defaults through canonical
+  preset resolution, and emits a typed exchange delegation contract while the parent retains cycle ownership.
+
 ## 0.35.478
 
 - **Durably captured cycles recover onto a fresh supervisor (GH #181).** Stale, install-requested, and explicitly

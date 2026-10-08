@@ -31,7 +31,7 @@ Released agent-doc v0.35.475. v0.35.476 is not yet tagged or published; the acti
 
 ## Exchange
 
-<!-- agent:exchange patch=append -->
+<!-- agent:exchange patch=append subagents -->
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20261008-011101.md`*
@@ -63,6 +63,11 @@ work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md`.
 ```
 
 ### Re: retained closeouts, queue integrity, GH #181–#184, and v0.35.478 — gpt-6.1-sol · 2026-10-08T00:34-04:00
+
+> **Queue prompt:**
+>
+> do [#correspondingsubagentspr]
+
 
 > **Chat prompt (#chatprompt):** • Hook stopped
 >   └ agent-doc Stop hook already continued once for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
@@ -153,7 +158,18 @@ For `tools.md`, the installed rejected-generation recovery converged the retaine
 
 For `api.md`, the malformed duplicated row is absent. The newly installed exact-ack path observed that convergence had already removed it; `agent-doc commit` then completed as `78d11d1cde`, and session-check reports a committed cycle with no drainable work.
 
-For `frontend.md`, the retained response is present and supervisor/editor convergence health is good. The remaining artifact is the one-byte newline deletion `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`; the existing repair path has a passing exact regression. The file currently has no live JetBrains registration, so this item is gated on reopening/refreshing `frontend.md`. Once registered, run its existing `agent-doc repair`, then the committed-residue `preflight` + `commit` remedy without resubmitting the response.
+For `frontend.md`, the retained response is present and supervisor/editor convergence health is good. The remaining artifact is the one-byte newline deletion `...`; the existing repair path has a passing exact regression. The file currently has no live JetBrains registration, so this item is gated on reopening/refreshing `frontend.md`. Once registered, run its existing `agent-doc repair`, then the committed-residue `preflight` + `commit` remedy without resubmitting the response.
+#subagent: Fix sdk.md issue: My queue item was duplicated during Run Agent Doc.
+```
+- 🚧 In https://github.com/haiven-dev/haiven-tools/pull/2, describe what Mise is and how it will be used. Add docs which includes installing and usage. Copy the haiven-contracts pin logic from haiven-contracts. This will be the first tool. Setup .mise.toml which includes Python 3.14 and other dependencies.
+- In https://github.com/haiven-dev/haiven-tools/pull/2, describe what Mise is and how it will be used. Add docs which includes installing and usage. Copy the haiven-contracts pin logic from haiven-contracts. This will be the first tool. Setup .mise.toml which includes Python 3.14.
+```
+The sdk.md current markers are drifted from the actual work state. Same with this document...there is drift between what is being worked on and which queue items have the `🚧` prefix:
+```
+- do [#testhttpsgithub]
+- In https://github.com/haiven-dev/haiven-tools/pull/2, describe what Mise is and how it will be used. Add docs which includes installing and usage. Copy the haiven-contracts pin logic from haiven-contracts. This will be the first tool. Setup .mise.toml which includes Python 3.14 and other dependencies.
+- 🚧 After a successful test of [#testhttpsgithub], squash merge the entire https://github.com/haiven-dev/haiven-sdk/pull/57 stack
+```
 <!-- agent:boundary:72f38ede -->
 <!-- /agent:exchange -->
 
@@ -162,10 +178,18 @@ For `frontend.md`, the retained response is present and supervisor/editor conver
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#correspondingsubagentspr]~~
 - 🚧 do [#possibletellclaude]
 - 🚧 Make the tmux pane title contain the document name in all states.
-- #gh-fix https://github.com/btakita/agent-doc/issues/185
-- #gh-fix https://github.com/btakita/agent-doc/issues/186
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/185
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/186
+- 🚧 release + publish
+- #gh-fix https://github.com/btakita/agent-doc/issues/187
+- #gh-fix https://github.com/btakita/agent-doc/issues/188
+- #gh-fix https://github.com/btakita/agent-doc/issues/189
+- #gh-fix https://github.com/btakita/agent-doc/issues/190
+- After release, add support for multiple `agent:queue` tags. Should we have a `id=...` attribute to distinguish between queues? I want to have different queues to allow different attributes. Some queues may be a subagents queue and others may be ordered. This post-release queue is a perfect example use case. If you can start the subagent now and keep it out of the upcoming release, do that. I want to be able to have different queues and even allow a queue to depend on another queue. Perhaps a release B queue can organize release B after the release A queue is complete.
+- Give queues an auto-dag like queue items. So a queue id=B must run after queue id=A ends, should we have an after=A in queue id=B? If we want to make a reoccurring sequence, perhaps queue id=A could be later filled again by queue id=B once complete? I wonder if you have suggestions on how we can have an interface algorithm on adding queue items defined in the md file.
 - release + publish
 <!-- /agent:queue -->
 

@@ -162,12 +162,14 @@ For `frontend.md`, the retained response is present and supervisor/editor conver
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
-- Make the tmux pane title contain the document name in all states.
+- do [#possibletellclaude]
+- 🚧 Make the tmux pane title contain the document name in all states.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#possibletellclaude] Is it possible to tell Claude Code which document to focus on for context?
 <!-- /agent:backlog -->
 
 ## Review

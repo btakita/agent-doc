@@ -327,3 +327,4 @@
 - 2026-10-07 [#annotatehistorynoop] [recommended] [P2][correctness] Implement git-history attribution for `agent-doc annotate --history`, or reject/remove the flag until implemented; add CLI and sidecar regression tests proving history mode differs from snapshot-only attribution and invalidates its cache when relevant Git history changes.
 - 2026-10-07 [#semanticcontinuationfalsepositive] [recommended] [P2][diagnostics] Stop semantic-completion warnings from treating a newer re-gated continuation under a different item ID as already resolved by its obsolete predecessor; add the #steergatemodelrerun/#steergatenamodata pair as a regression while preserving warnings for true duplicate work.
 - 2026-10-08 [#correspondingsubagentspr] Add a corresponding subagents + preset attributes for the `agent:exchange` tag.
+- 2026-10-08 [#possibletellclaude] Is it possible to tell Claude Code which document to focus on for context?

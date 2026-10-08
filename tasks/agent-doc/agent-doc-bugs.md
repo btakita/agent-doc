@@ -269,6 +269,17 @@ The editor restart completed and the old JetBrains process exited; a new backend
 > **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/197
 
 **Deferred:** All three worker slots are occupied by the FPE convergence fix and the already-running #189/#190 fixes. Issue #197 is the next subagent dispatch when a slot returns; it is not being treated as complete or executed inline.
+
+### Re: Claude Code session-document focus — gpt-5 · 2026-10-08T15:42:16-04:00
+
+> **Queue prompt:**
+>
+> do [#possibletellclaude]
+
+
+Completed and merged through PR #199 as merge commit `80e61a04a9fd1d24ca40dac4793849701b374eef`. Claude Code supports explicit file context interactively through `@file`/IDE context, but its headless `-p` interface has no dedicated local-file focus flag. Agent-doc now supplies the exact session-document path as primary, model-visible turn context across normal, resumed, streaming, orchestration, and direct-run paths, below the prompt-cache boundary.
+
+Focused prompt-context, stream, direct-run, and orchestration tests passed; `make check-fast` and PR CI both passed before merge.
 <!-- agent:boundary:26678c74 -->
 <!-- /agent:exchange -->
 
@@ -278,7 +289,7 @@ The editor restart completed and the old JetBrains process exited; a new backend
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#correspondingsubagentspr]~~
-- do [#possibletellclaude]
+- ~~do [#possibletellclaude]~~
 - ~~Make the tmux pane title contain the document name in all states.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/185~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/186~~ — auto-struck: answered this cycle (#ftstrike)
@@ -298,7 +309,6 @@ The editor restart completed and the old JetBrains process exited; a new backend
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#possibletellclaude] Is it possible to tell Claude Code which document to focus on for context?
 <!-- /agent:backlog -->
 
 ## Review

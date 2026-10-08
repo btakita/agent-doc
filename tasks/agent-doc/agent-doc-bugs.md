@@ -214,7 +214,7 @@ Focused verification passed 16 tests with zero failures: the 14 `agent-doc-turn`
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#correspondingsubagentspr]~~
 - do [#possibletellclaude]
-- Make the tmux pane title contain the document name in all states.
+- ~~Make the tmux pane title contain the document name in all states.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/185~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/186
 - release + publish

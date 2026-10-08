@@ -46,10 +46,13 @@ pub fn is_recognized_bare_flag_attr(component: &str, key: &str) -> bool {
     if is_queue_only_component_attr(key) {
         return component != "agent:queue" || is_queue_bare_flag_attr(key);
     }
-    if !is_prompt_component_attr(key) || key == "preset" {
+    if !is_prompt_component_attr(key) {
         return false;
     }
-    !matches!(component, "agent:queue" | "agent:exchange") || matches!(key, "subagents" | "fan-out")
+    if !matches!(component, "agent:queue" | "agent:exchange") {
+        return true;
+    }
+    matches!(key, "subagents" | "fan-out")
 }
 
 /// Component attribute keys recognized anywhere in the document, excluding the
@@ -302,6 +305,13 @@ mod tests {
             .expect("exchange concurrency is meaningless")
             .message_body();
         assert!(body.contains("expected a bare `subagents` flag"), "{body}");
+    }
+
+    #[test]
+    fn bare_preset_is_warning_only_when_misplaced_but_malformed_on_prompt_components() {
+        assert!(is_recognized_bare_flag_attr("agent:backlog", "preset"));
+        assert!(!is_recognized_bare_flag_attr("agent:queue", "preset"));
+        assert!(!is_recognized_bare_flag_attr("agent:exchange", "preset"));
     }
 
     #[test]

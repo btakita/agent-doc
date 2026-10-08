@@ -212,6 +212,14 @@ Focused verification passed 16 tests with zero failures: the 14 `agent-doc-turn`
 Already completed and released in v0.35.479 by commit `b526f1c9e1a9837e3876101b7169cc471ccc939e` (`fix: expose lint diagnostics in JetBrains`); GitHub issue #186 is closed. The fix makes lint extraction multiline and CRLF-safe despite a trailing `[dogfood]` record, exposes the read-only `agent-doc lint` command, wires the JetBrains lint action, and records the first rule/line/column in blocked-operation diagnostics.
 
 Fresh verification on current `main` passed: 24 lint-I/O tests, 2 lint CLI tests, 73 JetBrains `TerminalUtilTest` tests, and 6 popup-action tests. The verification worktree was clean, so no duplicate patch was created.
+
+### Re: GitHub issue #188 — gpt-5 · 2026-10-08T14:57:10-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/188
+
+Completed by merged PRs #191 and #192; GitHub issue #188 is closed. PR #191 preserves live editor authority, requires proven replay settlement, and makes the terminal stale-preflight transition atomic against turn-active writers. PR #192 preserves active one-shot queue intent across post-commit consume/sync and prevents a closed response from receiving a retroactive queue-prompt splice.
+
+Both PRs passed their full CI gates before merge. Their merge commits are `2570cbe71c059fcd7cee3c25f5f348d2b180a441` (#191) and `403df31528e04a6dbefde815bb54a9e1d59c53ff` (#192).
 <!-- agent:boundary:72f38ede -->
 <!-- /agent:exchange -->
 

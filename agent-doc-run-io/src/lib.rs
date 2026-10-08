@@ -1613,8 +1613,13 @@ pub fn owner_pane_queue_edit_should_defer_until_closeout(
         return false;
     };
     let document_path = file.to_string_lossy().to_string();
-    let ops =
-        agent_doc_turn::op_log::build_ops_from_semantic_diff(&document_path, None, "", &summary);
+    let ops = agent_doc_turn::op_log::build_ops_from_semantic_diff(
+        &document_path,
+        None,
+        "",
+        agent_doc_turn::op_log::OpSource::SnapshotDiff,
+        &summary,
+    );
     let affectedness = agent_doc_turn::turn_scope::classify_cycle(&ops, &scope);
     !affectedness.turn_affected
 }

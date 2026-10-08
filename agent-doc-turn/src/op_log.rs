@@ -259,17 +259,18 @@ pub fn classify_actor(source: OpSource) -> OpActor {
 
 /// Build durable op-log records from semantic node events.
 ///
-/// Preflight observes a snapshot-to-document diff, so every node op is
-/// classified as a `user` edit: the agent's committed output already lives in
-/// the snapshot. The durable store owns Lamport assignment; this builder leaves
-/// the placeholder clock at `0`.
+/// The caller must supply the provenance boundary that produced the semantic
+/// diff. This keeps attribution explicit at the observation site instead of
+/// silently treating every batch as a snapshot/user edit. The durable store
+/// owns Lamport assignment; this builder leaves the placeholder clock at `0`.
 pub fn build_ops_from_semantic_diff(
     document_path: &str,
     origin_session: Option<&str>,
     recorded_at: &str,
+    source: OpSource,
     summary: &agent_doc_diff::semantic::SemanticDiffSummary,
 ) -> Vec<DocumentOp> {
-    let actor = classify_actor(OpSource::SnapshotDiff);
+    let actor = classify_actor(source);
     summary
         .node_events
         .iter()
@@ -354,6 +355,7 @@ impl DocumentOp {
             && self.component == other.component
             && self.node_key == other.node_key
             && self.op_kind == other.op_kind
+            && self.actor == other.actor
             && self.before_preview == other.before_preview
             && self.after_preview == other.after_preview
     }
@@ -508,14 +510,24 @@ mod tests {
         let mut different = base.clone();
         different.after_preview = Some("- do [#gamma]".to_string());
         assert!(!base.same_mutation(&different));
+
+        let mut different_actor = base.clone();
+        different_actor.actor = OpActor::Agent;
+        assert!(!base.same_mutation(&different_actor));
     }
 
     #[test]
-    fn build_ops_from_semantic_diff_tags_user_actor_and_session() {
+    fn build_ops_from_semantic_diff_uses_source_actor_and_session() {
         let before = "<!-- agent:queue -->\n- do [#alpha]\n<!-- /agent:queue -->\n";
         let after = "<!-- agent:queue -->\n- do [#alpha]\n- do [#beta]\n<!-- /agent:queue -->\n";
         let summary = semantic_diff_summary(before, after, &[]).unwrap();
-        let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "100", &summary);
+        let ops = build_ops_from_semantic_diff(
+            "plan.md",
+            Some("sess-1"),
+            "100",
+            OpSource::SnapshotDiff,
+            &summary,
+        );
         assert!(!ops.is_empty());
         let beta = ops
             .iter()
@@ -527,6 +539,18 @@ mod tests {
         assert_eq!(beta.clock.origin_session.as_deref(), Some("sess-1"));
         // Lamport assignment is owned by the durable store; the builder leaves 0.
         assert_eq!(beta.clock.lamport, 0);
+
+        let maintenance_ops = build_ops_from_semantic_diff(
+            "plan.md",
+            Some("sess-1"),
+            "101",
+            OpSource::AgentWrite,
+            &summary,
+        );
+        assert!(
+            maintenance_ops.iter().all(|op| op.actor == OpActor::Agent),
+            "agent maintenance must not be attributed to the user"
+        );
     }
 
     /// `#pcc1` success criterion, stated empirically: replay the sixteen-line
@@ -561,7 +585,13 @@ mod tests {
         after.push_str("<!-- /agent:queue -->\n");
 
         let summary = semantic_diff_summary(before, &after, &[]).unwrap();
-        let ops = build_ops_from_semantic_diff("bugs2.md", Some("sess-1"), "100", &summary);
+        let ops = build_ops_from_semantic_diff(
+            "bugs2.md",
+            Some("sess-1"),
+            "100",
+            OpSource::SnapshotDiff,
+            &summary,
+        );
         let inserts: Vec<&DocumentOp> = ops
             .iter()
             .filter(|op| op.component == "queue" && op.op_kind == "insert")
@@ -583,12 +613,12 @@ mod tests {
         }
     }
 
-    /// Why the fold-heal must run BEFORE the semantic diff (`#qfoldedhead`,
-    /// fixed 0.35.120): if the paste is still folded when the diff runs, the
-    /// whole block is ONE node and fifteen ids never reach the op log. This
-    /// pins the ordering dependency that makes the test above pass.
+    /// A folded operator paste and agent-doc's normalization are distinct
+    /// provenance batches (`#qfoldedhead`, GH #187). The operator batch may see
+    /// one folded node; the maintenance batch must expose the repaired item ids
+    /// without falsely attributing those repairs to the operator.
     #[test]
-    fn a_folded_paste_would_record_only_one_op() {
+    fn folded_paste_records_separate_user_and_agent_batches() {
         let before =
             "<!-- agent:queue -->\n- Read the handoff completely.\n<!-- /agent:queue -->\n";
         let folded = concat!(
@@ -600,8 +630,14 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         let summary = semantic_diff_summary(before, folded, &[]).unwrap();
-        let ops = build_ops_from_semantic_diff("bugs2.md", Some("sess-1"), "100", &summary);
-        let queue_ids: Vec<&str> = ops
+        let user_ops = build_ops_from_semantic_diff(
+            "bugs2.md",
+            Some("sess-1"),
+            "100",
+            OpSource::SnapshotDiff,
+            &summary,
+        );
+        let queue_ids: Vec<&str> = user_ops
             .iter()
             .filter(|op| op.component == "queue")
             .map(|op| op.item_id.as_str())
@@ -610,6 +646,24 @@ mod tests {
             !queue_ids.contains(&"beta") && !queue_ids.contains(&"gamma"),
             "a folded block must not yield per-id ops before the heal runs: {queue_ids:?}"
         );
+        assert!(user_ops.iter().all(|op| op.actor == OpActor::User));
+
+        let healed = folded.replace("  do [#beta]\n  do [#gamma]", "- do [#beta]\n- do [#gamma]");
+        let maintenance_summary = semantic_diff_summary(folded, &healed, &[]).unwrap();
+        let maintenance_ops = build_ops_from_semantic_diff(
+            "bugs2.md",
+            Some("sess-1"),
+            "101",
+            OpSource::AgentWrite,
+            &maintenance_summary,
+        );
+        assert!(maintenance_ops.iter().all(|op| op.actor == OpActor::Agent));
+        let maintenance_ids = maintenance_ops
+            .iter()
+            .map(|op| op.item_id.as_str())
+            .collect::<Vec<_>>();
+        assert!(maintenance_ids.contains(&"beta"));
+        assert!(maintenance_ids.contains(&"gamma"));
     }
 
     #[test]
@@ -621,7 +675,13 @@ mod tests {
         let after =
             "<!-- agent:queue -->\n- do [#driver-a]\n- do [#sibling-b]\n<!-- /agent:queue -->\n";
         let summary = semantic_diff_summary(before, after, &[]).unwrap();
-        let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
+        let ops = build_ops_from_semantic_diff(
+            "plan.md",
+            Some("sess-1"),
+            "",
+            OpSource::SnapshotDiff,
+            &summary,
+        );
         let scope = TurnScope::for_driver(Some(Address::node("queue", 0, "queue:0:driver-a:0")));
         let affectedness = classify_cycle(&ops, &scope);
         assert!(
@@ -672,7 +732,13 @@ mod tests {
             "- old context bullet one EDITED",
         );
         let summary = semantic_diff_summary(base, &old_edit, &[]).unwrap();
-        let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
+        let ops = build_ops_from_semantic_diff(
+            "plan.md",
+            Some("sess-1"),
+            "",
+            OpSource::SnapshotDiff,
+            &summary,
+        );
         let affectedness = classify_cycle(&ops, &scope);
         assert!(
             !affectedness.turn_affected,
@@ -686,7 +752,13 @@ mod tests {
             "- old context bullet two\n- please also cover the retry path\n",
         );
         let summary2 = semantic_diff_summary(base, &tail_append, &[]).unwrap();
-        let ops2 = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary2);
+        let ops2 = build_ops_from_semantic_diff(
+            "plan.md",
+            Some("sess-1"),
+            "",
+            OpSource::SnapshotDiff,
+            &summary2,
+        );
         let affectedness2 = classify_cycle(&ops2, &scope);
         assert!(
             affectedness2.turn_affected,

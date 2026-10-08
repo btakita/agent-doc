@@ -29,7 +29,7 @@
 //! - lamport_is_per_document: independent documents keep independent clocks
 //! - read_ops_returns_lamport_order: rows come back ordered by Lamport tick
 
-use agent_doc_turn::op_log::{CausalClock, DocumentOp, OpActor};
+use agent_doc_turn::op_log::{CausalClock, DocumentOp, OpActor, OpSource};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 use std::collections::HashMap;
@@ -196,6 +196,7 @@ pub fn append_semantic_diff_ops(
     project_root: &Path,
     document_path: &str,
     origin_session: Option<&str>,
+    source: OpSource,
     summary: &agent_doc_diff::semantic::SemanticDiffSummary,
 ) -> Result<usize> {
     if summary.node_events.is_empty() {
@@ -206,6 +207,7 @@ pub fn append_semantic_diff_ops(
         document_path,
         origin_session,
         &recorded_at,
+        source,
         summary,
     );
     append_ops(project_root, &ops)
@@ -366,13 +368,44 @@ mod tests {
         )
         .unwrap();
 
-        let written =
-            append_semantic_diff_ops(dir.path(), "plan.md", Some("sess-1"), &summary).unwrap();
+        let written = append_semantic_diff_ops(
+            dir.path(),
+            "plan.md",
+            Some("sess-1"),
+            OpSource::SnapshotDiff,
+            &summary,
+        )
+        .unwrap();
 
         assert_eq!(written, 1);
         let ops = read_ops(dir.path(), "plan.md", 0).unwrap();
         assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].actor, OpActor::User);
         assert_eq!(ops[0].clock.origin_session.as_deref(), Some("sess-1"));
         assert!(ops[0].recorded_at.is_some());
+    }
+
+    #[test]
+    fn append_semantic_diff_ops_persists_agent_maintenance_actor() {
+        let dir = project_with_agent_doc();
+        let summary = agent_doc_diff::semantic::semantic_diff_summary(
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue -->\n- 🚧 do [#a]\n<!-- /agent:queue -->\n",
+            &[],
+        )
+        .unwrap();
+
+        append_semantic_diff_ops(
+            dir.path(),
+            "plan.md",
+            Some("sess-1"),
+            OpSource::AgentWrite,
+            &summary,
+        )
+        .unwrap();
+
+        let ops = read_ops(dir.path(), "plan.md", 0).unwrap();
+        assert!(!ops.is_empty());
+        assert!(ops.iter().all(|op| op.actor == OpActor::Agent));
     }
 }

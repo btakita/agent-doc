@@ -290,6 +290,196 @@ pub struct FreeTextWorkPrompt {
     pub text: String,
 }
 
+/// A proven revision of free text that one agent projection already
+/// materialized as an id-backed queue/backlog item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaterializedFreeTextRevision {
+    pub id: String,
+    pub text: String,
+}
+
+/// Result of reconciling one raced materialization projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaterializedFreeTextReconciliation {
+    pub queue_entries: Vec<crate::document_queue::QueueEntry>,
+    pub backlog_edits: Vec<MaterializedFreeTextRevision>,
+}
+
+/// Reconcile an operator revision that raced free-text materialization.
+///
+/// Identity here is the three-way projection provenance, never a text-prefix
+/// guess:
+///
+/// 1. `baseline -> projected` removes a set of free-text source nodes and adds
+///    one `do [#id]` node per source. The projected backlog text establishes a
+///    unique bijection from each removed source node to its durable id.
+/// 2. Removing those exact projected id nodes from `observed` must recover the
+///    baseline queue shape, with only the proven source slots allowed to differ.
+/// 3. Each differing source slot must still be actionable free text. Its text is
+///    the authoritative revision of the same source identity, so the backlog id
+///    is edited and the id-less replay row is removed.
+///
+/// Any extra row, missing id, ambiguous equal-text source, or change outside a
+/// source slot makes the proof fail closed. Consequently retries are idempotent:
+/// after one reconciliation the projected ids remain but the source replay rows
+/// do not, so step 2 can no longer match.
+pub fn reconcile_materialized_free_text_projection(
+    baseline: &[crate::document_queue::QueueEntry],
+    projected: &[crate::document_queue::QueueEntry],
+    observed: &[crate::document_queue::QueueEntry],
+    projected_backlog_text_by_id: &HashMap<String, String>,
+) -> Option<MaterializedFreeTextReconciliation> {
+    use crate::document_queue::QueueEntry;
+
+    let mut baseline_id_counts = HashMap::<String, usize>::new();
+    for id in baseline
+        .iter()
+        .filter_map(crate::queue_projection::queue_entry_do_id)
+    {
+        *baseline_id_counts.entry(id).or_default() += 1;
+    }
+
+    let mut projected_seen = HashMap::<String, usize>::new();
+    let mut projected_ids = Vec::<String>::new();
+    for id in projected
+        .iter()
+        .filter_map(crate::queue_projection::queue_entry_do_id)
+    {
+        let seen = projected_seen.entry(id.clone()).or_default();
+        *seen += 1;
+        if *seen > baseline_id_counts.get(&id).copied().unwrap_or_default() {
+            projected_ids.push(id);
+        }
+    }
+    if projected_ids.is_empty() {
+        return None;
+    }
+    let projected_id_set = projected_ids.iter().cloned().collect::<HashSet<_>>();
+    if projected_id_set.len() != projected_ids.len()
+        || projected_id_set
+            .iter()
+            .any(|id| baseline_id_counts.contains_key(id))
+    {
+        return None;
+    }
+
+    // Establish the materialization receipt. Exact text is used only to bind
+    // the pre-projection source node to the id minted from that same text; it is
+    // never used to decide whether the later operator revision is "similar".
+    let mut source_by_id = HashMap::<String, usize>::new();
+    let mut claimed_sources = HashSet::<usize>::new();
+    for id in &projected_ids {
+        let backlog_text = projected_backlog_text_by_id.get(id)?;
+        let candidates = baseline
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                let QueueEntry::Prompt(prompt) = entry else {
+                    return None;
+                };
+                (!claimed_sources.contains(&index)
+                    && free_text_prompt_is_backlog_task(&prompt.text)
+                    && normalize_admitted_free_text(&prompt.text)
+                        == normalize_admitted_free_text(backlog_text))
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let [source_index] = candidates.as_slice() else {
+            return None;
+        };
+        claimed_sources.insert(*source_index);
+        source_by_id.insert(id.clone(), *source_index);
+    }
+
+    let baseline_without_sources = baseline
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !claimed_sources.contains(index))
+        .map(|(_, entry)| entry.clone())
+        .collect::<Vec<_>>();
+    let projected_without_materialized_ids = projected
+        .iter()
+        .filter(|entry| {
+            crate::queue_projection::queue_entry_do_id(entry)
+                .is_none_or(|id| !projected_id_set.contains(&id))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if projected_without_materialized_ids != baseline_without_sources {
+        return None;
+    }
+
+    let mut remaining_projected_ids =
+        projected_ids
+            .iter()
+            .fold(HashMap::<String, usize>::new(), |mut counts, id| {
+                *counts.entry(id.clone()).or_default() += 1;
+                counts
+            });
+    let mut observed_without_ids = Vec::<(usize, &QueueEntry)>::new();
+    for (index, entry) in observed.iter().enumerate() {
+        let remove_projected_id = crate::queue_projection::queue_entry_do_id(entry)
+            .and_then(|id| remaining_projected_ids.get_mut(&id))
+            .is_some_and(|remaining| {
+                if *remaining == 0 {
+                    false
+                } else {
+                    *remaining -= 1;
+                    true
+                }
+            });
+        if !remove_projected_id {
+            observed_without_ids.push((index, entry));
+        }
+    }
+    if remaining_projected_ids
+        .values()
+        .any(|remaining| *remaining != 0)
+        || observed_without_ids.len() != baseline.len()
+    {
+        return None;
+    }
+
+    let id_by_source = source_by_id
+        .into_iter()
+        .map(|(id, source)| (source, id))
+        .collect::<HashMap<_, _>>();
+    let mut replay_rows = HashSet::<usize>::new();
+    let mut backlog_edits = Vec::with_capacity(id_by_source.len());
+    for (source_index, baseline_entry) in baseline.iter().enumerate() {
+        let (observed_index, observed_entry) = observed_without_ids[source_index];
+        let Some(id) = id_by_source.get(&source_index) else {
+            if observed_entry != baseline_entry {
+                return None;
+            }
+            continue;
+        };
+        let QueueEntry::Prompt(prompt) = observed_entry else {
+            return None;
+        };
+        if !free_text_prompt_is_backlog_task(&prompt.text) {
+            return None;
+        }
+        replay_rows.insert(observed_index);
+        backlog_edits.push(MaterializedFreeTextRevision {
+            id: id.clone(),
+            text: normalize_admitted_free_text(&prompt.text),
+        });
+    }
+    backlog_edits.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let queue_entries = observed
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !replay_rows.contains(index))
+        .map(|(_, entry)| entry.clone())
+        .collect();
+    Some(MaterializedFreeTextReconciliation {
+        queue_entries,
+        backlog_edits,
+    })
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ActionableFreeTextPrompts {
     pub prompts: Vec<FreeTextWorkPrompt>,
@@ -830,6 +1020,70 @@ mod tests {
             }
         );
         assert!(prompts.has_work());
+    }
+
+    #[test]
+    fn materialized_projection_identity_is_idempotent_for_both_crdt_orders() {
+        let old = "Re: Cross-platform mise bootstrap: Can this be run remotely via uvx?";
+        let revised = concat!(
+            "Re: Cross-platform mise bootstrap: Can this be run remotely via uvx...",
+            "cross platform?",
+        );
+        let baseline =
+            crate::document_queue::parse(&format!("- {old}\n- do [#neighbor]\n")).unwrap();
+        let projected =
+            crate::document_queue::parse("- do [#crossplatformmise]\n- do [#neighbor]\n").unwrap();
+        let backlog = HashMap::from([("crossplatformmise".to_string(), old.to_string())]);
+
+        for observed_body in [
+            format!("- do [#crossplatformmise]\n- {revised}\n- do [#neighbor]\n"),
+            format!("- {revised}\n- do [#crossplatformmise]\n- do [#neighbor]\n"),
+        ] {
+            let observed = crate::document_queue::parse(&observed_body).unwrap();
+            let reconciled = reconcile_materialized_free_text_projection(
+                &baseline, &projected, &observed, &backlog,
+            )
+            .expect("projection order must not change source identity");
+            assert_eq!(reconciled.backlog_edits.len(), 1);
+            assert_eq!(reconciled.backlog_edits[0].id, "crossplatformmise");
+            assert_eq!(reconciled.backlog_edits[0].text, revised);
+            assert_eq!(
+                crate::document_queue::render(&reconciled.queue_entries),
+                "- do [#crossplatformmise]\n- do [#neighbor]\n"
+            );
+            assert!(
+                reconcile_materialized_free_text_projection(
+                    &baseline,
+                    &projected,
+                    &reconciled.queue_entries,
+                    &backlog,
+                )
+                .is_none(),
+                "the projection join must be idempotent"
+            );
+        }
+    }
+
+    #[test]
+    fn materialized_projection_identity_fails_closed_on_extra_authored_work() {
+        let old = "Can this be run remotely via uvx?";
+        let baseline = crate::document_queue::parse(&format!("- {old}\n")).unwrap();
+        let projected = crate::document_queue::parse("- do [#crossplatformmise]\n").unwrap();
+        let observed = crate::document_queue::parse(concat!(
+            "- do [#crossplatformmise]\n",
+            "- Can this be run remotely via uvx on every platform?\n",
+            "- Publish an independent portability report.\n",
+        ))
+        .unwrap();
+        let backlog = HashMap::from([("crossplatformmise".to_string(), old.to_string())]);
+
+        assert!(
+            reconcile_materialized_free_text_projection(
+                &baseline, &projected, &observed, &backlog,
+            )
+            .is_none(),
+            "cardinality growth is independent authoring, never a revision proof"
+        );
     }
 
     #[test]

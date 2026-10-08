@@ -507,6 +507,10 @@ pub enum StateFact {
         document_hash: String,
         file: String,
         cycle_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head_sha256: Option<String>,
+        #[serde(default)]
+        drainable_head_count: usize,
         stall_epoch: u64,
         recorded_secs: u64,
     },
@@ -2079,6 +2083,8 @@ impl DocumentStateProjection {
             StateFact::QueueDrainStallContinuationRecorded {
                 file,
                 cycle_id,
+                head_sha256,
+                drainable_head_count,
                 stall_epoch,
                 recorded_secs,
                 ..
@@ -2088,6 +2094,8 @@ impl DocumentStateProjection {
                     QueueDrainStallFields {
                         file,
                         cycle_id: Some(cycle_id),
+                        head_sha256: head_sha256.as_deref(),
+                        drainable_head_count: Some(*drainable_head_count),
                         reason: None,
                     },
                     *stall_epoch,
@@ -2106,6 +2114,8 @@ impl DocumentStateProjection {
                     QueueDrainStallFields {
                         file,
                         cycle_id: None,
+                        head_sha256: None,
+                        drainable_head_count: None,
                         reason: reason.as_deref(),
                     },
                     *stall_epoch,
@@ -3520,6 +3530,8 @@ impl QueueProjection {
 struct QueueDrainStallFields<'a> {
     file: &'a str,
     cycle_id: Option<&'a str>,
+    head_sha256: Option<&'a str>,
+    drainable_head_count: Option<usize>,
     reason: Option<&'a str>,
 }
 
@@ -3528,6 +3540,10 @@ pub struct QueueDrainStallProjection {
     pub phase: QueueDrainStallPhase,
     pub file: String,
     pub cycle_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_sha256: Option<String>,
+    #[serde(default)]
+    pub drainable_head_count: usize,
     pub stall_epoch: u64,
     pub recorded_secs: u64,
     pub cleared_secs: u64,
@@ -3553,6 +3569,8 @@ impl QueueDrainStallProjection {
             match event {
                 QueueDrainStallEvent::Recorded => {
                     self.cycle_id = fields.cycle_id.unwrap_or_default().to_string();
+                    self.head_sha256 = fields.head_sha256.map(str::to_string);
+                    self.drainable_head_count = fields.drainable_head_count.unwrap_or_default();
                     self.recorded_secs = event_secs;
                     self.cleared_secs = 0;
                     self.clear_reason = None;
@@ -9724,6 +9742,8 @@ mod tests {
                 document_hash: "doc-a".into(),
                 file: "/tmp/plan.md".into(),
                 cycle_id: "cycle-1".into(),
+                head_sha256: Some("head-1".into()),
+                drainable_head_count: 1,
                 stall_epoch: 1,
                 recorded_secs: 1_000,
             },
@@ -9734,6 +9754,8 @@ mod tests {
         assert_eq!(drain_stall.phase, QueueDrainStallPhase::Pending);
         assert!(drain_stall.is_pending());
         assert_eq!(drain_stall.cycle_id, "cycle-1");
+        assert_eq!(drain_stall.head_sha256.as_deref(), Some("head-1"));
+        assert_eq!(drain_stall.drainable_head_count, 1);
 
         ledger.append(state_event(
             "drain-stall-recorded-2",
@@ -9741,6 +9763,8 @@ mod tests {
                 document_hash: "doc-a".into(),
                 file: "/tmp/plan.md".into(),
                 cycle_id: "cycle-2".into(),
+                head_sha256: Some("head-2".into()),
+                drainable_head_count: 2,
                 stall_epoch: 2,
                 recorded_secs: 2_000,
             },
@@ -9760,6 +9784,8 @@ mod tests {
         assert_eq!(drain_stall.phase, QueueDrainStallPhase::Pending);
         assert_eq!(drain_stall.stall_epoch, 2);
         assert_eq!(drain_stall.cycle_id, "cycle-2");
+        assert_eq!(drain_stall.head_sha256.as_deref(), Some("head-2"));
+        assert_eq!(drain_stall.drainable_head_count, 2);
 
         ledger.append(state_event(
             "drain-stall-clear",
@@ -9779,6 +9805,23 @@ mod tests {
             drain_stall.clear_reason.as_deref(),
             Some("preflight_reconciled")
         );
+    }
+
+    #[test]
+    fn legacy_queue_drain_stall_projection_deserializes_without_head_evidence() {
+        let projection: QueueDrainStallProjection = serde_json::from_value(serde_json::json!({
+            "phase": "pending",
+            "file": "/tmp/plan.md",
+            "cycle_id": "cycle-legacy",
+            "stall_epoch": 3,
+            "recorded_secs": 1_000,
+            "cleared_secs": 0
+        }))
+        .unwrap();
+
+        assert!(projection.is_pending());
+        assert_eq!(projection.head_sha256, None);
+        assert_eq!(projection.drainable_head_count, 0);
     }
 
     #[test]

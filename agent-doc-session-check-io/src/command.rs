@@ -884,6 +884,22 @@ pub fn log_supervisor_drain_handoff(
     );
 }
 
+fn clear_queue_drain_stall_after_valid_closeout(file: &Path, reason: &str) {
+    if let Err(err) = agent_doc_controller_io::project_controller::clear_queue_drain_stall_continuation_pending_for_file(
+        file, reason,
+    ) {
+        eprintln!(
+            "[session-check] warning: failed to reconcile prior continuation projection: {err}"
+        );
+    }
+}
+
+fn no_in_session_continuation_resolves_prior_stall(
+    supervisor_readiness: Option<agent_doc_controller::status::SupervisorDrainReadiness>,
+) -> bool {
+    supervisor_readiness.is_none_or(|readiness| readiness.is_ready())
+}
+
 fn ensure_terminal_authority_disk_convergence(
     file: &Path,
     authority_content: &str,
@@ -1829,6 +1845,7 @@ fn run_with_options_inner(
             // `execve` recycle fire and the drain resumes on the fresh binary. Never
             // force the Codex final-gate here — yielding is the desired outcome.
             if agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file(file) {
+                clear_queue_drain_stall_after_valid_closeout(file, "supervisor_recycle_yield");
                 let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
                     agent_doc_flow::outcome::UserFacingOutcomeKind::NoDrainableWork,
                 )
@@ -1855,6 +1872,10 @@ fn run_with_options_inner(
                 // Codex final-gate) while such a prompt exists so the next cycle
                 // answers it instead of skipping to the queue head.
                 if let Some(unresolved) = crate::unresolved_exchange_prompt(file)? {
+                    clear_queue_drain_stall_after_valid_closeout(
+                        file,
+                        "clean_closeout_user_prompt_preempts",
+                    );
                     let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
                         agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
                     )
@@ -1925,9 +1946,20 @@ fn run_with_options_inner(
                     .flatten()
                     .map(|s| s.cycle_id)
                     .unwrap_or_default();
+                let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(
+                    file,
+                    &continuation_content,
+                );
+                let recorded_drainable_head_count =
+                    agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
+                        &continuation_content,
+                        &claimed,
+                    );
                 if let Err(err) = agent_doc_controller_io::project_controller::record_queue_drain_stall_continuation_pending_for_file(
                     file,
                     &stall_cycle_id,
+                    &continuation.head_prompt,
+                    recorded_drainable_head_count,
                 ) {
                     eprintln!(
                         "[session-check] warning: failed to record continuation projection: {err}"
@@ -1994,6 +2026,14 @@ fn run_with_options_inner(
                         );
                     (head, readiness)
                 });
+                if no_in_session_continuation_resolves_prior_stall(
+                    supervisor_drain.as_ref().map(|(_, readiness)| *readiness),
+                ) {
+                    clear_queue_drain_stall_after_valid_closeout(
+                        file,
+                        "clean_closeout_no_in_session_continuation",
+                    );
+                }
                 if let Some((supervisor_head, readiness)) = supervisor_drain {
                     let kind = supervisor_drain_outcome_kind(readiness);
                     let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(kind)
@@ -2050,6 +2090,8 @@ fn run_with_options_inner(
                         if let Err(err) = agent_doc_controller_io::project_controller::record_queue_drain_stall_continuation_pending_for_file(
                             file,
                             &stall_cycle_id,
+                            &supervisor_head,
+                            1,
                         ) {
                             eprintln!(
                                 "[session-check] warning: failed to record continuation projection: {err}"
@@ -3813,6 +3855,19 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
 mod terminal_convergence_tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn clean_closeout_resolves_prior_stall_unless_supervisor_fallback_stays_in_session() {
+        use agent_doc_controller::status::SupervisorDrainReadiness;
+
+        assert!(no_in_session_continuation_resolves_prior_stall(None));
+        assert!(no_in_session_continuation_resolves_prior_stall(Some(
+            SupervisorDrainReadiness::Ready { supervisor_pid: 7 }
+        )));
+        assert!(!no_in_session_continuation_resolves_prior_stall(Some(
+            SupervisorDrainReadiness::HeartbeatStale { supervisor_pid: 7 }
+        )));
+    }
 
     #[test]
     fn snapshot_head_drift_identity_reports_hashes_and_first_line() {

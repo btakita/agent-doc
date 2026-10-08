@@ -27164,6 +27164,30 @@ fn test_agent_doc_document_owns_claim_scaffold_policy() {
             && claim.contains("merge_default_template_component_config"),
         "claim.rs should call focused document claim scaffold policy directly"
     );
+
+    let sync = fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
+    assert!(
+        sync.contains("agent_doc_document::claim_scaffold::render_empty_template_scaffold"),
+        "sync must share claim's canonical template generator"
+    );
+
+    let jetbrains_claim = fs::read_to_string(
+        manifest_dir.join(
+            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/ClaimAction.kt",
+        ),
+    )
+    .unwrap();
+    assert!(
+        jetbrains_claim.contains("mutableListOf(agentDoc, \"claim\", relativePath)"),
+        "JetBrains Claim for Tmux Pane must delegate template generation to agent-doc claim"
+    );
+
+    let vscode_claim =
+        fs::read_to_string(manifest_dir.join("editors/vscode/src/extension.ts")).unwrap();
+    assert!(
+        vscode_claim.contains("const args = ['claim', rel];"),
+        "VS Code Claim for Tmux Pane must delegate template generation to agent-doc claim"
+    );
 }
 
 #[test]

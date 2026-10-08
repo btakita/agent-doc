@@ -2,7 +2,32 @@ use anyhow::Result;
 
 use agent_doc_frontmatter::{frontmatter, project_config};
 
-const DEFAULT_TEMPLATE_COMPONENTS: &str = "\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n";
+const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
+    "\n\n## Status\n\n",
+    "<!-- agent:status patch=replace -->\n",
+    "<!-- /agent:status -->\n",
+    "\n## Exchange\n\n",
+    "<!-- agent:exchange patch=append -->\n",
+    "<!-- /agent:exchange -->\n",
+    "\n## Queue\n\n",
+    "<!-- agent:queue -->\n",
+    "<!-- /agent:queue -->\n",
+    "\n## Backlog\n\n",
+    "<!-- agent:backlog -->\n",
+    "<!-- /agent:backlog -->\n",
+    "\n## Review\n\n",
+    "<!-- agent:review -->\n",
+    "<!-- /agent:review -->\n",
+    "\n## Icebox\n\n",
+    "<!-- agent:icebox -->\n",
+    "<!-- /agent:icebox -->\n",
+    "\n## Done\n\n",
+    "<!-- agent:done -->\n",
+    "<!-- /agent:done -->\n",
+    "\n## Notes\n\n",
+    "<!-- agent:notes -->\n",
+    "<!-- /agent:notes -->\n",
+);
 
 pub fn should_scaffold_empty_markdown(content: &str, extension: Option<&str>) -> bool {
     content.trim().is_empty() && extension == Some("md")
@@ -93,8 +118,33 @@ mod tests {
         let scaffold = render_empty_template_scaffold("session-1");
         assert!(scaffold.contains("agent_doc_session: session-1"));
         assert!(scaffold.contains("agent_doc_format: template"));
-        assert!(scaffold.contains("<!-- agent:status patch=replace -->"));
-        assert!(scaffold.contains("<!-- agent:icebox -->"));
+
+        let components = agent_doc_element::element::parse(&scaffold)
+            .expect("default template components must form a valid component AST");
+        let component_names = components
+            .iter()
+            .map(|component| component.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            component_names,
+            [
+                "status", "exchange", "queue", "backlog", "review", "icebox", "done", "notes",
+            ],
+            "claim scaffolds every canonical component in stable document order"
+        );
+        assert_eq!(components[0].patch_mode(), Some("replace"));
+        assert_eq!(components[1].patch_mode(), Some("append"));
+        assert!(
+            components[2..]
+                .iter()
+                .all(|component| component.attrs.is_empty())
+        );
+        assert!(
+            components
+                .iter()
+                .all(|component| component.content(&scaffold).is_empty()),
+            "newly scaffolded components must start empty"
+        );
     }
 
     #[test]
@@ -121,8 +171,18 @@ mod tests {
             .unwrap()
             .expect("template without components should scaffold");
         assert!(scaffolded.starts_with("---\nagent_doc_format: template\n---\n\nIntro"));
-        assert!(scaffolded.contains("## Status"));
-        assert!(scaffolded.contains("<!-- agent:queue -->"));
+        let component_names = agent_doc_element::element::parse(&scaffolded)
+            .expect("default components must form a valid component AST")
+            .into_iter()
+            .map(|component| component.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            component_names,
+            [
+                "status", "exchange", "queue", "backlog", "review", "icebox", "done", "notes",
+            ],
+            "claim must use the same canonical component sequence for non-empty templates"
+        );
     }
 
     #[test]

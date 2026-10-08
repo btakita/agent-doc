@@ -1087,6 +1087,59 @@ mod tests {
     }
 
     #[test]
+    fn materialized_projection_identity_fails_closed_on_ambiguous_equal_text_sources() {
+        let old = "Can this be run remotely via uvx?";
+        let baseline =
+            crate::document_queue::parse(&format!("- {old}\n- {old}\n")).unwrap();
+        let projected = crate::document_queue::parse(&format!(
+            "- do [#crossplatformmise]\n- {old}\n"
+        ))
+        .unwrap();
+        let observed = crate::document_queue::parse(concat!(
+            "- do [#crossplatformmise]\n",
+            "- Can this be run remotely via uvx on every platform?\n",
+            "- Can this be run remotely via uvx?\n",
+        ))
+        .unwrap();
+        let backlog = HashMap::from([("crossplatformmise".to_string(), old.to_string())]);
+
+        assert!(
+            reconcile_materialized_free_text_projection(
+                &baseline, &projected, &observed, &backlog,
+            )
+            .is_none(),
+            "equal-text source nodes do not prove which source the id materialized"
+        );
+    }
+
+    #[test]
+    fn materialized_projection_identity_fails_closed_on_unrelated_same_shape_edit() {
+        let old = "Can this be run remotely via uvx?";
+        let baseline = crate::document_queue::parse(&format!(
+            "- {old}\n- do [#neighbor]\n"
+        ))
+        .unwrap();
+        let projected =
+            crate::document_queue::parse("- do [#crossplatformmise]\n- do [#neighbor]\n")
+                .unwrap();
+        let observed = crate::document_queue::parse(concat!(
+            "- do [#crossplatformmise]\n",
+            "- Can this be run remotely via uvx on every platform?\n",
+            "- do [#different-neighbor]\n",
+        ))
+        .unwrap();
+        let backlog = HashMap::from([("crossplatformmise".to_string(), old.to_string())]);
+
+        assert!(
+            reconcile_materialized_free_text_projection(
+                &baseline, &projected, &observed, &backlog,
+            )
+            .is_none(),
+            "matching cardinality does not permit edits outside the proven source slot"
+        );
+    }
+
+    #[test]
     fn ensure_queue_priority_attr_adds_priority_to_queue_opener() {
         let content = concat!(
             "<!-- agent:queue go -->\n",

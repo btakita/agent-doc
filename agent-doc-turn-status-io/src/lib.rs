@@ -190,6 +190,24 @@ pub fn turn_active_for_pane_for_file(file: &Path, pane: &str) -> bool {
         .is_some_and(|root| turn_active_for_pane(&root, pane))
 }
 
+/// Return the fresh turn-active marker only when it belongs to this document's
+/// durable owner pane.
+///
+/// Project-wide turn markers are pane-scoped, so reading the newest marker by
+/// itself can accidentally borrow liveness from a sibling document. Resolve the
+/// document's registry owner first and require the marker for that exact pane.
+/// Missing/unreadable registry or lease state remains `None`, preserving the
+/// fail-closed behavior of callers that use this only as positive liveness
+/// evidence.
+pub fn active_turn_owner_for_file(file: &Path) -> Option<TurnActiveMarker> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    let owner = agent_doc_session_registry_io::lookup_file_entry_in(&root, file)
+        .ok()
+        .flatten()?;
+    read_turn_active_marker_for_pane_at(&root, &owner.pane, now_secs())
+        .filter(|marker| turn_active_marker_matches_pane(marker, &owner.pane))
+}
+
 /// Publish the stale-supervisor flag in the project state database.
 /// Best-effort cross-process channel for the supervisor → turn-status hook.
 pub fn set_supervisor_stale_marker(base: &Path, pane: &str, stale: bool) -> Result<()> {
@@ -415,6 +433,50 @@ mod tests {
 
         assert!(turn_active_for_pane(base, "%7"));
         assert!(!turn_active_for_pane(base, "%8"));
+    }
+
+    #[test]
+    fn active_turn_owner_for_file_requires_exact_registered_pane() {
+        let dir = agent_doc_base();
+        let base = dir.path();
+        let file = base.join("doc.md");
+        std::fs::write(&file, "body\n").unwrap();
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            file.display().to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%152".to_string(),
+                pid: std::process::id(),
+                cwd: base.display().to_string(),
+                started: "2026-10-08T22:06:04Z".to_string(),
+                session_id: "session-live".to_string(),
+                file: file.display().to_string(),
+                window: "@2".to_string(),
+                supervisor_instance_id: "supervisor-live".to_string(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(base, &registry).unwrap();
+
+        write_turn_active_marker(base, "%999").unwrap();
+        assert!(
+            active_turn_owner_for_file(&file).is_none(),
+            "a sibling pane's fresh marker is not document liveness"
+        );
+
+        write_turn_active_marker(base, "%152").unwrap();
+        let marker = active_turn_owner_for_file(&file).expect("exact owner is active");
+        assert_eq!(marker.pane, "%152");
+
+        write_turn_active_marker_at(
+            base,
+            "%152",
+            now_secs().saturating_sub(TURN_ACTIVE_TTL_SECS),
+        )
+        .unwrap();
+        assert!(
+            active_turn_owner_for_file(&file).is_none(),
+            "an expired exact-owner lease is not liveness proof"
+        );
     }
 
     #[test]

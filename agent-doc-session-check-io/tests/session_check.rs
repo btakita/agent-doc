@@ -2301,6 +2301,42 @@ Body\n\
     }
 
     #[test]
+    fn session_check_distinguishes_live_owner_turn_from_abandoned_preflight() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let state =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            doc.display().to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%152".to_string(),
+                pid: 1,
+                cwd: tmp.path().display().to_string(),
+                started: "2026-10-08T22:06:04Z".to_string(),
+                session_id: "session-live".to_string(),
+                file: doc.display().to_string(),
+                window: "@2".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(tmp.path(), &registry).unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker(tmp.path(), "%152").unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.starts_with("[session-check] IN PROGRESS:"));
+                assert!(message.contains(&state.cycle_id));
+                assert!(message.contains("owning pane `%152`"));
+                assert!(message.contains("still running"));
+                assert!(message.contains("Do not recover or abandon"));
+                assert!(!message.contains("cycle started but no write/commit followed"));
+            }
+            other => panic!("expected fail-closed in-progress state, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn session_check_uses_committed_closeout_projection() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());

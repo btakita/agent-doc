@@ -528,9 +528,7 @@ fn is_agent_doc_queue_bare_flag_finding(finding: &LintFinding) -> bool {
     let Some(component) = quoted.nth(1) else {
         return false;
     };
-    agent_doc_queue::component_attrs::is_queue_only_component_attr(attribute)
-        && (component != "agent:queue"
-            || agent_doc_queue::component_attrs::is_queue_bare_flag_attr(attribute))
+    agent_doc_queue::component_attrs::is_recognized_bare_flag_attr(component, attribute)
 }
 
 fn is_registry_known_unknown_component_finding(finding: &LintFinding) -> bool {
@@ -1002,7 +1000,7 @@ operator-owned scratch state\n\
     }
 
     #[test]
-    fn queue_subagent_capacity_flags_are_valid_bare_attributes() {
+    fn prompt_component_subagent_flags_are_valid_bare_attributes() {
         let dir = TempDir::new().unwrap();
         for attribute in ["subagents", "fan-out"] {
             let doc = format!(
@@ -1017,6 +1015,17 @@ operator-owned scratch state\n\
             let file = write_doc(&dir, &format!("{attribute}.md"), &doc);
             run(&file, None).unwrap_or_else(|error| {
                 panic!("bare queue flag `{attribute}` must pass lint: {error:#}")
+            });
+
+            let exchange_doc = format!(
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange {attribute} preset=\"#build\" -->\n\
+                 prompt\n\
+                 <!-- /agent:exchange -->\n"
+            );
+            let exchange_file = write_doc(&dir, &format!("exchange-{attribute}.md"), &exchange_doc);
+            run(&exchange_file, None).unwrap_or_else(|error| {
+                panic!("bare exchange flag `{attribute}` must pass lint: {error:#}")
             });
         }
     }

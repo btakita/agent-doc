@@ -74,6 +74,39 @@ pub struct PromptPresetRequestResolution {
     pub missing: Vec<String>,
 }
 
+/// Merge component-scoped default presets into an existing prompt resolution.
+///
+/// Marker defaults are not present in the prompt text/diff, so callers add
+/// them explicitly after ordinary prompt discovery. Alias canonicalization,
+/// de-duplication, and missing-preset reporting stay identical to explicit
+/// references.
+pub fn extend_prompt_preset_resolution(
+    resolution: &mut PromptPresetRequestResolution,
+    defaults: impl IntoIterator<Item = String>,
+    prompt_presets: &IndexMap<String, String>,
+) {
+    for name in defaults {
+        let canonical =
+            agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(prompt_presets, &name)
+                .unwrap_or(name);
+        if !resolution
+            .requested
+            .iter()
+            .any(|existing| existing == &canonical)
+        {
+            resolution.requested.push(canonical.clone());
+        }
+        if !prompt_presets.contains_key(canonical.as_str())
+            && !resolution
+                .missing
+                .iter()
+                .any(|existing| existing == &canonical)
+        {
+            resolution.missing.push(canonical);
+        }
+    }
+}
+
 pub fn resolve_prompt_preset_requests(
     prompt_diff: Option<&str>,
     harness_diff: Option<&str>,
@@ -830,6 +863,22 @@ mod tests {
 
         assert_eq!(resolution.requested, vec!["#spec-test".to_string()]);
         assert!(resolution.missing.is_empty());
+    }
+
+    #[test]
+    fn component_default_preset_uses_explicit_request_resolution_rules() {
+        let presets = IndexMap::from([("#review".to_string(), "review carefully".to_string())]);
+        let mut resolution = PromptPresetRequestResolution {
+            requested: vec!["#review".to_string()],
+            missing: Vec::new(),
+        };
+        extend_prompt_preset_resolution(
+            &mut resolution,
+            ["#review".to_string(), "#missing".to_string()],
+            &presets,
+        );
+        assert_eq!(resolution.requested, vec!["#review", "#missing"]);
+        assert_eq!(resolution.missing, vec!["#missing"]);
     }
 
     #[test]

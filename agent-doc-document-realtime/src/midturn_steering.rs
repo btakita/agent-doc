@@ -110,6 +110,8 @@ pub enum PresetScope {
     Item,
     /// `agent:queue preset="…"` attribute or a `preset …` queue entry.
     Queue,
+    /// `agent:exchange preset="…"` attribute.
+    Exchange,
     /// Requested by this cycle's prompt (preflight `prompt_presets_requested`).
     Cycle,
 }
@@ -573,6 +575,7 @@ fn exchange_candidates(
     current: &str,
     boundary: bool,
 ) -> Vec<Candidate> {
+    let presets = PresetContext::new(current, &watermark.session_presets);
     let without_agent_responses = strip_new_response_sections(&watermark.baseline, current);
     let set = exchange_steering_set_between(&watermark.baseline, &without_agent_responses);
     let mut out = Vec::new();
@@ -627,6 +630,11 @@ fn exchange_candidates(
             RealtimeSteering::PromptReduced { .. } => (SteeringChange::Edited, true, None),
             RealtimeSteering::None => continue,
         };
+        let (dispatch, preset_intents) = if current_item || change == SteeringChange::Deleted {
+            (SteeringDispatch::AddressNow, Vec::new())
+        } else {
+            presets.classify(&verbatim, SteeringSource::Exchange)
+        };
         out.push(Candidate {
             key: format!("exchange:{identity}"),
             content_hash: identity.clone(),
@@ -634,11 +642,11 @@ fn exchange_candidates(
             item: SteeringItem {
                 source: SteeringSource::Exchange,
                 change,
-                dispatch: SteeringDispatch::AddressNow,
+                dispatch,
                 current_item,
                 verbatim,
                 previous,
-                presets: Vec::new(),
+                presets: preset_intents,
                 possibly_partial: false,
                 owner: None,
                 explicit: false,
@@ -837,7 +845,7 @@ fn queue_alignment(
             alignment.events.push(QueueEvent::Keep(item.norm.clone()));
             return;
         }
-        let (dispatch, intents) = presets.classify(&item.raw);
+        let (dispatch, intents) = presets.classify(&item.raw, SteeringSource::Queue);
         let key = format!("queue:add:{}", content_hash(&item.norm));
         alignment.candidates.push(Candidate {
             key: key.clone(),
@@ -868,7 +876,7 @@ fn queue_alignment(
         let (dispatch, intents) = if is_current {
             (SteeringDispatch::AddressNow, Vec::new())
         } else {
-            presets.classify(&item.raw)
+            presets.classify(&item.raw, SteeringSource::Queue)
         };
         let key = format!(
             "queue:edit:{}:{}",
@@ -1049,63 +1057,80 @@ fn binary_owned_line(norm: &str, owned: &BTreeSet<String>) -> bool {
 
 struct PresetContext<'a> {
     current: &'a str,
-    inherited: Vec<PresetIntent>,
+    cycle: Vec<PresetIntent>,
+    queue: Vec<PresetIntent>,
+    exchange: Vec<PresetIntent>,
     /// `<!-- agent:queue subagents -->` (alias `fan-out`): every queue line
     /// without an opt-out tag carries subagent intent.
     queue_subagents: bool,
+    /// `<!-- agent:exchange subagents -->` (alias `fan-out`): each new
+    /// exchange prompt is delegated while the parent retains cycle ownership.
+    exchange_subagents: bool,
 }
 
 impl<'a> PresetContext<'a> {
     fn new(current: &'a str, session_presets: &[String]) -> Self {
-        let mut inherited = Vec::new();
-        let mut queue_names = Vec::new();
-        let mut queue_subagents = false;
+        let mut cycle = Vec::new();
+        let mut queue_intents = Vec::new();
+        let mut exchange_intents = Vec::new();
+        let queue_attrs =
+            agent_doc_queue::prompt_component_attrs::prompt_component_attrs(current, "queue");
+        let mut queue_names: Vec<String> = queue_attrs.preset.clone().into_iter().collect();
         if let Ok(components) = agent_doc_element::element::parse(current)
             && let Some(queue) = components.iter().find(|c| c.name == "queue")
+            && let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(current))
         {
-            queue_subagents =
-                agent_doc_queue::subagent_intent::queue_subagents_mode(&queue.attrs).is_some();
-            if let Some(value) = queue.attrs.get("preset") {
-                queue_names.push(value.clone());
-            }
-            if let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(current)) {
-                for entry in entries {
-                    if let agent_doc_queue::document_queue::QueueEntry::Preset(name) = entry {
-                        queue_names.push(name);
-                    }
+            for entry in entries {
+                if let agent_doc_queue::document_queue::QueueEntry::Preset(name) = entry {
+                    queue_names.push(name);
                 }
             }
         }
-        for (names, scope) in [
-            (queue_names.as_slice(), PresetScope::Queue),
-            (session_presets, PresetScope::Cycle),
+        let exchange_attrs =
+            agent_doc_queue::prompt_component_attrs::prompt_component_attrs(current, "exchange");
+        let exchange_names: Vec<String> = exchange_attrs.preset.clone().into_iter().collect();
+        for (names, scope, target) in [
+            (
+                queue_names.as_slice(),
+                PresetScope::Queue,
+                &mut queue_intents,
+            ),
+            (
+                exchange_names.as_slice(),
+                PresetScope::Exchange,
+                &mut exchange_intents,
+            ),
+            (session_presets, PresetScope::Cycle, &mut cycle),
         ] {
             for name in names {
                 let resolved =
                     agent_doc_queue::queue_response::queue_prompt_preset_expansions(current, name);
                 if resolved.is_empty() {
                     // Unregistered names still carry literal intent.
-                    inherited.push(PresetIntent {
+                    target.push(PresetIntent {
                         name: name.trim().to_string(),
                         body: String::new(),
                         scope,
                     });
                 }
                 for (name, body) in resolved {
-                    inherited.push(PresetIntent { name, body, scope });
+                    target.push(PresetIntent { name, body, scope });
                 }
             }
         }
         Self {
             current,
-            inherited,
-            queue_subagents,
+            cycle,
+            queue: queue_intents,
+            exchange: exchange_intents,
+            queue_subagents: queue_attrs.subagents,
+            exchange_subagents: exchange_attrs.subagents,
         }
     }
 
     /// Resolve presets for one queue line through the same resolver closeout
     /// uses (`queue_prompt_preset_expansions`) and classify its dispatch.
-    fn classify(&self, raw: &str) -> (SteeringDispatch, Vec<PresetIntent>) {
+    fn classify(&self, raw: &str, source: SteeringSource) -> (SteeringDispatch, Vec<PresetIntent>) {
         let mut intents: Vec<PresetIntent> =
             agent_doc_queue::queue_response::queue_prompt_preset_expansions(self.current, raw)
                 .into_iter()
@@ -1117,18 +1142,31 @@ impl<'a> PresetContext<'a> {
                 .collect();
         let literal_subagent_tag =
             agent_doc_queue::subagent_intent::carries_subagent_intent_tag(raw);
-        intents.extend(self.inherited.iter().cloned());
-        let queue_attr_subagent = self.queue_subagents
-            && !agent_doc_queue::subagent_intent::opts_out_of_queue_subagents(raw);
+        let scoped = match source {
+            SteeringSource::Queue => &self.queue,
+            SteeringSource::Exchange => &self.exchange,
+        };
+        intents.extend(scoped.iter().cloned());
+        intents.extend(self.cycle.iter().cloned());
+        let component_attr_subagent = match source {
+            SteeringSource::Queue => {
+                self.queue_subagents
+                    && !agent_doc_queue::subagent_intent::opts_out_of_queue_subagents(raw)
+            }
+            SteeringSource::Exchange => self.exchange_subagents,
+        };
         let subagent = literal_subagent_tag
-            || queue_attr_subagent
+            || component_attr_subagent
             || intents
                 .iter()
                 .any(|intent| preset_requests_subagents(&intent.name, &intent.body));
         let dispatch = if subagent {
             SteeringDispatch::Subagent
         } else {
-            SteeringDispatch::DrainAfterCurrent
+            match source {
+                SteeringSource::Queue => SteeringDispatch::DrainAfterCurrent,
+                SteeringSource::Exchange => SteeringDispatch::AddressNow,
+            }
         };
         (dispatch, intents)
     }
@@ -1540,7 +1578,9 @@ pub fn queue_attr_subagent_heads(
     let items = executable_queue_items(content);
     let eligible = items
         .iter()
-        .filter(|item| presets.classify(&item.raw).0 == SteeringDispatch::Subagent)
+        .filter(|item| {
+            presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
+        })
         .map(|item| item.norm.clone())
         .collect();
     let live = items.into_iter().map(|item| item.norm).collect();
@@ -1566,14 +1606,17 @@ pub fn subagent_dispatch_heads(content: &str, reference_queue: Option<&[String]>
         reference_queue.map(|queue| {
             let mut identities: BTreeMap<String, bool> = BTreeMap::new();
             for norm in queue {
-                let subagent = presets.classify(norm).0 == SteeringDispatch::Subagent;
+                let subagent =
+                    presets.classify(norm, SteeringSource::Queue).0 == SteeringDispatch::Subagent;
                 *identities.entry(queue_identity(norm)).or_default() |= subagent;
             }
             (queue.iter().map(String::as_str).collect(), identities)
         });
     executable_queue_items(content)
         .into_iter()
-        .filter(|item| presets.classify(&item.raw).0 == SteeringDispatch::Subagent)
+        .filter(|item| {
+            presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
+        })
         .filter(|item| {
             reference.as_ref().is_none_or(|(norms, identities)| {
                 !norms.contains(item.norm.as_str())
@@ -1818,6 +1861,29 @@ mod tests {
                 .verbatim
                 .contains("also check the CI status please")
         );
+    }
+
+    #[test]
+    fn exchange_component_attrs_dispatch_subagent_with_scoped_preset() {
+        let owned = BTreeSet::new();
+        let baseline = doc("", EX).replace(
+            "<!-- agent:exchange -->",
+            "<!-- agent:exchange subagents preset=\"#gh-fix\" -->",
+        );
+        let current = doc("", &format!("{EX}\nfix the newly reported issue\n")).replace(
+            "<!-- agent:exchange -->",
+            "<!-- agent:exchange subagents preset=\"#gh-fix\" -->",
+        );
+        let obs = observe(&seeded(&baseline, None), &current, &quiet_ctx(&owned));
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        let item = &obs.ready[0];
+        assert_eq!(item.source, SteeringSource::Exchange);
+        assert_eq!(item.dispatch, SteeringDispatch::Subagent);
+        assert!(item.presets.iter().any(|preset| {
+            preset.name == "#gh-fix"
+                && preset.body == "fix the github issue"
+                && preset.scope == PresetScope::Exchange
+        }));
     }
 
     /// `#steerbacklogsource` (agent-doc-bugs.md, 2026-10-04): the operator

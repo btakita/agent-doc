@@ -240,6 +240,7 @@ pub use agent_doc_merge::document_replay::{ExactDocumentReplay, coalesce_exact_d
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorDeliveryAdmission {
     DeliverToLiveEditor,
+    RecoverThroughDocumentAuthority,
     Detached,
     RefuseIncompleteRegistration,
 }
@@ -255,8 +256,12 @@ pub const fn decide_editor_delivery_admission(
 ) -> EditorDeliveryAdmission {
     match (facts.reliable_editor_live, facts.registration_available) {
         (true, true) => EditorDeliveryAdmission::DeliverToLiveEditor,
+        // The reliable open-set can lead the registration projection by one
+        // edge while an editor reattaches. Do not fail before the caller can
+        // retain/replay the write through CRDT + Lazily authority.
+        (true, false) => EditorDeliveryAdmission::RecoverThroughDocumentAuthority,
         (false, false) => EditorDeliveryAdmission::Detached,
-        _ => EditorDeliveryAdmission::RefuseIncompleteRegistration,
+        (false, true) => EditorDeliveryAdmission::RefuseIncompleteRegistration,
     }
 }
 
@@ -4918,13 +4923,21 @@ fn crdt_retry_admission_keeps_external_events_behind_backoff() {
 }
 
 #[test]
-fn editor_delivery_admission_fails_closed_on_incomplete_registration() {
+fn editor_delivery_admission_routes_each_liveness_registration_pair() {
     assert_eq!(
         decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {
             reliable_editor_live: true,
             registration_available: true,
         }),
         EditorDeliveryAdmission::DeliverToLiveEditor,
+    );
+    assert_eq!(
+        decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {
+            reliable_editor_live: true,
+            registration_available: false,
+        }),
+        EditorDeliveryAdmission::RecoverThroughDocumentAuthority,
+        "a temporarily missing registration must recover through retained document authority",
     );
     assert_eq!(
         decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {

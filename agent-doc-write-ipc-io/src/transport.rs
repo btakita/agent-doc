@@ -460,6 +460,20 @@ fn try_ipc_inner(
                 skipped_committed_cycle: false,
             });
         }
+        EditorDeliveryAdmission::RecoverThroughDocumentAuthority => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_editor_delivery_deferred file={} reliable_editor_live=true registration_available=false action=document_authority_recovery",
+                    file.display()
+                ),
+            );
+            return Ok(IpcResult {
+                success: false,
+                patch_id,
+                skipped_committed_cycle: false,
+            });
+        }
         EditorDeliveryAdmission::RefuseIncompleteRegistration => {
             agent_doc_ops_log_io::log_op(
                 file,
@@ -1107,6 +1121,48 @@ fn try_ipc_inner(
 #[cfg(test)]
 mod gh131nonipc_tests {
     use super::*;
+
+    #[test]
+    fn live_editor_without_projected_registration_recovers_through_document_authority() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("doc.md");
+        let content = "---\nagent_doc_session: registration-lag\n---\n\nbody\n";
+        std::fs::write(&file, content).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: "registration-lag".to_string(),
+            }]);
+
+        assert!(agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(&file));
+        assert!(registered_editor_delivery_target(&file).is_none());
+
+        let result = try_ipc_inner(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            &file,
+            &[],
+            "",
+            None,
+            Some(content),
+            Some(content),
+            None,
+            None,
+        )
+        .expect("registration projection lag must defer to document authority");
+
+        assert!(!result.success);
+        assert!(!result.skipped_committed_cycle);
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("action=document_authority_recovery"),
+            "{ops}"
+        );
+    }
 
     /// `#gh131nonipc`: the `socket_visible_write` divergence refusal happens
     /// after the socket ACK, so the send's error branch never saw it. The

@@ -6044,17 +6044,25 @@ pub fn clear_queue_context_clear_deferred_for_file(file: &Path) -> Result<bool> 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct QueueDrainStallPayload {
     cycle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    head_sha256: Option<String>,
+    #[serde(default)]
+    drainable_head_count: usize,
 }
 
 pub fn record_queue_drain_stall_continuation_pending_for_file(
     file: &Path,
     cycle_id: &str,
+    head_prompt: &str,
+    drainable_head_count: usize,
 ) -> Result<agent_doc_state_backbone::QueueDrainStallProjection> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     ensure_controller_running(&project_root, LaunchMode::Lazy)?;
     let payload = QueueDrainStallPayload {
         cycle_id: Some(cycle_id.to_string()),
+        head_sha256: Some(agent_doc_hash::content_hash(head_prompt)),
+        drainable_head_count,
     };
     request_controller(
         &project_root,
@@ -6132,7 +6140,11 @@ pub fn clear_queue_drain_stall_continuation_pending_for_file(
     if connect(&project_root).is_err() {
         return Ok(false);
     }
-    let payload = QueueDrainStallPayload { cycle_id: None };
+    let payload = QueueDrainStallPayload {
+        cycle_id: None,
+        head_sha256: None,
+        drainable_head_count: 0,
+    };
     request_controller::<agent_doc_state_backbone::QueueDrainStallProjection>(
         &project_root,
         ControllerRequest {
@@ -19533,7 +19545,11 @@ fn queue_drain_stall_payload(request: &ControllerRequest) -> Result<QueueDrainSt
         Some(payload_json) => {
             serde_json::from_str(payload_json).context("parse queue drain-stall payload")
         }
-        None => Ok(QueueDrainStallPayload { cycle_id: None }),
+        None => Ok(QueueDrainStallPayload {
+            cycle_id: None,
+            head_sha256: None,
+            drainable_head_count: 0,
+        }),
     }
 }
 
@@ -19558,6 +19574,8 @@ pub(crate) fn handle_queue_drain_stall_continuation_recorded(
     let cycle_id = payload
         .cycle_id
         .with_context(|| "queue drain-stall record missing cycle_id")?;
+    let head_sha256 = payload.head_sha256;
+    let drainable_head_count = payload.drainable_head_count;
     let document_hash = agent_doc_hash::document_id_for_path(&file);
     let current = queue_drain_stall_projection(runtime, &file)?;
     let stall_epoch = current.stall_epoch.saturating_add(1);
@@ -19567,6 +19585,8 @@ pub(crate) fn handle_queue_drain_stall_continuation_recorded(
             document_hash,
             file: file.to_string_lossy().into_owned(),
             cycle_id: cycle_id.clone(),
+            head_sha256: head_sha256.clone(),
+            drainable_head_count,
             stall_epoch,
             recorded_secs: timestamp_secs(),
         },
@@ -19576,9 +19596,11 @@ pub(crate) fn handle_queue_drain_stall_continuation_recorded(
     agent_doc_ops_log_io::log_op(
         &file,
         &format!(
-            "queue_drain_stall_continuation_recorded file={} cycle_id={} stall_epoch={} phase={:?}",
+            "queue_drain_stall_continuation_recorded file={} cycle_id={} head_sha256={} drainable_head_count={} stall_epoch={} phase={:?}",
             file.display(),
             cycle_id,
+            head_sha256.as_deref().unwrap_or("legacy-unavailable"),
+            drainable_head_count,
             projection.stall_epoch,
             projection.phase
         ),

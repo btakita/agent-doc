@@ -2484,10 +2484,9 @@ fn run_with_options_to_writer_in_pass(
     // clears it so the diagnostic fires once per stall, not every preflight.
     {
         let file_str = file.to_string_lossy().to_string();
-        if agent_doc_controller_io::project_controller::queue_drain_stall_continuation_pending_for_file(file)
+        if let Some(stall_projection) = agent_doc_controller_io::project_controller::queue_drain_stall_continuation_pending_for_file(file)
             .ok()
             .flatten()
-            .is_some()
         {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2496,7 +2495,12 @@ fn run_with_options_to_writer_in_pass(
             let facts = StallFacts {
                 continuation_pending_projection: true,
                 continuation_required_now: queue_continuation_required,
-                drainable_head_count: queue_state.queue_drainable_head_count,
+                recorded_head_in_committed_snapshot:
+                    recorded_stall_head_is_in_snapshot(
+                        &stall_projection,
+                        &diff_result_with_current.previous,
+                    ),
+                recorded_drainable_head_count: stall_projection.drainable_head_count,
                 user_prompt_preempts: !user_intent_prompt_changes.is_empty(),
                 queue_stopped: queue_state.queue_active != Some(true)
                     || queue_state.queue_halted.is_some(),
@@ -2673,6 +2677,21 @@ fn run_with_options_to_writer_in_pass(
     writeln!(writer, "{}", json)?;
 
     Ok(())
+}
+
+fn recorded_stall_head_is_in_snapshot(
+    projection: &agent_doc_state_backbone::QueueDrainStallProjection,
+    committed_snapshot: &str,
+) -> bool {
+    let Some(recorded_head_sha256) = projection.head_sha256.as_deref() else {
+        // Legacy projections did not carry head identity. Fail closed: they
+        // cannot prove that a newly visible head belonged to the blamed cycle.
+        return false;
+    };
+    agent_doc_queue::queue_continuation::live_queue_head_texts(committed_snapshot)
+        .unwrap_or_default()
+        .iter()
+        .any(|head| agent_doc_hash::content_hash(head) == recorded_head_sha256)
 }
 
 /// Item budget that keeps `agent:review` legible, mirrored by the generated
@@ -3025,6 +3044,30 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn stall_projection_ignores_head_added_after_committed_snapshot() {
+        let committed = "<!-- agent:queue go -->\n- ~~do [#old]~~\n<!-- /agent:queue -->\n";
+        let projection = agent_doc_state_backbone::QueueDrainStallProjection {
+            head_sha256: Some(agent_doc_hash::content_hash("#upgrade")),
+            drainable_head_count: 1,
+            ..Default::default()
+        };
+
+        assert!(!recorded_stall_head_is_in_snapshot(&projection, committed));
+    }
+
+    #[test]
+    fn stall_projection_recognizes_its_exact_committed_head() {
+        let committed = "<!-- agent:queue go -->\n- #upgrade\n<!-- /agent:queue -->\n";
+        let projection = agent_doc_state_backbone::QueueDrainStallProjection {
+            head_sha256: Some(agent_doc_hash::content_hash("#upgrade")),
+            drainable_head_count: 1,
+            ..Default::default()
+        };
+
+        assert!(recorded_stall_head_is_in_snapshot(&projection, committed));
+    }
 
     /// `#hook-owned-cycle-reentry`: hook provenance must not depend on the
     /// subprocess inheriting a model-specific ambient environment marker.

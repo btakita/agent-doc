@@ -16,8 +16,12 @@ pub struct StallFacts {
     pub continuation_pending_projection: bool,
     /// This preflight still computes `queue_continuation_required=true`.
     pub continuation_required_now: bool,
-    /// Loop-scope drainable head count this preflight.
-    pub drainable_head_count: usize,
+    /// Whether the head captured by the prior closeout still exists in the
+    /// committed snapshot this preflight is evaluating. A newly edited,
+    /// uncommitted head must not satisfy this evidence.
+    pub recorded_head_in_committed_snapshot: bool,
+    /// Drainable-head count captured by the prior clean closeout.
+    pub recorded_drainable_head_count: usize,
     /// A real user prompt edited the in-scope exchange tail this turn.
     pub user_prompt_preempts: bool,
     /// The operator stopped the queue via the sanctioned mechanism.
@@ -57,7 +61,8 @@ pub fn classify_stall(facts: &StallFacts) -> StallVerdict {
     if facts.user_prompt_preempts
         || facts.queue_stopped
         || !facts.continuation_required_now
-        || facts.drainable_head_count == 0
+        || !facts.recorded_head_in_committed_snapshot
+        || facts.recorded_drainable_head_count == 0
     {
         return StallVerdict::LegitimateStop;
     }
@@ -66,7 +71,7 @@ pub fn classify_stall(facts: &StallFacts) -> StallVerdict {
          loop neither continued nor recorded a valid stop reason - a real user prompt, \
          `queue: stop`, or a drained queue. A degraded/stale supervisor, high accretion, \
          or a semantic_completion_match warning are NOT valid stop reasons.)",
-        facts.drainable_head_count
+        facts.recorded_drainable_head_count
     ))
 }
 
@@ -78,7 +83,8 @@ mod tests {
         StallFacts {
             continuation_pending_projection: true,
             continuation_required_now: true,
-            drainable_head_count: 1,
+            recorded_head_in_committed_snapshot: true,
+            recorded_drainable_head_count: 1,
             user_prompt_preempts: false,
             queue_stopped: false,
             loop_is_continuing: false,
@@ -132,12 +138,40 @@ mod tests {
         );
         assert_eq!(
             classify_stall(&StallFacts {
-                drainable_head_count: 0,
+                recorded_head_in_committed_snapshot: false,
+                recorded_drainable_head_count: 0,
                 continuation_required_now: false,
                 ..base()
             }),
             StallVerdict::LegitimateStop
         );
+    }
+
+    #[test]
+    fn newly_added_uncommitted_head_does_not_revive_a_stale_projection() {
+        let facts = StallFacts {
+            continuation_required_now: true,
+            recorded_head_in_committed_snapshot: false,
+            recorded_drainable_head_count: 1,
+            ..base()
+        };
+        assert_eq!(classify_stall(&facts), StallVerdict::LegitimateStop);
+    }
+
+    #[test]
+    fn diagnostic_uses_the_recorded_closeout_count() {
+        let facts = StallFacts {
+            recorded_head_in_committed_snapshot: true,
+            recorded_drainable_head_count: 2,
+            ..base()
+        };
+        match classify_stall(&facts) {
+            StallVerdict::Stalled(message) => {
+                assert!(message.contains("prior cycle committed with 2 drainable head(s)"));
+                assert!(!message.contains("prior cycle committed with 9 drainable head(s)"));
+            }
+            other => panic!("expected Stalled, got {other:?}"),
+        }
     }
 
     #[test]

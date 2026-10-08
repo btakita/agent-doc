@@ -9491,49 +9491,26 @@ mod tests {
         assert!(fm.session.is_some(), "must have session UUID");
         assert!(fm.format.is_some(), "must have format set");
 
-        // Verify all five components
-        assert!(
-            content.contains("<!-- agent:status patch=replace -->"),
-            "must have status component"
+        // Sync and Claim for Tmux Pane share this generator. Parse the rendered
+        // document so parity covers structure, balance, and canonical ordering.
+        let components = agent_doc_element::element::parse(&content)
+            .expect("sync scaffold must form a valid component AST");
+        let component_names = components
+            .iter()
+            .map(|component| component.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            component_names,
+            [
+                "status", "exchange", "queue", "backlog", "review", "icebox", "done", "notes",
+            ],
+            "sync must render the same complete scaffold as claim"
         );
-        assert!(
-            content.contains("<!-- agent:exchange patch=append -->"),
-            "must have exchange component"
-        );
-        assert!(
-            content.contains("<!-- agent:queue -->"),
-            "must have queue component"
-        );
-        assert!(
-            content.contains("<!-- agent:backlog -->"),
-            "must have backlog component"
-        );
-        assert!(
-            content.contains("<!-- agent:icebox -->"),
-            "must have icebox component"
-        );
-
-        // Verify components are properly closed
-        assert!(
-            content.contains("<!-- /agent:status -->"),
-            "status must be closed"
-        );
-        assert!(
-            content.contains("<!-- /agent:exchange -->"),
-            "exchange must be closed"
-        );
-        assert!(
-            content.contains("<!-- /agent:queue -->"),
-            "queue must be closed"
-        );
-        assert!(
-            content.contains("<!-- /agent:backlog -->"),
-            "backlog must be closed"
-        );
-        assert!(
-            content.contains("<!-- /agent:icebox -->"),
-            "icebox must be closed"
-        );
+        assert_eq!(components[0].patch_mode(), Some("replace"));
+        assert_eq!(components[1].patch_mode(), Some("append"));
+        assert!(components[2..]
+            .iter()
+            .all(|component| component.attrs.is_empty()));
     }
     /// Non-.md files should never be scaffolded even if empty.
     #[test]

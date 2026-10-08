@@ -39,6 +39,121 @@ Released agent-doc v0.35.475. v0.35.476 is not yet tagged or published; the acti
 Compacted content:
 - Archived 12 response topic(s): actionable review and release status; v0.35.476 release and review closeout; `/tmp` sizing; 9 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): release and delegated fixes; GH #172, GH #173, SDK Stop-hook r...
+Fix in a subagent:
+```
+• Blocked by hook
+  └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
+dev/tasks/frontend.md. [session-check] INTERRUPTED: binary-owned captured closeout for `/home/brian/work/btakita/agent-
+loop/src/haiven-dev/tasks/frontend.md` remains pending: response_captured: captured response is waiting for exact
+authority/disk convergence before write-applied. The same capture is durable; do not issue another closeout payload and
+do not force disk. Retry only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+frontend.md`. The latest assistant text was captured into the pending/capture ledger before auto-close. The hook could
+not finish the required commit boundary: refused editor IPC for /home/brian/work/btakita/agent-loop/src/haiven-dev/
+tasks/frontend.md because reliable document liveness has no matching editor registration (reliable_editor_live=true,
+registration_available=false); refresh or update the editor integration before retrying closeout. The retained capture
+or projection is already durable and this exact retained intent commits itself once delivery converges — this is a
+deferral, not a lost response. Wait for its controller-owned terminal state edge; do not use the document's current-
+cycle status as proof because queue continuation can advance to a different cycle. Do NOT re-send the response, force
+disk, or `admin recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own
+either: `admin reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor
+holding the document is not serving its replica, and then its remedy governs. Do not send the final answer yet. If the
+response is missing from the document, run `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+frontend.md` first. Then finish the commit boundary for this turn and end with `agent-doc session-check /home/brian/
+work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md`.
+```
+
+### Re: retained closeouts, queue integrity, GH #181–#184, and v0.35.478 — gpt-6.1-sol · 2026-10-08T00:34-04:00
+
+> **Chat prompt (#chatprompt):** • Hook stopped
+>   └ agent-doc Stop hook already continued once for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+> frontend.md, but the cycle is still open. [session-check] INTERRUPTED: completed free-text agent:queue head(s) "Why
+> does PR 653 have a `dev:stg` task? Why can't /sbx + /stg work with the `dev` task?" are still active in the committed
+> queue even though exchange history contains a `Queue prompt` echo proving they were already answered — completed queue
+> residue would re-run stale work
+>     [session-check] hint: this cycle is already committed, so run `agent-doc preflight /home/brian/work/btakita/agent-
+> loop/src/haiven-dev/tasks/frontend.md` first to open the binary-owned repair cycle and strike the answered head, then
+> run `agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md` without resubmitting the
+> response; add `<!-- no-free-text-queue-head-guard -->` only if keeping the answered row active is intentional (see
+> #qheadresidue/#qresiduecommittedhint/#qresiduecommitonly)
+>
+>   Worked for 9m 1s • 9:12 PM
+
+> **Chat prompt (#chatprompt):** subagent fix: › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md
+> • Blocked by hook
+>   └ agent-doc Stop hook opened a fresh cycle for post-commit prompt work in /home/brian/work/btakita/agent-loop/src/
+> haiven-dev/tasks/tools.md, then retained the response under that cycle but could not finish closeout. The latest
+> assistant text was captured into the pending/capture ledger before auto-close. The hook could not finish the required
+> commit boundary: serialized_atomic_write: retained editor-owned write for /home/brian/work/btakita/agent-loop/src/
+> haiven-dev/tasks/tools.md before retrying live model reconciliation (intent_id=1791423594030432053-3-
+> da36ebc5d3b5f64e23d49913e8ea5fcfa1f78da5b758ff23b37d1ff8f071e137): serialized_atomic_write: retained the canonical
+> write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md in CRDT + Lazily state
+> (intent_id=1791423592466877439-2-e2e45578149b93042f021ca906a1c2c7e2091d135b39982c6144948e14dd1c05), but the editor
+> replica disappeared during delivery admission; disk was not written; supervisor_recycle=request_skipped
+> reason=editor_reregister_primary editor_replica_reregister=requested:1;
+> recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing
+> binary-owned capture; do not resubmit finalize, write --commit, or --force-disk; The retained capture or projection is
+> already durable and this exact retained intent commits itself once delivery converges — this is a deferral, not a lost
+> response. Wait for its controller-owned terminal state edge; do not use the document's current-cycle status as proof
+> because queue continuation can advance to a different cycle. Do NOT re-send the response, force disk, or `admin
+> recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own either: `admin
+> reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor holding the document
+> is not serving its replica, and then its remedy governs pending change retained for retry
+> [recovery=await_editor_replica_no_disk_write]. The registered editor endpoint REJECTED the delivery receipt (`IPC
+> receipt rejected`) — it answered NO, so the delivery projection this write is waiting on will never converge and
+> waiting will not commit it. The response is durable and NOT lost: do NOT re-send it or force disk. Recover by removing
+> the rejecting endpoint: restart or reload the editor that has /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+> tools.md open (a backend still running deleted plugin jars after an update is the observed cause). Once that endpoint
+> is gone or re-registered, the retained intent converges through document authority on its own; then run `agent-doc
+> session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` and follow the recovery it names. Do
+> not recapture the response or rerun finalize/write. Run `agent-doc session-check /home/brian/work/btakita/agent-loop/
+> src/haiven-dev/tasks/tools.md` and let the binary-owned keyed retry finish.
+
+> **Chat prompt (#chatprompt):** • The response is already durable in agent-doc’s retained ledger; I won’t resend or force-write it. I’m running only
+>   the required session-check so the binary-owned retry can reconcile the editor projection and report the terminal
+>   state.
+>
+> • Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md
+>   └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md total_ms=43…
+>     Error: [session-check] INTERRUPTED: canonical editor authority and disk projection diverge for /home/brian/work/bt…
+>     + 2 lines (ctrl+t to expand)
+>
+> • Agent-doc remains interrupted because the editor endpoint rejected the delivery receipt. The response is durable and
+>   must not be resent or force-written.
+>
+>   Please restart or reload the editor holding tasks/tools.md. Once it re-registers, rerun agent-doc session-check
+>   tasks/tools.md; the retained intent should converge automatically.
+
+> **Chat prompt (#chatprompt):** also fix in subagent: Run Agent Doc in api.md: The text of my queue item was duplicated: `Make another PR to merge #666 into `dev`.Make another PR to merge #666 into `dev`.`
+
+> **Queue prompt:** do [#fixsubagent]
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/181
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/182
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/183
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/184: Removing the Context Chip makes Run Agent Doc work. agent-doc should support Claude Code's context chip.
+
+> **Queue prompt:** release + publish
+
+Released agent-doc **v0.35.478** from commit `06f4d92c2`. The authoritative gate passed 9,669/9,669 main tests, 193/193 VS Code tests, the cross-editor native harness, bootstrap tests, editor parity, documentation checks, tmux CI, and all positive/non-vacuity TLA+ models. The tag and remote `main` push succeeded, and `install-full` completed for CLI/native 0.35.478, JetBrains 0.2.506, and VS Code 0.2.80. GitHub Release, CI, and PyPI workflows were still running at the one-time post-push observation; Book and Pages were green.
+
+The delegated fixes shipped:
+
+- **GH #181** (`29d586e4b`): durable capture evidence now drives guarded supervisor refresh instead of leaving a captured open cycle deferred after its wedge latch is spent.
+- **GH #182** (`3bae8f74b`): queue identity is structural, admission reserves document IDs, and one invalid batch item no longer discards valid siblings.
+- **GH #183** (`45bacc111`): misplaced queue-only flags receive one consistent verdict, and opening-marker lint errors block before response mutation.
+- **GH #184** (`da042e5f5`): Claude Code's leading context chip is normalized as composer chrome—including the NBSP rendering—while genuine typed text after it still blocks routing.
+- **Editor recovery and queue duplication:** registration-lagged closeouts recover through document authority; rejected editor generations are quarantined; JetBrains replacement replicas use bounded splices rather than CRDT identity-destroying whole-document replacement; exact answered bare residue can be acknowledged safely.
+
+GH #181, #182, #183, and #184 are closed with release comments.
+
+For `tools.md`, the installed rejected-generation recovery converged the retained response without resending it; its session check completed successfully.
+
+For `api.md`, the malformed duplicated row is absent. The newly installed exact-ack path observed that convergence had already removed it; `agent-doc commit` then completed as `78d11d1cde`, and session-check reports a committed cycle with no drainable work.
+
+For `frontend.md`, the retained response is present and supervisor/editor convergence health is good. The remaining artifact is the one-byte newline deletion `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`; the existing repair path has a passing exact regression. The file currently has no live JetBrains registration, so this item is gated on reopening/refreshing `frontend.md`. Once registered, run its existing `agent-doc repair`, then the committed-residue `preflight` + `commit` remedy without resubmitting the response.
 <!-- agent:boundary:72f38ede -->
 <!-- /agent:exchange -->
 
@@ -47,18 +162,23 @@ Compacted content:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#fixsubagent]
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/181
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/182
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/183
-- #gh-fix https://github.com/btakita/agent-doc/issues/184
-- 🚧 release + publish
+- 🚧 do [#fixsubagent]
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/181~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/182~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/183~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/184: Removing the Context Chip makes Run Agent Doc work. agent-doc should support Claude Code's context chip.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#fixsubagent] Fix in a subagent:
+<!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] 🚧 [#fixsubagent] Fix in a subagent:
   ```
   • Blocked by hook
   └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
@@ -80,11 +200,6 @@ Compacted content:
   frontend.md` first. Then finish the commit boundary for this turn and end with `agent-doc session-check /home/brian/
   work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md`.
   ```
-<!-- /agent:backlog -->
-
-## Review
-
-<!-- agent:review -->
 - [/] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 - [/] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md). SETUP COMPLETE: tasks/software/tsift.md now has subagents=3 on branch qsubattr5-dogfood commit de5a8aa7c0d5e879547d4e321d159b1eff840073; gated pending the next real operator-created multi-head batch proof from distinct queue claims and ops.log that every eligible head dispatches exactly once and none drain inline.
 - [/] [#steergatemodelrerun] [agent-doc] Rerun the steergatenamo model evaluation on real pause points. Gate: at least 200 labelled steering_gate_log rows with a text_tail (66 as of 2026-10-06); src/agent-doc/scripts/steergate-model-eval --dataset currently exits insufficient_data. Then integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Proxy results and decision: tasks/agent-doc/eval-steergatenamo.md

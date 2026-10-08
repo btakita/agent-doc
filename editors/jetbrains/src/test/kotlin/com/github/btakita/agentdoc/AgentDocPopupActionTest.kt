@@ -22,6 +22,7 @@ class AgentDocPopupActionTest {
                 "AgentDoc.RestartSupervisorProcess",
                 "AgentDoc.RestartAgent",
                 "AgentDoc.ClearSessionContext",
+                "AgentDoc.LintDocument",
                 "AgentDoc.CancelTurn",
                 "AgentDoc.CopySessionDiagnostics",
                 "AgentDoc.SyncLayout",

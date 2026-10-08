@@ -849,7 +849,7 @@ class TerminalUtilTest {
     @Test
     fun `compact lint failure is concise and actionable in a small notification`() {
         val output = """
-            Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to temporarily skip this gate. /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
+            Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /repo/tasks/api.md (mode=warn, source=default). Fix the directives below, then retry the interrupted command. /repo/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
         """.trimIndent()
 
         val message = TerminalUtil.buildCommandFailureMessage("compact this document", 1, output)
@@ -870,6 +870,26 @@ class TerminalUtilTest {
         assertFalse(message.contains("project controller command"))
         assertFalse(message.contains("agent_doc_lint_dialect"))
         assertTrue(message.length < 300)
+    }
+
+    @Test
+    fun `compact lint failure extracts CRLF diagnostic before dogfood trailer`() {
+        val output = listOf(
+            "Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /repo/tasks/sample.md (mode=warn, source=default).",
+            "/repo/tasks/sample.md:616:1 error: attribute `subagents` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr]",
+            "  hint: try `subagents=<value>`",
+            "",
+            "[dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class=interrupted_closeout",
+            "Agent Doc did not complete this turn successfully.",
+        ).joinToString("\r\n")
+
+        val message = TerminalUtil.buildCommandFailureMessage("compact this document", 1, output)
+
+        assertTrue(message.contains("sample.md, line 616"))
+        assertTrue(message.contains("Attribute `subagents`"))
+        assertTrue(message.contains("Suggested fix: `subagents=<value>`"))
+        assertFalse(message.contains("dogfood"))
+        assertFalse(message.contains("project controller command"))
     }
 
     @Test
@@ -1201,6 +1221,14 @@ class TerminalUtilTest {
                 "agent-doc",
                 "tasks/agent-doc/agent-doc-bugs2.md",
             ),
+        )
+    }
+
+    @Test
+    fun `lint document uses read only lint command`() {
+        assertEquals(
+            listOf("agent-doc", "lint", "tasks/sample.md"),
+            TerminalUtil.buildLintDocumentCommand("agent-doc", "tasks/sample.md"),
         )
     }
 

@@ -215,6 +215,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Diagnose workflow invariant status and print exact repair/operator actions",
     ));
     cmds.push(cmd(
+        "/agent-doc lint",
+        "<FILE>",
+        "Inspect the authoritative document with the same lint policy used by closeout gates",
+    ));
+    cmds.push(cmd(
         "/agent-doc autofix",
         "<FILE> [--preflight-json PATH] [--session-check-json PATH] [--limit N] [--apply] [--dry-run] [--json]",
         "Plan invariant-driven repairs, record de-duplication proof markers, and optionally execute whitelisted safe repairs",

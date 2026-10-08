@@ -11,6 +11,15 @@ Extends `editors/SPEC.md` with JetBrains-specific behavior.
 
 ## Implementation Details
 
+### Document lint inspection
+
+**Inspect Document Directives** runs `agent-doc lint <FILE>` for the focused
+Markdown document. The command is read-only and resolves the same authoritative
+editor content and lint policy as closeout gates. Clean results use a transient
+hint; warnings and blocking findings are retained in the Agent Doc Event Log so
+the full rule, position, and hint remain available even when a compact/write
+failure notification is intentionally concise.
+
 When registration carries a retained native CRDT state vector, a controller may
 force a full canonical bootstrap for a durable projection without discarding the
 vector. The response reports whether canonical causally covers that frontier.

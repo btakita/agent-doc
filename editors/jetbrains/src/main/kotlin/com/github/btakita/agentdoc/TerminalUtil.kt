@@ -71,6 +71,7 @@ object TerminalUtil {
     )
     private val LINT_DIAGNOSTIC_REGEX = Regex(
         """((?:[A-Za-z]:)?[/\\][^\r\n]*?):(\d+):(\d+)\s+error:\s+(.+?)\s+\[[^]]+](?:\s+hint:\s*(.*))?$""",
+        RegexOption.MULTILINE,
     )
     private val SESSION_STATUS_ACTOR_GENERATION_REGEX = Regex("""\bactor:\s+generation=(\d+)""")
     private val RESTART_TELEMETRY_EVENT_NAMES = listOf(
@@ -1230,6 +1231,30 @@ object TerminalUtil {
         )
     }
 
+    fun lintDocument(project: Project, file: VirtualFile) {
+        val (cwd, relativePath) = resolveProject(project, file)
+        runDocumentCommand(
+            project = project,
+            file = file,
+            command = buildLintDocumentCommand(resolveAgentDoc(cwd), relativePath),
+            startedMessage = "Inspecting directives in ${file.name}",
+            failureAction = "inspect this document",
+            onSuccess = { resolvedPath, output ->
+                if (output.isBlank()) {
+                    showHint(project, "No blocking lint findings for $resolvedPath")
+                } else {
+                    notifyWarning(project, output)
+                }
+            },
+            onFailure = { resolvedPath, exitCode, output ->
+                notifyError(
+                    project,
+                    output.ifBlank { "agent-doc lint failed for $resolvedPath (exit $exitCode) without diagnostics." },
+                )
+            },
+        )
+    }
+
     fun clearSessionContext(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
         val (cwd, relativePath) = resolveProject(project, file)
         val routeKey = RunAgentDocAttemptLedger.routeKey(cwd, relativePath)
@@ -1519,6 +1544,11 @@ object TerminalUtil {
         "exchange",
         "--commit",
     )
+
+    internal fun buildLintDocumentCommand(
+        agentDoc: String,
+        relativePath: String,
+    ): List<String> = listOf(agentDoc, "lint", relativePath)
 
     internal fun sessionStatusSuccessMessage(relativePath: String, output: String): String =
         output.ifBlank { "Loaded session status for $relativePath" }

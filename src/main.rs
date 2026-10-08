@@ -72,6 +72,7 @@ mod jobs;
 mod layout;
 mod lib_gc;
 mod lib_install;
+mod lint;
 mod mcp;
 mod migrate;
 mod mode;
@@ -2846,6 +2847,12 @@ enum Commands {
         /// Emit machine-readable JSON
         #[arg(long)]
         json: bool,
+    },
+    /// Inspect the current authoritative document with the same integrity and
+    /// dialect policy used by closeout gates, without changing the document
+    Lint {
+        /// Path to the session document
+        file: PathBuf,
     },
     /// Plan and optionally apply catalog-safe workflow invariant repairs
     Autofix {
@@ -5773,6 +5780,7 @@ fn try_main() -> anyhow::Result<()> {
                 &mut effects,
             )
         }
+        Commands::Lint { file } => lint::run(&file),
         Commands::Autofix {
             file,
             preflight_json,

@@ -235,7 +235,7 @@ Both PRs passed their full CI gates before merge. Their merge commits are `2570c
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/186~~ — auto-struck: answered this cycle (#ftstrike)
 - release + publish
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/187~~ — auto-struck: answered this cycle (#ftstrike)
-- #gh-fix https://github.com/btakita/agent-doc/issues/188
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/188~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/189
 - #gh-fix https://github.com/btakita/agent-doc/issues/190
 - #gh-fix https://github.com/btakita/agent-doc/issues/196

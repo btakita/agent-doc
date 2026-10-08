@@ -33715,3 +33715,47 @@ fn captured_splice_live_recipe_holds_delivery_and_uses_disposable_commit_boundar
         "the live driver must defer the verdict to the branch-specific verifier contract",
     );
 }
+
+#[test]
+fn actions_artifact_cleanup_is_durable_only_and_fail_closed() {
+    let workflow = std::fs::read_to_string(".github/workflows/artifact-cleanup.yml")
+        .expect("read Actions artifact cleanup workflow");
+
+    for required in [
+        "schedule:",
+        "workflow_dispatch:",
+        "contents: read",
+        "actions: write",
+        "concurrency:",
+        "scripts/audit-actions-artifacts.py",
+        "scripts/purge-actions-artifacts.py",
+        "--execute",
+        "--authorize-deletion \"$GITHUB_REPOSITORY\"",
+        "--durability durable",
+        "--max-deletions 1000",
+        "${{ runner.temp }}/agent-doc-artifact-audit",
+    ] {
+        assert!(
+            workflow.contains(required),
+            "artifact cleanup workflow must retain its fail-closed guard: {required}"
+        );
+    }
+
+    let audit = workflow
+        .find("scripts/audit-actions-artifacts.py")
+        .expect("read-only audit step");
+    let purge = workflow
+        .find("scripts/purge-actions-artifacts.py")
+        .expect("purge step");
+    assert!(
+        audit < purge,
+        "the live audit must run before its purge handoff is consumed"
+    );
+    assert!(
+        !workflow.contains("--durability all")
+            && !workflow.contains("--durability perishable")
+            && !workflow.contains("upload-artifact")
+            && !workflow.contains("upload-pages-artifact"),
+        "scheduled cleanup must neither widen deletion beyond durable counterparts nor retain its own artifacts"
+    );
+}

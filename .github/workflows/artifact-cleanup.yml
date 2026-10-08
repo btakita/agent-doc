@@ -1,0 +1,47 @@
+name: Cleanup durable Actions artifacts
+
+on:
+  # Weekly cleanup keeps release-build artifacts from accumulating while leaving
+  # enough time for release investigation and download retries.
+  schedule:
+    - cron: "23 7 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: actions-artifact-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HANDOFF_DIR: ${{ runner.temp }}/agent-doc-artifact-audit
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Audit Actions artifacts against durable release assets
+        run: |
+          set -euo pipefail
+          python3 scripts/audit-actions-artifacts.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --output-dir "$HANDOFF_DIR"
+
+      - name: Delete only artifacts backed by durable release assets
+        run: |
+          set -euo pipefail
+          # Normal weekly release output is far below 1,000 artifacts. This cap
+          # tolerates a release burst while refusing an unexpectedly broad purge
+          # that should receive a fresh operator review.
+          python3 scripts/purge-actions-artifacts.py \
+            --handoff-dir "$HANDOFF_DIR" \
+            --execute \
+            --authorize-deletion "$GITHUB_REPOSITORY" \
+            --durability durable \
+            --max-deletions 1000 \
+            --report-path "$RUNNER_TEMP/artifact-cleanup-report.json"

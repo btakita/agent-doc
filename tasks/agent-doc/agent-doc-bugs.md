@@ -280,7 +280,48 @@ The editor restart completed and the old JetBrains process exited; a new backend
 Completed and merged through PR #199 as merge commit `80e61a04a9fd1d24ca40dac4793849701b374eef`. Claude Code supports explicit file context interactively through `@file`/IDE context, but its headless `-p` interface has no dedicated local-file focus flag. Agent-doc now supplies the exact session-document path as primary, model-visible turn context across normal, resumed, streaming, orchestration, and direct-run paths, below the prompt-cache boundary.
 
 Focused prompt-context, stream, direct-run, and orchestration tests passed; `make check-fast` and PR CI both passed before merge.
-<!-- agent:boundary:26678c74 -->
+> **Chat prompt (#chatprompt):** Can we increase the number of subagents? At this rate, the release will take all day.
+
+> **Chat prompt (#chatprompt):** would restarting the agent give us 6 subagents?
+
+> **Chat prompt (#chatprompt):** Make my default subagent count 6
+
+> **Chat prompt (#chatprompt):** Can I restart this agent process to get the new configuration? Or can we transfer to a new session?
+
+### Re: Six-subagent default and session transfer — gpt-5 · 2026-10-08T16:51-04:00
+
+Set the user-global Codex configuration in `/home/brian/.codex/config.toml`:
+
+```toml
+[agents]
+max_concurrent_threads_per_session = 6
+```
+
+Codex 0.161.0 accepted the file under strict config parsing, and `codex doctor` completed with no failures. The setting is the stable spawned-subagent limit: the root agent is separate.
+
+It applies when a new Codex session is created. Restart by exiting this process, starting a fresh Codex session, and invoking `agent-doc tasks/agent-doc/agent-doc-bugs.md`. Starting a fresh thread is safer than resuming this thread because this thread's four-slot runtime was fixed at session creation. The session document carries the queue and this handoff.
+
+### Re: Claim for Tmux Pane components — gpt-5 · 2026-10-08T16:51-04:00
+
+PR [#206](https://github.com/btakita/agent-doc/pull/206) adds the canonical scaffold order `status → exchange → queue → backlog → review → icebox → done → notes` through the shared generator used by CLI, JetBrains, and VS Code. Focused tests, strict Clippy, JetBrains tests, 8,068 affected tests, and all batched suites passed. The queue item remains open and its claim was released so the new session can integrate it after CI.
+
+### Re: tools.md duplicate projection and fenced Markdown — gpt-5 · 2026-10-08T16:51-04:00
+
+PR [#208](https://github.com/btakita/agent-doc/pull/208) replaces prefix/similarity inference with a fail-closed baseline → projection → observed structural proof and exact backlog receipt. It preserves one durable ID across CRDT orderings and retries while refusing ambiguous identities, reused IDs, extra rows, or unrelated edits. Focused tests, both affected crate suites, strict Clippy, and all 9,729 nextest tests passed; the remaining batched run was interrupted only for this session transfer after its reported binaries stayed green.
+
+PR [#207](https://github.com/btakita/agent-doc/pull/207) fixes the fenced-content defect at the AST boundary: backlog extraction, malformed-item detection, and nested-subtask normalization now exclude pulldown-cmark literal ranges for fenced/indented code and raw HTML. Its full `make check-fast` passed, including 8,914 nextest tests and all batched/doc-test phases.
+
+Both queue items remain open for integration, and their claims were released for the new session.
+
+### Re: Codex Stop-hook continuation label — gpt-5 · 2026-10-08T16:51-04:00
+
+PR [#209](https://github.com/btakita/agent-doc/pull/209) addresses the reported `Blocked by hook` presentation. Codex requires `decision: "block"` for a Stop continuation and renders that envelope with the alarming host label, so agent-doc now leads with `Queue continuation, not an error:` and explains the label. The fail-first regression and all 94 package tests passed; the broader gate had started but was intentionally stopped for transfer. Its queue claim was released.
+
+The separate report that a steering Run Agent Doc was never submitted remains queued; I have not conflated that dispatch failure with the wording-only PR #209.
+
+The exchange is oversized, but the active queue was not stalled for compaction.
+
+<!-- agent:boundary:fadb4605 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -288,27 +329,53 @@ Focused prompt-context, stream, direct-run, and orchestration tests passed; `mak
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#reviewiceboxnotes]
+- do [#crossplatformmise-txpw]
 - ~~do [#correspondingsubagentspr]~~
 - ~~do [#possibletellclaude]~~
-- ~~Make the tmux pane title contain the document name in all states.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/185~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/186~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/187~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/188~~ — auto-struck: answered this cycle (#ftstrike)
-- #gh-fix https://github.com/btakita/agent-doc/issues/189
-- #gh-fix https://github.com/btakita/agent-doc/issues/190
-- #gh-fix https://github.com/btakita/agent-doc/issues/196
-- #gh-fix https://github.com/btakita/agent-doc/issues/197
-- #gh-fix https://github.com/btakita/agent-doc/issues/198
-- After release, add support for multiple `agent:queue` tags. Should we have a `id=...` attribute to distinguish between queues? I want to have different queues to allow different attributes. Some queues may be a subagents queue and others may be ordered. This post-release queue is a perfect example use case. If you can start the subagent now and keep it out of the upcoming release, do that. I want to be able to have different queues and even allow a queue to depend on another queue. Perhaps a release B queue can organize release B after the release A queue is complete.
+- ~~Make the tmux pane title contain the document name in all states.~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/185~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/186~~
+- ~~release + publish~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/187~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/188~~
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/189
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/190
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/196
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/197
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/198
+- 🚧 After release, add support for multiple `agent:queue` tags. Should we have a `id=...` attribute to distinguish between queues? I want to have different queues to allow different attributes. Some queues may be a subagents queue and others may be ordered. This post-release queue is a perfect example use case. If you can start the subagent now and keep it out of the upcoming release, do that. I want to be able to have different queues and even allow a queue to depend on another queue. Perhaps a release B queue can organize release B after the release A queue is complete.
 - Give queues an auto-dag like queue items. So a queue id=B must run after queue id=A ends, should we have an after=A in queue id=B? If we want to make a reoccurring sequence, perhaps queue id=A could be later filled again by queue id=B once complete? I wonder if you have suggestions on how we can have an interface algorithm on adding queue items defined in the md file.
+- A steering Run Agent Doc on this file was not submitted to Codex. I manually submitted it.
+- I authored a queue item which fenced backlog items that were written in tools.md. agent-doc created backlog items for the fenced backlog items. agent-doc should have used the AST to understand the content was fenced...not regexes.
+---
+fix tools.md issue:
+```
+• Blocked by hook
+  └ agent-doc Stop hook kept an active `agent:queue auto` moving for /home/brian/work/btakita/agent-loop/src/haiven-
+dev/tasks/tools.md. The next queue prompt is "Update https://github.com/haiven-dev/haiven-tools/pull/2 description".
+Continue THIS turn in-pane: answer that prompt in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md and
+persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` (or `agent-doc
+write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md`). Do NOT run `agent-doc /home/brian/
+work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` from this pane — that re-invokes the owner pane and hits the
+recursive-direct-invocation deadlock guard, and do not send the final answer yet.
+```
+---
 - release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#reviewiceboxnotes] Add agent:review + agent:icebox + agent:done + agent:notes to the Claim for Tmux Pane template.
+- [ ] [#crossplatformmise-txpw] Run Agent Doc on tools.md duplicated my queue item and created duplicate backlog items. This issue has been reoccurring across several fix attempts. Use formal logic to ensure this class of error stops occurring:
+  ```
+  - [ ] [#crossplatformmise-txpw-0xfe] do - do [#crossplatformmise]
+  ```
+  ```
+  - [ ] [#crossplatformmise-txpw-44kg] Re: Cross-platform mise bootstrap: Can this be run remotely via uvx...cross platform?
+  - [ ] [#crossplatformmise] Re: Cross-platform mise bootstrap: Can this be run remotely via uvx?
+  ```
 <!-- /agent:backlog -->
 
 ## Review

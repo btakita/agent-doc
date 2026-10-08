@@ -1019,7 +1019,7 @@ pub fn repair_prompt_tail_outside_exchange(doc: &str) -> Result<Option<String>> 
 /// even though the document still has the real opening exchange marker. When the
 /// text between the first and second close markers is safe exchange content, move
 /// that text back into the real exchange block and drop the stray second close.
-fn structural_exchange_marker_span(doc: &str) -> Option<(usize, usize, usize)> {
+fn structural_exchange_close_pair(doc: &str) -> Option<(usize, usize)> {
     let mut open_end = None;
     let mut close_starts = Vec::new();
 
@@ -1048,18 +1048,12 @@ fn structural_exchange_marker_span(doc: &str) -> Option<(usize, usize, usize)> {
     let mut closes_after_open = close_starts
         .into_iter()
         .filter(|close_start| *close_start >= open_end);
-    Some((
-        open_end,
-        closes_after_open.next()?,
-        closes_after_open.next()?,
-    ))
+    Some((closes_after_open.next()?, closes_after_open.next()?))
 }
 
 pub fn repair_duplicate_exchange_close_tail(doc: &str) -> Result<Option<String>> {
     let close_tag = "<!-- /agent:exchange -->";
-    let Some((open_end, first_close_start, second_close_start)) =
-        structural_exchange_marker_span(doc)
-    else {
+    let Some((first_close_start, second_close_start)) = structural_exchange_close_pair(doc) else {
         return Ok(None);
     };
     let first_close_end = first_close_start + close_tag.len();
@@ -1110,8 +1104,7 @@ pub fn repair_duplicate_exchange_close_tail(doc: &str) -> Result<Option<String>>
 /// the real scaffold after the second close marker.
 pub fn repair_duplicate_exchange_close_scaffold(doc: &str) -> Result<Option<String>> {
     let close_tag = "<!-- /agent:exchange -->";
-    let Some((_, first_close_start, second_close_start)) = structural_exchange_marker_span(doc)
-    else {
+    let Some((first_close_start, second_close_start)) = structural_exchange_close_pair(doc) else {
         return Ok(None);
     };
     let first_close_end = first_close_start + close_tag.len();
@@ -1137,8 +1130,7 @@ pub fn repair_duplicate_exchange_close_scaffold(doc: &str) -> Result<Option<Stri
 /// exchange.
 pub fn repair_duplicate_exchange_close_mixed_scaffold_tail(doc: &str) -> Result<Option<String>> {
     let close_tag = "<!-- /agent:exchange -->";
-    let Some((_, first_close_start, second_close_start)) = structural_exchange_marker_span(doc)
-    else {
+    let Some((first_close_start, second_close_start)) = structural_exchange_close_pair(doc) else {
         return Ok(None);
     };
     let first_close_end = first_close_start + close_tag.len();
@@ -1669,7 +1661,7 @@ mod tests {
             "---\nagent_doc_format: template\n---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "### Re: marker examples — gpt-6\n\n",
-            "Inline artifact: `<!-- agent:boundary:abc123 --><!-- /agent:exchange -->`.\n\n",
+            "Inline artifact: `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`.\n\n",
             "```markdown\n",
             "<!-- agent:exchange patch=append -->\n",
             "<!-- /agent:exchange -->\n",
@@ -1679,6 +1671,22 @@ mod tests {
             "<!-- agent:queue -->\n",
             "- keep working\n",
             "<!-- /agent:queue -->\n"
+        );
+
+        let structural_markers = element::structural_marker_occurrences(doc)
+            .into_iter()
+            .filter(|occurrence| occurrence.line_anchored)
+            .map(|occurrence| doc[occurrence.start..].lines().next().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            structural_markers,
+            vec![
+                "<!-- agent:exchange patch=append -->",
+                "<!-- /agent:exchange -->",
+                "<!-- agent:queue -->",
+                "<!-- /agent:queue -->",
+            ],
+            "inline and fenced marker examples must stay outside the structural marker stream"
         );
 
         assert!(repair_duplicate_exchange_close_tail(doc).unwrap().is_none());

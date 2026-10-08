@@ -8326,6 +8326,103 @@ mod tests {
     }
 
     #[test]
+    fn preflight_collapses_checkpoint_proven_fourfold_tail_without_losing_edits() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let captured_response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: marker handling — gpt-5\n\n",
+            "The artifact is `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ original operator prompt\n\n",
+            "### Re: marker handling — gpt-5\n\n",
+            "The artifact is `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- [ ] Existing work.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let replayed_tail = concat!(
+            "\n#subagent: Fix sample-sdk queue replay.\n\n",
+            "Preserve this newer operator edit.\n\n",
+            "```text\n",
+            "sample output\n",
+            "```\n",
+        );
+        let replayed = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+                "<!-- agent:exchange patch=append subagents -->\n",
+                "❯ original operator prompt\n\n",
+                "### Re: marker handling — gpt-5\n\n",
+                "The artifact is `...`.\n",
+                "{replayed_tail}{replayed_tail}{replayed_tail}{replayed_tail}",
+                "<!-- agent:boundary:new -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- [ ] Existing work.\n",
+                "- [ ] Add corresponding subagent attributes.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            replayed_tail = replayed_tail,
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline))
+                .unwrap();
+        let response_sha = agent_doc_hash::content_hash(captured_response);
+        agent_doc_cycle_state_io::append_response_captured_body(
+            &doc,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &cycle.cycle_id,
+                capture_id: &cycle.cycle_id,
+                response_sha256: &response_sha,
+                response_body: captured_response,
+                intent_body: Some(captured_response),
+                mutation_plan_json: None,
+                file_hash: Some(&agent_doc_hash::content_hash(baseline)),
+                snapshot_hash: Some(&agent_doc_hash::content_hash(baseline)),
+                baseline_content: Some(baseline),
+            },
+        )
+        .unwrap();
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "preflight-fourfold-tail-dedup",
+            &replayed,
+        );
+
+        run_with_options(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let current = resolve_current_preflight_document(&doc, "test_fourfold_tail_dedup").unwrap();
+        assert_eq!(current.matches(replayed_tail).count(), 1);
+        assert!(current.contains("The artifact is `...`."));
+        assert!(!current.contains("f4405030"));
+        assert!(current.contains("<!-- agent:exchange patch=append subagents -->"));
+        assert!(current.contains("- [ ] Add corresponding subagent attributes."));
+        assert_eq!(current.matches("agent:boundary:").count(), 1);
+        assert!(current.contains("agent:boundary:new"));
+    }
+
+    #[test]
     fn preflight_retires_redundant_intent_before_retaining_exact_projection() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

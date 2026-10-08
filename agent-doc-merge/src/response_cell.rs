@@ -10,6 +10,7 @@ use agent_doc_markdown_ast::exchange_tree::{
     ExchangeNode, ExchangeNodeKind, ResponseTurnCellPolicy, parse_exchange_nodes,
     remove_all_salient_responses, render_exchange_nodes,
 };
+use similar::{Algorithm, DiffTag, capture_diff_slices};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,6 +243,80 @@ fn replay_provenance_lines(lines: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn line_edit_distance(old: &[String], new: &[String]) -> usize {
+    capture_diff_slices(Algorithm::Myers, old, new)
+        .into_iter()
+        .filter(|op| op.tag() != DiffTag::Equal)
+        .map(|op| op.old_range().len() + op.new_range().len())
+        .sum()
+}
+
+/// Collapse one exact, checkpoint-proven replay run appended inside a response.
+///
+/// Free-text appended after a response heading is parsed as part of that response
+/// node. A stale editor replay can therefore append the same operator text several
+/// times without creating duplicate response nodes for the ordinary cell repair
+/// below to see. Recovery is safe only when all of these independent proofs hold:
+///
+/// - the node ends in at least three byte-identical copies of a non-trivial block;
+/// - the captured response does not itself contain that block; and
+/// - deleting all but the first copy lies on an optimal line-edit path back to the
+///   captured response.
+///
+/// The last condition proves that only capture-extraneous lines are removed while
+/// leaving operator edits in the response prefix untouched. Multiple possible
+/// collapsed results are ambiguous and fail closed.
+fn collapse_checkpoint_proven_repeated_suffix(
+    current: &[String],
+    captured: &[String],
+) -> Option<Vec<String>> {
+    const MIN_REPLAY_COPIES: usize = 3;
+
+    let current = content_lines_without_protocol_boundaries(current);
+    let captured = content_lines_without_protocol_boundaries(captured);
+    if current.len() < MIN_REPLAY_COPIES || captured.is_empty() {
+        return None;
+    }
+
+    let current_distance = line_edit_distance(&captured, &current);
+    let mut collapsed_results = Vec::<Vec<String>>::new();
+    for block_len in 1..=current.len() / MIN_REPLAY_COPIES {
+        let block_start = current.len() - block_len;
+        let block = &current[block_start..];
+        if block.iter().filter(|line| !line.trim().is_empty()).count() < 2
+            || captured.windows(block_len).any(|window| window == block)
+        {
+            continue;
+        }
+
+        let mut copies = 1;
+        while copies < current.len() / block_len {
+            let preceding_end = current.len() - copies * block_len;
+            let preceding_start = preceding_end - block_len;
+            if current[preceding_start..preceding_end] != *block {
+                break;
+            }
+            copies += 1;
+        }
+        if copies < MIN_REPLAY_COPIES {
+            continue;
+        }
+
+        let run_start = current.len() - copies * block_len;
+        let mut collapsed = current[..run_start].to_vec();
+        collapsed.extend_from_slice(block);
+        let removed_lines = (copies - 1) * block_len;
+        if line_edit_distance(&captured, &collapsed) + removed_lines != current_distance {
+            continue;
+        }
+        if !collapsed_results.contains(&collapsed) {
+            collapsed_results.push(collapsed);
+        }
+    }
+
+    (collapsed_results.len() == 1).then(|| collapsed_results.pop().unwrap())
+}
+
 /// Remove repeated response nodes with the same body-aware identity.
 ///
 /// Response cells are idempotent: replaying the same heading and body is a
@@ -315,9 +390,12 @@ pub fn deduplicate_response_cells(doc: &str) -> anyhow::Result<Option<String>> {
 ///   or the independently retained baseline node;
 /// - any novel line fails closed for that topic.
 ///
-/// Those proofs let recovery retain one exact captured response, preserve a
+/// A second capture-scoped shape covers one response node whose tail contains
+/// at least three exact copies of newly appended text; see
+/// [`collapse_checkpoint_proven_repeated_suffix`] for its stricter proof.
+/// Together these repairs retain one exact captured response, preserve a
 /// distinct earlier same-topic response, and keep every prompt, unrelated
-/// response, and the newest boundary.
+/// response, operator edit, and the newest boundary.
 pub fn deduplicate_captured_response_replays(
     doc: &str,
     baseline: &str,
@@ -392,14 +470,29 @@ pub fn deduplicate_captured_response_replays(
             continue;
         }
 
-        let candidates = nodes
+        let candidate_indices = nodes
             .iter()
             .enumerate()
             .filter(|(_, node)| node.kind == captured.kind)
+            .map(|(index, _)| index)
             .collect::<Vec<_>>();
-        if candidates.len() < 2 {
+        if candidate_indices.len() == 1 {
+            let index = candidate_indices[0];
+            if let Some(collapsed) =
+                collapse_checkpoint_proven_repeated_suffix(&nodes[index].lines, &captured.lines)
+            {
+                nodes[index].lines = collapsed;
+                removed = true;
+            }
             continue;
         }
+        if candidate_indices.len() < 2 {
+            continue;
+        }
+        let candidates = candidate_indices
+            .iter()
+            .map(|index| (*index, &nodes[*index]))
+            .collect::<Vec<_>>();
 
         let distinct_baseline = baseline_candidates
             .first()
@@ -925,6 +1018,85 @@ mod tests {
         assert_eq!(normalized.matches("agent:boundary:").count(), 1);
         assert!(normalized.contains("agent:boundary:latest"));
         assert!(normalized.contains("❯ operator prompt"));
+    }
+
+    #[test]
+    fn captured_response_replay_collapses_fourfold_tail_after_operator_edits() {
+        let captured = concat!(
+            "### Re: marker handling — gpt-5\n\n",
+            "The artifact is `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`.\n",
+        );
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ original operator prompt\n\n",
+            "### Re: marker handling — gpt-5\n\n",
+            "The artifact is `<!-- agent:boundary:f4405030:frontend --><!-- /agent:exchange -->`.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- [ ] Existing work.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let replayed_tail = concat!(
+            "\n#subagent: Fix sample-sdk queue replay.\n\n",
+            "Preserve this newer operator edit.\n\n",
+            "```text\n",
+            "sample output\n",
+            "```\n",
+        );
+        let current = format!(
+            concat!(
+                "---\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append subagents -->\n",
+                "❯ original operator prompt\n\n",
+                "### Re: marker handling — gpt-5\n\n",
+                "The artifact is `...`.\n",
+                "{replayed_tail}{replayed_tail}{replayed_tail}{replayed_tail}",
+                "<!-- agent:boundary:new -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- [ ] Existing work.\n",
+                "- [ ] Add corresponding subagent attributes.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            replayed_tail = replayed_tail,
+        );
+
+        let normalized = deduplicate_captured_response_replays(&current, baseline, captured)
+            .unwrap()
+            .expect("the checkpoint proves the exact fourfold appended replay");
+
+        assert_eq!(normalized.matches(replayed_tail).count(), 1);
+        assert!(normalized.contains("The artifact is `...`."));
+        assert!(!normalized.contains("f4405030"));
+        assert!(normalized.contains("<!-- agent:exchange patch=append subagents -->"));
+        assert!(normalized.contains("- [ ] Add corresponding subagent attributes."));
+        assert_eq!(normalized.matches("agent:boundary:").count(), 1);
+        assert!(normalized.contains("agent:boundary:new"));
+    }
+
+    #[test]
+    fn captured_response_replay_preserves_unproven_repeated_tail() {
+        let captured = "### Re: topic — gpt-5\n\nCaptured body.\n";
+        let repeated = "\nOperator-authored refrain.\n\nKeep it intact.\n";
+        let current = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            &format!(
+                concat!(
+                    "### Re: topic — gpt-5\n\nCaptured body.\n",
+                    "{repeated}{repeated}",
+                    "<!-- agent:boundary:latest -->",
+                ),
+                repeated = repeated,
+            ),
+        );
+
+        assert_eq!(
+            deduplicate_captured_response_replays(&current, DOC, captured).unwrap(),
+            None,
+            "two intentional copies do not meet the replay-proof threshold"
+        );
     }
 
     #[test]

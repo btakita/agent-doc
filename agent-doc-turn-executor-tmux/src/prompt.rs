@@ -528,7 +528,7 @@ fn is_safe_codex_placeholder_token(word: &str) -> bool {
 
 fn codex_prompt_line_body_starts_dim(raw_line: &str) -> bool {
     let mut faint = false;
-    let mut after_prompt = false;
+    let mut visible = Vec::new();
     let mut chars = raw_line.char_indices().peekable();
     while let Some((_, ch)) = chars.next() {
         if ch == '\x1b' && chars.peek().is_some_and(|(_, next)| *next == '[') {
@@ -545,20 +545,36 @@ fn codex_prompt_line_body_starts_dim(raw_line: &str) -> bool {
             }
             continue;
         }
-
-        if !after_prompt {
-            if matches!(ch, '>' | '›' | '❯') {
-                after_prompt = true;
-            }
-            continue;
-        }
-
-        if ch.is_whitespace() {
-            continue;
-        }
-        return faint;
+        visible.push((ch, faint));
     }
-    false
+
+    let Some(prompt) = visible
+        .iter()
+        .position(|(ch, _)| matches!(ch, '>' | '›' | '❯'))
+    else {
+        return false;
+    };
+    let mut body = &visible[prompt + 1..];
+    body = body
+        .iter()
+        .position(|(ch, _)| !ch.is_whitespace())
+        .map_or(&[][..], |first| &body[first..]);
+
+    // Claude Code renders its IDE-context chip inside the composer row. It is
+    // normal-intensity chrome, so inspect the first glyph after the chip rather
+    // than mistaking `[` for the body of a dynamic dim autosuggestion.
+    if body.first().is_some_and(|(ch, _)| *ch == '[')
+        && body.get(1).is_some_and(|(ch, _)| *ch == '⧉')
+        && let Some(close) = body.iter().position(|(ch, _)| *ch == ']')
+    {
+        body = &body[close + 1..];
+        body = body
+            .iter()
+            .position(|(ch, _)| !ch.is_whitespace())
+            .map_or(&[][..], |first| &body[first..]);
+    }
+
+    body.first().is_some_and(|(_, faint)| *faint)
 }
 
 fn apply_sgr_sequence(sequence: &str, faint: &mut bool) {
@@ -992,6 +1008,21 @@ in @filename
         assert!(!codex_prompt_candidate_is_dim_placeholder(
             rgb,
             "› Ask Codex to do anything"
+        ));
+    }
+
+    #[test]
+    fn dim_placeholder_detection_skips_claude_context_chip() {
+        let dim = "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/api.md] \x1b[2m\x1b[39mcontinue the prior task\x1b[0m\n";
+        assert!(prompt_candidate_is_dim_placeholder(
+            dim,
+            "❯\u{a0}[⧉ In tasks/api.md] continue the prior task"
+        ));
+
+        let typed = "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/api.md] \x1b[39mcontinue the prior task\x1b[0m\n";
+        assert!(!prompt_candidate_is_dim_placeholder(
+            typed,
+            "❯\u{a0}[⧉ In tasks/api.md] continue the prior task"
         ));
     }
 

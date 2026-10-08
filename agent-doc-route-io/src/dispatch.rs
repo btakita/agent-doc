@@ -661,10 +661,21 @@ fn observe_pre_dispatch_stranded_draft(
     pane: &str,
     harness: &HarnessConfig,
     trigger: &str,
-) -> PreDispatchStrandedDraftAction {
+) -> PreDispatchDraftObservation {
     let capture = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane).ok();
     let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
-    classify_pre_dispatch_stranded_draft_capture(capture.as_deref(), cursor_y, harness, trigger)
+    classify_pre_dispatch_stranded_draft_observation(
+        capture.as_deref(),
+        cursor_y,
+        harness,
+        trigger,
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreDispatchDraftObservation {
+    action: PreDispatchStrandedDraftAction,
+    draft_preview: Option<String>,
 }
 
 /// Classify only text that the harness composer projection owns as an operator
@@ -672,18 +683,32 @@ fn observe_pre_dispatch_stranded_draft(
 /// line too, but its faint ANSI style means the input buffer is empty. Treating
 /// that ghost text as a stranded trigger makes every bare `Enter` a no-op and
 /// prevents route from ever typing the real trigger (`#routeghostdraft`).
+#[cfg(test)]
 fn classify_pre_dispatch_stranded_draft_capture(
     capture: Option<&str>,
     cursor_y: Option<usize>,
     harness: &HarnessConfig,
     trigger: &str,
 ) -> PreDispatchStrandedDraftAction {
-    let operator_draft = capture.is_some_and(|content| {
-        matches!(
-            agent_doc_harness::project_pane_composer_at_cursor(content, harness, cursor_y),
-            agent_doc_harness::PaneComposerProjection::OperatorDraft { .. }
-        )
+    classify_pre_dispatch_stranded_draft_observation(capture, cursor_y, harness, trigger).action
+}
+
+fn classify_pre_dispatch_stranded_draft_observation(
+    capture: Option<&str>,
+    cursor_y: Option<usize>,
+    harness: &HarnessConfig,
+    trigger: &str,
+) -> PreDispatchDraftObservation {
+    let projection = capture.map(|content| {
+        agent_doc_harness::project_pane_composer_at_cursor(content, harness, cursor_y)
     });
+    let draft_preview = match projection.as_ref() {
+        Some(agent_doc_harness::PaneComposerProjection::OperatorDraft { preview }) => {
+            Some(preview.clone())
+        }
+        _ => None,
+    };
+    let operator_draft = draft_preview.is_some();
     // Preserve the raw capture for wrapped-path matching, but only after the
     // composer policy owner proves those glyphs are real input rather than a
     // faint autosuggestion.
@@ -693,7 +718,7 @@ fn classify_pre_dispatch_stranded_draft_capture(
                 harness.is_prompt_line(line)
             })
         });
-    classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
+    let action = classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
         pane_captured: capture.is_some(),
         trigger_drafted,
         pane_busy: capture.is_some_and(|content| harness.has_busy_cue(content)),
@@ -701,7 +726,11 @@ fn classify_pre_dispatch_stranded_draft_capture(
         // empty ready composer from one holding a draft. A draft that is not this
         // trigger is exactly the state that concatenates.
         foreign_draft: operator_draft && !trigger_drafted,
-    })
+    });
+    PreDispatchDraftObservation {
+        action,
+        draft_preview,
+    }
 }
 
 /// GH #98: a foreground supervisor diagnostic can be echoed into the managed
@@ -789,7 +818,8 @@ fn try_pre_dispatch_stranded_draft_submit(
 ) -> Result<Option<RoutedDispatchStartProof>> {
     clear_agent_owned_composer_notice(tmux, file, pane, harness)?;
     let trigger = harness.trigger_command(file_path);
-    let action = observe_pre_dispatch_stranded_draft(tmux, pane, harness, &trigger);
+    let observation = observe_pre_dispatch_stranded_draft(tmux, pane, harness, &trigger);
+    let action = observation.action;
     if action == PreDispatchStrandedDraftAction::DeferForeignDraft {
         // `#concatdraftinject`: operator-reported 2026-09-28 — a composer holding
         // `agent-doc tasks/api.md` received `agent-doc /abs/.../tasks/api.md`
@@ -800,17 +830,22 @@ fn try_pre_dispatch_stranded_draft_submit(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_pre_dispatch_draft_observation file={} pane={} harness={} action={} note=composer holds a different draft; injecting would concatenate it with this trigger",
+                "route_pre_dispatch_draft_observation file={} pane={} harness={} action={} draft_preview={:?} note=composer holds a different draft; injecting would concatenate it with this trigger",
                 file.display(),
                 pane,
                 harness.binary,
                 action.as_str(),
+                observation.draft_preview.as_deref().unwrap_or("<unavailable>"),
             ),
         );
+        let preview = observation
+            .draft_preview
+            .as_deref()
+            .unwrap_or("<unavailable>");
         anyhow::bail!(
             "pane {pane} composer already holds an unsubmitted draft that is not this trigger; \
              injecting would concatenate the two into one line. Submit or clear that draft in the \
-             pane, then re-run the trigger."
+             pane, then re-run the trigger. Redacted draft preview: {preview:?}."
         );
     }
     if action != PreDispatchStrandedDraftAction::ResubmitStrandedDraft {
@@ -876,7 +911,7 @@ fn try_pre_dispatch_stranded_draft_submit(
             // composer instead: only the identical draft still sitting there is
             // evidence the Enter did not land, and even then the remedy is a
             // retry of the same Enter, never a second trigger.
-            let after = observe_pre_dispatch_stranded_draft(tmux, pane, harness, &trigger);
+            let after = observe_pre_dispatch_stranded_draft(tmux, pane, harness, &trigger).action;
             let followup =
                 agent_doc_controller::dispatch::stranded_draft_unobserved_admission_followup(after);
             agent_doc_ops_log_io::log_op(
@@ -1318,5 +1353,35 @@ mod tests {
             ),
             PreDispatchStrandedDraftAction::DeferForeignDraft,
         );
+    }
+
+    #[test]
+    fn claude_context_chip_does_not_block_route_but_following_draft_does() {
+        let harness = HarnessConfig::claude();
+        let chip = "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/docs.md]\x1b[0m";
+        let pane = claude_pane(chip);
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_capture(
+                Some(&pane),
+                Some(2),
+                &harness,
+                TRIGGER,
+            ),
+            PreDispatchStrandedDraftAction::DispatchFresh,
+        );
+
+        let chip_with_draft = format!("{chip} operator text");
+        let pane = claude_pane(&chip_with_draft);
+        let observation = classify_pre_dispatch_stranded_draft_observation(
+            Some(&pane),
+            Some(2),
+            &harness,
+            TRIGGER,
+        );
+        assert_eq!(
+            observation.action,
+            PreDispatchStrandedDraftAction::DeferForeignDraft
+        );
+        assert_eq!(observation.draft_preview.as_deref(), Some("❯ operator text"));
     }
 }

@@ -725,7 +725,10 @@ impl HarnessConfig {
         let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
         let trimmed = stripped.trim();
         match self.binary.as_str() {
-            "claude" => is_claude_idle_placeholder_prompt(trimmed),
+            "claude" => {
+                let normalized = claude_prompt_without_context_chip(trimmed);
+                is_claude_idle_placeholder_prompt(&normalized)
+            }
             "codex" => is_codex_idle_placeholder_prompt(trimmed),
             _ => false,
         }
@@ -753,10 +756,11 @@ impl HarnessConfig {
             return false;
         }
         let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
-        stripped
-            .trim()
-            .strip_prefix("\u{276f} ")
-            .is_some_and(|rest| rest.trim() == "Press up to edit queued messages")
+        let normalized = claude_prompt_without_context_chip(stripped.trim());
+        normalized
+            .strip_prefix('\u{276f}')
+            .map(str::trim_start)
+            .is_some_and(|rest| rest == "Press up to edit queued messages")
     }
 
     pub fn is_dispatch_ready_prompt_line(&self, line: &str) -> bool {
@@ -768,9 +772,11 @@ impl HarnessConfig {
                 .and_then(|s| s.strip_suffix('│'))
                 .is_some_and(|s| s.trim().is_empty()),
             "claude" => {
-                matches!(trimmed, "❯" | "⏵")
-                    || is_claude_idle_placeholder_prompt(trimmed)
-                    || (trimmed.starts_with("⏵⏵ ") && trimmed.contains("(shift+tab to cycle)"))
+                let normalized = claude_prompt_without_context_chip(trimmed);
+                matches!(normalized.as_ref(), "❯" | "⏵")
+                    || is_claude_idle_placeholder_prompt(&normalized)
+                    || (normalized.starts_with("⏵⏵ ")
+                        && normalized.contains("(shift+tab to cycle)"))
             }
             "codex" => {
                 matches!(trimmed, "❯" | ">" | "›" | "› |")
@@ -1427,9 +1433,17 @@ impl BottomIdleChromeScan {
     }
 }
 
-fn protected_prompt_draft_preview_from_candidate(candidate: &str) -> Option<String> {
+fn protected_prompt_draft_preview_from_candidate(
+    candidate: &str,
+    harness: &HarnessConfig,
+) -> Option<String> {
     let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(candidate);
-    let redacted = agent_doc_secret_redact::redact(stripped.trim());
+    let normalized = if harness.binary == "claude" {
+        claude_prompt_without_context_chip(stripped.trim())
+    } else {
+        std::borrow::Cow::Borrowed(stripped.trim())
+    };
+    let redacted = agent_doc_secret_redact::redact(normalized.as_ref());
     let preview = redacted.trim();
     if preview.is_empty() {
         return None;
@@ -1465,7 +1479,7 @@ fn agent_owned_notice_from_prompt_candidate(
 
 pub fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) -> Option<String> {
     let candidate = harness.last_prompt_candidate(content)?;
-    protected_prompt_draft_preview_from_candidate(&candidate)
+    protected_prompt_draft_preview_from_candidate(&candidate, harness)
 }
 
 /// Reactive projection of one ANSI-preserving pane-capture source observation.
@@ -1621,7 +1635,7 @@ pub fn project_pane_composer(content: &str, harness: &HarnessConfig) -> PaneComp
         && !harness.is_dispatch_ready_prompt_line(candidate)
         && !latest_prompt_is_dim_placeholder
         && agent_owned_notice_from_prompt_candidate(candidate, harness).is_none()
-        && let Some(preview) = protected_prompt_draft_preview_from_candidate(candidate)
+        && let Some(preview) = protected_prompt_draft_preview_from_candidate(candidate, harness)
     {
         return PaneComposerProjection::OperatorDraft { preview };
     }
@@ -1872,10 +1886,34 @@ fn is_claude_idle_placeholder_prompt(trimmed: &str) -> bool {
         "Press up to edit queued messages",
         "describe a task for a new session",
     ];
-    let Some(rest) = trimmed.strip_prefix("❯ ") else {
+    let Some(rest) = trimmed.strip_prefix('❯').map(str::trim_start) else {
         return false;
     };
-    PLACEHOLDERS.contains(&rest.trim())
+    PLACEHOLDERS.contains(&rest)
+}
+
+/// Remove Claude Code's IDE-context chip from the start of a composer body.
+///
+/// The chip is rendered inside the `❯` row (for example
+/// `❯\u{a0}[⧉ In tasks/api.md]`) but is not part of the submitted prompt. Keep any
+/// text after the closing bracket so a real operator draft remains protected.
+fn claude_prompt_without_context_chip(trimmed: &str) -> std::borrow::Cow<'_, str> {
+    let Some(after_prompt) = trimmed.strip_prefix('❯') else {
+        return std::borrow::Cow::Borrowed(trimmed);
+    };
+    let body = after_prompt.trim_start();
+    let Some(chip) = body.strip_prefix("[⧉") else {
+        return std::borrow::Cow::Borrowed(trimmed);
+    };
+    let Some(close) = chip.find(']') else {
+        return std::borrow::Cow::Borrowed(trimmed);
+    };
+    let suffix = chip[close + 1..].trim_start();
+    if suffix.is_empty() {
+        std::borrow::Cow::Borrowed("❯")
+    } else {
+        std::borrow::Cow::Owned(format!("❯ {suffix}"))
+    }
 }
 
 /// Return the addressed subagent from Claude's empty-composer placeholder.
@@ -1885,8 +1923,8 @@ fn is_claude_idle_placeholder_prompt(trimmed: &str) -> bool {
 /// target, and a trailing ellipsis. Arbitrary operator prose remains a draft.
 fn claude_agent_addressed_target(line: &str) -> Option<String> {
     let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
-    let trimmed = stripped.trim();
-    let after_prompt = trimmed.strip_prefix('❯')?;
+    let normalized = claude_prompt_without_context_chip(stripped.trim());
+    let after_prompt = normalized.strip_prefix('❯')?;
     let after_spacing = after_prompt.trim_start_matches(char::is_whitespace);
     if after_spacing.len() == after_prompt.len() {
         return None;
@@ -3201,6 +3239,48 @@ mod tests {
             h.is_dispatch_ready_prompt_line(&candidate),
             "attachment chip must be skipped to the idle composer: {candidate:?}"
         );
+    }
+
+    #[test]
+    fn claude_inline_context_chip_is_empty_composer_chrome() {
+        let h = HarnessConfig::claude();
+        let captured_rows = [
+            "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/api.md]\x1b[0m",
+            "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉\x1b[38;5;74m In\x1b[38;5;74m tasks/api.md]\x1b[0m",
+        ];
+
+        for row in captured_rows {
+            assert!(matches!(
+                project_pane_composer(row, &h),
+                PaneComposerProjection::ReadyEmpty { .. }
+            ));
+            assert_eq!(pane_composer_draft(&h, row), None);
+        }
+    }
+
+    #[test]
+    fn claude_context_chip_preserves_typed_draft_and_ignores_dim_hint() {
+        let h = HarnessConfig::claude();
+        let typed = "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/api.md] \x1b[39mkeep this draft\x1b[0m";
+        assert_eq!(
+            project_pane_composer(typed, &h),
+            PaneComposerProjection::OperatorDraft {
+                preview: "❯ keep this draft".to_string(),
+            }
+        );
+
+        let dim_hint = "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/api.md] \x1b[2m\x1b[39mcontinue the prior task\x1b[0m";
+        assert!(matches!(
+            project_pane_composer(dim_hint, &h),
+            PaneComposerProjection::ReadyEmpty { .. }
+        ));
+
+        let queued = "\x1b[38;5;246m❯\u{a0}\x1b[38;5;74m[⧉ In tasks/api.md] \x1b[2m\x1b[39mPress up to edit queued messages\x1b[0m";
+        assert!(h.is_queued_input_placeholder_line(queued));
+        assert!(matches!(
+            project_pane_composer(queued, &h),
+            PaneComposerProjection::ReadyEmpty { .. }
+        ));
     }
 
     #[test]

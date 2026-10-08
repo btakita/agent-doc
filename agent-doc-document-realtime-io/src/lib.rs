@@ -3605,6 +3605,7 @@ pub fn apply_canonical_replace_if_attached(
                             // a fresh CRDT transition on every closeout retry.
                             let relay_text = collapse_progressive_queue_projection(
                                 expected_current,
+                                content,
                                 &relay_text,
                             )
                             .unwrap_or(relay_text);
@@ -3678,8 +3679,12 @@ pub fn apply_canonical_replace_if_attached(
                             content.to_string()
                         } else {
                             let relay_text = if agent_projection_may_be_visible {
-                                collapse_progressive_queue_projection(expected_current, &relay_text)
-                                    .unwrap_or_else(|| relay_text.clone())
+                                collapse_progressive_queue_projection(
+                                    expected_current,
+                                    content,
+                                    &relay_text,
+                                )
+                                .unwrap_or_else(|| relay_text.clone())
                             } else {
                                 relay_text.clone()
                             };
@@ -4434,27 +4439,67 @@ fn structurally_invalid_post_apply_editor_cut(
 /// repair refuses to cross committed snapshot entries or structurally distinct
 /// heads; without the caller's causal race evidence this normalization is not
 /// applied at all.
-fn collapse_progressive_queue_projection(expected_base: &str, observed: &str) -> Option<String> {
+fn collapse_progressive_queue_projection(
+    expected_base: &str,
+    projected_target: &str,
+    observed: &str,
+) -> Option<String> {
     let observed_components = agent_doc_element::element::parse(observed).ok()?;
     let observed_queue = observed_components
         .iter()
         .find(|component| component.name == "queue")?;
-    let snapshot_body = agent_doc_element::element::parse(expected_base)
-        .ok()?
-        .into_iter()
+    let expected_components = agent_doc_element::element::parse(expected_base).ok()?;
+    let snapshot_body = expected_components
+        .iter()
         .find(|component| component.name == "queue")
         .map(|component| component.content(expected_base))
         .unwrap_or_default();
     let observed_entries =
         agent_doc_queue::document_queue::parse(observed_queue.content(observed)).ok()?;
     let snapshot_entries = agent_doc_queue::document_queue::parse(snapshot_body).ok()?;
-    let collapsed = agent_doc_queue::document_queue::collapse_progressive_free_text_heads(
+    let projected_entries = agent_doc_element::element::parse(projected_target)
+        .ok()?
+        .into_iter()
+        .find(|component| component.name == "queue")
+        .map(|component| {
+            agent_doc_queue::document_queue::parse(component.content(projected_target))
+        })
+        .transpose()
+        .ok()?
+        .unwrap_or_default();
+    let progressive = agent_doc_queue::document_queue::collapse_progressive_free_text_heads(
         &observed_entries,
         &snapshot_entries,
-    )?;
+    );
+    let entries = progressive.as_deref().unwrap_or(&observed_entries);
+
+    // A live editor may ACK the materialized `do [#id]` projection and replay an
+    // older spelling of that same queue item beside it. The live backlog row is
+    // the id-bearing content cell for the materialized item, so use its parsed
+    // identity/text rather than comparing raw markdown lines.
+    let live_backlog_text_by_id = observed_components
+        .iter()
+        .find(|component| component.name == "backlog")
+        .map(|component| {
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(component.content(observed));
+            items
+                .into_iter()
+                .filter(|item| item.state != agent_doc_element_backlog::backlog::PendingState::Done)
+                .map(|item| (item.id.trim().to_ascii_lowercase(), item.text))
+                .collect::<std::collections::HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let materialized = agent_doc_queue::document_queue::collapse_materialized_free_text_revisions(
+        entries,
+        &snapshot_entries,
+        &projected_entries,
+        &live_backlog_text_by_id,
+    );
+    let collapsed = materialized.as_deref().or(progressive.as_deref())?;
     Some(observed_queue.replace_content(
         observed,
-        &agent_doc_queue::document_queue::render(&collapsed),
+        &agent_doc_queue::document_queue::render(collapsed),
     ))
 }
 
@@ -10882,8 +10927,9 @@ mod tests {
         );
         assert!(canonical_document_target_is_valid(&raced_projection));
 
-        let collapsed = collapse_progressive_queue_projection(base, &raced_projection)
-            .expect("the raced projection should expose a progressive queue chain");
+        let collapsed =
+            collapse_progressive_queue_projection(base, &agent_target, &raced_projection)
+                .expect("the raced projection should expose a progressive queue chain");
         let recovered = editor_operator_cut_for_agent_rebase(
             &file,
             base,
@@ -10935,8 +10981,9 @@ mod tests {
             1,
         );
 
-        let collapsed = collapse_progressive_queue_projection(base, &raced_projection)
-            .expect("the completed live edit must supersede its stale baseline prefix");
+        let collapsed =
+            collapse_progressive_queue_projection(base, &agent_target, &raced_projection)
+                .expect("the completed live edit must supersede its stale baseline prefix");
         assert_eq!(collapsed.matches(complete_prompt.trim_end()).count(), 1);
         assert!(
             !collapsed
@@ -10950,6 +10997,51 @@ mod tests {
         assert_eq!(merged.matches(complete_prompt.trim_end()).count(), 1);
         assert!(!merged.lines().any(|line| line == partial_prompt.trim_end()));
         assert!(merged.contains("### Re: current"));
+    }
+
+    #[test]
+    fn post_projection_race_drops_stale_text_revision_beside_materialized_queue_identity() {
+        let base = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let materialized = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🚧 do [#dynamicallyrunhaiven]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] 🚧 [#dynamicallyrunhaiven] Can we dynamically run haiven tools...like bunx or npx or uvx?\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let stale_editor_replay = materialized.replacen(
+            "<!-- /agent:queue -->",
+            concat!(
+                "- Can we dynamically run haiven tools...like bunx or npx?\n",
+                "<!-- /agent:queue -->",
+            ),
+            1,
+        );
+
+        let collapsed =
+            collapse_progressive_queue_projection(base, materialized, &stale_editor_replay)
+                .expect("the materialized id must absorb its stale adjacent text revision");
+
+        assert_eq!(collapsed.matches("do [#dynamicallyrunhaiven]").count(), 1);
+        assert!(collapsed.contains("npx or uvx?"));
+        assert!(
+            !collapsed.contains("- Can we dynamically run haiven tools...like bunx or npx?\n"),
+            "the old editor revision must not survive as another queue item:\n{collapsed}"
+        );
     }
 
     #[test]

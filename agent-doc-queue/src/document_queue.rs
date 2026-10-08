@@ -3011,6 +3011,98 @@ pub fn collapse_progressive_free_text_heads(
     changed.then_some(collapsed)
 }
 
+/// Remove a stale id-less spelling that a raced editor projection placed beside
+/// the id-backed queue reference which superseded it.
+///
+/// Queue maintenance materializes free text as a `do [#id]` reference plus an
+/// id-backed backlog row. If an editor is still typing while that projection is
+/// applied, its older cut can be replayed immediately beside the new reference.
+/// The two rows then have different text keys even though they are revisions of
+/// one logical item. The materialized id, adjacency, the retained projection,
+/// the pre-projection baseline, and the live backlog text jointly provide the
+/// stable identity proof; no fuzzy or global text deduplication is performed.
+pub fn collapse_materialized_free_text_revisions(
+    entries: &[QueueEntry],
+    baseline_entries: &[QueueEntry],
+    materialized_entries: &[QueueEntry],
+    live_backlog_text_by_id: &std::collections::HashMap<String, String>,
+) -> Option<Vec<QueueEntry>> {
+    let materialized_ids = materialized_entries
+        .iter()
+        .filter_map(crate::queue_projection::queue_entry_do_id)
+        .collect::<std::collections::HashSet<_>>();
+    if materialized_ids.is_empty() || live_backlog_text_by_id.is_empty() {
+        return None;
+    }
+
+    let normalize = |text: &str| crate::queue_response::normalize_for_answer_match(text);
+    let mut baseline_free_text_counts = std::collections::HashMap::<String, usize>::new();
+    for (_, text) in baseline_entries
+        .iter()
+        .filter_map(progressive_free_text_prompt)
+    {
+        *baseline_free_text_counts
+            .entry(normalize(&text))
+            .or_default() += 1;
+    }
+
+    let mut changed = false;
+    let mut collapsed = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let Some((prompt, text)) = progressive_free_text_prompt(entry) else {
+            collapsed.push(entry.clone());
+            continue;
+        };
+        let text_key = normalize(&text);
+        if let Some(remaining) = baseline_free_text_counts.get_mut(&text_key)
+            && *remaining > 0
+        {
+            *remaining -= 1;
+            collapsed.push(entry.clone());
+            continue;
+        }
+
+        let mut adjacent_ids = [index.checked_sub(1), index.checked_add(1)]
+            .into_iter()
+            .flatten()
+            .filter_map(|neighbor| entries.get(neighbor))
+            .filter_map(|neighbor| {
+                let neighbor_prompt = match neighbor {
+                    QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt,
+                    _ => return None,
+                };
+                (neighbor_prompt.indent == prompt.indent
+                    && neighbor_prompt.ordered_marker == prompt.ordered_marker)
+                    .then(|| crate::queue_projection::queue_entry_do_id(neighbor))
+                    .flatten()
+            })
+            .filter(|id| materialized_ids.contains(id))
+            .collect::<Vec<_>>();
+        adjacent_ids.sort();
+        adjacent_ids.dedup();
+        let [id] = adjacent_ids.as_slice() else {
+            collapsed.push(entry.clone());
+            continue;
+        };
+        let Some(backlog_text) = live_backlog_text_by_id.get(id) else {
+            collapsed.push(entry.clone());
+            continue;
+        };
+        let backlog_key = normalize(backlog_text);
+        let stale_revision = text_key.len() >= 8
+            && !text_key.is_empty()
+            && backlog_key.len() >= text_key.len()
+            && backlog_key.starts_with(&text_key);
+        if stale_revision {
+            changed = true;
+        } else {
+            collapsed.push(entry.clone());
+        }
+    }
+
+    changed.then_some(collapsed)
+}
+
 fn progressive_revision_contains(candidate: &str, revision: &str) -> bool {
     let normalize = |text: &str| {
         text.split_whitespace()
@@ -4984,6 +5076,84 @@ mod tests {
         ))
         .unwrap();
         assert!(collapse_progressive_free_text_heads(&entries, &[]).is_none());
+    }
+
+    #[test]
+    fn materialized_identity_absorbs_an_older_adjacent_text_revision() {
+        let baseline = parse("").unwrap();
+        let materialized = parse("- 🚧 do [#dynamicallyrunhaiven]\n").unwrap();
+        let observed = parse(concat!(
+            "- 🚧 do [#dynamicallyrunhaiven]\n",
+            "- Can we dynamically run haiven tools...like bunx or npx?\n",
+        ))
+        .unwrap();
+        let backlog = std::collections::HashMap::from([(
+            "dynamicallyrunhaiven".to_string(),
+            "Can we dynamically run haiven tools...like bunx or npx or uvx?".to_string(),
+        )]);
+
+        let collapsed = collapse_materialized_free_text_revisions(
+            &observed,
+            &baseline,
+            &materialized,
+            &backlog,
+        )
+        .expect("the adjacent stale revision should resolve to the materialized id");
+        assert_eq!(render(&collapsed), "- 🚧 do [#dynamicallyrunhaiven]\n");
+    }
+
+    #[test]
+    fn materialized_identity_preserves_unchanged_and_newer_live_queue_text() {
+        let baseline = parse("- Review and publish\n").unwrap();
+        let materialized = parse("- do [#task]\n").unwrap();
+        let unchanged = parse(concat!("- do [#task]\n", "- Review and publish\n",)).unwrap();
+        let old_backlog = std::collections::HashMap::from([(
+            "task".to_string(),
+            "Review and publish".to_string(),
+        )]);
+        assert!(
+            collapse_materialized_free_text_revisions(
+                &unchanged,
+                &baseline,
+                &materialized,
+                &old_backlog,
+            )
+            .is_none(),
+            "text already present in the baseline queue is intentional"
+        );
+
+        let newer = parse("- do [#task]\n- Review and publish the release\n").unwrap();
+        assert!(
+            collapse_materialized_free_text_revisions(
+                &newer,
+                &[],
+                &materialized,
+                &old_backlog,
+            )
+            .is_none(),
+            "a newer live editor revision must remain authoritative"
+        );
+    }
+
+    #[test]
+    fn materialized_identity_does_not_conflate_a_distinct_adjacent_item() {
+        let materialized = parse("- do [#task]\n").unwrap();
+        let observed = parse("- do [#task]\n- Publish the release notes\n").unwrap();
+        let backlog = std::collections::HashMap::from([(
+            "task".to_string(),
+            "Review and publish the release".to_string(),
+        )]);
+
+        assert!(
+            collapse_materialized_free_text_revisions(
+                &observed,
+                &[],
+                &materialized,
+                &backlog,
+            )
+            .is_none(),
+            "adjacency alone cannot merge distinct operator intent"
+        );
     }
 
     #[test]

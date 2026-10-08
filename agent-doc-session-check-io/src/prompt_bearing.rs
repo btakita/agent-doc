@@ -65,6 +65,7 @@ pub fn realtime_steering_set_since_turn_baseline(
 pub struct TurnAdmissionVerdict {
     pub admission: agent_doc_turn::turn_admission::TurnAdmission,
     pub steering: Option<String>,
+    pub explicit_route: bool,
 }
 
 impl TurnAdmissionVerdict {
@@ -75,9 +76,29 @@ impl TurnAdmissionVerdict {
     pub fn continues_with_steering(&self) -> bool {
         self.admission.continues_with_steering()
     }
+
+    pub fn continues_with_operator_intent(&self) -> bool {
+        self.admission.continues_with_operator_intent()
+    }
 }
 
 pub fn turn_admission(file: &Path, cycle_open: bool) -> Result<TurnAdmissionVerdict> {
+    turn_admission_with_explicit_route(file, cycle_open, false)
+}
+
+/// Whether the current realtime document has a live editor authority.
+///
+/// This observation belongs beside the other admission I/O facts; the pure
+/// `agent-doc-turn` policy receives only the resulting boolean.
+pub fn live_editor_authority(file: &Path) -> bool {
+    agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached()
+}
+
+pub fn turn_admission_with_explicit_route(
+    file: &Path,
+    cycle_open: bool,
+    explicit_route: bool,
+) -> Result<TurnAdmissionVerdict> {
     // An open cycle owns its own recovery; do not spend a steering observation
     // on a verdict that cannot use it.
     let steering = if cycle_open {
@@ -89,11 +110,13 @@ pub fn turn_admission(file: &Path, cycle_open: bool) -> Result<TurnAdmissionVerd
         agent_doc_turn::turn_admission::TurnAdmissionFacts {
             cycle_open,
             steering_pending: steering.is_some(),
+            explicit_route_pending: explicit_route,
         },
     );
     Ok(TurnAdmissionVerdict {
         admission,
         steering,
+        explicit_route,
     })
 }
 

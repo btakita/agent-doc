@@ -1247,6 +1247,28 @@ const SELF_CONVERGING_INTERRUPTIONS: &[&str] = &[
     "binary-owned captured closeout",
 ];
 
+/// Describe the read-only projection transition while preserving its owner.
+/// The two controller-owned states deliberately carry the existing
+/// `remains unsettled` settle-window token; terminal observations do not.
+fn read_only_terminal_projection_detail(
+    decision: ReadOnlyTerminalProjectionDecision,
+) -> &'static str {
+    match decision {
+        ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery => {
+            "the exact editor delivery acknowledgement is pending; retained delivery remains unsettled while controller reconciliation remains scheduled"
+        }
+        ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave => {
+            "the one-shot editor-native save receipt is pending; retained delivery remains unsettled while controller reconciliation remains scheduled"
+        }
+        ReadOnlyTerminalProjectionDecision::ObserveOnly => {
+            "session-check is observing a non-recoverable projection state"
+        }
+        ReadOnlyTerminalProjectionDecision::Converged => {
+            "the projection changed after its converged observation"
+        }
+    }
+}
+
 /// Whether `message` reports a state the binary converges without the agent.
 pub fn is_self_converging_interruption(message: &str) -> bool {
     message.contains("[session-check] INTERRUPTED")
@@ -1730,16 +1752,7 @@ fn run_with_options_inner(
                 &authority_content,
                 &disk_content,
             ),
-            match terminal_projection_decision {
-                ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery =>
-                    "the exact editor delivery acknowledgement is pending",
-                ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave =>
-                    "the one-shot editor-native save receipt is pending",
-                ReadOnlyTerminalProjectionDecision::ObserveOnly =>
-                    "session-check is observing a non-recoverable projection state",
-                ReadOnlyTerminalProjectionDecision::Converged =>
-                    "the projection changed after its converged observation",
-            },
+            read_only_terminal_projection_detail(terminal_projection_decision),
             divergence_owner_note,
             unmerged_editor_steering_note(
                 &authority_content,
@@ -5400,12 +5413,40 @@ mod settle_window_tests {
             "[session-check] INTERRUPTED: binary-owned response delivery `i` is retained for `f` (reason=r, source=s, target_hash=h); the same capture will resume automatically after editor/controller delivery converges.",
             "[session-check] INTERRUPTED: retained document-write delivery remains unsettled for f; automatic controller reconciliation remains scheduled.",
             "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for f (authority_hash=a, disk_hash=d, component_divergence=c); refusing a false successful closeout. Automatic editor recovery status: s. Replica re-registration and projection settlement are scheduled automatically;",
+            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for f (authority_hash=a, disk_hash=d, component_divergence=c); the one-shot editor-native save receipt is pending; retained delivery remains unsettled while controller reconciliation remains scheduled. The controller owns the next closeout attempt; it retries the native editor save as the delivery receipt allows.",
         ] {
             assert!(is_self_converging_interruption(message), "{message}");
         }
         assert!(!is_self_converging_interruption(
             "will resume automatically"
         ));
+    }
+
+    #[test]
+    fn read_only_editor_authority_recovery_waits_until_rejection_is_actionable() {
+        let calls = Cell::new(0);
+        let pending = format!(
+            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for f; {}. The controller owns the next closeout attempt",
+            read_only_terminal_projection_detail(
+                ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave,
+            ),
+        );
+        let rejected = "[session-check] INTERRUPTED: binary-owned response delivery is retained; the registered editor endpoint rejected the delivery receipt; restart or reload the editor";
+
+        let outcome = settle_until_converged(
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() == 1 {
+                    anyhow::bail!(pending.clone());
+                }
+                anyhow::bail!(rejected);
+            },
+        );
+
+        assert_eq!(calls.get(), 2, "the pending native-save state must be resampled");
+        assert!(format!("{:#}", outcome.unwrap_err()).contains("rejected"));
     }
 
     #[test]

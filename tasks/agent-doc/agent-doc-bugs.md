@@ -534,6 +534,14 @@ Fixed and closed.
 Commit `25c10e3c6a2ce12d720ab9af0b461fa97b18e805` is now fast-forwarded onto `main`. Retained persistence validates exact disk byte length plus SHA-256 against the immutable delivery epoch and treats that proof as a terminal durability receipt when no native-save route exists; missing or stale disk remains on the existing retry path.
 
 Regression coverage passed for exact-disk settlement and stale/missing-disk rejection. The worker's authoritative `make check` passed, the coordinator-owned local `make install` completed successfully, the independent closeout review found no unrelated changes, and GitHub issue #223 was closed with the commit evidence.
+
+### Re: #gh-fix https://github.com/btakita/agent-doc/issues/218 — gpt-6.1-sol · 2026-10-09T13:34:47-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/218
+
+The code, tests, and one-ZIP role-selecting distribution are complete in draft PR #222 at `254b75e68`, but issue #218 intentionally remains open and the PR remains draft/unmerged. Fresh CI for that exact head and the real IDEA 2026.2.3 / branch 262 Remote Dev acceptance matrix are still required; this closes only the queue dispatch, not the GitHub issue.
+
+A durable `#gh218remoteproof` operator-review gate now records the exact two-sided acceptance matrix and prevents the implementation from being mistaken for a completed live proof.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -557,6 +565,7 @@ Regression coverage passed for exact-disk settlement and stale/missing-disk reje
 ## Review
 
 <!-- agent:review -->
+- [/] [#gh218remoteproof] [operator-verify] GH #218 / draft PR #222: require green CI for head 254b75e68 and real IDEA 2026.2.3 (262) Remote Dev proof with the same modular ZIP installed on backend and Client/Gateway: detached-only isolated terminal; same-document main-wins read-only placeholder and byte-identical main; focus/sync/resize no main mutation; close/rejoin; backend restart/client reconnect before first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Only then mark PR ready, merge, and close #218.
 - [/] [#fixsubagent] Fix in a subagent:
   ```
   • Blocked by hook

@@ -568,7 +568,12 @@ Verification passed: the focused regressions; `cargo test -p agent-doc-controlle
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#singleplugindistribution]~~\n- ~~#gh-fix https://github.com/btakita/agent-doc/issues/223~~\n- ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~ — auto-struck: answered this cycle (#ftstrike)\n- ~~#gh-fix https://github.com/btakita/agent-doc/issues/224~~\n- do [#jetbrainsdualrelease]\n- release + publish
+- ~~do [#singleplugindistribution]~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/223~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/224~~
+- do [#jetbrainsdualrelease]
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

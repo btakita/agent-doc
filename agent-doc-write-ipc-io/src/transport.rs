@@ -111,19 +111,41 @@ fn fold_visible_write_into_canonical(
     source: &str,
     scope: Option<&agent_doc_document_realtime_io::EditorReceiptCellScope>,
 ) -> Result<String> {
-    let adopted = agent_doc_document_realtime_io::adopt_verified_editor_receipt_by_cells_within(
-        file,
-        content,
-        source,
-        scope,
-        std::time::Duration::from_millis(
-            agent_doc_document_realtime_io::EDITOR_RECEIPT_CANONICAL_CATCHUP_MS,
-        ),
-        std::time::Duration::from_millis(
-            agent_doc_document_realtime_io::EDITOR_RECEIPT_OWNED_CELL_PENDING_MS,
-        ),
-    )
-    .inspect_err(|err| record_visible_write_refusal(file, patch_id, source, err))?;
+    let catchup = std::time::Duration::from_millis(
+        agent_doc_document_realtime_io::EDITOR_RECEIPT_CANONICAL_CATCHUP_MS,
+    );
+    let adopted =
+        match agent_doc_document_realtime_io::adopt_verified_editor_receipt_by_cells_within(
+            file,
+            content,
+            source,
+            scope,
+            catchup,
+            std::time::Duration::from_millis(
+                agent_doc_document_realtime_io::EDITOR_RECEIPT_OWNED_CELL_PENDING_MS,
+            ),
+        ) {
+            Ok(adopted) => adopted,
+            // `#appliedresponsefold`: a receipt whose owned cells never reached
+            // canonical is this patch's own landing; fold it instead of refusing.
+            Err(err) => {
+                match agent_doc_document_realtime_io::fold_pending_owned_cells_into_canonical(
+                    file, patch_id, content, source, scope, catchup,
+                ) {
+                    Ok(Some(adopted)) => adopted,
+                    Ok(None) => {
+                        record_visible_write_refusal(file, patch_id, source, &err);
+                        return Err(err);
+                    }
+                    Err(fold_err) => {
+                        record_visible_write_refusal(file, patch_id, source, &err);
+                        return Err(
+                            err.context(format!("pending owned-cell fold failed: {fold_err:#}"))
+                        );
+                    }
+                }
+            }
+        };
     agent_doc_ops_log_io::log_op(
         file,
         &format!(

@@ -1238,7 +1238,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                     "[patch-watcher] minimal-edit target (applyPatch.component) for ${patch.file} patchId=${patch.patchId} (${result.length} chars):\n$result"
                 )
             }
-            CrdtReplicaManager.withAgentAppliedEditorMutation(patch.file) {
+            CrdtReplicaManager.withAgentAppliedEditorMutation(
+                patch.file,
+                patchId = patch.patchId,
+                postText = result,
+            ) {
                 applyMinimalDocumentEditUtil(document, content, result)
             }
             wrote = true

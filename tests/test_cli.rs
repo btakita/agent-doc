@@ -33795,10 +33795,15 @@ fn every_wedge_recording_site_classifies_rejections_too() {
     // the same typed recorder.
     let transport = std::fs::read_to_string("agent-doc-write-ipc-io/src/transport.rs")
         .expect("read write-ipc transport");
+    // `#appliedresponsefold`: a refusal that the pending owned-cell fold cannot
+    // resolve is still recorded on every refusing arm.
     assert!(
         transport.contains(
             ".inspect_err(|err| record_visible_write_refusal(file, patch_id, source, err))"
-        ),
+        ) || transport
+            .matches("record_visible_write_refusal(file, patch_id, source, &err);")
+            .count()
+            >= 2,
         "a refused `socket_visible_write` receipt must be recorded against transport health"
     );
     let realtime = std::fs::read_to_string("agent-doc-document-realtime-io/src/lib.rs")

@@ -22896,10 +22896,17 @@ fn focus_escalation_columns(
                 .collect(),
             source: "editor_surface",
             replaced: None,
+            basis_generation: None,
         });
     }
-    let (mut retained, mut retained_focus) = runtime
-        .pane_layout_desired()
+    let retained_desired = runtime.pane_layout_desired();
+    let basis_generation = Some(
+        retained_desired
+            .as_ref()
+            .map(|desired| desired.generation)
+            .unwrap_or(0),
+    );
+    let (mut retained, mut retained_focus) = retained_desired
         .map(|desired| (desired.invocation.columns, desired.invocation.focus))
         .unwrap_or_default();
     let mut basis_source = "retained_layout";
@@ -22943,6 +22950,7 @@ fn focus_escalation_columns(
             columns: retained,
             source: basis_source,
             replaced: None,
+            basis_generation,
         });
     }
     let (merged, _, _) = merge_editor_route_columns_within(
@@ -22972,6 +22980,7 @@ fn focus_escalation_columns(
             "retained_focus_column"
         },
         replaced,
+        basis_generation,
     })
 }
 
@@ -22984,6 +22993,9 @@ struct FocusEscalationColumns {
     source: &'static str,
     /// The retained column the document replaced, for `retained_focus_column`.
     replaced: Option<String>,
+    /// Retained desired generation used to derive `columns`; zero means there
+    /// was no desired generation and the live tmux observation was the basis.
+    basis_generation: Option<u64>,
 }
 
 /// Hand a `Focus` intent the selection lane could not apply to the structural
@@ -23007,6 +23019,7 @@ fn escalate_focus_to_structural_layout(
         columns,
         source,
         replaced,
+        basis_generation,
     } = match focus_escalation_columns(bootstrap, runtime, document, columns) {
         Ok(escalation) => escalation,
         Err(cause) => {
@@ -23025,12 +23038,14 @@ fn escalate_focus_to_structural_layout(
             "controller_editor_surface_focus_escalated document={document} reason={reason} columns={} source={source}{}",
             columns.len(),
             replaced
+                .as_ref()
                 .map(|column| format!(" replaced={column}"))
                 .unwrap_or_default()
         ),
     );
     // The intent is "select this document", so the republished layout must carry
     // the focus rather than preserve whatever tmux happens to have selected.
+    let derived_columns = columns.clone();
     let mut invocation = automatic_layout_sync_invocation(columns, document, false);
     if source != "editor_surface" {
         // GH #112: republishing the retained layout keeps its order source, so
@@ -23064,10 +23079,24 @@ fn escalate_focus_to_structural_layout(
         invocation,
         None,
         publication,
-        PaneLayoutClaim::from(PaneLayoutPublisher::Escalation).asserting(asserted_columns),
+        PaneLayoutClaim::from(PaneLayoutPublisher::Escalation)
+            .asserting(asserted_columns)
+            .derived_from(basis_generation),
     );
     match published {
-        Ok((desired, _)) => {
+        Ok((desired, published_invocation)) => {
+            let rebased = published_invocation.columns != derived_columns;
+            if rebased {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "controller_editor_surface_focus_escalation_rebased document={document} reason={reason} basis_generation={} published_generation={} columns={}",
+                        basis_generation.unwrap_or(0),
+                        desired.generation,
+                        published_invocation.columns.len(),
+                    ),
+                );
+            }
             if publication == PaneLayoutPublication::CoalesceIdentical
                 && previous_generation == Some(desired.generation)
             {
@@ -27119,7 +27148,14 @@ fn publish_pane_layout_desired_invocation(
         // columns there in place of the retained generation's.
         store_layout_state(&bootstrap.project_root, &desired.invocation.columns)?;
         publish_pane_layout_status(runtime);
-        return Ok((desired, invocation));
+        let applied_invocation = desired.invocation.clone();
+        return Ok((desired, applied_invocation));
+    }
+    if desired.invocation.columns != invocation.columns {
+        // GH #224: the graph may rebase a derived escalation after a newer
+        // editor split wins the race into the publication critical section.
+        // Keep the durable effect sink aligned with the graph-owned fact.
+        store_layout_state(&bootstrap.project_root, &desired.invocation.columns)?;
     }
     log_pane_layout_desired_publication(
         &bootstrap.project_root,
@@ -27132,7 +27168,8 @@ fn publish_pane_layout_desired_invocation(
         log_pane_layout_narrowed(&bootstrap.project_root, &desired);
     }
     publish_pane_layout_status(runtime);
-    Ok((desired, invocation))
+    let applied_invocation = desired.invocation.clone();
+    Ok((desired, applied_invocation))
 }
 
 /// GH #136 follow-up (a): apply [`agent_doc_controller::pane_layout::bound_layout_width`]

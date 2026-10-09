@@ -26416,13 +26416,19 @@ fn delegate_focus_to_owning_controller(
     controller_root: &Path,
     owner_root: &Path,
     document: &Path,
+    missing_pane_policy: MissingFocusPanePolicy,
 ) -> ControllerTmuxFocusReceipt {
-    match focus_document_pane(owner_root, document) {
+    // Preserve the caller's structural authority across the project-root hop.
+    // In particular, manual/full layout sync reaches this seam with
+    // `ProvisionForLayout`; degrading that request to the public focus-only
+    // helper leaves a killed subproject pane unresolved forever even though
+    // the owning controller is exactly the component allowed to recreate it.
+    match request_document_pane(owner_root, document, missing_pane_policy) {
         Ok(receipt) => {
             agent_doc_ops_log_io::log_op(
                 controller_root,
                 &format!(
-                    "controller_focus_delegated document={} owner_root={} focused={} reason={}",
+                    "controller_focus_delegated document={} owner_root={} policy={missing_pane_policy:?} focused={} reason={}",
                     document.display(),
                     owner_root.display(),
                     receipt.focused,
@@ -26435,7 +26441,7 @@ fn delegate_focus_to_owning_controller(
             agent_doc_ops_log_io::log_op(
                 controller_root,
                 &format!(
-                    "controller_focus_delegation_failed document={} owner_root={} error={error:#}",
+                    "controller_focus_delegation_failed document={} owner_root={} policy={missing_pane_policy:?} error={error:#}",
                     document.display(),
                     owner_root.display(),
                 ),
@@ -26479,6 +26485,7 @@ fn handle_focus_document_pane_with_policy(
             &bootstrap.project_root,
             owner_root,
             &canonical,
+            missing_pane_policy,
         ));
     }
     let document_id = agent_doc_session_actor_io::canonical_document_id_in(
@@ -36503,6 +36510,69 @@ mod tests {
         assert!(
             ops.contains(&format!("owner_root={}", submodule.display())),
             "delegation must name the submodule root that owns the document; got:\n{ops}"
+        );
+        assert!(
+            ops.contains("policy=ObserveOnly"),
+            "ordinary focus must preserve its observe-only policy across the root hop; got:\n{ops}"
+        );
+    }
+
+    /// `#sync-cross-root-autostart`: structural layout sync owns provisioning.
+    /// A superproject request must not become focus-only while it is delegated
+    /// to the subproject controller, or a killed subproject pane can never be
+    /// recreated by Sync Tmux Layout.
+    #[test]
+    fn layout_provision_for_a_submodule_document_preserves_policy() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let submodule = dir.path().join("src/nested-project");
+        std::fs::create_dir_all(submodule.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(submodule.join("tasks")).unwrap();
+        let doc = submodule.join("tasks/tools.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: nested-tools\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+
+        let bootstrap = test_bootstrap(&dir);
+        let receipt = handle_focus_document_pane_with_policy(
+            &bootstrap,
+            None,
+            ControllerRequest {
+                command: "focus_document_pane".to_string(),
+                file: Some(doc.clone()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+                sequence: None,
+            },
+            MissingFocusPanePolicy::ProvisionForLayout,
+            None,
+        )
+        .expect("cross-root structural delegation returns a receipt");
+
+        assert_eq!(
+            receipt.reason, "cross_root_controller_unavailable",
+            "the test runtime's provisioning refusal proves the structural policy reached the owner"
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("policy=ProvisionForLayout"),
+            "structural provisioning policy must survive delegation; got:\n{ops}"
+        );
+        assert!(
+            ops.contains("test runtime does not route auto-start"),
+            "the owning controller must reach its provision effect; got:\n{ops}"
         );
     }
 

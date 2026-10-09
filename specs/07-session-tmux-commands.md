@@ -436,9 +436,14 @@ thread or in a detached periodic timer.
   asked. So `handle_focus_document_pane` resolves the document's own project
   root through `agent_doc_project_root_io::project_root_containing` first: when
   it differs from the controller's root, the request is delegated to that
-  root's controller and its receipt is returned verbatim, with
-  `controller_focus_delegated document=<doc> owner_root=<root> focused=<b>
-  reason=<r>` recorded on the receiving controller. The decision is pure
+  root's controller with its original missing-pane policy intact and its
+  receipt is returned verbatim. In particular, `ProvisionForLayout` must remain
+  structural across this hop: after a subproject document's tmux pane is killed,
+  manual **Sync Tmux Layout** asks the owning controller to create a replacement
+  pane; it must not be downgraded to `ObserveOnly`. The receiving controller
+  records
+  `controller_focus_delegated document=<doc> owner_root=<root> policy=<policy>
+  focused=<b> reason=<r>`. The decision is pure
   (`agent_doc_controller::focus_routing::focus_owner`) and terminates: the
   delegated call re-enters it on the owning controller, where the roots now
   match. An unknown document root is never delegated — with no proof of another

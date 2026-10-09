@@ -802,11 +802,14 @@ version = "0.35.480"
 dependencies = [
  "agent-doc-controller-io",
  "agent-doc-editor-surface",
+ "agent-doc-hash",
+ "agent-doc-state-backbone",
  "agent-doc-state-scope",
  "anyhow",
  "lazily 0.57.1",
  "serde",
  "serde_json",
+ "tmux-router",
 ]
 
 [[package]]

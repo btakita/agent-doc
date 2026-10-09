@@ -465,6 +465,30 @@ The one authoritative `make check` exited 0 (9827/9827, 141 skipped). `make inst
 **Follow-ups added to the backlog:**
 - `#crossrootcolumnflip`: two project controllers sharing one main window can disagree about the second column.
 - `#staleharnessturnlive`: an idle owner pane stays flagged `harness_turn_live=true` / `protected_live_turn`.
+
+### Re: GH #227 and #228 dispatched — opus-5.5 · 2026-10-09T19:32-04:00
+
+> **Queue prompt:**
+>
+> #gh-fix https://github.com/btakita/agent-doc/issues/218
+
+
+Both new `#gh-fix` heads ("fix then close") are claimed and with their own subagents. Each is based on agent-doc main `eafa5cb2e` and works in its own worktree. Each will open a `Fixes #N` PR, and I close the issues after integrating.
+
+- **GH #227 (`subagent:gh227`, `fix/gh227-empty-preset-attr`):** `preset=""` on `agent:queue` blocked IDE Compact. The issue reports three problems:
+  1. `compact` has no lint override, unlike `write --lint`.
+  2. An auto-commit rewrote `preset="#subagents"` to `subagents preset=""`. The subagent will find that writer and make it never emit an empty attribute.
+  3. The JetBrains notification drops `<value>` from the lint hint, probably an HTML-escaping bug.
+
+  All three get fixed, each with regression tests.
+- **GH #228 (`subagent:gh228`, `fix/gh228-route-live-turn-blocker`):** a route during a healthy live turn exited 75 and recommended `session cancel-turn`. `session-check` had correctly said IN PROGRESS / do not recover, but the drain-closeout wait path re-derived the blocker as `replay_safe [open_empty_preflight]`. It also wrongly said the head was queued behind the closeout, while the live cycle was already answering it. The fix will:
+  - surface one classification, reusing the live-turn verdict and protection guards;
+  - never recommend cancel-turn for a protected live turn;
+  - make a live turn a benign wait or queue outcome instead of exit 75.
+
+  It also gets a regression test that replays the timeline.
+
+GH #218, GH #221 and `release + publish` are unchanged. They wait on PR #222, which needs the Remote Dev proof on Coder. I'll integrate #227 and #228 into main together, with one `make check` and one `make install`.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -481,10 +505,12 @@ The one authoritative `make check` exited 0 (9827/9827, 141 skipped). `make inst
 - ~~do [#previewartifactprovenance]~~
 - ~~do [#ci25gradle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/225~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/218
-- #gh-fix https://github.com/btakita/agent-doc/issues/221
-- ~~fix: Run Agent Doc on contracts.md: [route] active closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md could not be drained before reroute; nothing was dispatched and existing queue head "#rebase-conflicts https://github.com/haiven-dev/haiven-contracts/pull/123" remains queued behind the closeout (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md. Rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md`; resume durable checkpoint cycle=cycle-1791583495987 phase=response_captured capture_id=cycle-1791583495987; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md~~ — auto-struck: answered this cycle (#ftstrike)
-- release + publish
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/221~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/227~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/228~~
+- ~~fix: Run Agent Doc on contracts.md: [route] active closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md could not be drained before reroute; nothing was dispatched and existing queue head "#rebase-conflicts https://github.com/haiven-dev/haiven-contracts/pull/123" remains queued behind the closeout (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md. Rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md`; resume durable checkpoint cycle=cycle-1791583495987 phase=response_captured capture_id=cycle-1791583495987; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md~~
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
@@ -499,7 +525,7 @@ The one authoritative `make check` exited 0 (9827/9827, 141 skipped). `make inst
 ## Review
 
 <!-- agent:review -->
-- [/] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
+- [/] [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
 - [/] [#releasepublishgate] [operator-verify] Authorize release + publish only after: (1) CI is green for the final PR 222 head after ci25gradle (run 37974793628 on c39de1b04 failed); (2) gh218remoteproof is resolved; (3) PR 222 is marked ready and merged and GH 221 is closed, resolving gh221mergeclose; and (4) repository secret HOMEBREW_TAP_TOKEN is provisioned (gh secret list on btakita/agent-doc showed nothing on 2026-10-09, possibly because the token lacks secret visibility). Only then perform the authorized release + publish and verify delivery.
 - [/] [#gh221mergeclose] [operator-verify] GH 221: keep open until draft PR 222 has green CI on its post-ci25gradle head (run 37974793628 on c39de1b04 failed) and merges. The shared/frontend/backend split is code-complete and available as prerelease jetbrains-262-preview-c39de1b; GH 218 separately retains the real IDEA 2026.2.3 Remote Dev acceptance gate. After 222 merges, close 221 as fixed by 222.
 - [/] [#gh218remoteproof] [operator-verify] GH 218 / draft PR 222: CI run 37974793628 on head c39de1b04 FAILED (classic gradlew 8.14 on JDK 25; see ci25gradle). After ci25gradle lands, require green CI on the new PR 222 head. Then require a real IDEA 2026.2.3 (262) Remote Dev proof using a preview prerelease rebuilt from that head, with the same agent-doc-jetbrains-262 ZIP installed on backend and Client/Gateway: detached-only isolated terminal; same-document main-wins read-only placeholder and byte-identical main; focus/sync/resize causes no main mutation; close/rejoin; backend restart/client reconnect before the first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Only then mark the PR ready, merge, and close 218.

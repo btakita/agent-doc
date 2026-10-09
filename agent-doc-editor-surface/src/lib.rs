@@ -39,7 +39,8 @@ pub use editor_view_policy::{
     EditorViewId, EditorViewLifecycleTransition, EditorViewPlaceholderReason, EditorViewPolicy,
     EditorViewPolicyBinding, EditorViewPolicyProjection, EditorViewPolicyStatus,
     EditorViewPresentation, EditorViewReleaseDestination, EditorViewReleaseReason,
-    EditorViewSnapshot, EditorViewSurface, EditorViewSurfaceKey, MainLayoutEligibility,
+    EditorViewSessionKey, EditorViewSnapshot, EditorViewSurface, EditorViewSurfaceKey,
+    MainLayoutEligibility, isolated_view_session_name,
 };
 pub use graph::{EditorSurfaceState, SurfaceFold};
 pub use remote_layout::{

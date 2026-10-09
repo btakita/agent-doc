@@ -31,8 +31,9 @@ use agent_doc_editor_surface::terminal_ownership::{
 };
 use agent_doc_editor_surface::{
     EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
-    EditorViewPolicy, EditorViewPolicyBinding, EditorViewPolicyProjection, EditorViewSnapshot,
-    SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
+    EditorViewId, EditorViewPolicy, EditorViewPolicyBinding, EditorViewPolicyProjection,
+    EditorViewSessionKey, EditorViewSnapshot, SurfaceColumn, SurfaceIntent,
+    SurfaceObservationReceipt, TmuxLayout, isolated_view_session_name,
 };
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use std::collections::{BTreeMap, BTreeSet};
@@ -194,6 +195,39 @@ impl ControllerEditorViewPolicyGraph {
         persist(&projection)?;
         *policy = candidate;
         Ok(projection)
+    }
+
+    pub(super) fn apply_durable_settlement(
+        &self,
+        canonical_path: &str,
+        binding_epoch: u64,
+        state: &agent_doc_state_backbone::EditorViewBindingState,
+    ) {
+        use agent_doc_state_backbone::EditorViewBindingState;
+
+        if !matches!(
+            state,
+            EditorViewBindingState::Bound { .. } | EditorViewBindingState::Released { .. }
+        ) {
+            return;
+        }
+        let identity = state.binding();
+        let view_id = EditorViewId {
+            client_id: identity.client_family.clone(),
+            connection_generation: identity.connection_generation,
+            surface_id: identity.surface_id.clone(),
+            surface_generation: identity.surface_generation,
+        };
+        let mut policy = self.policy.lock();
+        match state {
+            EditorViewBindingState::Bound { .. } => {
+                let _ = policy.settle_bound(canonical_path, binding_epoch, &view_id);
+            }
+            EditorViewBindingState::Released { .. } => {
+                let _ = policy.settle_released(canonical_path, binding_epoch, &view_id);
+            }
+            _ => unreachable!("pending states returned before locking the policy"),
+        }
     }
 }
 
@@ -23966,17 +24000,20 @@ fn editor_view_identity(
     binding: &EditorViewPolicyBinding,
 ) -> Result<agent_doc_state_backbone::EditorViewBindingIdentity> {
     let view_id = serde_json::to_string(&binding.view_id)?;
-    let session_key = format!("{}|{view_id}", project_root.display());
+    let session_key = EditorViewSessionKey {
+        project_id: project_root.display().to_string(),
+        client_id: binding.owner.client_id.clone(),
+        connection_generation: binding.owner.connection_generation,
+        surface_id: binding.owner.surface_id.clone(),
+        surface_generation: binding.owner.surface_generation,
+    };
     Ok(agent_doc_state_backbone::EditorViewBindingIdentity {
         view_id,
         client_family: binding.owner.client_id.clone(),
         connection_generation: binding.owner.connection_generation,
         surface_id: binding.owner.surface_id.clone(),
         surface_generation: binding.owner.surface_generation,
-        view_session: format!(
-            "agent-doc-view-{}",
-            agent_doc_hash::short_content_hash(&session_key)
-        ),
+        view_session: isolated_view_session_name(&session_key),
     })
 }
 
@@ -32615,6 +32652,10 @@ mod tests {
             projection.transitions.as_slice(),
             [EditorViewLifecycleTransition::BindPending { .. }]
         ));
+        let pending_binding = match projection.transitions.as_slice() {
+            [EditorViewLifecycleTransition::BindPending { binding, .. }] => binding.clone(),
+            _ => unreachable!("asserted one bind transition"),
+        };
         assert!(
             !runtime
                 .main_layout_eligibility()
@@ -32633,7 +32674,51 @@ mod tests {
             "durable BindPending must exclude before the restarted controller serves layout",
         );
 
-        let main_duplicate = editor_view_snapshot("rd-client-a", 7, 2, &[&detached], &detached);
+        append_apply_state_event(
+            &restarted.bootstrap_snapshot().unwrap(),
+            restarted.as_ref(),
+            agent_doc_state_backbone::StateEvent::new(
+                "editor-view-test-bound",
+                agent_doc_state_backbone::StateFact::EditorViewBindingObserved {
+                    document_hash: agent_doc_hash::document_id_for_path(&detached),
+                    canonical_path: detached.to_string_lossy().into_owned(),
+                    binding_epoch: pending_binding.binding_epoch,
+                    state: agent_doc_state_backbone::EditorViewBindingState::Bound {
+                        binding: editor_view_identity(dir.path(), &pending_binding).unwrap(),
+                        pane: agent_doc_state_backbone::EditorViewPaneReceipt {
+                            pane_id: "%9".to_string(),
+                            actor_generation: 3,
+                            session_name: isolated_view_session_name(&EditorViewSessionKey {
+                                project_id: dir.path().display().to_string(),
+                                client_id: "rd-client-a".to_string(),
+                                connection_generation: 7,
+                                surface_id: "detached-1".to_string(),
+                                surface_generation: 4,
+                            }),
+                            window_id: "@9".to_string(),
+                        },
+                    },
+                },
+            ),
+        )
+        .unwrap();
+        let bound = restarted
+            .editor_view_policy_graph
+            .observe(
+                editor_view_snapshot("rd-client-a", 7, 2, &[], &detached),
+                |_| Ok(()),
+            )
+            .unwrap();
+        assert!(
+            bound.presentations.values().any(|presentation| matches!(
+                presentation,
+                EditorViewPresentation::Terminal { document, .. }
+                    if document == &detached.to_string_lossy()
+            )),
+            "{bound:?}"
+        );
+
+        let main_duplicate = editor_view_snapshot("rd-client-a", 7, 3, &[&detached], &detached);
         let projection = restarted
             .editor_view_policy_graph
             .observe(main_duplicate, |_| Ok(()))

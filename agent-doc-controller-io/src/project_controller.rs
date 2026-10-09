@@ -7674,6 +7674,19 @@ impl ControllerRuntime {
         );
         let captured_finalize_wake_projection =
             captured_finalize_wake_reason.and_then(|_| document_projection.as_ref().cloned());
+        if let agent_doc_state_backbone::StateFact::EditorViewBindingObserved {
+            canonical_path,
+            binding_epoch,
+            state,
+            ..
+        } = &event.fact
+        {
+            self.editor_view_policy_graph.apply_durable_settlement(
+                canonical_path,
+                *binding_epoch,
+                state,
+            );
+        }
         self.supervisor_recycle_graph.set(recycle);
         self.main_layout_eligibility_graph
             .set(main_layout_eligibility);

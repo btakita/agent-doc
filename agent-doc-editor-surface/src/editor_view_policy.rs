@@ -45,6 +45,34 @@ pub struct EditorViewId {
     pub surface_generation: u64,
 }
 
+/// Stable inputs for the bounded isolated tmux session name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorViewSessionKey {
+    pub project_id: String,
+    pub client_id: String,
+    pub connection_generation: u64,
+    pub surface_id: String,
+    pub surface_generation: u64,
+}
+
+pub fn isolated_view_session_name(key: &EditorViewSessionKey) -> String {
+    let encoded = format!(
+        "{}:{}|{}:{}:{}|{}:{}:{}",
+        key.project_id.len(),
+        key.project_id,
+        key.client_id.len(),
+        key.client_id,
+        key.connection_generation,
+        key.surface_id.len(),
+        key.surface_id,
+        key.surface_generation,
+    );
+    format!(
+        "agent-doc-view-{}",
+        agent_doc_hash::short_content_hash(&encoded)
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditorViewSurface {
     pub surface_id: String,
@@ -299,7 +327,11 @@ impl EditorViewPolicy {
             return self.project(EditorViewPolicyStatus::Stale, Vec::new());
         }
         binding.phase = EditorViewBindingPhase::Bound;
-        self.recompute(None)
+        // Settling the tmux receipt is not new editor evidence. In particular,
+        // restart recovery may finish a pending bind before the first complete
+        // frontend snapshot arrives; recomputing against an empty client set
+        // would immediately misclassify the recovered owner as closed.
+        self.project(EditorViewPolicyStatus::Applied, Vec::new())
     }
 
     pub fn settle_released(

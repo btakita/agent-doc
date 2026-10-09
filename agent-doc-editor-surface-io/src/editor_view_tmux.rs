@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 
+pub use agent_doc_editor_surface::{EditorViewSessionKey, isolated_view_session_name};
 use agent_doc_state_backbone::{
     EditorViewBindingIdentity, EditorViewBindingState, EditorViewPaneReceipt,
     EditorViewReleaseDestination, EditorViewReleaseReason, StateFact,
@@ -18,16 +19,6 @@ use tmux_router::{PaneMoveOp, Tmux};
 
 const VIEW_WINDOW_NAME: &str = "view";
 const CROSS_SESSION_REASON: &str = "agent-doc editor-view lifecycle";
-
-/// Stable inputs for the bounded isolated-session name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EditorViewSessionKey {
-    pub project_id: String,
-    pub client_id: String,
-    pub connection_generation: u64,
-    pub surface_id: String,
-    pub surface_generation: u64,
-}
 
 /// One typed reconciliation request. The pane identity comes from the durable
 /// actor/registry projection, never from focus or ambient tmux state.
@@ -233,24 +224,6 @@ pub fn plan_editor_view_tmux(
         }
         EditorViewBindingState::Released { .. } => Ok(Vec::new()),
     }
-}
-
-pub fn isolated_view_session_name(key: &EditorViewSessionKey) -> String {
-    let encoded = format!(
-        "{}:{}|{}:{}:{}|{}:{}:{}",
-        key.project_id.len(),
-        key.project_id,
-        key.client_id.len(),
-        key.client_id,
-        key.connection_generation,
-        key.surface_id.len(),
-        key.surface_id,
-        key.surface_generation,
-    );
-    format!(
-        "agent-doc-view-{}",
-        agent_doc_hash::short_content_hash(&encoded)
-    )
 }
 
 pub fn reconcile_editor_view_tmux(
@@ -659,6 +632,7 @@ mod tests {
         EditorViewBindingIdentity {
             view_id: "client-a/7/floating-1/3".into(),
             client_family: "client-a".into(),
+            connection_generation: 7,
             surface_id: "floating-1".into(),
             surface_generation: 3,
             view_session: isolated_view_session_name(&key()),

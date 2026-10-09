@@ -789,6 +789,7 @@ dependencies = [
 name = "agent-doc-editor-surface"
 version = "0.35.480"
 dependencies = [
+ "agent-doc-hash",
  "agent-doc-state-scope",
  "agent-doc-turn",
  "lazily 0.57.1",

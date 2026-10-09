@@ -22,6 +22,17 @@ Ship two independently verifiable JetBrains artifacts:
    module owns serializable RPC DTOs, and the backend authenticates the client
    session and publishes typed facts into the controller graph.
 
+The 262 frontend uses one narrowly isolated internal adapter for exact
+`EditorWindow` placement because the public platform API cannot mount a
+terminal or replacement editor into a specified detached split. The artifact is
+therefore clamped to `since-build="262" until-build="262.*"`. Before advertising
+terminal capability, the adapter probes every internal class, constructor, and
+method shape it invokes. A failed probe advertises snapshot-only capability;
+policy freezes and neither the shared main terminal nor a focus-derived fallback
+is used. Every 262 platform update requires a fresh Plugin Verifier run and a
+real two-process Remote Dev acceptance pass. This maintenance-risk exception
+does not apply to or alter the classic 242 source tree.
+
 The split artifact is installed on both backend and JetBrains Client/Gateway.
 Development may use explicit two-sided installation. Production distribution
 must use Marketplace or a custom plugin repository because a local ZIP on one
@@ -189,7 +200,9 @@ edit is allowed in this implementation PR.
 
 1. Package/build both artifacts independently. Plugin Verifier proves the 242
    classic artifact remains compatible and the 262 artifact has loadable
-   frontend/shared/backend modules. Inspect each ZIP/module descriptor.
+   frontend/shared/backend modules. Inspect each ZIP/module descriptor, prove
+   the exact `262.*` upper bound, and source-fence internal terminal/editor
+   imports to the designated 262 frontend adapter.
 2. A split-mode test target launches frontend and backend, proves typed RPC
    discovery, complete frame-tagged snapshots before dedupe, `root` main role,
    detached frame lifecycle, and fail-closed transport loss.

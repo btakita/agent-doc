@@ -3,6 +3,7 @@
 //! This crate owns subprocess effects for tmux commands. It does not own
 //! document authority, merge behavior, queue projection, or turn commits.
 
+pub mod editor_view;
 pub mod observation_cache;
 
 pub use observation_cache::{

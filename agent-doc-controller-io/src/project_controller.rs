@@ -7273,7 +7273,8 @@ impl ControllerRuntime {
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
             }));
-        let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::hydrate(
+        let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::new_in(
+            &scope,
             editor_view_policy_bindings_from_state(&memory.state_projection),
         );
         let document_path_transition_graph =
@@ -7324,6 +7325,28 @@ impl ControllerRuntime {
         runtime
             .document_graphs
             .install_settle_sink(project_root.clone(), &runtime);
+        runtime
+            .editor_view_policy_graph
+            .install_lifecycle_sink(&runtime);
+        let pending_editor_views = runtime
+            .memory
+            .lock()
+            .state_projection
+            .active_editor_view_bindings();
+        for (document_hash, binding) in pending_editor_views {
+            if matches!(
+                binding.state,
+                agent_doc_state_backbone::EditorViewBindingState::BindPending { .. }
+                    | agent_doc_state_backbone::EditorViewBindingState::ReleasePending { .. }
+            ) {
+                runtime.editor_view_policy_graph.apply_durable_binding(
+                    &document_hash,
+                    &binding.canonical_path,
+                    binding.binding_epoch,
+                    &binding.state,
+                );
+            }
+        }
         rpc::install_state_plane_projection_sinks(&runtime);
         #[cfg(not(any(test, feature = "test-support")))]
         rpc::install_pane_layout_projection_sink(&runtime);
@@ -7675,13 +7698,21 @@ impl ControllerRuntime {
         let captured_finalize_wake_projection =
             captured_finalize_wake_reason.and_then(|_| document_projection.as_ref().cloned());
         if let agent_doc_state_backbone::StateFact::EditorViewBindingObserved {
+            document_hash,
             canonical_path,
             binding_epoch,
             state,
             ..
         } = &event.fact
+            && document_projection
+                .as_ref()
+                .and_then(|document| document.editor_view_binding.as_ref())
+                .is_some_and(|binding| {
+                    binding.binding_epoch == *binding_epoch && binding.state == *state
+                })
         {
-            self.editor_view_policy_graph.apply_durable_settlement(
+            self.editor_view_policy_graph.apply_durable_binding(
+                document_hash,
                 canonical_path,
                 *binding_epoch,
                 state,
@@ -16522,7 +16553,8 @@ agent:queue\n\
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
             }));
-        let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::hydrate(
+        let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::new_in(
+            &scope,
             editor_view_policy_bindings_from_state(&state_projection),
         );
         let document_path_transition_graph =

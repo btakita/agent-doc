@@ -572,6 +572,7 @@ Verification passed: the focused regressions; `cargo test -p agent-doc-controlle
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#jetbrainsdualrelease] Complete PR #222 dual JetBrains release plumbing before release: assign distinct classic/modular JetBrains update versions, clamp the classic plugin to until-build="261.*", and add corresponding release-version, check, and release tests proving both artifacts remain distinct, compatibility-ranged, and collision-free.
 <!-- /agent:backlog -->
 
 ## Review

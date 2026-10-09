@@ -332,3 +332,4 @@
 - 2026-10-09 [#usabilitymaintenancecons] What are the usability + maintenance consequenes of https://github.com/btakita/agent-doc/issues/221?
 - 2026-10-09 [#backendfrontendidea] What is the backend + frontend in Idea?
 - 2026-10-09 [#singleplugindistribution] Can we have a single plugin distribution that recognizes if it is the frontend or backend or both?
+- 2026-10-09 [#starttools] Fix Sync Tmux Panes recovery for tools.md: reproduce by running :kill-pane on the bound pane, then Sync Tmux Panes; the session must restart in a newly created pane and rebind cleanly. Identify the lifecycle/routing cause, add regression coverage, and verify the installed CLI/editor path end to end.

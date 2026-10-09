@@ -582,6 +582,16 @@ That isolates `#starttools` to the pane-recovery path. Direct Run Agent Doc star
 The independent audit found no missing #221-specific implementation. Draft PR #222 at `254b75e68b9bbf974b95f5f5982e63f55657e13f` already provides one exact-262 ZIP with shared, frontend, and backend modules; capability-based role selection; frontend client-surface capture; authenticated generation-fenced backend publication; artifact checks; a role matrix; and both split-sandbox verifications. `make jetbrains-262-check` passed, and the implementation merges cleanly with current `main`.
 
 This consumes the duplicate implementation dispatch, but GitHub #221 remains open because PR #222 is still draft and unmerged. Its current CI failure is the unrelated installed-inode freshness test. A durable `#gh221mergeclose` review gate now requires green CI and the PR merge before #221 is closed. The existing `#gh218remoteproof` gate separately owns real IDEA 2026.2.3 Remote Dev acceptance. The modular artifact is deliberately scoped to `262.*`; it does not claim support for the issue's original 263 reproducer.
+
+### Re: do [#starttools] — gpt-6.1-sol · 2026-10-09 14:30 EDT
+
+> **Queue prompt:** do [#starttools]
+
+Fixed and installed on `main` at `ab265347dde9b68aa5bcfb7ddedeef6be1d3df6c`.
+
+The failure was specific to cross-root Sync Tmux Panes recovery. When the tools.md pane had been killed, delegation to the nested project controller silently changed `ProvisionForLayout` into `ObserveOnly`; the child controller therefore found the pane missing but was forbidden to recreate it. Delegation now preserves the original typed missing-pane policy through `request_document_pane`, while ordinary focus remains observe-only.
+
+Verification passed: the new nested-project provisioning regression; the ordinary cross-root focus regression; all 606 controller tests; live `make tmux-ci`; the 9,805-test main nextest phase; editor, cross-editor, parity, and bootstrap checks; private-name scan; diff check; coordinator controller-suite rerun; and `make install`. The installed CLI/native library and live JetBrains plugin were refreshed; VS Code package sync was skipped because `vsce` is not installed.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -595,7 +605,7 @@ This consumes the duplicate implementation dispatch, but GitHub #221 remains ope
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/224~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/221~~ — auto-struck: answered this cycle (#ftstrike)
-- ⏭️ do [#starttools]
+- ~~⏭️ do [#starttools]~~
 - 🚧 do [#jetbrainsdualrelease]
 - 🚧 release + publish
 <!-- /agent:queue -->
@@ -603,7 +613,6 @@ This consumes the duplicate implementation dispatch, but GitHub #221 remains ope
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] 🚧 [#starttools] Fix Sync Tmux Panes recovery for tools.md: reproduce by running :kill-pane on the bound pane, then Sync Tmux Panes; the session must restart in a newly created pane and rebind cleanly. Identify the lifecycle/routing cause, add regression coverage, and verify the installed CLI/editor path end to end.
 - [ ] 🚧 [#jetbrainsdualrelease] Complete PR #222 dual JetBrains release plumbing before release: assign distinct classic/modular JetBrains update versions, clamp the classic plugin to until-build="261.*", and add corresponding release-version, check, and release tests proving both artifacts remain distinct, compatibility-ranged, and collision-free.
 <!-- /agent:backlog -->
 

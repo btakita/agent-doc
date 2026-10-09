@@ -2283,6 +2283,7 @@ fn run_with_options_to_writer_in_pass(
     // is judged against the previous cycle's steering seed.
     let queue_subagent_dispatch = agent_doc_preflight_io::queue_subagent_dispatch_entries(
         file,
+        queue_authoritative_content,
         &agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(
             file,
             queue_authoritative_content,

@@ -1436,8 +1436,11 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              worktree outside the IDE-watched project; never run two subagents against one \
              checkout. Before dispatching, claim it with `agent-doc queue claim <FILE> --item \
              <id-or-line> --owner subagent:<label>` so the loop and Stop hook do not re-enter for \
-             it; run `agent-doc queue release` when the subagent reports back. Keep working the \
-             current item yourself; record the item as dispatched in your response."
+             it; then paste the output of `agent-doc queue brief <FILE> --item <id-or-line>` \
+             verbatim at the top of the subagent prompt (the operator's authorization for the \
+             item, `#waypostauthorization`). Run `agent-doc queue release` when the subagent \
+             reports back. Keep working the current item yourself; record the item as dispatched \
+             in your response."
         }
         (SteeringDispatch::Subagent, SteeringSource::Exchange, _, _) => {
             "subagent intent: dispatch this exchange prompt NOW to a NEW background subagent \
@@ -1481,6 +1484,16 @@ fn shell_single_quote(text: &str) -> String {
 pub fn claim_command_for(document: &str, verbatim: &str) -> String {
     format!(
         "agent-doc queue claim {} --item {} --owner subagent:<label>",
+        shell_single_quote(document),
+        shell_single_quote(&claim_item_handle(verbatim))
+    )
+}
+
+/// The command that prints the operator-authorization preamble for a
+/// subagent dispatch of `verbatim` in `document` (`#waypostauthorization`).
+pub fn brief_command_for(document: &str, verbatim: &str) -> String {
+    format!(
+        "agent-doc queue brief {} --item {}",
         shell_single_quote(document),
         shell_single_quote(&claim_item_handle(verbatim))
     )
@@ -1552,9 +1565,12 @@ pub fn render_closeout_steering_context(
                 "DISPATCH NOW to a NEW background subagent (one per item). Claim it first with \
                  `{}` so the loop and Stop hook do not drain it inline, then dispatch; if it \
                  touches a repository, give the subagent its own git worktree outside the \
-                 IDE-watched project. Run `agent-doc queue release` when the subagent reports \
-                 back.",
-                claim_command_for(document, &item.verbatim)
+                 IDE-watched project. Paste the output of `{}` verbatim at the top of the \
+                 subagent prompt: it carries the operator's authorization for the item \
+                 (`#waypostauthorization`). Run `agent-doc queue release` when the subagent \
+                 reports back.",
+                claim_command_for(document, &item.verbatim),
+                brief_command_for(document, &item.verbatim)
             ),
             (SteeringDispatch::Subagent, SteeringSource::Exchange) => {
                 "DISPATCH NOW to a NEW background subagent (one per prompt). Exchange prompts \
@@ -2494,6 +2510,10 @@ mod tests {
                 "`agent-doc queue claim 'tasks/bugs.md' --item '#preflightdeadline' --owner subagent:<label>`"
             ),
             "{text}"
+        );
+        assert!(
+            text.contains("`agent-doc queue brief 'tasks/bugs.md' --item '#preflightdeadline'`"),
+            "the dispatch directive names the authorization brief: {text}"
         );
         assert_eq!(
             claim_item_handle("#gh-fix https://x/issues/1"),

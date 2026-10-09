@@ -4225,6 +4225,21 @@ enum QueueAction {
         #[arg(long, value_name = "ID_OR_TEXT")]
         item: String,
     },
+    /// Print the operator authorization preamble for a dispatched queue item
+    /// (`#waypostauthorization`): the verbatim item, the backlog text an id head
+    /// names, and the queue/item preset bodies, plus the coordinator rules.
+    /// Paste it verbatim at the top of the subagent's prompt. Same text as the
+    /// item's `queue_subagent_dispatch[].authorization.subagent_prompt_preamble`.
+    Brief {
+        /// Path to the session document
+        file: PathBuf,
+        /// The queue item: `#id` / `do [#id]`, or the queue line's text
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: String,
+        /// Print the whole authorization object as JSON instead of the preamble
+        #[arg(long)]
+        json: bool,
+    },
     /// List the document's active queue claims as JSON (`#queueclaim`).
     Claims {
         /// Path to the session document
@@ -7088,6 +7103,18 @@ fn try_main() -> anyhow::Result<()> {
                         )
                     }
                     None => eprintln!("[queue] no claim on {item:?}; nothing to release"),
+                }
+                Ok(())
+            }
+            QueueAction::Brief { file, item, json } => {
+                let authorization =
+                    agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(
+                        &file, &item,
+                    )?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&authorization)?);
+                } else {
+                    print!("{}", authorization.subagent_prompt_preamble);
                 }
                 Ok(())
             }

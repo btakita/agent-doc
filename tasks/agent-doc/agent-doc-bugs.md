@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -416,11 +417,13 @@ Separately, PR #219's detached-surface substrate merged post-release as `566c669
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#usabilitymaintenancecons]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#usabilitymaintenancecons] What are the usability + maintenance consequenes of https://github.com/btakita/agent-doc/issues/221?
 <!-- /agent:backlog -->
 
 ## Review

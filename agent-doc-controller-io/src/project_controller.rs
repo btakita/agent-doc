@@ -3942,6 +3942,17 @@ struct RetainedPersistenceProjection {
     controller_generation: u64,
 }
 
+/// Exact bytes already present on disk are a terminal persistence receipt for
+/// this immutable delivery projection. A native-save route is needed only when
+/// disk has not reached the projection yet.
+fn retained_persistence_has_exact_disk_proof(
+    projection: &RetainedPersistenceProjection,
+) -> std::io::Result<bool> {
+    let bytes = std::fs::read(&projection.file)?;
+    Ok(bytes.len() == projection.content_len
+        && agent_doc_hash::bytes_hash(&bytes).eq_ignore_ascii_case(&projection.content_hash))
+}
+
 #[derive(Clone, Debug)]
 struct RetainedPersistenceCommand {
     document_hash: String,
@@ -4460,6 +4471,40 @@ impl RetainedWriteSettleSink {
         document_hash: &str,
         projection: &RetainedPersistenceProjection,
     ) -> bool {
+        // `#retaineddiskproof` / GH #223: a previous native save can land the
+        // exact immutable projection without its receipt reaching this worker.
+        // Requiring another editor route in that state cannot make progress and
+        // kept the durable frontier retrying forever. Disk equality is itself
+        // an exact persistence receipt; a later edit produces a newer delivery
+        // epoch and therefore cannot be acknowledged by this one.
+        match retained_persistence_has_exact_disk_proof(projection) {
+            Ok(true) => {
+                agent_doc_ops_log_io::log_op(
+                    &projection.file,
+                    &format!(
+                        "retained_persistence_applied document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} proof=exact_disk",
+                        projection.controller_generation,
+                        projection.delivery_version,
+                        projection.content_hash,
+                        projection.content_len,
+                    ),
+                );
+                return true;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                agent_doc_ops_log_io::log_op(
+                    &projection.file,
+                    &format!(
+                        "retained_persistence_disk_observation_failed document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} error={error}",
+                        projection.controller_generation,
+                        projection.delivery_version,
+                        projection.content_hash,
+                        projection.content_len,
+                    ),
+                );
+            }
+        }
         let outcome = agent_doc_crdt_relay_io::request_native_save_for_current_projection(
             &projection.file,
             &projection.content_hash,
@@ -20685,6 +20730,48 @@ mod state_event_ingress_slow_tests {
 #[cfg(test)]
 mod retained_persistence_retry_tests {
     use super::*;
+
+    #[test]
+    fn exact_disk_projection_is_terminal_without_a_native_save_route() {
+        // GH #223: native-save routing can disappear after the exact bytes have
+        // already landed. The durable frontier must settle from that disk proof
+        // instead of retrying `no_exact_native_save_receipt` every 30 seconds.
+        let project = tempfile::tempdir().unwrap();
+        let file = project.path().join("session.md");
+        let content = "already durable\n";
+        std::fs::write(&file, content).unwrap();
+        let projection = RetainedPersistenceProjection {
+            file,
+            content_hash: agent_doc_hash::content_hash(content),
+            content_len: content.len(),
+            delivery_version: 126,
+            controller_generation: 1,
+        };
+        let sink = RetainedWriteSettleSink {
+            project_root: project.path().to_path_buf(),
+            runtime: std::sync::Weak::new(),
+        };
+
+        assert!(sink.persist_current_delivery("document", &projection));
+    }
+
+    #[test]
+    fn stale_or_missing_disk_is_not_persistence_proof() {
+        let project = tempfile::tempdir().unwrap();
+        let file = project.path().join("session.md");
+        let target = "target\n";
+        let projection = RetainedPersistenceProjection {
+            file: file.clone(),
+            content_hash: agent_doc_hash::content_hash(target),
+            content_len: target.len(),
+            delivery_version: 9,
+            controller_generation: 1,
+        };
+
+        assert!(retained_persistence_has_exact_disk_proof(&projection).is_err());
+        std::fs::write(file, "stale\n").unwrap();
+        assert!(!retained_persistence_has_exact_disk_proof(&projection).unwrap());
+    }
 
     #[test]
     fn a_refused_current_epoch_retries_on_a_capped_backoff_until_superseded() {

@@ -84,6 +84,7 @@ operator edits.
 | --- | --- | --- |
 | Retained compact; editor target equals disk | Exact canonical editor and disk hash equality | Checkpoint, commit, and settle |
 | Retained compact; target delivered but disk stale | Exact live editor target, delivery convergence, and native-save receipt | Re-observe editor/disk equality, then checkpoint, commit, and settle |
+| Retained delivery; native-save route absent after disk reached the projected revision | Exact disk byte length and content hash for that immutable delivery epoch | Acknowledge that epoch as durable; do not retry waiting for another editor route |
 | Captured response is already `write_applied` when session-check begins | Matching capture identity and response hash, the exact response materialized once, and canonical editor authority equals disk | Resume that same captured closeout and commit without requiring a redundant native-save request |
 | Open exact closeout capture | Matching cycle identity and nonterminal phase | May project the answered free-text queue strike; a retained-delivery Source change retries the same projection until its exact application receipt exists |
 | Terminal or mismatched capture | Committed/terminal proof or a different cycle identity | Preserve the durable response payload, but expose no queue-strike target |

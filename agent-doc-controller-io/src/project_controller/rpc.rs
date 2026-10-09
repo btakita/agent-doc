@@ -10,7 +10,6 @@ use agent_doc_controller::dispatch::{
     pause_reason_is_stale_supervisor_churn_stop, queue_pause_predates_boot,
     spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
 };
-use agent_doc_controller::pane_layout::MainLayoutEligibility;
 use agent_doc_controller::status;
 #[cfg(not(any(test, feature = "test-support")))]
 use agent_doc_controller::supervisor_replacement::{
@@ -122,7 +121,7 @@ mod main_layout_eligibility_tests {
         std::fs::create_dir_all(&tasks).unwrap();
         let detached = tasks.join("detached.md");
         std::fs::write(&detached, "# detached\n").unwrap();
-        let eligibility = MainLayoutEligibility::excluding([detached
+        let eligibility = MainLayoutEligibility::new([detached
             .canonicalize()
             .unwrap()
             .to_string_lossy()
@@ -2513,38 +2512,6 @@ pub fn main_layout_eligibility(project_root: &Path) -> Result<MainLayoutEligibil
         project_root,
         empty_controller_request("main_layout_eligibility"),
     )
-}
-
-/// Publish a complete projection after its durable state transaction commits.
-/// The state/policy owner is responsible for restart hydration and lifecycle
-/// semantics; the controller owns only this derived exclusion Source.
-pub fn publish_main_layout_eligibility(
-    project_root: &Path,
-    eligibility: &MainLayoutEligibility,
-) -> Result<MainLayoutEligibility> {
-    #[cfg(any(test, feature = "test-support"))]
-    {
-        let _ = project_root;
-        Ok(eligibility.clone())
-    }
-
-    #[cfg(not(any(test, feature = "test-support")))]
-    {
-        let mut request = empty_controller_request("publish_main_layout_eligibility");
-        request.state = Some(serde_json::to_string(eligibility)?);
-        request_controller(project_root, request)
-    }
-}
-
-fn handle_publish_main_layout_eligibility(
-    runtime: &ControllerRuntime,
-    request: ControllerRequest,
-) -> Result<MainLayoutEligibility> {
-    let state = request_string(&request.state, "state")?;
-    let eligibility: MainLayoutEligibility =
-        serde_json::from_str(&state).context("parse main layout eligibility projection")?;
-    runtime.set_main_layout_eligibility(eligibility.clone());
-    Ok(eligibility)
 }
 
 /// Content observations the caller resolved, sent to the controller so the
@@ -17199,9 +17166,6 @@ pub(crate) fn handle_request_locked(
             Some(runtime.as_ref()),
         )),
         "main_layout_eligibility" => controller_envelope(Ok(runtime.main_layout_eligibility())),
-        "publish_main_layout_eligibility" => controller_envelope(
-            handle_publish_main_layout_eligibility(runtime.as_ref(), request),
-        ),
         "tmux_layout_sync_state" => controller_envelope(handle_tmux_layout_sync_state(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -22721,7 +22685,7 @@ fn main_layout_eligible_columns(
                 .map(str::trim)
                 .filter(|document| !document.is_empty())
                 .filter(|document| {
-                    eligibility.is_eligible(&canonical_layout_document_id(project_root, document))
+                    eligibility.permits(&canonical_layout_document_id(project_root, document))
                 })
                 .collect::<Vec<_>>();
             (!kept.is_empty()).then(|| kept.join(","))
@@ -22734,7 +22698,7 @@ fn document_is_main_layout_eligible(
     eligibility: &MainLayoutEligibility,
     document: &str,
 ) -> bool {
-    eligibility.is_eligible(&canonical_layout_document_id(project_root, document))
+    eligibility.permits(&canonical_layout_document_id(project_root, document))
 }
 
 /// GH #136: `columns` without the documents the layout effect acknowledged it

@@ -2841,7 +2841,7 @@ fn filter_main_layout_columns(
                 .filter(|document| !document.is_empty())
                 .filter_map(|document| {
                     if eligibility
-                        .is_eligible(&canonical_main_layout_document_id(project_root, document))
+                        .permits(&canonical_main_layout_document_id(project_root, document))
                     {
                         Some(document.to_string())
                     } else {
@@ -3170,7 +3170,7 @@ fn run_with_options_internal_at_root(
         ));
     }
     let focus = focus.filter(|document| {
-        main_layout_eligibility.is_eligible(&canonical_main_layout_document_id(
+        main_layout_eligibility.permits(&canonical_main_layout_document_id(
             &sync_project_root,
             document,
         ))
@@ -12010,8 +12010,7 @@ mod tests {
     #[test]
     fn main_layout_filter_removes_bound_documents_before_sync_resolution() {
         let root = PathBuf::from("/project");
-        let eligibility =
-            MainLayoutEligibility::excluding(["/project/tasks/detached.md".to_string()]);
+        let eligibility = MainLayoutEligibility::new(["/project/tasks/detached.md".to_string()]);
         let (columns, dropped) = filter_main_layout_columns(
             &root,
             &eligibility,

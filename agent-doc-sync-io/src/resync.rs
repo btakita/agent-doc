@@ -197,7 +197,7 @@ fn resync_document_is_main_eligible(
     } else {
         project_root.join(path)
     };
-    eligibility.is_eligible(&path.canonicalize().unwrap_or(path).to_string_lossy())
+    eligibility.permits(&path.canonicalize().unwrap_or(path).to_string_lossy())
 }
 
 impl std::fmt::Display for Issue {
@@ -2799,8 +2799,7 @@ mod tests {
 
     #[test]
     fn view_bound_document_is_not_main_resync_eligible() {
-        let eligibility =
-            MainLayoutEligibility::excluding(["/project/tasks/detached.md".to_string()]);
+        let eligibility = MainLayoutEligibility::new(["/project/tasks/detached.md".to_string()]);
         assert!(!resync_document_is_main_eligible(
             Path::new("/project"),
             &eligibility,

@@ -16,6 +16,7 @@ test = false
 bench = false
 
 [dependencies]
+agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.480" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.480" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.480" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.480" }

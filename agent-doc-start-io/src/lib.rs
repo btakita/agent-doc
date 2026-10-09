@@ -1550,7 +1550,7 @@ fn prepare_start_runtime_with_admission(
     let main_layout_eligibility =
         agent_doc_controller_io::project_controller::main_layout_eligibility(&project_root)?;
     let main_layout_relocation_allowed =
-        main_layout_eligibility.is_eligible(canonical.to_string_lossy().as_ref());
+        main_layout_eligibility.permits(canonical.to_string_lossy().as_ref());
     if let Some(target) = start_target
         && main_layout_relocation_allowed
         && !relocate_if_wrong_session(&tmux, &pane_id, &target.session)

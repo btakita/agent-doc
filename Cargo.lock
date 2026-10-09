@@ -505,6 +505,7 @@ dependencies = [
 name = "agent-doc-controller"
 version = "0.35.480"
 dependencies = [
+ "agent-doc-editor-surface",
  "agent-doc-element-backlog",
  "agent-doc-flow",
  "agent-doc-fs",

@@ -9,7 +9,6 @@ use crate::process::{is_same_project_controller_pid, process_is_alive};
 use agent_doc_controller::dispatch::{
     ControllerDispatchProofScope, ControllerDispatchReceipt, ControllerDispatchResultStatus,
 };
-use agent_doc_controller::pane_layout::MainLayoutEligibility;
 use agent_doc_controller::paths::socket_path;
 use agent_doc_controller::status::{
     self, ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
@@ -30,6 +29,8 @@ use interprocess::local_socket::{
 use lazily::{Computed, Source, ThreadSafeContext};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+pub use agent_doc_controller::pane_layout::MainLayoutEligibility;
 
 // The SQLite state layer (the only `rusqlite::Connection` surface) lives in
 // `agent-doc-sqlite::state_store`. Keep persistence types private to this
@@ -1353,16 +1354,24 @@ struct ControllerPaneLayoutGraph {
     wait_lock: Mutex<()>,
 }
 
-/// Process-scoped adapter boundary for the durable document-to-view binding
-/// projection. The durable state owner publishes one complete snapshot; all
-/// main-layout effects read the same retained Source before crossing into tmux.
-///
-/// The default exists only for rolling compatibility. The editor-view state
-/// integration must hydrate this Source before publishing its first main
-/// layout after controller restart.
+/// Process-scoped derivative of the durable document-to-view binding
+/// projection. Controller hydration supplies the first complete snapshot
+/// before any request can publish layout, and every accepted state fact
+/// replaces it atomically before a tmux effect can consume it.
 struct ControllerMainLayoutEligibilityGraph {
     ctx: ThreadSafeContext,
     value: Source<MainLayoutEligibility>,
+}
+
+fn main_layout_eligibility_from_state(
+    state: &agent_doc_state_backbone::StateBackboneProjection,
+) -> MainLayoutEligibility {
+    MainLayoutEligibility::new(
+        state
+            .active_editor_view_bindings()
+            .into_values()
+            .map(|binding| binding.canonical_path),
+    )
 }
 
 impl ControllerMainLayoutEligibilityGraph {
@@ -7203,8 +7212,10 @@ impl ControllerRuntime {
         );
         let pane_layout_graph =
             ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
-        let main_layout_eligibility_graph =
-            ControllerMainLayoutEligibilityGraph::new_in(&scope, MainLayoutEligibility::default());
+        let main_layout_eligibility_graph = ControllerMainLayoutEligibilityGraph::new_in(
+            &scope,
+            main_layout_eligibility_from_state(&memory.state_projection),
+        );
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         let editor_surface_graph =
             rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {
@@ -7277,13 +7288,6 @@ impl ControllerRuntime {
 
     pub(crate) fn main_layout_eligibility(&self) -> MainLayoutEligibility {
         self.main_layout_eligibility_graph.get()
-    }
-
-    /// Adapter ingress for the durable editor-view binding projection.
-    /// Publication is whole-snapshot so release cannot expose a partially
-    /// updated exclusion set to a concurrent layout effect.
-    pub(crate) fn set_main_layout_eligibility(&self, value: MainLayoutEligibility) {
-        self.main_layout_eligibility_graph.set(value);
     }
 
     /// `#ctlrecycle` R2 — mark this controller for a two-phase handoff.
@@ -7551,6 +7555,8 @@ impl ControllerRuntime {
         let project_root = self.bootstrap_snapshot()?.project_root;
         let (next, next_actor_store) = ControllerMemoryState::load(&project_root)?;
         let recycle = next.state_projection.project_supervisor_recycle();
+        let main_layout_eligibility =
+            main_layout_eligibility_from_state(&next.state_projection);
         let next_documents = next.state_projection.documents.clone();
         let mut memory = self.memory.lock();
         let previous_documents = memory.state_projection.documents.clone();
@@ -7558,6 +7564,8 @@ impl ControllerRuntime {
         drop(memory);
         self.actor_graph.set(next_actor_store);
         self.supervisor_recycle_graph.set(recycle);
+        self.main_layout_eligibility_graph
+            .set(main_layout_eligibility);
         for document_hash in previous_documents
             .keys()
             .chain(next_documents.keys())
@@ -7576,7 +7584,7 @@ impl ControllerRuntime {
 
     fn apply_state_event(&self, event: &agent_doc_state_backbone::StateEvent) -> Result<()> {
         let document_hash = event.fact.document_hash().to_string();
-        let (recycle, document_projection) = {
+        let (recycle, document_projection, main_layout_eligibility) = {
             let mut memory = self.memory.lock();
             // SQLite accepted the unique event id before this transition. Keep
             // only the current projection and epoch in the process: the durable
@@ -7591,6 +7599,7 @@ impl ControllerRuntime {
             (
                 memory.state_projection.project_supervisor_recycle(),
                 document_projection,
+                main_layout_eligibility_from_state(&memory.state_projection),
             )
         };
         let captured_finalize_wake_reason = match &event.fact {
@@ -7614,6 +7623,8 @@ impl ControllerRuntime {
         let captured_finalize_wake_projection =
             captured_finalize_wake_reason.and_then(|_| document_projection.as_ref().cloned());
         self.supervisor_recycle_graph.set(recycle);
+        self.main_layout_eligibility_graph
+            .set(main_layout_eligibility);
         // `#retainedsettlereactive`: publish the applied *projection* as the fact
         // lands; the retained-intent facts and the settlement verdict are derived
         // from it. Pushing a pre-computed intent here instead would put the
@@ -16478,6 +16489,60 @@ agent:queue\n\
             recycle_declined_target: Mutex::new(None),
             _scope: scope,
         }
+    }
+
+    #[test]
+    fn durable_editor_view_projection_updates_main_layout_eligibility() {
+        use agent_doc_state_backbone::{
+            EditorViewBindingIdentity, EditorViewBindingState, EditorViewReleaseDestination,
+            EditorViewReleaseReason, StateEvent, StateFact,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime_for_bootstrap(test_bootstrap(&dir));
+        let document = dir.path().join("tasks/detached.md");
+        let canonical_path = document.to_string_lossy().to_string();
+        let binding = EditorViewBindingIdentity {
+            view_id: "view-a".to_string(),
+            client_family: "jetbrains".to_string(),
+            surface_id: "detached-1".to_string(),
+            surface_generation: 3,
+            view_session: "agent-doc-view-a".to_string(),
+        };
+        let fact = |event_id: &str, state| {
+            StateEvent::new(
+                event_id,
+                StateFact::EditorViewBindingObserved {
+                    document_hash: "detached-document".to_string(),
+                    canonical_path: canonical_path.clone(),
+                    binding_epoch: 7,
+                    state,
+                },
+            )
+        };
+
+        runtime
+            .apply_state_event(&fact(
+                "bind-pending",
+                EditorViewBindingState::BindPending {
+                    binding: binding.clone(),
+                },
+            ))
+            .unwrap();
+        assert!(!runtime.main_layout_eligibility().permits(&canonical_path));
+
+        runtime
+            .apply_state_event(&fact(
+                "released",
+                EditorViewBindingState::Released {
+                    binding,
+                    pane: None,
+                    reason: EditorViewReleaseReason::OwnerClosed,
+                    destination: EditorViewReleaseDestination::MainStash,
+                },
+            ))
+            .unwrap();
+        assert!(runtime.main_layout_eligibility().permits(&canonical_path));
     }
 
     #[test]

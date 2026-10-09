@@ -216,6 +216,12 @@ Post the results on #218 with the preview tag and commit `c39de1b04`. If they pa
 - The `#jetbrains262installselect` worktree had been idle for more than 20 minutes with uncommitted work, so a new subagent has taken it over to finish.
 - `#jetbrains262distribution` (`740fb3169`) and `#previewartifactprovenance` (`44281dda2`) are done and re-claimed by the coordinator. They will be stacked onto PR #222.
 - The exchange has 9 response sections; I'm leaving compaction alone while the queue is active.
+
+### Re: #jetbrains262installselect in flight — opus-5.5 · 2026-10-09T17:53-04:00
+
+`#jetbrains262installselect` is already running. The subagent claimed it at 17:49 (`subagent:installselect2`) and has moved the worktree onto PR #222's head, `8abda947f`, so the 262 module is present. It is now finishing the earlier uncommitted changes and their tests. Running it again here would put two agents in one checkout.
+
+The item stays open until the subagent reports its branch, commit and test results. Then I merge it with `#jetbrains262distribution` and `#previewartifactprovenance`, run one `make check` and one `make install`, release the claim, and close the item. The fix for the red CI check on PR #222 (lazily resolution) and `#fixruninfra` are also with their own subagents.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -224,11 +230,11 @@ Post the results on #218 with the preview tag and commit `c39de1b04`. If they pa
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#fixruninfra]
+- ~~do [#fixruninfra]~~
 - ~~do [#readyanotherpreview]~~
 - ~~do [#waypostauthorization]~~
 - ⏭️ do [#jetbrains262installselect]
-- do [#jetbrains262distribution]
+- 🚧 do [#jetbrains262distribution]
 - ⏭️ do [#previewartifactprovenance]
 - ~~do [#ci25gradle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/225~~
@@ -240,9 +246,9 @@ Post the results on #218 with the preview tag and commit `c39de1b04`. If they pa
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
-- [ ] [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
-- [ ] [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
+- [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
+- [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
+- [ ] 🚧 [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
 - [ ] [#previewrepin] [agent-doc] CI run 37988803442 on PR 222 head 8abda947f FAILED: :backend:compileKotlin in make jetbrains-262-check could not resolve io.github.lazily:lazily:0.39.0, because editors/jetbrains-262/settings.gradle.kts only uses mavenLocal+mavenCentral while classic uses the guarded lazily-kt composite / GitHub Packages. A fix subagent (branch fix/pr222-ci-lazily) is landing that on the PR 222 head branch. After CI is green on the new head, rebuild the jetbrains-262 preview prerelease from it and re-pin the previewartifactprovenance manifest (preview-artifacts/*.json plus the constants in scripts/verify_jetbrains_preview.py) to the new asset digest, size, asset id and head. Then point the gh218remoteproof review text at the new preview tag.
 <!-- /agent:backlog -->
 

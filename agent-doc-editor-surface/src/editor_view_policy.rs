@@ -485,8 +485,16 @@ impl EditorViewPolicy {
         self.clients
             .iter()
             .flat_map(|(client_id, client)| {
-                client.surfaces.iter().filter_map(move |surface| {
-                    (surface.role == EditorSurfaceRole::Detached).then(|| {
+                client
+                    .surfaces
+                    .iter()
+                    .filter(|surface| surface.role == EditorSurfaceRole::Detached)
+                    .map(move |surface| {
+                        let focused = if surface.visible.contains(&surface.focused) {
+                            surface.focused.clone()
+                        } else {
+                            String::new()
+                        };
                         (
                             EditorViewSurfaceKey {
                                 client_id: client_id.clone(),
@@ -494,14 +502,9 @@ impl EditorViewPolicy {
                                 surface_id: surface.surface_id.clone(),
                                 surface_generation: surface.surface_generation,
                             },
-                            surface
-                                .visible
-                                .contains(&surface.focused)
-                                .then(|| surface.focused.clone())
-                                .unwrap_or_default(),
+                            focused,
                         )
                     })
-                })
             })
             .collect()
     }

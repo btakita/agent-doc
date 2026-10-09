@@ -296,6 +296,26 @@ The `contractsroute` subagent no longer needs to produce a recovery recipe. It i
 - the editor-applied response that the controller refused (`settled_buffer_dropped_response`);
 - an edit offset that assumed text the controller lacked, which spliced your line into the wrong place;
 - the printed unblocker, which must stop recommending plain `reset --from-current --preserve-session` when the controller's copy is the corrupt side.
+
+### Re: accepting your edit, and change lineage in the plugin — opus-5.5 · 2026-10-09T18:22-04:00
+
+> **Chat prompt (#chatprompt):** agent-doc should have accepted my edit
+
+> **Chat prompt (#chatprompt):** can the plugin track the lineage of a change?
+
+**Agreed, it should have.** Your queue edit was ordinary editor text. It was refused because it was based on text the controller had rejected moments earlier: the response the socket patch applied in your editor, refused as `all_ops_non_operator` / `settled_buffer_dropped_response`. The controller then applied your keystrokes at offsets that assumed that response was present, so they landed 769 characters off. The correct outcome was to accept the response as delivered, accept your edit on top of it, and commit.
+
+**Yes, the plugin can track lineage, and it already does part of it.** In the JetBrains plugin (`TypingTracker.kt`), every captured op already carries:
+- an operator/non-operator flag (`nonOperatorMutation`);
+- a merge-base hash for the text it was typed against;
+- a document stamp, so a burst the document outran gets requeued instead of dropped.
+
+What's missing is *which* change a non-operator mutation came from. An agent-applied response is just "non-operator", so the controller can't tell its own captured response landing apart from unknown foreign text, and it drops it. The lineage design the `contractsroute` subagent is implementing now:
+1. Agent-applied mutations carry the `patch_id`/`capture_id` of the response they deliver. The controller treats them as the delivery receipt for that capture and integrates them instead of refusing.
+2. Operator ops carry the base they were typed against, including any agent patch lineage. The controller applies them after that patch. If it doesn't have that base, it fails closed and pulls the missing base. It never splices at shifted offsets.
+3. Regression coverage for this exact sequence: response applied in the editor, then an operator queue edit on top, then commit. Both must land with no manual recovery.
+
+This touches the plugin and the controller. Any `.kt` change needs a JetBrains plugin version bump, which I'll do when integrating, together with the single `make install`.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

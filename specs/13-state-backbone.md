@@ -69,6 +69,21 @@ Examples:
 - `RouteSubmitSettled`
 - `RouteSubmitBlocked`
 
+`SupervisorRecycleSettled` carries the epoch it was minted from, and the
+projection drops a settle below its current recycle epoch as stale. A
+supervisor's `watch_loop_started` settle can therefore be minted from a read
+that has not yet seen its own `SupervisorRecycleStarted` (observed during an
+install-time controller handoff: `started-N+1` followed by `settled-N`), which
+would pin the document `InFlight` forever and make every dispatch-only reopen
+refuse as "mid-recycle". The settle handler verifies its fact landed: when the
+projection read back is still unsettled at a strictly newer epoch than the one
+minted, it re-mints `settled-<outstanding epoch>` (bounded, logged as
+`supervisor_recycle_settle_reminted`). This is sound because `Started` for a
+document is published only by that document's supervisor immediately before
+its own `execve`, and the settling process is what that `execve` produced. The
+stale row stays in the append-only log; the covering row after it settles the
+recycle on replay as well as live (`#fixruninfra`).
+
 Events must carry stable ids where available: document hash, session id, cycle
 id, actor generation, patch id, queue node key, backlog id, and causation id.
 The event log is append-only on the write path. Corrections are new events that

@@ -9422,6 +9422,72 @@ mod tests {
         );
     }
 
+    /// `#fixruninfra`: the durable rows observed on `infra.md` were
+    /// `requested-13437`, `started-13438`, `settled-13437`. Replaying them alone
+    /// pins the recycle `InFlight` forever; the controller's covering
+    /// `settled-13438` re-mint is what settles it, and it must settle on replay
+    /// too, not only in the live projection.
+    #[test]
+    fn supervisor_recycle_stale_epoch_settle_is_covered_by_a_reminted_settle() {
+        let hash = "ce164b";
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "requested-13437",
+            StateFact::SupervisorRecycleRequested {
+                document_hash: hash.into(),
+                reason: "install_fanout".into(),
+                recycle_epoch: 13437,
+                marked_secs: 1,
+            },
+        ));
+        ledger.append(state_event(
+            "started-13438",
+            StateFact::SupervisorRecycleStarted {
+                document_hash: hash.into(),
+                reason: "auto_install_reexec".into(),
+                recycle_epoch: 13438,
+                marked_secs: 2,
+            },
+        ));
+        ledger.append(state_event(
+            "settled-13437",
+            StateFact::SupervisorRecycleSettled {
+                document_hash: hash.into(),
+                reason: "watch_loop_started".into(),
+                recycle_epoch: 13437,
+                marked_secs: 6,
+            },
+        ));
+        let stuck = ledger
+            .project()
+            .document(hash)
+            .map(|document| document.supervisor.recycle.clone())
+            .unwrap();
+        assert_eq!(
+            stuck.phase,
+            SupervisorRecyclePhase::InFlight,
+            "a settle minted below the started epoch is dropped as stale"
+        );
+        assert_eq!(stuck.recycle_epoch, 13438);
+
+        ledger.append(state_event(
+            "settled-13438",
+            StateFact::SupervisorRecycleSettled {
+                document_hash: hash.into(),
+                reason: "watch_loop_started".into(),
+                recycle_epoch: 13438,
+                marked_secs: 6,
+            },
+        ));
+        let healed = ledger
+            .project()
+            .document(hash)
+            .map(|document| document.supervisor.recycle.clone())
+            .unwrap();
+        assert_eq!(healed.phase, SupervisorRecyclePhase::Settled);
+        assert_eq!(healed.recycle_epoch, 13438);
+    }
+
     #[test]
     fn supervisor_recycle_projection_folds_started_and_settled() {
         let mut ledger = EventLedger::new();

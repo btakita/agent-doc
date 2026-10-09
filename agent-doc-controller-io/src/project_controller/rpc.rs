@@ -20459,38 +20459,108 @@ pub(crate) fn handle_supervisor_recycle_settled(
     let event_hash = document_hash
         .as_deref()
         .unwrap_or(agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH);
-    if matches!(
-        current.phase,
-        agent_doc_state_backbone::SupervisorRecyclePhase::Settled
-    ) {
-        return Ok(current);
-    }
-    let recycle_epoch = current.recycle_epoch;
     let reason = request
         .reason
         .as_deref()
         .unwrap_or("supervisor_recycle_settled");
-    let event = agent_doc_state_backbone::StateEvent::new(
-        format!(
-            "{}:{event_hash}",
-            supervisor_recycle_event_id("settled", recycle_epoch)
-        ),
-        agent_doc_state_backbone::StateFact::SupervisorRecycleSettled {
-            document_hash: event_hash.to_string(),
-            reason: reason.to_string(),
+    settle_supervisor_recycle_from(bootstrap, runtime, event_hash, reason, current)
+}
+
+/// How many times one settle request may re-mint its `Settled` fact against a
+/// newer outstanding recycle epoch (`#fixruninfra`).
+const SUPERVISOR_RECYCLE_SETTLE_MAX_MINTS: u32 = 3;
+
+/// Mint `SupervisorRecycleSettled` from `current`, then verify the settle
+/// actually landed.
+///
+/// `#fixruninfra`: the settle fact carries the epoch it was minted from, and the
+/// reducer drops any fact whose epoch is below the projection's. A settle minted
+/// from a read that had not yet seen the `Started` fact (observed 2026-10-09 on
+/// `src/haiven-dev/tasks/infra.md`: rows `started-13438` then `settled-13437`,
+/// four seconds apart, during an install-time controller handoff) was appended
+/// and then ignored, so the projection stayed `InFlight` for good — the
+/// supervisor's watch loop publishes its settle once, and it had been
+/// *accepted*. Every later Run Agent Doc then hit the dispatch-only recycle
+/// gate past its TTL with the supervisor alive (`RefuseOwnerStillRecycling`)
+/// and surfaced "refused to inject … mid-recycle" while the idle-queue watch
+/// delivered the same trigger moments later.
+///
+/// A settle from a document's freshly started supervisor settles whatever
+/// recycle of that document is outstanding when it lands: `Started` facts are
+/// only published by that same supervisor before its own `execve`, and this
+/// process is what the `execve` produced. So when the post-append projection
+/// still reports an unsettled phase at a *newer* epoch than the one minted,
+/// re-mint at that epoch. Bounded, and deterministic on replay: the durable
+/// ledger then carries the covering `settled-<newer>` row after the stale one.
+pub(crate) fn settle_supervisor_recycle_from(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    event_hash: &str,
+    reason: &str,
+    mut current: agent_doc_state_backbone::SupervisorRecycleProjection,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let mut mints: u32 = 0;
+    loop {
+        if matches!(
+            current.phase,
+            agent_doc_state_backbone::SupervisorRecyclePhase::Settled
+        ) {
+            return Ok(current);
+        }
+        let recycle_epoch = current.recycle_epoch;
+        let event = agent_doc_state_backbone::StateEvent::new(
+            format!(
+                "{}:{event_hash}",
+                supervisor_recycle_event_id("settled", recycle_epoch)
+            ),
+            agent_doc_state_backbone::StateFact::SupervisorRecycleSettled {
+                document_hash: event_hash.to_string(),
+                reason: reason.to_string(),
+                recycle_epoch,
+                marked_secs: timestamp_secs(),
+            },
+        );
+        let projection = append_and_apply_state_event(bootstrap, runtime, event)?;
+        mints += 1;
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "supervisor_recycle_graph_settled document_hash={event_hash} reason={} minted_epoch={} recycle_epoch={} phase={:?}",
+                reason, recycle_epoch, projection.recycle_epoch, projection.phase
+            ),
+        );
+        match agent_doc_controller::dispatch::supervisor_recycle_settle_follow_up(
             recycle_epoch,
-            marked_secs: timestamp_secs(),
-        },
-    );
-    let projection = append_and_apply_state_event(bootstrap, runtime, event)?;
-    agent_doc_ops_log_io::log_op(
-        &bootstrap.project_root,
-        &format!(
-            "supervisor_recycle_graph_settled document_hash={event_hash} reason={} recycle_epoch={} phase={:?}",
-            reason, projection.recycle_epoch, projection.phase
-        ),
-    );
-    Ok(projection)
+            projection.phase == agent_doc_state_backbone::SupervisorRecyclePhase::Settled,
+            projection.recycle_epoch,
+            mints,
+            SUPERVISOR_RECYCLE_SETTLE_MAX_MINTS,
+        ) {
+            agent_doc_controller::dispatch::SupervisorRecycleSettleFollowUp::Done => {
+                return Ok(projection);
+            }
+            agent_doc_controller::dispatch::SupervisorRecycleSettleFollowUp::RemintAtNewerEpoch => {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "supervisor_recycle_settle_reminted document_hash={event_hash} reason={} stale_epoch={} outstanding_epoch={} phase={:?} (#fixruninfra)",
+                        reason, recycle_epoch, projection.recycle_epoch, projection.phase
+                    ),
+                );
+                current = projection;
+            }
+            agent_doc_controller::dispatch::SupervisorRecycleSettleFollowUp::GiveUp => {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "supervisor_recycle_settle_unconverged document_hash={event_hash} reason={} minted_epoch={} recycle_epoch={} phase={:?} mints={} (#fixruninfra)",
+                        reason, recycle_epoch, projection.recycle_epoch, projection.phase, mints
+                    ),
+                );
+                return Ok(projection);
+            }
+        }
+    }
 }
 
 /// GH #136 follow-up (d): republish the retained desired layout when the

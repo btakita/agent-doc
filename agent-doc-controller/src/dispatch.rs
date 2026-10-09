@@ -2300,6 +2300,44 @@ pub fn recycle_inflight_is_abandoned(marked_secs: u64, now_secs: u64, ttl_secs: 
     marked_secs != 0 && now_secs.saturating_sub(marked_secs) > ttl_secs
 }
 
+/// What a `supervisor_recycle_settled` handler does after appending one
+/// `Settled` fact (`#fixruninfra`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorRecycleSettleFollowUp {
+    /// The projection is settled, or nothing newer is outstanding: stop.
+    Done,
+    /// The minted epoch was below the outstanding recycle's, so the reducer
+    /// dropped it as stale. Mint again at the outstanding epoch.
+    RemintAtNewerEpoch,
+    /// Still unsettled after the mint budget: stop and report loudly rather
+    /// than spin.
+    GiveUp,
+}
+
+/// Classify the projection read back after a settle append.
+///
+/// A settle minted from a read that lagged a `Started` fact carries the older
+/// epoch, and the reducer ignores facts below the projection's epoch, so the
+/// recycle would stay `InFlight` forever. Only a strictly newer outstanding
+/// epoch re-mints: an unsettled projection at the minted epoch (or below) means
+/// the append did not take for some other reason, and re-minting the same
+/// event id would only be deduplicated again.
+pub fn supervisor_recycle_settle_follow_up(
+    minted_epoch: u64,
+    settled: bool,
+    outstanding_epoch: u64,
+    mints: u32,
+    max_mints: u32,
+) -> SupervisorRecycleSettleFollowUp {
+    if settled || outstanding_epoch <= minted_epoch {
+        return SupervisorRecycleSettleFollowUp::Done;
+    }
+    if mints >= max_mints {
+        return SupervisorRecycleSettleFollowUp::GiveUp;
+    }
+    SupervisorRecycleSettleFollowUp::RemintAtNewerEpoch
+}
+
 /// What a dispatch-only reopen must do when one settle-wait RPC returned without
 /// the `InFlight` recycle having settled.
 ///
@@ -5689,6 +5727,34 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     /// `#recyclesettlewaitshort`: the live `infra.md` refusal, as a table.
     ///
+    /// `#fixruninfra`: the observed rows were `started-13438` then
+    /// `settled-13437`. The stale settle must re-mint at the outstanding epoch,
+    /// exactly once per newer epoch, and the loop must stay bounded.
+    #[test]
+    fn supervisor_recycle_settle_follow_up_remints_only_against_a_newer_epoch() {
+        use SupervisorRecycleSettleFollowUp::*;
+        // The live incident: minted 13437, projection still InFlight at 13438.
+        assert_eq!(
+            supervisor_recycle_settle_follow_up(13437, false, 13438, 1, 3),
+            RemintAtNewerEpoch
+        );
+        // The covering re-mint lands.
+        assert_eq!(
+            supervisor_recycle_settle_follow_up(13438, true, 13438, 2, 3),
+            Done
+        );
+        // Settled on the first mint: nothing to do.
+        assert_eq!(supervisor_recycle_settle_follow_up(7, true, 7, 1, 3), Done);
+        // Unsettled at the minted epoch is not a lagging read; re-minting the
+        // same event id would only dedupe again.
+        assert_eq!(supervisor_recycle_settle_follow_up(7, false, 7, 1, 3), Done);
+        // Bounded: a recycle that keeps advancing cannot spin the handler.
+        assert_eq!(
+            supervisor_recycle_settle_follow_up(9, false, 10, 3, 3),
+            GiveUp
+        );
+    }
+
     /// The shipped gate read ONE 10s RPC timeout as a verdict, so every elapsed
     /// value strictly between the wait and the TTL refused. The verdict is what
     /// closes that window: inside the TTL it keeps waiting, outside it proceeds,

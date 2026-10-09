@@ -16786,6 +16786,106 @@ agent:queue\n\
         );
     }
 
+    /// `#fixruninfra`: during an install-time controller handoff the
+    /// supervisor's `watch_loop_started` settle was minted from a read that had
+    /// not seen `Started` yet, so `settled-13437` landed after `started-13438`,
+    /// the reducer dropped it as stale, and `infra.md` stayed `InFlight` for 33
+    /// minutes — every Run Agent Doc then refused with "mid-recycle" while the
+    /// idle-queue watch delivered the trigger anyway. The handler must verify
+    /// its settle landed and cover the outstanding epoch, durably.
+    #[test]
+    fn stale_epoch_recycle_settle_remints_against_the_outstanding_started_epoch() {
+        use agent_doc_state_backbone::{SupervisorRecyclePhase, SupervisorRecycleProjection};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        let runtime = Arc::new(runtime_for_bootstrap(bootstrap.clone()));
+        let infra = dir.path().join("infra.md");
+        std::fs::write(&infra, "# infra").unwrap();
+        let hash = agent_doc_hash::document_id_for_path(&infra);
+        let request = |command: &str, reason: &str| -> ControllerRequest {
+            serde_json::from_value(serde_json::json!({
+                "command": command, "file": infra, "reason": reason
+            }))
+            .unwrap()
+        };
+
+        let requested = rpc::handle_supervisor_recycle_requested(
+            &bootstrap,
+            &runtime,
+            request("supervisor_recycle_requested", "install_fanout"),
+        )
+        .unwrap();
+        assert_eq!(requested.phase, SupervisorRecyclePhase::Requested);
+        // The read the racing settle minted from: still `Requested`.
+        let lagging: SupervisorRecycleProjection = requested.clone();
+        let started = rpc::handle_supervisor_recycle_started(
+            &bootstrap,
+            &runtime,
+            request("supervisor_recycle_started", "auto_install_reexec"),
+        )
+        .unwrap();
+        assert_eq!(started.phase, SupervisorRecyclePhase::InFlight);
+        assert!(started.recycle_epoch > lagging.recycle_epoch);
+
+        let settled = rpc::settle_supervisor_recycle_from(
+            &bootstrap,
+            &runtime,
+            &hash,
+            "watch_loop_started",
+            lagging.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            settled.phase,
+            SupervisorRecyclePhase::Settled,
+            "a settle minted from a lagging read must still settle the recycle it reports"
+        );
+        assert_eq!(settled.recycle_epoch, started.recycle_epoch);
+        assert!(
+            runtime
+                .wait_for_supervisor_recycle_settle_for(Some(&hash), Duration::ZERO)
+                .is_ok(),
+            "the dispatch-only gate must see the recycle settled"
+        );
+
+        // Durable: replaying the ledger (stale settle row included) settles too.
+        let ledger = load_state_event_ledger(dir.path()).unwrap();
+        let replayed = ledger
+            .project()
+            .document(&hash)
+            .map(|document| document.supervisor.recycle.clone())
+            .unwrap();
+        assert_eq!(replayed.phase, SupervisorRecyclePhase::Settled);
+        let ids: Vec<String> = ledger
+            .events()
+            .iter()
+            .map(|event| event.event_id.clone())
+            .filter(|id| id.starts_with("project-supervisor-recycle-settled-"))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                format!(
+                    "project-supervisor-recycle-settled-{}:{hash}",
+                    lagging.recycle_epoch
+                ),
+                format!(
+                    "project-supervisor-recycle-settled-{}:{hash}",
+                    started.recycle_epoch
+                ),
+            ],
+            "the stale settle stays in the log and a covering settle follows it"
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("supervisor_recycle_settle_reminted"),
+            "the re-mint must be visible in ops.log:\n{ops}"
+        );
+    }
+
     fn preparing_runtime_bootstrap(
         project_root: &Path,
         handoff_state: ControllerHandoffState,

@@ -419,13 +419,26 @@ install-full: editor-generation-bump
 # version, so this adds no churn to a no-op `make install`.
 # The native cdylib and editor package are separate install surfaces: updating
 # only the former leaves running turns reporting the older package generation.
+# The classic (242-261) and modular (262) packages are disjoint artifacts with
+# one plugin ID. Build both before the all-installed convergence command so each
+# target can select its own range; never let a classic-only build replace 262.
+# Without the modular project, 262 targets fail closed in the Rust selector.
 install-editor-plugins:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
 		python3 scripts/check_plugin_versions.py --bump JetBrains || exit 1; \
 		( cd editors/jetbrains && ./gradlew buildPlugin ) || { \
-			echo "JetBrains plugin build failed. Its Gradle daemon is pinned to Temurin 21 (gradle/gradle-daemon-jvm.properties); check that Gradle can detect or download it. Refusing to install a stale package." >&2; \
+			echo "JetBrains classic plugin build failed. Its Gradle daemon is pinned to Temurin 21 (gradle/gradle-daemon-jvm.properties); check that Gradle can detect or download it. Refusing to install a stale package." >&2; \
 			exit 1; \
 		}; \
+		if [ -f editors/jetbrains-262/gradle.properties ]; then \
+			python3 scripts/check_plugin_versions.py --bump "JetBrains 262" || exit 1; \
+			( cd editors/jetbrains-262 && gradle --no-daemon --console=plain buildPlugin verifySplitArtifact ) || { \
+				echo "JetBrains 262 modular plugin build failed. Refusing to install the classic package into a 262 IDE." >&2; \
+				exit 1; \
+			}; \
+		else \
+			echo "WARNING: this checkout has no editors/jetbrains-262 project; any build-262 IDE target is refused rather than given the classic package." >&2; \
+		fi; \
 		agent-doc plugin install jetbrains --local --all-installed; \
 	else \
 		echo "No existing JetBrains agent-doc package; editor package sync skipped."; \

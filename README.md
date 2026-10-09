@@ -196,6 +196,11 @@ When multiple JetBrains IDE data roots exist, select the target explicitly for a
 agent-doc plugin install jetbrains --plugins-dir ~/.local/share/JetBrains/IdeaIC2026.1/plugins
 ```
 
+The target must remain under a versioned JetBrains IDE data root so agent-doc can
+prove its platform build. Builds 242–261 receive the classic package; build 262
+receives the separately ranged modular package. An unprovable or unsupported
+target is refused instead of guessing an artifact.
+
 Or install from JetBrains Marketplace. Configure an External Tool: Program=`agent-doc`, Args=`run $FilePath$`, Working dir=`$ProjectFileDir$`. Assign a keyboard shortcut.
 
 **VS Code**

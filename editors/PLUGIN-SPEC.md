@@ -29,6 +29,14 @@ Rust binary.
   splices even when the host reports the reload as an incremental range edit.
 - Missing capabilities, an incompatible ABI, an unknown intent, or ambiguous
   structure fails closed without mutating the buffer or disk.
+- A plugin package is selected per target editor build, never per release or
+  per most recent local build. JetBrains publishes two disjoint packages under
+  one plugin ID: builds 242-261 receive `agent-doc-jetbrains-<version>.zip` and
+  build 262 receives `agent-doc-jetbrains-262-<version>.zip`. The installer
+  proves the build from the versioned IDE data directory; an unprovable or
+  unsupported target fails closed with guidance instead of defaulting to the
+  classic package. Update numbers are compared only within one line; a target
+  holding the other line is always replaced with its own line's package.
 
 There is no filesystem delivery queue, live-value projection, receipt file,
 plugin-owner file, queue journal, or file-signal compatibility transport.

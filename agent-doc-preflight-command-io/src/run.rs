@@ -8579,6 +8579,59 @@ mod tests {
     }
 
     #[test]
+    fn preflight_restores_captured_interrupted_empty_response_before_integrity_gate() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ reproduce interrupted response\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content(
+            &doc,
+            "### Re: retained response — gpt-5\n\nRecovered body.\n",
+            baseline,
+        )
+        .unwrap();
+        let interrupted = baseline.replace(
+            "<!-- agent:boundary:latest -->",
+            "### Re: retained response — gpt-5 (HEAD)\n\n<!-- agent:boundary:latest -->",
+        );
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "preflight-empty-response-repair",
+            &interrupted,
+        );
+
+        run_with_options(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let current =
+            resolve_current_preflight_document(&doc, "test_empty_response_repair").unwrap();
+        assert_eq!(current.matches("### Re: retained response").count(), 1);
+        assert!(current.contains("Recovered body."));
+        assert!(current.contains("❯ reproduce interrupted response"));
+        assert!(current.contains("agent:boundary:latest"));
+        agent_doc_lint_io::validate_structure_on_content(&doc, &current).unwrap();
+    }
+
+    #[test]
     fn preflight_collapses_checkpoint_proven_fourfold_tail_without_losing_edits() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

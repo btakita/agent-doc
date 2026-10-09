@@ -4789,6 +4789,46 @@ mod terminal_convergence_tests {
     }
 
     #[test]
+    fn session_check_restores_captured_interrupted_empty_response_before_integrity() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ reproduce interrupted response\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content(
+            &file,
+            "### Re: retained response — gpt-5\n\nRecovered body.\n",
+            baseline,
+        )
+        .unwrap();
+
+        let interrupted = baseline.replace(
+            "<!-- agent:boundary:latest -->",
+            "### Re: retained response — gpt-5 (HEAD)\n\n<!-- agent:boundary:latest -->",
+        );
+        std::fs::write(&file, interrupted).unwrap();
+
+        let read_only = ReadOnlySessionCheckEffects {
+            inner: &RepairOnlyEffects,
+        };
+        assert!(self_heal_response_replay_duplication(&file, &read_only).unwrap());
+
+        let healed = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(healed.matches("### Re: retained response").count(), 1);
+        assert!(healed.contains("Recovered body."));
+        assert!(healed.contains("❯ reproduce interrupted response"));
+        assert!(healed.contains("agent:boundary:latest"));
+        agent_doc_lint_io::validate_structure_on_content(&file, &healed).unwrap();
+    }
+
+    #[test]
     fn session_check_accepts_operator_edit_after_response_replay_repair() {
         struct AdvancedRepairEffects;
 

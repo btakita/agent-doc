@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -602,6 +601,12 @@ Completed on draft PR #222 at exact head `c39de1b045b8b5238f8e5b7fa6870062798d41
 The release path now assigns collision-free, idempotent JetBrains update pairs: classic `0.2.510` for builds `242..261.*`, and modular `0.2.511` for `262..262.*`. `make release-version` refreshes both digests, ordinary plugin bumps allocate above both versions, the packaged classic range is verified, and CI/release assertions reject asset/version collisions. The prior CI inode-observation race now uses a bounded one-second settle while still strictly requiring the installed inode to become fresh.
 
 Verification passed: both JetBrains artifact gates; plugin self/live checks; release-driver checks; one complete `make check`; the inode test 100 times; full sync-io tests; merged-tree sync-io and controller suites; diff check; and coordinator `make install`. Classic `0.2.510` is installed locally; VS Code package sync was skipped because `vsce` is unavailable. Fresh PR CI is pending for the new exact head, and release remains blocked by the existing Remote Dev / merge review gates.
+
+### Re: release + publish — gpt-6.1-sol · 2026-10-09T14:40-04:00
+
+> **Queue prompt:** release + publish
+
+Release preparation is code-complete on draft PR #222 at exact head `c39de1b045b8b5238f8e5b7fa6870062798d4114`, merged with current `main`. Publication was not executed. This closes the free-text queue dispatch by transferring the remaining external/operator conditions to durable review gate `#releasepublishgate`; only after that gate clears may an authorized release and publication run.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -610,14 +615,6 @@ Verification passed: both JetBrains artifact gates; plugin self/live checks; rel
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#singleplugindistribution]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/223~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/224~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/221~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~⏭️ do [#starttools]~~
-- ~~do [#jetbrainsdualrelease]~~
-- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
@@ -628,6 +625,7 @@ Verification passed: both JetBrains artifact gates; plugin self/live checks; rel
 ## Review
 
 <!-- agent:review -->
+- [/] [#releasepublishgate] [operator-verify] Authorize release + publish only after: (1) CI run 37974793628 is green for exact PR #222 head c39de1b04; (2) #gh218remoteproof is resolved; (3) PR #222 is marked ready and merged and GH #221 is closed, resolving #gh221mergeclose; and (4) repository secret HOMEBREW_TAP_TOKEN is provisioned. Only then perform the authorized release + publish and verify delivery.
 - [/] [#gh221mergeclose] [operator-verify] GH #221: keep open until draft PR #222, including modular head 254b75e68, has green CI and merges. The shared/frontend/backend split is code-complete; GH #218 separately retains the real IDEA 2026.2.3 Remote Dev acceptance gate. After #222 merges, close #221 as fixed by #222.
 - [/] [#gh218remoteproof] [operator-verify] GH #218 / draft PR #222: require green CI for head 254b75e68 and real IDEA 2026.2.3 (262) Remote Dev proof with the same modular ZIP installed on backend and Client/Gateway: detached-only isolated terminal; same-document main-wins read-only placeholder and byte-identical main; focus/sync/resize no main mutation; close/rejoin; backend restart/client reconnect before first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Only then mark PR ready, merge, and close #218.
 - [/] [#fixsubagent] Fix in a subagent:

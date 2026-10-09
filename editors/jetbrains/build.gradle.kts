@@ -123,10 +123,7 @@ tasks {
 
     patchPluginXml {
         sinceBuild.set("242")
-        // The 262+ split artifact uses the same plugin ID. Keep the classic
-        // backend-only distribution selectable only where its 242 API and
-        // fail-closed Remote Dev semantics are valid.
-        untilBuild.set("261.*")
+        untilBuild.set(provider { null })
         changeNotes.set("""
             <ul>
                 <li>Initial release</li>

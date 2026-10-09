@@ -4,11 +4,11 @@ This build is the Plugin Model v2 distribution for IntelliJ Platform 2026.2
 (branch/build `262`) and later. It keeps the existing plugin ID
 `com.github.btakita.agent-doc` and plugin version line, but has `since-build="262"`.
 The classic build in `../jetbrains` remains the distribution for 242 through
-261 and its build patches `until-build="261.*"`. The two distributions need
-distinct Marketplace update versions at release time because Marketplace
-update versions are unique; an IDE then selects the newest update compatible
-with its build. This branch intentionally does not bump or publish either
-version.
+261. Because this post-release feature branch is forbidden from bumping the
+classic package generation, its source and open-ended range stay byte-identical.
+Before the two alternatives are published, an authorized release must assign
+distinct update versions and clamp the classic artifact to `until-build="261.*"`
+through Marketplace metadata or its package-generation bump.
 
 The ZIP is one plugin, not a companion plugin. Its `lib/modules` directory
 contains `agent.doc.shared.jar`, `agent.doc.frontend.jar`, and

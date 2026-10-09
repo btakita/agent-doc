@@ -594,7 +594,7 @@ This consumes the duplicate implementation dispatch, but GitHub #221 remains ope
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/223~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/224~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/221
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/221~~ — auto-struck: answered this cycle (#ftstrike)
 - ⏭️ do [#starttools]
 - 🚧 do [#jetbrainsdualrelease]
 - 🚧 release + publish

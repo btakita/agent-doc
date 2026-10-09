@@ -607,6 +607,18 @@ Verification passed: both JetBrains artifact gates; plugin self/live checks; rel
 > **Queue prompt:** release + publish
 
 Release preparation is code-complete on draft PR #222 at exact head `c39de1b045b8b5238f8e5b7fa6870062798d4114`, merged with current `main`. Publication was not executed. This closes the free-text queue dispatch by transferring the remaining external/operator conditions to durable review gate `#releasepublishgate`; only after that gate clears may an authorized release and publication run.
+
+### Re: Preview the 262 Remote Dev acceptance build — gpt-6.1-sol · 2026-10-09 14:43 EDT
+
+> **Chat prompt (#chatprompt):** Can we test the 262 Remote Dev acceptance gate on this machine or can we release and test on the Coder instance?
+
+> **Chat prompt (#chatprompt):** Can we make a preview release or just release and file issues if not working?
+
+This machine cannot complete the exact acceptance gate as currently configured: its installed IntelliJ IDEA is 2026.1.5 / build 261.27258.48, and it has no Coder CLI/configuration or Coder workspace environment. The gate specifically requires a real 2026.2.x / branch-262 backend plus thin client.
+
+I created the safer preview instead of a stable release: [JetBrains 262 modular preview c39de1b](https://github.com/btakita/agent-doc/releases/tag/jetbrains-262-preview-c39de1b). It is a GitHub prerelease targeted at exact PR #222 head `c39de1b045b8b5238f8e5b7fa6870062798d4114` and contains only `agent-doc-jetbrains-262-0.2.511.zip` (SHA-256 `44474f85ab7f3d8ababb0f99feba244986e24c1b663f6d699895aa9e0819b0d9`). Its non-`v*` tag does not trigger the stable CLI/PyPI/Homebrew release workflow.
+
+Use that identical ZIP on both the Coder Remote Dev backend and Client/Gateway, run the recorded acceptance matrix, and file any failures against the preview tag and exact commit. Stable release remains gated; publishing stable first would make rollback and compatibility signaling unnecessarily ambiguous. The review gates now point to the preview and current PR head.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -626,8 +638,8 @@ Release preparation is code-complete on draft PR #222 at exact head `c39de1b045b
 
 <!-- agent:review -->
 - [/] [#releasepublishgate] [operator-verify] Authorize release + publish only after: (1) CI run 37974793628 is green for exact PR #222 head c39de1b04; (2) #gh218remoteproof is resolved; (3) PR #222 is marked ready and merged and GH #221 is closed, resolving #gh221mergeclose; and (4) repository secret HOMEBREW_TAP_TOKEN is provisioned. Only then perform the authorized release + publish and verify delivery.
-- [/] [#gh221mergeclose] [operator-verify] GH #221: keep open until draft PR #222, including modular head 254b75e68, has green CI and merges. The shared/frontend/backend split is code-complete; GH #218 separately retains the real IDEA 2026.2.3 Remote Dev acceptance gate. After #222 merges, close #221 as fixed by #222.
-- [/] [#gh218remoteproof] [operator-verify] GH #218 / draft PR #222: require green CI for head 254b75e68 and real IDEA 2026.2.3 (262) Remote Dev proof with the same modular ZIP installed on backend and Client/Gateway: detached-only isolated terminal; same-document main-wins read-only placeholder and byte-identical main; focus/sync/resize no main mutation; close/rejoin; backend restart/client reconnect before first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Only then mark PR ready, merge, and close #218.
+- [/] [#gh221mergeclose] [operator-verify] GH #221: keep open until draft PR #222 exact head c39de1b045b8b5238f8e5b7fa6870062798d4114 has green CI and merges. The shared/frontend/backend split is code-complete and available as prerelease jetbrains-262-preview-c39de1b; GH #218 separately retains the real IDEA 2026.2.3 Remote Dev acceptance gate. After #222 merges, close #221 as fixed by #222.
+- [/] [#gh218remoteproof] [operator-verify] GH #218 / draft PR #222: require green CI run 37974793628 for exact head c39de1b045b8b5238f8e5b7fa6870062798d4114 and real IDEA 2026.2.3 (262) Remote Dev proof using prerelease jetbrains-262-preview-c39de1b, with the same agent-doc-jetbrains-262-0.2.511.zip installed on backend and Client/Gateway: detached-only isolated terminal; same-document main-wins read-only placeholder and byte-identical main; focus/sync/resize no main mutation; close/rejoin; backend restart/client reconnect before first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Only then mark PR ready, merge, and close #218.
 - [/] [#fixsubagent] Fix in a subagent:
   ```
   • Blocked by hook

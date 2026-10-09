@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -409,6 +408,58 @@ Completed in PR #209, merge `bc48a8543ff8`. Codex Stop continuation now presents
 Completed as agent-doc v0.35.480 at tag/`main` commit `a87ff750f618e`; checks, publication, and installation are green.
 
 Separately, PR #219's detached-surface substrate merged post-release as `566c66922609`. PR #218's full Remote Dev isolation remains open because it still depends on the 262 split-plugin migration; it is not represented here as a completed queue item.
+
+### Re: #221 usability and maintenance consequences — gpt-5 · 2026-10-09T11:16-04:00
+
+> **Queue prompt:**
+>
+> do [#usabilitymaintenancecons]
+
+
+Issue [#221](https://github.com/btakita/agent-doc/issues/221), “JetBrains plugin: split into frontend/backend/shared modules for Split Mode (Remote Dev),” is open and has no comments. The split is a real prerequisite for correct Remote Dev detached-frame support, not merely Gradle cleanup.
+
+The current JetBrains plugin is one classic module: `editors/jetbrains/settings.gradle.kts` declares no subprojects, and `plugin.xml` has classic dependencies rather than modular `<content>` entries. It consequently mixes frontend UI/editor observation with backend project, filesystem, terminal, native-library, CRDT, and agent-doc process work. The decisive limitation is that a Remote Dev backend does not have the client’s `EditorWindow` topology, so backend-only `LayoutChangeDetector` evidence cannot reliably distinguish main-window and detached-frame views before path deduplication.
+
+#### Usability consequences
+
+Benefits:
+
+- A frontend observer can report the real client frame/window topology, enabling correct main-window precedence, detached placeholders, separate terminal views, and fail-closed handling of incomplete evidence.
+- Latency-sensitive observation and presentation can run on the client while project-model, filesystem, terminal, native-library, and binary orchestration remain backend-local.
+- Monolithic IDE users need not lose functionality: JetBrains loads frontend and backend modules together outside Split Mode.
+
+Costs and rough edges:
+
+- Installation becomes two-sided in Remote Dev. Marketplace distribution can place compatible modules on both sides, but local ZIP/custom-repository installs require explicit backend and Client/Gateway handling.
+- One-sided installation, RPC negotiation failure, reconnect, stale generations, or serialization incompatibility must fail closed. That is safer, but users may temporarily see unavailable/pending placeholder states.
+- Splitting modules alone does not make every existing UI surface frontend-native. If actions, status widgets, and notifications stay in the backend module, they retain the backend-rendering latency and lifecycle behavior JetBrains warns about.
+- Support can fragment by IDE line. Draft [PR #222](https://github.com/btakita/agent-doc/pull/222) keeps a classic artifact for 242–261 and clamps the modular artifact to `262.*`, while #221 reports IDEA `263.6259.32`. As drafted, it therefore does not solve the reported environment.
+
+#### Maintenance consequences
+
+Benefits:
+
+- The boundary becomes explicit and testable: serializable DTO/RPC contracts in shared, client observation/presentation in frontend, and project/native/process work in backend.
+- Most existing implementation can initially remain backend-side, limiting logic duplication.
+- Separate classloaders expose accidental cross-side imports earlier and make platform-specific responsibilities easier to audit.
+
+Costs:
+
+- The release matrix expands to classic and modular build stacks, non-overlapping IDE ranges, coordinated versions under one plugin ID, both-side packaging checks, Plugin Verifier, split-mode sandboxes, and real two-process Remote Dev acceptance tests.
+- Shared RPC becomes a compatibility surface. Contract evolution must tolerate frontend/backend skew, reconnects, suspend calls, and serialization changes.
+- Dynamic unload/reload now spans multiple modules and classloaders, compounding the lifecycle/generation cleanup already handled by `PluginLifecycleListener`.
+- PR #222’s reuse approach is pragmatic but brittle: its backend build text-transforms `PluginLifecycleListener.kt` between markers and derives a modular descriptor from classic XML sections. Source-marker or descriptor-layout changes need dedicated regression checks.
+- JetBrains’ modular Plugin Model v2 and RPC APIs are experimental, increasing platform-upgrade churn. The detached-view work also uses internal exact-version APIs because no public API targets a specific detached `EditorWindow`; that requires source fencing, runtime probes, strict build clamps, and per-IDE-line verification.
+
+#### Recommendation
+
+Proceed with the split architecture if detached Remote Dev frames are a product requirement; the backend-only design cannot satisfy that requirement safely. Keep the frontend module narrow, keep a small versioned shared contract, and leave project/native/process orchestration backend-side initially.
+
+Treat dual classic/modular artifacts as a temporary compatibility bridge with an explicit retirement policy. Prefer Marketplace or a managed custom repository, document two-sided local installation, and detect/report one-sided installs clearly.
+
+Do not consider #221 complete based on the current exact-262 draft for the stated 263 environment. Either target and prove 263, or explicitly declare 262 as the supported line and reconcile the issue’s setup. Keep internal UI APIs isolated and version-clamped; broaden a compatibility range only after Plugin Verifier and real backend/Client acceptance both pass.
+
+This cycle was architectural analysis only; no repository implementation or test/build work was required. The exchange remains oversized, but the active queue was not stalled for compaction.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -416,14 +467,12 @@ Separately, PR #219's detached-surface substrate merged post-release as `566c669
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#usabilitymaintenancecons]
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#usabilitymaintenancecons] What are the usability + maintenance consequenes of https://github.com/btakita/agent-doc/issues/221?
 <!-- /agent:backlog -->
 
 ## Review

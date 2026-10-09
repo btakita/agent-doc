@@ -616,6 +616,7 @@ fn ensure_main_unchanged(
 mod tests {
     use super::*;
     use std::path::Path;
+    use std::time::{Duration, Instant};
     use tmux_router::IsolatedTmux;
 
     fn key() -> EditorViewSessionKey {
@@ -769,6 +770,21 @@ mod tests {
         (tmux, request, baseline)
     }
 
+    fn wait_for_window_size(tmux: &IsolatedTmux, window_id: &str, expected: (u32, u32)) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if window_size(tmux, window_id).ok() == Some(expected) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "tmux window {window_id} did not settle at {expected:?}; observed {:?}",
+                window_size(tmux, window_id),
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn isolated_tmux_bind_release_round_trip_preserves_main_snapshot_bytes() {
         let (tmux, mut request, baseline) = fixture("gh218-view-roundtrip");
@@ -818,6 +834,68 @@ mod tests {
             serde_json::to_vec(&after_round_trip).unwrap(),
             "main window, stash membership, current window, active pane, and geometry must be byte-identical"
         );
+    }
+
+    #[test]
+    fn isolated_view_clients_never_contend_with_main_geometry_or_focus_matrix() {
+        for policy in ["latest", "largest", "smallest"] {
+            for aggressive_resize in ["off", "on"] {
+                let socket = format!("gh218-view-geometry-{policy}-{aggressive_resize}");
+                let (tmux, request, _) = fixture(&socket);
+                let bound = reconcile_editor_view_tmux(&tmux, &request).unwrap();
+                let view_session = bound.pane.session_name.clone();
+                let view_window = bound.pane.window_id.clone();
+
+                tmux.raw_cmd(&["set-option", "-t", "main", "status", "off"])
+                    .unwrap();
+                tmux.raw_cmd(&["set-option", "-t", &view_session, "status", "off"])
+                    .unwrap();
+                for session in ["main", view_session.as_str()] {
+                    tmux.raw_cmd(&["set-option", "-t", session, "window-size", policy])
+                        .unwrap();
+                }
+                for window in [request.main_window_id.as_str(), view_window.as_str()] {
+                    tmux.raw_cmd(&[
+                        "set-window-option",
+                        "-t",
+                        window,
+                        "aggressive-resize",
+                        aggressive_resize,
+                    ])
+                    .unwrap();
+                }
+
+                let mut main_client = tmux.attach_control_mode(Some("main")).unwrap();
+                main_client
+                    .send_command("refresh-client -C 240x50")
+                    .unwrap();
+                let mut view_client = tmux.attach_control_mode(Some(&view_session)).unwrap();
+                view_client
+                    .send_command("refresh-client -C 100x30")
+                    .unwrap();
+                wait_for_window_size(&tmux, &request.main_window_id, (240, 50));
+                wait_for_window_size(&tmux, &view_window, (100, 30));
+                let main_before = snapshot_main(&tmux, &request).unwrap();
+
+                view_client
+                    .send_command(&format!("select-window -t {view_session}:view"))
+                    .unwrap();
+                view_client
+                    .send_command(&format!("select-pane -t {}", request.pane_id))
+                    .unwrap();
+                view_client
+                    .send_command("refresh-client -C 120x35")
+                    .unwrap();
+                wait_for_window_size(&tmux, &view_window, (120, 35));
+
+                let main_after = snapshot_main(&tmux, &request).unwrap();
+                assert_eq!(
+                    serde_json::to_vec(&main_before).unwrap(),
+                    serde_json::to_vec(&main_after).unwrap(),
+                    "separate sessions must isolate policy={policy} aggressive-resize={aggressive_resize}",
+                );
+            }
+        }
     }
 
     #[test]

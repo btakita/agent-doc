@@ -99,6 +99,21 @@ already loaded a package generation declaring `require-restart="true"` also
 requires a restart before the dynamic lifecycle can govern later upgrades on a
 compatible build.
 
+Package selection is per target IDE. The classic package
+(`agent-doc-jetbrains-<version>.zip`, `editors/jetbrains`) covers builds
+242-261; the modular package (`agent-doc-jetbrains-262-<version>.zip`,
+`editors/jetbrains-262`) covers exactly 262. `agent-doc plugin install|update
+jetbrains`, the `agent-doc upgrade` installed-plugin reconciliation, and `plugin install jetbrains --local
+--all-installed` derive each target's platform build from its versioned IDE data
+directory (`IntelliJIdea2026.2` -> 262) and select only that range's asset or
+local ZIP. A target whose build cannot be proven, or is outside both ranges, is
+refused with guidance; `--local --all-installed` resolves every target before
+replacing any, so one unprovable target or a missing modular build changes
+nothing. Both archive roots install into the canonical `agent-doc-jetbrains/`
+tree, and a stale `agent-doc-jetbrains-262/` tree is removed so one plugin ID
+never has two on-disk roots. `make install-editor-plugins` builds both packages
+before the all-installed convergence.
+
 Local package convergence compares every ZIP payload byte and relative path
 with the installed plugin tree before replacing it. A byte-identical package is
 a true no-op: the installer leaves the existing files and inodes in place so a

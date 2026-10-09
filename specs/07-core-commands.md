@@ -412,9 +412,14 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 - Supports JetBrains and VS Code.
 - Pulls assets from GitHub Releases, preferring signed assets when available.
   Published asset names are versioned (`agent-doc-jetbrains-0.2.392.zip`), so the
-  signed preference matches on SHAPE — any `<prefix>*-signed.<ext>` — rather than
-  on an exact unversioned filename that no release has ever carried (GH #55).
-  Selection must not depend on the order the API returns assets in.
+  signed preference matches the complete versioned package shape rather than an
+  exact unversioned filename that no release has ever carried (GH #55).
+  Selection must not depend on the order the API returns assets in. JetBrains
+  install/update derives the platform branch from the versioned IDE data root:
+  builds 242–261 select `agent-doc-jetbrains-<version>.zip`, build 262 selects
+  `agent-doc-jetbrains-262-<version>.zip`, and an unprovable or unsupported
+  target fails before any installed tree is replaced. `--local --all-installed`
+  applies the same policy independently to every existing installation.
 - Downloaded editor packages are verified before they are extracted or handed to
   the editor CLI (`#editorpkgdigest`, GH #55). The expected digest comes from the
   release's `EDITOR-PACKAGES.sha256` manifest, and from GitHub's per-asset

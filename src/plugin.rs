@@ -9,7 +9,7 @@
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
-//! - Asset selection: prefers a `-signed.<ext>` variant matched by *shape* (published assets are versioned, so an exact `<prefix>-signed.<ext>` name never occurs), falls back to the first `<prefix>*.<ext>` match. For local JetBrains installs, prefers `-signed.zip` over `.zip`. Local VS Code installs require the VSIX version to match `package.json` exactly so stale artifacts cannot be installed by accident.
+//! - Asset selection matches complete versioned package shapes and prefers a signed variant. JetBrains targets prove their platform build from the versioned IDE data root: 242-261 select `agent-doc-jetbrains-<version>.zip`, exact 262 selects `agent-doc-jetbrains-262-<version>.zip`, and an unprovable/unsupported target fails before replacement. Local installs read the selected package's own `gradle.properties`; VS Code installs require the VSIX version to match `package.json` exactly.
 //! - Downloaded editor packages are verified before installation against the release's `EDITOR-PACKAGES.sha256` manifest, falling back to GitHub's per-asset `digest`. A declared digest that disagrees with the bytes fails closed.
 //!
 //! ## Agentic Contracts
@@ -45,7 +45,7 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::cmp::Ordering as CmpOrdering;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, IsTerminal as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -304,12 +304,10 @@ struct ReleaseAsset<'a> {
 }
 
 fn asset_matches(name: &str, prefix: &str, ext: &str) -> bool {
-    // Match the complete package shape, not a prefix. Once the exact-262 modular
-    // artifact joined releases, `agent-doc-jetbrains` also prefixed
-    // `agent-doc-jetbrains-262-<version>.zip`; prefix-first selection could hand
-    // an exact-262 artifact to a classic 242-261 install. The generic installer
-    // continues to select the classic numeric version shape until it has an
-    // explicit target-IDE compatibility resolver.
+    // Match the complete package shape, not a prefix: `agent-doc-jetbrains`
+    // also prefixes `agent-doc-jetbrains-262-<version>.zip`, and prefix-first
+    // selection could hand the exact-262 artifact to a classic 242-261 install.
+    // Which line a target receives is decided by the target-IDE build resolver.
     packaged_plugin_version(name, &format!("{prefix}-"), &format!(".{ext}")).is_some()
 }
 
@@ -503,9 +501,167 @@ fn release_version(release: &Value) -> &str {
 
 // --- JetBrains ---
 
+use agent_doc_fs::jetbrains_install::is_jetbrains_ide_data_dir;
 pub(crate) use agent_doc_fs::jetbrains_install::jetbrains_plugin_dirs;
 #[cfg(test)]
-use agent_doc_fs::jetbrains_install::{is_jetbrains_ide_data_dir, jetbrains_plugin_dirs_in_roots};
+use agent_doc_fs::jetbrains_install::jetbrains_plugin_dirs_in_roots;
+
+/// The two published JetBrains packages share a plugin ID but have disjoint
+/// compatibility ranges. Artifact selection therefore belongs to the target
+/// IDE, never to release-asset ordering or whichever local ZIP was built last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum JetbrainsPackageRange {
+    Classic242To261,
+    Modular262,
+}
+
+impl JetbrainsPackageRange {
+    fn asset_prefix(self) -> &'static str {
+        match self {
+            Self::Classic242To261 => "agent-doc-jetbrains",
+            Self::Modular262 => "agent-doc-jetbrains-262",
+        }
+    }
+
+    fn project_dir(self) -> &'static str {
+        match self {
+            Self::Classic242To261 => "editors/jetbrains",
+            Self::Modular262 => "editors/jetbrains-262",
+        }
+    }
+
+    fn build_command(self) -> &'static str {
+        match self {
+            Self::Classic242To261 => "./gradlew buildPlugin",
+            Self::Modular262 => "gradle buildPlugin verifySplitArtifact",
+        }
+    }
+
+    fn package_version(self, asset_name: &str) -> Option<String> {
+        packaged_plugin_version(asset_name, &format!("{}-", self.asset_prefix()), ".zip")
+    }
+}
+
+fn jetbrains_platform_build(target_dir: &Path) -> Option<u32> {
+    let label = jetbrains_target_label(target_dir);
+    if !is_jetbrains_ide_data_dir(&label) {
+        return None;
+    }
+    let version_start = label.find(|ch: char| ch.is_ascii_digit())?;
+    let (year, release) = label[version_start..].split_once('.')?;
+    if year.len() != 4 || release.is_empty() || !release.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    let year = year.parse::<u32>().ok()?;
+    let release = release.parse::<u32>().ok()?;
+    if !(2000..=2099).contains(&year) || !(1..=9).contains(&release) {
+        return None;
+    }
+    Some((year - 2000) * 10 + release)
+}
+
+fn jetbrains_package_range(target_dir: &Path) -> Result<JetbrainsPackageRange> {
+    let label = jetbrains_target_label(target_dir);
+    let build = jetbrains_platform_build(target_dir).with_context(|| {
+        format!(
+            "Cannot prove the JetBrains platform build for {}. Expected a versioned IDE data directory such as ~/.local/share/JetBrains/IntelliJIdea2026.2 or its plugins child; refusing to choose between the classic 242-261 and modular 262 artifacts. Re-run with `--plugins-dir <versioned IDE data dir>/plugins`, or install the matching ZIP manually (agent-doc-jetbrains-<version>.zip for 242-261, agent-doc-jetbrains-262-<version>.zip for 262)",
+            target_dir.display()
+        )
+    })?;
+    match build {
+        242..=261 => Ok(JetbrainsPackageRange::Classic242To261),
+        262 => Ok(JetbrainsPackageRange::Modular262),
+        _ => bail!(
+            "JetBrains target {label} uses unsupported platform build {build}; supported artifact ranges are 242-261 (agent-doc-jetbrains-<version>.zip) and 262 (agent-doc-jetbrains-262-<version>.zip). Upgrade agent-doc for newer IDE builds; refusing to install an incompatible package"
+        ),
+    }
+}
+
+/// The exact release asset a target IDE must receive. Both published ZIPs
+/// share one plugin ID, so the target's proven platform build is the only
+/// selector; asset order and signed/unsigned preference never cross ranges.
+fn jetbrains_release_asset_for_target<'a>(
+    release: &'a Value,
+    target_dir: &Path,
+) -> Result<(JetbrainsPackageRange, ReleaseAsset<'a>)> {
+    let package_range = jetbrains_package_range(target_dir)?;
+    let asset = find_asset(release, package_range.asset_prefix(), "zip")?;
+    Ok((package_range, asset))
+}
+
+/// Which compatibility line an installed tree holds, read from its plugin jar:
+/// the classic package ships `agent-doc-jetbrains-<v>.jar`, the modular 262
+/// package ships `agent.doc-<v>.jar` (its module JARs are unversioned).
+fn installed_jetbrains_package(target_dir: &Path) -> Option<(JetbrainsPackageRange, String)> {
+    [JETBRAINS_PLUGIN_DIR, JETBRAINS_MODULAR_PLUGIN_DIR]
+        .into_iter()
+        .filter_map(|plugin_dir| fs::read_dir(target_dir.join(plugin_dir).join("lib")).ok())
+        .flat_map(|entries| entries.flatten())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            [
+                (
+                    JetbrainsPackageRange::Classic242To261,
+                    "agent-doc-jetbrains-",
+                ),
+                (JetbrainsPackageRange::Modular262, "agent.doc-"),
+            ]
+            .into_iter()
+            .find_map(|(range, prefix)| {
+                let version = name.strip_prefix(prefix)?.strip_suffix(".jar")?;
+                let key = numeric_dot_version(version)?;
+                Some((key, range, version.to_string()))
+            })
+        })
+        .max_by(|left, right| left.0.cmp(&right.0))
+        .map(|(_, range, version)| (range, version))
+}
+
+/// What a release reconciliation must do with one target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JetbrainsReleaseDecision {
+    /// The target already holds this compatibility line at or above the asset.
+    Current,
+    /// Install the asset. `cross_line` means the target holds the OTHER
+    /// compatibility line (for example a classic package inside a 262 IDE);
+    /// version numbers across lines are not comparable, so it is replaced
+    /// regardless of which Marketplace update number is higher.
+    Replace { cross_line: bool },
+}
+
+fn jetbrains_release_decision(
+    installed: Option<(JetbrainsPackageRange, &str)>,
+    target_range: JetbrainsPackageRange,
+    available_version: &str,
+) -> Result<JetbrainsReleaseDecision> {
+    let Some((installed_range, installed_version)) = installed else {
+        return Ok(JetbrainsReleaseDecision::Replace { cross_line: false });
+    };
+    if installed_range != target_range {
+        return Ok(JetbrainsReleaseDecision::Replace { cross_line: true });
+    }
+    Ok(
+        match jetbrains_version_cmp(installed_version, available_version)? {
+            CmpOrdering::Less => JetbrainsReleaseDecision::Replace { cross_line: false },
+            CmpOrdering::Equal | CmpOrdering::Greater => JetbrainsReleaseDecision::Current,
+        },
+    )
+}
+
+fn jetbrains_release_decision_for(
+    target_dir: &Path,
+    target_range: JetbrainsPackageRange,
+    available_version: &str,
+) -> Result<JetbrainsReleaseDecision> {
+    let installed = installed_jetbrains_package(target_dir);
+    jetbrains_release_decision(
+        installed
+            .as_ref()
+            .map(|(range, version)| (*range, version.as_str())),
+        target_range,
+        available_version,
+    )
+}
 
 fn choose_plugins_dir_with_interactivity(
     dirs: &[PathBuf],
@@ -560,7 +716,7 @@ fn install_jetbrains_into(
     release: &Value,
     target_dir: &Path,
 ) -> Result<JetbrainsLocalInstallOutcome> {
-    let asset = find_asset(release, "agent-doc-jetbrains", "zip")?;
+    let (package_range, asset) = jetbrains_release_asset_for_target(release, target_dir)?;
     eprintln!("Found asset: {}", asset.name);
     fs::create_dir_all(target_dir).context("Failed to create JetBrains plugins directory")?;
 
@@ -568,7 +724,11 @@ fn install_jetbrains_into(
     verify_editor_package(release, &asset, tmp.path())?;
 
     let expected_version = jetbrains_zip_plugin_version(tmp.path())?;
-    if let Some(installed_version) = installed_jetbrains_plugin_version(target_dir)
+    // The downgrade guard compares versions only within one compatibility
+    // line. A classic package left inside a 262 IDE (or the reverse) is
+    // incompatible whatever its update number, so it is always replaced.
+    if let Some((installed_range, installed_version)) = installed_jetbrains_package(target_dir)
+        && installed_range == package_range
         && jetbrains_version_cmp(&installed_version, &expected_version)? == CmpOrdering::Greater
     {
         eprintln!(
@@ -622,13 +782,12 @@ fn jetbrains_install_success_message(target_dir: &Path) -> Result<String> {
     ))
 }
 
-fn install_jetbrains(
-    release: &Value,
-    plugins_dir: Option<&Path>,
-) -> Result<JetbrainsLocalInstallOutcome> {
+fn install_jetbrains(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalInstallOutcome> {
     let dirs = jetbrains_plugin_dirs();
     let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
-    install_jetbrains_into(release, &target_dir)
+    let package_range = jetbrains_package_range(&target_dir)?;
+    let release = fetch_release_for_asset(package_range.asset_prefix(), "zip")?;
+    install_jetbrains_into(&release, &target_dir)
 }
 
 // --- VS Code ---
@@ -738,13 +897,10 @@ pub fn install(editor: &str) -> Result<()> {
 
 pub fn install_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
     let live_plugin_replaced = match editor {
-        "jetbrains" | "jb" | "idea" => {
-            let release = fetch_release_for_asset("agent-doc-jetbrains", "zip")?;
-            matches!(
-                install_jetbrains(&release, plugins_dir)?,
-                JetbrainsLocalInstallOutcome::HotUpgraded { .. }
-            )
-        }
+        "jetbrains" | "jb" | "idea" => matches!(
+            install_jetbrains(plugins_dir)?,
+            JetbrainsLocalInstallOutcome::HotUpgraded { .. }
+        ),
         "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
             if plugins_dir.is_some() {
                 bail!("--plugins-dir is only supported for JetBrains installs");
@@ -811,7 +967,7 @@ fn find_local_build_dir() -> Result<PathBuf> {
 fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalInstallOutcome> {
     let dirs = jetbrains_plugin_dirs();
     let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
-    let zip_path = local_jetbrains_zip()?;
+    let zip_path = local_jetbrains_zip(&target_dir)?;
     let outcome = install_jetbrains_local_zip_into(&zip_path, &target_dir)?;
     match &outcome {
         JetbrainsLocalInstallOutcome::Installed => {
@@ -823,10 +979,7 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<JetbrainsLocalI
             eprintln!("No JetBrains restart is required.");
         }
         JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
-            eprintln!(
-                "WARNING: {}",
-                restart_required_message(&target_dir, reason)
-            );
+            eprintln!("WARNING: {}", restart_required_message(&target_dir, reason));
         }
         JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
             eprintln!(
@@ -871,13 +1024,17 @@ fn install_jetbrains_local_all_existing() -> Result<usize> {
         );
     }
 
-    let zip_path = local_jetbrains_zip()?;
+    // Resolve every target before replacing any installation. A custom or
+    // future IDE directory whose platform build cannot be proven must not let
+    // an arbitrary classic ZIP overwrite a modular installation.
+    let project_root = find_local_build_dir()?;
+    let targets = resolve_local_jetbrains_targets(&project_root, targets)?;
     let mut installed = 0usize;
     let mut hot_upgraded = 0usize;
     let mut unchanged = 0usize;
     let mut restart_pending = 0usize;
-    for target_dir in &targets {
-        match install_jetbrains_local_zip_into(&zip_path, target_dir)? {
+    for (target_dir, zip_path) in &targets {
+        match install_jetbrains_local_zip_into(zip_path, target_dir)? {
             JetbrainsLocalInstallOutcome::Installed => {
                 installed += 1;
                 eprintln!(
@@ -982,13 +1139,44 @@ fn existing_jetbrains_agent_doc_dirs_in(
         .collect()
 }
 
-fn local_jetbrains_zip() -> Result<PathBuf> {
-    let project_root = find_local_build_dir()?;
-    local_jetbrains_zip_in(&project_root)
+/// Bind every existing installation to the local ZIP of its own compatibility
+/// range BEFORE any tree is replaced. Every unresolvable target is reported
+/// together, and none is installed: a missing 262 build or an unprovable IDE
+/// directory must never fall back to the classic ZIP.
+fn resolve_local_jetbrains_targets(
+    project_root: &Path,
+    targets: Vec<PathBuf>,
+) -> Result<Vec<(PathBuf, PathBuf)>> {
+    let mut resolved = Vec::with_capacity(targets.len());
+    let mut failures = Vec::new();
+    for target in targets {
+        match local_jetbrains_zip_in(project_root, &target) {
+            Ok(zip) => resolved.push((target, zip)),
+            Err(error) => failures.push(format!("  {}: {error:#}", target.display())),
+        }
+    }
+    if !failures.is_empty() {
+        bail!(
+            "Refusing to update any JetBrains installation: {} target(s) have no provable compatible local package (no installation was changed):\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
+    Ok(resolved)
 }
 
-fn jetbrains_plugin_version(project_root: &Path) -> Result<String> {
-    let properties = project_root.join("editors/jetbrains/gradle.properties");
+fn local_jetbrains_zip(target_dir: &Path) -> Result<PathBuf> {
+    let project_root = find_local_build_dir()?;
+    local_jetbrains_zip_in(&project_root, target_dir)
+}
+
+fn jetbrains_plugin_version(
+    project_root: &Path,
+    package_range: JetbrainsPackageRange,
+) -> Result<String> {
+    let properties = project_root
+        .join(package_range.project_dir())
+        .join("gradle.properties");
     let content = fs::read_to_string(&properties)
         .with_context(|| format!("Failed to read {}", properties.display()))?;
     content
@@ -1001,21 +1189,32 @@ fn jetbrains_plugin_version(project_root: &Path) -> Result<String> {
         .with_context(|| format!("Missing pluginVersion in {}", properties.display()))
 }
 
-fn local_jetbrains_zip_in(project_root: &Path) -> Result<PathBuf> {
-    let dist_dir = project_root.join("editors/jetbrains/build/distributions");
-    let version = jetbrains_plugin_version(project_root)?;
-    let signed = dist_dir.join(format!("agent-doc-jetbrains-{version}-signed.zip"));
+fn local_jetbrains_zip_in(project_root: &Path, target_dir: &Path) -> Result<PathBuf> {
+    let package_range = jetbrains_package_range(target_dir)?;
+    let plugin_project = project_root.join(package_range.project_dir());
+    let dist_dir = plugin_project.join("build/distributions");
+    let version = jetbrains_plugin_version(project_root, package_range).with_context(|| {
+        format!(
+            "{} needs the {} package, but this checkout has no buildable {} project; refusing to substitute the other compatibility line",
+            jetbrains_target_label(target_dir),
+            package_range.asset_prefix(),
+            plugin_project.display()
+        )
+    })?;
+    let prefix = package_range.asset_prefix();
+    let signed = dist_dir.join(format!("{prefix}-{version}-signed.zip"));
     if signed.is_file() {
         return Ok(signed);
     }
-    let unsigned = dist_dir.join(format!("agent-doc-jetbrains-{version}.zip"));
+    let unsigned = dist_dir.join(format!("{prefix}-{version}.zip"));
     if unsigned.is_file() {
         return Ok(unsigned);
     }
     bail!(
-        "No JetBrains package matching gradle.properties pluginVersion {version} at {}; run `./gradlew buildPlugin` in {}",
+        "No JetBrains package matching gradle.properties pluginVersion {version} at {}; build the compatibility-ranged artifact in {} (`{}`), or run `make install-editor-plugins`",
         unsigned.display(),
-        project_root.join("editors/jetbrains").display()
+        plugin_project.display(),
+        package_range.build_command()
     )
 }
 
@@ -1024,13 +1223,13 @@ fn local_jetbrains_zip_version(zip_path: &Path) -> Result<String> {
         .file_name()
         .and_then(|name| name.to_str())
         .context("Local JetBrains build has a non-UTF-8 filename")?;
-    let base = name
-        .strip_prefix("agent-doc-jetbrains-")
-        .context("Local JetBrains build has an unexpected filename")?;
-    base.strip_suffix("-signed.zip")
-        .or_else(|| base.strip_suffix(".zip"))
-        .map(str::to_owned)
-        .context("Local JetBrains build has an unexpected filename")
+    [
+        JetbrainsPackageRange::Modular262,
+        JetbrainsPackageRange::Classic242To261,
+    ]
+    .into_iter()
+    .find_map(|range| range.package_version(name))
+    .context("Local JetBrains build has an unexpected filename")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1142,11 +1341,15 @@ fn jetbrains_mapped_jar_proves_load(
     let agent_doc_fs::plugin_jar::MappedPluginJar::Current { path, .. } = mapped else {
         return false;
     };
-    let expected = target_dir
-        .join("agent-doc-jetbrains")
-        .join("lib")
-        .join(format!("agent-doc-jetbrains-{expected_version}.jar"));
-    same_filesystem_path(Path::new(path), &expected)
+    // The classic package ships `agent-doc-jetbrains-<v>.jar`; the modular 262
+    // package ships `agent.doc-<v>.jar`. Both land in the canonical tree.
+    let lib = target_dir.join(JETBRAINS_PLUGIN_DIR).join("lib");
+    [
+        format!("agent-doc-jetbrains-{expected_version}.jar"),
+        format!("agent.doc-{expected_version}.jar"),
+    ]
+    .iter()
+    .any(|jar| same_filesystem_path(Path::new(path), &lib.join(jar)))
 }
 
 /// Poll `pid`'s mapped plugin jar until it proves the expected generation is
@@ -1210,8 +1413,8 @@ fn jetbrains_hot_upgrade_from_statuses(
                 } else {
                     unverified.get_or_insert_with(|| {
                         format!(
-                            "pid {pid}: the upgrader reported `{status_line}` but the IDE was not observed running agent-doc-jetbrains-{expected_version}.jar from {} within {}s",
-                            target_dir.join("agent-doc-jetbrains").display(),
+                            "pid {pid}: the upgrader reported `{status_line}` but the IDE was not observed running the agent-doc {expected_version} plugin jar from {} within {}s",
+                            target_dir.join(JETBRAINS_PLUGIN_DIR).display(),
                             JETBRAINS_LIVE_LOAD_PROOF_TIMEOUT.as_secs()
                         )
                     });
@@ -1365,7 +1568,7 @@ fn extract_jetbrains_upgrade_launcher(zip_path: &Path) -> Result<tempfile::Named
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or_default();
-        if file_name.starts_with("agent-doc-jetbrains-") && file_name.ends_with(".jar") {
+        if jetbrains_plugin_jar_version(file_name).is_some() {
             let mut launcher = tempfile::Builder::new()
                 .prefix("agent-doc-jb-upgrader-")
                 .suffix(".jar")
@@ -1620,11 +1823,8 @@ fn jetbrains_zip_plugin_version(zip_path: &Path) -> Result<String> {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or_default();
-        if let Some(version) = file_name
-            .strip_prefix("agent-doc-jetbrains-")
-            .and_then(|name| name.strip_suffix(".jar"))
-        {
-            return Ok(version.to_string());
+        if let Some(version) = jetbrains_plugin_jar_version(file_name) {
+            return Ok(version);
         }
     }
     bail!("JetBrains package has no versioned agent-doc plugin jar")
@@ -1636,6 +1836,28 @@ fn jetbrains_zip_plugin_version(zip_path: &Path) -> Result<String> {
 /// root (`lib/`) nor a descriptor, so the IDE never loads it.
 const JETBRAINS_INSTALL_WORK_DIR: &str = ".agent-doc-jetbrains-install";
 const JETBRAINS_PLUGIN_DIR: &str = "agent-doc-jetbrains";
+const JETBRAINS_MODULAR_PLUGIN_DIR: &str = "agent-doc-jetbrains-262";
+
+fn jetbrains_plugin_jar_version(file_name: &str) -> Option<String> {
+    ["agent-doc-jetbrains-", "agent.doc-"]
+        .into_iter()
+        .find_map(|prefix| {
+            let version = file_name.strip_prefix(prefix)?.strip_suffix(".jar")?;
+            numeric_dot_version(version).map(|_| version.to_string())
+        })
+}
+
+fn jetbrains_archive_relative(enclosed: &Path) -> Result<PathBuf> {
+    [JETBRAINS_PLUGIN_DIR, JETBRAINS_MODULAR_PLUGIN_DIR]
+        .into_iter()
+        .find_map(|root| enclosed.strip_prefix(root).ok().map(Path::to_path_buf))
+        .with_context(|| {
+            format!(
+                "Unexpected JetBrains package root: {} (expected {JETBRAINS_PLUGIN_DIR}/ or {JETBRAINS_MODULAR_PLUGIN_DIR}/)",
+                enclosed.display()
+            )
+        })
+}
 
 /// Points in [`replace_jetbrains_plugin_tree_with`] where a test can inject a
 /// failure (disk full, permission denied) to prove the old tree survives.
@@ -1731,6 +1953,16 @@ fn replace_jetbrains_plugin_tree_with(
                 .unwrap_or_else(|| "; the previous plugin was restored".to_string())
         )));
     }
+    let legacy_modular = target_dir.join(JETBRAINS_MODULAR_PLUGIN_DIR);
+    if legacy_modular.exists() {
+        fs::remove_dir_all(&legacy_modular).with_context(|| {
+            format!(
+                "Installed the selected package at {}, but failed to remove the obsolete modular plugin tree {}; remove it before restarting the IDE to avoid duplicate plugin IDs",
+                dest.display(),
+                legacy_modular.display()
+            )
+        })?;
+    }
     let _ = fs::remove_dir_all(&staging);
     if had_old && let Err(error) = fs::remove_dir_all(&backup) {
         eprintln!(
@@ -1806,13 +2038,11 @@ fn extract_jetbrains_package_into(
         let enclosed = entry
             .enclosed_name()
             .with_context(|| format!("Unsafe path in JetBrains package: {}", entry.name()))?;
-        if !enclosed.starts_with(JETBRAINS_PLUGIN_DIR) {
-            bail!(
-                "Unexpected JetBrains package root: {} (expected {JETBRAINS_PLUGIN_DIR}/)",
-                enclosed.display()
-            );
-        }
-        let out_path = staging.join(&enclosed);
+        let relative = jetbrains_archive_relative(&enclosed)?;
+        // Normalize both published archive roots to the established on-disk
+        // plugin directory. This also converges preview/manual modular installs
+        // without teaching every activation/staging path a second live root.
+        let out_path = staging.join(JETBRAINS_PLUGIN_DIR).join(relative);
         if entry.is_dir() {
             fs::create_dir_all(&out_path)
                 .with_context(|| format!("Failed to create {}", out_path.display()))?;
@@ -1859,7 +2089,7 @@ fn verify_staged_jetbrains_tree(zip_path: &Path, staged_tree: &Path) -> Result<(
         let enclosed = entry
             .enclosed_name()
             .with_context(|| format!("Unsafe path in JetBrains package: {}", entry.name()))?;
-        let relative = enclosed.strip_prefix(JETBRAINS_PLUGIN_DIR)?.to_path_buf();
+        let relative = jetbrains_archive_relative(&enclosed)?;
         let staged_len = fs::metadata(staged_tree.join(&relative))
             .map(|metadata| metadata.len())
             .with_context(|| format!("Staged plugin is missing {}", relative.display()))?;
@@ -1877,11 +2107,11 @@ fn verify_staged_jetbrains_tree(zip_path: &Path, staged_tree: &Path) -> Result<(
             && relative
                 .file_name()
                 .and_then(|name| name.to_str())
-                .and_then(|name| name.strip_prefix("agent-doc-jetbrains-"))
-                .is_some_and(|rest| rest.ends_with(".jar"))
+                .and_then(jetbrains_plugin_jar_version)
+                .is_some()
     });
     if !has_plugin_jar {
-        bail!("Staged plugin has no lib/agent-doc-jetbrains-<version>.jar");
+        bail!("Staged plugin has no versioned agent-doc plugin jar");
     }
     let mut staged = BTreeSet::new();
     collect_installed_plugin_files(staged_tree, staged_tree, &mut staged)?;
@@ -2332,7 +2562,7 @@ fn collect_installed_plugin_files(
 
 fn jetbrains_local_zip_matches_installation(zip_path: &Path, target_dir: &Path) -> Result<bool> {
     let installed_root = target_dir.join("agent-doc-jetbrains");
-    if !installed_root.is_dir() {
+    if !installed_root.is_dir() || target_dir.join(JETBRAINS_MODULAR_PLUGIN_DIR).exists() {
         return Ok(false);
     }
 
@@ -2347,10 +2577,7 @@ fn jetbrains_local_zip_matches_installation(zip_path: &Path, target_dir: &Path) 
         let enclosed = entry
             .enclosed_name()
             .with_context(|| format!("Unsafe path in JetBrains package: {}", entry.name()))?;
-        let relative = enclosed
-            .strip_prefix("agent-doc-jetbrains")
-            .with_context(|| format!("Unexpected JetBrains package root: {}", enclosed.display()))?
-            .to_path_buf();
+        let relative = jetbrains_archive_relative(&enclosed)?;
         let installed = installed_root.join(&relative);
         let mut packaged = Vec::new();
         entry.read_to_end(&mut packaged)?;
@@ -2463,17 +2690,15 @@ fn find_local_vscode_vsix(dist_dir: &std::path::Path) -> Result<PathBuf> {
 }
 
 fn installed_jetbrains_plugin_version(target_dir: &std::path::Path) -> Option<String> {
-    let lib_dir = target_dir.join("agent-doc-jetbrains/lib");
-    fs::read_dir(lib_dir)
-        .ok()?
-        .flatten()
+    [JETBRAINS_PLUGIN_DIR, JETBRAINS_MODULAR_PLUGIN_DIR]
+        .into_iter()
+        .filter_map(|plugin_dir| fs::read_dir(target_dir.join(plugin_dir).join("lib")).ok())
+        .flat_map(|entries| entries.flatten())
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let version = name
-                .strip_prefix("agent-doc-jetbrains-")?
-                .strip_suffix(".jar")?;
-            let key = numeric_dot_version(version)?;
-            Some((key, version.to_owned()))
+            let version = jetbrains_plugin_jar_version(&name)?;
+            let key = numeric_dot_version(&version)?;
+            Some((key, version))
         })
         .max_by(|left, right| left.0.cmp(&right.0))
         .map(|(_, version)| version)
@@ -2563,14 +2788,26 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
         "jetbrains" | "jb" | "idea" => {
             let dirs = jetbrains_plugin_dirs();
             let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
-            let release = fetch_release_for_asset("agent-doc-jetbrains", "zip")?;
-            let asset = find_asset(&release, "agent-doc-jetbrains", "zip")?;
-            let version = packaged_plugin_version(asset.name, "agent-doc-jetbrains-", ".zip")
+            let package_range = jetbrains_package_range(&target_dir)?;
+            let release = fetch_release_for_asset(package_range.asset_prefix(), "zip")?;
+            let (_, asset) = jetbrains_release_asset_for_target(&release, &target_dir)?;
+            let version = package_range
+                .package_version(asset.name)
                 .context("JetBrains release asset has no valid package version")?;
-            if installed_jetbrains_plugin_version(&target_dir).as_deref() == Some(version.as_str())
-            {
-                eprintln!("JetBrains plugin is already at v{version}.");
-                return Ok(());
+            match jetbrains_release_decision_for(&target_dir, package_range, &version)? {
+                JetbrainsReleaseDecision::Current => {
+                    eprintln!(
+                        "JetBrains plugin ({}) is already at or above v{version}.",
+                        package_range.asset_prefix()
+                    );
+                    return Ok(());
+                }
+                JetbrainsReleaseDecision::Replace { cross_line: true } => eprintln!(
+                    "{} holds the other JetBrains compatibility line; replacing it with {}.",
+                    jetbrains_target_label(&target_dir),
+                    asset.name
+                ),
+                JetbrainsReleaseDecision::Replace { cross_line: false } => {}
             }
             matches!(
                 install_jetbrains_into(&release, &target_dir)?,
@@ -2800,6 +3037,81 @@ fn jetbrains_target_label(target_dir: &Path) -> String {
         .unwrap_or_else(|| target_dir.display().to_string())
 }
 
+/// One JetBrains target in a release reconciliation, already bound to the
+/// exact asset of its own compatibility range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct JetbrainsReleasePlanEntry {
+    target: PathBuf,
+    range: JetbrainsPackageRange,
+    asset_name: String,
+    version: String,
+    decision: JetbrainsReleaseDecision,
+}
+
+#[derive(Debug, Default)]
+struct JetbrainsReleasePlan {
+    releases: BTreeMap<JetbrainsPackageRange, Value>,
+    entries: Vec<JetbrainsReleasePlanEntry>,
+    errors: Vec<String>,
+}
+
+/// Bind every installed JetBrains target to its own range's release asset.
+/// Each range fetches its own release (the newest one that carries that
+/// range's asset), so a 262 target never waits on, or receives, the classic
+/// line and vice versa. A target whose platform build cannot be proven is
+/// reported as an error and left untouched; the others still converge.
+fn plan_jetbrains_release_reconcile(
+    targets: Vec<PathBuf>,
+    mut fetch_release: impl FnMut(&str) -> Result<Value>,
+) -> JetbrainsReleasePlan {
+    let mut plan = JetbrainsReleasePlan::default();
+    let mut targets_by_range = BTreeMap::<JetbrainsPackageRange, Vec<PathBuf>>::new();
+    for target in targets {
+        match jetbrains_package_range(&target) {
+            Ok(range) => targets_by_range.entry(range).or_default().push(target),
+            Err(error) => plan.errors.push(format!("{}: {error:#}", target.display())),
+        }
+    }
+    for (range, targets) in targets_by_range {
+        let release = match fetch_release(range.asset_prefix()) {
+            Ok(release) => release,
+            Err(error) => {
+                plan.errors
+                    .push(format!("JetBrains {}: {error:#}", range.asset_prefix()));
+                continue;
+            }
+        };
+        let asset = match find_asset(&release, range.asset_prefix(), "zip").and_then(|asset| {
+            let version = range
+                .package_version(asset.name)
+                .context("JetBrains release asset has no valid package version")?;
+            Ok((asset.name.to_string(), version))
+        }) {
+            Ok(asset) => asset,
+            Err(error) => {
+                plan.errors
+                    .push(format!("JetBrains {}: {error:#}", range.asset_prefix()));
+                continue;
+            }
+        };
+        let (asset_name, version) = asset;
+        for target in targets {
+            match jetbrains_release_decision_for(&target, range, &version) {
+                Ok(decision) => plan.entries.push(JetbrainsReleasePlanEntry {
+                    target,
+                    range,
+                    asset_name: asset_name.clone(),
+                    version: version.clone(),
+                    decision,
+                }),
+                Err(error) => plan.errors.push(format!("{}: {error:#}", target.display())),
+            }
+        }
+        plan.releases.insert(range, release);
+    }
+    plan
+}
+
 /// Update every already-installed editor plugin without installing into a new IDE.
 ///
 /// Used by the release watcher. Each editor family is attempted independently so
@@ -2813,49 +3125,28 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
     }
 
     if !jetbrains_targets.is_empty() {
-        match fetch_release_for_asset("agent-doc-jetbrains", "zip") {
-            Ok(release) => {
-                match find_asset(&release, "agent-doc-jetbrains", "zip").and_then(|asset| {
-                    packaged_plugin_version(asset.name, "agent-doc-jetbrains-", ".zip")
-                        .context("JetBrains release asset has no valid package version")
-                }) {
-                    Ok(version) => {
-                        for target in jetbrains_targets {
-                            let mut record = |outcome| {
-                                report.targets.push(PluginTargetReport {
-                                    family: PluginEditorFamily::JetBrains,
-                                    label: jetbrains_target_label(&target),
-                                    version: version.clone(),
-                                    outcome,
-                                })
-                            };
-                            if let Some(installed) = installed_jetbrains_plugin_version(&target) {
-                                match jetbrains_version_cmp(&installed, &version) {
-                                    Ok(CmpOrdering::Equal | CmpOrdering::Greater) => {
-                                        record(PluginTargetOutcome::Unchanged);
-                                        continue;
-                                    }
-                                    Ok(CmpOrdering::Less) => {}
-                                    Err(error) => {
-                                        errors.push(format!("{}: {error:#}", target.display()));
-                                        continue;
-                                    }
-                                }
-                            }
-                            match install_jetbrains_into(&release, &target) {
-                                Ok(outcome) => {
-                                    record(PluginTargetOutcome::from_jetbrains(&outcome))
-                                }
-                                Err(error) => {
-                                    errors.push(format!("{}: {error:#}", target.display()))
-                                }
-                            }
-                        }
-                    }
-                    Err(error) => errors.push(format!("JetBrains: {error:#}")),
-                }
+        let plan = plan_jetbrains_release_reconcile(jetbrains_targets, |prefix| {
+            fetch_release_for_asset(prefix, "zip")
+        });
+        errors.extend(plan.errors);
+        for entry in plan.entries {
+            let mut record = |outcome| {
+                report.targets.push(PluginTargetReport {
+                    family: PluginEditorFamily::JetBrains,
+                    label: jetbrains_target_label(&entry.target),
+                    version: entry.version.clone(),
+                    outcome,
+                })
+            };
+            if entry.decision == JetbrainsReleaseDecision::Current {
+                record(PluginTargetOutcome::Unchanged);
+                continue;
             }
-            Err(error) => errors.push(format!("JetBrains: {error:#}")),
+            let release = &plan.releases[&entry.range];
+            match install_jetbrains_into(release, &entry.target) {
+                Ok(outcome) => record(PluginTargetOutcome::from_jetbrains(&outcome)),
+                Err(error) => errors.push(format!("{}: {error:#}", entry.target.display())),
+            }
         }
     }
 
@@ -2928,18 +3219,19 @@ mod tests {
         parse_asset_digest, verify_editor_package,
     };
     use super::{
-        JetbrainsLocalInstallOutcome, RELEASE_SEARCH_MAX_PAGES, RELEASES_PER_PAGE,
-        choose_plugins_dir_with_interactivity, ensure_github_api_success,
+        JetbrainsLocalInstallOutcome, JetbrainsPackageRange, RELEASE_SEARCH_MAX_PAGES,
+        RELEASES_PER_PAGE, choose_plugins_dir_with_interactivity, ensure_github_api_success,
         existing_jetbrains_agent_doc_dirs, find_asset, find_best_local_zip, find_local_vscode_vsix,
         find_local_zip, find_release_with_asset, find_release_with_asset_at_or_below,
         github_get_request, github_token_from, has_asset, install_jetbrains_local_zip_into,
         installed_jetbrains_plugin_version, is_jetbrains_ide_data_dir,
         jetbrains_ide_pids_from_jcmd, jetbrains_install_success_message,
-        jetbrains_local_zip_matches_installation, jetbrains_plugin_dirs_in_roots,
+        jetbrains_local_zip_matches_installation, jetbrains_package_range,
+        jetbrains_platform_build, jetbrains_plugin_dirs_in_roots,
         jetbrains_upgrade_launcher_has_main_manifest, jetbrains_upgrade_reattach_warning,
         jetbrains_version_cmp, local_jetbrains_zip_in, local_jetbrains_zip_version,
-        packaged_plugin_version, release_version, releases_page_url, verify_local_install_version,
-        vscode_extension_version_from_output,
+        packaged_plugin_version, release_version, releases_page_url, replace_jetbrains_plugin_tree,
+        verify_local_install_version, vscode_extension_version_from_output,
     };
     use super::{install_jetbrains_package_bytes, java_candidates_for_ide, resolve_java_for_ide};
     use serde_json::json;
@@ -2965,6 +3257,27 @@ mod tests {
             .start_file("agent-doc-jetbrains/lib/dependency.jar", options)
             .unwrap();
         archive.write_all(b"dependency").unwrap();
+        archive.finish().unwrap();
+    }
+
+    fn write_test_modular_jetbrains_zip(path: &std::path::Path, version: &str, plugin: &[u8]) {
+        let file = fs::File::create(path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        archive
+            .start_file(
+                format!("agent-doc-jetbrains-262/lib/agent.doc-{version}.jar"),
+                options,
+            )
+            .unwrap();
+        archive.write_all(plugin).unwrap();
+        archive
+            .start_file(
+                "agent-doc-jetbrains-262/lib/modules/agent.doc.backend.jar",
+                options,
+            )
+            .unwrap();
+        archive.write_all(b"backend").unwrap();
         archive.finish().unwrap();
     }
 
@@ -3325,6 +3638,36 @@ mod tests {
     }
 
     #[test]
+    fn jetbrains_asset_selection_keeps_classic_and_modular_ranges_disjoint() {
+        let modular = json!({
+            "name": "agent-doc-jetbrains-262-0.2.511.zip",
+            "browser_download_url": "https://example.com/modular.zip"
+        });
+        let classic = json!({
+            "name": "agent-doc-jetbrains-0.2.510.zip",
+            "browser_download_url": "https://example.com/classic.zip"
+        });
+        for assets in [
+            json!([modular.clone(), classic.clone()]),
+            json!([classic.clone(), modular.clone()]),
+        ] {
+            let release = json!({"assets": assets});
+            assert_eq!(
+                find_asset(&release, "agent-doc-jetbrains", "zip")
+                    .unwrap()
+                    .name,
+                "agent-doc-jetbrains-0.2.510.zip"
+            );
+            assert_eq!(
+                find_asset(&release, "agent-doc-jetbrains-262", "zip")
+                    .unwrap()
+                    .name,
+                "agent-doc-jetbrains-262-0.2.511.zip"
+            );
+        }
+    }
+
+    #[test]
     fn editor_package_manifest_lookup_matches_sha256sum_output() {
         let manifest = "\
 11112222333344445555666677778888999900001111222233334444555566ab  agent-doc-0.2.71.vsix
@@ -3531,24 +3874,419 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     }
 
     #[test]
-    fn local_jetbrains_zip_requires_gradle_properties_version() {
+    fn jetbrains_target_build_selects_only_its_compatibility_range() {
+        let classic = PathBuf::from("/tmp/JetBrains/IntelliJIdea2026.1/plugins");
+        let modular = PathBuf::from("/tmp/JetBrains/IntelliJIdea2026.2/plugins");
+        assert_eq!(jetbrains_platform_build(&classic), Some(261));
+        assert_eq!(jetbrains_platform_build(&modular), Some(262));
+        assert_eq!(
+            jetbrains_package_range(&classic).unwrap(),
+            JetbrainsPackageRange::Classic242To261
+        );
+        assert_eq!(
+            jetbrains_package_range(&modular).unwrap(),
+            JetbrainsPackageRange::Modular262
+        );
+
+        let unknown = PathBuf::from("/opt/jetbrains/plugins");
+        let error = jetbrains_package_range(&unknown).unwrap_err().to_string();
+        assert!(error.contains("Cannot prove the JetBrains platform build"));
+
+        let future = PathBuf::from("/tmp/JetBrains/IntelliJIdea2026.3/plugins");
+        let error = jetbrains_package_range(&future).unwrap_err().to_string();
+        assert!(error.contains("unsupported platform build 263"));
+    }
+
+    #[test]
+    fn local_jetbrains_zip_requires_target_ranged_gradle_properties_version() {
         let tmp = TempDir::new().unwrap();
         let jetbrains = tmp.path().join("editors/jetbrains");
-        let dist = jetbrains.join("build/distributions");
-        fs::create_dir_all(&dist).unwrap();
+        let classic_dist = jetbrains.join("build/distributions");
+        let modular = tmp.path().join("editors/jetbrains-262");
+        let modular_dist = modular.join("build/distributions");
+        fs::create_dir_all(&classic_dist).unwrap();
+        fs::create_dir_all(&modular_dist).unwrap();
         fs::write(
             jetbrains.join("gradle.properties"),
             "pluginGroup = example.agentdoc\npluginName = agent-doc-jetbrains\npluginVersion = 0.2.91\n",
         )
         .unwrap();
-        fs::write(dist.join("agent-doc-jetbrains-0.2.90.zip"), b"stale").unwrap();
+        fs::write(
+            modular.join("gradle.properties"),
+            "pluginGroup = example.agentdoc\npluginName = agent-doc-jetbrains\npluginVersion = 0.2.92\n",
+        )
+        .unwrap();
+        fs::write(
+            classic_dist.join("agent-doc-jetbrains-0.2.90.zip"),
+            b"stale",
+        )
+        .unwrap();
+        fs::write(
+            modular_dist.join("agent-doc-jetbrains-262-0.2.91.zip"),
+            b"stale",
+        )
+        .unwrap();
 
-        let error = local_jetbrains_zip_in(tmp.path()).unwrap_err().to_string();
+        let classic_target = Path::new("/tmp/JetBrains/IntelliJIdea2026.1/plugins");
+        let modular_target = Path::new("/tmp/JetBrains/IntelliJIdea2026.2/plugins");
+
+        let error = local_jetbrains_zip_in(tmp.path(), classic_target)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("pluginVersion 0.2.91"));
+        let error = local_jetbrains_zip_in(tmp.path(), modular_target)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("pluginVersion 0.2.92"));
 
-        let current = dist.join("agent-doc-jetbrains-0.2.91.zip");
-        fs::write(&current, b"current").unwrap();
-        assert_eq!(local_jetbrains_zip_in(tmp.path()).unwrap(), current);
+        let classic = classic_dist.join("agent-doc-jetbrains-0.2.91.zip");
+        let modular = modular_dist.join("agent-doc-jetbrains-262-0.2.92.zip");
+        fs::write(&classic, b"classic").unwrap();
+        fs::write(&modular, b"modular").unwrap();
+        assert_eq!(
+            local_jetbrains_zip_in(tmp.path(), classic_target).unwrap(),
+            classic
+        );
+        assert_eq!(
+            local_jetbrains_zip_in(tmp.path(), modular_target).unwrap(),
+            modular
+        );
+    }
+
+    fn dual_range_release() -> serde_json::Value {
+        // Deliberately interleaved and including signed variants: selection
+        // must depend on the target's range, never on API order.
+        json!({
+            "tag_name": "v0.35.481",
+            "assets": [
+                {"name": "agent-doc-jetbrains-262-0.2.511.zip", "browser_download_url": "https://example.invalid/m.zip"},
+                {"name": "agent-doc-jetbrains-0.2.510.zip", "browser_download_url": "https://example.invalid/c.zip"},
+                {"name": "agent-doc-jetbrains-262-0.2.511-signed.zip", "browser_download_url": "https://example.invalid/ms.zip"},
+                {"name": "agent-doc-jetbrains-0.2.510-signed.zip", "browser_download_url": "https://example.invalid/cs.zip"},
+            ],
+        })
+    }
+
+    fn install_test_jar(plugins: &Path, jar: &str) {
+        let lib = plugins.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join(jar), b"installed").unwrap();
+    }
+
+    #[test]
+    fn mixed_261_and_262_targets_choose_distinct_exact_release_assets() {
+        let release = dual_range_release();
+        let classic = Path::new("/home/u/.local/share/JetBrains/IntelliJIdea2026.1/plugins");
+        let modular = Path::new("/home/u/.local/share/JetBrains/IntelliJIdea2026.2/plugins");
+        let oldest = Path::new("/home/u/.local/share/JetBrains/PyCharm2024.2");
+
+        let (range, asset) = super::jetbrains_release_asset_for_target(&release, classic).unwrap();
+        assert_eq!(range, JetbrainsPackageRange::Classic242To261);
+        assert_eq!(asset.name, "agent-doc-jetbrains-0.2.510-signed.zip");
+        let (range, asset) = super::jetbrains_release_asset_for_target(&release, modular).unwrap();
+        assert_eq!(range, JetbrainsPackageRange::Modular262);
+        assert_eq!(asset.name, "agent-doc-jetbrains-262-0.2.511-signed.zip");
+        let (range, asset) = super::jetbrains_release_asset_for_target(&release, oldest).unwrap();
+        assert_eq!(range, JetbrainsPackageRange::Classic242To261);
+        assert_eq!(asset.name, "agent-doc-jetbrains-0.2.510-signed.zip");
+
+        // A release that carries only the classic line must not satisfy a 262
+        // target, and vice versa.
+        let classic_only = json!({"assets": [
+            {"name": "agent-doc-jetbrains-0.2.510.zip", "browser_download_url": "https://example.invalid/c.zip"},
+        ]});
+        assert!(super::jetbrains_release_asset_for_target(&classic_only, modular).is_err());
+        let modular_only = json!({"assets": [
+            {"name": "agent-doc-jetbrains-262-0.2.511.zip", "browser_download_url": "https://example.invalid/m.zip"},
+        ]});
+        assert!(super::jetbrains_release_asset_for_target(&modular_only, classic).is_err());
+    }
+
+    #[test]
+    fn update_all_plan_preserves_each_compatible_line_and_fails_closed_on_unknown() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("JetBrains");
+        let classic_current = root.join("IntelliJIdea2026.1/plugins");
+        install_test_jar(&classic_current, "agent-doc-jetbrains-0.2.510.jar");
+        let modular_current = root.join("RustRover2026.2/plugins");
+        install_test_jar(&modular_current, "agent.doc-0.2.511.jar");
+        let modular_stale = root.join("PyCharm2026.2/plugins");
+        install_test_jar(&modular_stale, "agent.doc-0.2.509.jar");
+        // A classic package wrongly left in a 262 IDE carries a HIGHER update
+        // number than the modular asset; it must still be replaced.
+        let classic_in_262 = root.join("GoLand2026.2/plugins");
+        install_test_jar(&classic_in_262, "agent-doc-jetbrains-0.2.600.jar");
+        // And the reverse: a modular package inside a 261 IDE.
+        let modular_in_261 = root.join("CLion2026.1/plugins");
+        install_test_jar(&modular_in_261, "agent.doc-0.2.700.jar");
+        let unknown = tmp.path().join("custom-ide/plugins");
+        install_test_jar(&unknown, "agent-doc-jetbrains-0.2.400.jar");
+
+        let mut fetched = Vec::new();
+        let plan = super::plan_jetbrains_release_reconcile(
+            vec![
+                classic_current.clone(),
+                modular_current.clone(),
+                modular_stale.clone(),
+                classic_in_262.clone(),
+                modular_in_261.clone(),
+                unknown.clone(),
+            ],
+            |prefix| {
+                fetched.push(prefix.to_string());
+                Ok(dual_range_release())
+            },
+        );
+        fetched.sort();
+        assert_eq!(fetched, ["agent-doc-jetbrains", "agent-doc-jetbrains-262"]);
+
+        let decision = |target: &Path| {
+            let entry = plan
+                .entries
+                .iter()
+                .find(|entry| entry.target == target)
+                .unwrap_or_else(|| panic!("no plan entry for {}", target.display()));
+            (
+                entry.asset_name.clone(),
+                entry.version.clone(),
+                entry.decision,
+            )
+        };
+        use super::JetbrainsReleaseDecision::{Current, Replace};
+        let classic_asset = "agent-doc-jetbrains-0.2.510-signed.zip".to_string();
+        let modular_asset = "agent-doc-jetbrains-262-0.2.511-signed.zip".to_string();
+        assert_eq!(
+            decision(&classic_current),
+            (classic_asset.clone(), "0.2.510".into(), Current)
+        );
+        assert_eq!(
+            decision(&modular_current),
+            (modular_asset.clone(), "0.2.511".into(), Current)
+        );
+        assert_eq!(
+            decision(&modular_stale),
+            (
+                modular_asset.clone(),
+                "0.2.511".into(),
+                Replace { cross_line: false }
+            )
+        );
+        assert_eq!(
+            decision(&classic_in_262),
+            (
+                modular_asset,
+                "0.2.511".into(),
+                Replace { cross_line: true }
+            )
+        );
+        assert_eq!(
+            decision(&modular_in_261),
+            (
+                classic_asset,
+                "0.2.510".into(),
+                Replace { cross_line: true }
+            )
+        );
+
+        assert!(plan.entries.iter().all(|entry| entry.target != unknown));
+        assert_eq!(plan.errors.len(), 1, "{:?}", plan.errors);
+        assert!(plan.errors[0].contains("Cannot prove the JetBrains platform build"));
+        assert!(plan.errors[0].contains("--plugins-dir"));
+        assert_eq!(plan.releases.len(), 2);
+    }
+
+    #[test]
+    fn update_all_plan_reports_a_missing_range_release_without_crossing_lines() {
+        let tmp = TempDir::new().unwrap();
+        let classic = tmp.path().join("IntelliJIdea2026.1/plugins");
+        let modular = tmp.path().join("IntelliJIdea2026.2/plugins");
+        install_test_jar(&classic, "agent-doc-jetbrains-0.2.500.jar");
+        install_test_jar(&modular, "agent.doc-0.2.501.jar");
+        let plan = super::plan_jetbrains_release_reconcile(
+            vec![classic.clone(), modular.clone()],
+            |prefix| {
+                if prefix == "agent-doc-jetbrains-262" {
+                    anyhow::bail!("no release carries {prefix}")
+                }
+                Ok(json!({"assets": [
+                    {"name": "agent-doc-jetbrains-0.2.510.zip", "browser_download_url": "https://example.invalid/c.zip"},
+                    {"name": "agent-doc-jetbrains-262-0.2.511.zip", "browser_download_url": "https://example.invalid/m.zip"},
+                ]}))
+            },
+        );
+        assert_eq!(plan.entries.len(), 1);
+        assert_eq!(plan.entries[0].target, classic);
+        assert_eq!(
+            plan.entries[0].asset_name,
+            "agent-doc-jetbrains-0.2.510.zip"
+        );
+        assert_eq!(plan.errors.len(), 1);
+        assert!(plan.errors[0].contains("agent-doc-jetbrains-262"));
+    }
+
+    fn write_local_dual_build(project: &Path, classic: &str, modular: &str) {
+        for (dir, version) in [
+            ("editors/jetbrains", classic),
+            ("editors/jetbrains-262", modular),
+        ] {
+            let dist = project.join(dir).join("build/distributions");
+            fs::create_dir_all(&dist).unwrap();
+            fs::write(
+                project.join(dir).join("gradle.properties"),
+                format!("pluginVersion = {version}\n"),
+            )
+            .unwrap();
+        }
+        write_test_jetbrains_zip(
+            &project.join(format!(
+                "editors/jetbrains/build/distributions/agent-doc-jetbrains-{classic}.zip"
+            )),
+            classic,
+            b"classic",
+        );
+        write_test_modular_jetbrains_zip(
+            &project.join(format!(
+                "editors/jetbrains-262/build/distributions/agent-doc-jetbrains-262-{modular}.zip"
+            )),
+            modular,
+            b"modular",
+        );
+    }
+
+    #[test]
+    fn local_all_installs_each_target_from_its_own_compatible_package() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path().join("checkout");
+        write_local_dual_build(&project, "0.2.510", "0.2.511");
+        let root = tmp.path().join("JetBrains");
+        let classic = root.join("IntelliJIdea2026.1/plugins");
+        install_test_jar(&classic, "agent-doc-jetbrains-0.2.500.jar");
+        let modular = root.join("IntelliJIdea2026.2/plugins");
+        install_test_jar(&modular, "agent.doc-0.2.501.jar");
+        // A 262 IDE holding a newer-numbered classic package must still be
+        // converged to the modular line, never kept or refreshed as classic.
+        let classic_in_262 = root.join("WebStorm2026.2/plugins");
+        install_test_jar(&classic_in_262, "agent-doc-jetbrains-0.2.600.jar");
+
+        let resolved = super::resolve_local_jetbrains_targets(
+            &project,
+            vec![classic.clone(), modular.clone(), classic_in_262.clone()],
+        )
+        .unwrap();
+        let zip_name = |target: &Path| {
+            resolved
+                .iter()
+                .find(|(t, _)| t == target)
+                .unwrap()
+                .1
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        };
+        assert_eq!(zip_name(&classic), "agent-doc-jetbrains-0.2.510.zip");
+        assert_eq!(zip_name(&modular), "agent-doc-jetbrains-262-0.2.511.zip");
+        assert_eq!(
+            zip_name(&classic_in_262),
+            "agent-doc-jetbrains-262-0.2.511.zip"
+        );
+
+        for (target, zip) in &resolved {
+            install_jetbrains_local_zip_into(zip, target).unwrap();
+        }
+        assert_eq!(
+            super::installed_jetbrains_package(&classic),
+            Some((JetbrainsPackageRange::Classic242To261, "0.2.510".into()))
+        );
+        for target in [&modular, &classic_in_262] {
+            assert_eq!(
+                super::installed_jetbrains_package(target),
+                Some((JetbrainsPackageRange::Modular262, "0.2.511".into())),
+                "{}",
+                target.display()
+            );
+            assert!(
+                !target
+                    .join("agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.600.jar")
+                    .exists()
+            );
+            assert!(
+                target
+                    .join("agent-doc-jetbrains/lib/modules/agent.doc.backend.jar")
+                    .is_file()
+            );
+        }
+    }
+
+    #[test]
+    fn local_all_refuses_every_target_when_any_cannot_prove_its_range() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path().join("checkout");
+        write_local_dual_build(&project, "0.2.510", "0.2.511");
+        let classic = tmp.path().join("JetBrains/IntelliJIdea2026.1/plugins");
+        install_test_jar(&classic, "agent-doc-jetbrains-0.2.500.jar");
+        let unknown = tmp.path().join("portable-ide/plugins");
+        install_test_jar(&unknown, "agent.doc-0.2.501.jar");
+
+        let error = super::resolve_local_jetbrains_targets(
+            &project,
+            vec![classic.clone(), unknown.clone()],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("no installation was changed"), "{error}");
+        assert!(
+            error.contains("Cannot prove the JetBrains platform build"),
+            "{error}"
+        );
+        assert!(error.contains("--plugins-dir"), "{error}");
+        assert!(error.contains("portable-ide"), "{error}");
+        assert_eq!(
+            super::installed_jetbrains_package(&classic),
+            Some((JetbrainsPackageRange::Classic242To261, "0.2.500".into()))
+        );
+    }
+
+    #[test]
+    fn local_262_target_without_a_modular_build_never_falls_back_to_classic() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path().join("checkout");
+        write_local_dual_build(&project, "0.2.510", "0.2.511");
+        fs::remove_dir_all(project.join("editors/jetbrains-262")).unwrap();
+        let modular = tmp.path().join("JetBrains/IntelliJIdea2026.2/plugins");
+
+        let error = super::resolve_local_jetbrains_targets(&project, vec![modular])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("agent-doc-jetbrains-262 package"), "{error}");
+        assert!(
+            error.contains("refusing to substitute the other compatibility line"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn modular_zip_converges_to_the_canonical_installed_tree() {
+        let tmp = TempDir::new().unwrap();
+        let package = tmp.path().join("agent-doc-jetbrains-262-0.2.511.zip");
+        let plugins = tmp.path().join("IntelliJIdea2026.2/plugins");
+        let legacy = plugins.join("agent-doc-jetbrains-262/lib");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("agent.doc-0.2.510.jar"), b"old").unwrap();
+        write_test_modular_jetbrains_zip(&package, "0.2.511", b"new");
+
+        replace_jetbrains_plugin_tree(&package, &plugins).unwrap();
+
+        assert!(!plugins.join("agent-doc-jetbrains-262").exists());
+        assert_eq!(
+            fs::read(plugins.join("agent-doc-jetbrains/lib/agent.doc-0.2.511.jar")).unwrap(),
+            b"new"
+        );
+        assert_eq!(
+            installed_jetbrains_plugin_version(&plugins).as_deref(),
+            Some("0.2.511")
+        );
+        assert!(super::jetbrains_local_zip_matches_installation(&package, &plugins).unwrap());
     }
 
     #[test]

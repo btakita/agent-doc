@@ -14244,6 +14244,20 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
         install_target.contains("Refusing to install a stale package."),
         "a failed JetBrains build must explicitly refuse stale package installation"
     );
+    // `#jetbrains262installselect`: the modular 262 package is built (and fails
+    // closed) before the all-installed convergence, so a 262 IDE is never handed
+    // the classic package as a substitute.
+    let modular_build = install_target
+        .find("( cd editors/jetbrains-262 && gradle --no-daemon --console=plain buildPlugin verifySplitArtifact ) || {")
+        .expect("JetBrains 262 build must fail closed");
+    assert!(
+        modular_build < install,
+        "the 262 modular package must build before local installation"
+    );
+    assert!(
+        install_target.contains("Refusing to install the classic package into a 262 IDE."),
+        "a failed 262 build must refuse classic substitution"
+    );
 
     let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
     assert!(

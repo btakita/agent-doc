@@ -10151,6 +10151,9 @@ fn handle_editor_route_rpc_with_tmux(
         force_disk: payload.force_disk.unwrap_or(false),
         prune_before_lookup: true,
         background_existing_pane_only: false,
+        // `#routelaterescue`: the layout above already converged; from here the
+        // layout plane is the only topology writer for this route.
+        layout_owned_by_controller: true,
     })?;
     agent_doc_ops_log_io::log_op(
         &canonical,
@@ -15733,6 +15736,7 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             force_disk: false,
             prune_before_lookup: false,
             background_existing_pane_only: true,
+            layout_owned_by_controller: false,
         };
         match enqueue_orphan_drain_route(invocation) {
             Ok(true) => {}

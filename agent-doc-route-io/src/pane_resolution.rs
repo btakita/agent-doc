@@ -1752,6 +1752,24 @@ pub fn rescue_from_stash(
 
     let pane_win_name = agent_doc_tmux_io::target_window_name(tmux, pane_id).unwrap_or_default();
 
+    if is_stash_window_name(&pane_win_name) && crate::invocation::layout_owned_by_controller() {
+        // `#routelaterescue`: the controller editor route already projected and
+        // observed this route's layout. A pane that is back in stash by dispatch
+        // time was stashed by a newer layout publication (for example another
+        // project root's controller sharing the window). A raw join here adds a
+        // column that no publisher asked for and that no projection will ever
+        // reconcile, so dispatch to the pane in place and leave topology to the
+        // layout plane.
+        agent_doc_ops_log_io::log_op(
+            Path::new(file_path),
+            &format!(
+                "route_stash_rescue_skipped file={} pane={} window={} reason=controller_layout_owns_topology pane_effect=none (#routelaterescue)",
+                file_path, pane_id, pane_win_name,
+            ),
+        );
+        return false;
+    }
+
     if is_stash_window_name(&pane_win_name) {
         tracing::debug!(pane_id, window = %pane_win_name, target_session, "route: rescuing pane from stash");
         eprintln!(

@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 from typing import Any, Callable, Dict, Iterable
 import urllib.error
@@ -228,13 +229,16 @@ def build_fixture(path: Path, manifest: Dict[str, Any], **overrides: str) -> Non
     version = overrides.get("version", plugin["version"])
     since_build = overrides.get("since_build", plugin["since_build"])
     until_build = overrides.get("until_build", plugin["until_build"])
-    module_names: Iterable[str] = plugin["required_modules"]
+    plugin_id = overrides.get("plugin_id", plugin["id"])
+    module_names: Iterable[str] = list(plugin["required_modules"])
+    omit_module = overrides.get("omit_module")
+    module_xml = "".join(f'<module name="{name}" />' for name in module_names)
     plugin_xml = f"""<idea-plugin>
-  <idea-version since-build=\"{since_build}\" until-build=\"{until_build}\" />
+  <idea-version since-build="{since_build}" until-build="{until_build}" />
   <version>{version}</version>
-  <id>{plugin['id']}</id>
+  <id>{plugin_id}</id>
   <content>
-    {''.join('<module name=\"' + name + '\" />' for name in module_names)}
+    {module_xml}
   </content>
 </idea-plugin>
 """.encode()
@@ -245,6 +249,8 @@ def build_fixture(path: Path, manifest: Dict[str, Any], **overrides: str) -> Non
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(f"{root}/lib/agent.doc-{plugin['version']}.jar", jar_buffer.getvalue())
         for name in module_names:
+            if name == omit_module:
+                continue
             archive.writestr(f"{root}/lib/modules/{name}.jar", b"fixture")
 
 
@@ -288,6 +294,82 @@ def self_test() -> int:
             lambda: verify_artifact(wrong_version, wrong_version_manifest, "client/Gateway"),
         )
 
+        wrong_since = root / "wrong-since.zip"
+        build_fixture(wrong_since, recorded, since_build="261")
+        wrong_since_manifest = fixture_manifest(wrong_since, recorded)
+        expect_failure(
+            "since-build",
+            lambda: verify_artifact(wrong_since, wrong_since_manifest, "backend"),
+        )
+
+        wrong_id = root / "wrong-id.zip"
+        build_fixture(wrong_id, recorded, plugin_id="com.example.impostor")
+        wrong_id_manifest = fixture_manifest(wrong_id, recorded)
+        expect_failure(
+            "plugin id",
+            lambda: verify_artifact(wrong_id, wrong_id_manifest, "backend"),
+        )
+
+        missing_module = root / "missing-module.zip"
+        build_fixture(missing_module, recorded, omit_module="agent.doc.frontend")
+        missing_module_manifest = fixture_manifest(missing_module, recorded)
+        expect_failure(
+            "missing modular plugin JAR",
+            lambda: verify_artifact(
+                missing_module, missing_module_manifest, "client/Gateway"
+            ),
+        )
+
+        truncated = root / "truncated.zip"
+        truncated.write_bytes(valid.read_bytes()[:-1])
+        expect_failure("byte length", lambda: verify_artifact(truncated, local, "backend"))
+
+        # A manifest edited to bless different bytes must not load.
+        for key, value in (
+            ("sha256", "0" * 64),
+            ("size", PINNED_ASSET_SIZE + 1),
+            ("id", PINNED_ASSET_ID + 1),
+        ):
+            drifted = copy.deepcopy(recorded)
+            drifted["asset"][key] = value
+            drifted_path = root / f"drifted-{key}.json"
+            drifted_path.write_text(json.dumps(drifted), encoding="utf-8")
+            expect_failure("pinned", lambda: load_manifest(drifted_path))
+        drifted = copy.deepcopy(recorded)
+        drifted["source_commit"] = "1" * 40
+        drifted_path = root / "drifted-commit.json"
+        drifted_path.write_text(json.dumps(drifted), encoding="utf-8")
+        expect_failure("pinned source commit", lambda: load_manifest(drifted_path))
+
+        # CLI: tampered bytes and a single reused copy both exit non-zero,
+        # with the remote lookup stubbed so the self-test stays offline.
+        global fetch_and_verify_remote_provenance
+        real_fetch = fetch_and_verify_remote_provenance
+        real_argv = sys.argv
+        real_stderr = sys.stderr
+        fetch_and_verify_remote_provenance = lambda manifest: None
+        try:
+            sys.stderr = io.StringIO()
+            sys.argv = ["verify", "--backend", str(tampered), "--client-gateway", str(valid)]
+            require_equal("CLI exit on tampered bytes", main(), 1)
+            # The real pinned manifest gates the CLI, so non-genuine bytes are
+            # refused on the first recorded property they violate.
+            require_equal(
+                "CLI tamper message",
+                "preview verification FAILED: backend byte length" in sys.stderr.getvalue(),
+                True,
+            )
+            sys.stderr = io.StringIO()
+            sys.argv = ["verify", "--backend", str(valid), "--client-gateway", str(valid)]
+            require_equal("CLI exit on reused copy", main(), 1)
+            require_equal(
+                "CLI same-file message", "same file" in sys.stderr.getvalue(), True
+            )
+        finally:
+            fetch_and_verify_remote_provenance = real_fetch
+            sys.argv = real_argv
+            sys.stderr = real_stderr
+
         wrong_range = root / "wrong-range.zip"
         build_fixture(wrong_range, recorded, until_build="263.*")
         wrong_range_manifest = fixture_manifest(wrong_range, recorded)
@@ -325,6 +407,45 @@ def self_test() -> int:
         "release asset digest",
         lambda: verify_remote_provenance(recorded, pr, redigested),
     )
+    forked = copy.deepcopy(pr)
+    forked["head"]["repo"]["full_name"] = "attacker/agent-doc"
+    expect_failure(
+        "PR head repository", lambda: verify_remote_provenance(recorded, forked, release)
+    )
+    retargeted = copy.deepcopy(release)
+    retargeted["target_commitish"] = "main"
+    expect_failure(
+        "release target commit",
+        lambda: verify_remote_provenance(recorded, pr, retargeted),
+    )
+    promoted = copy.deepcopy(release)
+    promoted["prerelease"] = False
+    expect_failure(
+        "release prerelease flag",
+        lambda: verify_remote_provenance(recorded, pr, promoted),
+    )
+    resized = copy.deepcopy(release)
+    resized["assets"][0]["size"] += 1
+    expect_failure(
+        "release asset size", lambda: verify_remote_provenance(recorded, pr, resized)
+    )
+    reuploaded = copy.deepcopy(release)
+    reuploaded["assets"][0]["updated_at"] = "2026-10-10T00:00:00Z"
+    expect_failure(
+        "release asset updated_at",
+        lambda: verify_remote_provenance(recorded, pr, reuploaded),
+    )
+    removed = copy.deepcopy(release)
+    removed["assets"] = []
+    expect_failure(
+        "release asset count", lambda: verify_remote_provenance(recorded, pr, removed)
+    )
+    duplicated = copy.deepcopy(release)
+    duplicated["assets"].append(copy.deepcopy(duplicated["assets"][0]))
+    expect_failure(
+        "release asset count",
+        lambda: verify_remote_provenance(recorded, pr, duplicated),
+    )
     print("verify_jetbrains_preview self-test: ok")
     return 0
 
@@ -354,7 +475,7 @@ def main() -> int:
         verify_artifact(args.backend, manifest, "backend")
         verify_artifact(args.client_gateway, manifest, "client/Gateway")
     except VerificationError as error:
-        print(f"preview verification FAILED: {error}", file=os.sys.stderr)
+        print(f"preview verification FAILED: {error}", file=sys.stderr)
         return 1
 
     print(

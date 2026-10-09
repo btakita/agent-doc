@@ -3605,6 +3605,7 @@ pub fn apply_canonical_replace_if_attached(
                             // a fresh CRDT transition on every closeout retry.
                             let relay_text = collapse_progressive_queue_projection(
                                 expected_current,
+                                content,
                                 &relay_text,
                             )
                             .unwrap_or(relay_text);
@@ -3678,8 +3679,12 @@ pub fn apply_canonical_replace_if_attached(
                             content.to_string()
                         } else {
                             let relay_text = if agent_projection_may_be_visible {
-                                collapse_progressive_queue_projection(expected_current, &relay_text)
-                                    .unwrap_or_else(|| relay_text.clone())
+                                collapse_progressive_queue_projection(
+                                    expected_current,
+                                    content,
+                                    &relay_text,
+                                )
+                                .unwrap_or_else(|| relay_text.clone())
                             } else {
                                 relay_text.clone()
                             };
@@ -4474,28 +4479,90 @@ fn structurally_invalid_post_apply_editor_cut(
 /// repair refuses to cross committed snapshot entries or structurally distinct
 /// heads; without the caller's causal race evidence this normalization is not
 /// applied at all.
-fn collapse_progressive_queue_projection(expected_base: &str, observed: &str) -> Option<String> {
+fn collapse_progressive_queue_projection(
+    expected_base: &str,
+    projected_target: &str,
+    observed: &str,
+) -> Option<String> {
     let observed_components = agent_doc_element::element::parse(observed).ok()?;
     let observed_queue = observed_components
         .iter()
         .find(|component| component.name == "queue")?;
-    let snapshot_body = agent_doc_element::element::parse(expected_base)
-        .ok()?
-        .into_iter()
+    let baseline_components = agent_doc_element::element::parse(expected_base).ok()?;
+    let snapshot_body = baseline_components
+        .iter()
         .find(|component| component.name == "queue")
         .map(|component| component.content(expected_base))
+        .unwrap_or_default();
+    let projected_components = agent_doc_element::element::parse(projected_target).ok()?;
+    let projected_body = projected_components
+        .iter()
+        .find(|component| component.name == "queue")
+        .map(|component| component.content(projected_target))
         .unwrap_or_default();
     let observed_entries =
         agent_doc_queue::document_queue::parse(observed_queue.content(observed)).ok()?;
     let snapshot_entries = agent_doc_queue::document_queue::parse(snapshot_body).ok()?;
-    let collapsed = agent_doc_queue::document_queue::collapse_progressive_free_text_heads(
-        &observed_entries,
+    let projected_entries = agent_doc_queue::document_queue::parse(projected_body).ok()?;
+    let projected_backlog_text_by_id = projected_components
+        .iter()
+        .find(|component| component.name == "backlog")
+        .map(|component| {
+            let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(
+                component.content(projected_target),
+            );
+            items
+                .into_iter()
+                .filter(|item| item.state != agent_doc_element_backlog::backlog::PendingState::Done)
+                .map(|item| (item.id.trim().to_ascii_lowercase(), item.text))
+                .collect::<std::collections::HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+    let materialized =
+        agent_doc_queue::free_text_admission::reconcile_materialized_free_text_projection(
+            &snapshot_entries,
+            &projected_entries,
+            &observed_entries,
+            &projected_backlog_text_by_id,
+        );
+    let entries = materialized
+        .as_ref()
+        .map(|reconciliation| reconciliation.queue_entries.as_slice())
+        .unwrap_or(&observed_entries);
+    let progressive = agent_doc_queue::document_queue::collapse_progressive_free_text_heads(
+        entries,
         &snapshot_entries,
-    )?;
-    Some(observed_queue.replace_content(
+    );
+    if materialized.is_none() && progressive.is_none() {
+        return None;
+    }
+
+    let final_entries = progressive.as_deref().unwrap_or(entries);
+    let mut reconciled = observed_queue.replace_content(
         observed,
-        &agent_doc_queue::document_queue::render(&collapsed),
-    ))
+        &agent_doc_queue::document_queue::render(final_entries),
+    );
+    if let Some(materialized) = materialized
+        && !materialized.backlog_edits.is_empty()
+    {
+        let components = agent_doc_element::element::parse(&reconciled).ok()?;
+        let backlog = components
+            .iter()
+            .find(|component| component.name == "backlog")?;
+        let edits = materialized
+            .backlog_edits
+            .into_iter()
+            .map(|revision| (revision.id, revision.text))
+            .collect::<Vec<_>>();
+        let body = agent_doc_element_backlog::backlog::op_edit_many(
+            backlog.content(&reconciled),
+            &edits,
+        )
+        .ok()?;
+        reconciled = backlog.replace_content(&reconciled, &body);
+    }
+    Some(reconciled)
 }
 
 /// Resolve the operator-authored editor cut independently from agent projection
@@ -10922,7 +10989,7 @@ mod tests {
         );
         assert!(canonical_document_target_is_valid(&raced_projection));
 
-        let collapsed = collapse_progressive_queue_projection(base, &raced_projection)
+        let collapsed = collapse_progressive_queue_projection(base, &agent_target, &raced_projection)
             .expect("the raced projection should expose a progressive queue chain");
         let recovered = editor_operator_cut_for_agent_rebase(
             &file,
@@ -10952,6 +11019,40 @@ mod tests {
     }
 
     #[test]
+    fn materialized_queue_revision_keeps_one_id_across_projection_retry() {
+        let partial =
+            "Re: Cross-platform mise bootstrap: Can this be run remotely via uvx?";
+        let complete = concat!(
+            "Re: Cross-platform mise bootstrap: Can this be run remotely via uvx...",
+            "cross platform?",
+        );
+        let base = format!(
+            "<!-- agent:queue go -->\n- {partial}\n<!-- /agent:queue -->\n\n\
+             <!-- agent:backlog queue -->\n<!-- /agent:backlog -->\n"
+        );
+        let projected = format!(
+            "<!-- agent:queue go -->\n- do [#crossplatformmise]\n<!-- /agent:queue -->\n\n\
+             <!-- agent:backlog queue -->\n- [ ] [#crossplatformmise] {partial}\n<!-- /agent:backlog -->\n"
+        );
+        let raced = format!(
+            "<!-- agent:queue go -->\n- do [#crossplatformmise]\n- {complete}\n<!-- /agent:queue -->\n\n\
+             <!-- agent:backlog queue -->\n- [ ] [#crossplatformmise] {partial}\n<!-- /agent:backlog -->\n"
+        );
+
+        let reconciled = collapse_progressive_queue_projection(&base, &projected, &raced)
+            .expect("the three-way source slot proves one logical queue item");
+        assert_eq!(reconciled.matches("do [#crossplatformmise]").count(), 1);
+        assert_eq!(reconciled.matches("[#crossplatformmise]").count(), 2);
+        assert!(reconciled.contains(&format!("[#crossplatformmise] {complete}")));
+        assert!(!reconciled.contains("[#crossplatformmise-txpw]"));
+        assert_eq!(
+            collapse_progressive_queue_projection(&base, &projected, &reconciled),
+            None,
+            "a CAS retry must not replay or mint the source a second time"
+        );
+    }
+
+    #[test]
     fn post_projection_race_removes_deleted_long_queue_revision() {
         let base = concat!(
             "---\nqueue: go\n---\n\n",
@@ -10969,7 +11070,7 @@ mod tests {
             1,
         );
 
-        let collapsed = collapse_progressive_queue_projection(base, &raced_projection)
+        let collapsed = collapse_progressive_queue_projection(base, base, &raced_projection)
             .expect("the raced long revision pair should collapse");
         let queue = agent_doc_element::element::parse(&collapsed)
             .unwrap()
@@ -11008,7 +11109,7 @@ mod tests {
             1,
         );
 
-        let collapsed = collapse_progressive_queue_projection(base, &raced_projection)
+        let collapsed = collapse_progressive_queue_projection(base, &agent_target, &raced_projection)
             .expect("the completed live edit must supersede its stale baseline prefix");
         assert_eq!(collapsed.matches(complete_prompt.trim_end()).count(), 1);
         assert!(

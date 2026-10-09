@@ -281,6 +281,21 @@ Per the editor-truth rule, recovery takes the editor text as the base. The `cont
 - accepting ops whose offsets assume text the CRDT doesn't have.
 
 After the fix it will report a safe recovery path for this document. I'll run that, keeping the editor text, rather than handing you a command.
+
+### Re: contracts.md unwedged by the IDEA restart — opus-5.5 · 2026-10-09T18:20-04:00
+
+> **Chat prompt (#chatprompt):** can you unwedge contracts.md?
+
+**Done, and no reset was needed.** I first checked how a plain `reset --from-current --preserve-session` works (`src/reset.rs`). Without `--force-disk` it takes the controller's copy as "current" and then asks the editor to save to match it. In this state that would have overwritten your correct text with the corrupted copy. So the subagent was right.
+
+Your IDEA restart is what fixed it. IDEA came back at 18:15:01 and the plugin reattached at 22:15:22Z. The controller's copy was rebuilt from your editor text, and it now matches the disk copy except for the normal `(HEAD)` marker. The captured cancellation note then committed as `d514def3` (18:15:08), with both `#rebase-conflicts` queue lines in `agent:queue`. Your text matches the 18:12 backup byte for byte, so nothing was lost.
+
+There was one leftover: `do [#republish643dev]` was in the queue at the 18:00 commit and absent from your editor text. You confirmed you removed it, so I ran `agent-doc backlog tasks/contracts.md keep-unqueued republish643dev`. The backlog item stays open and unqueued. `session-check` now reports a new cycle (`cycle-1791584155455`) running in owner pane %161, which is normal progress.
+
+The `contractsroute` subagent no longer needs to produce a recovery recipe. It is still fixing three things:
+- the editor-applied response that the controller refused (`settled_buffer_dropped_response`);
+- an edit offset that assumed text the controller lacked, which spliced your line into the wrong place;
+- the printed unblocker, which must stop recommending plain `reset --from-current --preserve-session` when the controller's copy is the corrupt side.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

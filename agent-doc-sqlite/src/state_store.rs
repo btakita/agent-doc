@@ -25,6 +25,9 @@ const STATE_DB_SCHEMA_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 static STATE_DB_CONNECTIONS_FORBIDDEN: AtomicBool = AtomicBool::new(false);
 
 use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState, ActorStoreWrite};
+use agent_doc_state_backbone::{
+    EditorViewBindingProjection, StateEvent as BackboneStateEvent, StateFact,
+};
 
 // ---------------------------------------------------------------------------
 // Status types (moved from agent-doc-orchestration::project_controller).
@@ -1168,6 +1171,10 @@ fn run_state_event_retention_if_due(conn: &Connection) {
                 "turn_intent_checkpointed",
                 TURN_INTENT_CHECKPOINTS_KEPT_PER_DOCUMENT,
             ),
+        ),
+        (
+            EDITOR_VIEW_BINDING_FACT_TYPE,
+            prune_editor_view_binding_facts(conn),
         ),
         (
             "visible_write_commit_candidate_observed",
@@ -3780,6 +3787,101 @@ pub fn load_state_events_by_fact_type_from_db(
         events.push(row?);
     }
     Ok(events)
+}
+
+/// Durable hydration frontier for detached editor-view ownership (GH #218).
+///
+/// `editor_view_binding_observed` is a complete superseding snapshot. Return
+/// exactly the newest *accepted* row per document, in durable append order, so
+/// startup can hydrate every exclusion before accepting a main-layout
+/// publication without replaying dead binding history. A stale receipt may be
+/// durably appended, so row order alone is not a safe lifecycle fence.
+pub const EDITOR_VIEW_BINDING_FACT_TYPE: &str = "editor_view_binding_observed";
+
+pub fn load_latest_editor_view_bindings_from_db(
+    conn: &Connection,
+) -> Result<Vec<StateEventStatus>> {
+    latest_editor_view_bindings(load_state_events_by_fact_type_from_db(
+        conn,
+        EDITOR_VIEW_BINDING_FACT_TYPE,
+    )?)
+}
+
+fn latest_editor_view_bindings(events: Vec<StateEventStatus>) -> Result<Vec<StateEventStatus>> {
+    let mut latest: BTreeMap<String, (EditorViewBindingProjection, StateEventStatus)> =
+        BTreeMap::new();
+    for status in events {
+        let event: BackboneStateEvent = serde_json::from_str(&status.payload_json)
+            .with_context(|| format!("invalid {} payload", EDITOR_VIEW_BINDING_FACT_TYPE))?;
+        let StateFact::EditorViewBindingObserved {
+            document_hash,
+            canonical_path,
+            binding_epoch,
+            state,
+        } = event.fact
+        else {
+            anyhow::bail!(
+                "{} row {} decoded as another fact",
+                EDITOR_VIEW_BINDING_FACT_TYPE,
+                status.sequence
+            );
+        };
+        if document_hash != status.document_hash || event.event_id != status.event_id {
+            anyhow::bail!(
+                "{} row {} has mismatched envelope identity",
+                EDITOR_VIEW_BINDING_FACT_TYPE,
+                status.sequence
+            );
+        }
+        let accept = latest
+            .get(&document_hash)
+            .is_none_or(|(current, _)| current.accepts(binding_epoch, &state));
+        if accept {
+            latest.insert(
+                document_hash,
+                (
+                    EditorViewBindingProjection {
+                        canonical_path,
+                        binding_epoch,
+                        state,
+                    },
+                    status,
+                ),
+            );
+        }
+    }
+    let mut events = latest
+        .into_values()
+        .map(|(_, event)| event)
+        .collect::<Vec<_>>();
+    events.sort_by_key(|event| event.sequence);
+    Ok(events)
+}
+
+fn prune_editor_view_binding_facts(conn: &Connection) -> Result<()> {
+    let events = load_state_events_by_fact_type_from_db(conn, EDITOR_VIEW_BINDING_FACT_TYPE)?;
+    let retained = latest_editor_view_bindings(events.clone())?
+        .into_iter()
+        .map(|event| event.sequence)
+        .collect::<BTreeSet<_>>();
+    let rowids = events
+        .into_iter()
+        .filter(|event| !retained.contains(&event.sequence))
+        .map(|event| {
+            i64::try_from(event.sequence).context("editor view event sequence exceeds SQLite i64")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    for rowids in rowids.chunks(2_000) {
+        let tx = conn.unchecked_transaction()?;
+        {
+            let mut statement = tx.prepare_cached("DELETE FROM state_events WHERE rowid = ?1")?;
+            for rowid in rowids {
+                statement.execute([rowid])?;
+            }
+        }
+        tx.commit()?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -8258,5 +8360,52 @@ mod state_db_corruption_evidence_tests {
 
         open_state_db(dir.path()).expect("a fresh project must open");
         assert!(path.exists());
+    }
+
+    #[test]
+    fn editor_view_binding_reload_and_retention_keep_latest_per_document() {
+        let dir = tempfile::tempdir().unwrap();
+        reset_state_db_schema_convergence_memo();
+        let conn = open_state_db(dir.path()).unwrap();
+        let insert = |event_id: &str, document_hash: &str, epoch: u64| {
+            let payload = format!(
+                r#"{{"event_id":"{event_id}","fact":{{"type":"editor_view_binding_observed","document_hash":"{document_hash}","canonical_path":"/tmp/{document_hash}.md","binding_epoch":{epoch},"state":{{"phase":"released","binding":{{"view_id":"view-{document_hash}","client_family":"client","surface_id":"dock","surface_generation":1,"view_session":"view-session"}},"reason":"owner_closed","destination":"main_stash"}}}}}}"#
+            );
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id,
+                    document_hash,
+                    domain: "editor_view",
+                    fact_type: EDITOR_VIEW_BINDING_FACT_TYPE,
+                    payload_json: &payload,
+                },
+            )
+            .unwrap();
+        };
+        insert("a-1", "doc-a", 1);
+        insert("b-1", "doc-b", 1);
+        insert("a-2", "doc-a", 2);
+        insert("a-stale", "doc-a", 1);
+
+        let hydrated = load_latest_editor_view_bindings_from_db(&conn).unwrap();
+        assert_eq!(hydrated.len(), 2);
+        assert_eq!(
+            hydrated
+                .iter()
+                .map(|event| (event.document_hash.as_str(), event.event_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("doc-b", "b-1"), ("doc-a", "a-2")]
+        );
+
+        prune_editor_view_binding_facts(&conn).unwrap();
+        let retained =
+            load_state_events_by_fact_type_from_db(&conn, EDITOR_VIEW_BINDING_FACT_TYPE).unwrap();
+        assert_eq!(retained.len(), 2);
+        assert!(
+            retained
+                .iter()
+                .all(|event| event.event_id != "a-1" && event.event_id != "a-stale")
+        );
     }
 }

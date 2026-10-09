@@ -28,6 +28,7 @@
 //! derives [`SurfaceIntent`] from it, so the intent updates because an
 //! observation arrived rather than because a caller remembered to ask.
 
+pub mod editor_view_policy;
 pub mod graph;
 pub mod pane_placement;
 pub mod remote_layout;

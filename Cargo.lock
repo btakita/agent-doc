@@ -2278,6 +2278,7 @@ dependencies = [
  "agent-doc-diff",
  "agent-doc-frontmatter",
  "agent-doc-log-time",
+ "agent-doc-state-backbone",
  "agent-doc-topic",
  "agent-doc-turn",
  "anyhow",

@@ -316,6 +316,21 @@ What's missing is *which* change a non-operator mutation came from. An agent-app
 3. Regression coverage for this exact sequence: response applied in the editor, then an operator queue edit on top, then commit. Both must land with no manual recovery.
 
 This touches the plugin and the controller. Any `.kt` change needs a JetBrains plugin version bump, which I'll do when integrating, together with the single `make install`.
+
+### Re: three panes in the main window — opus-5.5 · 2026-10-09T18:24-04:00
+
+> **Chat prompt (#chatprompt):** subagent: There are 3 tmux panes. Fix agent-doc causes
+
+Confirmed. tmux window `0:0` holds three panes:
+- `%149`: agent-doc-bugs.md, 120 columns
+- `%165`: haiven-dev `api.md`, 59 columns
+- `%161`: `contracts.md`, 59 columns
+
+The controller's last two layouts (generation 20 at 22:15:22Z, right after the IDEA restart, and generation 21 at 22:17:47Z) both asked for only **two** columns: agent-doc-bugs.md and contracts.md. api.md's pane was never moved out. The logs show `foreign_owned_sweep_skip … owner_pane=%165` and `protected_live_turn` for api.md. One likely cause: this window spans two projects, so each project's cleanup skips a pane the other one owns, and live-turn protection blocks the stash instead of deferring it.
+
+I've given this to a subagent (`fix/stale-third-main-pane`, own worktree). It will find the real cause, fix it with regression tests and a spec update, and push its branch. If a pane mid-turn can't be moved, the stash must wait until the turn ends rather than be dropped. It only reads diagnostics and won't touch your live panes. Its report will say whether the fixed binary tidies the current window after install, or what one-time step is safe.
+
+Also noted: api.md's `session-check` reports an authority/disk divergence. It looks like the same kind of fault as contracts.md, and I'll include it in that fix once the reports are in.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

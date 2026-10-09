@@ -1,10 +1,13 @@
 [env]
 _.source = ".env"
 _.path = [".bin", ".venv/bin"]
+# mise exports UV_PYTHON=<exact patch> (e.g. 3.14.8) that uv cannot resolve when it
+# only manages other patches; point uv at the mise-installed interpreter instead.
+UV_PYTHON = { value = "{{ tools.python.path }}/bin/python", tools = true }
 
 [tools]
 bun = "latest"
-python = "3.12"
+python = "3.14"
 
 [settings]
 python.uv_venv_auto = true

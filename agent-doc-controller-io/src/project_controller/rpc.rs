@@ -24115,6 +24115,12 @@ fn handle_editor_view_snapshot_observe(
     let payload = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let snapshot: EditorViewSnapshot =
         serde_json::from_str(&payload).context("parse complete editor view snapshot")?;
+    anyhow::ensure!(
+        request.caller.as_deref() == Some(snapshot.client_id.as_str())
+            && request.generation == Some(snapshot.connection_generation)
+            && request.sequence == Some(snapshot.sequence),
+        "editor view snapshot envelope identity does not match its authenticated payload"
+    );
     runtime
         .editor_view_policy_graph
         .observe(snapshot, |projection| {

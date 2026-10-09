@@ -104,6 +104,15 @@ I claimed the three newly queued heads and dispatched them:
 - **`#steergatedecision`** and **`#uvpython3148`**: one subagent runs them in order, because both touch the shared agent-loop superproject and only one subagent may work in a repo at a time. It will record the eval decision in `tasks/agent-doc/eval-steergatenamo.md`, then fix uv's exact-patch `UV_PYTHON` pin without reverting your Python 3.14 bump. Each commit is limited to the files it touches (`--only`).
 
 `#waypostauthorization` and the three JetBrains heads are still in flight with their subagents.
+
+### Re: GH 225/218/221 and release dispatch — opus-5.5 · 2026-10-09T16:42-04:00
+
+I claimed all four new heads:
+- **GH #225** (PyPI workflow runs on non-`v*` prereleases): dispatched to a subagent in `~/worktrees/agent-doc-gh225-20261009`. It will gate the `release: published` path in `pypi.yml`, and any similar workflow, to `v*` tags, add workflow regression coverage, and open a PR that fixes #225. I close the issue after integration.
+- **GH #218 and GH #221**: coordinator-owned (`coordinator:pr222-integration`). Both are code-complete inside draft PR #222 and close only when it merges. Merging needs green CI, which `#ci25gradle` is working on now. The branches for `#jetbrains262installselect`, `#jetbrains262distribution` and `#previewartifactprovenance` are stacked on the same dual-release line. `#jetbrains262distribution` (`740fb3169`) has already been rebased onto that line, because main has no `jetbrains-262` module, so these land via PR #222, not straight onto main. The real IDEA 2026.2.3 Remote Dev proof in `#gh218remoteproof` stays operator-only. I won't merge PR #222 or close #218 without your call on that gate.
+- **release + publish**: coordinator-owned (`coordinator:release-after-batch`) and sequenced last. It runs once at the batch boundary, after the PR #222 line and the #225 and `#waypostauthorization` branches are integrated, with one `make check` and one install. It does not run while CI on PR #222 is red.
+
+`#steergatedecision` and `#uvpython3148` are done as local superproject commits `bd82b842a` and `6ebc0721d`; agent-loop has no remote of its own, so nothing was pushed. Still in flight: `#waypostauthorization`, `#ci25gradle` (running `make check`) and `#jetbrains262installselect`.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -112,14 +121,15 @@ I claimed the three newly queued heads and dispatched them:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#waypostauthorization]
-- ~~#actionable-review~~
+- ⏭️ do [#waypostauthorization]
 - ⏭️ do [#jetbrains262installselect]
 - 🚧 do [#jetbrains262distribution]
 - 🚧 do [#previewartifactprovenance]
-- do [#ci25gradle]
-- ~~do [#steergatedecision]~~
-- ~~do [#uvpython3148]~~
+- 🚧 do [#ci25gradle]
+- #gh-fix https://github.com/btakita/agent-doc/issues/225
+- #gh-fix https://github.com/btakita/agent-doc/issues/218
+- #gh-fix https://github.com/btakita/agent-doc/issues/221
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog
@@ -128,7 +138,7 @@ I claimed the three newly queued heads and dispatched them:
 - [ ] 🚧 [#waypostauthorization] Add a way to post authorization from the queue item prompt to Claude Code subagents when the `subagents` queue attribute is used.
 - [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
 - [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
-- [ ] [#ci25gradle] [agent-doc] Fix the red CI on draft PR 222 (head c39de1b04; run 37974793628 failed in dev-harness-test, Makefile:209). PR 222 moved ci.yml/release.yml to JDK 25 with Gradle 9.2.1 for editors/jetbrains-262, but the classic editors/jetbrains/gradlew still uses the Gradle 8.14 wrapper, which fails on JDK 25 ('Unsupported class file major version 69'). Run the classic build on JDK 21, or move its wrapper to Gradle 9.1 or later while keeping source/target 21 for 242–261. Apply the same fix to release.yml's classic step; that file is shared with jetbrains262distribution, so integrate after it. Verify make check locally under JDK 25 and green CI on the new PR 222 head; earlier head 254b75e also failed at make test (Makefile:97). Afterwards rebuild the jetbrains-262 preview prerelease from the new head and re-pin the previewartifactprovenance manifest.
+- [ ] 🚧 [#ci25gradle] [agent-doc] Fix the red CI on draft PR 222 (head c39de1b04; run 37974793628 failed in dev-harness-test, Makefile:209). PR 222 moved ci.yml/release.yml to JDK 25 with Gradle 9.2.1 for editors/jetbrains-262, but the classic editors/jetbrains/gradlew still uses the Gradle 8.14 wrapper, which fails on JDK 25 ('Unsupported class file major version 69'). Run the classic build on JDK 21, or move its wrapper to Gradle 9.1 or later while keeping source/target 21 for 242–261. Apply the same fix to release.yml's classic step; that file is shared with jetbrains262distribution, so integrate after it. Verify make check locally under JDK 25 and green CI on the new PR 222 head; earlier head 254b75e also failed at make test (Makefile:97). Afterwards rebuild the jetbrains-262 preview prerelease from the new head and re-pin the previewartifactprovenance manifest.
 - [ ] 🚧 [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
 <!-- /agent:backlog -->
 

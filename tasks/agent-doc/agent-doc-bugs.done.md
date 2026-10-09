@@ -330,3 +330,4 @@
 - 2026-10-08 [#possibletellclaude] Is it possible to tell Claude Code which document to focus on for context?
 - 2026-10-09 [#reviewiceboxnotes] Add agent:review + agent:icebox + agent:done + agent:notes to the Claim for Tmux Pane template.
 - 2026-10-09 [#usabilitymaintenancecons] What are the usability + maintenance consequenes of https://github.com/btakita/agent-doc/issues/221?
+- 2026-10-09 [#backendfrontendidea] What is the backend + frontend in Idea?

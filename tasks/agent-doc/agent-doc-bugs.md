@@ -460,6 +460,36 @@ Treat dual classic/modular artifacts as a temporary compatibility bridge with an
 Do not consider #221 complete based on the current exact-262 draft for the stated 263 environment. Either target and prove 263, or explicitly declare 262 as the supported line and reconcile the issue’s setup. Keep internal UI APIs isolated and version-clamped; broaden a compatibility range only after Plugin Verifier and real backend/Client acceptance both pass.
 
 This cycle was architectural analysis only; no repository implementation or test/build work was required. The exchange remains oversized, but the active queue was not stalled for compaction.
+
+### Re: IDEA frontend and backend — gpt-5 · 2026-10-09T11:54-04:00
+
+> **Queue prompt:**
+>
+> do [#backendfrontendidea]
+
+
+In JetBrains Remote Development, **frontend** and **backend** are two halves of IntelliJ IDEA itself. They do not mean the frontend and backend of the application you are developing.
+
+- The **frontend** is the JetBrains Client process, normally running on the developer’s laptop. It owns what the user directly sees and manipulates: IDE windows, editor frames and splits, detached windows, focus, dialogs, and other latency-sensitive UI.
+- The **backend** is an IntelliJ IDEA process running beside the project, normally on the remote host, container, or cloud machine. It owns the files, project model, PSI, indexes, code analysis, builds, run/debug processes, terminals, and other project-local work.
+- **JetBrains Gateway** starts or connects the two processes. Gateway is the launcher/connection manager, not the plugin frontend.
+- A plugin’s **shared module** defines the small serializable contract understood by both sides: DTOs, RPC interfaces, acknowledgements, and remote topics. It is not a third service and should not become a general-purpose logic module.
+
+For Agent Doc, a sensible division is:
+
+- **Frontend:** observe the actual JetBrains Client frames, distinguish the main window from detached “Open in New Window” frames, collect each frame’s visible document, and place a terminal or read-only placeholder into the intended client editor window.
+- **Shared:** define surface snapshots, client/surface identities and generations, leases, presentation commands and receipts, and the RPC interface carrying them.
+- **Backend:** authenticate the connection, resolve the real backend `Project`, validate and fence snapshots, pass them to Agent Doc’s project controller, and perform filesystem, process, native-library, Agent Doc, and tmux work. It sends the resulting presentation decision back to the frontend.
+
+The split matters because the backend can know that a file is open or selected without owning the client’s actual `EditorWindow` or detached top-level frame. The frontend sees that window topology, but it should not directly manipulate the remote filesystem, run the Agent Doc binary, or own tmux policy.
+
+This is unlike a web browser talking to a business API. Both halves are IntelliJ Platform processes that together present one IDE session; RPC is the transport across that IDE process boundary.
+
+In an ordinary local, monolithic IDEA session, there is only one IDE process. The frontend- and backend-qualified plugin modules both load into that process, and shared RPC executes in-process rather than over a remote connection. The user still experiences one conventional plugin; the modular split mainly provides clean responsibility boundaries.
+
+JetBrains documents the model in [Split Mode](https://plugins.jetbrains.com/docs/intellij/split-mode-and-remote-development.html), [Modular Plugins](https://plugins.jetbrains.com/docs/intellij/modular-plugins.html), and [RPC](https://plugins.jetbrains.com/docs/intellij/remote-procedure-calls.html). One relevant caveat remains: Plugin Model v2 is experimental, and Agent Doc’s draft PR #222 currently targets IDEA `262.*`, while issue #221 reports IDEA 263.
+
+This was an explanatory task only, so no repository code, tests, build, or installation were needed. The exchange remains oversized, but the active queue was not stalled for compaction.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

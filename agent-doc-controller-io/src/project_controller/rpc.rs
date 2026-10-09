@@ -33306,9 +33306,7 @@ mod tests {
 
     #[test]
     fn one_complete_snapshot_settles_two_detached_view_effects() {
-        use agent_doc_editor_surface::{
-            EditorSurfaceRole, EditorViewLifecycleTransition, EditorViewSurface,
-        };
+        use agent_doc_editor_surface::{EditorSurfaceRole, EditorViewSurface};
         use agent_doc_state_backbone::EditorViewBindingState;
 
         let dir = tempfile::tempdir().unwrap();
@@ -33449,11 +33447,11 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(projection.transitions.len(), 2);
-        assert!(projection.transitions.iter().all(|transition| matches!(
-            transition,
-            EditorViewLifecycleTransition::BindPending { .. }
-        )));
+        assert_eq!(projection.presentations.len(), 2);
+        assert!(projection.retry_suggested);
+        assert!(projection.presentations.iter().all(|presentation| {
+            presentation.kind == "placeholder" && presentation.reason == Some("binding_pending")
+        }));
 
         let mut commands = vec![
             lifecycle_receiver
@@ -33738,13 +33736,26 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(matches!(
-            projection.transitions.as_slice(),
-            [EditorViewLifecycleTransition::BindPending { .. }]
-        ));
-        let pending_binding = match projection.transitions.as_slice() {
-            [EditorViewLifecycleTransition::BindPending { binding, .. }] => binding.clone(),
-            _ => unreachable!("asserted one bind transition"),
+        assert_eq!(projection.presentations.len(), 1);
+        assert!(projection.retry_suggested);
+        assert_eq!(projection.presentations[0].kind, "placeholder");
+        assert_eq!(projection.presentations[0].reason, Some("binding_pending"));
+        let (pending_binding_epoch, pending_binding) = {
+            let document_hash = agent_doc_hash::document_id_for_path(&detached);
+            let durable = runtime.memory.lock();
+            match durable
+                .state_projection
+                .document(&document_hash)
+                .and_then(|document| document.editor_view_binding.as_ref())
+            {
+                Some(projection) => match &projection.state {
+                    agent_doc_state_backbone::EditorViewBindingState::BindPending {
+                        binding,
+                    } => (projection.binding_epoch, binding.clone()),
+                    other => panic!("expected durable BindPending, got {other:?}"),
+                },
+                other => panic!("expected durable BindPending, got {other:?}"),
+            }
         };
         assert!(
             !runtime
@@ -33772,9 +33783,9 @@ mod tests {
                 agent_doc_state_backbone::StateFact::EditorViewBindingObserved {
                     document_hash: agent_doc_hash::document_id_for_path(&detached),
                     canonical_path: detached.to_string_lossy().into_owned(),
-                    binding_epoch: pending_binding.binding_epoch,
+                    binding_epoch: pending_binding_epoch,
                     state: agent_doc_state_backbone::EditorViewBindingState::Bound {
-                        binding: editor_view_identity(dir.path(), &pending_binding).unwrap(),
+                        binding: pending_binding,
                         pane: agent_doc_state_backbone::EditorViewPaneReceipt {
                             pane_id: "%9".to_string(),
                             actor_generation: 3,

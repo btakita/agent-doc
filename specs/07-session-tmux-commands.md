@@ -236,6 +236,15 @@ when its columns, order, and focus are identical to the retained escalation: sel
 `agent-doc` tmux window is itself the missing consequence. Other identical escalation reasons may
 coalesce; that branch writes `controller_editor_surface_focus_escalation_coalesced` with the
 document, reason, and retained generation so an inert publication is diagnosable (GH #154).
+An escalation is a derived focus intent, not a structural observation (GH #224). It is fenced to
+the desired generation from which it derived its retained columns. If a positive editor split
+publishes first, the layout graph rebases the escalation inside its publication critical section:
+it keeps the newer editor column order and only focuses or replaces that layout's focus column. A
+route lease may defer a positive editor split that omits the route document; a later derived
+escalation for a document already present in that pending split must not overwrite the pending
+split. Releasing the route projects the editor observation, so an accepted structural-sync
+observation remains the next authoritative layout rather than disappearing behind an escalation
+reconstructed from retained columns.
 - Realising a column is audited after tmux-router runs (GH #109). A column pane
 that moved windows (a stash → layout promotion), runs another document, or
 whose route-owned supervisor maps a superseded binary gets one

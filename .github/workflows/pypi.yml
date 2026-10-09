@@ -13,6 +13,14 @@ name: PyPI
 # silently stopped firing once release creation moved into CI and 0.35.97
 # through 0.35.118 never reached PyPI. `skip-existing` makes the overlap
 # harmless.
+#
+# GH #225: `release: published` has no tag filter of its own, so publishing an
+# editor-only prerelease such as `jetbrains-262-preview-c39de1b` started this
+# workflow, and its publish job failed after 30 minutes waiting for a
+# `SHA256SUMS` that non-`v*` releases never carry. Every job that a release
+# event can reach is gated on `RELEASE_TAG_GATE` below: a `release` event runs
+# only for a `v*` tag name, while `v*` tag pushes and `workflow_dispatch` run
+# exactly as before.
 on:
   push:
     tags: ["v*"]
@@ -26,6 +34,8 @@ permissions:
 
 jobs:
   build:
+    # RELEASE_TAG_GATE (GH #225): skip non-`v*` releases (editor-only previews).
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
 
     steps:
@@ -69,6 +79,9 @@ jobs:
 
   publish:
     needs: [build]
+    # RELEASE_TAG_GATE (GH #225): repeated so publish never depends on skip
+    # propagation through `needs` alone.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     environment: pypi
 

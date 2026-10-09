@@ -14478,6 +14478,164 @@ fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
     );
 }
 
+/// GH #225: `release: published` carries no tag filter, so an editor-only
+/// prerelease (`jetbrains-262-preview-*`) started the PyPI workflow and its
+/// publish job hung for 30 minutes waiting for a `SHA256SUMS` that non-`v*`
+/// releases never carry. Every job a `release` event can reach must be gated
+/// on a `v*` tag name, either directly or through `needs` on gated jobs.
+#[test]
+fn test_release_published_workflows_gate_every_job_on_v_tags() {
+    const GATE: &str = "startsWith(github.event.release.tag_name, 'v')";
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workflows_dir = manifest_dir.join(".github/workflows");
+    let mut workflows: Vec<PathBuf> = fs::read_dir(&workflows_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext == "yml" || ext == "yaml")
+        })
+        .collect();
+    workflows.sort();
+
+    let mut release_triggered = Vec::new();
+    for path in &workflows {
+        let text = fs::read_to_string(path).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+
+        // Top-level `on:` block: does it list a `release` event?
+        let on_start = lines.iter().position(|line| *line == "on:");
+        let Some(on_start) = on_start else { continue };
+        let on_block: Vec<&str> = lines[on_start + 1..]
+            .iter()
+            .take_while(|line| line.is_empty() || line.starts_with(' ') || line.starts_with('#'))
+            .copied()
+            .collect();
+        let release_trigger = on_block.iter().position(|line| *line == "  release:");
+        let Some(release_trigger) = release_trigger else {
+            continue;
+        };
+        let release_types = on_block[release_trigger + 1..]
+            .iter()
+            .take_while(|line| line.starts_with("    "))
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !release_types.is_empty() && !release_types.contains("published") {
+            continue;
+        }
+        release_triggered.push(path.clone());
+
+        // Split the `jobs:` block into (name, body) at two-space job keys.
+        let jobs_start = lines
+            .iter()
+            .position(|line| *line == "jobs:")
+            .unwrap_or_else(|| panic!("{} has no jobs block", path.display()));
+        let mut jobs: Vec<(String, Vec<&str>)> = Vec::new();
+        for line in &lines[jobs_start + 1..] {
+            if !line.is_empty() && !line.starts_with(' ') && !line.starts_with('#') {
+                break;
+            }
+            let is_job_key = line.starts_with("  ")
+                && !line.starts_with("   ")
+                && !line.trim_start().starts_with('#')
+                && line.trim_end().ends_with(':');
+            if is_job_key {
+                jobs.push((line.trim().trim_end_matches(':').to_string(), Vec::new()));
+            } else if let Some((_, body)) = jobs.last_mut() {
+                body.push(line);
+            }
+        }
+        assert!(!jobs.is_empty(), "{} defines no jobs", path.display());
+
+        let job_if = |body: &[&str]| -> Option<String> {
+            body.iter()
+                .find(|line| line.starts_with("    if:"))
+                .map(|line| line.to_string())
+        };
+        let job_needs = |body: &[&str]| -> Vec<String> {
+            body.iter()
+                .find(|line| line.starts_with("    needs:"))
+                .map(|line| {
+                    line.trim_start_matches("    needs:")
+                        .trim()
+                        .trim_matches(|c| c == '[' || c == ']')
+                        .split(',')
+                        .map(|need| need.trim().to_string())
+                        .filter(|need| !need.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        let mut gated: BTreeSet<String> = BTreeSet::new();
+        loop {
+            let before = gated.len();
+            for (name, body) in &jobs {
+                let direct = job_if(body).is_some_and(|cond| {
+                    cond.contains(GATE) && cond.contains("github.event_name != 'release'")
+                });
+                let needs = job_needs(body);
+                let inherited = !needs.is_empty() && needs.iter().all(|need| gated.contains(need));
+                if direct || inherited {
+                    gated.insert(name.clone());
+                }
+            }
+            if gated.len() == before {
+                break;
+            }
+        }
+        let ungated: Vec<&str> = jobs
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .filter(|name| !gated.contains(*name))
+            .collect();
+        assert!(
+            ungated.is_empty(),
+            "{}: jobs reachable from `release: published` must be gated on `v*` tags \
+             (`if: github.event_name != 'release' || {GATE}`) or need only gated jobs; \
+             ungated: {ungated:?}",
+            path.display()
+        );
+
+        // A publish job must carry the gate itself, not rely on skip
+        // propagation through `needs` alone.
+        for (name, body) in &jobs {
+            let publishes = body.iter().any(|line| {
+                line.contains("gh-action-pypi-publish") || line.contains("gh release download")
+            });
+            if publishes {
+                assert!(
+                    job_if(body).is_some_and(|cond| cond.contains(GATE)),
+                    "{}: publish job `{name}` must carry the `v*` release gate directly",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    assert!(
+        release_triggered
+            .iter()
+            .any(|path| path.ends_with("pypi.yml")),
+        "pypi.yml keeps `release: published` for hand-published releases; this \
+         guard must still be exercising it (found: {release_triggered:?})"
+    );
+
+    // The tag-push trigger of record and the manual trigger stay unconditional.
+    let pypi = fs::read_to_string(workflows_dir.join("pypi.yml")).unwrap();
+    assert!(
+        pypi.contains("  push:\n    tags: [\"v*\"]") && pypi.contains("  workflow_dispatch:"),
+        "`v*` tag pushes and workflow_dispatch must keep publishing exactly as before"
+    );
+    assert!(
+        pypi.contains("skip-existing: true"),
+        "a hand-published `v*` release also fires the tag-push run; skip-existing keeps \
+         that overlap from double-publishing"
+    );
+}
+
 #[test]
 fn test_release_builds_both_macos_targets_on_every_tag() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));

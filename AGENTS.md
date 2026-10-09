@@ -385,7 +385,12 @@ When publishing a release:
    `.github/workflows/pypi.yml` publishes every tag as one small `py3-none-any`
    wheel. Its launcher waits for the matching GitHub Release, downloads the
    platform archive on first invocation, verifies `SHA256SUMS`, and keeps the
-   executable and cdylib together in a versioned user cache.
+   executable and cdylib together in a versioned user cache. It runs on `v*` tag
+   pushes (the trigger of record), `workflow_dispatch`, and hand-published
+   releases; the `release: published` path is gated to `v*` tag names, so an
+   editor-only prerelease (for example `jetbrains-262-preview-*`, which carries no
+   `SHA256SUMS`) never starts a PyPI publish (GH #225). A hand-published `v*`
+   release also fires the tag-push run; `skip-existing` absorbs that overlap.
 
    That cutover is what bounds PyPI storage growth, so the project ceiling is a
    measurement, not a guess: `make pypi-quota-check` sums per-file sizes from the

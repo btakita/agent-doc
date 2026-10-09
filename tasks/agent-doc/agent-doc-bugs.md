@@ -153,6 +153,69 @@ The current preview's integrity is already checked. `agent-doc-jetbrains-262-0.2
 3. `#jetbrains262installselect` is still with its subagent: CLI/local install selection of the right ZIP per IDE build.
 
 So for the #218 Remote Dev behaviour checklist (detached-only isolated terminal, main-wins placeholder, no main mutation on focus/sync/resize, close/rejoin, reconnect, two thin clients, one-sided install fails closed), test `c39de1b` now. If it passes, `#gh218remoteproof` can be marked satisfied on c39de1b-equivalent plugin code once CI on `8abda947f` is green.
+
+### Re: testing the #218 preview on Coder — opus-5.5 · 2026-10-09T17:51-04:00
+
+> **Chat prompt (#chatprompt):** How can I test this on coder?
+
+To test on Coder, install the same `jetbrains-262-preview-c39de1b` ZIP on both sides and run an agent-doc CLI built from the PR #222 line on the workspace. The released CLI on PyPI and Homebrew doesn't have the detached-view controller code (`EditorViewPolicy`, `agent-doc-view-*` sessions). With a released CLI, the plugin can only reach a snapshot-only, fail-closed state, so the test proves nothing.
+
+**1. Versions on both sides.** The Coder backend IDE and your local JetBrains Client (via Gateway or Toolbox) must both be IDEA 2026.2.3, build `262.*`. Check Help → About on each. The plugin is limited to `262`–`262.*`, so a 261 side refuses it, and that refusal is one of the fail-closed checks.
+
+**2. Workspace CLI from the PR line** (in a Coder terminal, with `tmux` already installed):
+```sh
+git clone https://github.com/btakita/agent-doc ~/src/agent-doc && cd ~/src/agent-doc
+git checkout c39de1b045b8b5238f8e5b7fa6870062798d4114   # the commit the preview was built from
+cargo install --path . --locked
+agent-doc --version && agent-doc env --json             # expect Coder workspace identity in env
+```
+Stop any agent-doc sessions the workspace was already running before you swap the binary.
+
+**3. Get the ZIP and check its digest on both sides:**
+```sh
+curl -LO https://github.com/btakita/agent-doc/releases/download/jetbrains-262-preview-c39de1b/agent-doc-jetbrains-262-0.2.511.zip
+sha256sum agent-doc-jetbrains-262-0.2.511.zip
+# must be 44474f85ab7f3d8ababb0f99feba244986e24c1b663f6d699895aa9e0819b0d9  (2,569,299 bytes)
+```
+Run this once in the workspace and once on your laptop.
+
+**4. Install on both sides.** In the JetBrains Client, open Settings → Plugins and use ⚙ → *Install Plugin from Disk…*. Do it once for the **host/backend** plugin list and once for the **client** plugin list; 2026.x split mode lists them separately. Then restart the backend and reconnect the client. If your build has no client-side "from disk" entry, unzip the ZIP into the client IDE's plugins directory instead. Afterwards, both sides should show *agent-doc 0.2.511*.
+
+**5. Optional byte-level proof of the installed copies.** Pull the backend copy back to your laptop with `coder config-ssh`, then `scp coder.<workspace>:agent-doc-jetbrains-262-0.2.511.zip backend.zip`. On the `codex/previewartifactprovenance-20261009` branch, run:
+```sh
+make verify-jetbrains-262-preview BACKEND_ZIP=backend.zip CLIENT_GATEWAY_ZIP=<your client copy>
+```
+
+**6. Session sanity** (workspace terminal):
+```sh
+agent-doc tmux ensure path/to/test.md --ide-terminal --json   # expect host=ide
+agent-doc session status path/to/test.md
+```
+For the detached-view checks, record main's layout before and after each step:
+```sh
+tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_width}x#{pane_height} active=#{pane_active}'
+tmux list-sessions | grep agent-doc-view-
+```
+The main session's lines must stay identical. A detached-only document should get its own `agent-doc-view-*` session.
+
+**7. The #218 checklist.** Run each check and note pass/fail:
+1. *Show Tab in New Window* on a document that is not open in main: the new window shows only that document's isolated terminal.
+2. The same document open in main and detached: main keeps its pane, detached shows a read-only placeholder, and main's pane list doesn't change.
+3. Focus/tab switches and manual sync from either window: no change to main panes, sizes, active window or active pane.
+4. Close the detached window and rejoin main: the original file comes back, the view session goes away, and main doesn't reflow.
+5. Restart the backend (or drop and reconnect the client) **before** anything new reaches main: bindings come back before main is published.
+6. Two thin clients connected at once: each keeps its own detached view.
+7. Remove the plugin from one side: it fails closed, with no fallback to a terminal in shared main.
+
+Post the results on #218 with the preview tag and commit `c39de1b04`. If they pass, `#gh218remoteproof` is satisfied for that plugin code.
+
+**CI is red on PR #222.** Run 37988803442 on `8abda947f` failed: the 262 backend couldn't resolve `io.github.lazily:lazily:0.39.0` on CI, because the 262 build looks only in mavenLocal and mavenCentral. This doesn't affect the preview you're testing, which already bundles `lazily-0.39.0.jar`. A subagent is fixing the 262 Gradle setup to resolve lazily the way the classic build does, then fast-forwarding PR #222. `#previewrepin` now records the failure.
+
+**Queue.**
+- `#fixruninfra` is claimed and with a subagent on `fix/fixruninfra`. It is checking the dispatch-only reopen path that refused to inject while the supervisor was recycling, even though the turn still started.
+- The `#jetbrains262installselect` worktree had been idle for more than 20 minutes with uncommitted work, so a new subagent has taken it over to finish.
+- `#jetbrains262distribution` (`740fb3169`) and `#previewartifactprovenance` (`44281dda2`) are done and re-claimed by the coordinator. They will be stacked onto PR #222.
+- The exchange has 9 response sections; I'm leaving compaction alone while the queue is active.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -161,10 +224,11 @@ So for the #218 Remote Dev behaviour checklist (detached-only isolated terminal,
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#fixruninfra]
 - ~~do [#readyanotherpreview]~~
 - ~~do [#waypostauthorization]~~
-- 🚧 do [#jetbrains262installselect]
-- 🚧 do [#jetbrains262distribution]
+- ⏭️ do [#jetbrains262installselect]
+- do [#jetbrains262distribution]
 - ⏭️ do [#previewartifactprovenance]
 - ~~do [#ci25gradle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/225~~
@@ -176,10 +240,11 @@ So for the #218 Remote Dev behaviour checklist (detached-only isolated terminal,
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
-- [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
-- [ ] 🚧 [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
-- [ ] [#previewrepin] [agent-doc] After CI run 37988803442 is green on PR 222 head 8abda947f (from ci25gradle), rebuild the jetbrains-262 preview prerelease from that head and re-pin the previewartifactprovenance manifest (preview-artifacts/*.json plus the constants in scripts/verify_jetbrains_preview.py) to the new asset digest, size, asset id and head. Then point the gh218remoteproof review text at the new preview tag. If CI is red, fix it first.
+- [ ] [#fixruninfra] Fix Run Agent Doc on infra.md. The turn did start but also emitted this error: dispatch-only claude reopen refused to inject into pane %152 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
+- [ ] [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
+- [ ] [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
+- [ ] [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
+- [ ] [#previewrepin] [agent-doc] CI run 37988803442 on PR 222 head 8abda947f FAILED: :backend:compileKotlin in make jetbrains-262-check could not resolve io.github.lazily:lazily:0.39.0, because editors/jetbrains-262/settings.gradle.kts only uses mavenLocal+mavenCentral while classic uses the guarded lazily-kt composite / GitHub Packages. A fix subagent (branch fix/pr222-ci-lazily) is landing that on the PR 222 head branch. After CI is green on the new head, rebuild the jetbrains-262 preview prerelease from it and re-pin the previewartifactprovenance manifest (preview-artifacts/*.json plus the constants in scripts/verify_jetbrains_preview.py) to the new asset digest, size, asset id and head. Then point the gh218remoteproof review text at the new preview tag.
 <!-- /agent:backlog -->
 
 ## Review

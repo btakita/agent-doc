@@ -23320,10 +23320,17 @@ fn focus_escalation_columns(
             columns: main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &supplied),
             source: "editor_surface",
             replaced: None,
+            basis_generation: None,
         });
     }
-    let (mut retained, mut retained_focus) = runtime
-        .pane_layout_desired()
+    let retained_desired = runtime.pane_layout_desired();
+    let basis_generation = Some(
+        retained_desired
+            .as_ref()
+            .map(|desired| desired.generation)
+            .unwrap_or(0),
+    );
+    let (mut retained, mut retained_focus) = retained_desired
         .map(|desired| (desired.invocation.columns, desired.invocation.focus))
         .unwrap_or_default();
     retained = main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &retained);
@@ -23374,6 +23381,7 @@ fn focus_escalation_columns(
             columns: retained,
             source: basis_source,
             replaced: None,
+            basis_generation,
         });
     }
     let (merged, _, _) = merge_editor_route_columns_within(
@@ -23403,6 +23411,7 @@ fn focus_escalation_columns(
             "retained_focus_column"
         },
         replaced,
+        basis_generation,
     })
 }
 
@@ -23415,6 +23424,9 @@ struct FocusEscalationColumns {
     source: &'static str,
     /// The retained column the document replaced, for `retained_focus_column`.
     replaced: Option<String>,
+    /// Retained desired generation used to derive `columns`; zero means there
+    /// was no desired generation and the live tmux observation was the basis.
+    basis_generation: Option<u64>,
 }
 
 /// Hand a `Focus` intent the selection lane could not apply to the structural
@@ -23438,6 +23450,7 @@ fn escalate_focus_to_structural_layout(
         columns,
         source,
         replaced,
+        basis_generation,
     } = match focus_escalation_columns(bootstrap, runtime, document, columns) {
         Ok(escalation) => escalation,
         Err(cause) => {
@@ -23456,12 +23469,14 @@ fn escalate_focus_to_structural_layout(
             "controller_editor_surface_focus_escalated document={document} reason={reason} columns={} source={source}{}",
             columns.len(),
             replaced
+                .as_ref()
                 .map(|column| format!(" replaced={column}"))
                 .unwrap_or_default()
         ),
     );
     // The intent is "select this document", so the republished layout must carry
     // the focus rather than preserve whatever tmux happens to have selected.
+    let derived_columns = columns.clone();
     let mut invocation = automatic_layout_sync_invocation(columns, document, false);
     if source != "editor_surface" {
         // GH #112: republishing the retained layout keeps its order source, so
@@ -23495,10 +23510,24 @@ fn escalate_focus_to_structural_layout(
         invocation,
         None,
         publication,
-        PaneLayoutClaim::from(PaneLayoutPublisher::Escalation).asserting(asserted_columns),
+        PaneLayoutClaim::from(PaneLayoutPublisher::Escalation)
+            .asserting(asserted_columns)
+            .derived_from(basis_generation),
     );
     match published {
-        Ok((desired, _)) => {
+        Ok((desired, published_invocation)) => {
+            let rebased = published_invocation.columns != derived_columns;
+            if rebased {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "controller_editor_surface_focus_escalation_rebased document={document} reason={reason} basis_generation={} published_generation={} columns={}",
+                        basis_generation.unwrap_or(0),
+                        desired.generation,
+                        published_invocation.columns.len(),
+                    ),
+                );
+            }
             if publication == PaneLayoutPublication::CoalesceIdentical
                 && previous_generation == Some(desired.generation)
             {
@@ -27407,13 +27436,19 @@ fn delegate_focus_to_owning_controller(
     controller_root: &Path,
     owner_root: &Path,
     document: &Path,
+    missing_pane_policy: MissingFocusPanePolicy,
 ) -> ControllerTmuxFocusReceipt {
-    match focus_document_pane(owner_root, document) {
+    // Preserve the caller's structural authority across the project-root hop.
+    // In particular, manual/full layout sync reaches this seam with
+    // `ProvisionForLayout`; degrading that request to the public focus-only
+    // helper leaves a killed subproject pane unresolved forever even though
+    // the owning controller is exactly the component allowed to recreate it.
+    match request_document_pane(owner_root, document, missing_pane_policy) {
         Ok(receipt) => {
             agent_doc_ops_log_io::log_op(
                 controller_root,
                 &format!(
-                    "controller_focus_delegated document={} owner_root={} focused={} reason={}",
+                    "controller_focus_delegated document={} owner_root={} policy={missing_pane_policy:?} focused={} reason={}",
                     document.display(),
                     owner_root.display(),
                     receipt.focused,
@@ -27426,7 +27461,7 @@ fn delegate_focus_to_owning_controller(
             agent_doc_ops_log_io::log_op(
                 controller_root,
                 &format!(
-                    "controller_focus_delegation_failed document={} owner_root={} error={error:#}",
+                    "controller_focus_delegation_failed document={} owner_root={} policy={missing_pane_policy:?} error={error:#}",
                     document.display(),
                     owner_root.display(),
                 ),
@@ -27470,6 +27505,7 @@ fn handle_focus_document_pane_with_policy(
             &bootstrap.project_root,
             owner_root,
             &canonical,
+            missing_pane_policy,
         ));
     }
     let document_id = agent_doc_session_actor_io::canonical_document_id_in(
@@ -28145,7 +28181,14 @@ fn publish_pane_layout_desired_invocation(
         // columns there in place of the retained generation's.
         store_layout_state(&bootstrap.project_root, &desired.invocation.columns)?;
         publish_pane_layout_status(runtime);
-        return Ok((desired, invocation));
+        let applied_invocation = desired.invocation.clone();
+        return Ok((desired, applied_invocation));
+    }
+    if desired.invocation.columns != invocation.columns {
+        // GH #224: the graph may rebase a derived escalation after a newer
+        // editor split wins the race into the publication critical section.
+        // Keep the durable effect sink aligned with the graph-owned fact.
+        store_layout_state(&bootstrap.project_root, &desired.invocation.columns)?;
     }
     log_pane_layout_desired_publication(
         &bootstrap.project_root,
@@ -28158,7 +28201,8 @@ fn publish_pane_layout_desired_invocation(
         log_pane_layout_narrowed(&bootstrap.project_root, &desired);
     }
     publish_pane_layout_status(runtime);
-    Ok((desired, invocation))
+    let applied_invocation = desired.invocation.clone();
+    Ok((desired, applied_invocation))
 }
 
 /// GH #136 follow-up (a): apply [`agent_doc_controller::pane_layout::bound_layout_width`]
@@ -38301,6 +38345,69 @@ mod tests {
         assert!(
             ops.contains(&format!("owner_root={}", submodule.display())),
             "delegation must name the submodule root that owns the document; got:\n{ops}"
+        );
+        assert!(
+            ops.contains("policy=ObserveOnly"),
+            "ordinary focus must preserve its observe-only policy across the root hop; got:\n{ops}"
+        );
+    }
+
+    /// `#sync-cross-root-autostart`: structural layout sync owns provisioning.
+    /// A superproject request must not become focus-only while it is delegated
+    /// to the subproject controller, or a killed subproject pane can never be
+    /// recreated by Sync Tmux Layout.
+    #[test]
+    fn layout_provision_for_a_submodule_document_preserves_policy() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let submodule = dir.path().join("src/nested-project");
+        std::fs::create_dir_all(submodule.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(submodule.join("tasks")).unwrap();
+        let doc = submodule.join("tasks/tools.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: nested-tools\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+
+        let bootstrap = test_bootstrap(&dir);
+        let receipt = handle_focus_document_pane_with_policy(
+            &bootstrap,
+            None,
+            ControllerRequest {
+                command: "focus_document_pane".to_string(),
+                file: Some(doc.clone()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+                sequence: None,
+            },
+            MissingFocusPanePolicy::ProvisionForLayout,
+            None,
+        )
+        .expect("cross-root structural delegation returns a receipt");
+
+        assert_eq!(
+            receipt.reason, "cross_root_controller_unavailable",
+            "the test runtime's provisioning refusal proves the structural policy reached the owner"
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("policy=ProvisionForLayout"),
+            "structural provisioning policy must survive delegation; got:\n{ops}"
+        );
+        assert!(
+            ops.contains("test runtime does not route auto-start"),
+            "the owning controller must reach its provision effect; got:\n{ops}"
         );
     }
 

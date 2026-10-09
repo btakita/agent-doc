@@ -574,6 +574,14 @@ I am dispatching this as `#starttools` to an isolated subagent. The worker will 
 > **Chat prompt (#chatprompt):** Run Agent Doc did successfully	start the tools.md tmux pane + session
 
 That isolates `#starttools` to the pane-recovery path. Direct Run Agent Doc startup is the working control; the failure is that Sync Tmux Panes does not recreate and rebind the tools.md session after its pane is killed. The isolated subagent will reproduce that exact sequence and implement the recovery with regression coverage.
+
+### Re: #gh-fix https://github.com/btakita/agent-doc/issues/221 — gpt-6.1-sol · 2026-10-09 14:16 EDT
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/221
+
+The independent audit found no missing #221-specific implementation. Draft PR #222 at `254b75e68b9bbf974b95f5f5982e63f55657e13f` already provides one exact-262 ZIP with shared, frontend, and backend modules; capability-based role selection; frontend client-surface capture; authenticated generation-fenced backend publication; artifact checks; a role matrix; and both split-sandbox verifications. `make jetbrains-262-check` passed, and the implementation merges cleanly with current `main`.
+
+This consumes the duplicate implementation dispatch, but GitHub #221 remains open because PR #222 is still draft and unmerged. Its current CI failure is the unrelated installed-inode freshness test. A durable `#gh221mergeclose` review gate now requires green CI and the PR merge before #221 is closed. The existing `#gh218remoteproof` gate separately owns real IDEA 2026.2.3 Remote Dev acceptance. The modular artifact is deliberately scoped to `262.*`; it does not claim support for the issue's original 263 reproducer.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -584,23 +592,25 @@ That isolates `#starttools` to the pane-recovery path. Direct Run Agent Doc star
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#singleplugindistribution]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/223~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/224~~
-- do [#starttools]
-- do [#jetbrainsdualrelease]
-- release + publish
+- #gh-fix https://github.com/btakita/agent-doc/issues/221
+- ⏭️ do [#starttools]
+- 🚧 do [#jetbrainsdualrelease]
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#starttools] Fix Sync Tmux Panes recovery for tools.md: reproduce by running :kill-pane on the bound pane, then Sync Tmux Panes; the session must restart in a newly created pane and rebind cleanly. Identify the lifecycle/routing cause, add regression coverage, and verify the installed CLI/editor path end to end.
-- [ ] [#jetbrainsdualrelease] Complete PR #222 dual JetBrains release plumbing before release: assign distinct classic/modular JetBrains update versions, clamp the classic plugin to until-build="261.*", and add corresponding release-version, check, and release tests proving both artifacts remain distinct, compatibility-ranged, and collision-free.
+- [ ] 🚧 [#starttools] Fix Sync Tmux Panes recovery for tools.md: reproduce by running :kill-pane on the bound pane, then Sync Tmux Panes; the session must restart in a newly created pane and rebind cleanly. Identify the lifecycle/routing cause, add regression coverage, and verify the installed CLI/editor path end to end.
+- [ ] 🚧 [#jetbrainsdualrelease] Complete PR #222 dual JetBrains release plumbing before release: assign distinct classic/modular JetBrains update versions, clamp the classic plugin to until-build="261.*", and add corresponding release-version, check, and release tests proving both artifacts remain distinct, compatibility-ranged, and collision-free.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#gh221mergeclose] [operator-verify] GH #221: keep open until draft PR #222, including modular head 254b75e68, has green CI and merges. The shared/frontend/backend split is code-complete; GH #218 separately retains the real IDEA 2026.2.3 Remote Dev acceptance gate. After #222 merges, close #221 as fixed by #222.
 - [/] [#gh218remoteproof] [operator-verify] GH #218 / draft PR #222: require green CI for head 254b75e68 and real IDEA 2026.2.3 (262) Remote Dev proof with the same modular ZIP installed on backend and Client/Gateway: detached-only isolated terminal; same-document main-wins read-only placeholder and byte-identical main; focus/sync/resize no main mutation; close/rejoin; backend restart/client reconnect before first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Only then mark PR ready, merge, and close #218.
 - [/] [#fixsubagent] Fix in a subagent:
   ```

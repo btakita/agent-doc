@@ -59,6 +59,12 @@ This session switched from Codex to Claude. The three new heads were already cla
 - **#previewartifactprovenance**: committed and pushed as `7a9f1b84b` on `codex/previewartifactprovenance-20261009`, not merged. A subagent is checking the manifest digest against the real prerelease asset and adding verifier tests if none exist.
 
 Once the subagents report, I'll merge the three branches into agent-doc main one after another, run one `make check`, one `make install`, and push. After that I'll release the claims and close the items. `#actionable-review` was already satisfied by the previous cycle's review, so this cycle didn't repeat it.
+
+### Re: actionable-review dispatch — opus-5.5 · 2026-10-09T15:50-04:00
+
+I claimed `#actionable-review` (`subagent:actionable-review`) and dispatched it to a read-only background subagent. It is re-checking each of the nine gated review items against current facts: CI run 37974793628, the state of PR #222 and issues #221/#218, the Homebrew tap secret, the steering-eval data count, and the pending capture in haiven-dev `frontend.md`. It excludes the three JetBrains heads, which other subagents are already working on.
+
+This cycle adds no backlog items: the capture belongs to the claimed subagent's result. When it reports back, I'll add the actionable items to the backlog and queue, convert or close stale review items, and release the claim. I hit one oddity along the way: the pre-write `pending_capture` gate fires for a preset head even after it has been claimed for subagent dispatch.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -68,7 +74,7 @@ Once the subagents report, I'll merge the three branches into agent-doc main one
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - #actionable-review
-- 🚧 do [#jetbrains262installselect]
+- ⏭️ do [#jetbrains262installselect]
 - 🚧 do [#jetbrains262distribution]
 - 🚧 do [#previewartifactprovenance]
 <!-- /agent:queue -->

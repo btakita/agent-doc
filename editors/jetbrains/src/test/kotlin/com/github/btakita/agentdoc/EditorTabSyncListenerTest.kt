@@ -427,6 +427,20 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `closing a detached frame retires only that surface endpoint`() {
+        val ownership = EditorTabSyncListener.SurfaceEndpointOwnership()
+        val main = EditorTabSyncListener.SurfaceEndpoint("/repo", "main")
+        val detached = EditorTabSyncListener.SurfaceEndpoint("/repo", "dock-window-7")
+
+        assertTrue(ownership.markPublished(main, setOf("main", "dock-window-7")).isEmpty())
+        assertTrue(ownership.markPublished(detached, setOf("main", "dock-window-7")).isEmpty())
+        assertEquals(listOf(detached), ownership.missing(setOf("main")))
+        assertEquals(listOf(detached), ownership.markPublished(main, setOf("main")))
+        assertTrue(ownership.markForgotten(detached))
+        assertEquals(listOf(main), ownership.drain())
+    }
+
+    @Test
     fun `surface projection waits while the selected document is absent`() {
         assertEquals(
             EditorTabSyncListener.SurfaceReport.ProjectionReadiness.AwaitingSelectedDocument,
@@ -1302,7 +1316,7 @@ previousSelectionPath = "/repo/tasks/tsift.md",
         assertTrue(activation.contains("activationGeneration"))
         assertTrue(activation.contains("selectionFocusProbeGeneration.get() != activationGeneration"))
         assertTrue(activation.contains("currentWindow?.selectedFile"))
-        assertTrue(activation.contains("getFrame(project)?.isActive == true"))
+        assertTrue(activation.contains("JetBrainsEditorSurfaces.isProjectSurfaceActive(project)"))
         assertTrue(activation.contains("AgentDocSessionFiles.isSessionDocument(selectedFile)"))
         assertTrue(activation.contains("onEditorFocusGained(project, selectedFile)"))
     }

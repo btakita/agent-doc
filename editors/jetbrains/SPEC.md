@@ -145,6 +145,9 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 
 ### Tab Sync Listener
 
+- “Show Tab in New Window” is a first-class editor surface, not another project. The listener resolves each `EditorWindow` through its AWT frame to JetBrains' persisted `ToolWindowPane.paneId`, reports only the windows owned by that editor surface, and includes that stable `surface_id` in structural and focus-only observations. The controller retains projections by `(project_root, client_id, surface_id)`. A closed detached frame is retired by exact surface id; it must not retire sibling frames or the whole plugin generation. Mouse/focus and structural AWT ingress include every live editor surface, not only the main `EditorsSplitters` tree.
+- The IDE-hosted agent terminal uses a dedicated `Agent Doc Terminal` tool window so relocation never moves unrelated stock Terminal tabs. After the exact controller focus receipt applies, the controller's `terminal_decision` may mount the dedicated tool window in one `ToolWindowPane`, keep it there, exclude another frame, or stash it. Internal pane-placement APIs are capability-probed; absence leaves terminal presentation untouched. Plugin/project disposal unregisters the dedicated tool window and clears retained placement.
+
 - Registered once per IntelliJ project from `PluginLifecycleListener`; `plugin.xml`
   owns only the project lifecycle listener.
 - Returning to an IntelliJ frame through an application-activation event is a

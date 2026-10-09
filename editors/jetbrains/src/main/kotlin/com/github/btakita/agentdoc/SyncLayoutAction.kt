@@ -611,12 +611,21 @@ object LayoutDetector {
     fun detectEditorLayout(
         project: com.intellij.openapi.project.Project,
         sessionDocumentPaths: Set<String>? = null,
+        surfaceWindows: List<com.intellij.openapi.fileEditor.impl.EditorWindow>? = null,
     ): EditorLayout? {
         try {
             val managerEx = FileEditorManagerEx.getInstanceEx(project)
-            val windows = managerEx.windows
-            val remoteClients = remoteClientSessionEditors(project, sessionDocumentPaths)
-            if (shouldUseRemoteClientLayout(windows.size, remoteClients.size)) {
+            val windows = surfaceWindows ?: managerEx.windows.toList()
+            val remoteClients =
+                if (surfaceWindows == null) {
+                    remoteClientSessionEditors(project, sessionDocumentPaths)
+                } else {
+                    emptyList()
+                }
+            if (
+                surfaceWindows == null &&
+                    shouldUseRemoteClientLayout(windows.size, remoteClients.size)
+            ) {
                 // GH #97: backend-local FileEditorManager.selectedFiles is only the
                 // focused file in Remote Dev. JetBrains keeps the real per-frontend
                 // selections in client-scoped managers; this is the same service set
@@ -646,7 +655,7 @@ object LayoutDetector {
                 return layout
             }
 
-            val splitters = managerEx.splitters
+            val splitters = windows.firstOrNull()?.owner ?: managerEx.splitters
             val splittersComponent = splitters as? java.awt.Component
             if (splittersComponent == null) {
                 LOG.debug("[layout-detect] ${windows.size} editor windows but splitters component unavailable; cannot resolve columns")

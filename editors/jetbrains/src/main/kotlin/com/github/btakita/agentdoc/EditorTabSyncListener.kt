@@ -11,7 +11,6 @@ import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.IdeFocusManager
-import com.intellij.openapi.wm.WindowManager
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -25,6 +24,7 @@ internal data class FocusProjectionEffectRequest(
     val projectRoot: String,
     val filePath: String,
     val surfaceJson: String,
+    val surfaceId: String = "project",
 )
 
 internal data class FocusProjectionEffectResponse(
@@ -68,6 +68,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
      * layouts.
      */
     private val surfaceRoots = SurfaceRootOwnership()
+    private val surfaceEndpoints = SurfaceEndpointOwnership()
 
     /**
      * Debounce generation. Per-instance, so one project's tab churn cannot supersede another
@@ -333,6 +334,37 @@ companion object {
         }
     }
 
+    internal data class SurfaceEndpoint(val projectRoot: String, val surfaceId: String)
+
+    /** Retained per-frame endpoints, used to retire a closed DockWindow without its siblings. */
+    internal class SurfaceEndpointOwnership {
+        private val observed: MutableSet<SurfaceEndpoint> = ConcurrentHashMap.newKeySet()
+
+        fun record(endpoint: SurfaceEndpoint) {
+            observed.add(endpoint)
+        }
+
+        fun missing(liveSurfaceIds: Set<String>): List<SurfaceEndpoint> =
+            observed
+                .filter { it.surfaceId !in liveSurfaceIds }
+                .sortedWith(compareBy(SurfaceEndpoint::projectRoot, SurfaceEndpoint::surfaceId))
+
+        fun markPublished(endpoint: SurfaceEndpoint, liveSurfaceIds: Set<String>): List<SurfaceEndpoint> {
+            record(endpoint)
+            return missing(liveSurfaceIds)
+        }
+
+        fun markForgotten(endpoint: SurfaceEndpoint): Boolean = observed.remove(endpoint)
+
+        fun drain(): List<SurfaceEndpoint> {
+            val endpoints = observed
+                .toList()
+                .sortedWith(compareBy(SurfaceEndpoint::projectRoot, SurfaceEndpoint::surfaceId))
+            observed.clear()
+            return endpoints
+        }
+    }
+
     /**
      * IDEA may emit selection, structural-layout, and file-open edges before `selectedFiles`
      * and every restored split window agree. Re-read the editor projection on a bounded
@@ -442,8 +474,10 @@ private data class PendingSurfaceObservation(
 private data class PendingSurface(
     val projectRoot: String,
     val relativePath: String,
+    val surfaceId: String,
     val surfaceJson: String,
     val knownControllerRoots: List<String>,
+    val liveSurfaceIds: Set<String>,
 )
 
 /**
@@ -454,6 +488,8 @@ private data class PendingSurface(
 private data class CapturedSurface(
     val project: Project,
     val projectBasePath: String?,
+    val surfaceId: String,
+    val liveSurfaceIds: Set<String>,
     val focusedFile: VirtualFile,
     val visibleMdFiles: List<String>,
     val openMdFiles: List<String>,
@@ -797,6 +833,18 @@ private data class CapturedSurface(
                                     remainingSelectionPasses - 1,
                                 )
                             } else {
+                                val missingEndpoints =
+                                    surfaceEndpoints.missing(
+                                        JetBrainsEditorSurfaces.liveSurfaceIds(observation.project),
+                                    )
+                                if (missingEndpoints.isNotEmpty()) {
+                                    surfaceDeliveryExecutor.execute {
+                                        retireClosedSurfaceEndpoints(
+                                            observation.project,
+                                            missingEndpoints,
+                                        )
+                                    }
+                                }
                                 log("observe: retained until editor-surface dependency changes")
                             }
                             return@invokeLater
@@ -854,6 +902,7 @@ private data class CapturedSurface(
                         CpRouteClient.observeEditorSurface(
                             projectRoot = pending.projectRoot,
                             surfaceJson = pending.surfaceJson,
+                            surfaceId = pending.surfaceId,
                         )
                     if (receipt.exitCode != 0) {
                         val retained =
@@ -875,6 +924,12 @@ private data class CapturedSurface(
                         return@execute
                     }
                     surfaceDeliveryRetryAttempt.set(0)
+                    val retiredEndpoints =
+                        surfaceEndpoints.markPublished(
+                            SurfaceEndpoint(pending.projectRoot, pending.surfaceId),
+                            pending.liveSurfaceIds,
+                        )
+                    retireClosedSurfaceEndpoints(observation.project, retiredEndpoints)
                     val obsoleteRoots =
                         synchronized(lifecycleLock) {
                             if (closed) {
@@ -913,6 +968,31 @@ private data class CapturedSurface(
         }
     }
 
+    private fun retireClosedSurfaceEndpoints(
+        project: Project,
+        endpoints: List<SurfaceEndpoint>,
+    ) {
+        for (endpoint in endpoints) {
+            CpRouteClient.forgetEditorSurface(endpoint.projectRoot, endpoint.surfaceId)
+            val focusRetirement =
+                CpRouteClient.forgetEditorFocusWithReceipt(
+                    endpoint.projectRoot,
+                    endpoint.surfaceId,
+                )
+            if (focusRetirement.exitCode != 0) continue
+            ApplicationManager.getApplication().invokeLater {
+                if (!project.isDisposed) {
+                    IdeTerminalHost.applySurfaceDecision(project, focusRetirement.output)
+                }
+            }
+            surfaceEndpoints.markForgotten(endpoint)
+            log(
+                "observe: retired closed editor surface " +
+                    "root=${endpoint.projectRoot} surface=${endpoint.surfaceId}",
+            )
+        }
+    }
+
     private fun captureSurface(
         project: Project,
         preferredFile: VirtualFile? = null,
@@ -924,24 +1004,53 @@ private data class CapturedSurface(
         val manager = FileEditorManager.getInstance(project)
         val managerEx = FileEditorManagerEx.getInstanceEx(project)
         val editorWindows = managerEx.windows
-        val openSessionFiles = manager.openFiles.filter(AgentDocSessionFiles::isSessionDocument)
-        val sessionDocumentPaths = openSessionFiles.map { it.path }.toSet()
+        val anchorWindow =
+            managerEx.currentWindow
+                ?.takeIf { current ->
+                    preferredFile == null || current.selectedFile?.path == preferredFile.path
+                }
+                ?: preferredFile?.let { preferred ->
+                    editorWindows.firstOrNull { it.selectedFile?.path == preferred.path }
+                }
+                ?: managerEx.currentWindow
+                ?: editorWindows.firstOrNull()
+        val editorSurface = JetBrainsEditorSurfaces.forEditorWindow(project, anchorWindow)
+        val liveSurfaceIds =
+            editorWindows
+                .map { JetBrainsEditorSurfaces.forEditorWindow(project, it).surfaceId }
+                .toSet()
+        val surfaceWindows =
+            anchorWindow?.owner?.let { owner ->
+                editorWindows.filter { it.owner === owner }
+            } ?: editorWindows.toList()
+        val allOpenSessionFiles = manager.openFiles.filter(AgentDocSessionFiles::isSessionDocument)
+        val allSessionDocumentPaths = allOpenSessionFiles.map { it.path }.toSet()
         // GH #177: capture remote-client evidence before consulting backend-window readiness.
         // Remote Dev may expose an incidental backend window whose selected file is null; that
         // window must not gate the frontend-owned layout.
         val remoteLayoutCandidate =
-            LayoutDetector.snapshotRemoteLayout(project, sessionDocumentPaths)
+            LayoutDetector.snapshotRemoteLayout(project, allSessionDocumentPaths)
         val useRemoteClientLayout =
             LayoutDetector.shouldUseRemoteClientLayout(
                 backendWindowCount = editorWindows.size,
                 remoteClientSessionCount = remoteLayoutCandidate.clients.size,
             )
+        val openSessionFiles =
+            if (useRemoteClientLayout) {
+                allOpenSessionFiles
+            } else {
+                surfaceWindows
+                    .flatMap { it.fileList.toList() }
+                    .distinctBy { it.path }
+                    .filter(AgentDocSessionFiles::isSessionDocument)
+            }
+        val sessionDocumentPaths = openSessionFiles.map { it.path }.toSet()
         val selectedWindowPaths =
             SurfaceReport.splitSelections(
                 if (useRemoteClientLayout) {
                     emptyList()
                 } else {
-                    editorWindows.map { it.selectedFile?.path }
+                    surfaceWindows.map { it.selectedFile?.path }
                 },
                 manager.selectedFiles.map { it.path },
             )
@@ -953,7 +1062,7 @@ private data class CapturedSurface(
         ) {
             return captureDeferred(
                 "backend_window_selection_incomplete " +
-                    "windows=${editorWindows.size} selected=${selectedWindowPaths.size}",
+                    "windows=${surfaceWindows.size} selected=${selectedWindowPaths.size}",
             )
         }
         val rawVisibleMdFiles =
@@ -962,7 +1071,7 @@ private data class CapturedSurface(
                 // `#stickymdpane`: keep a window that has switched to a source
                 // file standing for the last document it showed. A backend with no
                 // editor windows (GH #88) has no per-window tab history to consult.
-                editorWindows.map { window ->
+                surfaceWindows.map { window ->
                     LayoutDetector.stickyMarkdownForWindow(
                         selectedPath = window.selectedFile?.path,
                         windowMarkdownTabsMruLast =
@@ -979,7 +1088,7 @@ private data class CapturedSurface(
         // GH #157: capture Remote Dev client/editor state on this EDT turn, but defer its native
         // retained-split fold to the generation-owned surface delivery worker below.
         val remoteLayoutSnapshot =
-            if (useRemoteClientLayout || editorWindows.isEmpty()) {
+            if (useRemoteClientLayout || surfaceWindows.isEmpty()) {
                 remoteLayoutCandidate
             } else {
                 null
@@ -991,9 +1100,17 @@ private data class CapturedSurface(
                 project.basePath?.let { basePath ->
                     SyncLayoutAction.absolutizeEditorLayout(
                         basePath,
-                        LayoutDetector.detectEditorLayout(project, sessionDocumentPaths),
+                        LayoutDetector.detectEditorLayout(
+                            project,
+                            sessionDocumentPaths,
+                            surfaceWindows,
+                        ),
                     )
-                } ?: LayoutDetector.detectEditorLayout(project, sessionDocumentPaths)
+                } ?: LayoutDetector.detectEditorLayout(
+                    project,
+                    sessionDocumentPaths,
+                    surfaceWindows,
+                )
             }
         val settledProjection =
             if (reconcileStaleSelection) {
@@ -1035,8 +1152,12 @@ private data class CapturedSurface(
             return captureDeferred("preferred_document_not_in_current_projection")
         }
         val selectedEditorFile =
-            manager.selectedTextEditor?.virtualFile
-                ?.takeIf(AgentDocSessionFiles::isSessionDocument)
+            if (useRemoteClientLayout) {
+                manager.selectedTextEditor?.virtualFile
+                    ?.takeIf(AgentDocSessionFiles::isSessionDocument)
+            } else {
+                anchorWindow?.selectedFile?.takeIf(AgentDocSessionFiles::isSessionDocument)
+            }
         val activeFilePath =
             SurfaceReport.resolveActiveFilePath(
                 preferredActiveFile = preferredMarkdownFile?.path,
@@ -1047,13 +1168,13 @@ private data class CapturedSurface(
             sequenceOf(
                 preferredMarkdownFile,
                 selectedEditorFile,
-                manager.selectedFiles.firstOrNull(AgentDocSessionFiles::isSessionDocument),
+                openSessionFiles.firstOrNull { it.path == activeFilePath },
                 )
                 .filterNotNull()
                 .firstOrNull { it.path == activeFilePath }
                 ?: return captureDeferred("active_virtual_file_unresolved")
         val focusedWindowTabs =
-            managerEx.windows
+            surfaceWindows
                 .firstOrNull { it.selectedFile?.path == activeFilePath }
                 ?.fileList
                 ?.filter(AgentDocSessionFiles::isSessionDocument)
@@ -1074,6 +1195,8 @@ private data class CapturedSurface(
         return CapturedSurface(
             project = project,
             projectBasePath = project.basePath,
+            surfaceId = editorSurface.surfaceId,
+            liveSurfaceIds = liveSurfaceIds,
             focusedFile = file,
             visibleMdFiles = visibleMdFiles,
             openMdFiles = openMdFiles,
@@ -1129,6 +1252,7 @@ private data class CapturedSurface(
         return PendingSurface(
             projectRoot = surfaceProjectRoot,
             relativePath = focusedRelativePath,
+            surfaceId = captured.surfaceId,
             surfaceJson =
                 GSON.toJson(
                     SurfaceReport.buildSurface(
@@ -1141,6 +1265,7 @@ private data class CapturedSurface(
                     ),
                 ),
             knownControllerRoots = knownControllerRoots,
+            liveSurfaceIds = captured.liveSurfaceIds,
         )
     }
 
@@ -1148,6 +1273,12 @@ private data class CapturedSurface(
         synchronized(lifecycleLock) {
             if (closed) return@synchronized null
             val requestedGeneration = focusProjectionGeneration.incrementAndGet()
+            val focusWindow = FileEditorManagerEx.getInstanceEx(project).let { manager ->
+                manager.currentWindow?.takeIf { it.selectedFile?.path == file.path }
+                    ?: manager.windows.firstOrNull { it.selectedFile?.path == file.path }
+            }
+            val focusSurfaceId =
+                JetBrainsEditorSurfaces.forEditorWindow(project, focusWindow).surfaceId
             try {
                 val scheduled =
                     focusProjectionExecutor.schedule(
@@ -1157,9 +1288,8 @@ private data class CapturedSurface(
                                 !shouldPublishFocusProjection(
                                     requestedGeneration = requestedGeneration,
                                     currentGeneration = focusProjectionGeneration.get(),
-                                    projectWindowActive =
-                                        WindowManager.getInstance().getFrame(project)?.isActive ==
-                                            true,
+                                        projectWindowActive =
+                                        JetBrainsEditorSurfaces.isProjectSurfaceActive(project),
                                 )
                         ) {
                             log(
@@ -1180,8 +1310,7 @@ private data class CapturedSurface(
                                     requestedGeneration = requestedGeneration,
                                     currentGeneration = focusProjectionGeneration.get(),
                                     projectWindowActive =
-                                        WindowManager.getInstance().getFrame(project)?.isActive ==
-                                            true,
+                                        JetBrainsEditorSurfaces.isProjectSurfaceActive(project),
                                 )
                         ) {
                             log(
@@ -1196,6 +1325,7 @@ private data class CapturedSurface(
                                 generation = requestedGeneration,
                                 projectRoot = projectRoot,
                                 filePath = file.path,
+                                surfaceId = focusSurfaceId,
                                 surfaceJson =
                                     GSON.toJson(SurfaceReport.buildFocusProjection(file.path)),
                             )
@@ -1206,16 +1336,21 @@ private data class CapturedSurface(
                                     CpRouteClient.observeEditorFocus(
                                         projectRoot = request.projectRoot,
                                         surfaceJson = request.surfaceJson,
+                                        surfaceId = request.surfaceId,
                                     ),
                             )
                         synchronized(lifecycleLock) {
+                            if (response.transport.exitCode == 0) {
+                                surfaceEndpoints.record(
+                                    SurfaceEndpoint(request.projectRoot, request.surfaceId),
+                                )
+                            }
                             when (
                                 decideFocusProjectionReceipt(
                                     response = response,
                                     currentGeneration = focusProjectionGeneration.get(),
                                     projectWindowActive =
-                                        WindowManager.getInstance().getFrame(project)?.isActive ==
-                                            true,
+                                        JetBrainsEditorSurfaces.isProjectSurfaceActive(project),
                                 )
                             ) {
                                 FocusProjectionReceiptDecision.Applied -> {
@@ -1223,6 +1358,14 @@ private data class CapturedSurface(
                                     // controller proves that this exact retained projection selected
                                     // the pane. A missing actor must not install a stale lease.
                                     TmuxPaneFocusSync.recordEditorFocusIntent(project, request.filePath)
+                                    ApplicationManager.getApplication().invokeLater {
+                                        if (!project.isDisposed) {
+                                            IdeTerminalHost.applySurfaceDecision(
+                                                project,
+                                                response.transport.output,
+                                            )
+                                        }
+                                    }
                                     log("focus projection: applied file=${request.filePath}")
                                 }
 
@@ -1284,13 +1427,13 @@ private data class CapturedSurface(
         }
 
     private fun shutdown() {
-        val roots =
+        val (roots, endpoints) =
             synchronized(lifecycleLock) {
                 closed = true
                 invalidateFocusProjection()
                 focusProjectionExecutor.shutdownNow()
                 surfaceDeliveryExecutor.shutdownNow()
-                surfaceRoots.drain()
+                surfaceRoots.drain() to surfaceEndpoints.drain()
             }
         latestSurfaceObservation.set(null)
         Thread(
@@ -1298,6 +1441,10 @@ private data class CapturedSurface(
                     for (root in roots) {
                         CpRouteClient.forgetEditorSurface(root)
                         CpRouteClient.forgetEditorFocus(root)
+                    }
+                    for (endpoint in endpoints) {
+                        CpRouteClient.forgetEditorSurface(endpoint.projectRoot, endpoint.surfaceId)
+                        CpRouteClient.forgetEditorFocus(endpoint.projectRoot, endpoint.surfaceId)
                     }
                 },
                 "agent-doc-editor-surface-forget",
@@ -1397,7 +1544,7 @@ requiredFocusGeneration = requestedFocusGeneration,
             val activeWindowPath =
                 FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile?.path
             val projectWindowActive =
-                WindowManager.getInstance().getFrame(project)?.isActive == true
+                JetBrainsEditorSurfaces.isProjectSurfaceActive(project)
             if (
                 !shouldClaimSettledSelectionFocus(
                     selectionPath = file.path,
@@ -1429,7 +1576,7 @@ requiredFocusGeneration = requestedFocusGeneration,
             val selectedFile =
                 FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile
             if (
-                WindowManager.getInstance().getFrame(project)?.isActive == true &&
+                JetBrainsEditorSurfaces.isProjectSurfaceActive(project) &&
                     selectedFile != null &&
                     AgentDocSessionFiles.isSessionDocument(selectedFile)
             ) {
@@ -1554,5 +1701,13 @@ requiredFocusGeneration = requestedFocusGeneration,
     override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         StateProjectionBridge.evictForFile(file.path)
+        requestObservation(
+            PendingSurfaceObservation(
+                project = source.project,
+                preferredFile = null,
+                forceReconcile = false,
+                authority = ObservationAuthority.Layout,
+            ),
+        )
     }
 }

@@ -31,6 +31,7 @@ class CpRouteClientCommandPlaneTest {
                 clientId = "jetbrains-pid:42",
                 generation = 100,
                 sequence = 7,
+                surfaceId = "dock-window-7",
             )
 
         assertEquals("editor_surface_observe", request.get("command").asString)
@@ -42,6 +43,7 @@ class CpRouteClientCommandPlaneTest {
         assertEquals("jetbrains-pid:42", observation.get("client_id").asString)
         assertEquals(100L, observation.get("generation").asLong)
         assertEquals(7L, observation.get("sequence").asLong)
+        assertEquals("dock-window-7", observation.get("surface_id").asString)
         assertEquals(
             "/proj/plan.md",
             observation.getAsJsonObject("surface").get("focused").asString,
@@ -65,6 +67,21 @@ class CpRouteClientCommandPlaneTest {
             "editor_surface_client_family_retired",
             request.get("reason").asString,
         )
+    }
+
+    @Test
+    fun `editor surface retirement can target one detached frame`() {
+        val request =
+            CpRouteClient.editorSurfaceForgetRequest(
+                clientId = "jetbrains-pid:84",
+                generation = 101,
+                retireClientFamily = false,
+                surfaceId = "dock-window-7",
+            )
+
+        assertEquals("editor_surface_client_retired", request.get("reason").asString)
+        val payload = JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        assertEquals("dock-window-7", payload.get("surface_id").asString)
     }
 
     @Test

@@ -247,6 +247,7 @@ class PluginLifecycleListener : ProjectManagerListener {
             EditorFocusSyncListener.disposeProject(project)
             EditorTabSyncListener.disposeProject(project)
             TmuxPaneFocusSync.disposeProject(project)
+            IdeTerminalHost.disposeProject(project)
         }
     }
 

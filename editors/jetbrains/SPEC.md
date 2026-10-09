@@ -8,6 +8,7 @@ Extends `editors/SPEC.md` with JetBrains-specific behavior.
 - **Name:** Agent Doc
 - **Restart:** Required for every package upgrade on builds with asynchronous classloader retirement; compatible builds may upgrade dynamically
 - **Native upgrades:** Safe in-process generation handoff
+- **Distribution:** The classic and exact-262 updates share this ID but use distinct versions, disjoint compatibility ranges, and separate validated custom-repository listings; see [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md)
 
 ## Implementation Details
 

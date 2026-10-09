@@ -44,10 +44,11 @@ pub fn active_queue_head_text(content: &str) -> Result<Option<String>> {
         return Ok(None);
     }
     let components = agent_doc_element::element::parse(content)?;
-    let Some(queue) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let queue_set = crate::queue_set::QueueSet::parse(content, &components)?;
+    let Some(queue) = queue_set.selected().map(|block| block.component) else {
+        if !queue_set.blocks().is_empty() {
+            return Ok(None);
+        }
         return Err(anyhow::anyhow!(
             "queue consume guard: queue_active is true but document has no agent:queue component"
         ));
@@ -61,9 +62,9 @@ pub fn active_queue_head_text(content: &str) -> Result<Option<String>> {
 /// fresh diff but its queue is already active.
 pub fn active_queue_prompt(content: &str) -> Option<String> {
     let components = agent_doc_element::element::parse(content).ok()?;
-    let queue_component = components
-        .iter()
-        .find(|component| component.name == "queue")?;
+    let queue_component = crate::queue_set::selected_component(content, &components)
+        .ok()
+        .flatten()?;
     let entries = crate::document_queue::parse(queue_component.content(content)).ok()?;
     let has_auto = crate::document_queue::has_auto_attr(&queue_component.attrs);
     let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).ok()?;
@@ -101,9 +102,7 @@ pub fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
     let Ok(components) = agent_doc_element::element::parse(content) else {
         return false;
     };
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
+    let Ok(Some(queue_component)) = crate::queue_set::selected_component(content, &components)
     else {
         return false;
     };
@@ -149,10 +148,7 @@ pub enum ActiveQueueHeadKind {
 /// consume command's historical fail-closed behavior for inactive queued text.
 pub fn classify_active_queue_head(content: &str) -> Result<ActiveQueueHeadKind> {
     let components = agent_doc_element::element::parse(content)?;
-    let Some(queue) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let Some(queue) = crate::queue_set::selected_component(content, &components)? else {
         return Ok(ActiveQueueHeadKind::None);
     };
     let entries = crate::document_queue::parse(queue.content(content))?;
@@ -370,10 +366,7 @@ pub fn committed_queue_contains_free_text_head(content: &str, head: &str) -> boo
     let Ok(components) = agent_doc_element::element::parse(content) else {
         return false;
     };
-    let Some(queue) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let Ok(Some(queue)) = crate::queue_set::selected_component(content, &components) else {
         return false;
     };
     let Ok(entries) = crate::document_queue::parse(queue.content(content)) else {
@@ -408,10 +401,7 @@ pub fn committed_queue_extends_free_text_head(content: &str, head: &str) -> bool
     let Ok(components) = agent_doc_element::element::parse(content) else {
         return false;
     };
-    let Some(queue) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let Ok(Some(queue)) = crate::queue_set::selected_component(content, &components) else {
         return false;
     };
     let Ok(entries) = crate::document_queue::parse(queue.content(content)) else {
@@ -449,7 +439,7 @@ fn queue_prompt_heads(doc: &str) -> Vec<String> {
     let Ok(components) = agent_doc_element::element::parse(doc) else {
         return Vec::new();
     };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+    let Ok(Some(queue)) = crate::queue_set::selected_component(doc, &components) else {
         return Vec::new();
     };
     let Ok(entries) = crate::document_queue::parse(queue.content(doc)) else {
@@ -1047,5 +1037,24 @@ mod tests {
         )
         .unwrap();
         assert!(deferred.contains("explicitly defers that quoted head"));
+    }
+
+    #[test]
+    fn active_head_advances_across_dependent_queue_blocks() {
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue id=release-a -->\n",
+            "~~- publish A~~\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=release-b after=release-a subagents -->\n",
+            "- organize B\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            active_queue_head_text(content).unwrap().as_deref(),
+            Some("organize B")
+        );
+        assert_eq!(active_queue_prompt(content).as_deref(), Some("organize B"));
+        assert_eq!(active_queue_heads(content), vec!["organize B"]);
     }
 }

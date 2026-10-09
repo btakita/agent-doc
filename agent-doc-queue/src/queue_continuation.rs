@@ -198,12 +198,12 @@ pub fn required_continuation_excluding_claimed(
 ) -> Result<Option<QueueContinuation>> {
     let (fm, _) = frontmatter::parse(content)?;
     let components = element::parse(content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
+    let queue_set = crate::queue_set::QueueSet::parse(content, &components)?;
+    let Some(selected_queue) = queue_set.selected() else {
         return Ok(None);
     };
+    let queue_id = selected_queue.id.clone();
+    let queue_component = selected_queue.component;
     // `#qbindingone` (GH #79): the resolved control binding is the only
     // activation authority. Requiring the legacy `queue_active: true`, which
     // current writers no longer emit, kept this detector silent for every
@@ -228,9 +228,8 @@ pub fn required_continuation_excluding_claimed(
 
     if let Some(snapshot_content) = snapshot_content
         && let Ok(snapshot_components) = element::parse(snapshot_content)
-        && let Some(snapshot_queue) = snapshot_components
-            .iter()
-            .find(|component| component.name == "queue")
+        && let Ok(Some(snapshot_queue)) =
+            crate::queue_set::component_for_id(snapshot_content, &snapshot_components, &queue_id)
     {
         let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
         if let Ok(snapshot_entries) = document_queue::parse(snapshot_body) {
@@ -873,7 +872,9 @@ struct QueueFacts {
 
 fn queue_component_entries(content: &str) -> Option<(QueueFacts, Vec<QueueEntry>)> {
     let components = element::parse(content).ok()?;
-    let queue_component = components.iter().find(|c| c.name == "queue")?;
+    let queue_component = crate::queue_set::selected_component(content, &components)
+        .ok()
+        .flatten()?;
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries = document_queue::parse(body).ok()?;
     Some((

@@ -1073,16 +1073,21 @@ impl<'a> PresetContext<'a> {
         let mut cycle = Vec::new();
         let mut queue_intents = Vec::new();
         let mut exchange_intents = Vec::new();
-        let queue_attrs =
-            agent_doc_queue::prompt_component_attrs::prompt_component_attrs(current, "queue");
-        let mut queue_names: Vec<String> = queue_attrs.preset.clone().into_iter().collect();
+        let mut queue_attrs =
+            agent_doc_queue::prompt_component_attrs::PromptComponentAttrs::default();
+        let mut queue_names = Vec::new();
         if let Ok(components) = agent_doc_element::element::parse(current)
-            && let Some(queue) = components.iter().find(|c| c.name == "queue")
-            && let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(current))
+            && let Ok(Some(queue)) =
+                agent_doc_queue::queue_set::selected_component(current, &components)
         {
-            for entry in entries {
-                if let agent_doc_queue::document_queue::QueueEntry::Preset(name) = entry {
-                    queue_names.push(name);
+            queue_attrs =
+                agent_doc_queue::prompt_component_attrs::prompt_component_attrs_for(queue, "queue");
+            queue_names.extend(queue_attrs.preset.clone());
+            if let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(current)) {
+                for entry in entries {
+                    if let agent_doc_queue::document_queue::QueueEntry::Preset(name) = entry {
+                        queue_names.push(name);
+                    }
                 }
             }
         }
@@ -1590,7 +1595,9 @@ pub fn queue_attr_subagent_heads(
     Vec<String>,
 )> {
     let components = agent_doc_element::element::parse(content).ok()?;
-    let queue = components.iter().find(|c| c.name == "queue")?;
+    let queue = agent_doc_queue::queue_set::selected_component(content, &components)
+        .ok()
+        .flatten()?;
     let mode = agent_doc_queue::subagent_intent::queue_subagents_mode(&queue.attrs)?;
     let presets = PresetContext::new(content, &[]);
     let items = executable_queue_items(content);
@@ -2515,6 +2522,27 @@ mod tests {
             "{FM}# Session\n\n<!-- agent:queue subagents=0 -->\n- do [#a]\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
         );
         assert!(subagent_dispatch_heads(&invalid, None).is_empty());
+    }
+
+    #[test]
+    fn queue_subagents_attr_is_scoped_to_selected_identified_queue() {
+        let content = format!(
+            "{FM}# Session\n\n<!-- agent:queue id=release-a -->\n~~- shipped A~~\n<!-- /agent:queue -->\n\n<!-- agent:queue id=release-b after=release-a subagents -->\n- organize B\n- publish B [inline]\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
+        );
+        assert_eq!(
+            subagent_dispatch_heads(&content, None),
+            vec!["organize B".to_string()]
+        );
+        let (mode, eligible, live) = queue_attr_subagent_heads(&content).unwrap();
+        assert_eq!(
+            mode.capacity,
+            agent_doc_queue::subagent_intent::QueueSubagentsCapacity::AllEligible
+        );
+        assert_eq!(eligible, vec!["organize B".to_string()]);
+        assert_eq!(
+            live,
+            vec!["organize B".to_string(), "publish B [inline]".to_string()]
+        );
     }
 
     #[test]

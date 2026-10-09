@@ -10,7 +10,7 @@ use crate::document_queue::BacklogQueueSyncMode;
 
 /// Attributes that are only meaningful on the `agent:queue` component. Seeing
 /// one of these on any other component is a misplaced-attribute mistake.
-const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto", "start", "go", "stop"];
+const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto", "start", "go", "stop", "id", "after"];
 
 /// Prompt defaults shared by `agent:queue` and `agent:exchange`.
 const PROMPT_COMPONENT_ATTRS: &[&str] = &["preset", "subagents", "fan-out"];
@@ -257,6 +257,19 @@ mod tests {
             "<!-- /agent:backlog -->\n\n",
             "<!-- agent:done archive=tasks/x.done.md -->\n",
             "<!-- /agent:done -->\n",
+        );
+        assert!(component_attr_warning(content).is_none());
+    }
+
+    #[test]
+    fn component_attr_warning_allows_queue_id_and_after_dependencies() {
+        let content = concat!(
+            "<!-- agent:queue id=release-a -->\n",
+            "- release A\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=release-b after=release-a -->\n",
+            "- release B\n",
+            "<!-- /agent:queue -->\n",
         );
         assert!(component_attr_warning(content).is_none());
     }

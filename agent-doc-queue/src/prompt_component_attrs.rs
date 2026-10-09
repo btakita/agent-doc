@@ -26,6 +26,15 @@ pub fn prompt_component_attrs(content: &str, name: &str) -> PromptComponentAttrs
     let Some(component) = components.iter().find(|component| component.name == name) else {
         return PromptComponentAttrs::default();
     };
+    prompt_component_attrs_for(component, name)
+}
+
+/// Read prompt defaults from a component already selected by the queue graph.
+/// This avoids reintroducing first-occurrence policy in multi-queue callers.
+pub fn prompt_component_attrs_for(
+    component: &element::Component,
+    name: &str,
+) -> PromptComponentAttrs {
     let subagents = match name {
         "queue" => crate::subagent_intent::queue_subagents_mode(&component.attrs).is_some(),
         "exchange" => component.attrs.iter().any(|(key, value)| {

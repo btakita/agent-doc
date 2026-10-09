@@ -1641,14 +1641,19 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     }
 
     let components = element::parse(content)?;
-    let comp = components
-        .iter()
-        .find(|c| c.name == "queue")
-        .ok_or_else(|| {
+    let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
+    let selected_queue = queue_set.selected().ok_or_else(|| {
+        if queue_set.blocks().is_empty() {
             anyhow::anyhow!(
                 "queue consume: queue_active is true but document has no agent:queue component"
             )
-        })?;
+        } else {
+            anyhow::anyhow!("queue consume: no prompt to consume")
+        }
+    })?;
+    let selected_queue_id = selected_queue.id.clone();
+    let total_live_prompts = queue_set.live_prompt_count();
+    let comp = selected_queue.component;
 
     let body = &content[comp.open_end..comp.close_start];
     let entries = agent_doc_queue::document_queue::parse(body)
@@ -1678,6 +1683,7 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
             let refill_pending =
                 queue_empty && one_shot_queue_refill_pending(content, &completed_entries)?;
             let drained = queue_empty && !refill_pending;
+            let all_queues_drained = total_live_prompts == consumed_texts.len() && !refill_pending;
             let new_entries = if queue_empty {
                 Vec::new()
             } else {
@@ -1701,7 +1707,11 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
 
             if drained {
                 let comps = element::parse(&current)?;
-                if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+                if let Some(q) = agent_doc_queue::queue_set::component_for_id(
+                    &current,
+                    &comps,
+                    &selected_queue_id,
+                )? {
                     let raw = &current[q.open_start..q.open_end];
                     let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(
                         &agent_doc_queue::document_queue::strip_control_from_tag(raw),
@@ -1714,7 +1724,9 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                         current = rebuilt;
                     }
                 }
-                current = frontmatter::merge_queue_state(&current, false)?;
+                if all_queues_drained {
+                    current = frontmatter::merge_queue_state(&current, false)?;
+                }
             }
 
             let response_locator = response_embedding_locator(file)?;
@@ -1730,7 +1742,12 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
             if let Some(snap) = snapshot_content {
                 match (|| -> Result<Option<String>> {
                     let snap_comps = element::parse(snap)?;
-                    let Some(snap_queue) = snap_comps.iter().find(|c| c.name == "queue") else {
+                    let Some(snap_queue) = agent_doc_queue::queue_set::component_for_id(
+                        snap,
+                        &snap_comps,
+                        &selected_queue_id,
+                    )?
+                    else {
                         return Ok(None);
                     };
                     let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
@@ -1795,7 +1812,11 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                     };
                     if drained {
                         if let Ok(sc2) = element::parse(&new_snap)
-                            && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
+                            && let Ok(Some(sq2)) = agent_doc_queue::queue_set::component_for_id(
+                                &new_snap,
+                                &sc2,
+                                &selected_queue_id,
+                            )
                         {
                             let raw = &new_snap[sq2.open_start..sq2.open_end];
                             let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(
@@ -1809,7 +1830,9 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                                 new_snap = rebuilt;
                             }
                         }
-                        new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
+                        if all_queues_drained {
+                            new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
+                        }
                     }
                     Ok(Some(
                         if let Some(response_first_line) = response_locator.as_ref() {
@@ -1856,8 +1879,8 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                 consumed_text,
                 consumed_texts,
                 node_ops,
-                remaining,
-                drained,
+                remaining: total_live_prompts.saturating_sub(leading_done_consume_count),
+                drained: all_queues_drained,
                 auto: has_auto,
                 new_document: current,
                 new_snapshot: new_snap,
@@ -2010,6 +2033,7 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     let queue_empty = remaining == 0;
     let refill_pending = queue_empty && one_shot_queue_refill_pending(content, &completed_entries)?;
     let drained = queue_empty && !refill_pending;
+    let all_queues_drained = total_live_prompts == consume_count && !refill_pending;
     let new_entries = if queue_empty {
         Vec::new()
     } else {
@@ -2032,7 +2056,9 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     if drained {
         if has_auto {
             let comps = element::parse(&current)?;
-            if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+            if let Some(q) =
+                agent_doc_queue::queue_set::component_for_id(&current, &comps, &selected_queue_id)?
+            {
                 let raw = &current[q.open_start..q.open_end];
                 let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
                 if new_tag != raw {
@@ -2044,7 +2070,9 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                 }
             }
         }
-        current = frontmatter::merge_queue_state(&current, false)?;
+        if all_queues_drained {
+            current = frontmatter::merge_queue_state(&current, false)?;
+        }
     }
     // #queue-prompt-echo-in-response: an auto/synthetic queue head is never typed
     // into `agent:exchange`, so a consumed queue turn would otherwise record only
@@ -2066,7 +2094,12 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     if let Some(snap) = snapshot_content {
         match (|| -> Result<Option<String>> {
             let snap_comps = element::parse(snap)?;
-            let Some(snap_queue) = snap_comps.iter().find(|c| c.name == "queue") else {
+            let Some(snap_queue) = agent_doc_queue::queue_set::component_for_id(
+                snap,
+                &snap_comps,
+                &selected_queue_id,
+            )?
+            else {
                 return Ok(None);
             };
             let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
@@ -2162,7 +2195,11 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
             if drained {
                 if snap_has_auto
                     && let Ok(sc2) = element::parse(&new_snap)
-                    && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
+                    && let Ok(Some(sq2)) = agent_doc_queue::queue_set::component_for_id(
+                        &new_snap,
+                        &sc2,
+                        &selected_queue_id,
+                    )
                 {
                     let raw = &new_snap[sq2.open_start..sq2.open_end];
                     let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
@@ -2174,7 +2211,9 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                         new_snap = rebuilt;
                     }
                 }
-                new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
+                if all_queues_drained {
+                    new_snap = frontmatter::merge_queue_state(&new_snap, false)?;
+                }
             }
             Ok(Some(
                 if let Some(response_first_line) = response_locator.as_ref() {
@@ -2207,8 +2246,8 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
         consumed_text,
         consumed_texts,
         node_ops,
-        remaining,
-        drained,
+        remaining: total_live_prompts.saturating_sub(consume_count),
+        drained: all_queues_drained,
         auto: has_auto,
         new_document: current,
         new_snapshot: new_snap,
@@ -3086,6 +3125,44 @@ mod core_tests {
         .expect("the matching id-backed head is still consumed");
         assert_eq!(planned.consumed_texts, vec!["do [#foo]".to_string()]);
         assert_eq!(planned.remaining, 1, "the free-text head must survive");
+    }
+
+    #[test]
+    fn dependent_second_queue_consumes_without_mutating_drained_predecessor() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue id=release-a subagents -->\n",
+            "~~- publish A~~\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=release-b after=release-a -->\n",
+            "- organize B\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let planned =
+            plan_queue_prompt_consumption_with_snapshot_and_count(&doc, content, None, &[], 1)
+                .unwrap()
+                .expect("release-b is runnable once release-a is drained");
+
+        assert_eq!(planned.consumed_text, "organize B");
+        assert_eq!(planned.remaining, 0);
+        assert!(planned.drained);
+        assert!(
+            planned.node_ops.is_empty(),
+            "later queue uses exact-span fallback"
+        );
+        assert!(planned.new_document.contains(
+            "<!-- agent:queue id=release-a subagents -->\n~~- publish A~~\n<!-- /agent:queue -->"
+        ));
+        assert!(
+            planned.new_document.contains(
+                "<!-- agent:queue id=release-b after=release-a -->\n<!-- /agent:queue -->"
+            )
+        );
+        let (frontmatter, _) = frontmatter::parse(&planned.new_document).unwrap();
+        assert_ne!(frontmatter.queue_active, Some(true));
     }
 
     fn annotated_head_doc(exchange: &str) -> String {

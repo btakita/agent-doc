@@ -542,6 +542,18 @@ Regression coverage passed for exact-disk settlement and stale/missing-disk reje
 The code, tests, and one-ZIP role-selecting distribution are complete in draft PR #222 at `254b75e68`, but issue #218 intentionally remains open and the PR remains draft/unmerged. Fresh CI for that exact head and the real IDEA 2026.2.3 / branch 262 Remote Dev acceptance matrix are still required; this closes only the queue dispatch, not the GitHub issue.
 
 A durable `#gh218remoteproof` operator-review gate now records the exact two-sided acceptance matrix and prevents the implementation from being mistaken for a completed live proof.
+
+### Re: #gh-fix https://github.com/btakita/agent-doc/issues/224 — gpt-6.1-sol · 2026-10-09 13:44 EDT
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/224
+
+> **Chat prompt (#chatprompt):** cont
+
+Fixed and closed GitHub issue #224. The implementation is now on `main` at `0285833826d8b7f9a5e7490f731f69518fb6667b`.
+
+Focus escalations now retain their source desired-layout generation and rebase over newer editor splits before publication. An in-flight route also preserves a pending positive editor split when releasing its route lease, so stale escalation ordering cannot overwrite the editor's current column order.
+
+Verification passed: the focused regressions; `cargo test -p agent-doc-controller-io` (602 passed, 1 ignored); the repository-wide `make check` gate; and a clean coordinator `make install`. The issue was closed with this evidence.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -553,7 +565,7 @@ A durable `#gh218remoteproof` operator-review gate now records the exact two-sid
 - ~~do [#singleplugindistribution]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/223~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~ — auto-struck: answered this cycle (#ftstrike)
-- #gh-fix https://github.com/btakita/agent-doc/issues/224
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/224~~
 - release + publish
 <!-- /agent:queue -->
 

@@ -382,6 +382,16 @@ The `fix/stale-third-main-pane` subagent is still working on why the published t
 - `contractsroute`: change lineage, so your edit is accepted;
 - `stale-third-main-pane`;
 - the PR #222 stack.
+
+### Re: #jetbrains262installselect landing on PR #222 — opus-5.5 · 2026-10-09T18:50-04:00
+
+`#jetbrains262installselect` is finished on its branch (`d82196a3f`, `make check` green). It is now being merged into PR #222's head together with `#previewartifactprovenance` and `#jetbrains262distribution`. The integration subagent is running the single authoritative `make check` on the combined head and has not pushed yet. All three items close in the next cycle, once that head is green and pushed.
+
+Bookkeeping this cycle:
+- The two-hour claims on the PR #222 line had expired, so they surfaced again for subagent dispatch.
+- I re-claimed GH #218, GH #221 and the three JetBrains heads as `coordinator:pr222-integration`, and `release + publish` as `coordinator:release-after-batch`. They are all coordinator work, not new subagent work.
+- GH #218 still needs the operator's Remote Dev proof on Coder. `release + publish` waits for PR #222 to merge.
+- The contracts.md fix and the three-pane fix are still running in their own subagents.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -393,15 +403,15 @@ The `fix/stale-third-main-pane` subagent is still working on why the published t
 - ~~do [#fixruninfra]~~
 - ~~do [#readyanotherpreview]~~
 - ~~do [#waypostauthorization]~~
-- ⏭️ do [#jetbrains262installselect]
-- ⏭️ do [#jetbrains262distribution]
-- ⏭️ do [#previewartifactprovenance]
+- 🚧 do [#jetbrains262installselect]
+- 🚧 do [#jetbrains262distribution]
+- 🚧 do [#previewartifactprovenance]
 - ~~do [#ci25gradle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/225~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/218
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/221
-- fix: Run Agent Doc on contracts.md: [route] active closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md could not be drained before reroute; nothing was dispatched and existing queue head "#rebase-conflicts https://github.com/haiven-dev/haiven-contracts/pull/123" remains queued behind the closeout (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md. Rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md`; resume durable checkpoint cycle=cycle-1791583495987 phase=response_captured capture_id=cycle-1791583495987; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md
-- 🚧 release + publish
+- #gh-fix https://github.com/btakita/agent-doc/issues/218
+- #gh-fix https://github.com/btakita/agent-doc/issues/221
+- 🚧 fix: Run Agent Doc on contracts.md: [route] active closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md could not be drained before reroute; nothing was dispatched and existing queue head "#rebase-conflicts https://github.com/haiven-dev/haiven-contracts/pull/123" remains queued behind the closeout (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md. Rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md`; resume durable checkpoint cycle=cycle-1791583495987 phase=response_captured capture_id=cycle-1791583495987; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

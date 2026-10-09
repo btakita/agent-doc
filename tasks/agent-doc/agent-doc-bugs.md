@@ -560,6 +560,12 @@ Verification passed: the focused regressions; `cargo test -p agent-doc-controlle
 > **Queue prompt:** release + publish
 
 **Deferred:** Release and publication remain queued behind `#jetbrainsdualrelease`. GitHub issue #224 is integrated on `main` at `028583382` and closed, but draft PR #222 still needs agent-executable dual-release plumbing before any release: distinct classic and modular JetBrains update versions, a classic `until-build="261.*"` clamp, and corresponding release-version, check, and release regression coverage. No release, version bump, installation, tag, publish, or push was performed.
+
+### Re: Fix agent-doc start tools.md — gpt-6.1-sol · 2026-10-09 13:52 EDT
+
+> **Chat prompt (#chatprompt):** subagent: Fix agent-doc start tools.md not working
+
+I am dispatching this as `#starttools` to an isolated subagent. The worker will reproduce the current `agent-doc start` failure against the tools.md session path, identify the lifecycle or routing cause, add regression coverage, and verify the installed CLI end to end before integration.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -579,6 +585,7 @@ Verification passed: the focused regressions; `cargo test -p agent-doc-controlle
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#starttools] Fix `agent-doc start` for the tools.md session path: reproduce the current failure, identify the lifecycle/routing cause, add regression coverage, and verify the installed CLI end to end.
 - [ ] [#jetbrainsdualrelease] Complete PR #222 dual JetBrains release plumbing before release: assign distinct classic/modular JetBrains update versions, clamp the classic plugin to until-build="261.*", and add corresponding release-version, check, and release tests proving both artifacts remain distinct, compatibility-ranged, and collision-free.
 <!-- /agent:backlog -->
 

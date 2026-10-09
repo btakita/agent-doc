@@ -138,6 +138,21 @@ The main-line batch is integrated and installed.
 **Still in flight:**
 - PR #222 line: `#ci25gradle` is done (`8abda947f`); CI run 37988803442 is pending. `#jetbrains262installselect` is still running, and `#jetbrains262distribution` and `#previewartifactprovenance` are ready to stack.
 - GH #218, GH #221 and release + publish wait on PR #222. Merging it still needs your call on the operator-only Remote Dev proof (`#gh218remoteproof`).
+
+### Re: preview release readiness for #218 — opus-5.5 · 2026-10-09T18:05-04:00
+
+> **Queue prompt:** Are we ready for another preview release of #218 for me to test on my coder instance?
+
+**A new preview isn't needed: the existing `jetbrains-262-preview-c39de1b` is what to test.** Since c39de1b04, PR #222's only change is `#ci25gradle` (`8abda947f`). It touches CI and release workflows, a Gradle daemon-JVM pin for the *classic* plugin, docs and a version-check script. Nothing under `editors/jetbrains-262` changed, so a rebuilt 262 preview would carry the same plugin code, and probably near-identical bytes. Cutting another preview now would only reset the checksum pin that `#previewartifactprovenance` already verified, with no testable change.
+
+The current preview's integrity is already checked. `agent-doc-jetbrains-262-0.2.511.zip`'s sha256 is `44474f85ab7f3d8ababb0f99feba244986e24c1b663f6d699895aa9e0819b0d9` (2,569,299 bytes), matching GitHub's own digest. To confirm both Coder sides carry those exact bytes, check out branch `codex/previewartifactprovenance-20261009` (`44281dda2`) and run `make verify-jetbrains-262-preview BACKEND_ZIP=<backend copy> CLIENT_GATEWAY_ZIP=<client copy>`. It checks the digest, version 0.2.511, the 262–262.* range and the three modules, and fails on tampered or mismatched files.
+
+**When a new preview would make sense:**
+1. CI run 37988803442 on `8abda947f` is still in progress. A preview should come from a green head; `#previewrepin` is queued for exactly that.
+2. `#jetbrains262distribution` (`740fb3169`, done) adds the per-range custom-repository feeds. Stacked onto PR #222, they would let the Coder backend and Client/Gateway install from a feed URL instead of copying ZIPs by hand. That is worth a preview if you want to test the install channel as well.
+3. `#jetbrains262installselect` is still with its subagent: CLI/local install selection of the right ZIP per IDE build.
+
+So for the #218 Remote Dev behaviour checklist (detached-only isolated terminal, main-wins placeholder, no main mutation on focus/sync/resize, close/rejoin, reconnect, two thin clients, one-sided install fails closed), test `c39de1b` now. If it passes, `#gh218remoteproof` can be marked satisfied on c39de1b-equivalent plugin code once CI on `8abda947f` is green.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -146,12 +161,13 @@ The main-line batch is integrated and installed.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~⏭️ do [#waypostauthorization]~~
-- ⏭️ do [#jetbrains262installselect]
-- ⏭️ do [#jetbrains262distribution]
-- 🚧 do [#previewartifactprovenance]
+- do [#readyanotherpreview]
+- ~~do [#waypostauthorization]~~
+- 🚧 do [#jetbrains262installselect]
+- 🚧 do [#jetbrains262distribution]
+- ⏭️ do [#previewartifactprovenance]
 - ~~do [#ci25gradle]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/225~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/225~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/218
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/221
 - 🚧 release + publish
@@ -160,6 +176,7 @@ The main-line batch is integrated and installed.
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#readyanotherpreview] Are we ready for another preview release of #218 for me to test on my coder instance?
 - [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
 - [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
 - [ ] 🚧 [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.

@@ -331,3 +331,4 @@
 - 2026-10-09 [#reviewiceboxnotes] Add agent:review + agent:icebox + agent:done + agent:notes to the Claim for Tmux Pane template.
 - 2026-10-09 [#usabilitymaintenancecons] What are the usability + maintenance consequenes of https://github.com/btakita/agent-doc/issues/221?
 - 2026-10-09 [#backendfrontendidea] What is the backend + frontend in Idea?
+- 2026-10-09 [#singleplugindistribution] Can we have a single plugin distribution that recognizes if it is the frontend or backend or both?

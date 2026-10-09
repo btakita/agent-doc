@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
-  codex: 01a119cd-0320-7880-9e60-acef5cf54bc8
+  codex: 01a12175-b9c0-7db0-af02-218c5501efe7
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -490,6 +491,39 @@ In an ordinary local, monolithic IDEA session, there is only one IDE process. Th
 JetBrains documents the model in [Split Mode](https://plugins.jetbrains.com/docs/intellij/split-mode-and-remote-development.html), [Modular Plugins](https://plugins.jetbrains.com/docs/intellij/modular-plugins.html), and [RPC](https://plugins.jetbrains.com/docs/intellij/remote-procedure-calls.html). One relevant caveat remains: Plugin Model v2 is experimental, and Agent Doc’s draft PR #222 currently targets IDEA `262.*`, while issue #221 reports IDEA 263.
 
 This was an explanatory task only, so no repository code, tests, build, or installation were needed. The exchange remains oversized, but the active queue was not stalled for compaction.
+
+### Re: do [#singleplugindistribution] — gpt-6.1-sol · 2026-10-09T13:26:07-04:00
+
+> **Queue prompt:**
+>
+> do [#singleplugindistribution]
+
+
+Yes. JetBrains supports one modular plugin ZIP whose contents are selected by IDE role, and that contract is now implemented and verified on draft PR #222 at commit `254b75e68b9bbf974b95f5f5982e63f55657e13f`.
+
+The exact-262 artifact contains all three modules:
+
+- `shared` always loads.
+- `frontend` declares `required-if-available="intellij.platform.frontend"`.
+- `backend` declares `required-if-available="intellij.platform.backend"`.
+- A normal monolithic IDE exposes both capabilities, so all three load from the same ZIP.
+- Remote Dev installs the same ZIP in Client/Gateway and backend; each process activates its applicable module set.
+
+The change adds executable role-matrix verification for frontend-only, backend-only, and monolithic environments; proves both split sandboxes receive the complete artifact; wires the modular build into `make check`, CI, release packaging, and plugin-version fencing; and makes classic JetBrains asset lookup reject the similarly prefixed modular ZIP.
+
+Verification completed:
+
+- Modular Gradle tests, ZIP build, descriptor verification, and split-sandbox checks passed.
+- Rust plugin/asset-selection tests and release-package assertions passed.
+- The Rust suite passed 9,836 tests with 141 skipped; editor parity, JetBrains 262 checks, Python bootstrap, Lean, and all TLA+ models passed.
+- The coordinator-owned `make install` completed, including live classic JetBrains and VS Code package convergence; the targeted `make audit-docs` remedy then passed.
+- Draft PR #222 was fast-forwarded to the implementation commit. CI run `37966158420` for that exact head is in progress; local proof is complete, so this closeout does not wait on it.
+
+The modular artifact remains deliberately exact-262. PR #222 stays draft until the existing #218 acceptance gate is proven on real IDEA 2026.2.3 Remote Dev with the same ZIP installed on both sides; this does not claim 263 support. The outer superproject must also advance its `tmux-router` gitlink to `f4acd6d` or later before adopting the PR lineage.
+
+During this cycle I also dispatched the newly added GH #223, GH #218, GH #224, and release-audit queue work to separate claimed worktrees. GH #223 is complete and pushed at `25c10e3c6a2ce12d720ab9af0b461fa97b18e805`; GH #218 was verified as already implemented by PR #222 and remains operator-gated; GH #224 is still in flight. The release audit found the batch is not yet releasable while those fixes and the Remote Dev proof remain open, and Homebrew publishing additionally lacks `HOMEBREW_TAP_TOKEN`.
+
+The exchange remains above the size warning threshold, but the active queue was not stalled for compaction.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -497,7 +531,12 @@ This was an explanatory task only, so no repository code, tests, build, or insta
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#singleplugindistribution]~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/223
+- #gh-fix https://github.com/btakita/agent-doc/issues/218
+- #gh-fix https://github.com/btakita/agent-doc/issues/224
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

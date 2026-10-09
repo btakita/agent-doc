@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "repository": "btakita/agent-doc",
+  "pull_request": 222,
+  "source_commit": "c39de1b045b8b5238f8e5b7fa6870062798d4114",
+  "release": {
+    "id": 408229042,
+    "tag": "jetbrains-262-preview-c39de1b",
+    "prerelease": true,
+    "published_at": "2026-10-09T18:42:30Z"
+  },
+  "asset": {
+    "id": 625841715,
+    "name": "agent-doc-jetbrains-262-0.2.511.zip",
+    "size": 2569299,
+    "sha256": "44474f85ab7f3d8ababb0f99feba244986e24c1b663f6d699895aa9e0819b0d9",
+    "created_at": "2026-10-09T18:42:29Z",
+    "updated_at": "2026-10-09T18:42:29Z"
+  },
+  "plugin": {
+    "archive_root": "agent-doc-jetbrains-262",
+    "id": "com.github.btakita.agent-doc",
+    "version": "0.2.511",
+    "since_build": "262",
+    "until_build": "262.*",
+    "required_modules": [
+      "agent.doc.shared",
+      "agent.doc.frontend",
+      "agent.doc.backend"
+    ]
+  }
+}

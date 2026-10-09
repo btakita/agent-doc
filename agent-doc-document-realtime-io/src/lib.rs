@@ -11366,6 +11366,67 @@ mod tests {
     }
 
     #[test]
+    fn captured_replay_recovery_restores_retained_empty_heading_shell() {
+        let captured_response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: retained-delivery false error — gpt-5\n\n",
+            "Exact durable captured body.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior turn — gpt-5\n\n",
+            "Prior response body.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let stranded = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior turn — gpt-5\n\n",
+            "Prior response body.\n",
+            "> **Chat prompt (#chatprompt):** Fix the cause of the error\n\n",
+            "### Re: retained-delivery false error — gpt-5 (HEAD)\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, file, _) = temp_doc(baseline);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        let response_sha = agent_doc_hash::content_hash(captured_response);
+        agent_doc_cycle_state_io::append_response_captured_body(
+            &file,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &cycle.cycle_id,
+                capture_id: &cycle.cycle_id,
+                response_sha256: &response_sha,
+                response_body: captured_response,
+                intent_body: Some(captured_response),
+                mutation_plan_json: None,
+                file_hash: Some(&agent_doc_hash::content_hash(baseline)),
+                snapshot_hash: Some(&agent_doc_hash::content_hash(baseline)),
+                baseline_content: Some(baseline),
+            },
+        )
+        .unwrap();
+
+        let recovered = normalize_recoverable_response_replay_duplication_for_file(
+            &file,
+            stranded,
+            "test_retained_empty_heading",
+        )
+        .unwrap()
+        .expect("the durable capture should restore its retained empty shell");
+
+        assert!(recovered.contains("Exact durable captured body."));
+        assert!(recovered.contains("> **Chat prompt (#chatprompt):** Fix the cause of the error"));
+        assert_eq!(recovered.matches("agent:boundary:").count(), 1);
+        assert!(recovered.contains("agent:boundary:latest"));
+    }
+
+    #[test]
     fn stranded_duplicate_response_heading_is_recoverable_before_integrity_gate() {
         let interrupted = concat!(
             "---\nagent_doc_format: template\n---\n\n",

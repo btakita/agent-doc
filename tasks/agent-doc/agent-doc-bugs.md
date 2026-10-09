@@ -222,6 +222,28 @@ Post the results on #218 with the preview tag and commit `c39de1b04`. If they pa
 `#jetbrains262installselect` is already running. The subagent claimed it at 17:49 (`subagent:installselect2`) and has moved the worktree onto PR #222's head, `8abda947f`, so the 262 module is present. It is now finishing the earlier uncommitted changes and their tests. Running it again here would put two agents in one checkout.
 
 The item stays open until the subagent reports its branch, commit and test results. Then I merge it with `#jetbrains262distribution` and `#previewartifactprovenance`, run one `make check` and one `make install`, release the claim, and close the item. The fix for the red CI check on PR #222 (lazily resolution) and `#fixruninfra` are also with their own subagents.
+
+### Re: contracts.md route block dispatched; PR #222 CI fix pushed — opus-5.5 · 2026-10-09T18:12-04:00
+
+**New queue item, Run Agent Doc on contracts.md:** claimed as `subagent:contractsroute` and handed to a subagent on branch `fix/contractsroute-closeout-reroute`. The route refused to dispatch because a captured response (`cycle-1791583495987`) no longer matched the document. It then told you to run `reset --from-current --preserve-session` yourself. The subagent will:
+- find out why that captured response stopped matching the document, and why the route sent the repair back to you instead of the binary's retained-write recovery handling it (rolling the captured response forward onto your editor text, or queuing the trigger and dispatching afterwards);
+- fix it, with regression coverage.
+
+It may only run read-only diagnostics on the live `contracts.md`. I haven't run the recovery command there yet; the subagent will report whether the fixed binary heals that document after install or whether a one-time manual recovery is still needed.
+
+**`do [#jetbrains262installselect]`:** still with its subagent (`subagent:installselect2`), working on PR #222's head line. It stays open until the subagent reports; I'm not starting a second agent in that checkout.
+
+**PR #222 CI fix:** pushed as `548a24874` (fast-forward, CI-only change). The 262 backend couldn't resolve `io.github.lazily:lazily:0.39.0` because that version isn't on Maven Central. The previous green builds relied on a local `~/.m2` copy. A new CI step now:
+- clones lazily-kt at the pinned tag `v0.39.0` and runs `publishToMavenLocal` under JDK 21;
+- fails if the 262 and classic lazily pins diverge.
+
+Plugin sources and digests are unchanged, so no plugin version bump was needed, and the ZIP still bundles `lazily-0.39.0.jar`. Local checks:
+- I reproduced the CI failure with an empty mavenLocal.
+- With only the fresh tag build available, `make jetbrains-262-check` and `make jetbrains-classic-check` both exit 0.
+
+Side effect: the local test rebuilt `~/.m2/.../lazily/0.39.0` from the tag; the jar is the same size as before. New CI run 37997027534 is still in progress. Once it's green, `#previewrepin` can rebuild the preview.
+
+**`#fixruninfra`:** the subagent is still running its `make check`.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -234,12 +256,13 @@ The item stays open until the subagent reports its branch, commit and test resul
 - ~~do [#readyanotherpreview]~~
 - ~~do [#waypostauthorization]~~
 - ⏭️ do [#jetbrains262installselect]
-- 🚧 do [#jetbrains262distribution]
+- ⏭️ do [#jetbrains262distribution]
 - ⏭️ do [#previewartifactprovenance]
 - ~~do [#ci25gradle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/225~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/218
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/221
+- fix: Run Agent Doc on contracts.md: [route] active closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md could not be drained before reroute; nothing was dispatched and existing queue head "#rebase-conflicts https://github.com/haiven-dev/haiven-contracts/pull/123" remains queued behind the closeout (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md. Rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md`; resume durable checkpoint cycle=cycle-1791583495987 phase=response_captured capture_id=cycle-1791583495987; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md
 - 🚧 release + publish
 <!-- /agent:queue -->
 

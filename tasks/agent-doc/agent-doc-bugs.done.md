@@ -333,3 +333,4 @@
 - 2026-10-09 [#backendfrontendidea] What is the backend + frontend in Idea?
 - 2026-10-09 [#singleplugindistribution] Can we have a single plugin distribution that recognizes if it is the frontend or backend or both?
 - 2026-10-09 [#starttools] Fix Sync Tmux Panes recovery for tools.md: reproduce by running :kill-pane on the bound pane, then Sync Tmux Panes; the session must restart in a newly created pane and rebind cleanly. Identify the lifecycle/routing cause, add regression coverage, and verify the installed CLI/editor path end to end.
+- 2026-10-09 [#jetbrainsdualrelease] Complete PR #222 dual JetBrains release plumbing before release: assign distinct classic/modular JetBrains update versions, clamp the classic plugin to until-build="261.*", and add corresponding release-version, check, and release tests proving both artifacts remain distinct, compatibility-ranged, and collision-free.

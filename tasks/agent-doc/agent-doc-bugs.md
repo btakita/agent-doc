@@ -592,6 +592,16 @@ Fixed and installed on `main` at `ab265347dde9b68aa5bcfb7ddedeef6be1d3df6c`.
 The failure was specific to cross-root Sync Tmux Panes recovery. When the tools.md pane had been killed, delegation to the nested project controller silently changed `ProvisionForLayout` into `ObserveOnly`; the child controller therefore found the pane missing but was forbidden to recreate it. Delegation now preserves the original typed missing-pane policy through `request_document_pane`, while ordinary focus remains observe-only.
 
 Verification passed: the new nested-project provisioning regression; the ordinary cross-root focus regression; all 606 controller tests; live `make tmux-ci`; the 9,805-test main nextest phase; editor, cross-editor, parity, and bootstrap checks; private-name scan; diff check; coordinator controller-suite rerun; and `make install`. The installed CLI/native library and live JetBrains plugin were refreshed; VS Code package sync was skipped because `vsce` is not installed.
+
+### Re: do [#jetbrainsdualrelease] — gpt-6.1-sol · 2026-10-09 14:35 EDT
+
+> **Queue prompt:** do [#jetbrainsdualrelease]
+
+Completed on draft PR #222 at exact head `c39de1b045b8b5238f8e5b7fa6870062798d4114`, merged with current `main`.
+
+The release path now assigns collision-free, idempotent JetBrains update pairs: classic `0.2.510` for builds `242..261.*`, and modular `0.2.511` for `262..262.*`. `make release-version` refreshes both digests, ordinary plugin bumps allocate above both versions, the packaged classic range is verified, and CI/release assertions reject asset/version collisions. The prior CI inode-observation race now uses a bounded one-second settle while still strictly requiring the installed inode to become fresh.
+
+Verification passed: both JetBrains artifact gates; plugin self/live checks; release-driver checks; one complete `make check`; the inode test 100 times; full sync-io tests; merged-tree sync-io and controller suites; diff check; and coordinator `make install`. Classic `0.2.510` is installed locally; VS Code package sync was skipped because `vsce` is unavailable. Fresh PR CI is pending for the new exact head, and release remains blocked by the existing Remote Dev / merge review gates.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -606,14 +616,13 @@ Verification passed: the new nested-project provisioning regression; the ordinar
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/224~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/221~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~⏭️ do [#starttools]~~
-- 🚧 do [#jetbrainsdualrelease]
+- ~~do [#jetbrainsdualrelease]~~
 - 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] 🚧 [#jetbrainsdualrelease] Complete PR #222 dual JetBrains release plumbing before release: assign distinct classic/modular JetBrains update versions, clamp the classic plugin to until-build="261.*", and add corresponding release-version, check, and release tests proving both artifacts remain distinct, compatibility-ranged, and collision-free.
 <!-- /agent:backlog -->
 
 ## Review

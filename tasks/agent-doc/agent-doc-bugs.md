@@ -352,6 +352,36 @@ Things to avoid:
 - Don't rely on `agent-doc sync` to fix this. The skip is the bug, so it may leave the pane where it is again.
 
 The `fix/stale-third-main-pane` subagent is still working on why the published two-column layout never removed `%165`.
+
+### Re: #fixruninfra installed; #jetbrains262installselect done on its branch — opus-5.5 · 2026-10-09T18:50-04:00
+
+**`#fixruninfra` (done):** The "dispatch-only claude reopen refused … mid-recycle" error was a false refusal, not a real recycle in progress.
+- **What the log shows:**
+  - 21:47:59Z: the Run Agent Doc trigger hit a recycle that had shown as in flight since 21:14:33, so it was refused immediately.
+  - 21:48:02Z: the supervisor's idle-queue watch injected the same trigger and started the turn. That's why the turn ran and the error still appeared. Nothing was submitted twice.
+- **Root cause:** the supervisor's "recycle settled" event was minted at the *previous* epoch. In `state.db`, `started-13438` is followed by `settled-13437`. The reducer discarded it as stale, the RPC still returned success, and the supervisor never retried. Another document shows the same pattern (`started-4326` / `settled-4325`), both during an install-time controller handoff.
+- **Fix:** after writing the settle, the controller reads the state back. If the recycle is still in flight at a newer epoch, it re-mints the settle at that epoch, up to 3 times, and logs `supervisor_recycle_settle_reminted`.
+- **Tests:**
+  - a pure decision test;
+  - a test that replays the live rows;
+  - a real runtime + state DB test, which fails when the retry budget is cut to 1;
+  - spec updates in `13-state-backbone.md` and `SPEC.md`.
+- **Verification:** `make check` exited 0 (9821/9821 tests). Fast-forwarded to agent-doc main as `b4681a617`; `make install` exited 0.
+- **infra.md:** its stuck epoch 13438 clears at the next supervisor recycle, which the install starts. Until that recycle runs, Run Agent Doc there may still print the error, but the idle watch still starts the turn.
+
+**`#jetbrains262installselect`:** finished as `d82196a3f` on its branch; `make check` is green with 9846 tests.
+- **What changed:**
+  - Each JetBrains target's build is read from its versioned data folder: 262 gets the modular ZIP, 242–261 get classic. An unprovable or out-of-range build fails closed.
+  - Install and update-all fetch and compare per line.
+  - `--local --all-installed` checks every target before replacing any.
+  - `make install-editor-plugins` builds both ZIPs and won't put the classic ZIP on a 262 IDE.
+- **What's left:** it closes once it lands on PR #222. A subagent is stacking `#previewartifactprovenance`, `#jetbrains262distribution` and `#jetbrains262installselect` onto PR #222's head now and running one `make check`.
+- **Follow-up:** the author found that a running 2026.2 IDE can't be upgraded without a restart. The fallback warning gives the wrong reason, and the running-plugin checks miss the 262 jar name. Recorded as `#jb262dynupgrade`.
+
+**Still running:**
+- `contractsroute`: change lineage, so your edit is accepted;
+- `stale-third-main-pane`;
+- the PR #222 stack.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -377,6 +407,7 @@ The `fix/stale-third-main-pane` subagent is still working on why the published t
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#jb262dynupgrade] [agent-doc] Restart-free upgrade for the exact-262 modular JetBrains plugin: the 262 ZIP has no dynamic-upgrade launcher entry point, so updating a running 262 IDE falls back to file replacement + restart with a misleading 'predates restart-free dynamic upgrade support' warning; and the running-IDE jar probes (src/plugin.rs ~1366, plugin_activation.rs) only match agent-doc-jetbrains-*.jar, missing the 262 agent.doc-<v>.jar. Add a 262 entry point (or an accurate warning) and teach the probes the 262 jar name, with tests. Found by jetbrains262installselect (d82196a3f).
 - [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
 - [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
 - [ ] 🚧 [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.

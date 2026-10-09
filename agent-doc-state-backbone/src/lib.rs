@@ -178,6 +178,11 @@ impl StateDomain {
 pub struct EditorViewBindingIdentity {
     pub view_id: String,
     pub client_family: String,
+    /// Backend-authenticated Remote Dev connection generation. Kept separate
+    /// from the stable client family so a reconnect cannot inherit an older
+    /// frame binding.
+    #[serde(default)]
+    pub connection_generation: u64,
     pub surface_id: String,
     pub surface_generation: u64,
     pub view_session: String,
@@ -10307,6 +10312,7 @@ mod tests {
         EditorViewBindingIdentity {
             view_id: view_id.to_string(),
             client_family: "jetbrains-client-a".to_string(),
+            connection_generation: 2,
             surface_id: "dock-window-1".to_string(),
             surface_generation: 3,
             view_session: "agent-doc-view-a1b2".to_string(),

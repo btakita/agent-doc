@@ -31,6 +31,7 @@ use agent_doc_editor_surface::terminal_ownership::{
 };
 use agent_doc_editor_surface::{
     EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
+    EditorViewPolicy, EditorViewPolicyBinding, EditorViewPolicyProjection, EditorViewSnapshot,
     SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
 };
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
@@ -151,6 +152,49 @@ pub(super) struct ControllerEditorSurfaceGraph {
     roots: Mutex<BTreeMap<(PathBuf, String, String), ControllerEditorSurfaceRoot>>,
     terminal_ownership: Mutex<BTreeMap<PathBuf, SurfaceTerminalOwnership>>,
     run_intent: ControllerEditorSurfaceIntentRunner,
+}
+
+/// Controller-owned, restart-hydrated owner of detached editor view policy.
+///
+/// A complete frontend snapshot is folded here as one atomic fact. It never
+/// passes through the legacy per-surface focus/sync graph above.
+pub(super) struct ControllerEditorViewPolicyGraph {
+    policy: Mutex<EditorViewPolicy>,
+}
+
+impl ControllerEditorViewPolicyGraph {
+    pub(super) fn hydrate(bindings: impl IntoIterator<Item = EditorViewPolicyBinding>) -> Self {
+        Self {
+            policy: Mutex::new(EditorViewPolicy::hydrate(bindings)),
+        }
+    }
+
+    fn observe(
+        &self,
+        snapshot: EditorViewSnapshot,
+        persist: impl FnOnce(&EditorViewPolicyProjection) -> Result<()>,
+    ) -> Result<EditorViewPolicyProjection> {
+        let mut policy = self.policy.lock();
+        let mut candidate = policy.clone();
+        let projection = candidate.observe(snapshot);
+        persist(&projection)?;
+        *policy = candidate;
+        Ok(projection)
+    }
+
+    fn retire_client(
+        &self,
+        client_id: &str,
+        connection_generation: u64,
+        persist: impl FnOnce(&EditorViewPolicyProjection) -> Result<()>,
+    ) -> Result<EditorViewPolicyProjection> {
+        let mut policy = self.policy.lock();
+        let mut candidate = policy.clone();
+        let projection = candidate.retire_client(client_id, connection_generation);
+        persist(&projection)?;
+        *policy = candidate;
+        Ok(projection)
+    }
 }
 
 fn editor_surface_client_family(client_id: &str) -> Option<&str> {
@@ -3111,6 +3155,65 @@ pub fn observe_editor_surface_existing(
             sequence: None,
         },
         CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
+    )
+}
+
+/// Publish one complete frame-tagged Remote Dev snapshot atomically.
+///
+/// Unlike [`observe_editor_surface_existing`], this ingress never runs the
+/// legacy focus/sync consequence. The controller's `EditorViewPolicy` first
+/// derives main precedence, durable binding intents, and placeholders from the
+/// complete cross-frame snapshot.
+pub fn observe_editor_view_snapshot_existing(
+    project_root: &Path,
+    snapshot: &EditorViewSnapshot,
+) -> Result<EditorViewPolicyProjection> {
+    request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "editor_view_snapshot_observe".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(snapshot.connection_generation),
+            state: None,
+            caller: Some(snapshot.client_id.clone()),
+            reason: Some("complete_editor_view_snapshot".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(snapshot)?),
+            sequence: Some(snapshot.sequence),
+        },
+        CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
+    )
+}
+
+pub fn retire_editor_view_client_existing(
+    project_root: &Path,
+    client_id: &str,
+    connection_generation: u64,
+) -> Result<EditorViewPolicyProjection> {
+    request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "editor_view_client_retire".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(connection_generation),
+            state: None,
+            caller: Some(client_id.to_string()),
+            reason: Some("editor_view_client_retired".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        },
+        CONTROLLER_RPC_TIMEOUT,
     )
 }
 
@@ -17181,6 +17284,16 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "editor_view_snapshot_observe" => controller_envelope(handle_editor_view_snapshot_observe(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "editor_view_client_retire" => controller_envelope(handle_editor_view_client_retire(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "document_path_transition_observe" => controller_envelope(
             handle_document_path_transition_observe(&bootstrap_snapshot, runtime.as_ref(), request),
         ),
@@ -23846,6 +23959,146 @@ fn handle_editor_surface_forget(
         "forgotten_clients": forgotten_clients,
         "terminal_decision": terminal_decision,
     }))
+}
+
+fn editor_view_identity(
+    project_root: &Path,
+    binding: &EditorViewPolicyBinding,
+) -> Result<agent_doc_state_backbone::EditorViewBindingIdentity> {
+    let view_id = serde_json::to_string(&binding.view_id)?;
+    let session_key = format!("{}|{view_id}", project_root.display());
+    Ok(agent_doc_state_backbone::EditorViewBindingIdentity {
+        view_id,
+        client_family: binding.owner.client_id.clone(),
+        connection_generation: binding.owner.connection_generation,
+        surface_id: binding.owner.surface_id.clone(),
+        surface_generation: binding.owner.surface_generation,
+        view_session: format!(
+            "agent-doc-view-{}",
+            agent_doc_hash::short_content_hash(&session_key)
+        ),
+    })
+}
+
+fn editor_view_release_reason(
+    reason: agent_doc_editor_surface::EditorViewReleaseReason,
+) -> agent_doc_state_backbone::EditorViewReleaseReason {
+    use agent_doc_editor_surface::EditorViewReleaseReason as Source;
+    use agent_doc_state_backbone::EditorViewReleaseReason as Target;
+    match reason {
+        Source::MainVisible => Target::MainVisible,
+        Source::OwnerClosed => Target::OwnerClosed,
+        Source::OwnerChangedDocument => Target::OwnerChangedDocument,
+        Source::ClientRetired => Target::ClientRetired,
+        Source::RecoveryCompensation => Target::RecoveryCompensation,
+    }
+}
+
+fn persist_editor_view_transitions(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    projection: &EditorViewPolicyProjection,
+) -> Result<()> {
+    use agent_doc_editor_surface::EditorViewLifecycleTransition;
+    use agent_doc_state_backbone::{
+        EditorViewBindingState, EditorViewReleaseDestination, StateEvent, StateFact,
+    };
+
+    for transition in &projection.transitions {
+        let (binding, state, phase) = match transition {
+            EditorViewLifecycleTransition::BindPending { binding, .. } => {
+                let identity = editor_view_identity(&bootstrap.project_root, binding)?;
+                (
+                    binding,
+                    EditorViewBindingState::BindPending { binding: identity },
+                    "bind_pending",
+                )
+            }
+            EditorViewLifecycleTransition::ReleasePending {
+                binding, reason, ..
+            } => {
+                let document_hash =
+                    agent_doc_hash::document_id_for_path(Path::new(&binding.document));
+                let pane = runtime
+                    .memory
+                    .lock()
+                    .state_projection
+                    .document(&document_hash)
+                    .and_then(|document| document.editor_view_binding.as_ref())
+                    .and_then(|binding| match &binding.state {
+                        EditorViewBindingState::Bound { pane, .. }
+                        | EditorViewBindingState::ReleasePending {
+                            pane: Some(pane), ..
+                        } => Some(pane.clone()),
+                        _ => None,
+                    });
+                let identity = editor_view_identity(&bootstrap.project_root, binding)?;
+                (
+                    binding,
+                    EditorViewBindingState::ReleasePending {
+                        binding: identity,
+                        pane,
+                        reason: editor_view_release_reason(*reason),
+                        destination: EditorViewReleaseDestination::MainStash,
+                    },
+                    "release_pending",
+                )
+            }
+        };
+        let document_hash = agent_doc_hash::document_id_for_path(Path::new(&binding.document));
+        let event_id = format!(
+            "editor-view:{}:{}:{}:{}",
+            document_hash,
+            binding.binding_epoch,
+            phase,
+            agent_doc_hash::short_content_hash(&binding.owner.surface_id),
+        );
+        append_apply_state_event(
+            bootstrap,
+            runtime,
+            StateEvent::new(
+                event_id,
+                StateFact::EditorViewBindingObserved {
+                    document_hash,
+                    canonical_path: binding.document.clone(),
+                    binding_epoch: binding.binding_epoch,
+                    state,
+                },
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+fn handle_editor_view_snapshot_observe(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<EditorViewPolicyProjection> {
+    let payload = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let snapshot: EditorViewSnapshot =
+        serde_json::from_str(&payload).context("parse complete editor view snapshot")?;
+    runtime
+        .editor_view_policy_graph
+        .observe(snapshot, |projection| {
+            persist_editor_view_transitions(bootstrap, runtime, projection)
+        })
+}
+
+fn handle_editor_view_client_retire(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<EditorViewPolicyProjection> {
+    let client_id = request_string(&request.caller, "caller")?;
+    let generation = request
+        .generation
+        .context("editor_view_client_retire requires generation")?;
+    runtime
+        .editor_view_policy_graph
+        .retire_client(&client_id, generation, |projection| {
+            persist_editor_view_transitions(bootstrap, runtime, projection)
+        })
 }
 
 fn handle_document_path_transition_observe(
@@ -32272,6 +32525,135 @@ mod tests {
             archive,
             "an independently addressed done document keeps its own identity",
         );
+    }
+
+    fn editor_view_snapshot(
+        client_id: &str,
+        generation: u64,
+        sequence: u64,
+        main_visible: &[&Path],
+        detached_focused: &Path,
+    ) -> EditorViewSnapshot {
+        use agent_doc_editor_surface::{EditorSurfaceRole, EditorViewSurface};
+
+        EditorViewSnapshot {
+            client_id: client_id.to_string(),
+            connection_generation: generation,
+            sequence,
+            complete: true,
+            terminal_capable: true,
+            surfaces: vec![
+                EditorViewSurface {
+                    surface_id: "root".to_string(),
+                    surface_generation: 1,
+                    role: EditorSurfaceRole::Main,
+                    focused: main_visible
+                        .first()
+                        .map_or_else(String::new, |path| path.to_string_lossy().into_owned()),
+                    visible: main_visible
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect(),
+                },
+                EditorViewSurface {
+                    surface_id: "detached-1".to_string(),
+                    surface_generation: 4,
+                    role: EditorSurfaceRole::Detached,
+                    focused: detached_focused.to_string_lossy().into_owned(),
+                    visible: vec![detached_focused.to_string_lossy().into_owned()],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn complete_editor_view_snapshot_is_durable_before_main_exclusion_and_restart() {
+        use agent_doc_editor_surface::{
+            EditorViewLifecycleTransition, EditorViewPlaceholderReason, EditorViewPresentation,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let detached = dir.path().join("detached.md");
+        std::fs::write(&detached, "# detached\n").unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: current_binary_identity().ok(),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let snapshot = editor_view_snapshot("rd-client-a", 7, 1, &[], &detached);
+        let projection = handle_editor_view_snapshot_observe(
+            &bootstrap,
+            runtime.as_ref(),
+            ControllerRequest {
+                command: "editor_view_snapshot_observe".to_string(),
+                file: None,
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(7),
+                state: None,
+                caller: Some("rd-client-a".to_string()),
+                reason: Some("complete_editor_view_snapshot".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(serde_json::to_string(&snapshot).unwrap()),
+                sequence: Some(1),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            projection.transitions.as_slice(),
+            [EditorViewLifecycleTransition::BindPending { .. }]
+        ));
+        assert!(
+            !runtime
+                .main_layout_eligibility()
+                .permits(&detached.to_string_lossy())
+        );
+
+        let restarted = ControllerRuntime::new_arc(ControllerBootstrap {
+            controller_generation: 2,
+            ..bootstrap
+        })
+        .unwrap();
+        assert!(
+            !restarted
+                .main_layout_eligibility()
+                .permits(&detached.to_string_lossy()),
+            "durable BindPending must exclude before the restarted controller serves layout",
+        );
+
+        let main_duplicate = editor_view_snapshot("rd-client-a", 7, 2, &[&detached], &detached);
+        let projection = restarted
+            .editor_view_policy_graph
+            .observe(main_duplicate, |_| Ok(()))
+            .unwrap();
+        assert!(
+            projection
+                .presentations
+                .values()
+                .any(|presentation| matches!(
+                    presentation,
+                    EditorViewPresentation::Placeholder {
+                        reason: EditorViewPlaceholderReason::MainOwned,
+                        ..
+                    }
+                ))
+        );
+        assert!(matches!(
+            projection.transitions.as_slice(),
+            [EditorViewLifecycleTransition::ReleasePending { .. }]
+        ));
     }
 
     #[test]

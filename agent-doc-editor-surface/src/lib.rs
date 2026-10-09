@@ -34,6 +34,13 @@ pub mod pane_placement;
 pub mod remote_layout;
 pub mod terminal_ownership;
 
+pub use editor_view_policy::{
+    EditorSurfaceRole, EditorViewBindSource, EditorViewBindingPhase, EditorViewFreezeReason,
+    EditorViewId, EditorViewLifecycleTransition, EditorViewPlaceholderReason, EditorViewPolicy,
+    EditorViewPolicyBinding, EditorViewPolicyProjection, EditorViewPolicyStatus,
+    EditorViewPresentation, EditorViewReleaseDestination, EditorViewReleaseReason,
+    EditorViewSnapshot, EditorViewSurface, EditorViewSurfaceKey, MainLayoutEligibility,
+};
 pub use graph::{EditorSurfaceState, SurfaceFold};
 pub use remote_layout::{
     RemoteClientEditors, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,

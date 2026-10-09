@@ -1374,6 +1374,51 @@ fn main_layout_eligibility_from_state(
     )
 }
 
+fn editor_view_policy_bindings_from_state(
+    state: &agent_doc_state_backbone::StateBackboneProjection,
+) -> Vec<agent_doc_editor_surface::EditorViewPolicyBinding> {
+    use agent_doc_editor_surface::{
+        EditorViewBindingPhase, EditorViewId, EditorViewPolicyBinding, EditorViewSurfaceKey,
+    };
+    use agent_doc_state_backbone::EditorViewBindingState;
+
+    state
+        .active_editor_view_bindings()
+        .into_values()
+        .map(|projection| {
+            let identity = projection.state.binding();
+            let phase = match projection.state {
+                EditorViewBindingState::BindPending { .. } => EditorViewBindingPhase::BindPending,
+                EditorViewBindingState::Bound { .. } => EditorViewBindingPhase::Bound,
+                EditorViewBindingState::ReleasePending { .. } => {
+                    EditorViewBindingPhase::ReleasePending
+                }
+                EditorViewBindingState::Released { .. } => {
+                    unreachable!("active_editor_view_bindings excludes released projections")
+                }
+            };
+            let owner = EditorViewSurfaceKey {
+                client_id: identity.client_family.clone(),
+                connection_generation: identity.connection_generation,
+                surface_id: identity.surface_id.clone(),
+                surface_generation: identity.surface_generation,
+            };
+            EditorViewPolicyBinding {
+                document: projection.canonical_path,
+                binding_epoch: projection.binding_epoch,
+                view_id: EditorViewId {
+                    client_id: owner.client_id.clone(),
+                    connection_generation: owner.connection_generation,
+                    surface_id: owner.surface_id.clone(),
+                    surface_generation: owner.surface_generation,
+                },
+                owner,
+                phase,
+            }
+        })
+        .collect()
+}
+
 impl ControllerMainLayoutEligibilityGraph {
     fn new_in(scope: &agent_doc_state_scope::ProcessScope, initial: MainLayoutEligibility) -> Self {
         let ctx = scope.ctx().clone();
@@ -2945,6 +2990,9 @@ pub(crate) struct ControllerRuntime {
     /// Editor facts, history-dependent intent, and tmux consequences share the
     /// controller ProcessScope. Editors retain only transport/projection caches.
     editor_surface_graph: rpc::ControllerEditorSurfaceGraph,
+    /// Complete frame-tagged Remote Dev snapshots. This graph is separate from
+    /// the legacy per-surface graph because only it owns main precedence.
+    editor_view_policy_graph: rpc::ControllerEditorViewPolicyGraph,
     /// Retained old-path → new-path observations and their convergence
     /// receipts. Requests carry effects; this projection owns rename truth.
     document_path_transition_graph: rpc::ControllerDocumentPathTransitionGraph,
@@ -7225,6 +7273,9 @@ impl ControllerRuntime {
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
             }));
+        let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::hydrate(
+            editor_view_policy_bindings_from_state(&memory.state_projection),
+        );
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
         for (document_hash, projection) in &memory.state_projection.documents {
@@ -7244,6 +7295,7 @@ impl ControllerRuntime {
             pane_layout_graph,
             main_layout_eligibility_graph,
             editor_surface_graph,
+            editor_view_policy_graph,
             document_path_transition_graph,
             async_editor_commands,
             supervisor_recycle_waiters: Condvar::new(),
@@ -16457,6 +16509,9 @@ agent:queue\n\
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
             }));
+        let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::hydrate(
+            editor_view_policy_bindings_from_state(&state_projection),
+        );
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
         ControllerRuntime {
@@ -16481,6 +16536,7 @@ agent:queue\n\
             pane_layout_graph,
             main_layout_eligibility_graph,
             editor_surface_graph,
+            editor_view_policy_graph,
             document_path_transition_graph,
             async_editor_commands,
             recycle_requested: AtomicBool::new(false),
@@ -16505,6 +16561,7 @@ agent:queue\n\
         let binding = EditorViewBindingIdentity {
             view_id: "view-a".to_string(),
             client_family: "jetbrains".to_string(),
+            connection_generation: 2,
             surface_id: "detached-1".to_string(),
             surface_generation: 3,
             view_session: "agent-doc-view-a".to_string(),

@@ -196,6 +196,16 @@ editor-surface Source to the selected document's own controller. The controller
 graph derives typed `observe_only` focus rather than `resume_latest`: it may
 select an already-visible pane but never performs recovery or pane creation.
 The spanning editor surface graph owns that structural work.
+- JetBrains editor observations carry a stable `surface_id` derived from the
+  owning `ToolWindowPane`, and controller roots are retained independently per
+  `(project, client, surface)`. The controller is the sole policy owner for the
+  IDE terminal presentation: one focused visible surface exclusively owns a
+  document, a later focused detached surface atomically transfers ownership,
+  stale generations/sequences cannot move it, and retiring the owning surface
+  deterministically returns it to another visible surface or stashes it. The
+  JetBrains effect moves only the dedicated agent-doc terminal tool window; it
+  never relocates unrelated tabs from the stock Terminal tool window. Missing
+  pane-placement capability fails closed without changing tmux ownership.
 Its `active_window_guard` registers a project-scoped fence at async admission;
 supersession and the command deadline are checked again while holding that
 fence across the final `select-pane` effect. A worker that was accepted earlier

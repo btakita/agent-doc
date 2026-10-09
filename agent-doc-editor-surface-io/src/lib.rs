@@ -193,6 +193,7 @@ impl Registry {
             intent,
             outcome,
             error,
+            terminal_decision: Default::default(),
         }
     }
 
@@ -294,6 +295,7 @@ fn publish_editor_observation(
         client_id: format!("native-pid:{}", std::process::id()),
         generation: *EDITOR_SURFACE_CLIENT_GENERATION,
         sequence: EDITOR_SURFACE_SEQUENCE.fetch_add(1, Ordering::SeqCst) + 1,
+        surface_id: "project".to_string(),
         surface,
     };
     agent_doc_controller_io::project_controller::observe_editor_surface_existing(root, &observation)
@@ -312,6 +314,7 @@ pub fn observe(project_root: &Path, surface: EditorSurface) -> SurfaceObservatio
             idle: true,
             outcome: None,
             error: Some(format!("controller observation unavailable: {error:#}")),
+            terminal_decision: Default::default(),
         }
     })
 }
@@ -322,6 +325,7 @@ fn quiescing_receipt() -> SurfaceObservationReceipt {
         idle: true,
         outcome: None,
         error: Some("native editor generation is quiescing".to_string()),
+        terminal_decision: Default::default(),
     }
 }
 

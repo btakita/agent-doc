@@ -17,7 +17,6 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.IdeFocusManager
-import com.intellij.openapi.wm.WindowManager
 import java.awt.AWTEvent
 import java.awt.Component
 import java.awt.Container
@@ -112,7 +111,7 @@ class EditorFocusSyncListener private constructor(
             isActive = {
                 !disposed.get() &&
                     !project.isDisposed &&
-                    WindowManager.getInstance().getFrame(project)?.isActive == true
+                    JetBrainsEditorSurfaces.isProjectSurfaceActive(project)
             },
             isEligible = AgentDocSessionFiles::isSessionDocument,
             emit = { file -> tabSync.onEditorFocusGained(project, file) },
@@ -142,7 +141,8 @@ class EditorFocusSyncListener private constructor(
                 ?: return@AWTEventListener
         editorsRoot.set(root)
         val belongsToEditorTree =
-            component === root || SwingUtilities.isDescendingFrom(component, root)
+            JetBrainsEditorSurfaces.belongsToAnyEditorSurface(project, component) ||
+                component === root || SwingUtilities.isDescendingFrom(component, root)
         settledTreeFocusProbe.observeMousePress(belongsToEditorTree)
     }
 
@@ -197,7 +197,8 @@ class EditorFocusSyncListener private constructor(
                 KeyboardFocusManager.getCurrentKeyboardFocusManager().permanentFocusOwner
             settledTreeFocusProbe.observeMousePress(
                 focusOwner != null &&
-                    (focusOwner === root || SwingUtilities.isDescendingFrom(focusOwner, root)),
+                    (JetBrainsEditorSurfaces.belongsToAnyEditorSurface(project, focusOwner) ||
+                        focusOwner === root || SwingUtilities.isDescendingFrom(focusOwner, root)),
             )
         }
         if (SwingUtilities.isEventDispatchThread()) {

@@ -31,6 +31,7 @@
 pub mod graph;
 pub mod pane_placement;
 pub mod remote_layout;
+pub mod terminal_ownership;
 
 pub use graph::{EditorSurfaceState, SurfaceFold};
 pub use remote_layout::{
@@ -113,7 +114,17 @@ pub struct EditorSurfaceObservation {
     pub client_id: String,
     pub generation: u64,
     pub sequence: u64,
+    /// Stable identity of the IDE frame/editor surface that produced the fact.
+    ///
+    /// Older adapters omitted this field and represented the whole IDE process
+    /// as one surface. Keep that wire shape readable during rollout.
+    #[serde(default = "default_surface_id")]
+    pub surface_id: String,
     pub surface: EditorSurface,
+}
+
+fn default_surface_id() -> String {
+    "project".to_string()
 }
 
 /// Availability of the controller-owned turn projection for one document.
@@ -305,12 +316,17 @@ pub struct SurfaceObservationReceipt {
     pub outcome: Option<String>,
     /// A consequence failure does not invalidate the editor fact.
     pub error: Option<String>,
+    /// Controller-owned decision for the one IDE-hosted terminal presentation.
+    #[serde(default)]
+    pub terminal_decision: terminal_ownership::SurfaceTerminalDecision,
 }
 
 /// Controller-published reactive projection for an accepted editor fact.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorSurfaceProjection {
     pub client_id: String,
+    #[serde(default = "default_surface_id")]
+    pub surface_id: String,
     pub generation: u64,
     pub sequence: u64,
     pub receipt: SurfaceObservationReceipt,

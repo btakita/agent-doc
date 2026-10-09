@@ -179,10 +179,12 @@ internal object CpRouteClient {
     fun observeEditorSurface(
         projectRoot: String,
         surfaceJson: String,
+        surfaceId: String = "project",
     ): CpEditorRouteResult =
         observeEditorSurfaceWithClient(
             projectRoot = projectRoot,
             surfaceJson = surfaceJson,
+            surfaceId = surfaceId,
             clientId = editorSurfaceClientId,
             generation = editorSurfaceGeneration,
             sequence = editorSurfaceSequence.incrementAndGet(),
@@ -199,10 +201,12 @@ internal object CpRouteClient {
     fun observeEditorFocus(
         projectRoot: String,
         surfaceJson: String,
+        surfaceId: String = "project",
     ): CpEditorRouteResult =
         observeEditorSurfaceWithClient(
             projectRoot = projectRoot,
             surfaceJson = surfaceJson,
+            surfaceId = surfaceId,
             clientId = editorFocusClientId,
             generation = editorFocusGeneration,
             sequence = editorFocusSequence.incrementAndGet(),
@@ -214,6 +218,7 @@ internal object CpRouteClient {
     private fun observeEditorSurfaceWithClient(
         projectRoot: String,
         surfaceJson: String,
+        surfaceId: String,
         clientId: String,
         generation: Long,
         sequence: Long,
@@ -225,6 +230,7 @@ internal object CpRouteClient {
         val request =
             editorSurfaceObserveRequest(
                 surfaceJson = surfaceJson,
+                surfaceId = surfaceId,
                 clientId = clientId,
                 generation = generation,
                 sequence = sequence,
@@ -255,33 +261,62 @@ internal object CpRouteClient {
         }
     }
 
-    fun forgetEditorSurface(projectRoot: String): Boolean {
+    fun forgetEditorSurface(projectRoot: String, surfaceId: String? = null): Boolean {
         return forgetEditorSurfaceClient(
             projectRoot = projectRoot,
             clientId = editorSurfaceClientId,
             generation = editorSurfaceGeneration,
+            surfaceId = surfaceId,
         )
     }
 
-    fun forgetEditorFocus(projectRoot: String): Boolean {
+    fun forgetEditorFocus(projectRoot: String, surfaceId: String? = null): Boolean {
         return forgetEditorSurfaceClient(
             projectRoot = projectRoot,
             clientId = editorFocusClientId,
             generation = editorFocusGeneration,
+            surfaceId = surfaceId,
         )
+    }
+
+    fun forgetEditorFocusWithReceipt(projectRoot: String, surfaceId: String): CpEditorRouteResult {
+        val socket = cpcSocket(projectRoot)
+        val request =
+            editorSurfaceForgetRequest(
+                clientId = editorFocusClientId,
+                generation = editorFocusGeneration,
+                retireClientFamily = false,
+                surfaceId = surfaceId,
+            )
+        return try {
+            CpEditorRouteResult(
+                exitCode = 0,
+                output = sendRequestDataToSocket(socket, request).toString(),
+            )
+        } catch (e: Exception) {
+            log.debug(
+                "[focus] exact editor_surface_forget unavailable via ${socket.path}: ${e.message}",
+            )
+            CpEditorRouteResult(
+                exitCode = 1,
+                output = "editor_surface_forget unavailable via ${socket.path}: ${e.message}",
+            )
+        }
     }
 
     private fun forgetEditorSurfaceClient(
         projectRoot: String,
         clientId: String,
         generation: Long,
+        surfaceId: String?,
     ): Boolean {
         val socket = cpcSocket(projectRoot)
         val request =
             editorSurfaceForgetRequest(
                 clientId = clientId,
                 generation = generation,
-                retireClientFamily = true,
+                retireClientFamily = surfaceId == null,
+                surfaceId = surfaceId,
             )
         return try {
             sendRequestDataToSocket(socket, request).get("forgotten")?.asBoolean ?: false
@@ -471,6 +506,7 @@ internal object CpRouteClient {
         clientId: String,
         generation: Long,
         sequence: Long,
+        surfaceId: String = "project",
     ): JsonObject {
         val surface = JsonParser.parseString(surfaceJson).asJsonObject
         val observation =
@@ -478,6 +514,7 @@ internal object CpRouteClient {
                 it.addProperty("client_id", clientId)
                 it.addProperty("generation", generation)
                 it.addProperty("sequence", sequence)
+                it.addProperty("surface_id", surfaceId)
                 it.add("surface", surface)
             }
         return JsonObject().also {
@@ -494,6 +531,7 @@ internal object CpRouteClient {
         clientId: String,
         generation: Long,
         retireClientFamily: Boolean,
+        surfaceId: String? = null,
     ): JsonObject =
         JsonObject().also {
             it.addProperty("command", "editor_surface_forget")
@@ -507,6 +545,14 @@ internal object CpRouteClient {
                     "editor_surface_client_retired"
                 },
             )
+            if (surfaceId != null) {
+                it.addProperty(
+                    "diagnostic_payload",
+                    JsonObject().also { payload ->
+                        payload.addProperty("surface_id", surfaceId)
+                    }.toString(),
+                )
+            }
         }
 
     internal fun documentPathTransitionRequest(

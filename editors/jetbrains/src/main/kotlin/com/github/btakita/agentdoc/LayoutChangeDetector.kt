@@ -91,7 +91,9 @@ class LayoutChangeDetector(private val project: Project) {
         val source = containerEvent.container
         val child = containerEvent.child
         val belongsToEditorTree =
-            source === root ||
+            JetBrainsEditorSurfaces.belongsToAnyEditorSurface(project, source) ||
+                JetBrainsEditorSurfaces.belongsToAnyEditorSurface(project, child) ||
+                source === root ||
                 SwingUtilities.isDescendingFrom(source, root) ||
                 SwingUtilities.isDescendingFrom(child, root)
         if (!belongsToEditorTree) return@AWTEventListener

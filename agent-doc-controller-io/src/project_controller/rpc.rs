@@ -26,6 +26,9 @@ use agent_doc_controller::supervisor_replacement::{
 };
 use agent_doc_controller::timeout::is_timeout_error;
 use agent_doc_document_realtime::watch_authority::{DiskChangeSignal, WatchAction, WatchDelivery};
+use agent_doc_editor_surface::terminal_ownership::{
+    SurfaceOwnershipObservation, SurfaceTerminalDecision, SurfaceTerminalOwnership,
+};
 use agent_doc_editor_surface::{
     EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
     SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
@@ -114,7 +117,8 @@ struct ControllerEditorSurfaceRoot {
 /// Reloaded native libraries therefore hold neither live intent authority nor
 /// a route that can bootstrap/open controller SQLite.
 pub(super) struct ControllerEditorSurfaceGraph {
-    roots: Mutex<BTreeMap<(PathBuf, String), ControllerEditorSurfaceRoot>>,
+    roots: Mutex<BTreeMap<(PathBuf, String, String), ControllerEditorSurfaceRoot>>,
+    terminal_ownership: Mutex<BTreeMap<PathBuf, SurfaceTerminalOwnership>>,
     run_intent: ControllerEditorSurfaceIntentRunner,
 }
 
@@ -254,6 +258,7 @@ impl ControllerEditorSurfaceGraph {
     pub(super) fn new(run_intent: ControllerEditorSurfaceIntentRunner) -> Self {
         Self {
             roots: Mutex::new(BTreeMap::new()),
+            terminal_ownership: Mutex::new(BTreeMap::new()),
             run_intent,
         }
     }
@@ -265,7 +270,11 @@ impl ControllerEditorSurfaceGraph {
         observation: EditorSurfaceObservation,
         tmux: Option<TmuxLayout>,
     ) -> (bool, SurfaceObservationReceipt) {
-        let key = (project_root.to_path_buf(), observation.client_id.clone());
+        let key = (
+            project_root.to_path_buf(),
+            observation.client_id.clone(),
+            observation.surface_id.clone(),
+        );
         let mut roots = self.roots.lock();
 
         if let Some(current) = roots.get(&key)
@@ -281,6 +290,7 @@ impl ControllerEditorSurfaceGraph {
                     idle: true,
                     outcome: None,
                     error: None,
+                    terminal_decision: SurfaceTerminalDecision::Stale,
                 },
             );
         }
@@ -292,6 +302,15 @@ impl ControllerEditorSurfaceGraph {
             retired.state.stop(&retired.consequence);
         }
 
+        let terminal_observation = SurfaceOwnershipObservation {
+            source_id: observation.client_id.clone(),
+            surface_id: observation.surface_id.clone(),
+            generation: observation.generation,
+            sequence: observation.sequence,
+            authoritative_focus: observation.surface.focus_only,
+            focused: observation.surface.focused.clone(),
+            visible: observation.surface.visible.clone(),
+        };
         let root = project_root.to_path_buf();
         let run_intent = Arc::clone(&self.run_intent);
         let entry = roots.entry(key).or_insert_with(|| {
@@ -331,6 +350,12 @@ impl ControllerEditorSurfaceGraph {
             Some(Err(message)) => (None, Some(message)),
             None => (None, None),
         };
+        let terminal_decision = self
+            .terminal_ownership
+            .lock()
+            .entry(project_root.to_path_buf())
+            .or_default()
+            .observe(terminal_observation);
         (
             true,
             SurfaceObservationReceipt {
@@ -338,6 +363,7 @@ impl ControllerEditorSurfaceGraph {
                 intent,
                 outcome,
                 error,
+                terminal_decision,
             },
         )
     }
@@ -353,7 +379,7 @@ impl ControllerEditorSurfaceGraph {
     /// re-derives `Sync` — the decision lives in the graph, not the caller.
     pub(super) fn observe_tmux_for_project(&self, project_root: &Path, tmux: Option<TmuxLayout>) {
         let roots = self.roots.lock();
-        for ((root, _client_id), entry) in roots.iter() {
+        for ((root, _client_id, _surface_id), entry) in roots.iter() {
             if root == project_root && !entry.retired {
                 entry.state.observe_tmux(tmux.clone());
             }
@@ -361,17 +387,65 @@ impl ControllerEditorSurfaceGraph {
     }
 
     fn forget(&self, project_root: &Path, client_id: &str, generation: u64) -> bool {
-        let key = (project_root.to_path_buf(), client_id.to_string());
+        let mut roots = self.roots.lock();
+        let mut retired_surfaces = Vec::new();
+        for ((root, retained_client_id, surface_id), current) in roots.iter_mut() {
+            if root != project_root
+                || retained_client_id != client_id
+                || current.generation != generation
+                || current.retired
+            {
+                continue;
+            }
+            current.state.stop(&current.consequence);
+            current.retired = true;
+            retired_surfaces.push((
+                retained_client_id.clone(),
+                surface_id.clone(),
+                current.generation,
+            ));
+        }
+        drop(roots);
+        if !retired_surfaces.is_empty() {
+            let mut ownerships = self.terminal_ownership.lock();
+            if let Some(ownership) = ownerships.get_mut(project_root) {
+                for (source_id, surface_id, surface_generation) in &retired_surfaces {
+                    ownership.retire(source_id, surface_id, *surface_generation);
+                }
+            }
+        }
+        !retired_surfaces.is_empty()
+    }
+
+    fn forget_surface(
+        &self,
+        project_root: &Path,
+        client_id: &str,
+        surface_id: &str,
+        generation: u64,
+    ) -> (bool, SurfaceTerminalDecision) {
+        let key = (
+            project_root.to_path_buf(),
+            client_id.to_string(),
+            surface_id.to_string(),
+        );
         let mut roots = self.roots.lock();
         let Some(current) = roots.get_mut(&key) else {
-            return false;
+            return (false, SurfaceTerminalDecision::Stale);
         };
         if current.generation != generation || current.retired {
-            return false;
+            return (false, SurfaceTerminalDecision::Stale);
         }
         current.state.stop(&current.consequence);
         current.retired = true;
-        true
+        drop(roots);
+        let decision = self
+            .terminal_ownership
+            .lock()
+            .entry(project_root.to_path_buf())
+            .or_default()
+            .retire(client_id, surface_id, generation);
+        (true, decision)
     }
 
     fn forget_client_family(&self, project_root: &Path, client_id: &str, generation: u64) -> usize {
@@ -380,7 +454,8 @@ impl ControllerEditorSurfaceGraph {
         };
         let mut roots = self.roots.lock();
         let mut forgotten = 0;
-        for ((root, retained_client_id), current) in roots.iter_mut() {
+        let mut retired_surfaces = Vec::new();
+        for ((root, retained_client_id, surface_id), current) in roots.iter_mut() {
             if root != project_root
                 || current.retired
                 || current.generation > generation
@@ -390,7 +465,21 @@ impl ControllerEditorSurfaceGraph {
             }
             current.state.stop(&current.consequence);
             current.retired = true;
+            retired_surfaces.push((
+                retained_client_id.clone(),
+                surface_id.clone(),
+                current.generation,
+            ));
             forgotten += 1;
+        }
+        drop(roots);
+        if !retired_surfaces.is_empty() {
+            let mut ownerships = self.terminal_ownership.lock();
+            if let Some(ownership) = ownerships.get_mut(project_root) {
+                for (source_id, surface_id, surface_generation) in retired_surfaces {
+                    ownership.retire(&source_id, &surface_id, surface_generation);
+                }
+            }
         }
         forgotten
     }
@@ -399,8 +488,8 @@ impl ControllerEditorSurfaceGraph {
         self.roots
             .lock()
             .iter()
-            .filter(|((root, _), observation)| root == project_root && !observation.retired)
-            .map(|((_, client_id), observation)| {
+            .filter(|((root, _, _), observation)| root == project_root && !observation.retired)
+            .map(|((_, client_id, _), observation)| {
                 (
                     client_id.clone(),
                     observation.generation,
@@ -23295,6 +23384,7 @@ fn handle_editor_surface_observe(
     let observed_surface = observation.surface.clone();
     let projection_identity = (
         observation.client_id.clone(),
+        observation.surface_id.clone(),
         observation.generation,
         observation.sequence,
     );
@@ -23347,8 +23437,8 @@ fn handle_editor_surface_observe(
         &bootstrap.project_root,
         SurfaceObservationDiagnostic {
             client_id: projection_identity.0.clone(),
-            generation: projection_identity.1,
-            sequence: projection_identity.2,
+            generation: projection_identity.2,
+            sequence: projection_identity.3,
             accepted,
             intent: surface_intent_label(&receipt.intent).to_string(),
             focused: diagnostic_focused,
@@ -23360,7 +23450,7 @@ fn handle_editor_surface_observe(
     let surface_observation_key = format!(
         "{}|{}|{}|{}|{}",
         projection_identity.0,
-        projection_identity.1,
+        projection_identity.2,
         accepted,
         surface_intent_label(&receipt.intent),
         surface_layout_authority,
@@ -23371,8 +23461,8 @@ fn handle_editor_surface_observe(
             &format!(
                 "controller_editor_surface_observed client={} generation={} sequence={} accepted={} layout={} pane_action={}{}",
                 projection_identity.0,
-                projection_identity.1,
                 projection_identity.2,
+                projection_identity.3,
                 accepted,
                 surface_layout_authority,
                 match &receipt.intent {
@@ -23530,11 +23620,13 @@ fn handle_editor_surface_observe(
         }
         let projection = EditorSurfaceProjection {
             client_id: projection_identity.0.clone(),
-            generation: projection_identity.1,
-            sequence: projection_identity.2,
+            surface_id: projection_identity.1.clone(),
+            generation: projection_identity.2,
+            sequence: projection_identity.3,
             receipt: receipt.clone(),
         };
-        let channel = editor_surface_projection_channel(&projection_identity.0);
+        let channel =
+            editor_surface_projection_channel(&projection_identity.0, &projection_identity.1);
         let epoch = EDITOR_SURFACE_PROJECTION_EPOCH.fetch_add(1, Ordering::SeqCst);
         let message_json = state_plane_snapshot_message_json(
             epoch,
@@ -23569,18 +23661,37 @@ fn handle_editor_surface_forget(
     let generation = request
         .generation
         .context("editor_surface_forget requires generation")?;
-    let forgotten_clients = if retire_client_family {
-        runtime.editor_surface_graph.forget_client_family(
+    let surface_id = request
+        .diagnostic_payload
+        .as_deref()
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+        .and_then(|payload| payload.get("surface_id")?.as_str().map(str::to_string));
+    let (forgotten_clients, terminal_decision) = if let Some(surface_id) = surface_id.as_deref() {
+        let (forgotten, decision) = runtime.editor_surface_graph.forget_surface(
             &bootstrap.project_root,
             &client_id,
+            surface_id,
             generation,
+        );
+        (usize::from(forgotten), decision)
+    } else if retire_client_family {
+        (
+            runtime.editor_surface_graph.forget_client_family(
+                &bootstrap.project_root,
+                &client_id,
+                generation,
+            ),
+            SurfaceTerminalDecision::Idle,
         )
     } else {
-        usize::from(runtime.editor_surface_graph.forget(
-            &bootstrap.project_root,
-            &client_id,
-            generation,
-        ))
+        (
+            usize::from(runtime.editor_surface_graph.forget(
+                &bootstrap.project_root,
+                &client_id,
+                generation,
+            )),
+            SurfaceTerminalDecision::Idle,
+        )
     };
     // `#surfaceobservesilent`: a stray or early retirement is the leading cause of
     // a surface graph that silently rejects every later observation, so the forget
@@ -23588,13 +23699,18 @@ fn handle_editor_surface_forget(
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
-            "controller_editor_surface_forgotten client={} generation={} client_family={} forgotten_clients={}",
-            client_id, generation, retire_client_family, forgotten_clients
+            "controller_editor_surface_forgotten client={} surface={} generation={} client_family={} forgotten_clients={}",
+            client_id,
+            surface_id.as_deref().unwrap_or("all"),
+            generation,
+            retire_client_family,
+            forgotten_clients
         ),
     );
     Ok(serde_json::json!({
         "forgotten": forgotten_clients > 0,
         "forgotten_clients": forgotten_clients,
+        "terminal_decision": terminal_decision,
     }))
 }
 
@@ -23747,10 +23863,11 @@ fn handle_document_path_transition_observe(
     Ok(receipt)
 }
 
-pub fn editor_surface_projection_channel(client_id: &str) -> String {
+pub fn editor_surface_projection_channel(client_id: &str, surface_id: &str) -> String {
     format!(
-        "agent-doc/editor-surface/{}/projection/v1",
-        agent_doc_hash::content_hash(client_id)
+        "agent-doc/editor-surface/{}/{}/projection/v1",
+        agent_doc_hash::content_hash(client_id),
+        agent_doc_hash::content_hash(surface_id),
     )
 }
 
@@ -30880,6 +30997,7 @@ mod tests {
             idle: false,
             outcome: None,
             error: None,
+            terminal_decision: Default::default(),
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -30915,6 +31033,7 @@ mod tests {
             idle: false,
             outcome: Some("stale-eager-effect".to_string()),
             error: None,
+            terminal_decision: Default::default(),
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -30974,6 +31093,7 @@ mod tests {
             idle: false,
             outcome: None,
             error: None,
+            terminal_decision: Default::default(),
         };
 
         record_editor_surface_focus_outcome(
@@ -31638,6 +31758,7 @@ mod tests {
         let observe = |focused: &Path, sequence: u64| {
             let observation = EditorSurfaceObservation {
                 client_id: "idea:switch".to_string(),
+                surface_id: "project".to_string(),
                 generation: 7,
                 sequence,
                 surface: agent_doc_editor_surface::EditorSurface {
@@ -31751,6 +31872,7 @@ mod tests {
                 root,
                 EditorSurfaceObservation {
                     client_id: client.to_string(),
+                    surface_id: "project".to_string(),
                     generation: 1,
                     sequence: 1,
                     surface: surface.clone(),
@@ -31765,6 +31887,7 @@ mod tests {
             foreign_root,
             EditorSurfaceObservation {
                 client_id: "idea:9".to_string(),
+                surface_id: "project".to_string(),
                 generation: 1,
                 sequence: 1,
                 surface: surface.clone(),
@@ -31776,7 +31899,7 @@ mod tests {
         // Before the worker publishes, no client has a retained tmux observation.
         {
             let roots = graph.roots.lock();
-            for ((r, _), entry) in roots.iter() {
+            for ((r, _, _), entry) in roots.iter() {
                 if r == root {
                     assert_eq!(
                         entry.state.layout_matches(),
@@ -31793,7 +31916,7 @@ mod tests {
         // Every active client for the project now derives a match; the foreign
         // project is still without a retained observation.
         let roots = graph.roots.lock();
-        for ((r, _), entry) in roots.iter() {
+        for ((r, _, _), entry) in roots.iter() {
             if r == root {
                 assert_eq!(
                     entry.state.layout_matches(),
@@ -31948,6 +32071,7 @@ mod tests {
 
         let first = EditorSurfaceObservation {
             client_id: "idea:42".to_string(),
+            surface_id: "project".to_string(),
             generation: 10,
             sequence: 1,
             surface: test_editor_surface("/project/first.md"),
@@ -31964,6 +32088,7 @@ mod tests {
 
         let replacement = EditorSurfaceObservation {
             client_id: "idea:42".to_string(),
+            surface_id: "project".to_string(),
             generation: 11,
             sequence: 1,
             surface: test_editor_surface("/project/reloaded.md"),
@@ -31976,6 +32101,7 @@ mod tests {
 
         let retired_generation = EditorSurfaceObservation {
             client_id: "idea:42".to_string(),
+            surface_id: "project".to_string(),
             generation: 10,
             sequence: u64::MAX,
             surface: test_editor_surface("/project/stale.md"),
@@ -31995,6 +32121,7 @@ mod tests {
         assert!(!graph.forget(root, "idea:42", 11));
         let late_after_forget = EditorSurfaceObservation {
             client_id: "idea:42".to_string(),
+            surface_id: "project".to_string(),
             generation: 11,
             sequence: u64::MAX,
             surface: test_editor_surface("/project/late.md"),
@@ -32009,6 +32136,7 @@ mod tests {
 
         let next_generation = EditorSurfaceObservation {
             client_id: "idea:42".to_string(),
+            surface_id: "project".to_string(),
             generation: 12,
             sequence: 1,
             surface: test_editor_surface("/project/new.md"),
@@ -32016,6 +32144,52 @@ mod tests {
         let (next_accepted, _) = graph.observe(&scope, root, next_generation, None);
         assert!(next_accepted);
         assert_eq!(effects.lock().len(), 3);
+    }
+
+    #[test]
+    fn controller_editor_surface_graph_keeps_frame_projections_and_terminal_ownership_exclusive() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(|_, _| Ok("recorded".to_string())));
+        let root = Path::new("/project");
+        let observe = |surface_id: &str, sequence: u64, focused: &str| {
+            graph.observe(
+                &scope,
+                root,
+                EditorSurfaceObservation {
+                    client_id: "idea:42".to_string(),
+                    surface_id: surface_id.to_string(),
+                    generation: 10,
+                    sequence,
+                    surface: test_editor_surface(focused),
+                },
+                None,
+            )
+        };
+
+        let (_, main) = observe("main", 1, "/project/a.md");
+        assert!(matches!(
+            main.terminal_decision,
+            SurfaceTerminalDecision::Mount { ref surface_id, previous: None, .. }
+                if surface_id == "main"
+        ));
+        let (_, detached) = observe("dock-window-7", 2, "/project/a.md");
+        assert!(matches!(
+            detached.terminal_decision,
+            SurfaceTerminalDecision::Mount { ref surface_id, previous: Some(ref previous), .. }
+                if surface_id == "dock-window-7" && previous.surface_id == "main"
+        ));
+        assert_eq!(
+            graph.active_observation_generations(root).len(),
+            2,
+            "each editor frame retains an independent projection root",
+        );
+        let (forgotten, decision) = graph.forget_surface(root, "idea:42", "dock-window-7", 10);
+        assert!(forgotten);
+        assert!(matches!(
+            decision,
+            SurfaceTerminalDecision::Mount { surface_id, .. } if surface_id == "main"
+        ));
+        assert_eq!(graph.active_observation_generations(root).len(), 1);
     }
 
     #[test]
@@ -32034,6 +32208,7 @@ mod tests {
                 root,
                 EditorSurfaceObservation {
                     client_id: client_id.to_string(),
+                    surface_id: "project".to_string(),
                     generation,
                     sequence,
                     surface: test_editor_surface(file),
@@ -32048,6 +32223,16 @@ mod tests {
             graph.forget_client_family(root, "jetbrains-pid:42", 101),
             1,
             "a replacement JVM must retire the retained projection from its predecessor",
+        );
+        assert_eq!(
+            graph
+                .terminal_ownership
+                .lock()
+                .get(root)
+                .and_then(|ownership| ownership.owner_of("/project/old.md"))
+                .map(str::to_string),
+            None,
+            "same-family retirement must remove the predecessor's terminal authority",
         );
         assert_eq!(
             graph.active_observation_generations(root),
@@ -32089,6 +32274,7 @@ mod tests {
             .collect::<BTreeSet<_>>();
         let observation = EditorSurfaceObservation {
             client_id: "idea:passive".to_string(),
+            surface_id: "project".to_string(),
             generation: 1,
             sequence: 1,
             surface: test_editor_surface("/project/passive.md"),
@@ -32169,6 +32355,7 @@ mod tests {
         let observe = |client_id: &str, generation: u64, sequence: u64| {
             let observation = EditorSurfaceObservation {
                 client_id: client_id.to_string(),
+                surface_id: "project".to_string(),
                 generation,
                 sequence,
                 surface: test_editor_surface("/project/observed.md"),

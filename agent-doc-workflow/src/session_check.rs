@@ -729,6 +729,11 @@ pub fn open_cycle_detail(phase: CyclePhase) -> &'static str {
     }
 }
 
+/// Stable prefix for an open preflight that still has positive owner-turn
+/// liveness. It remains a fail-closed terminal-check outcome, but it is not an
+/// Agent Doc defect or abandoned-closeout recovery request.
+pub const SESSION_CHECK_IN_PROGRESS_PREFIX: &str = "[session-check] IN PROGRESS:";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenCycleMessage<'a> {
     pub file: &'a str,
@@ -736,9 +741,27 @@ pub struct OpenCycleMessage<'a> {
     pub phase: CyclePhase,
     pub last_event: &'a str,
     pub ipc_hint: &'a str,
+    /// Exact document owner pane with a fresh harness turn lease. This is
+    /// positive liveness evidence, never inferred from elapsed time or another
+    /// pane's project-wide marker.
+    pub active_owner_pane: Option<&'a str>,
 }
 
 pub fn open_cycle_message(input: OpenCycleMessage<'_>) -> String {
+    if input.phase == CyclePhase::PreflightStarted
+        && let Some(pane) = input.active_owner_pane
+    {
+        return format!(
+            "{} cycle `{}` remains `{}` ({}) while owning pane `{}` has a fresh active-turn lease — the response turn is still running, so no response capture or terminal commit exists yet. This is not abandoned closeout evidence. Do not recover or abandon this cycle, rerun finalize/write, or restart/clear the owner from another pane. Re-run `agent-doc session-check {}` only after the owning turn reaches its terminal boundary.{}",
+            SESSION_CHECK_IN_PROGRESS_PREFIX,
+            input.cycle_id,
+            input.phase.as_str(),
+            input.last_event,
+            pane,
+            input.file,
+            input.ipc_hint,
+        );
+    }
     if OpsLogEvent::DirectInvocationTimeout.is_line(input.last_event)
         || OpsLogEvent::RecursiveDirectInvocationBlocked.is_line(input.last_event)
     {
@@ -1199,6 +1222,7 @@ mod tests {
             phase: CyclePhase::PreflightStarted,
             last_event: "direct_invocation_timeout after 30s",
             ipc_hint: " ipc proof pending",
+            active_owner_pane: None,
         });
 
         assert!(message.contains("direct invocation did not reach response capture"));
@@ -1215,9 +1239,28 @@ mod tests {
             phase: CyclePhase::ResponseCaptured,
             last_event: "capture_response",
             ipc_hint: "",
+            active_owner_pane: None,
         });
 
         assert!(message.contains("response was captured but no write/commit followed"));
+    }
+
+    #[test]
+    fn open_cycle_message_distinguishes_active_preflight_owner() {
+        let message = open_cycle_message(OpenCycleMessage {
+            file: "doc.md",
+            cycle_id: "cycle-live",
+            phase: CyclePhase::PreflightStarted,
+            last_event: "preflight_started",
+            ipc_hint: "",
+            active_owner_pane: Some("%152"),
+        });
+
+        assert!(message.starts_with("[session-check] IN PROGRESS:"));
+        assert!(message.contains("owning pane `%152`"));
+        assert!(message.contains("response turn is still running"));
+        assert!(message.contains("Do not recover or abandon this cycle"));
+        assert!(!message.contains("cycle started but no write/commit followed"));
     }
 
     #[test]

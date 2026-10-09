@@ -2196,6 +2196,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-test-support",
  "agent-doc-turn",
+ "agent-doc-turn-status-io",
  "agent-doc-workflow",
  "anyhow",
  "lazily 0.57.1",

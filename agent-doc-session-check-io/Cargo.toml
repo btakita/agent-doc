@@ -54,6 +54,7 @@ lazily = "0.57.1"
 agent-doc-state-observer-io = { path = "../agent-doc-state-observer-io", version = "0.35.479" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.479" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.479" }
+agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.479" }
 agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.479" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.479" }
 serde = { version = "1", features = ["derive"] }

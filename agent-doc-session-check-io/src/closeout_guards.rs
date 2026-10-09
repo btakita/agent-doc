@@ -410,6 +410,9 @@ pub fn open_cycle_message(
             phase: state.phase,
             last_event: &state.last_event,
             ipc_hint: &ipc_hint,
+            active_owner_pane: agent_doc_turn_status_io::active_turn_owner_for_file(file)
+                .as_ref()
+                .map(|marker| marker.pane.as_str()),
         },
     ))
 }

@@ -206,6 +206,7 @@ Affected component: editor IPC / writeback\n\n\
 /// hunting for a defect that was the operator's own next prompt.
 pub fn is_dogfood_terminal_issue(diagnostic: &str) -> bool {
     !agent_doc_turn::response_text::is_session_check_steering_pending(diagnostic)
+        && !diagnostic.contains(crate::session_check::SESSION_CHECK_IN_PROGRESS_PREFIX)
 }
 
 pub fn dogfood_terminal_issue_class(diagnostic: &str) -> &'static str {
@@ -517,12 +518,15 @@ mod tests {
     }
 
     #[test]
-    fn pending_steering_is_not_a_dogfood_terminal_issue() {
+    fn expected_pending_work_is_not_a_dogfood_terminal_issue() {
         let steering = "[session-check] steering pending: cycle `cycle-1` is `committed` (commit_success), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: prompt_target: also check CI";
         assert!(!is_dogfood_terminal_issue(steering));
         assert!(!is_dogfood_terminal_issue(&format!(
             "respond failed\n\nCaused by:\n    {steering}"
         )));
+        assert!(!is_dogfood_terminal_issue(
+            "[session-check] IN PROGRESS: cycle `cycle-live` remains `preflight_started` while owning pane `%152` has a fresh active-turn lease"
+        ));
         assert!(is_dogfood_terminal_issue(
             "[session-check] INTERRUPTED: cycle `cycle-1` is still `write_applied`"
         ));

@@ -226,3 +226,21 @@ Each adapter must cover:
 10. Crash points at every state-machine transition converge under simulation.
 11. Refresh, reload, layout, and endpoint discovery stay within the bounded
     scope above and never block the editor event thread on native work.
+
+## 10. Distribution
+
+An adapter that ships more than one artifact under one plugin identity must:
+
+1. Give every artifact a distinct update version and a declared, closed
+   compatibility range; the ranges must not overlap, so every host build
+   selects at most one artifact and a build matching two is a release defect.
+2. Validate identity, versions, and ranges from the built artifacts themselves
+   before publishing any channel entry, and publish all entries or none.
+3. Keep host-side pieces of a multi-process artifact (for example a JetBrains
+   Remote Dev backend and its Client/Gateway) on the same artifact and
+   generation; a one-sided or mismatched install fails closed with no fallback
+   to a different artifact's code path.
+
+The JetBrains classic (`242`..`261.*`) and exact-262 modular (`262`..`262.*`)
+updates and their per-range custom-repository listings are specified in
+[`docs/reference/jetbrains-distribution.md`](../docs/reference/jetbrains-distribution.md).

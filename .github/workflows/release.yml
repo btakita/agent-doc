@@ -173,6 +173,8 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
+          # The exact-262 modular build requires Java 25. The classic Gradle
+          # build remains source/target 21 and is verified under this runtime.
           java-version: '25'
 
       - uses: gradle/actions/setup-gradle@v4
@@ -188,7 +190,7 @@ jobs:
       # `-signed` siblings (four zips locally), so a glob is one cache-restore
       # away from attaching a stale or differently-signed artifact to a release
       # and reporting success.
-      - name: Build JetBrains plugin zips
+      - name: Build JetBrains compatibility-ranged plugin zips
         run: |
           set -euo pipefail
           ( cd editors/jetbrains && ./gradlew --no-daemon --console=plain buildPlugin verifyClassicArtifact )
@@ -203,6 +205,27 @@ jobs:
           cp "editors/jetbrains-262/build/distributions/agent-doc-jetbrains-262-$modular_version.zip" editor-packages/
           ls -la editor-packages
 
+      # JetBrains' simple custom-repository format allows a plugin ID only once
+      # per listing. Publish one stable feed URL per compatibility range (served
+      # from `releases/latest/download/`); each listing pins its ZIP to THIS tag
+      # so a feed and the archive it names can never come from different
+      # releases. The generator refuses the pair (and writes neither listing)
+      # unless the ID matches, versions differ, and the ranges are exactly
+      # 242..261.* and 262..262.*. Remote Dev 262 users configure the 262 URL
+      # on both the backend and Client/Gateway.
+      - name: Build and verify JetBrains custom-repository feeds
+        run: |
+          set -euo pipefail
+          classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
+          modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
+          python3 scripts/jetbrains-custom-repository.py \
+            --classic "editor-packages/agent-doc-jetbrains-$classic_version.zip" \
+            --modular "editor-packages/agent-doc-jetbrains-262-$modular_version.zip" \
+            --output-dir editor-packages \
+            --download-base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          test -f editor-packages/agent-doc-jetbrains-classic.xml
+          test -f editor-packages/agent-doc-jetbrains-262.xml
+
       - name: Build VS Code extension vsix
         run: |
           set -euo pipefail
@@ -213,9 +236,9 @@ jobs:
           cp "editors/vscode/agent-doc-$version.vsix" editor-packages/
           ls -la editor-packages
 
-      # Prove every package exists before the release job can depend on them, so
+      # Prove all packages and both ranged feeds exist before the release job can depend on them, so
       # a silently-skipped build cannot publish a release missing its plugins.
-      - name: Verify all editor packages were produced
+      - name: Verify all editor packages and feeds were produced
         run: |
           set -euo pipefail
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
@@ -223,10 +246,16 @@ jobs:
           test "$classic_version" != "$modular_version"
           test -f "editor-packages/agent-doc-jetbrains-$classic_version.zip"
           test -f "editor-packages/agent-doc-jetbrains-262-$modular_version.zip"
+          test -f editor-packages/agent-doc-jetbrains-classic.xml
+          test -f editor-packages/agent-doc-jetbrains-262.xml
+          python3 scripts/jetbrains-custom-repository.py \
+            --output-dir editor-packages \
+            --verify-listings "$classic_version" "$modular_version"
           jetbrains=$(find editor-packages -name 'agent-doc-jetbrains-*.zip' | wc -l)
+          repositories=$(find editor-packages -name 'agent-doc-jetbrains-*.xml' | wc -l)
           vsix=$(find editor-packages -name '*.vsix' | wc -l)
-          if [ "$jetbrains" -ne 2 ] || [ "$vsix" -ne 1 ]; then
-            echo "::error::expected classic + modular JetBrains zips and 1 vsix, got $jetbrains and $vsix"
+          if [ "$jetbrains" -ne 2 ] || [ "$repositories" -ne 2 ] || [ "$vsix" -ne 1 ]; then
+            echo "::error::expected classic + modular JetBrains zips, 2 ranged feeds, and 1 vsix; got $jetbrains zips, $repositories feeds, and $vsix vsix"
             ls -la editor-packages
             exit 1
           fi

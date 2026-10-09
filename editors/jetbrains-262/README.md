@@ -58,12 +58,14 @@ module set is placed in both development sandboxes.
 
 ## Distribution and installation
 
-Publish the classic and 262 ZIPs as compatible updates of the same Marketplace
-plugin ID, with non-overlapping IDE ranges. Marketplace selects the compatible
-artifact and checks/installs the modular plugin on both backend and frontend
-where its module dependencies are satisfied. A custom plugin repository can
-provide the same two ranged updates, and each IDE process selects the update
-whose `since-build`/`until-build` contains its build.
+The classic and 262 ZIPs are compatible updates of the same plugin ID with
+non-overlapping IDE ranges. Every tag publishes one JetBrains custom-repository
+listing per range (`agent-doc-jetbrains-classic.xml`,
+`agent-doc-jetbrains-262.xml`), generated and validated by
+`scripts/jetbrains-custom-repository.py`; each IDE process selects the update
+whose `since-build`/`until-build` contains its build. Marketplace hosting of the
+same two ranged updates is the equivalent alternative but is not automated. See
+[`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md).
 
 Remote Dev plugin synchronization currently resolves the other side only for
 Marketplace-hosted plugins. A custom repository must be configured and the

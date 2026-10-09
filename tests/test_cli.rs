@@ -14345,14 +14345,18 @@ fn test_every_release_publishes_the_editor_packages() {
         .find("  plugins:")
         .expect("editor-package build job")..];
     for required in [
-        "./gradlew --no-daemon --console=plain buildPlugin",
+        "./gradlew --no-daemon --console=plain buildPlugin verifyClassicArtifact",
         "gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes",
+        "scripts/jetbrains-custom-repository.py",
+        "agent-doc-jetbrains-classic.xml",
+        "agent-doc-jetbrains-262.xml",
+        "--verify-listings \"$classic_version\" \"$modular_version\"",
         "npm run package --prefix editors/vscode",
-        "expected classic + modular JetBrains zips and 1 vsix",
+        "expected classic + modular JetBrains zips, 2 ranged feeds, and 1 vsix",
     ] {
         assert!(
             plugins.contains(required),
-            "the editor-package job must build and verify both packages: {required}"
+            "the editor-package job must build and verify both ranged updates and feeds: {required}"
         );
     }
     // `build/distributions/` accumulates every version it has built plus
@@ -14363,6 +14367,13 @@ fn test_every_release_publishes_the_editor_packages() {
             && plugins.contains("agent-doc-jetbrains-262-$modular_version.zip")
             && plugins.contains("agent-doc-$version.vsix"),
         "editor packages must be copied by declared version, never globbed"
+    );
+    assert!(
+        plugins.contains("test \"$classic_version\" != \"$modular_version\"")
+            && plugins.contains(
+                "--download-base-url \"https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}\""
+            ),
+        "same-ID updates must have distinct versions and tag-pinned download URLs"
     );
 
     // `SHA256SUMS` is generated over `artifacts/` and consumed by the PyPI

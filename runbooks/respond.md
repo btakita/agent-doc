@@ -144,20 +144,33 @@ rule. This runbook carries the rest.
   excluded from the loop; do not drain them inline. Lines tagged `[inline]` or
   `[operator-verify]` drain in queue order as usual. For each dispatch item:
   1. Run its `claim_command` (`agent-doc queue claim <FILE> --item <...> --owner subagent:<label>`).
-  2. Dispatch one background subagent per item. When it touches a repo, give it
+  2. Paste the entry's `authorization.subagent_prompt_preamble` VERBATIM at the
+     top of the subagent's Agent prompt (`#waypostauthorization`). The binary
+     resolved it from the document: the verbatim item, the backlog text a
+     `do [#id]` head names, and the queue/item preset bodies (for example
+     `preset="#spec-test-build-install-commit-push"` → "update spec + tests.
+     build + install for local testing. commit + push"), scoped to that one
+     item, plus the coordinator rules (own worktree, never `make install` or a
+     release, never touch the session document). Never paraphrase or extend it. When
+     `authorization.status` is `unresolved_preset`, the queue names a preset
+     frontmatter does not define; the preamble already tells the subagent that
+     no authorization beyond the item text was resolved, so do not add any.
+     `agent-doc queue brief <FILE> --item <...>` (or the entry's
+     `brief_command`; `--json` for the whole object) re-prints the same text.
+  3. Dispatch one background subagent per item. When it touches a repo, give it
      its own git worktree OUTSIDE the IDE-watched project (for example
      `~/worktrees/<repo>-<label>`), and never run two subagents in
      one checkout. Heads that `agent-doc plan` gives the same repo
      `write_scope` still get separate worktrees, but they are integrated one at a
      time. A head marked `parallelizable: false` runs alone.
-  3. While a subagent runs past a cycle, keep its claim alive with
+  4. While a subagent runs past a cycle, keep its claim alive with
      `agent-doc queue claim <FILE> --item <...> --owner subagent:<label> --refresh`
      (the heartbeat; the default TTL is 2h). Under the attribute, an expired claim
      is offered for dispatch again and never drained inline.
-  4. A subagent commits and pushes its branch (fast-forward only, never force).
+  5. A subagent commits and pushes its branch (fast-forward only, never force).
      It never runs `make install`, a release build, a version bump, a tag, or a
      release.
-  5. When subagents report back, integrate their work serially: rebase or
+  6. When subagents report back, integrate their work serially: rebase or
      cherry-pick each onto main, run the preset's verification, run ONE
      `make install` per integrated batch, and push. Then run
      `agent-doc queue release <FILE> --item <...>`. The next cycle answers and

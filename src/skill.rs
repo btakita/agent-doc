@@ -3545,6 +3545,10 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("ONE `make install` per batch"));
         assert!(SKILL_TEMPLATE.contains("agent-doc orchestrate <FILE> --mode parallel"));
         assert!(SKILL_TEMPLATE.contains("(`#queuesubagents`)"));
+        // `#waypostauthorization`: the coordinator pastes the binary-resolved
+        // operator authorization into each subagent prompt.
+        assert!(SKILL_TEMPLATE.contains("`authorization.subagent_prompt_preamble` verbatim"));
+        assert!(SKILL_TEMPLATE.contains("agent-doc queue brief <FILE> --item <...>"));
         let runbook = |name: &str| {
             BUNDLED_RUNBOOKS
                 .iter()
@@ -3563,6 +3567,9 @@ mod tests {
             "agent-doc queue release <FILE> --item <...>",
             "`agent-doc orchestrate <FILE> --mode parallel --task \"<item>\" ...`",
             "end the turn\n  quietly",
+            "`authorization.subagent_prompt_preamble` VERBATIM",
+            "`unresolved_preset`",
+            "agent-doc queue brief <FILE> --item <...>",
         ] {
             assert!(respond.contains(needle), "respond.md missing {needle:?}");
         }
@@ -3570,6 +3577,7 @@ mod tests {
         assert!(planning.contains("Under `<!-- agent:queue subagents -->`"));
         assert!(planning.contains("`agent-doc orchestrate <FILE> --mode parallel`"));
         assert!(planning.contains("(`#queuesubagents`)"));
+        assert!(planning.contains("`authorization.subagent_prompt_preamble` pasted verbatim"));
     }
 
     #[test]

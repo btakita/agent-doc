@@ -186,12 +186,16 @@ pub fn load_ledger(file: &Path) -> Result<QueueClaimLedger> {
 /// preflight computes `queue_subagent_dispatch` from. `None` when no editor
 /// owns the document (disk is the authority) or no current cut is available.
 fn editor_authority_queue_heads(file: &Path, source: &str) -> Option<Vec<String>> {
+    live_queue_head_texts(&editor_authority_text(file, source)?)
+}
+
+/// The editor/CRDT authority's current text of `file`. `None` when no editor
+/// owns the document (disk is the authority) or no current cut is available.
+pub(crate) fn editor_authority_text(file: &Path, source: &str) -> Option<String> {
     match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
         file, source,
     ) {
-        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => {
-            live_queue_head_texts(&text)
-        }
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => Some(text),
         _ => None,
     }
 }

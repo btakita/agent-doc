@@ -585,11 +585,22 @@ pub struct QueueSubagentDispatch {
     pub item: String,
     /// The claim to run BEFORE dispatching.
     pub claim_command: String,
+    /// The command that re-prints [`Self::authorization`]'s preamble later
+    /// (`agent-doc queue brief`), e.g. after the claim.
+    pub brief_command: String,
+    /// The operator's authorization for this item, resolved from the document
+    /// (`#waypostauthorization`): the verbatim item, the backlog text an id
+    /// head names, and the queue/item preset bodies. Its
+    /// `subagent_prompt_preamble` is pasted verbatim into the subagent prompt.
+    pub authorization: agent_doc_queue::subagent_brief::SubagentAuthorization,
 }
 
-/// Build the `queue_subagent_dispatch` contract entries for `file`.
+/// Build the `queue_subagent_dispatch` contract entries for `file`, resolving
+/// each item's authorization from `content` (the view dispatch was computed
+/// from).
 pub fn queue_subagent_dispatch_entries(
     file: &Path,
+    content: &str,
     items: &[String],
 ) -> Vec<QueueSubagentDispatch> {
     let document = file.display().to_string();
@@ -598,6 +609,11 @@ pub fn queue_subagent_dispatch_entries(
         .map(|item| QueueSubagentDispatch {
             item: item.clone(),
             claim_command: agent_doc_queue_io::subagent_dispatch::claim_command(&document, item),
+            brief_command: agent_doc_queue_io::subagent_dispatch::brief_command(&document, item),
+            authorization:
+                agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_content(
+                    file, content, item,
+                ),
         })
         .collect()
 }
@@ -606,9 +622,12 @@ pub fn queue_subagent_dispatch_entries(
 pub const QUEUE_SUBAGENT_DISPATCH_GUIDANCE: &str = "The operator added these queue items with \
 subagent intent. For EACH: run its `claim_command` (fill in `<label>`), then dispatch it NOW to \
 its own background subagent (its own git worktree outside the IDE-watched project if it touches \
-a repository). Do NOT execute them inline in queue order; they are excluded from \
-`selected_queue_prompts`. Run `agent-doc queue release <FILE> --item <item>` when a subagent \
-reports back, then close the item normally.";
+a repository). Paste the entry's `authorization.subagent_prompt_preamble` VERBATIM at the top of \
+the subagent prompt (`#waypostauthorization`): it quotes the operator's authorization (item, \
+backlog text, preset body) and the coordinator rules; never paraphrase it, and when its \
+`authorization.status` is `unresolved_preset` do not add authorization it lacks. Do NOT execute \
+them inline in queue order; they are excluded from `selected_queue_prompts`. Run `agent-doc \
+queue release <FILE> --item <item>` when a subagent reports back, then close the item normally.";
 
 /// One exchange prompt delegated by `<!-- agent:exchange subagents -->`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -8396,13 +8415,37 @@ mod tests {
             dispatch,
             vec!["#subagents do [#preflightdeadline]".to_string()]
         );
-        let entries = queue_subagent_dispatch_entries(&doc, &dispatch);
+        let entries = queue_subagent_dispatch_entries(&doc, &content, &dispatch);
         assert!(
             entries[0]
                 .claim_command
                 .contains("--item '#preflightdeadline'"),
             "{entries:?}"
         );
+        // `#waypostauthorization`: every entry carries the operator's
+        // authorization and the command that re-prints it.
+        assert!(
+            entries[0]
+                .brief_command
+                .starts_with("agent-doc queue brief ")
+                && entries[0]
+                    .brief_command
+                    .ends_with("--item '#preflightdeadline'"),
+            "{entries:?}"
+        );
+        let auth = &entries[0].authorization;
+        assert_eq!(auth.item, "#subagents do [#preflightdeadline]");
+        assert_eq!(
+            auth.status,
+            agent_doc_queue::subagent_brief::AuthorizationStatus::ItemTextOnly
+        );
+        assert!(
+            auth.subagent_prompt_preamble
+                .contains("> #subagents do [#preflightdeadline]"),
+            "{auth:?}"
+        );
+        let json = serde_json::to_value(&entries[0]).unwrap();
+        assert!(json["authorization"]["subagent_prompt_preamble"].is_string());
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(
             state.selected_queue_prompts,

@@ -152,6 +152,62 @@ pub fn claim_command(document: &str, item: &str) -> String {
     core::claim_command_for(document, item)
 }
 
+/// The `agent-doc queue brief` command that prints `item`'s subagent
+/// authorization preamble (`#waypostauthorization`).
+pub fn brief_command(document: &str, item: &str) -> String {
+    core::brief_command_for(document, item)
+}
+
+/// The operator authorization for dispatch item `item` of `content`
+/// (`#waypostauthorization`), as carried in `queue_subagent_dispatch`.
+pub fn subagent_authorization_for_content(
+    file: &Path,
+    content: &str,
+    item: &str,
+) -> agent_doc_queue::subagent_brief::SubagentAuthorization {
+    agent_doc_queue::subagent_brief::subagent_authorization(
+        &file.display().to_string(),
+        content,
+        item,
+    )
+}
+
+/// `agent-doc queue brief`: resolve `item` (`#id` / `do [#id]` / the line's
+/// text) to the live queue head it names, on disk or, while an editor save is
+/// deferred, in the editor authority's text (the view preflight dispatched
+/// from), and build that head's authorization.
+pub fn subagent_authorization_for_item(
+    file: &Path,
+    item: &str,
+) -> Result<agent_doc_queue::subagent_brief::SubagentAuthorization> {
+    if item.trim().is_empty() {
+        anyhow::bail!("queue brief needs a non-empty --item (`#id` or the queue line's text)");
+    }
+    let disk = std::fs::read_to_string(file)
+        .with_context(|| format!("read {} to brief queue item {item:?}", file.display()))?;
+    let disk_heads =
+        agent_doc_queue::queue_continuation::live_queue_head_texts(&disk).unwrap_or_default();
+    let (content, head) =
+        match agent_doc_queue::queue_claim::resolve_claim_target(item, &disk_heads) {
+            Ok(head) => (disk, head),
+            Err(miss) => {
+                let Some(authority) =
+                    crate::queue_claim::editor_authority_text(file, "queue_brief")
+                else {
+                    return Err(miss.into());
+                };
+                let heads = agent_doc_queue::queue_continuation::live_queue_head_texts(&authority)
+                    .unwrap_or_default();
+                let head = agent_doc_queue::queue_claim::resolve_claim_target(item, &heads)?;
+                (authority, head)
+            }
+        };
+    let head = agent_doc_document::queue_projection::strip_priority_markers(&head)
+        .trim()
+        .to_string();
+    Ok(subagent_authorization_for_content(file, &content, &head))
+}
+
 /// Whether `prompt` is one of the `dispatch` lines (marker-invariant identity).
 pub fn is_dispatch_item(dispatch: &[String], prompt: &str) -> bool {
     if dispatch.is_empty() {
@@ -449,5 +505,57 @@ mod tests {
         );
         let plan = queue_attr_subagent_plan(&file, &content).unwrap();
         assert!(plan.held.is_empty(), "a bare attr has no capacity hold");
+    }
+
+    /// `#waypostauthorization`: the dispatch entry's authorization and the
+    /// `queue brief` lookup agree, resolve the queue preset and the backlog
+    /// text of an id head, and fail closed on a missing preset.
+    #[test]
+    fn queue_brief_resolves_preset_and_backlog_text_and_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = |preset: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\nprompt_presets:\n  \"#ship\": \"commit + push\"\n---\n\n\
+                 <!-- agent:backlog -->\n- [ ] [#a] add the thing\n<!-- /agent:backlog -->\n\n\
+                 <!-- agent:queue subagents preset=\"{preset}\" go -->\n- do [#a]\n- tidy docs\n<!-- /agent:queue -->\n"
+            )
+        };
+        let resolved = content("#ship");
+        std::fs::write(&file, &resolved).unwrap();
+        let dispatch = pending_subagent_dispatch_for_content(&file, &resolved).unwrap();
+        assert_eq!(
+            dispatch,
+            vec!["do [#a]".to_string(), "tidy docs".to_string()]
+        );
+        let from_dispatch = subagent_authorization_for_content(&file, &resolved, &dispatch[0]);
+        let from_brief = subagent_authorization_for_item(&file, "#a").unwrap();
+        assert_eq!(from_dispatch, from_brief);
+        assert_eq!(
+            from_brief.status,
+            agent_doc_queue::subagent_brief::AuthorizationStatus::Resolved
+        );
+        assert_eq!(from_brief.tracked_items[0].text, "add the thing");
+        assert_eq!(from_brief.presets[0].body.as_deref(), Some("commit + push"));
+        let free = subagent_authorization_for_item(&file, "tidy docs").unwrap();
+        assert!(free.tracked_items.is_empty());
+        assert!(brief_command("task.md", "do [#a]").ends_with("--item '#a'"));
+
+        let missing = content("#nosuch");
+        std::fs::write(&file, &missing).unwrap();
+        let brief = subagent_authorization_for_item(&file, "#a").unwrap();
+        assert_eq!(
+            brief.status,
+            agent_doc_queue::subagent_brief::AuthorizationStatus::UnresolvedPreset
+        );
+        assert_eq!(brief.presets[0].body, None);
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains(agent_doc_queue::subagent_brief::UNRESOLVED_AUTHORIZATION_MARKER)
+        );
+        assert!(!brief.subagent_prompt_preamble.contains("commit + push"));
+        assert!(subagent_authorization_for_item(&file, "#zzz").is_err());
     }
 }

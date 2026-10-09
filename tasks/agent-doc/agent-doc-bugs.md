@@ -1,9 +1,9 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
+  claude: ba846c4c-2e01-4e12-9539-096faec207ee
   codex: 01a12175-b9c0-7db0-af02-218c5501efe7
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -49,6 +49,16 @@ The subagent review of the nine gated items and current JetBrains installer/rele
 3. Bind the existing 262 preview acceptance gate to immutable artifact bytes with a recorded checksum manifest and verification on both Remote Dev sides.
 
 The first item is a correctness blocker for CLI/local installs; the second is a production-readiness blocker unless manual two-sided ZIP installation is explicitly the supported policy; the third should precede the live `#gh218remoteproof` acceptance run. This cycle only reviewed and captured actionable work; it made no code changes.
+
+### Re: queue subagent dispatch (claude coordinator takeover) — opus-5.5 · 2026-10-09T15:48-04:00
+
+This session switched from Codex to Claude. The three new heads were already claimed by `subagent:*` owners from the prior Codex coordinator (claimed about 15:08). Their worktrees had been idle since 15:15, so I took over coordination and refreshed all three claims (TTL now about 17:46).
+
+- **#jetbrains262installselect** (`~/worktrees/agent-doc-jetbrains262installselect-20261009`): unfinished and uncommitted. The tree held about 92 modified files, mostly whole-workspace `cargo fmt` noise. A new subagent is reverting the noise, finishing per-build artifact selection (262 gets the modular ZIP, 242–261 get classic, unknown builds fail closed), and adding tests. It will then commit and push the branch.
+- **#jetbrains262distribution** (`~/worktrees/agent-doc-jetbrains262distribution-20261009`): unfinished, with the same fmt noise. The real work so far is in `release.yml`, the `Makefile`, `docs/reference/jetbrains-distribution.md` and `scripts/jetbrains-custom-repository.py`. A new subagent is finishing the ranged feed, a release assertion and tests. A live two-sided Remote Dev install still needs the operator.
+- **#previewartifactprovenance**: committed and pushed as `7a9f1b84b` on `codex/previewartifactprovenance-20261009`, not merged. A subagent is checking the manifest digest against the real prerelease asset and adding verifier tests if none exist.
+
+Once the subagents report, I'll merge the three branches into agent-doc main one after another, run one `make check`, one `make install`, and push. After that I'll release the claims and close the items. `#actionable-review` was already satisfied by the previous cycle's review, so this cycle didn't repeat it.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -58,14 +68,17 @@ The first item is a correctness blocker for CLI/local installs; the second is a 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - #actionable-review
+- 🚧 do [#jetbrains262installselect]
+- 🚧 do [#jetbrains262distribution]
+- 🚧 do [#previewartifactprovenance]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
-- [ ] [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
-- [ ] [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
+- [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
+- [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
+- [ ] 🚧 [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
 <!-- /agent:backlog -->
 
 ## Review

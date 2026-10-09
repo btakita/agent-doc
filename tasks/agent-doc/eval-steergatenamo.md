@@ -48,3 +48,34 @@ extra feature? The gate is the deterministic rules tier plus the
    downloaded and opt-in) only if rules+perceptron+turnsense beats rules+perceptron on
    held-out log-loss. If it comes close but falls short, fine-tune it on the logged
    rows as the backlog item proposed.
+
+## #steergatedecision — real-log rerun (2026-10-09)
+
+The rerun gate was met. `agent-doc steering dataset` reported 225 rows
+(premature=9, late=1, on_time=181, open=0), and `steergate-model-eval --dataset`
+found 224 labelled rows that carry a `text_tail` (floor 200). Held-out results:
+
+| | held-out log-loss | held-out AUC | AUC alone |
+|---|---|---|---|
+| rules only | — | — | 0.646 |
+| rules+perceptron (in-sample) | — | 0.943 | — |
+| rules+perceptron (held-out baseline) | **0.2092** | 0.9390 | — |
+| plus turnsense | 0.2105 | 0.9387 | 0.571 |
+| plus Namo v1 English | 0.2202 | 0.9337 | 0.658 |
+
+These match the earlier 223-row check: baseline 0.2110, turnsense 0.2123, Namo 0.2222.
+Neither model beats rules+perceptron on held-out log-loss. Namo makes it worse, and
+turnsense adds nothing. On the real log, both models score far below what the
+proxy corpus suggested (turnsense 0.571 alone, against 0.871 on the proxy).
+
+### Decision
+
+1. **Do not integrate turnsense** (and not Namo). The integration test above fails:
+   neither model beats the baseline on held-out log-loss.
+2. **Skip the fine-tune.** The data has only about 10 minority labels (9 premature,
+   1 late). That is too few to fine-tune a 135M-parameter model, or even to measure
+   whether a fine-tune helped. The baseline's ~0.94 AUC is mostly the perceptron
+   separating a large `on_time` majority.
+3. **Re-gate on minority-label count, not total rows.** Revisit only once the log
+   holds **at least 50 premature/late labels** combined. Total row count is the
+   wrong trigger, because rows grow almost entirely as `on_time`.

@@ -566,6 +566,14 @@ Verification passed: the focused regressions; `cargo test -p agent-doc-controlle
 > **Chat prompt (#chatprompt):** subagent: Fix agent-doc start tools.md not working
 
 I am dispatching this as `#starttools` to an isolated subagent. The worker will reproduce the current `agent-doc start` failure against the tools.md session path, identify the lifecycle or routing cause, add regression coverage, and verify the installed CLI end to end before integration.
+
+### Re: Recover tools.md after Sync Tmux Panes — gpt-6.1-sol · 2026-10-09 13:55 EDT
+
+> **Chat prompt (#chatprompt):** Actually, the issue was, I ran :kill-pane, then Sync Tmux Panes. tools.md session should have restarted with a new tmux pane.
+
+> **Chat prompt (#chatprompt):** Run Agent Doc did successfully	start the tools.md tmux pane + session
+
+That isolates `#starttools` to the pane-recovery path. Direct Run Agent Doc startup is the working control; the failure is that Sync Tmux Panes does not recreate and rebind the tools.md session after its pane is killed. The isolated subagent will reproduce that exact sequence and implement the recovery with regression coverage.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -586,7 +594,7 @@ I am dispatching this as `#starttools` to an isolated subagent. The worker will 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#starttools] Fix `agent-doc start` for the tools.md session path: reproduce the current failure, identify the lifecycle/routing cause, add regression coverage, and verify the installed CLI end to end.
+- [ ] [#starttools] Fix Sync Tmux Panes recovery for tools.md: reproduce by running :kill-pane on the bound pane, then Sync Tmux Panes; the session must restart in a newly created pane and rebind cleanly. Identify the lifecycle/routing cause, add regression coverage, and verify the installed CLI/editor path end to end.
 - [ ] [#jetbrainsdualrelease] Complete PR #222 dual JetBrains release plumbing before release: assign distinct classic/modular JetBrains update versions, clamp the classic plugin to until-build="261.*", and add corresponding release-version, check, and release tests proving both artifacts remain distinct, compatibility-ranged, and collision-free.
 <!-- /agent:backlog -->
 

@@ -4,8 +4,11 @@ This build is the Plugin Model v2 distribution for IntelliJ Platform 2026.2
 (branch/build `262`) and later. It keeps the existing plugin ID
 `com.github.btakita.agent-doc` and plugin version line, but has `since-build="262"`.
 The classic build in `../jetbrains` remains the distribution for 242 through
-261; release metadata for that artifact must set `until-build="261.*"` before
-both alternatives are uploaded.
+261 and its build patches `until-build="261.*"`. The two distributions need
+distinct Marketplace update versions at release time because Marketplace
+update versions are unique; an IDE then selects the newest update compatible
+with its build. This branch intentionally does not bump or publish either
+version.
 
 The ZIP is one plugin, not a companion plugin. Its `lib/modules` directory
 contains `agent.doc.shared.jar`, `agent.doc.frontend.jar`, and
@@ -59,7 +62,9 @@ host is proven, so controller policy freezes rather than authorizing a legacy
 main-window effect. A controller without the new atomic ingress rejects the
 command, so no detached surface reaches the legacy effect path.
 
-The controller-side atomic ingress/fold, per-surface terminal host, and
-main-window placeholder/read-only rendering are not implemented in this
-directory. Until those consumers are present, issue #218 is not complete and
-this artifact intentionally cannot attach a terminal to a detached window.
+The workspace controller implements the atomic ingress/fold, durable binding,
+and main-layout exclusion policy. A per-surface frontend terminal host,
+controller lifecycle-effect settlement, and main-owned placeholder rendering
+are still required before `terminal_capable` may become true. Until those
+effects and their receipts are proven, issue #218 is not complete and this
+artifact intentionally cannot attach a terminal to a detached window.

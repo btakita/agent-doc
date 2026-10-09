@@ -328,3 +328,4 @@
 - 2026-10-07 [#semanticcontinuationfalsepositive] [recommended] [P2][diagnostics] Stop semantic-completion warnings from treating a newer re-gated continuation under a different item ID as already resolved by its obsolete predecessor; add the #steergatemodelrerun/#steergatenamodata pair as a regression while preserving warnings for true duplicate work.
 - 2026-10-08 [#correspondingsubagentspr] Add a corresponding subagents + preset attributes for the `agent:exchange` tag.
 - 2026-10-08 [#possibletellclaude] Is it possible to tell Claude Code which document to focus on for context?
+- 2026-10-09 [#reviewiceboxnotes] Add agent:review + agent:icebox + agent:done + agent:notes to the Claim for Tmux Pane template.

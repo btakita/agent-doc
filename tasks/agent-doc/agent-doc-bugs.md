@@ -321,7 +321,6 @@ The separate report that a steering Run Agent Doc was never submitted remains qu
 
 The exchange is oversized, but the active queue was not stalled for compaction.> **Chat prompt (#chatprompt):** Fix the cause of the error
 
-> **Chat prompt (#chatprompt):** in a subagent
 
 ### Re: retained-delivery false error — gpt-5 · 2026-10-08T17:24-04:00
 
@@ -340,6 +339,76 @@ The other messages were classified rather than conflated:
 - The edited multi-queue prompt was forwarded verbatim to its existing `subagent:multi-queue-ids` owner without duplicate dispatch.
 
 The exchange remains oversized, but the active queue was not stalled for compaction.
+
+### Re: completed subagent batch and v0.35.480 reconciliation — gpt-5 · 2026-10-09T01:33-04:00
+
+> **Queue prompt:**
+>
+> do [#reviewiceboxnotes]
+
+
+The full claimed batch is complete and reconciled against its merged or released evidence. The tracked Claim for Tmux Pane work is complete in PR #206, merge `a51366d78049`. The orphaned `crossplatformmise-txpw` queue head was guardedly consumed only after the binary proved its backing row was already absent; PR #208 merged as `c4c434e88cd3`.
+
+> **Queue prompt:** 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/189
+
+Completed and closed through PR #201, merge `0f04178e2b`.
+
+> **Queue prompt:** 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/190
+
+Completed and closed through PR #202, merge `f2cf4919e1fc`.
+
+> **Queue prompt:** 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/196
+
+Completed and closed through PR #204, merge `c7348c41ee94`.
+
+> **Queue prompt:** 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/197
+
+Completed and closed through PR #205, merge `71633943b8fd`.
+
+> **Queue prompt:** 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/198
+
+Completed and closed through PR #217, merge `9a492e2077e9`.
+
+> **Queue prompt:** 🚧 Add support for multiple `agent:queue` tags. Should we have a `id=...` attribute to distinguish between queues? I want to have different queues to allow different attributes. Some queues may be a subagents queue and others may be ordered. This post-release queue is a perfect example use case. If you can start the subagent now and keep it out of the upcoming release, do that. I want to be able to have different queues and even allow a queue to depend on another queue. Perhaps a release B queue can organize release B after the release A queue is complete.
+
+Completed together with the multi-queue dependency and sequencing model in PR #220, merge `735c0d8fa2a4b28edc4a3e04bd54941a9af832a0`; its full CI passed.
+
+> **Queue prompt:** I started a new Codex session and removed the `resume.codex` frontmatter. Run Agent Doc error: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "reviewiceboxnotes" remains queued behind the closeout (blocker: closeout recovery retire_stale_capture [open_cycle]: proof: response heading "### Re: retained-delivery false error — gpt-5 · 2026-10-08T17:24-04:00" is already answered in live exchange) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_owner_absent ui_outcome_class=blocked next_action=retry_after_closeout_recovery
+
+Completed in PR #215, merge `c50447139b23`, and released in v0.35.480. The installed recovery reconciled the interrupted empty response and restored an admitted, committed boundary without a disk-authority fallback.
+
+> **Queue prompt:** Give queues an auto-dag like queue items. So a queue id=B must run after queue id=A ends, should we have an after=A in queue id=B? If we want to make a reoccurring sequence, perhaps queue id=A could be later filled again by queue id=B once complete? I wonder if you have suggestions on how we can have an interface algorithm on adding queue items defined in the md file.
+
+Completed in PR #220, merge `735c0d8fa2a4b28edc4a3e04bd54941a9af832a0`. Multiple named queues now use dependency-aware auto-DAG sequencing, including repeatable queue relationships, with full CI green.
+
+> **Queue prompt:** A steering Run Agent Doc on this file was not submitted to Codex. I manually submitted it.
+
+Completed on `main` by commit `f3ff1b4fae`.
+
+> **Queue prompt:** I authored a queue item which fenced backlog items that were written in tools.md. agent-doc created backlog items for the fenced backlog items. agent-doc should have used the AST to understand the content was fenced...not regexes.
+
+Completed in PR #207, merge `327671681dd6`. Queue/backlog extraction now respects the Markdown AST's literal ranges instead of treating fenced content as live tracked work.
+
+> **Queue prompt:** fix tools.md issue:
+>
+> ```
+> • Blocked by hook
+>   └ agent-doc Stop hook kept an active `agent:queue auto` moving for /home/brian/work/btakita/agent-loop/src/haiven-
+> dev/tasks/tools.md. The next queue prompt is "Update https://github.com/haiven-dev/haiven-tools/pull/2 description".
+> Continue THIS turn in-pane: answer that prompt in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md and
+> persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` (or `agent-doc
+> write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md`). Do NOT run `agent-doc /home/brian/
+> work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` from this pane — that re-invokes the owner pane and hits the
+> recursive-direct-invocation deadlock guard, and do not send the final answer yet.
+> ```
+
+Completed in PR #209, merge `bc48a8543ff8`. Codex Stop continuation now presents the required continuation as queue progress rather than an unexplained error while preserving the host protocol.
+
+> **Queue prompt:** release + publish
+
+Completed as agent-doc v0.35.480 at tag/`main` commit `a87ff750f618e`; checks, publication, and installation are green.
+
+Separately, PR #219's detached-surface substrate merged post-release as `566c66922609`. PR #218's full Remote Dev isolation remains open because it still depends on the 262 split-plugin migration; it is not represented here as a completed queue item.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -348,8 +417,8 @@ The exchange remains oversized, but the active queue was not stalled for compact
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#reviewiceboxnotes]
-- do [#crossplatformmise-txpw]
+- ~~do [#reviewiceboxnotes]~~
+- ~~do [#crossplatformmise-txpw]~~
 - ~~do [#correspondingsubagentspr]~~
 - ~~do [#possibletellclaude]~~
 - ~~Make the tmux pane title contain the document name in all states.~~
@@ -358,12 +427,13 @@ The exchange remains oversized, but the active queue was not stalled for compact
 - ~~release + publish~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/187~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/188~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/189
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/189~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/190
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/196
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/197
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/198
 - 🚧 Add support for multiple `agent:queue` tags. Should we have a `id=...` attribute to distinguish between queues? I want to have different queues to allow different attributes. Some queues may be a subagents queue and others may be ordered. This post-release queue is a perfect example use case. If you can start the subagent now and keep it out of the upcoming release, do that. I want to be able to have different queues and even allow a queue to depend on another queue. Perhaps a release B queue can organize release B after the release A queue is complete.
+- I started a new Codex session and removed the `resume.codex` frontmatter. Run Agent Doc error: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "reviewiceboxnotes" remains queued behind the closeout (blocker: closeout recovery retire_stale_capture [open_cycle]: proof: response heading "### Re: retained-delivery false error — gpt-5 · 2026-10-08T17:24-04:00" is already answered in live exchange) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_owner_absent ui_outcome_class=blocked next_action=retry_after_closeout_recovery
 - Give queues an auto-dag like queue items. So a queue id=B must run after queue id=A ends, should we have an after=A in queue id=B? If we want to make a reoccurring sequence, perhaps queue id=A could be later filled again by queue id=B once complete? I wonder if you have suggestions on how we can have an interface algorithm on adding queue items defined in the md file.
 - A steering Run Agent Doc on this file was not submitted to Codex. I manually submitted it.
 - I authored a queue item which fenced backlog items that were written in tools.md. agent-doc created backlog items for the fenced backlog items. agent-doc should have used the AST to understand the content was fenced...not regexes.
@@ -386,7 +456,6 @@ recursive-direct-invocation deadlock guard, and do not send the final answer yet
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#reviewiceboxnotes] Add agent:review + agent:icebox + agent:done + agent:notes to the Claim for Tmux Pane template.
 <!-- /agent:backlog -->
 
 ## Review

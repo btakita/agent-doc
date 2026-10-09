@@ -552,7 +552,7 @@ A durable `#gh218remoteproof` operator-review gate now records the exact two-sid
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#singleplugindistribution]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/223~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/218
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/224
 - release + publish
 <!-- /agent:queue -->

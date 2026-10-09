@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -38,6 +39,16 @@ Released agent-doc v0.35.475. v0.35.476 is not yet tagged or published; the acti
 Compacted content:
 - Archived 31 response topic(s): retained closeouts, queue integrity, GH #181–#184, and v0.35.478; GH #185 remote replacement column slot; release-critical drift and admission fixes; 28 more
 - Prior summary/context: prior compacted content: Archived 12 response topic(s): actionable review and release status; v0.35.476 release and r...
+
+### Re: actionable review — gpt-5 · 2026-10-09T15:06-04:00
+
+The subagent review of the nine gated items and current JetBrains installer/release surfaces found three concrete follow-ups, now added to the backlog and queue in priority order:
+
+1. Make stable and local installs select the classic or exact-262 plugin artifact from the target IDE build, with mixed-target and fail-closed coverage.
+2. Provide a tested two-sided production distribution channel for the 262 modular plugin before treating v0.35.480 as generally installable.
+3. Bind the existing 262 preview acceptance gate to immutable artifact bytes with a recorded checksum manifest and verification on both Remote Dev sides.
+
+The first item is a correctness blocker for CLI/local installs; the second is a production-readiness blocker unless manual two-sided ZIP installation is explicitly the supported policy; the third should precede the live `#gh218remoteproof` acceptance run. This cycle only reviewed and captured actionable work; it made no code changes.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -46,11 +57,15 @@ Compacted content:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- #actionable-review
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
+- [ ] [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
+- [ ] [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
 <!-- /agent:backlog -->
 
 ## Review

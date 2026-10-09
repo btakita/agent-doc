@@ -619,6 +619,18 @@ This machine cannot complete the exact acceptance gate as currently configured: 
 I created the safer preview instead of a stable release: [JetBrains 262 modular preview c39de1b](https://github.com/btakita/agent-doc/releases/tag/jetbrains-262-preview-c39de1b). It is a GitHub prerelease targeted at exact PR #222 head `c39de1b045b8b5238f8e5b7fa6870062798d4114` and contains only `agent-doc-jetbrains-262-0.2.511.zip` (SHA-256 `44474f85ab7f3d8ababb0f99feba244986e24c1b663f6d699895aa9e0819b0d9`). Its non-`v*` tag does not trigger the stable CLI/PyPI/Homebrew release workflow.
 
 Use that identical ZIP on both the Coder Remote Dev backend and Client/Gateway, run the recorded acceptance matrix, and file any failures against the preview tag and exact commit. Stable release remains gated; publishing stable first would make rollback and compatibility signaling unnecessarily ambiguous. The review gates now point to the preview and current PR head.
+
+### Re: Publish the Coder-accessible 262 preview — gpt-6.1-sol · 2026-10-09 14:51 EDT
+
+> **Chat prompt (#chatprompt):** This needs to be published so the Coder instance can access it.
+
+It is published as a public, non-draft GitHub prerelease: [JetBrains 262 modular preview c39de1b](https://github.com/btakita/agent-doc/releases/tag/jetbrains-262-preview-c39de1b).
+
+The Coder instance can download the artifact directly from:
+
+`https://github.com/btakita/agent-doc/releases/download/jetbrains-262-preview-c39de1b/agent-doc-jetbrains-262-0.2.511.zip`
+
+I verified that URL without GitHub API authentication; it returns HTTP 200. GitHub reports the uploaded 2,569,299-byte asset as available with SHA-256 `44474f85ab7f3d8ababb0f99feba244986e24c1b663f6d699895aa9e0819b0d9`. The release is explicitly marked prerelease, not draft, and targets exact commit `c39de1b045b8b5238f8e5b7fa6870062798d4114`.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

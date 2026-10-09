@@ -262,6 +262,25 @@ agent-doc session-check tasks/contracts.md
 `--from-current` rebuilds the recovery projection from the editor's current text, so your edits stay. `--preserve-session` keeps the pane/session binding. The captured note should then finish through retained-write recovery; don't resubmit it. If `session-check` still shows `response_captured` after that, send me its output rather than forcing disk or recycling.
 
 One clue for the fix: ops.log still records `harness_turn_live=true` / `protected_live_turn` for that cycle while %161 sits idle. A stale live-turn flag may be what kept automatic recovery from running.
+
+### Re: correction — do NOT reset contracts.md yet — opus-5.5 · 2026-10-09T18:16-04:00
+
+**My previous answer was wrong. Don't run `agent-doc reset --from-current --preserve-session` on contracts.md.** The controller's (CRDT) copy is corrupted, and `--from-current` would rebuild from that copy and ask the editor to match it. That would overwrite your correct editor text and drop the captured cancellation note.
+
+I checked the subagent's finding:
+- The **editor/disk copy is correct** (39,579 bytes). It has the cancellation response with `(HEAD)`, and your line `- #rebase-conflicts: the entire PR stack for …/pull/123` is in `agent:queue`.
+- The **controller copy is corrupted** (38,908 bytes, from `agent-doc read`). It has no response, and the same queue line is spliced into the middle of backlog item `[#contractsopenprsreview]`, about 769 characters too far.
+- **How it happened:** at 22:05:49Z the socket patch applied the response in JetBrains. The controller logged `settled_buffer_dropped_response` and refused those editor ops as `all_ops_non_operator`, so the response never reached the CRDT. Your later queue keystrokes, at editor offsets that include the response, were then applied to the CRDT, which lacks it. That misplacement is why queue-only drift was "not proven" and the cycle went to `needs_operator`.
+
+I backed up the correct disk text to `contracts-disk-backup-*.md` in the scratchpad. Until the fix lands:
+- leave contracts.md open and don't reset, recycle, reload-lib or force-disk it;
+- don't close the tab, since closing could let the corrupted authority win.
+
+Per the editor-truth rule, recovery takes the editor text as the base. The `contractsroute` subagent is fixing both sides of this:
+- capture of the dropped response;
+- accepting ops whose offsets assume text the CRDT doesn't have.
+
+After the fix it will report a safe recovery path for this document. I'll run that, keeping the editor text, rather than handing you a command.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

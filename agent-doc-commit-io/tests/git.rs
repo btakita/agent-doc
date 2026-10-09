@@ -5578,6 +5578,156 @@ Duplicate replay should stay live.
         );
     }
 
+    /// GH #144 follow-up: after the editor route is unregistered and its last
+    /// replica disappears, session-check names `agent-doc commit` as the
+    /// recovery. The response may exist only in controller authority because
+    /// the native save was rejected; commit must materialize that exact durable
+    /// capture instead of checking the older snapshot and prescribing itself
+    /// forever.
+    #[test]
+    fn commit_recovers_exact_capture_from_unregistered_zero_replica_authority() {
+        use agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD as N;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: zero-live-recovery\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please answer the stranded prompt\n",
+            "<!-- agent:boundary:head-boundary -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        commit_file(root, "session.md", committed, "add stranded session");
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: Please answer the stranded prompt — gpt-5\n\n",
+            "Recovered only from controller authority.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(committed),
+            Some(committed),
+            &capture.response_sha256,
+            Some(&capture.cycle_id),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let authority = concat!(
+            "---\nagent_doc_session: zero-live-recovery\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please answer the stranded prompt\n",
+            "### Re: Please answer the stranded prompt — gpt-5\n\n",
+            "Recovered only from controller authority.\n",
+            "<!-- agent:boundary:authority-boundary -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let editor_pid = std::process::id();
+        let editor_identity = "test-zero-live-editor-recovery";
+        let canonical = doc.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .restore_liveness(&[
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                    document_hash: document_hash.clone(),
+                    pid: editor_pid.into(),
+                    tag: editor_identity.to_string(),
+                },
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+                    agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                        document_hash,
+                        pid: editor_pid.into(),
+                        path: canonical.to_string_lossy().into_owned(),
+                        editor_id: editor_identity.to_string(),
+                        editor_kind: "test".to_string(),
+                        editor_version: "test".to_string(),
+                        capabilities: vec![
+                            agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY.to_string(),
+                            agent_doc_document_realtime::editor_contract::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY.to_string(),
+                        ],
+                        timestamp_ms,
+                    },
+                ),
+            ]);
+        let (client_id, _) =
+            agent_doc_crdt_relay_io::register_replica_for_file(&doc, editor_identity)
+                .unwrap()
+                .expect("the fixture editor replica must attach");
+        let write = agent_doc_crdt_relay_io::apply_cp_write_for_file(
+            &doc,
+            committed,
+            authority,
+            "test_zero_live_capture_authority",
+        )
+        .unwrap()
+        .expect("the captured response must enter controller authority");
+        assert_eq!(write.live_editors, 1);
+        agent_doc_crdt_relay_io::with_hub(&doc, |hub| {
+            assert!(hub.disconnect(client_id));
+            assert_eq!(hub.live_count(), 0);
+        })
+        .unwrap();
+        assert_eq!(fs::read_to_string(&doc).unwrap(), committed);
+
+        for attempt in 0..N {
+            agent_doc_write_converge_io::record_ipc_socket_ack_failure(
+                root,
+                &doc,
+                Some(&format!("zero-live-{attempt}")),
+                "native_editor_save_request",
+                agent_doc_ipc_protocol::SocketDeliveryFailure::Rejected,
+            )
+            .unwrap();
+        }
+        let ownership = agent_doc_document_realtime_io::observed_retained_write_ownership(&doc);
+        assert!(ownership.editor_route_unowned, "{ownership:?}");
+        assert!(ownership.verdict().commit_is_the_named_recovery());
+
+        assert!(
+            commit(&doc).expect("the prescribed commit recovery must terminate"),
+            "the authoritative response cut should produce one real commit"
+        );
+        let head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed session document");
+        assert!(head.contains("Recovered only from controller authority."));
+        assert_eq!(
+            head.matches("Recovered only from controller authority.")
+                .count(),
+            1,
+            "recovery must preserve exact-once response materialization"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_adopted_unowned_editor_capture_authority"),
+            "the narrow recovery must audit its proof basis:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_blocked_missing_captured_response"),
+            "the prescribed recovery must not return its old self-loop refusal:\n{log}"
+        );
+    }
+
     #[test]
     fn commit_blocks_committed_historical_patchback_that_mutates_status() {
         use std::fs;

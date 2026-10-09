@@ -2316,6 +2316,76 @@ where
         }
     }
 
+    // `#zerolivecapturecommitloop`: session-check deliberately names
+    // `agent-doc commit` when the rejecting editor route has been removed and
+    // authority reports zero live replicas. At that point no editor can move
+    // the durable capture forward. Generic snapshot adoption remains blocked
+    // in this state because it cannot prove response identity, but this site
+    // has both the exact capture and controller-authoritative current text.
+    // Adopt only that response-bearing cut, and only when doing so cannot
+    // consume a newer prompt or unproved typed-component edit.
+    if !authoritative_compaction_commit_enabled()
+        && let Some(response_body) = active_response_body.as_deref()
+    {
+        let ownership = agent_doc_git_io::capture_materialization_guard::CaptureMaterializationGuardEffects::retained_write_ownership(
+            ports.capture_materialization_guard,
+            file,
+        );
+        let has_fresh_unanswered_prompt = snapshot_content.as_deref().is_none_or(|snapshot| {
+            exchange_has_unanswered_disk_only_prompt_target_for_commit(
+                snapshot,
+                &file_content,
+                active_response_target.as_deref(),
+            )
+        });
+        let has_unproved_typed_component_edit =
+            snapshot_content.as_deref().is_none_or(|snapshot| {
+                has_blocking_non_exchange_component_drift(snapshot, &file_content, None)
+                    && !unlanded_own_tracked_work(file, &file_content)
+            });
+        let decision =
+            agent_doc_git_io::capture_materialization_guard::plan_unowned_editor_capture_recovery(
+                ownership,
+                response_body,
+                snapshot_content.as_deref(),
+                &file_content,
+                has_fresh_unanswered_prompt || has_unproved_typed_component_edit,
+            );
+        if decision
+            == agent_doc_git_io::capture_materialization_guard::UnownedEditorCaptureRecovery::AdoptAuthoritativeCurrent
+        {
+            let capture_id = cycle_state_for_commit
+                .as_ref()
+                .and_then(|state| state.capture_id.as_deref())
+                .unwrap_or("unknown");
+            let response_sha256 = cycle_state_for_commit
+                .as_ref()
+                .and_then(|state| state.response_sha256.as_deref())
+                .unwrap_or("unknown");
+            eprintln!(
+                "[commit] recovering exact captured response from unowned editor authority for {}",
+                file.display()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "commit_adopted_unowned_editor_capture_authority file={} capture_id={} response_sha256={} basis=unregistered_zero_live_replica_authority old_snap_len={} new_snap_len={}",
+                    file.display(),
+                    capture_id,
+                    response_sha256,
+                    snapshot_content.as_ref().map(|content| content.len()).unwrap_or(0),
+                    file_content.len(),
+                ),
+            );
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                file,
+                &file_content,
+                agent_doc_ops_log_io::log_op,
+            )?;
+            snapshot_content = Some(file_content.clone());
+        }
+    }
+
     agent_doc_git_io::pre_stage_repair::dedupe_snapshot_and_worktree_before_commit(
         ports.pre_stage_repair,
         file,

@@ -14,6 +14,47 @@ use std::path::Path;
 pub const MISSING_CAPTURED_RESPONSE_REFUSAL_TOKEN: &str =
     "refusal=captured_response_not_materialized";
 
+/// The one safe recovery for a captured response stranded after its editor
+/// delivery route has disappeared.
+///
+/// This decision is intentionally narrower than generic snapshot adoption:
+/// the exact captured response must already be present in controller
+/// authority, it must still be absent from the commit surface, and the caller
+/// must prove that adopting authority would not consume a newer edit. The
+/// commit coordinator remains responsible for that last document-level proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnownedEditorCaptureRecovery {
+    AdoptAuthoritativeCurrent,
+    Refuse,
+}
+
+pub fn plan_unowned_editor_capture_recovery(
+    ownership: agent_doc_turn::write_ownership::RetainedWriteOwnership,
+    response_body: &str,
+    staged_content: Option<&str>,
+    authoritative_current: &str,
+    has_unowned_document_edit: bool,
+) -> UnownedEditorCaptureRecovery {
+    let response_in_commit_surface = staged_content.is_some_and(|content| {
+        agent_doc_turn::response_replay::response_materialized_in_content(response_body, content)
+    });
+    let response_in_authority = agent_doc_turn::response_replay::response_materialized_in_content(
+        response_body,
+        authoritative_current,
+    );
+
+    if ownership.editor_route_unowned
+        && ownership.verdict().commit_is_the_named_recovery()
+        && !response_in_commit_surface
+        && response_in_authority
+        && !has_unowned_document_edit
+    {
+        UnownedEditorCaptureRecovery::AdoptAuthoritativeCurrent
+    } else {
+        UnownedEditorCaptureRecovery::Refuse
+    }
+}
+
 /// Whether a rendered error is the missing-captured-response commit refusal.
 pub fn is_missing_captured_response_refusal(message: &str) -> bool {
     message.contains(MISSING_CAPTURED_RESPONSE_REFUSAL_TOKEN)
@@ -144,9 +185,21 @@ pub fn ensure_active_capture_materialized_for_commit(
     // commit. Preserve that evidence through the shared verdict so this guard
     // cannot bounce between `commit`, `write --commit`, and a new cycle while
     // the binary-owned worker is already waiting on editor convergence.
-    let ownership = effects
+    let mut ownership = effects
         .retained_write_ownership(file)
         .with_retained_capture(true);
+    if ownership.editor_route_unowned {
+        // `commit` was the route-removal recovery only while an exact
+        // response-bearing authority cut could still be materialized. We are
+        // already inside that command and proved that its commit surface does
+        // not contain the capture, so prescribing `commit` again would create
+        // a terminal instruction loop. Preserve the durable capture and hand
+        // it to its same-intent resume transition instead; do not ask the
+        // caller to replay the response or force disk.
+        ownership.editor_route_unowned = false;
+        ownership.retained_projection = false;
+        ownership.capture_resume_unowned = true;
+    }
     let remedy = agent_doc_turn::write_ownership::retained_write_remedy(
         ownership,
         &file.display().to_string(),
@@ -235,7 +288,10 @@ mod tests {
 
         let err = blocked_error(captured);
         assert!(err.contains("this exact retained intent"), "{err}");
-        assert!(err.contains("controller-owned terminal state edge"), "{err}");
+        assert!(
+            err.contains("controller-owned terminal state edge"),
+            "{err}"
+        );
         assert!(
             !err.contains("Run `agent-doc session-check plan.md`"),
             "a document-wide status check can observe a successor cycle: {err}"
@@ -278,5 +334,67 @@ mod tests {
         assert!(!is_missing_captured_response_refusal(
             "recovery=await_editor_replica_no_disk_write"
         ));
+    }
+
+    #[test]
+    fn unregistered_zero_replica_route_adopts_exact_response_bearing_authority() {
+        let response = "### Re: prompt — gpt-5\n\nRecovered answer.\n";
+        let staged = "<!-- agent:exchange -->\n❯ prompt\n<!-- /agent:exchange -->\n";
+        let authority = "<!-- agent:exchange -->\n❯ prompt\n### Re: prompt — gpt-5\n\nRecovered answer.\n<!-- /agent:exchange -->\n";
+        let ownership = RetainedWriteOwnership::new(true, true)
+            .with_retained_projection(true)
+            .with_delivery_rejected(true)
+            .with_editor_route_unowned(true);
+
+        assert_eq!(
+            plan_unowned_editor_capture_recovery(
+                ownership,
+                response,
+                Some(staged),
+                authority,
+                false,
+            ),
+            UnownedEditorCaptureRecovery::AdoptAuthoritativeCurrent,
+        );
+    }
+
+    #[test]
+    fn unregistered_route_never_adopts_missing_response_or_fresh_prompt() {
+        let response = "### Re: prompt — gpt-5\n\nRecovered answer.\n";
+        let staged = "<!-- agent:exchange -->\n❯ prompt\n<!-- /agent:exchange -->\n";
+        let authority = format!(
+            "<!-- agent:exchange -->\n❯ prompt\n{response}❯ later prompt\n<!-- /agent:exchange -->\n"
+        );
+        let ownership = RetainedWriteOwnership::new(true, true)
+            .with_retained_projection(true)
+            .with_delivery_rejected(true)
+            .with_editor_route_unowned(true);
+
+        assert_eq!(
+            plan_unowned_editor_capture_recovery(
+                ownership,
+                response,
+                Some(staged),
+                &authority,
+                true,
+            ),
+            UnownedEditorCaptureRecovery::Refuse,
+        );
+        assert_eq!(
+            plan_unowned_editor_capture_recovery(ownership, response, Some(staged), staged, false,),
+            UnownedEditorCaptureRecovery::Refuse,
+        );
+    }
+
+    #[test]
+    fn missing_capture_after_route_removal_names_same_capture_resume_not_commit() {
+        let ownership = RetainedWriteOwnership::new(true, true)
+            .with_retained_projection(true)
+            .with_delivery_rejected(true)
+            .with_editor_route_unowned(true);
+        let err = blocked_error(ownership);
+
+        assert!(err.contains("repair --resume-capture plan.md"), "{err}");
+        assert!(!err.contains("Run `agent-doc commit plan.md`"), "{err}");
     }
 }

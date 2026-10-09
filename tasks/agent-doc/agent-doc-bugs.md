@@ -331,6 +331,27 @@ The controller's last two layouts (generation 20 at 22:15:22Z, right after the I
 I've given this to a subagent (`fix/stale-third-main-pane`, own worktree). It will find the real cause, fix it with regression tests and a spec update, and push its branch. If a pane mid-turn can't be moved, the stash must wait until the turn ends rather than be dropped. It only reads diagnostics and won't touch your live panes. Its report will say whether the fixed binary tidies the current window after install, or what one-time step is safe.
 
 Also noted: api.md's `session-check` reports an authority/disk divergence. It looks like the same kind of fault as contracts.md, and I'll include it in that fix once the reports are in.
+
+### Re: correcting the third pane — opus-5.5 · 2026-10-09T18:22-04:00
+
+> **Chat prompt (#chatprompt):** can I correct the 3
+
+> **Chat prompt (#chatprompt):** pane state now?
+
+**Pane state now:** unchanged. `0:0` still has `%149` (agent-doc-bugs.md, 120×53), `%165` (api.md, 59×53) and `%161` (contracts.md, 59×53). The controller's last published layout (generation 21, 22:17:47Z) still wants only agent-doc-bugs.md and contracts.md. I saved a snapshot of this tmux state for the subagent, so fixing the window now won't lose evidence.
+
+**Yes, you can fix it.** The smallest safe step is to move api.md's pane out of the main window without stopping it:
+```sh
+tmux break-pane -d -s %165
+```
+That moves `%165` into its own window in session `0` and keeps its Claude process and pane id. agent-doc's routing for api.md is keyed by that pane id, so Run Agent Doc on api.md still finds it. tmux then gives the freed width back to `%149`/`%161`.
+
+Things to avoid:
+- Don't `kill-pane` it. api.md has session state and a reported authority/disk divergence that's still under diagnosis.
+- `%165`'s composer shows `❯ regenerate haiven-contracts #128`. If you typed that and haven't sent it, it stays in the pane after the move, but check it before you do anything else in that pane.
+- Don't rely on `agent-doc sync` to fix this. The skip is the bug, so it may leave the pane where it is again.
+
+The `fix/stale-third-main-pane` subagent is still working on why the published two-column layout never removed `%165`.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

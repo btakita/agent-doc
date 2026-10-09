@@ -9,6 +9,7 @@ use crate::process::{is_same_project_controller_pid, process_is_alive};
 use agent_doc_controller::dispatch::{
     ControllerDispatchProofScope, ControllerDispatchReceipt, ControllerDispatchResultStatus,
 };
+use agent_doc_controller::pane_layout::MainLayoutEligibility;
 use agent_doc_controller::paths::socket_path;
 use agent_doc_controller::status::{
     self, ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
@@ -943,9 +944,7 @@ pub(crate) fn pane_layout_route_readiness(
         | PaneLayoutProjection::RetryPending(_) => PaneLayoutRouteReadiness::Wait,
         PaneLayoutProjection::Absent
         | PaneLayoutProjection::Refused(_)
-        | PaneLayoutProjection::OperatorOwned(_) => {
-            PaneLayoutRouteReadiness::Refused
-        }
+        | PaneLayoutProjection::OperatorOwned(_) => PaneLayoutRouteReadiness::Refused,
     }
 }
 
@@ -1352,6 +1351,34 @@ struct ControllerPaneLayoutGraph {
     width_memory: Mutex<PaneLayoutWidthMemory>,
     waiters: Condvar,
     wait_lock: Mutex<()>,
+}
+
+/// Process-scoped adapter boundary for the durable document-to-view binding
+/// projection. The durable state owner publishes one complete snapshot; all
+/// main-layout effects read the same retained Source before crossing into tmux.
+///
+/// The default exists only for rolling compatibility. The editor-view state
+/// integration must hydrate this Source before publishing its first main
+/// layout after controller restart.
+struct ControllerMainLayoutEligibilityGraph {
+    ctx: ThreadSafeContext,
+    value: Source<MainLayoutEligibility>,
+}
+
+impl ControllerMainLayoutEligibilityGraph {
+    fn new_in(scope: &agent_doc_state_scope::ProcessScope, initial: MainLayoutEligibility) -> Self {
+        let ctx = scope.ctx().clone();
+        let value = ctx.source(initial);
+        Self { ctx, value }
+    }
+
+    fn get(&self) -> MainLayoutEligibility {
+        self.ctx.get(&self.value)
+    }
+
+    fn set(&self, value: MainLayoutEligibility) {
+        self.ctx.set(&self.value, value);
+    }
 }
 
 /// Publication semantics for the retained desired-layout Source.
@@ -2542,6 +2569,7 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         &self,
         project_root: &Path,
         invocation: ControllerTmuxLayoutSyncInvocation,
+        main_layout_eligibility: &MainLayoutEligibility,
     ) -> Result<ControllerTmuxLayoutSyncReceipt>;
 
     /// Surface a proven live-owner pane that is parked in the tmux stash.
@@ -2717,6 +2745,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         &self,
         _project_root: &Path,
         invocation: ControllerTmuxLayoutSyncInvocation,
+        _main_layout_eligibility: &MainLayoutEligibility,
     ) -> Result<ControllerTmuxLayoutSyncReceipt> {
         let routes_created_panes = invocation.routes_created_panes();
         Ok(ControllerTmuxLayoutSyncReceipt {
@@ -2903,6 +2932,7 @@ pub(crate) struct ControllerRuntime {
     captured_finalize_wake_publication: Mutex<()>,
     captured_finalize_wakes: Mutex<BTreeMap<String, rpc::CapturedFinalizeWakeProjection>>,
     pane_layout_graph: ControllerPaneLayoutGraph,
+    main_layout_eligibility_graph: ControllerMainLayoutEligibilityGraph,
     /// Editor facts, history-dependent intent, and tmux consequences share the
     /// controller ProcessScope. Editors retain only transport/projection caches.
     editor_surface_graph: rpc::ControllerEditorSurfaceGraph,
@@ -4290,11 +4320,8 @@ impl RetainedWriteSettleSink {
         };
         // Persistence needs a wall-clock timestamp, but a backwards clock
         // adjustment must not extend this controller's bounded wait.
-        let delay = Duration::from_millis(
-            deadline_ms
-                .saturating_sub(now_ms)
-                .min(deadline_window_ms),
-        );
+        let delay =
+            Duration::from_millis(deadline_ms.saturating_sub(now_ms).min(deadline_window_ms));
         let runtime = self.runtime.clone();
         let project_root = self.project_root.clone();
         let error_document_hash = command.document_hash.clone();
@@ -7176,6 +7203,8 @@ impl ControllerRuntime {
         );
         let pane_layout_graph =
             ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
+        let main_layout_eligibility_graph =
+            ControllerMainLayoutEligibilityGraph::new_in(&scope, MainLayoutEligibility::default());
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         let editor_surface_graph =
             rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {
@@ -7202,6 +7231,7 @@ impl ControllerRuntime {
             captured_finalize_wake_publication: Mutex::new(()),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
+            main_layout_eligibility_graph,
             editor_surface_graph,
             document_path_transition_graph,
             async_editor_commands,
@@ -7243,6 +7273,17 @@ impl ControllerRuntime {
             }),
         );
         Ok(runtime)
+    }
+
+    pub(crate) fn main_layout_eligibility(&self) -> MainLayoutEligibility {
+        self.main_layout_eligibility_graph.get()
+    }
+
+    /// Adapter ingress for the durable editor-view binding projection.
+    /// Publication is whole-snapshot so release cannot expose a partially
+    /// updated exclusion set to a concurrent layout effect.
+    pub(crate) fn set_main_layout_eligibility(&self, value: MainLayoutEligibility) {
+        self.main_layout_eligibility_graph.set(value);
     }
 
     /// `#ctlrecycle` R2 — mark this controller for a two-phase handoff.
@@ -9353,9 +9394,8 @@ pub fn fresh_foreign_supervisor_lease_holds_document(
     // `#netadv5` R6: heartbeat age is a timer, not evidence; an idle live
     // supervisor that still names this document keeps holding it.
     let supervisor_owns_document = lease.supervisor_pid.is_some_and(|pid| {
-        crate::process::open_supervisor_document(pid).is_some_and(|document| {
-            same_document_path(&document, Path::new(document_id))
-        })
+        crate::process::open_supervisor_document(pid)
+            .is_some_and(|document| same_document_path(&document, Path::new(document_id)))
     });
     status::supervisor_lease_holds_against_takeover(
         lease.last_heartbeat,
@@ -9535,9 +9575,11 @@ where
                 agent_doc_supervisor_io::selfkill::selfkill_grace(),
                 dry_run,
             ) {
-                Ok(agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::RefusedSelfAncestor(
-                    pid,
-                )) => {
+                Ok(
+                    agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::RefusedSelfAncestor(
+                        pid,
+                    ),
+                ) => {
                     agent_doc_ops_log_io::log_op(
                         Path::new(&record.document_id),
                         &format!(
@@ -12528,10 +12570,7 @@ mod tests {
         }
     }
 
-    fn seed_reliable_sync_editor_open(
-        doc: &std::path::Path,
-        tag: &str,
-    ) -> ReliableSyncOpenFixture {
+    fn seed_reliable_sync_editor_open(doc: &std::path::Path, tag: &str) -> ReliableSyncOpenFixture {
         use std::sync::atomic::{AtomicU64, Ordering};
 
         // The reliable-sync plane is process-global, while Rust tests execute
@@ -12588,7 +12627,10 @@ mod tests {
         let summary =
             checkpoint_route_owned_documents_for_project(dir.path(), "test_recycle").unwrap();
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert_eq!(summary.failed, 0, "checkpoint summary={summary:?}\n{ops_log}");
+        assert_eq!(
+            summary.failed, 0,
+            "checkpoint summary={summary:?}\n{ops_log}"
+        );
         assert_eq!(summary.detached, 0);
         assert_eq!(summary.skipped, 1);
         assert!(ops_log.contains("controller_crdt_checkpoint"));
@@ -16393,6 +16435,8 @@ agent:queue\n\
         );
         let pane_layout_graph =
             ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
+        let main_layout_eligibility_graph =
+            ControllerMainLayoutEligibilityGraph::new_in(&scope, MainLayoutEligibility::default());
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         let editor_surface_graph =
             rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {
@@ -16424,6 +16468,7 @@ agent:queue\n\
             captured_finalize_wake_publication: Mutex::new(()),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
+            main_layout_eligibility_graph,
             editor_surface_graph,
             document_path_transition_graph,
             async_editor_commands,
@@ -19407,7 +19452,10 @@ revised operator request
                 )
             })
             .count();
-        assert_eq!(timed_out, 1, "the deadline receipt is identity-fenced and idempotent");
+        assert_eq!(
+            timed_out, 1,
+            "the deadline receipt is identity-fenced and idempotent"
+        );
     }
 
     #[test]

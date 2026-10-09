@@ -183,6 +183,7 @@
 //! - batch_summary_not_printed_for_single_pane: 1 auto-started pane → batch summary
 //!   condition (len > 1) is false.
 
+use agent_doc_controller::pane_layout::MainLayoutEligibility;
 use anyhow::{Context, Result};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -707,6 +708,7 @@ pub fn run_in_project_root(
         false,
         true,
         &[],
+        &MainLayoutEligibility::default(),
         &agent_doc_tmux_io::configured_tmux(),
     )
 }
@@ -726,6 +728,7 @@ pub fn run_provision_only_in_project_root(
         false,
         false,
         &[],
+        &MainLayoutEligibility::default(),
         &agent_doc_tmux_io::configured_tmux(),
     )
 }
@@ -746,6 +749,7 @@ pub fn run_provision_only_exact_visible_with_actor_bindings_in_project_root(
         true,
         false,
         actor_bindings,
+        &MainLayoutEligibility::default(),
         &agent_doc_tmux_io::configured_tmux(),
     )
 }
@@ -776,6 +780,7 @@ fn run_with_options_at_root(
         false,
         false,
         &[],
+        &MainLayoutEligibility::default(),
         &agent_doc_tmux_io::configured_tmux(),
     )
 }
@@ -935,6 +940,7 @@ pub fn run_layout_only_exact_visible_with_actor_bindings_and_tmux_in_project_roo
         true,
         false,
         actor_bindings,
+        &MainLayoutEligibility::default(),
         tmux,
     )
 }
@@ -952,6 +958,40 @@ pub fn run_layout_only_exact_visible_with_actor_bindings_in_project_root(
         window,
         focus,
         actor_bindings,
+        &agent_doc_tmux_io::configured_tmux(),
+    )
+}
+
+/// Controller effect entry point carrying the retained main-layout exclusion
+/// projection into the sync process. This is deliberately one typed boundary:
+/// standalone/older callers retain all-eligible behavior, while the controller
+/// cannot accidentally drop the projection when changing sync mode.
+#[allow(clippy::too_many_arguments)]
+pub fn run_controller_layout_with_main_layout_eligibility_in_project_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    no_autostart: bool,
+    exact_visible_projection: bool,
+    route_created_panes: bool,
+    actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+    main_layout_eligibility: &MainLayoutEligibility,
+) -> Result<()> {
+    run_with_options_internal_at_root(
+        project_root,
+        col_args,
+        window,
+        focus,
+        if no_autostart {
+            AutoStartMode::SafePassive
+        } else {
+            AutoStartMode::Full
+        },
+        exact_visible_projection,
+        route_created_panes,
+        actor_bindings,
+        main_layout_eligibility,
         &agent_doc_tmux_io::configured_tmux(),
     )
 }
@@ -2758,6 +2798,7 @@ fn run_with_options_internal(
         exact_visible_projection,
         route_created_panes,
         &[],
+        &MainLayoutEligibility::default(),
         tmux,
     )
 }
@@ -2768,6 +2809,51 @@ fn canonical_sync_project_root(project_root: &Path) -> PathBuf {
     agent_doc_fs::find_project_root_canonical(project_root)
         .or_else(|| project_root.canonicalize().ok())
         .unwrap_or_else(|| project_root.to_path_buf())
+}
+
+fn canonical_main_layout_document_id(project_root: &Path, document: &str) -> String {
+    let path = Path::new(document.trim());
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        project_root.join(path)
+    };
+    path.canonicalize()
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Apply the controller's durable document↔view exclusion before pane
+/// resolution, auto-start, column memory publication, or tmux reconciliation.
+fn filter_main_layout_columns(
+    project_root: &Path,
+    eligibility: &MainLayoutEligibility,
+    columns: Vec<String>,
+) -> (Vec<String>, Vec<String>) {
+    let mut dropped = Vec::new();
+    let columns = columns
+        .into_iter()
+        .filter_map(|column| {
+            let kept = column
+                .split(',')
+                .map(str::trim)
+                .filter(|document| !document.is_empty())
+                .filter_map(|document| {
+                    if eligibility
+                        .is_eligible(&canonical_main_layout_document_id(project_root, document))
+                    {
+                        Some(document.to_string())
+                    } else {
+                        dropped.push(document.to_string());
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            (!kept.is_empty()).then(|| kept.join(","))
+        })
+        .collect();
+    (columns, dropped)
 }
 
 /// A document belongs to this sync's project root only when its nearest
@@ -2883,6 +2969,7 @@ fn run_with_options_internal_at_root(
     exact_visible_projection: bool,
     route_created_panes: bool,
     reactive_actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+    main_layout_eligibility: &MainLayoutEligibility,
     tmux: &Tmux,
 ) -> Result<()> {
     let window = agent_doc_sync::normalize_scope_arg(window);
@@ -3074,6 +3161,20 @@ fn run_with_options_internal_at_root(
         .into_iter()
         .filter(|col| !col.is_empty())
         .collect();
+    let (eligible_columns, view_bound_documents) =
+        filter_main_layout_columns(&sync_project_root, main_layout_eligibility, col_args);
+    col_args = eligible_columns;
+    for document in &view_bound_documents {
+        sync_log(&format!(
+            "main_layout_document_excluded file={document} reason=bound_to_editor_view"
+        ));
+    }
+    let focus = focus.filter(|document| {
+        main_layout_eligibility.is_eligible(&canonical_main_layout_document_id(
+            &sync_project_root,
+            document,
+        ))
+    });
     let skip_autostart_diagnostics =
         exact_visible_safe_passive(auto_start_mode, exact_visible_projection);
     let skip_sync_status_updates = skip_sync_status_updates_for_mode(auto_start_mode);
@@ -7222,6 +7323,7 @@ mod tests {
             false,
             false,
             &[],
+            &MainLayoutEligibility::default(),
             &iso,
         )
         .unwrap();
@@ -7321,6 +7423,7 @@ mod tests {
             true,
             false,
             &[root_binding],
+            &MainLayoutEligibility::default(),
             &iso,
         )
         .unwrap();
@@ -7417,6 +7520,7 @@ mod tests {
             true,
             false,
             &[root_binding],
+            &MainLayoutEligibility::default(),
             &iso,
         )
         .unwrap();
@@ -9508,9 +9612,11 @@ mod tests {
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
         assert_eq!(components[1].patch_mode(), Some("append"));
-        assert!(components[2..]
-            .iter()
-            .all(|component| component.attrs.is_empty()));
+        assert!(
+            components[2..]
+                .iter()
+                .all(|component| component.attrs.is_empty())
+        );
     }
     /// Non-.md files should never be scaffolded even if empty.
     #[test]
@@ -11899,5 +12005,23 @@ mod tests {
             target_window,
             "requested hidden pane should move into the visible agent-doc window"
         );
+    }
+
+    #[test]
+    fn main_layout_filter_removes_bound_documents_before_sync_resolution() {
+        let root = PathBuf::from("/project");
+        let eligibility =
+            MainLayoutEligibility::excluding(["/project/tasks/detached.md".to_string()]);
+        let (columns, dropped) = filter_main_layout_columns(
+            &root,
+            &eligibility,
+            vec![
+                "tasks/main.md,tasks/detached.md".to_string(),
+                "tasks/detached.md".to_string(),
+            ],
+        );
+
+        assert_eq!(columns, vec!["tasks/main.md"]);
+        assert_eq!(dropped, vec!["tasks/detached.md", "tasks/detached.md"]);
     }
 }

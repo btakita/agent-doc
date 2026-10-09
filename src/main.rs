@@ -347,49 +347,21 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         &self,
         project_root: &Path,
         invocation: agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncInvocation,
+        main_layout_eligibility: &agent_doc_controller::pane_layout::MainLayoutEligibility,
     ) -> anyhow::Result<agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncReceipt>
     {
         let routes_created_panes = invocation.routes_created_panes();
-        let sync_result = if invocation.no_autostart {
-            if invocation.exact_visible {
-                agent_doc_sync_io::sync::run_layout_only_exact_visible_with_actor_bindings_in_project_root(
-                    project_root,
-                    &invocation.columns,
-                    invocation.window.as_deref(),
-                    invocation.focus.as_deref(),
-                    &invocation.actor_bindings,
-                )
-            } else {
-                agent_doc_sync_io::sync::run_layout_only_in_project_root(
-                    project_root,
-                    &invocation.columns,
-                    invocation.window.as_deref(),
-                    invocation.focus.as_deref(),
-                )
-            }
-        } else if routes_created_panes {
-            agent_doc_sync_io::sync::run_in_project_root(
-                project_root,
-                &invocation.columns,
-                invocation.window.as_deref(),
-                invocation.focus.as_deref(),
-            )
-        } else if invocation.exact_visible {
-            agent_doc_sync_io::sync::run_provision_only_exact_visible_with_actor_bindings_in_project_root(
-                project_root,
-                &invocation.columns,
-                invocation.window.as_deref(),
-                invocation.focus.as_deref(),
-                &invocation.actor_bindings,
-            )
-        } else {
-            agent_doc_sync_io::sync::run_provision_only_in_project_root(
-                project_root,
-                &invocation.columns,
-                invocation.window.as_deref(),
-                invocation.focus.as_deref(),
-            )
-        };
+        let sync_result = agent_doc_sync_io::sync::run_controller_layout_with_main_layout_eligibility_in_project_root(
+            project_root,
+            &invocation.columns,
+            invocation.window.as_deref(),
+            invocation.focus.as_deref(),
+            invocation.no_autostart,
+            invocation.exact_visible,
+            routes_created_panes,
+            &invocation.actor_bindings,
+            main_layout_eligibility,
+        );
         sync_result?;
         let sync_report = agent_doc_sync_io::sync::last_sync_run_report();
         Ok(
@@ -4940,12 +4912,7 @@ fn try_main() -> anyhow::Result<()> {
             file,
             title,
             position,
-        } => match init::prepare_editor_session(
-            &file,
-            title.as_deref(),
-            None,
-            &config,
-        )? {
+        } => match init::prepare_editor_session(&file, title.as_deref(), None, &config)? {
             init::SessionPreparation::Existing => agent_doc_claim_io::run(
                 &file,
                 ClaimOptions {
@@ -4956,10 +4923,8 @@ fn try_main() -> anyhow::Result<()> {
             ),
             init::SessionPreparation::Initialized => {
                 let resume = Some(agent_doc_harness::ResumeRequest::Latest);
-                let reap_policy =
-                    agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto;
-                let purpose =
-                    agent_doc_supervisor::route_owned::RouteOwnedStartPurpose::Dispatch;
+                let reap_policy = agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto;
+                let purpose = agent_doc_supervisor::route_owned::RouteOwnedStartPurpose::Dispatch;
                 if agent_doc_start_io::bootstrap_start_inside_tmux_if_needed_with_purpose(
                     &file,
                     false,

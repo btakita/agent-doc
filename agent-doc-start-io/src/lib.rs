@@ -1540,7 +1540,19 @@ fn prepare_start_runtime_with_admission(
         agent_doc_project_config_io::project_tmux_session().as_deref(),
     )
     .map_err(|refused| anyhow::anyhow!("[start] {refused}"))?;
+    // Starting inside an isolated editor view must not pull that pane back into
+    // the project's main session. The controller hydrates this projection from
+    // durable binding state before accepting layout effects.
+    agent_doc_controller_io::project_controller::ensure_controller_running(
+        &project_root,
+        LaunchMode::Lazy,
+    )?;
+    let main_layout_eligibility =
+        agent_doc_controller_io::project_controller::main_layout_eligibility(&project_root)?;
+    let main_layout_relocation_allowed =
+        main_layout_eligibility.is_eligible(canonical.to_string_lossy().as_ref());
     if let Some(target) = start_target
+        && main_layout_relocation_allowed
         && !relocate_if_wrong_session(&tmux, &pane_id, &target.session)
         && target.authority == agent_doc_sync::LayoutSessionAuthority::ScopedProject
         && pane_session

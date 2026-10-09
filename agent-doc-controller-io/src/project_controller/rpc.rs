@@ -10,6 +10,7 @@ use agent_doc_controller::dispatch::{
     pause_reason_is_stale_supervisor_churn_stop, queue_pause_predates_boot,
     spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
 };
+use agent_doc_controller::pane_layout::MainLayoutEligibility;
 use agent_doc_controller::status;
 #[cfg(not(any(test, feature = "test-support")))]
 use agent_doc_controller::supervisor_replacement::{
@@ -108,6 +109,37 @@ struct ControllerEditorSurfaceRoot {
     state: EditorSurfaceState,
     consequence: lazily::Effect,
     outcome: Arc<Mutex<Option<Result<String, String>>>>,
+}
+
+#[cfg(test)]
+mod main_layout_eligibility_tests {
+    use super::*;
+
+    #[test]
+    fn eligibility_filter_canonicalizes_aliases_and_removes_empty_columns() {
+        let root = tempfile::tempdir().unwrap();
+        let tasks = root.path().join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let detached = tasks.join("detached.md");
+        std::fs::write(&detached, "# detached\n").unwrap();
+        let eligibility = MainLayoutEligibility::excluding([detached
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()]);
+
+        assert_eq!(
+            main_layout_eligible_columns(
+                root.path(),
+                &eligibility,
+                &[
+                    "tasks/main.md,tasks/detached.md".to_string(),
+                    detached.to_string_lossy().to_string(),
+                ],
+            ),
+            vec!["tasks/main.md"]
+        );
+    }
 }
 
 /// Project-Controller-owned editor observation graph.
@@ -2464,6 +2496,55 @@ pub fn tmux_focus_state(project_root: &Path) -> Result<ControllerTmuxFocusState>
             sequence: None,
         },
     )
+}
+
+/// Read the controller's process-scoped projection of durable editor-view
+/// bindings. Callers that can mutate tmux must carry this snapshot into their
+/// effect rather than independently re-reading policy state mid-operation.
+pub fn main_layout_eligibility(project_root: &Path) -> Result<MainLayoutEligibility> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let _ = project_root;
+        Ok(MainLayoutEligibility::default())
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    request_controller(
+        project_root,
+        empty_controller_request("main_layout_eligibility"),
+    )
+}
+
+/// Publish a complete projection after its durable state transaction commits.
+/// The state/policy owner is responsible for restart hydration and lifecycle
+/// semantics; the controller owns only this derived exclusion Source.
+pub fn publish_main_layout_eligibility(
+    project_root: &Path,
+    eligibility: &MainLayoutEligibility,
+) -> Result<MainLayoutEligibility> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let _ = project_root;
+        Ok(eligibility.clone())
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        let mut request = empty_controller_request("publish_main_layout_eligibility");
+        request.state = Some(serde_json::to_string(eligibility)?);
+        request_controller(project_root, request)
+    }
+}
+
+fn handle_publish_main_layout_eligibility(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<MainLayoutEligibility> {
+    let state = request_string(&request.state, "state")?;
+    let eligibility: MainLayoutEligibility =
+        serde_json::from_str(&state).context("parse main layout eligibility projection")?;
+    runtime.set_main_layout_eligibility(eligibility.clone());
+    Ok(eligibility)
 }
 
 /// Content observations the caller resolved, sent to the controller so the
@@ -9976,6 +10057,20 @@ fn handle_editor_route_rpc_with_tmux(
         .unwrap_or_else(|_| canonical.clone())
         .to_string_lossy()
         .to_string();
+    let main_layout_eligibility = runtime.main_layout_eligibility();
+    anyhow::ensure!(
+        document_is_main_layout_eligible(
+            &bootstrap.project_root,
+            &main_layout_eligibility,
+            &routed_document,
+        ),
+        "editor route is bound to an isolated editor view and cannot mutate the main tmux layout"
+    );
+    layout_invocation.columns = main_layout_eligible_columns(
+        &bootstrap.project_root,
+        &main_layout_eligibility,
+        &layout_invocation.columns,
+    );
     if let Some(retarget) = retarget_editor_route_focus(&mut layout_invocation, &routed_document) {
         agent_doc_ops_log_io::log_op(
             &canonical,
@@ -10004,6 +10099,18 @@ fn handle_editor_route_rpc_with_tmux(
             )
         })
         .unwrap_or_default();
+    let retained_columns = main_layout_eligible_columns(
+        &bootstrap.project_root,
+        &main_layout_eligibility,
+        &retained_columns,
+    );
+    let retained_focus = retained_focus.filter(|document| {
+        document_is_main_layout_eligible(
+            &bootstrap.project_root,
+            &main_layout_eligibility,
+            document,
+        )
+    });
     // GH #136 follow-up (b): a controller that just took over (handoff or
     // restart) has no retained layout, and a replayed `ensure` route used to
     // "seed" from its own single column — an exact one-column publication
@@ -10030,6 +10137,11 @@ fn handle_editor_route_rpc_with_tmux(
             )
         },
         &canonical,
+    );
+    let retained_columns = main_layout_eligible_columns(
+        &bootstrap.project_root,
+        &main_layout_eligibility,
+        &retained_columns,
     );
     let (merged_columns, layout_merge, dropped_columns) = merge_editor_route_columns_within(
         layout_mode,
@@ -11999,17 +12111,10 @@ fn observe_live_layout_documents_with_tmux(
         documents.push(document);
     }
     if documents.is_empty() {
-        return LiveLayoutDocumentsObservation::unavailable(
-            "no_project_documents",
-            session_source,
-        );
+        return LiveLayoutDocumentsObservation::unavailable("no_project_documents", session_source);
     }
     LiveLayoutDocumentsObservation::positive(
-        respell_live_documents_like_route(
-            &bootstrap.project_root,
-            &route.columns,
-            documents,
-        ),
+        respell_live_documents_like_route(&bootstrap.project_root, &route.columns, documents),
         session_source,
     )
 }
@@ -13851,8 +13956,7 @@ pub(crate) enum ServingProbe {
 pub(crate) fn classify_serving_probe(result: &Result<String>) -> ServingProbe {
     match result {
         Ok(response) => {
-            if serde_json::from_str::<ControllerStatus>(response)
-                .is_ok_and(|status| status.active)
+            if serde_json::from_str::<ControllerStatus>(response).is_ok_and(|status| status.active)
             {
                 ServingProbe::Serving
             } else {
@@ -13862,7 +13966,10 @@ pub(crate) fn classify_serving_probe(result: &Result<String>) -> ServingProbe {
         Err(error) => {
             let not_bound = error.chain().any(|cause| {
                 cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
-                    matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+                    matches!(
+                        io.kind(),
+                        ErrorKind::ConnectionRefused | ErrorKind::NotFound
+                    )
                 })
             });
             if not_bound {
@@ -13899,7 +14006,9 @@ fn ensure_serving_controller_with(
             };
             agent_doc_ops_log_io::log_op(
                 project_root,
-                &format!("controller_self_heal_deferred reason=status_unresponsive detail={detail}"),
+                &format!(
+                    "controller_self_heal_deferred reason=status_unresponsive detail={detail}"
+                ),
             );
             anyhow::bail!("{CONTROLLER_BUSY_RETRY_LATER}: {detail}")
         }
@@ -17089,6 +17198,10 @@ pub(crate) fn handle_request_locked(
             &bootstrap_snapshot,
             Some(runtime.as_ref()),
         )),
+        "main_layout_eligibility" => controller_envelope(Ok(runtime.main_layout_eligibility())),
+        "publish_main_layout_eligibility" => controller_envelope(
+            handle_publish_main_layout_eligibility(runtime.as_ref(), request),
+        ),
         "tmux_layout_sync_state" => controller_envelope(handle_tmux_layout_sync_state(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -18336,7 +18449,10 @@ pub(crate) fn editor_live_on_controller_connect_failure(
 ) -> bool {
     let nothing_bound = error.chain().any(|cause| {
         cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
-            matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+            matches!(
+                io.kind(),
+                ErrorKind::ConnectionRefused | ErrorKind::NotFound
+            )
         })
     });
     !nothing_bound || controller_process_present()
@@ -20262,12 +20378,14 @@ fn closeout_advance_outcome(
 
     let mut terminal_events = Vec::new();
     if checkpoint {
-        terminal_events.push(agent_doc_cycle_state_io::build_turn_intent_checkpoint_event(
-            &document_hash,
-            checkpoint_sequence,
-            &state,
-        )
-        .map_err(|e| format!("{e:#}"))?);
+        terminal_events.push(
+            agent_doc_cycle_state_io::build_turn_intent_checkpoint_event(
+                &document_hash,
+                checkpoint_sequence,
+                &state,
+            )
+            .map_err(|e| format!("{e:#}"))?,
+        );
     }
     for fact in &facts {
         if let Some(phase_event) =
@@ -20292,18 +20410,20 @@ fn closeout_advance_outcome(
             .map_err(|e| format!("serialize fenced closeout event: {e}"))?;
         let inserts = encoded
             .iter()
-            .map(|(event, json)| agent_doc_sqlite::state_store::StateEventInsert {
-                event_id: &event.event_id,
-                document_hash: event.document_hash(),
-                domain: event.domain().label(),
-                fact_type: event.fact.label(),
-                payload_json: json,
-            })
+            .map(
+                |(event, json)| agent_doc_sqlite::state_store::StateEventInsert {
+                    event_id: &event.event_id,
+                    document_hash: event.document_hash(),
+                    domain: event.domain().label(),
+                    fact_type: event.fact.label(),
+                    payload_json: json,
+                },
+            )
             .collect::<Vec<_>>();
         let mut conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root)
             .map_err(|e| format!("{e:#}"))?;
-        let active_after_secs = timestamp_secs()
-            .saturating_sub(agent_doc_turn::turn_status::TURN_ACTIVE_TTL_SECS);
+        let active_after_secs =
+            timestamp_secs().saturating_sub(agent_doc_turn::turn_status::TURN_ACTIVE_TTL_SECS);
         match agent_doc_sqlite::state_store::insert_state_events_if_terminal_turn_fence_in_db(
             &mut conn,
             &agent_doc_sqlite::state_store::TerminalTurnFenceCheck {
@@ -20323,7 +20443,9 @@ fn closeout_advance_outcome(
             agent_doc_sqlite::state_store::FencedStateEventInsert::Applied(inserted) => {
                 for (event, inserted) in terminal_events.iter().zip(inserted) {
                     if inserted {
-                        runtime.apply_state_event(event).map_err(|e| format!("{e:#}"))?;
+                        runtime
+                            .apply_state_event(event)
+                            .map_err(|e| format!("{e:#}"))?;
                     }
                 }
             }
@@ -22472,22 +22594,26 @@ fn pane_layout_observation_session(
     registered_supervisor_file_panes: &[(String, String)],
     mut pane_session: impl FnMut(&str) -> Option<String>,
 ) -> Option<(String, PaneLayoutObservationSessionSource)> {
-    let configured_session = configured_session
-        .map(|session| (session, PaneLayoutObservationSessionSource::ConfiguredSession));
+    let configured_session = configured_session.map(|session| {
+        (
+            session,
+            PaneLayoutObservationSessionSource::ConfiguredSession,
+        )
+    });
     if multi_session {
         pane_layout_session_from_panes(
             effect_file_panes,
             PaneLayoutObservationSessionSource::LayoutEffectPane,
             &mut pane_session,
         )
-            .or(configured_session)
-            .or_else(|| {
-                pane_layout_session_from_panes(
-                    registered_supervisor_file_panes,
-                    PaneLayoutObservationSessionSource::RegisteredSupervisorPane,
-                    &mut pane_session,
-                )
-            })
+        .or(configured_session)
+        .or_else(|| {
+            pane_layout_session_from_panes(
+                registered_supervisor_file_panes,
+                PaneLayoutObservationSessionSource::RegisteredSupervisorPane,
+                &mut pane_session,
+            )
+        })
     } else {
         configured_session
             .or_else(|| {
@@ -22577,6 +22703,38 @@ fn canonical_layout_document_id(project_root: &Path, file: &str) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .to_string()
+}
+
+/// Remove editor-view-bound documents before a value reaches any main-layout
+/// merge, width calculation, focus decision, or tmux effect. Empty columns are
+/// removed; document order within surviving columns is preserved.
+fn main_layout_eligible_columns(
+    project_root: &Path,
+    eligibility: &MainLayoutEligibility,
+    columns: &[String],
+) -> Vec<String> {
+    columns
+        .iter()
+        .filter_map(|column| {
+            let kept = column
+                .split(',')
+                .map(str::trim)
+                .filter(|document| !document.is_empty())
+                .filter(|document| {
+                    eligibility.is_eligible(&canonical_layout_document_id(project_root, document))
+                })
+                .collect::<Vec<_>>();
+            (!kept.is_empty()).then(|| kept.join(","))
+        })
+        .collect()
+}
+
+fn document_is_main_layout_eligible(
+    project_root: &Path,
+    eligibility: &MainLayoutEligibility,
+    document: &str,
+) -> bool {
+    eligibility.is_eligible(&canonical_layout_document_id(project_root, document))
 }
 
 /// GH #136: `columns` without the documents the layout effect acknowledged it
@@ -22888,12 +23046,17 @@ fn focus_escalation_columns(
     document: &str,
     columns: &[SurfaceColumn],
 ) -> std::result::Result<FocusEscalationColumns, &'static str> {
+    let eligibility = runtime.main_layout_eligibility();
+    if !document_is_main_layout_eligible(&bootstrap.project_root, &eligibility, document) {
+        return Err("document_bound_to_editor_view");
+    }
     if !columns.is_empty() {
+        let supplied = columns
+            .iter()
+            .map(|column| column.files.join(","))
+            .collect::<Vec<_>>();
         return Ok(FocusEscalationColumns {
-            columns: columns
-                .iter()
-                .map(|column| column.files.join(","))
-                .collect(),
+            columns: main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &supplied),
             source: "editor_surface",
             replaced: None,
         });
@@ -22902,6 +23065,10 @@ fn focus_escalation_columns(
         .pane_layout_desired()
         .map(|desired| (desired.invocation.columns, desired.invocation.focus))
         .unwrap_or_default();
+    retained = main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &retained);
+    retained_focus = retained_focus.filter(|focused| {
+        document_is_main_layout_eligible(&bootstrap.project_root, &eligibility, focused)
+    });
     let mut basis_source = "retained_layout";
     if retained.is_empty() {
         // GH #166: a promoted controller's layout graph starts empty even
@@ -22931,7 +23098,10 @@ fn focus_escalation_columns(
                 live.len(),
             ),
         );
-        retained = live;
+        retained = main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &live);
+        if retained.is_empty() {
+            return Err("no_main_layout_eligible_columns");
+        }
         retained_focus = None;
         basis_source = "live_tmux_layout";
     }
@@ -25451,7 +25621,11 @@ fn pane_layout_effect_worker(
         );
         let _effect_cancel_guard = StructuralEffectCancelGuard;
         let effect_result = match runtime_effects() {
-            Ok(effects) => effects.sync_tmux_layout(&bootstrap.project_root, guarded_invocation),
+            Ok(effects) => effects.sync_tmux_layout(
+                &bootstrap.project_root,
+                guarded_invocation,
+                &runtime.main_layout_eligibility(),
+            ),
             Err(error) => Err(error),
         };
         let effect_file_panes = effect_result
@@ -25881,6 +26055,21 @@ pub(crate) fn handle_tmux_focus_state(
         .as_ref()
         .map(|record| record.document_id.clone())
         .or(process_owner_document);
+    if let (Some(runtime), Some(document)) = (runtime, document_id.as_deref())
+        && !document_is_main_layout_eligible(
+            &bootstrap.project_root,
+            &runtime.main_layout_eligibility(),
+            document,
+        )
+    {
+        return Ok(inactive_tmux_focus_state(
+            "document_bound_to_editor_view",
+            Some(session_name),
+            window_id,
+            window_name,
+            pane_id,
+        ));
+    }
     Ok(ControllerTmuxFocusState {
         active: document_id.is_some(),
         reason: if record.is_some() {
@@ -27058,6 +27247,12 @@ fn publish_pane_layout_desired_invocation(
             bootstrap.handoff_state
         );
     }
+    let eligibility = runtime.main_layout_eligibility();
+    invocation.columns =
+        main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &invocation.columns);
+    invocation.focus = invocation.focus.filter(|document| {
+        document_is_main_layout_eligible(&bootstrap.project_root, &eligibility, document)
+    });
     let desired_columns = layout_sync_state_expected_documents(
         &bootstrap.project_root,
         &ControllerTmuxLayoutSyncStateInvocation {
@@ -27150,10 +27345,15 @@ fn bound_pane_layout_publication_width(
     use agent_doc_controller::pane_layout::{
         LayoutWidthDecision, LayoutWidthExtent, bound_layout_width,
     };
+    let eligibility = runtime.main_layout_eligibility();
+    let columns = main_layout_eligible_columns(project_root, &eligibility, &columns);
     let memory = runtime.pane_layout_width_memory();
     let retained_generation = retained.map(|desired| desired.generation);
     let retained_columns = retained
-        .map(|desired| desired.invocation.columns.len())
+        .map(|desired| {
+            main_layout_eligible_columns(project_root, &eligibility, &desired.invocation.columns)
+                .len()
+        })
         .unwrap_or_default();
     // Only the pass that realised the RETAINED generation speaks for it.
     let observed_panes = memory
@@ -27171,7 +27371,9 @@ fn bound_pane_layout_publication_width(
         asserted_columns: claim.asserted_column_count(),
     };
     let authority = claim.width_authority();
-    let focus_id = focus.map(|focus| canonical_layout_document_id(project_root, focus));
+    let focus_id = focus
+        .filter(|focus| document_is_main_layout_eligible(project_root, &eligibility, focus))
+        .map(|focus| canonical_layout_document_id(project_root, focus));
     let holds_focus = |column: &str| {
         focus_id.as_ref().is_some_and(|focus_id| {
             column
@@ -27490,7 +27692,11 @@ fn await_sync_tmux_layout_projection(
         let _ = (&desired, await_timeout);
         let mut invocation = invocation;
         invocation.actor_bindings = runtime.pane_layout_actor_bindings();
-        return runtime_effects()?.sync_tmux_layout(&bootstrap.project_root, invocation);
+        return runtime_effects()?.sync_tmux_layout(
+            &bootstrap.project_root,
+            invocation,
+            &runtime.main_layout_eligibility(),
+        );
     }
     #[cfg(not(any(test, feature = "test-support")))]
     {
@@ -27616,7 +27822,11 @@ fn reobserve_editor_route_layout(
         let _ = timeout;
         let mut invocation = published.invocation.clone();
         invocation.actor_bindings = runtime.pane_layout_actor_bindings();
-        runtime_effects()?.sync_tmux_layout(&bootstrap.project_root, invocation)
+        runtime_effects()?.sync_tmux_layout(
+            &bootstrap.project_root,
+            invocation,
+            &runtime.main_layout_eligibility(),
+        )
     }
     #[cfg(not(any(test, feature = "test-support")))]
     {
@@ -28570,7 +28780,10 @@ pub(crate) fn handle_queue_control(
             &operation_kind,
             document_id.as_deref(),
             "stale_sequence",
-            &format!("{diagnostic_payload} stamp={:?} newest={newest}", request.sequence),
+            &format!(
+                "{diagnostic_payload} stamp={:?} newest={newest}",
+                request.sequence
+            ),
             request.generation,
             record.as_ref().map(|record| record.generation),
         );
@@ -30194,20 +30407,31 @@ mod tests {
         .unwrap_err();
         assert!(format!("{err:#}").contains(CONTROLLER_BUSY_RETRY_LATER));
         assert_eq!(reaped.get(), 0, "a late receipt must not authorize a kill");
-        assert_eq!(launched.get(), 0, "a late receipt must not launch a duplicate");
+        assert_eq!(
+            launched.get(),
+            0,
+            "a late receipt must not launch a duplicate"
+        );
 
         // A reset mid-recycle is equally inconclusive.
-        let reset = || -> Result<String> {
-            Err(std::io::Error::from(ErrorKind::ConnectionReset).into())
-        };
+        let reset =
+            || -> Result<String> { Err(std::io::Error::from(ErrorKind::ConnectionReset).into()) };
         assert!(
-            ensure_serving_controller_with(root.path(), reset, || reaped.set(9), || Ok(()), || Ok(()))
-                .is_err()
+            ensure_serving_controller_with(
+                root.path(),
+                reset,
+                || reaped.set(9),
+                || Ok(()),
+                || Ok(())
+            )
+            .is_err()
         );
         assert_eq!(reaped.get(), 0);
 
         // Eventual progress: the controller finishes its work and answers.
-        let serving = || -> Result<String> { Ok(r#"{"active":true,"project_root":"/p","socket_path":"/p/.agent-doc/controller.sock"}"#.to_string()) };
+        let serving = || -> Result<String> {
+            Ok(r#"{"active":true,"project_root":"/p","socket_path":"/p/.agent-doc/controller.sock"}"#.to_string())
+        };
         assert_eq!(classify_serving_probe(&serving()), ServingProbe::Serving);
         let reconnected = std::cell::Cell::new(false);
         ensure_serving_controller_with(
@@ -30236,8 +30460,11 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("tasks/netadv5r8.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "---\nagent_doc_session: session-r8\nagent: codex\n---\nBody\n")
-            .unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-r8\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
         agent_doc_session_actor_io::record_session_start_direct(&doc, "session-r8", "%48", "@1", 1)
             .unwrap();
         agent_doc_session_actor_io::transition_state_direct(
@@ -30281,7 +30508,9 @@ mod tests {
         let attempts = || -> i64 {
             open_state_db(root)
                 .unwrap()
-                .query_row("SELECT COUNT(*) FROM dispatch_attempts", [], |row| row.get(0))
+                .query_row("SELECT COUNT(*) FROM dispatch_attempts", [], |row| {
+                    row.get(0)
+                })
                 .unwrap()
         };
         let keyed =
@@ -30291,17 +30520,33 @@ mod tests {
 
         // The ACK was lost; the caller retransmits the same request.
         let copy = handle_dispatch(&bootstrap, None, request(&keyed)).unwrap();
-        assert_eq!(copy, first, "a duplicate is answered with the original outcome");
-        assert_eq!(attempts(), after_first, "a duplicate never creates a second dispatch");
+        assert_eq!(
+            copy, first,
+            "a duplicate is answered with the original outcome"
+        );
+        assert_eq!(
+            attempts(),
+            after_first,
+            "a duplicate never creates a second dispatch"
+        );
 
         // Durable: a restarted controller (fresh schema memo) still answers it.
         state_store::reset_state_db_schema_convergence_memo();
         let after_restart = handle_dispatch(&bootstrap, None, request(&keyed)).unwrap();
         assert_eq!(after_restart, first);
         assert_eq!(attempts(), after_first);
-        let ops_log = std::fs::read_to_string(doc.parent().unwrap().parent().unwrap().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
-        assert!(ops_log.contains("dispatch_request_duplicate_answered"), "{ops_log}");
+        let ops_log = std::fs::read_to_string(
+            doc.parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join(".agent-doc/logs/ops.log"),
+        )
+        .unwrap_or_default();
+        assert!(
+            ops_log.contains("dispatch_request_duplicate_answered"),
+            "{ops_log}"
+        );
 
         // Eventual progress: a new logical request (new key) is evaluated fresh.
         let fresh =
@@ -30391,12 +30636,17 @@ mod tests {
             "refused with no controller process: the durable plane is authoritative"
         );
         let missing = anyhow::Error::new(std::io::Error::from(ErrorKind::NotFound));
-        assert!(!editor_live_on_controller_connect_failure(&missing, || false));
+        assert!(!editor_live_on_controller_connect_failure(&missing, || {
+            false
+        }));
         // A slow/blocked connect proves nothing, even without a visible process.
         let slow = anyhow::Error::new(std::io::Error::from(ErrorKind::TimedOut));
         assert!(editor_live_on_controller_connect_failure(&slow, || false));
         let path_rejected = anyhow::anyhow!("socket path too long");
-        assert!(editor_live_on_controller_connect_failure(&path_rejected, || false));
+        assert!(editor_live_on_controller_connect_failure(
+            &path_rejected,
+            || false
+        ));
     }
 
     /// Positive evidence (nothing bound) still recovers: reap verified
@@ -30405,8 +30655,10 @@ mod tests {
     fn refused_status_connect_is_positive_evidence_for_relaunch() {
         let root = tempfile::tempdir().unwrap();
         let refused = || -> Result<String> {
-            Err(anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
-                .context("failed to connect to project controller"))
+            Err(
+                anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+                    .context("failed to connect to project controller"),
+            )
         };
         assert_eq!(classify_serving_probe(&refused()), ServingProbe::NotBound);
         let order = std::cell::RefCell::new(Vec::new());
@@ -38206,9 +38458,9 @@ mod tests {
                 cycle_id_hint: Some(cycle_id),
                 terminal_turn_fence: Some(
                     agent_doc_cycle_state_io::command_plane::TerminalTurnFence {
-                    session_id: Some("session-fenced".to_string()),
-                    pane_id: Some("%91".to_string()),
-                    generation: Some(1),
+                        session_id: Some("session-fenced".to_string()),
+                        pane_id: Some("%91".to_string()),
+                        generation: Some(1),
                     },
                 ),
             },
@@ -40067,9 +40319,7 @@ mod tests {
                         let status_stream = listener.accept().unwrap();
                         let (reader_half, _writer_half) = status_stream.split();
                         let mut request = String::new();
-                        BufReader::new(reader_half)
-                            .read_line(&mut request)
-                            .unwrap();
+                        BufReader::new(reader_half).read_line(&mut request).unwrap();
                         assert!(request.contains("status"), "{request}");
                     }
                     let _adopted_stream = listener.accept().unwrap();
@@ -41300,10 +41550,7 @@ mod tests {
             focused: focused.to_string(),
             open: vec!["/a.md".to_string(), "/b.md".to_string()],
             visible: vec!["/a.md".to_string(), "/b.md".to_string()],
-            columns: vec![
-                SurfaceColumn::new(["/a.md"]),
-                SurfaceColumn::new(["/b.md"]),
-            ],
+            columns: vec![SurfaceColumn::new(["/a.md"]), SurfaceColumn::new(["/b.md"])],
             force_reconcile: false,
             focus_only: false,
             preserve_focus: false,
@@ -41313,7 +41560,10 @@ mod tests {
         assert!(matches!(intent, SurfaceIntent::Focus { .. }));
         // The select-pane effect errored. Pre-fix, the same focus is now Idle.
         let (_, idle) = tracking.advance(&surface("/b.md"), Some(true));
-        assert!(idle.is_idle(), "the wedge: graph advanced before the effect");
+        assert!(
+            idle.is_idle(),
+            "the wedge: graph advanced before the effect"
+        );
         let focus_intent = SurfaceIntent::Focus {
             document: "/b.md".to_string(),
         };
@@ -41382,8 +41632,11 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/simf1.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "---\nagent_doc_session: session-sf\nagent: codex\n---\nBody\n")
-            .unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-sf\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
         agent_doc_session_actor_io::record_session_start_direct(&doc, "session-sf", "%51", "@1", 1)
             .unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -41483,7 +41736,10 @@ mod tests {
         )
         .unwrap()
         .expect("queue control row");
-        assert_eq!(effective.state, "resumed", "the newer resume stays in force");
+        assert_eq!(
+            effective.state, "resumed",
+            "the newer resume stays in force"
+        );
     }
 
     #[test]

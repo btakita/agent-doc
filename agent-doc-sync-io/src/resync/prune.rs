@@ -56,6 +56,11 @@ pub fn apply_targeted_fix_for_route(
 ) -> Result<TargetDocumentFixOutcome> {
     let target = resolve_target_file(target_file)?;
     let base_dir = resolve_registry_root(&target);
+    let main_layout_eligibility =
+        agent_doc_controller_io::project_controller::main_layout_eligibility(&base_dir)?;
+    if !resync_document_is_main_eligible(&base_dir, &main_layout_eligibility, &target.to_string_lossy()) {
+        return Ok(TargetDocumentFixOutcome::default());
+    }
     let removed = prune_targeted_in(tmux, &target, &base_dir)?;
     let mut outcome = TargetDocumentFixOutcome {
         pruned_dead_entries: removed.len(),
@@ -66,10 +71,21 @@ pub fn apply_targeted_fix_for_route(
     outcome.killed_redundant_stash_panes = recovered.killed_redundant_stash_panes;
     let scoped_registry =
         filter_registry_for_target(&agent_doc_session_registry_io::load_in(&base_dir)?, &target);
-    let issues = detect_issues_in_registry(tmux, &scoped_registry);
+    let issues = detect_issues_in_registry_with_main_layout_eligibility(
+        tmux,
+        &scoped_registry,
+        &base_dir,
+        &main_layout_eligibility,
+    );
     if !issues.is_empty() {
-        outcome.fixed_issues =
-            apply_fixes_with_base(tmux, &issues, None, Some(&base_dir), Some(&target))?;
+        outcome.fixed_issues = apply_fixes_with_base_and_main_layout_eligibility(
+            tmux,
+            &issues,
+            None,
+            Some(&base_dir),
+            Some(&target),
+            &main_layout_eligibility,
+        )?;
     }
     Ok(outcome)
 }

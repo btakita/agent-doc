@@ -4,6 +4,41 @@
 //! decision: a newer input revision published while the current effect is
 //! finishing must keep one worker active.
 
+use std::collections::BTreeSet;
+
+use serde::{Deserialize, Serialize};
+
+/// Controller projection of documents that may participate in the main tmux
+/// layout.
+///
+/// Document ids are canonical project-local identities supplied by the
+/// durable editor-view binding projection. A binding remains excluded through
+/// bind-pending, bound, and release-pending; the producer removes it only after
+/// release is durably verified. Keeping that lifecycle decision outside the
+/// layout controller gives every mutation boundary one small, typed policy to
+/// apply.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MainLayoutEligibility {
+    #[serde(default)]
+    excluded_document_ids: BTreeSet<String>,
+}
+
+impl MainLayoutEligibility {
+    pub fn excluding(document_ids: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            excluded_document_ids: document_ids.into_iter().collect(),
+        }
+    }
+
+    pub fn is_eligible(&self, canonical_document_id: &str) -> bool {
+        !self.excluded_document_ids.contains(canonical_document_id)
+    }
+
+    pub fn excluded_document_ids(&self) -> &BTreeSet<String> {
+        &self.excluded_document_ids
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LatestProjectionWorkerState {
     pending_revision: u64,
@@ -590,5 +625,18 @@ mod tests {
         assert!(!pane_window_binding_drifted("", Some("@904")));
         assert!(!pane_window_binding_drifted("   ", Some("@904")));
         assert!(!pane_window_binding_drifted("", None));
+    }
+
+    #[test]
+    fn main_layout_eligibility_is_a_closed_exclusion_projection() {
+        let eligibility = MainLayoutEligibility::excluding([
+            "/project/tasks/detached.md".to_string(),
+            "/project/tasks/releasing.md".to_string(),
+        ]);
+
+        assert!(!eligibility.is_eligible("/project/tasks/detached.md"));
+        assert!(!eligibility.is_eligible("/project/tasks/releasing.md"));
+        assert!(eligibility.is_eligible("/project/tasks/main.md"));
+        assert_eq!(eligibility.excluded_document_ids().len(), 2);
     }
 }

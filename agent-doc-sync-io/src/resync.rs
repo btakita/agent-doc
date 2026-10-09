@@ -100,6 +100,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use agent_doc_controller::dispatch::is_stash_window_name;
+use agent_doc_controller::pane_layout::MainLayoutEligibility;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_sync::{ResyncTargetMatcher, superseded_candidates};
@@ -168,6 +169,35 @@ enum Issue {
         pane: String,
         window_name: String,
     },
+}
+
+impl Issue {
+    fn file(&self) -> &str {
+        match self {
+            Self::WrongSession { file, .. }
+            | Self::WrongProcess { file, .. }
+            | Self::NoLiveOwner { file, .. }
+            | Self::InStash { file, .. }
+            | Self::WrongWindow { file, .. } => file,
+        }
+    }
+}
+
+fn resync_document_is_main_eligible(
+    project_root: &Path,
+    eligibility: &MainLayoutEligibility,
+    document: &str,
+) -> bool {
+    if document.trim().is_empty() {
+        return true;
+    }
+    let path = Path::new(document);
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        project_root.join(path)
+    };
+    eligibility.is_eligible(&path.canonicalize().unwrap_or(path).to_string_lossy())
 }
 
 impl std::fmt::Display for Issue {
@@ -467,19 +497,6 @@ fn pane_hosts_live_supervisor_session(
 mod stash;
 pub(crate) use stash::*;
 
-/// Detect issues with alive panes: wrong tmux session or wrong process.
-fn detect_issues(tmux: &Tmux) -> Vec<Issue> {
-    tracing::debug!("resync::detect_issues start");
-    let registry = match agent_doc_session_registry_io::load() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("resync: failed to load registry: {}", e);
-            return Vec::new();
-        }
-    };
-    detect_issues_in_registry(tmux, &registry)
-}
-
 /// Info about an alive pane for cross-entry analysis.
 struct PaneInfo {
     key: String,
@@ -491,7 +508,22 @@ struct PaneInfo {
 }
 
 /// Detect issues in a given registry (testable without disk I/O).
+#[cfg_attr(not(test), allow(dead_code))]
 fn detect_issues_in_registry(tmux: &Tmux, registry: &tmux_router::Registry) -> Vec<Issue> {
+    detect_issues_in_registry_with_main_layout_eligibility(
+        tmux,
+        registry,
+        Path::new("."),
+        &MainLayoutEligibility::default(),
+    )
+}
+
+fn detect_issues_in_registry_with_main_layout_eligibility(
+    tmux: &Tmux,
+    registry: &tmux_router::Registry,
+    project_root: &Path,
+    main_layout_eligibility: &MainLayoutEligibility,
+) -> Vec<Issue> {
     let mut issues = Vec::new();
     let proof_cache = crate::sync::SyncProofCache::default();
 
@@ -499,6 +531,9 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &tmux_router::Registry) -> V
     let mut alive_panes: Vec<PaneInfo> = Vec::new();
 
     for (key, entry) in registry {
+        if !resync_document_is_main_eligible(project_root, main_layout_eligibility, &entry.file) {
+            continue;
+        }
         if !tmux.pane_alive(&entry.pane) {
             continue; // Dead panes are handled by prune()
         }
@@ -811,11 +846,6 @@ pub fn close_superseded_drift_sessions(
     Ok(closed)
 }
 
-/// Apply fixes for detected issues: kill wrong-session panes, deregister wrong-process panes.
-fn apply_fixes(tmux: &Tmux, issues: &[Issue], relocate_session: Option<&str>) -> Result<usize> {
-    apply_fixes_with_base(tmux, issues, relocate_session, None, None)
-}
-
 #[derive(Clone, Copy)]
 struct TargetFixScope<'a> {
     target: &'a Path,
@@ -856,12 +886,13 @@ fn refresh_target_no_live_owner_registry_entry(
     true
 }
 
-fn apply_fixes_with_base(
+fn apply_fixes_with_base_and_main_layout_eligibility(
     tmux: &Tmux,
     issues: &[Issue],
     relocate_session: Option<&str>,
     base_dir: Option<&Path>,
     target_file: Option<&Path>,
+    main_layout_eligibility: &MainLayoutEligibility,
 ) -> Result<usize> {
     if issues.is_empty() {
         return Ok(0);
@@ -883,8 +914,15 @@ fn apply_fixes_with_base(
         target,
         base_dir: effective_base,
     });
-    let fixed =
-        apply_fixes_to_registry(tmux, issues, &mut registry, relocate_session, target_scope);
+    let fixed = apply_fixes_to_registry_with_main_layout_eligibility(
+        tmux,
+        issues,
+        &mut registry,
+        relocate_session,
+        target_scope,
+        effective_base,
+        main_layout_eligibility,
+    );
 
     if fixed > 0 {
         agent_doc_session_registry_io::save_in(effective_base, &registry)?;
@@ -899,6 +937,7 @@ fn apply_fixes_with_base(
 /// move the pane to the target session instead of killing it. The registry entry is
 /// kept (pane ID is stable after join-pane). Use this to preserve running sessions
 /// while consolidating them into a single tmux session.
+#[cfg_attr(not(test), allow(dead_code))]
 fn apply_fixes_to_registry(
     tmux: &Tmux,
     issues: &[Issue],
@@ -906,10 +945,34 @@ fn apply_fixes_to_registry(
     relocate_session: Option<&str>,
     target_scope: Option<TargetFixScope<'_>>,
 ) -> usize {
+    apply_fixes_to_registry_with_main_layout_eligibility(
+        tmux,
+        issues,
+        registry,
+        relocate_session,
+        target_scope,
+        Path::new("."),
+        &MainLayoutEligibility::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_fixes_to_registry_with_main_layout_eligibility(
+    tmux: &Tmux,
+    issues: &[Issue],
+    registry: &mut tmux_router::Registry,
+    relocate_session: Option<&str>,
+    target_scope: Option<TargetFixScope<'_>>,
+    project_root: &Path,
+    main_layout_eligibility: &MainLayoutEligibility,
+) -> usize {
     let mut fixed = 0;
     let proof_cache = crate::sync::SyncProofCache::default();
 
     for issue in issues {
+        if !resync_document_is_main_eligible(project_root, main_layout_eligibility, issue.file()) {
+            continue;
+        }
         match issue {
             Issue::WrongSession {
                 key,
@@ -1211,6 +1274,23 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
     if let Some(file) = target_file {
         let target = resolve_target_file(file)?;
         let base_dir = resolve_registry_root(&target);
+        agent_doc_controller_io::project_controller::ensure_controller_running(
+            &base_dir,
+            agent_doc_controller::status::LaunchMode::Lazy,
+        )?;
+        let main_layout_eligibility =
+            agent_doc_controller_io::project_controller::main_layout_eligibility(&base_dir)?;
+        if !resync_document_is_main_eligible(
+            &base_dir,
+            &main_layout_eligibility,
+            &target.to_string_lossy(),
+        ) {
+            eprintln!(
+                "Skipping main-layout resync for editor-view-bound document {}.",
+                target.display()
+            );
+            return Ok(());
+        }
         let removed = prune_targeted_in(&tmux, &target, &base_dir)?;
 
         if removed.is_empty() {
@@ -1247,7 +1327,12 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
             &agent_doc_session_registry_io::load_in(&base_dir)?,
             &target,
         );
-        let issues = detect_issues_in_registry(&tmux, &scoped_registry);
+        let issues = detect_issues_in_registry_with_main_layout_eligibility(
+            &tmux,
+            &scoped_registry,
+            &base_dir,
+            &main_layout_eligibility,
+        );
         if !issues.is_empty() {
             if fix {
                 eprintln!(
@@ -1255,12 +1340,13 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
                     issues.len(),
                     target.display()
                 );
-                let fixed = apply_fixes_with_base(
+                let fixed = apply_fixes_with_base_and_main_layout_eligibility(
                     &tmux,
                     &issues,
                     relocate_session,
                     Some(&base_dir),
                     Some(&target),
+                    &main_layout_eligibility,
                 )?;
                 eprintln!("\nFixed {} of {} issue(s).", fixed, issues.len());
             } else {
@@ -1300,6 +1386,14 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
     }
 
     let registry_path = agent_doc_session_registry_io::registry_path();
+    let cwd = std::env::current_dir()?;
+    let project_root = agent_doc_project_root_io::project_root_containing(&cwd).unwrap_or(cwd);
+    agent_doc_controller_io::project_controller::ensure_controller_running(
+        &project_root,
+        agent_doc_controller::status::LaunchMode::Lazy,
+    )?;
+    let main_layout_eligibility =
+        agent_doc_controller_io::project_controller::main_layout_eligibility(&project_root)?;
 
     // Show what's being removed (verbose)
     let registry_before = agent_doc_session_registry_io::load()?;
@@ -1326,11 +1420,24 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
     }
 
     // Detect issues with alive panes
-    let issues = detect_issues(&tmux);
+    let registry = agent_doc_session_registry_io::load()?;
+    let issues = detect_issues_in_registry_with_main_layout_eligibility(
+        &tmux,
+        &registry,
+        &project_root,
+        &main_layout_eligibility,
+    );
     if !issues.is_empty() {
         if fix {
             eprintln!("\nFixing {} issue(s):", issues.len());
-            let fixed = apply_fixes(&tmux, &issues, relocate_session)?;
+            let fixed = apply_fixes_with_base_and_main_layout_eligibility(
+                &tmux,
+                &issues,
+                relocate_session,
+                None,
+                None,
+                &main_layout_eligibility,
+            )?;
             eprintln!("\nFixed {} of {} issue(s).", fixed, issues.len());
         } else {
             eprintln!(
@@ -1783,9 +1890,9 @@ mod th {
 #[cfg(test)]
 pub(crate) use th::{
     ScopedCurrentDir, drive_pane_to_retained_dead, launch_mock_agent_doc, test_cwd, test_entry,
-    wait_for_pane_contains, wait_for_pane_current_command,
-    wait_for_pane_in_stash_window, wait_for_pane_removed, wait_for_process_pid, wait_for_shell,
-    wait_for_window_relation, write_mock_agent_doc,
+    wait_for_pane_contains, wait_for_pane_current_command, wait_for_pane_in_stash_window,
+    wait_for_pane_removed, wait_for_process_pid, wait_for_shell, wait_for_window_relation,
+    write_mock_agent_doc,
 };
 
 #[cfg(test)]
@@ -2688,5 +2795,21 @@ mod tests {
         // No pending/cycle state → no-op, no error, content unchanged.
         finish_unfinished_turn(&doc).unwrap();
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn view_bound_document_is_not_main_resync_eligible() {
+        let eligibility =
+            MainLayoutEligibility::excluding(["/project/tasks/detached.md".to_string()]);
+        assert!(!resync_document_is_main_eligible(
+            Path::new("/project"),
+            &eligibility,
+            "tasks/detached.md",
+        ));
+        assert!(resync_document_is_main_eligible(
+            Path::new("/project"),
+            &eligibility,
+            "tasks/main.md",
+        ));
     }
 }

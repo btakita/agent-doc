@@ -46,6 +46,14 @@ TARGETS = (
         DIGEST_KEY,
     ),
     Target(
+        "JetBrains 262",
+        ("editors/jetbrains-262/", "editors/jetbrains/src/"),
+        (".kt", ".java", ".xml", ".kts"),
+        "editors/jetbrains-262/gradle.properties",
+        ("editors/jetbrains-262/gradle.properties",),
+        DIGEST_KEY,
+    ),
+    Target(
         "VS Code",
         ("editors/vscode/src/",),
         (".ts",),
@@ -180,6 +188,11 @@ def self_test() -> int:
     import tempfile
 
     jb = TARGETS[0]
+    jb262 = TARGETS[1]
+    assert "editors/jetbrains-262/" in jb262.source_prefixes
+    assert "editors/jetbrains/src/" in jb262.source_prefixes, (
+        "the modular backend compiles classic implementation sources, so they must fence both generations"
+    )
 
     # bump_gradle_patch increments only the patch and leaves the file otherwise intact.
     with tempfile.TemporaryDirectory() as tmp:
@@ -281,6 +294,10 @@ def self_test() -> int:
     bump_plugin = recipe("bump-plugin")
     assert "check_plugin_versions.py --bump JetBrains" in bump_plugin, bump_plugin
     assert "sed -i" not in bump_plugin, "bump-plugin must not bump pluginVersion without recording its digest"
+    bump_plugin_262 = recipe("bump-plugin-262")
+    assert 'check_plugin_versions.py --bump "JetBrains 262"' in bump_plugin_262, bump_plugin_262
+    check_header = recipe("check").splitlines()[1]
+    assert "jetbrains-262-check" in check_header, check_header
     assert "--bump JetBrains" in recipe("editor-generation-bump")
 
     release_workflow_path = os.path.join(
@@ -289,6 +306,12 @@ def self_test() -> int:
     release_workflow = open(release_workflow_path, encoding="utf-8").read()
     assert "python3 scripts/check_plugin_versions.py" in release_workflow, (
         "tag-triggered releases must fail closed on editor source-generation drift"
+    )
+    assert "agent-doc-jetbrains-262-$modular_version.zip" in release_workflow, (
+        "tag-triggered releases must package the modular JetBrains distribution by exact name"
+    )
+    assert "verifySplitModeSandboxes" in release_workflow, (
+        "the modular release artifact must prove the same ZIP is installed into both sandboxes"
     )
 
     print("[self-test] check_plugin_versions: ok")

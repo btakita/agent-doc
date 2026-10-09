@@ -19,6 +19,25 @@ bridge. `required-if-available` module dependencies load frontend code in a
 regular IDE or JetBrains Client and backend code in a regular IDE or Remote Dev
 backend.
 
+### One-artifact role-selection contract
+
+The distribution does not publish separate frontend and backend ZIPs and does
+not guess its role from host names, environment variables, or connection state.
+IntelliJ Platform selects content modules from the capabilities of the process
+that is loading the same ZIP:
+
+| Process | Platform capability | Agent Doc modules loaded |
+|---|---|---|
+| JetBrains Client | `intellij.platform.frontend` | shared + frontend |
+| Remote Dev backend | `intellij.platform.backend` | shared + backend |
+| Regular monolithic IDE | frontend + backend | shared + frontend + backend |
+
+The shared module is always required. The frontend and backend modules are
+optional where their matching platform capability is absent and required where
+it is present. This is declarative process-role recognition owned by the
+IntelliJ Platform plugin loader; Agent Doc must not add a second imperative
+role detector that could disagree with the module/classloader boundary.
+
 ## Build and split-mode checks
 
 IntelliJ 2026.2 requires a Java 25 toolchain for compilation in this build.
@@ -32,8 +51,10 @@ gradle runIdeSplitMode
 The build sets `splitMode = true` and `pluginInstallationTarget = BOTH`.
 `runIdeSplitMode` therefore installs the same built plugin into the local
 backend and frontend sandboxes. `verifySplitArtifact` checks the 262 range,
-root content declarations, exact module JAR/descriptor pairing, and module
-presence in the distribution.
+the exact frontend/backend/both role-selection matrix, exact module
+JAR/descriptor pairing and dependencies, and module presence in the
+distribution. `verifySplitModeSandboxes` proves that the complete same-artifact
+module set is placed in both development sandboxes.
 
 ## Distribution and installation
 
@@ -51,6 +72,18 @@ backend or only JetBrains Client does not copy it to the other process. For
 local ZIP testing, install the same ZIP explicitly in both backend and
 Client/Gateway, or use `runIdeSplitMode`. A one-sided install is unsupported and
 the surface bridge must be treated as unavailable.
+
+Every Agent Doc tag packages the modular ZIP as
+`agent-doc-jetbrains-262-<pluginVersion>.zip` alongside the compatibility-ranged
+classic ZIP and the VS Code package. The package-generation fence tracks both
+the modular build and the classic implementation sources reused by its backend.
+`make check` builds and verifies the modular ZIP and both sandboxes, while the
+tag workflow copies both JetBrains artifacts by exact versioned name. The
+generic `agent-doc plugin install jetbrains` asset resolver deliberately accepts
+only the classic numeric filename shape; it must not choose the exact-262 ZIP by
+shared prefix until it can prove the target IDE build. Marketplace/custom-repo
+compatibility selection or an explicit two-sided local install owns the modular
+path in the meantime.
 
 ## Fail-closed integration boundary
 

@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-262-check tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla fuzz
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -213,6 +213,12 @@ dev-harness-test: $(VSCODE_NODE_LOCK)
 editor-parity: dev-harness-test cross-editor-simworld
 	@python3 scripts/check_editor_parity.py
 
+# The 262 modular ZIP is a distinct compatibility-ranged artifact. Keep its
+# frontend/backend/both descriptor contract and BOTH sandboxes in the same
+# authoritative gate as the classic editor packages.
+jetbrains-262-check:
+	@cd editors/jetbrains-262 && gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes
+
 # Bump JB plugin patch version (when its sources changed) and build both zips.
 # `#installgenskew`: the bump goes through check_plugin_versions.py so it also
 # records `pluginSourceDigest`. A bare `sed` bump left the digest stale, and the
@@ -224,6 +230,13 @@ bump-plugin:
 	new=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
 	./gradlew buildPlugin signPlugin && \
 	ls -1 build/distributions/agent-doc-jetbrains-$$new*.zip
+
+bump-plugin-262:
+	@python3 scripts/check_plugin_versions.py --bump "JetBrains 262"
+	@cd editors/jetbrains-262 && \
+	new=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
+	gradle --no-daemon --console=plain buildPlugin verifySplitArtifact && \
+	ls -1 build/distributions/agent-doc-jetbrains-262-$$new.zip
 
 # `#installgenskew`: the binary embeds the JetBrains generation it expects
 # (agent-doc-reliable-sync-io/build.rs reads gradle.properties), so any bump
@@ -316,7 +329,7 @@ release-driver-self-test:
 check-fast: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test
 	@python3 scripts/dev-check.py run
 
-check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity python-bootstrap-test lean tla
+check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-262-check python-bootstrap-test lean tla
 	@AGENT_DOC_FULL_CHECK_SUCCEEDED=1 python3 scripts/dev-check.py record-full-check
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.

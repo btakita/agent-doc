@@ -14346,8 +14346,9 @@ fn test_every_release_publishes_the_editor_packages() {
         .expect("editor-package build job")..];
     for required in [
         "./gradlew --no-daemon --console=plain buildPlugin",
+        "gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes",
         "npm run package --prefix editors/vscode",
-        "expected 1 JetBrains zip and 1 vsix",
+        "expected classic + modular JetBrains zips and 1 vsix",
     ] {
         assert!(
             plugins.contains(required),
@@ -14358,7 +14359,8 @@ fn test_every_release_publishes_the_editor_packages() {
     // `-signed` siblings, so a glob is one cache restore away from attaching a
     // stale artifact and reporting success.
     assert!(
-        plugins.contains("agent-doc-jetbrains-$version.zip")
+        plugins.contains("agent-doc-jetbrains-$classic_version.zip")
+            && plugins.contains("agent-doc-jetbrains-262-$modular_version.zip")
             && plugins.contains("agent-doc-$version.vsix"),
         "editor packages must be copied by declared version, never globbed"
     );

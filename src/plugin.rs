@@ -304,7 +304,13 @@ struct ReleaseAsset<'a> {
 }
 
 fn asset_matches(name: &str, prefix: &str, ext: &str) -> bool {
-    name.starts_with(prefix) && name.ends_with(&format!(".{ext}"))
+    // Match the complete package shape, not a prefix. Once the exact-262 modular
+    // artifact joined releases, `agent-doc-jetbrains` also prefixed
+    // `agent-doc-jetbrains-262-<version>.zip`; prefix-first selection could hand
+    // an exact-262 artifact to a classic 242-261 install. The generic installer
+    // continues to select the classic numeric version shape until it has an
+    // explicit target-IDE compatibility resolver.
+    packaged_plugin_version(name, &format!("{prefix}-"), &format!(".{ext}")).is_some()
 }
 
 fn read_asset<'a>(asset: &'a Value) -> Result<ReleaseAsset<'a>> {
@@ -3002,10 +3008,11 @@ mod tests {
     }
 
     fn plugin_release(tag: &str) -> serde_json::Value {
+        let package_version = tag.trim_start_matches('v');
         json!({
             "tag_name": tag,
             "assets": [{
-                "name": format!("agent-doc-jetbrains-{tag}-signed.zip"),
+                "name": format!("agent-doc-jetbrains-{package_version}-signed.zip"),
                 "browser_download_url": format!("https://example.invalid/{tag}.zip"),
             }],
         })
@@ -3291,6 +3298,30 @@ mod tests {
         assert_eq!(parse_asset_digest(asset.digest.unwrap()), Some("abc123"));
         assert_eq!(parse_asset_digest("md5:abc123"), None);
         assert_eq!(parse_asset_digest("sha256:"), None);
+    }
+
+    #[test]
+    fn find_asset_does_not_confuse_the_modular_262_zip_with_the_classic_zip() {
+        let modular = json!({
+            "name": "agent-doc-jetbrains-262-0.2.509.zip",
+            "browser_download_url": "https://example.com/modular.zip"
+        });
+        let classic = json!({
+            "name": "agent-doc-jetbrains-0.2.508.zip",
+            "browser_download_url": "https://example.com/classic.zip"
+        });
+
+        for assets in [
+            json!([modular.clone(), classic.clone()]),
+            json!([classic.clone(), modular.clone()]),
+        ] {
+            let release = json!({"tag_name": "v0.35.481", "assets": assets});
+            let asset = find_asset(&release, "agent-doc-jetbrains", "zip").unwrap();
+            assert_eq!(asset.name, "agent-doc-jetbrains-0.2.508.zip");
+        }
+
+        let modular_only = json!({"tag_name": "v0.35.481", "assets": [modular]});
+        assert!(find_asset(&modular_only, "agent-doc-jetbrains", "zip").is_err());
     }
 
     #[test]

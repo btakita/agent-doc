@@ -2,9 +2,30 @@ import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.intellij.platform.gradle.tasks.aware.SplitModeAware
 import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask
+import org.w3c.dom.Element
+import java.io.ByteArrayInputStream
 import java.util.EnumSet
 import java.util.jar.JarInputStream
 import java.util.zip.ZipFile
+import javax.xml.parsers.DocumentBuilderFactory
+
+data class ContentModuleContract(
+    val loading: String?,
+    val requiredIfAvailable: String?,
+)
+
+fun parsePluginXml(content: String) = DocumentBuilderFactory.newInstance().apply {
+    isNamespaceAware = true
+    setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+}.newDocumentBuilder().parse(ByteArrayInputStream(content.toByteArray()))
+
+fun Element.directChildren(tagName: String): List<Element> = buildList {
+    val children = childNodes
+    for (index in 0 until children.length) {
+        val child = children.item(index)
+        if (child is Element && child.tagName == tagName) add(child)
+    }
+}
 
 plugins {
     id("java")
@@ -117,14 +138,22 @@ tasks {
                 ?: error("missing unique split plugin distribution")
             ZipFile(zip).use { archive ->
                 val names = archive.entries().asSequence().map { it.name }.toList()
-                listOf("agent.doc.shared", "agent.doc.frontend", "agent.doc.backend").forEach { module ->
+                val expectedModuleNames = setOf("agent.doc.shared", "agent.doc.frontend", "agent.doc.backend")
+                val moduleDescriptors = expectedModuleNames.associateWith { module ->
                     val moduleJar = archive.entries().asSequence()
                         .singleOrNull { it.name.endsWith("/lib/modules/$module.jar") }
                         ?: error("split distribution is missing exact module JAR $module.jar")
-                    val hasDescriptor = JarInputStream(archive.getInputStream(moduleJar)).use { jar ->
-                        generateSequence { jar.nextJarEntry }.any { it.name == "$module.xml" }
+                    JarInputStream(archive.getInputStream(moduleJar)).use { jar ->
+                        var content: String? = null
+                        while (true) {
+                            val entry = jar.nextJarEntry ?: break
+                            if (entry.name == "$module.xml") {
+                                content = jar.readBytes().toString(Charsets.UTF_8)
+                                break
+                            }
+                        }
+                        content ?: error("$module.jar is missing its root $module.xml descriptor")
                     }
-                    check(hasDescriptor) { "$module.jar is missing its root $module.xml descriptor" }
                 }
                 val rootJarEntry = archive.entries().asSequence()
                     .firstOrNull { it.name.endsWith(".jar") && !it.name.contains("/modules/") && !it.name.contains("lazily-") }
@@ -145,9 +174,62 @@ tasks {
                 check(pluginXml.contains("<id>com.github.btakita.agent-doc</id>")) {
                     "split distribution changed the existing plugin ID"
                 }
-                check(pluginXml.contains("agent.doc.shared")) { "shared content module missing" }
-                check(pluginXml.contains("agent.doc.frontend")) { "frontend content module missing" }
-                check(pluginXml.contains("agent.doc.backend")) { "backend content module missing" }
+
+                val pluginDocument = parsePluginXml(pluginXml)
+                val content = pluginDocument.documentElement.directChildren("content").singleOrNull()
+                    ?: error("root descriptor must contain exactly one content element")
+                val actualContentModules = content.directChildren("module").associate { module ->
+                    module.getAttribute("name") to ContentModuleContract(
+                        loading = module.getAttribute("loading").ifBlank { null },
+                        requiredIfAvailable = module.getAttribute("required-if-available").ifBlank { null },
+                    )
+                }
+                val expectedContentModules = mapOf(
+                    "agent.doc.shared" to ContentModuleContract("required", null),
+                    "agent.doc.frontend" to ContentModuleContract(null, "intellij.platform.frontend"),
+                    "agent.doc.backend" to ContentModuleContract(null, "intellij.platform.backend"),
+                )
+                check(actualContentModules == expectedContentModules) {
+                    "single-distribution role selectors changed: expected=$expectedContentModules actual=$actualContentModules"
+                }
+
+                val roleMatrix = mapOf(
+                    "frontend" to setOf("intellij.platform.frontend"),
+                    "backend" to setOf("intellij.platform.backend"),
+                    "monolithic" to setOf("intellij.platform.frontend", "intellij.platform.backend"),
+                )
+                val expectedSelections = mapOf(
+                    "frontend" to setOf("agent.doc.shared", "agent.doc.frontend"),
+                    "backend" to setOf("agent.doc.shared", "agent.doc.backend"),
+                    "monolithic" to expectedModuleNames,
+                )
+                roleMatrix.forEach { (role, availableCapabilities) ->
+                    val selected = actualContentModules.filterValues { contract ->
+                        contract.requiredIfAvailable == null || contract.requiredIfAvailable in availableCapabilities
+                    }.keys
+                    check(selected == expectedSelections.getValue(role)) {
+                        "$role process selected wrong modules: expected=${expectedSelections.getValue(role)} actual=$selected"
+                    }
+                }
+
+                val descriptorDependencies = moduleDescriptors.mapValues { (_, descriptor) ->
+                    val document = parsePluginXml(descriptor)
+                    document.documentElement.directChildren("dependencies")
+                        .singleOrNull()
+                        ?.directChildren("module")
+                        ?.map { it.getAttribute("name") }
+                        ?.toSet()
+                        .orEmpty()
+                }
+                check(descriptorDependencies.getValue("agent.doc.shared").isEmpty()) {
+                    "shared module must remain loadable in every process: $descriptorDependencies"
+                }
+                check(descriptorDependencies.getValue("agent.doc.frontend").containsAll(
+                    setOf("intellij.platform.frontend", "agent.doc.shared"),
+                )) { "frontend descriptor lost its side/shared dependencies: $descriptorDependencies" }
+                check(descriptorDependencies.getValue("agent.doc.backend").containsAll(
+                    setOf("intellij.platform.backend", "agent.doc.shared"),
+                )) { "backend descriptor lost its side/shared dependencies: $descriptorDependencies" }
             }
         }
     }
@@ -164,6 +246,16 @@ tasks {
                     .flatMap { output -> output.walkTopDown().asSequence() }
                     .filter { it.isFile && it.extension == "jar" }
                     .toList()
+                val jarNames = jars.map { it.name }.toSet()
+                val expectedModuleJars = setOf(
+                    "agent.doc.shared.jar",
+                    "agent.doc.frontend.jar",
+                    "agent.doc.backend.jar",
+                )
+                check(jarNames.containsAll(expectedModuleJars)) {
+                    "$taskName did not receive the complete single-distribution module set: " +
+                        "missing=${expectedModuleJars - jarNames}"
+                }
                 check(jars.any { jarFile ->
                     JarInputStream(jarFile.inputStream()).use { jar ->
                         generateSequence { jar.nextJarEntry }

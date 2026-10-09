@@ -528,7 +528,136 @@ internal data class CapturedLocalEditorEdit(
     val oldFragment: String,
     val newFragment: String,
     val projectionEpoch: Long,
+    /**
+     * `#splicebaselength`: the UTF-16 length of the IntelliJ Document immediately
+     * before this splice, or -1 when unknown (synthesised splices from older
+     * call sites). A pure insertion carries no range text to mismatch, so its
+     * offset alone cannot prove it is being replayed against the text it was
+     * typed into. The pre-edit length can: a shadow that lacks text the editor
+     * holds (a response the editor applied but the replica never received) has
+     * a different length, and the splice is refused instead of landing that many
+     * characters away from where the operator typed it.
+     */
+    val beforeLengthUtf16: Int = -1,
+    /**
+     * `#agentpatchlineage`: the agent patch (IPC `patch_id`) most recently applied
+     * to this Document before the splice was typed, or null when none is known.
+     * The splice's base therefore includes that patch's text. If the shadow does
+     * not, the splice is rebased past exactly that patch or held — never replayed
+     * at shifted offsets.
+     */
+    val agentLineage: String? = null,
 )
+
+/**
+ * `#agentpatchlineage`: identity of the last agent-applied (non-operator)
+ * mutation of a Document: the IPC patch id and the exact text it produced.
+ */
+internal data class AgentMutationLineage(
+    val patchId: String,
+    val postTextHash: String,
+    val postLength: Int,
+)
+
+internal fun agentLineageTextHashUtil(text: String): String =
+    java.security.MessageDigest.getInstance("SHA-256")
+        .digest(text.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+
+/**
+ * `#agentpatchlineage`: rebase operator splices typed AFTER agent patch
+ * [lineage] onto a [shadow] that never received that patch.
+ *
+ * Live 2026-10-09 (contracts.md): a socket patch put a 668-char response into
+ * the IntelliJ Document, but neither the shadow nor the replica received it.
+ * The operator then typed a queue line; its pure-insert splices validated
+ * against the response-less shadow (no range text to mismatch) and landed 769
+ * chars further down, inside a backlog item, in the replica and the canonical.
+ *
+ * [visible] is a read-locked editor cut and [edits] are every splice captured
+ * up to that cut (oldest first). Undoing them from [visible] must reproduce the
+ * exact text [lineage] produced; the difference between that text and [shadow]
+ * is then the missing agent patch `P`. Each operator splice is transformed
+ * through `P`: entirely before it keeps its offset, entirely after it shifts by
+ * `P`'s length change, and one that overlaps `P` cannot be rebased. Answers the
+ * batch that applies ONLY the operator's splices to [shadow] — the agent text
+ * stays the controller's to fold (`#appliedresponsefold`), so nothing is
+ * inserted twice — or null when lineage cannot be proven (the caller holds the
+ * splices and waits for the missing base).
+ */
+internal fun rebaseOperatorEditsPastAgentPatchUtil(
+    shadow: String,
+    visible: String,
+    edits: List<CapturedLocalEditorEdit>,
+    lineage: AgentMutationLineage?,
+): PreparedLocalEditorBatch? {
+    if (lineage == null || edits.isEmpty()) return null
+    if (edits.any { it.agentLineage != lineage.patchId }) return null
+    var base = visible
+    for (edit in edits.asReversed()) {
+        base = reconstructLocalEditorBaseTextUtil(base, edit) ?: return null
+    }
+    if (base.length != lineage.postLength || agentLineageTextHashUtil(base) != lineage.postTextHash) {
+        return null
+    }
+    val patch = singleSpliceCapturedEditUtil(shadow, base, 0L) ?: return null
+    var patchOffset = patch.offsetUtf16
+    val patchInsertLength = patch.newFragment.length
+    val patchDelta = patch.newFragment.length - patch.oldFragment.length
+    var shadowLength = shadow.length
+    val rebased = ArrayList<CapturedLocalEditorEdit>(edits.size)
+    for (edit in edits) {
+        val start = edit.offsetUtf16
+        val end = start + edit.oldFragment.length
+        val patchEnd = patchOffset + patchInsertLength
+        val offset =
+            when {
+                end <= patchOffset -> {
+                    patchOffset += edit.newFragment.length - edit.oldFragment.length
+                    start
+                }
+                start >= patchEnd -> start - patchDelta
+                else -> return null
+            }
+        rebased.add(
+            edit.copy(
+                offsetUtf16 = offset,
+                beforeLengthUtf16 = shadowLength,
+            ),
+        )
+        shadowLength += edit.newFragment.length - edit.oldFragment.length
+    }
+    val batch = prepareLocalEditorEditsUtil(shadow, rebased) ?: return null
+    // Proof: the agent patch re-applied over the rebased operator text must
+    // reproduce the visible editor text exactly.
+    val operatorText = batch.resultingText
+    val patchedEnd = patchOffset + patch.oldFragment.length
+    if (patchedEnd > operatorText.length ||
+        operatorText.substring(patchOffset, patchedEnd) != patch.oldFragment
+    ) {
+        return null
+    }
+    val withPatch = operatorText.substring(0, patchOffset) + patch.newFragment + operatorText.substring(patchedEnd)
+    return batch.takeIf { withPatch == visible }
+}
+
+/**
+ * `#splicebaselength`: true when [edits] were captured against a document whose
+ * length differs from [before] at the point each splice applies. The batch then
+ * cannot be replayed onto [before] by offset; the caller must roll the visible
+ * editor text forward instead (editor text is the base).
+ */
+internal fun localEditorSpliceBaseLengthMismatchUtil(
+    before: String,
+    edits: List<CapturedLocalEditorEdit>,
+): Boolean {
+    var length = before.length
+    for (edit in edits) {
+        if (edit.beforeLengthUtf16 >= 0 && edit.beforeLengthUtf16 != length) return true
+        length += edit.newFragment.length - edit.oldFragment.length
+    }
+    return false
+}
 
 /**
  * Reconstruct the exact editor cut that preceded the first observed local
@@ -581,6 +710,9 @@ internal fun prepareLocalEditorEditsUtil(
     for (edit in edits) {
         val start = edit.offsetUtf16
         val end = start + edit.oldFragment.length
+        // `#splicebaselength`: the splice was typed into a document of a
+        // different length, so its offset does not address this text.
+        if (edit.beforeLengthUtf16 >= 0 && edit.beforeLengthUtf16 != current.length) return null
         if (start < 0 || start > current.length || end > current.length) return null
         if (current.substring(start, end) != edit.oldFragment) return null
         val deleteCodePoints = edit.oldFragment.codePointCount(0, edit.oldFragment.length)
@@ -696,6 +828,7 @@ internal fun singleSpliceCapturedEditUtil(
         oldFragment = before.substring(prefix, before.length - suffix),
         newFragment = after.substring(prefix, after.length - suffix),
         projectionEpoch = epoch,
+        beforeLengthUtf16 = before.length,
     )
 }
 
@@ -1000,6 +1133,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     oldFragment = oldFragment,
                     newFragment = newFragment,
                     projectionEpoch = projectionEpoch,
+                    // DocumentEvent arrives after the mutation: recover the
+                    // pre-edit length the offset was taken against.
+                    // O(1) length read, never a copy of the editor text.
+                    beforeLengthUtf16 =
+                        event.document.let { it.textLength } - newFragment.length + oldFragment.length,
+                    agentLineage = agentMutationLineages[filePath]?.patchId,
                 )
             if (!shadows.containsKey(filePath)) {
                 val visibleText = tryReadDocumentText(event.document) ?: return
@@ -1530,8 +1669,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return LocalEditorForwardResult.Fenced
         }
         val beforeText = shadows[filePath] ?: return LocalEditorForwardResult.Retry
+        var rebasedPastAgentPatch = false
         val batch =
             prepareLocalEditorEditsUtil(beforeText, currentEdits)
+                ?: rebaseSplicesPastMissingAgentPatch(filePath, beforeText, currentEdits)
+                    ?.also { rebasedPastAgentPatch = true }
                 ?: run {
                     log.debug(
                         "[crdt-replica] retained local splice batch for $filePath because its exact shadow range no longer matches",
@@ -1592,7 +1734,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             retainedCanonicalProjectionPaths.add(filePath)
             requestRemoteDrain(filePath, "rebased-local-splices-projection")
         }
-        if (!projectSettledVisibleState(filePath, forwarders[filePath]!!, editorText)) {
+        if (rebasedPastAgentPatch) {
+            // `#agentpatchlineage`: the editor still shows the agent patch the
+            // replica lacks, so the operator-only text is not the visible state.
+            // The controller folds that patch from its own receipt; the remote
+            // apply then re-aligns the shadow with the editor.
+            requestRemoteDrain(filePath, "rebased-past-agent-patch")
+        } else if (!projectSettledVisibleState(filePath, forwarders[filePath]!!, editorText)) {
             requestRemoteDrain(filePath, "local-visible-projection-retry")
         }
         logSlow(
@@ -1603,6 +1751,55 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "splices=${batch.edits.size} before_chars=${beforeText.length} after_chars=${editorText.length}",
         )
         return LocalEditorForwardResult.Applied
+    }
+
+    /**
+     * `#agentpatchlineage`: the captured splices address a document of a
+     * different length than the shadow (`#splicebaselength`), so replaying them
+     * by offset would land them in the wrong place. When their lineage proves
+     * the only missing base is one agent patch, rebase them past it; otherwise
+     * answer null so the caller holds them and drains for the missing base.
+     */
+    private fun rebaseSplicesPastMissingAgentPatch(
+        filePath: String,
+        beforeText: String,
+        edits: List<CapturedLocalEditorEdit>,
+    ): PreparedLocalEditorBatch? {
+        if (!localEditorSpliceBaseLengthMismatchUtil(beforeText, edits)) return null
+        val lineage = agentMutationLineages[filePath]
+        val batch =
+            withEditorCaptureCut(filePath) { visible ->
+                // Every splice captured up to this read-locked cut is in
+                // `visible`; rebase them together so none is applied twice.
+                val all = edits + pendingLocalEditorEdits[filePath].orEmpty()
+                rebaseOperatorEditsPastAgentPatchUtil(beforeText, visible, all, lineage)
+                    ?.also {
+                        pendingLocalEditorEdits.remove(filePath)
+                        // The next burst is typed into `visible`: same patch
+                        // lineage, newer post-patch cut.
+                        agentMutationLineages[filePath] =
+                            AgentMutationLineage(
+                                lineage!!.patchId,
+                                agentLineageTextHashUtil(visible),
+                                visible.length,
+                            )
+                    }
+            }
+        if (batch == null) {
+            log.warn(
+                "[crdt-replica] held local splices for ${File(filePath).name}: their base includes text the " +
+                    "replica lacks; shadow_chars=${beforeText.length} splices=${edits.size} " +
+                    "agent_lineage=${edits.lastOrNull()?.agentLineage ?: "-"} " +
+                    "known_patch=${lineage?.patchId ?: "-"} recovery=await-missing-base (#agentpatchlineage)",
+            )
+            return null
+        }
+        log.warn(
+            "[crdt-replica] rebased operator splices past unreplicated agent patch ${lineage?.patchId} for " +
+                "${File(filePath).name}; shadow_chars=${beforeText.length} " +
+                "operator_splices=${batch.edits.size} (#agentpatchlineage)",
+        )
+        return batch
     }
 
     /**
@@ -4116,6 +4313,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     companion object {
         private val instances = ConcurrentHashMap<Project, CrdtReplicaManager>()
         private val applyingAgentMutations = ConcurrentHashMap.newKeySet<String>()
+        /** `#agentpatchlineage`: last agent-applied mutation per document. */
+        private val agentMutationLineages = ConcurrentHashMap<String, AgentMutationLineage>()
         private val nonOperatorMutationEpochs = ConcurrentHashMap<String, AtomicLong>()
         private val nativeReloadResumeStates =
             ConcurrentHashMap<String, ReplicaResumeState>()
@@ -4624,13 +4823,30 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
         }
 
-        fun <T> withAgentAppliedEditorMutation(filePath: String, block: () -> T): T {
+        /**
+         * Apply an agent-authored mutation to the Document. `#agentpatchlineage`:
+         * when [patchId] and [postText] identify the patch, later operator splices
+         * record it as their base lineage; an unidentified agent mutation clears
+         * the lineage, so splices typed after it can only be held, never rebased.
+         */
+        fun <T> withAgentAppliedEditorMutation(
+            filePath: String,
+            patchId: String? = null,
+            postText: String? = null,
+            block: () -> T,
+        ): T {
             advanceNonOperatorMutationEpoch(filePath)
             applyingAgentMutations.add(filePath)
             return try {
                 block()
             } finally {
                 applyingAgentMutations.remove(filePath)
+                if (patchId != null && postText != null) {
+                    agentMutationLineages[filePath] =
+                        AgentMutationLineage(patchId, agentLineageTextHashUtil(postText), postText.length)
+                } else {
+                    agentMutationLineages.remove(filePath)
+                }
             }
         }
 

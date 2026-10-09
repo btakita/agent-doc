@@ -106,6 +106,25 @@ report it as one:
   wait up to three catch-up budgets for the editor delta (a replica generation
   handoff can land it late). An owned cell matching neither side refuses at the
   ordinary budget and names the cell (`diverged_owned_cells=`).
+- `#appliedresponsefold`: when the pending budget runs out and every differing
+  owned cell in canonical STILL equals the pre-write cut (no owned cell
+  diverged), the receipt is the controller's own patch landing (keyed by its
+  `patch_id`) that the editor replica never published — programmatic editor
+  mutations do not publish operator deltas. The controller folds exactly those
+  owned cells from the receipt into canonical through the compare-and-swap
+  boundary, keeping canonical's newer operator cells, logs
+  `ipc_visible_write_pending_owned_cells_folded`, and re-verifies the receipt.
+  It never folds a cell canonical changed since the cut, a duplicated
+  component, or a pseudo-cell; those still refuse. Leaving the response in the
+  editor but out of canonical strands the captured response and makes every
+  later replay see a drifted, response-less baseline.
+- `#editorbaseunblocker`: when replay of a captured response finds its
+  baseline drifted and cannot prove benign drift, the printed unblocker leads
+  with the editor-preserving reattach (`agent-doc admin reload-lib`, or reopen
+  the tab), which re-bootstraps the authority from the editor text.
+  `reset --from-current --preserve-session` resolves "current" from the
+  authority and saves it over the editor, so it is offered only as the
+  headless fallback.
 - `exchange`, the unscoped text outside components, and the component
   structure stay strict: any difference there keeps the existing live-prompt
   handling, so a prompt or directive typed into those cells is never absorbed.

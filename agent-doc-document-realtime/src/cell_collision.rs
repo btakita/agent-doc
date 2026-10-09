@@ -289,6 +289,63 @@ pub fn decide_editor_receipt_cells(
     }
 }
 
+/// `#appliedresponsefold`: the canonical text that carries an editor receipt's
+/// owned cells which never reached canonical, keeping canonical's newer
+/// operator edits in every other cell.
+///
+/// Live 2026-10-09 (contracts.md): the editor applied an agent response through
+/// a component patch and acknowledged the full content, but its replica never
+/// published that programmatic edit, so canonical's `exchange` cell stayed at
+/// the pre-write cut while the operator kept typing in the queue. The receipt
+/// verdict was [`EditorReceiptCellVerdict::OwnedCellsPending`] until the budget
+/// ran out, the receipt was refused as divergent, and the captured response
+/// was stranded in the editor while canonical (and every later replay) lacked
+/// it.
+///
+/// Answers `Some(folded)` only when the verdict is exactly `OwnedCellsPending`
+/// (no owned cell diverged), every pending cell is a named component present
+/// exactly once in both texts, and the folded text then agrees with the
+/// receipt on every owned cell. Anything else answers `None` and the caller
+/// keeps failing closed.
+pub fn fold_pending_owned_cells_from_receipt(
+    pre_write: Option<&str>,
+    receipt: &str,
+    canonical: &str,
+    owned: &BTreeSet<String>,
+) -> Option<String> {
+    let EditorReceiptCellVerdict::OwnedCellsPending { pending_cells } =
+        decide_editor_receipt_cells(pre_write, receipt, canonical, owned)
+    else {
+        return None;
+    };
+    let receipt_components = agent_doc_element::element::parse(receipt).ok()?;
+    let mut folded = canonical.to_string();
+    for label in &pending_cells {
+        // Occurrence labels (`queue#2`) and pseudo-cells are not folded.
+        if label.contains('#') || label.starts_with('@') {
+            return None;
+        }
+        let mut in_receipt = receipt_components.iter().filter(|c| &c.name == label);
+        let receipt_cell = in_receipt.next()?;
+        if in_receipt.next().is_some() {
+            return None;
+        }
+        let canonical_components = agent_doc_element::element::parse(&folded).ok()?;
+        let mut in_canonical = canonical_components.iter().filter(|c| &c.name == label);
+        let canonical_cell = in_canonical.next()?;
+        if in_canonical.next().is_some() {
+            return None;
+        }
+        folded = canonical_cell.replace_content(&folded, receipt_cell.content(receipt));
+    }
+    match decide_editor_receipt_cells(pre_write, receipt, &folded, owned) {
+        EditorReceiptCellVerdict::Exact | EditorReceiptCellVerdict::OwnedCellsConverged { .. } => {
+            Some(folded)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,5 +491,75 @@ mod tests {
         let base = doc(PROMPT, "- do #a\n", "");
         let ours = doc(REPLY, "- do #a\n", "");
         assert_eq!(owned_cell_names(&base, &ours), Some(owned(&["exchange"])));
+    }
+
+    /// `#appliedresponsefold`: the editor applied the response, canonical never
+    /// got it, and the operator typed in the queue meanwhile. The fold carries
+    /// the response into canonical and keeps the operator's queue text.
+    #[test]
+    fn pending_owned_response_folds_into_canonical_keeping_operator_cells() {
+        let pre = doc(PROMPT, "- do #a\n", "- [ ] [#a] a\n");
+        let receipt = doc(REPLY, "- do #a\n", "- [ ] [#a] a\n");
+        let canonical = doc(PROMPT, "- do #a\n- #b typed later\n", "- [ ] [#a] a\n");
+        let folded = fold_pending_owned_cells_from_receipt(
+            Some(&pre),
+            &receipt,
+            &canonical,
+            &owned(&["exchange"]),
+        )
+        .expect("a pending owned cell must fold");
+        assert_eq!(
+            folded,
+            doc(REPLY, "- do #a\n- #b typed later\n", "- [ ] [#a] a\n")
+        );
+    }
+
+    /// An operator edit in the owned cell itself is a real overlap: no fold.
+    #[test]
+    fn diverged_owned_cell_never_folds() {
+        let pre = doc(PROMPT, "", "");
+        let receipt = doc(REPLY, "", "");
+        let canonical = doc(&format!("{PROMPT}❯ operator typed here\n"), "", "");
+        assert_eq!(
+            fold_pending_owned_cells_from_receipt(
+                Some(&pre),
+                &receipt,
+                &canonical,
+                &owned(&["exchange"])
+            ),
+            None
+        );
+    }
+
+    /// Without a pre-write cut nothing can be called pending: no fold.
+    #[test]
+    fn fold_requires_a_pre_write_cut() {
+        let receipt = doc(REPLY, "", "");
+        let canonical = doc(PROMPT, "", "");
+        assert_eq!(
+            fold_pending_owned_cells_from_receipt(
+                None,
+                &receipt,
+                &canonical,
+                &owned(&["exchange"])
+            ),
+            None
+        );
+    }
+
+    /// Already converged: nothing to fold.
+    #[test]
+    fn converged_receipt_does_not_fold() {
+        let pre = doc(PROMPT, "", "");
+        let receipt = doc(REPLY, "", "");
+        assert_eq!(
+            fold_pending_owned_cells_from_receipt(
+                Some(&pre),
+                &receipt,
+                &receipt,
+                &owned(&["exchange"])
+            ),
+            None
+        );
     }
 }

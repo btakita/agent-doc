@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CrdtLocalEditorSpliceTest {
@@ -268,5 +269,133 @@ class CrdtLocalEditorSpliceTest {
         assertEquals("\uD83D\uDE00", splice.oldFragment)
         assertEquals("\uD83D\uDE01", splice.newFragment)
         assertNull(singleSpliceCapturedEditUtil("same", "same", 0))
+    }
+
+    // ---- `#splicebaselength` / `#agentpatchlineage` (live 2026-10-09, contracts.md) ----
+
+    private val lineageShadow =
+        "<!-- agent:exchange -->\n> cancel the rebase\n<!-- /agent:exchange -->\n" +
+            "<!-- agent:queue -->\n- #a\n<!-- /agent:queue -->\n" +
+            "<!-- agent:backlog -->\n- [/] [#open] #129 at 3800641 then stacked\n<!-- /agent:backlog -->\n"
+    private val response = "### Re: cancel\n\nCancelled. Nothing was pushed.\n"
+
+    private fun agentPatched(): String {
+        val at = lineageShadow.indexOf("<!-- /agent:exchange -->")
+        return lineageShadow.substring(0, at) + response + lineageShadow.substring(at)
+    }
+
+    private fun lineageOf(text: String, patchId: String = "65bde203") =
+        AgentMutationLineage(patchId, agentLineageTextHashUtil(text), text.length)
+
+    private fun queueInsert(base: String, patchId: String? = "65bde203"): CapturedLocalEditorEdit {
+        val at = base.indexOf("<!-- /agent:queue -->")
+        return CapturedLocalEditorEdit(
+            offsetUtf16 = at,
+            oldFragment = "",
+            newFragment = "- #rebase-conflicts pull/123\n",
+            projectionEpoch = 9,
+            beforeLengthUtf16 = base.length,
+            agentLineage = patchId,
+        )
+    }
+
+    @Test
+    fun `pure insert typed into a longer document never replays at shifted offsets`() {
+        val visibleBase = agentPatched()
+        val edit = queueInsert(visibleBase)
+        // Without the length the replay passes and lands inside the backlog:
+        val legacy = edit.copy(beforeLengthUtf16 = -1)
+        val shifted = prepareLocalEditorEditsUtil(lineageShadow, listOf(legacy))
+        assertNotNull("legacy splices without a base length still replay by offset", shifted)
+        assertFalse(
+            "the live corruption: the queue line lands outside agent:queue",
+            shifted!!.resultingText.contains("- #a\n- #rebase-conflicts"),
+        )
+        // With the captured pre-edit length the replay is refused.
+        assertTrue(localEditorSpliceBaseLengthMismatchUtil(lineageShadow, listOf(edit)))
+        assertNull(prepareLocalEditorEditsUtil(lineageShadow, listOf(edit)))
+    }
+
+    @Test
+    fun `operator splice is rebased past the unreplicated agent patch it was typed after`() {
+        val patched = agentPatched()
+        val edit = queueInsert(patched)
+        val visible = prepareLocalEditorEditsUtil(patched, listOf(edit))!!.resultingText
+
+        val batch =
+            rebaseOperatorEditsPastAgentPatchUtil(lineageShadow, visible, listOf(edit), lineageOf(patched))
+
+        assertNotNull(batch)
+        // Only the operator's splice reaches the replica, in the queue, and the
+        // agent response is NOT inserted (the controller folds it), so nothing
+        // can be duplicated.
+        assertEquals(
+            lineageShadow.replace("- #a\n", "- #a\n- #rebase-conflicts pull/123\n"),
+            batch!!.resultingText,
+        )
+        assertFalse(batch.resultingText.contains("Cancelled."))
+        assertEquals(1, batch.edits.size)
+    }
+
+    @Test
+    fun `a second burst rebases against the advanced lineage cut`() {
+        val patched = agentPatched()
+        val first = queueInsert(patched)
+        val visible1 = prepareLocalEditorEditsUtil(patched, listOf(first))!!.resultingText
+        val shadow1 =
+            rebaseOperatorEditsPastAgentPatchUtil(lineageShadow, visible1, listOf(first), lineageOf(patched))!!
+                .resultingText
+        val colonAt = visible1.indexOf("- #rebase-conflicts") + "- #rebase-conflicts".length
+        val second = CapturedLocalEditorEdit(colonAt, "", ":", 9, visible1.length, "65bde203")
+        val visible2 = prepareLocalEditorEditsUtil(visible1, listOf(second))!!.resultingText
+
+        val batch =
+            rebaseOperatorEditsPastAgentPatchUtil(shadow1, visible2, listOf(second), lineageOf(visible1))
+
+        assertEquals(
+            lineageShadow.replace("- #a\n", "- #a\n- #rebase-conflicts: pull/123\n"),
+            batch!!.resultingText,
+        )
+    }
+
+    @Test
+    fun `splices without a proven agent lineage are held, not rebased`() {
+        val patched = agentPatched()
+        val edit = queueInsert(patched)
+        val visible = prepareLocalEditorEditsUtil(patched, listOf(edit))!!.resultingText
+        // No lineage recorded (an unidentified agent mutation cleared it).
+        assertNull(rebaseOperatorEditsPastAgentPatchUtil(lineageShadow, visible, listOf(edit), null))
+        // A splice typed under a different patch lineage.
+        assertNull(
+            rebaseOperatorEditsPastAgentPatchUtil(
+                lineageShadow,
+                visible,
+                listOf(edit.copy(agentLineage = "other-patch")),
+                lineageOf(patched),
+            ),
+        )
+        // The recorded post-patch text does not match the reconstructed base.
+        assertNull(
+            rebaseOperatorEditsPastAgentPatchUtil(lineageShadow, visible, listOf(edit), lineageOf(patched + "x")),
+        )
+    }
+
+    @Test
+    fun `an operator edit inside the agent patch cannot be rebased`() {
+        val patched = agentPatched()
+        val at = patched.indexOf("Nothing")
+        val edit = CapturedLocalEditorEdit(at, "Nothing", "Something", 9, patched.length, "65bde203")
+        val visible = prepareLocalEditorEditsUtil(patched, listOf(edit))!!.resultingText
+        assertNull(rebaseOperatorEditsPastAgentPatchUtil(lineageShadow, visible, listOf(edit), lineageOf(patched)))
+    }
+
+    @Test
+    fun `an edit before the agent patch keeps its offset`() {
+        val patched = agentPatched()
+        val at = patched.indexOf("cancel the rebase")
+        val edit = CapturedLocalEditorEdit(at, "", "please ", 9, patched.length, "65bde203")
+        val visible = prepareLocalEditorEditsUtil(patched, listOf(edit))!!.resultingText
+        val batch = rebaseOperatorEditsPastAgentPatchUtil(lineageShadow, visible, listOf(edit), lineageOf(patched))
+        assertEquals(lineageShadow.replace("> cancel", "> please cancel"), batch!!.resultingText)
     }
 }

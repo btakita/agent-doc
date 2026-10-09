@@ -348,7 +348,10 @@ class TypingTrackerEdtBudgetTest {
 
         assertTrue(
             "agent-doc IPC patch writes should not set the unsynced-local-operator flag",
-            componentApplyBody.contains("CrdtReplicaManager.withAgentAppliedEditorMutation(patch.file)") &&
+            componentApplyBody.contains("CrdtReplicaManager.withAgentAppliedEditorMutation(") &&
+                // `#agentpatchlineage`: the patch identity travels with the mutation.
+                componentApplyBody.contains("patchId = patch.patchId") &&
+                componentApplyBody.contains("postText = result") &&
                 componentApplyBody.contains("applyMinimalDocumentEditUtil(document, content, result)"),
         )
         assertTrue(

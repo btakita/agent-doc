@@ -3307,6 +3307,66 @@ pub fn adopt_verified_editor_receipt_by_cells_within(
     }
 }
 
+/// `#appliedresponsefold`: the editor acknowledged applying an agent patch (a
+/// content-bearing receipt), but programmatic editor mutations do not publish
+/// operator deltas, so when the editor replica also failed to re-register the
+/// patch never reached canonical (live 2026-10-09, contracts.md: the response
+/// stayed in the editor while canonical, and every later replay, lacked it).
+///
+/// Called after [`adopt_verified_editor_receipt_by_cells_within`] refused. When
+/// every differing owned cell in canonical still equals the pre-write cut (the
+/// receipt is "pending", no owned cell diverged), the receipt is this
+/// controller's own patch landing, identified by `patch_id`: fold exactly those
+/// owned cells into canonical through the compare-and-swap boundary, keeping
+/// canonical's newer operator cells, then re-verify within `wait`. Answers
+/// `Ok(None)` (the caller keeps refusing) when the cells cannot be proven
+/// pending; never touches a cell canonical changed since the cut.
+pub fn fold_pending_owned_cells_into_canonical(
+    file: &Path,
+    patch_id: &str,
+    receipt: &str,
+    source: &str,
+    scope: Option<&EditorReceiptCellScope>,
+    wait: std::time::Duration,
+) -> Result<Option<String>> {
+    let Some(scope) = scope else {
+        return Ok(None);
+    };
+    let canonical = try_resolve_current_document_content(file, source)?;
+    let Some(target) =
+        agent_doc_document_realtime::cell_collision::fold_pending_owned_cells_from_receipt(
+            scope.pre_write.as_deref(),
+            receipt,
+            &canonical,
+            &scope.owned_cells,
+        )
+    else {
+        return Ok(None);
+    };
+    if apply_cp_write_through_relay_authority(file, &canonical, &target, source)?.is_none() {
+        return Ok(None);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_visible_write_pending_owned_cells_folded file={} patch_id={} source={} owned_cells={} canonical_hash={} target_hash={} (#appliedresponsefold)",
+            file.display(),
+            patch_id,
+            source,
+            scope
+                .owned_cells
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(","),
+            agent_doc_hash::content_hash(&canonical),
+            agent_doc_hash::content_hash(&target),
+        ),
+    );
+    adopt_verified_editor_receipt_by_cells_within(file, receipt, source, Some(scope), wait, wait)
+        .map(Some)
+}
+
 /// Park until the canonical delivery revision moves past `version`, returning
 /// whether it did. Follows the hub subscription when the relay is embedded and
 /// the controller's document delivery-wake subscription otherwise, the same two
@@ -15853,6 +15913,109 @@ mod tests {
         assert_eq!(
             adopted.expect("a pending owned cell must not be refused at the ordinary budget"),
             landed
+        );
+    }
+
+    /// `#appliedresponsefold` (live 2026-10-09, contracts.md): the editor applied
+    /// the response and acknowledged it, the patch never reached canonical, and
+    /// the operator kept typing in the queue. After the pending budget the
+    /// receipt is refused; the fold then carries the response into canonical
+    /// exactly once and keeps the operator's newer queue text.
+    #[test]
+    fn pending_owned_response_is_folded_into_canonical_after_the_budget() {
+        let pre = cell_doc("prompt\n", "- do #a\n");
+        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "- do #a\n");
+        let (_dir, file, _canonical) = temp_doc(&pre);
+        let identity = "test-editor-receipt-pending-owned-fold";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let operator = pre.replace("- do #a\n", "- do #a\n- #b typed later\n");
+        apply_cp_write_through_relay_authority(&file, &pre, &operator, "operator_queue_typing")
+            .unwrap();
+        let scope = exchange_scope(&pre);
+
+        let err = adopt_verified_editor_receipt_by_cells_within(
+            &file,
+            &receipt,
+            "appliedresponsefold_receipt",
+            Some(&scope),
+            std::time::Duration::from_millis(100),
+            std::time::Duration::from_millis(200),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("pending_owned_cells=exchange"),
+            "{err:#}"
+        );
+
+        let folded = fold_pending_owned_cells_into_canonical(
+            &file,
+            "patch-1",
+            &receipt,
+            "appliedresponsefold_receipt",
+            Some(&scope),
+            std::time::Duration::from_millis(500),
+        )
+        .unwrap()
+        .expect("a pending owned response must fold into canonical");
+        let expected = receipt.replace("- do #a\n", "- do #a\n- #b typed later\n");
+        assert_eq!(folded, expected);
+        assert_eq!(
+            try_resolve_current_document_content(&file, "appliedresponsefold_check").unwrap(),
+            expected
+        );
+        assert_eq!(folded.matches("### Re: answer").count(), 1);
+
+        // Idempotent: a second fold finds nothing pending and changes nothing.
+        assert_eq!(
+            fold_pending_owned_cells_into_canonical(
+                &file,
+                "patch-1",
+                &receipt,
+                "appliedresponsefold_receipt",
+                Some(&scope),
+                std::time::Duration::from_millis(100),
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            try_resolve_current_document_content(&file, "appliedresponsefold_check").unwrap(),
+            expected
+        );
+    }
+
+    /// An operator edit in the owned cell itself is a genuine overlap: no fold.
+    #[test]
+    fn diverged_owned_cell_is_never_folded() {
+        let pre = cell_doc("prompt\n", "");
+        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "");
+        let canonical = cell_doc("prompt\n❯ operator typed at the tail\n", "");
+        let (_dir, file, _canonical) = temp_doc(&pre);
+        let identity = "test-editor-receipt-diverged-no-fold";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        apply_cp_write_through_relay_authority(&file, &pre, &canonical, "operator_overlap")
+            .unwrap();
+        assert_eq!(
+            fold_pending_owned_cells_into_canonical(
+                &file,
+                "patch-2",
+                &receipt,
+                "appliedresponsefold_overlap",
+                Some(&exchange_scope(&pre)),
+                std::time::Duration::from_millis(100),
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            try_resolve_current_document_content(&file, "appliedresponsefold_check").unwrap(),
+            canonical
         );
     }
 

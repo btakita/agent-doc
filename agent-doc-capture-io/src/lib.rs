@@ -1014,8 +1014,16 @@ pub fn validate_replay_with_current_content(
         return Ok(());
     }
 
+    // `#editorbaseunblocker`: the authority, not the editor, is the suspect copy
+    // here (live 2026-10-09, contracts.md: the authority had lost an applied
+    // response and carried an operator line spliced into the wrong component,
+    // while the editor showed the correct text). `reset --from-current` resolves
+    // "current" from that authority and asks the editor to save it, so it must
+    // never be the first recommendation while an editor is attached. Lead with
+    // the reattach that re-bootstraps the authority from the editor text; keep
+    // the reset only as the headless fallback.
     anyhow::bail!(
-        "captured response baseline no longer matches current document for {}. Rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session {}`",
+        "captured response baseline no longer matches current document for {}. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session {}`",
         file.display(),
         file.display()
     );
@@ -1952,6 +1960,15 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("agent-doc reset --from-current --preserve-session")
+        );
+        // `#editorbaseunblocker`: the first exact command is the editor-preserving
+        // reattach, never the reset that pushes the authority onto the editor.
+        assert_eq!(
+            agent_doc_turn::closeout_recovery::short_recovery_command_from_recommendation(
+                &err.to_string()
+            )
+            .as_deref(),
+            Some("agent-doc admin reload-lib")
         );
     }
 

@@ -142,6 +142,10 @@ pub struct ControllerEditorRouteInvocation {
     /// preserve the operator's current tmux client/window/pane focus. It may not
     /// rescue a stash pane, select an alternate pane, or auto-start a new pane.
     pub background_existing_pane_only: bool,
+    /// `#routelaterescue`: the controller already projected and observed this
+    /// route's layout, so the layout plane owns tmux topology for the rest of
+    /// the route. Route must not raw-join a stashed pane back into view.
+    pub layout_owned_by_controller: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

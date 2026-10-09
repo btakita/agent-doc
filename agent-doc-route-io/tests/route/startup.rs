@@ -3754,6 +3754,90 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
         assert!(iso.pane_alive(&stashed));
     }
+    /// `#routelaterescue` (2026-10-09 three-pane window): a controller
+    /// `editor_route` converged a two-column layout, then -- during the route's
+    /// ready wait -- another project root's controller published a newer layout
+    /// that stashed the routed pane. The route's late stash rescue raw-joined it
+    /// back as a THIRD column that no publisher asked for and no projection
+    /// reconciled. Under a controller-owned layout the rescue must leave the
+    /// pane in stash and the two-pane window untouched.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn controller_owned_layout_route_does_not_rejoin_pane_stashed_by_newer_publication() {
+        use agent_doc_route_io::invocation::LayoutOwnedByControllerGuard;
+        use agent_doc_route_io::pane_resolution::rescue_from_stash;
+
+        let iso = IsolatedTmux::new("route-test-controller-layout-late-rescue");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("contracts.md");
+        std::fs::write(&file, "# contracts\n").unwrap();
+
+        // Two visible editor columns: the other root's document + api.md.
+        let left = iso.auto_start(session, &cwd).unwrap();
+        let _ = iso
+            .cmd()
+            .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
+            .status();
+        let right = iso.auto_start(session, &cwd).unwrap();
+        agent_doc_tmux_io::join_pane_guarded(&iso, &right, &left, session, "-dh").unwrap();
+
+        // The routed document's pane was stashed by the newer publication.
+        let routed = iso.auto_start(session, &cwd).unwrap();
+        iso.stash_pane(&routed, session).unwrap();
+        let agent_doc_window = format!("{}:agent-doc", session);
+        let visible_before = iso.list_window_panes(&agent_doc_window).unwrap();
+        let stash_before = iso.pane_window(&routed).unwrap();
+        assert_eq!(
+            visible_before.len(),
+            2,
+            "fixture models a converged two-pane layout"
+        );
+
+        let rescued = {
+            let _guard = LayoutOwnedByControllerGuard::set(true);
+            rescue_from_stash(
+                &iso,
+                &routed,
+                "contracts-session",
+                file.to_str().unwrap(),
+                session,
+                false,
+            )
+        };
+
+        assert!(
+            !rescued,
+            "controller-owned layout route must not raw-join its stashed pane"
+        );
+        assert_eq!(
+            iso.list_window_panes(&agent_doc_window).unwrap(),
+            visible_before,
+            "the converged two-pane window must not grow a third column"
+        );
+        assert_eq!(iso.pane_window(&routed).unwrap(), stash_before);
+        assert!(
+            iso.pane_alive(&routed),
+            "the routed pane stays alive in stash"
+        );
+
+        // Control: outside a controller-owned layout the standalone route keeps
+        // its legacy rescue, so the guard is what prevented the join above.
+        let rescued_standalone = rescue_from_stash(
+            &iso,
+            &routed,
+            "contracts-session",
+            file.to_str().unwrap(),
+            session,
+            false,
+        );
+        assert!(
+            rescued_standalone,
+            "standalone route still rescues from stash"
+        );
+        assert_eq!(iso.list_window_panes(&agent_doc_window).unwrap().len(), 3);
+    }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn join_pane_rescue_places_left_of_target_when_requested() {

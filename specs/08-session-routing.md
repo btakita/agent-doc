@@ -288,6 +288,20 @@ carry pane-local process identity. This keeps an automatic cross-document
 closeout/queue continuation from additively rejoining a hidden target after a
 two-pane editor projection has already converged.
 
+**Controller-owned layout boundary (`#routelaterescue`):** A controller
+`editor_route` projects and observes the route's layout BEFORE it runs the
+route's dispatch. From that point the layout plane is the only tmux topology
+writer for the route. If the routed document's pane is back in a stash window
+when the route reaches dispatch (after its ready wait), a NEWER layout
+publication stashed it — for example another project root's controller that
+shares the same `agent-doc` window in a cross-root layout, which the route's
+own layout lease cannot hold back. Route must then dispatch to the pane in
+place and log `route_stash_rescue_skipped ... reason=controller_layout_owns_topology`;
+it must never raw-`join-pane` the pane back, because that adds a column no
+publisher requested, no `pane_layout_projection` records, and no projection
+ever reconciles (observed 2026-10-09: a converged two-pane window grew a
+silent third column). Standalone CLI routes keep the legacy stash rescue.
+
 Claude artifact and IDE-context UI must be distinguished by stable shape rather than session-owned text. A bare `⧉ <label>` attachment line and a leading `[⧉ ...]` chip inside Claude Code's `❯` composer are chrome; labels and paths are arbitrary. Composer projection removes the inline chip before deciding whether the remaining body is empty, a faint placeholder, or real operator text. It accepts both ASCII whitespace and Claude's U+00A0 after `❯`, while preserving any text after the chip as a protected draft. The active artifact picker is blocked only when `Enter to open` and a `claude.ai/code/artifact/...` URL are both visible.
 
 **Owned ready/busy conflict:** When a managed owned pane reaches an internally ready state (`actor=ready`, supervisor runtime actor ready, controller lease ready) but the pane probe still reports `alive-busy` / `prompt_ready=false` from a recoverable stale queued-draft cue, route-owned completion and supervisor idle-queue dispatch must treat that as a bounded ready/busy conflict rather than an unbounded keep-alive. After the same four-poll debounce used by stale-busy idle repair, they emit `owned_pane_ready_busy_conflict` and continue route-owned reap/liveness or queue dispatch as appropriate. Active turn cues, permission prompts, hook-review prompts, shell-search prompts, help screens, and clean-exit prompts remain hard blockers. `agent-doc session status` prints this conflict with a bounded reconcile/clear hint so the operator does not have to infer it from raw ready/busy fields.
@@ -523,7 +537,7 @@ When the user navigates to a document in the editor:
 3. **File resolution** — `resolve_file()` reads frontmatter. Files with `agent_doc_session` → `FileResolution::Registered`. Non-`.md` files or files with content but no frontmatter → `Unmanaged`. For mixed-root editor layouts, resolution and later registry write-back must canonicalize each file path and consult the nearest `.agent-doc` ancestor for that file, not the caller's current working directory, so sibling repos in the same IDE window cannot borrow or overwrite each other's pane bindings.
 4. **Reconciliation** — `tmux_router::sync` matches the declared layout to tmux panes:
    - Pane exists for this session → **focus it** (Binding found)
-   - Pane in stash → **rescue it** (join-pane it back to the agent-doc window without evicting a visible pane)
+   - Pane in stash → **rescue it** (join-pane it back to the agent-doc window without evicting a visible pane). A route that runs inside a controller `editor_route` after its layout converged never performs this rescue (`#routelaterescue`); the layout projection owns topology there.
    - No pane exists → trigger **Provisioning**
 5. **Provisioning** — `route::provision_pane()` creates a new tmux pane:
 - Serializes concurrent provisioning with per-document and per-session startup flocks before choosing the split target

@@ -27,6 +27,13 @@ thread_local! {
     /// focus. This is the automatic child-route counterpart to controller
     /// background recovery.
     static CROSS_DOCUMENT_EXISTING_PANE_ONLY: Cell<bool> = const { Cell::new(false) };
+    /// `#routelaterescue`: the controller `editor_route` has already projected
+    /// and observed this route's layout before dispatch. From then on the
+    /// layout plane is the sole tmux topology writer: a pane found in stash at
+    /// dispatch time was stashed by a NEWER publication (possibly another
+    /// project root's controller sharing the window), so route must dispatch
+    /// to it in place instead of raw-joining it back as an extra column.
+    static LAYOUT_OWNED_BY_CONTROLLER: Cell<bool> = const { Cell::new(false) };
 /// Layout reconciliation owns the final visible pane and focus projection.
 ///
 /// Pane provisioning performed inside that transaction must remain
@@ -91,6 +98,12 @@ pub fn cross_document_existing_pane_only() -> bool {
 /// Whether this route must preserve the caller's visible tmux surface.
 pub fn preserve_route_layout() -> bool {
     background_existing_pane_only() || cross_document_existing_pane_only()
+}
+
+/// Whether the controller layout projection owns tmux topology for this route
+/// (`#routelaterescue`). See [`LayoutOwnedByControllerGuard`].
+pub fn layout_owned_by_controller() -> bool {
+    LAYOUT_OWNED_BY_CONTROLLER.with(Cell::get)
 }
 
 pub fn defer_startup_focus_to_layout() -> bool {
@@ -174,6 +187,25 @@ fn automatic_cross_document_route(
     foreign_owner: Option<&str>,
 ) -> bool {
     !has_layout_columns && !explicit_background_route && foreign_owner.is_some()
+}
+
+/// Scopes [`layout_owned_by_controller`] to one controller `editor_route`
+/// invocation and restores the previous value on drop.
+pub struct LayoutOwnedByControllerGuard {
+    previous: bool,
+}
+
+impl LayoutOwnedByControllerGuard {
+    pub fn set(value: bool) -> Self {
+        let previous = LAYOUT_OWNED_BY_CONTROLLER.with(|cell| cell.replace(value));
+        Self { previous }
+    }
+}
+
+impl Drop for LayoutOwnedByControllerGuard {
+    fn drop(&mut self) {
+        LAYOUT_OWNED_BY_CONTROLLER.with(|cell| cell.set(self.previous));
+    }
 }
 
 pub struct DeferStartupFocusToLayoutGuard {
@@ -377,5 +409,29 @@ mod tests {
             Some("other.md")
         ));
         assert!(!automatic_cross_document_route(false, false, None));
+    }
+
+    /// `#routelaterescue`: the controller-owned layout scope is per invocation
+    /// and restores on drop, and it does not widen into the background /
+    /// cross-document `preserve_route_layout` policy (an editor route may still
+    /// cold-start or focus; it only loses the raw stash rejoin).
+    #[test]
+    fn layout_owned_by_controller_guard_is_scoped_and_independent_of_preserve_layout() {
+        use super::{
+            LayoutOwnedByControllerGuard, layout_owned_by_controller, preserve_route_layout,
+        };
+
+        assert!(!layout_owned_by_controller());
+        {
+            let _outer = LayoutOwnedByControllerGuard::set(true);
+            assert!(layout_owned_by_controller());
+            assert!(!preserve_route_layout());
+            {
+                let _inner = LayoutOwnedByControllerGuard::set(false);
+                assert!(!layout_owned_by_controller());
+            }
+            assert!(layout_owned_by_controller());
+        }
+        assert!(!layout_owned_by_controller());
     }
 }

@@ -554,6 +554,12 @@ Fixed and closed GitHub issue #224. The implementation is now on `main` at `0285
 Focus escalations now retain their source desired-layout generation and rebase over newer editor splits before publication. An in-flight route also preserves a pending positive editor split when releasing its route lease, so stale escalation ordering cannot overwrite the editor's current column order.
 
 Verification passed: the focused regressions; `cargo test -p agent-doc-controller-io` (602 passed, 1 ignored); the repository-wide `make check` gate; and a clean coordinator `make install`. The issue was closed with this evidence.
+
+### Re: release + publish — gpt-6.1-sol · 2026-10-09T13:46-04:00
+
+> **Queue prompt:** release + publish
+
+**Deferred:** Release and publication remain queued behind `#jetbrainsdualrelease`. GitHub issue #224 is integrated on `main` at `028583382` and closed, but draft PR #222 still needs agent-executable dual-release plumbing before any release: distinct classic and modular JetBrains update versions, a classic `until-build="261.*"` clamp, and corresponding release-version, check, and release regression coverage. No release, version bump, installation, tag, publish, or push was performed.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

@@ -5,11 +5,11 @@ This build is the Plugin Model v2 distribution for IntelliJ Platform 2026.2
 `com.github.btakita.agent-doc` and plugin version line, with
 `since-build="262" until-build="262.*"`.
 The classic build in `../jetbrains` remains the distribution for 242 through
-261. Because this post-release feature branch is forbidden from bumping the
-classic package generation, its source and open-ended range stay byte-identical.
-Before the two alternatives are published, an authorized release must assign
-distinct update versions and clamp the classic artifact to `until-build="261.*"`
-through Marketplace metadata or its package-generation bump.
+261 and is clamped to `until-build="261.*"`. `make release-version VERSION=...`
+assigns fresh, distinct classic and modular update versions under the shared
+Marketplace plugin ID and records both source digests. Repeating the projection
+is idempotent; changed source bytes allocate a new pair above both prior update
+versions, so the two ranged artifacts cannot overwrite one another.
 
 The ZIP is one plugin, not a companion plugin. Its `lib/modules` directory
 contains `agent.doc.shared.jar`, `agent.doc.frontend.jar`, and
@@ -77,8 +77,9 @@ Every Agent Doc tag packages the modular ZIP as
 `agent-doc-jetbrains-262-<pluginVersion>.zip` alongside the compatibility-ranged
 classic ZIP and the VS Code package. The package-generation fence tracks both
 the modular build and the classic implementation sources reused by its backend.
-`make check` builds and verifies the modular ZIP and both sandboxes, while the
-tag workflow copies both JetBrains artifacts by exact versioned name. The
+`make check` builds and verifies both compatibility-ranged ZIPs plus the modular
+backend/frontend sandboxes, while the tag workflow rejects equal update versions
+and copies both JetBrains artifacts by exact versioned name. The
 generic `agent-doc plugin install jetbrains` asset resolver deliberately accepts
 only the classic numeric filename shape; it must not choose the exact-262 ZIP by
 shared prefix until it can prove the target IDE build. Marketplace/custom-repo

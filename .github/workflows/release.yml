@@ -191,13 +191,14 @@ jobs:
       - name: Build JetBrains plugin zips
         run: |
           set -euo pipefail
-          ( cd editors/jetbrains && ./gradlew --no-daemon --console=plain buildPlugin )
+          ( cd editors/jetbrains && ./gradlew --no-daemon --console=plain buildPlugin verifyClassicArtifact )
           ( cd editors/jetbrains-262 && gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes )
           mkdir -p editor-packages
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
           modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
           test -n "$classic_version"
           test -n "$modular_version"
+          test "$classic_version" != "$modular_version"
           cp "editors/jetbrains/build/distributions/agent-doc-jetbrains-$classic_version.zip" editor-packages/
           cp "editors/jetbrains-262/build/distributions/agent-doc-jetbrains-262-$modular_version.zip" editor-packages/
           ls -la editor-packages
@@ -219,6 +220,7 @@ jobs:
           set -euo pipefail
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
           modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
+          test "$classic_version" != "$modular_version"
           test -f "editor-packages/agent-doc-jetbrains-$classic_version.zip"
           test -f "editor-packages/agent-doc-jetbrains-262-$modular_version.zip"
           jetbrains=$(find editor-packages -name 'agent-doc-jetbrains-*.zip' | wc -l)

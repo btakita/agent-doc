@@ -1231,7 +1231,19 @@ mod tests {
         let replaced_before = supervisor_binary_replaced(pid);
         // `%33`: an install replaced the bytes it runs (`/proc/pid/exe … (deleted)`).
         std::fs::remove_file(&copy).unwrap();
-        let replaced_after = supervisor_binary_replaced(pid);
+        // `/proc/<pid>/exe` is an external kernel/filesystem observation. A loaded
+        // GitHub runner returned the pre-unlink projection once immediately after
+        // `remove_file`, even though the same proof is stable after propagation.
+        // Keep the assertion strict, but give that observation a bounded settle
+        // window instead of requiring it to change in the same scheduler tick.
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let replaced_after = loop {
+            let observed = supervisor_binary_replaced(pid);
+            if observed == Some(true) || std::time::Instant::now() >= deadline {
+                break observed;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
         let _ = child.kill();
         let _ = child.wait();
         assert_eq!(replaced_before, Some(false));

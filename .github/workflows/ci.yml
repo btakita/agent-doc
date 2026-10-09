@@ -74,6 +74,11 @@ jobs:
         with:
           tool: nextest
 
+      - name: Verify collision-free JetBrains release contract
+        run: |
+          python3 scripts/check_plugin_versions.py --self-test
+          python3 scripts/check_plugin_versions.py
+
       - name: Run make check
         run: make check
 

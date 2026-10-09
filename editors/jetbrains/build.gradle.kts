@@ -1,3 +1,6 @@
+import java.util.jar.JarInputStream
+import java.util.zip.ZipFile
+
 plugins {
     id("java")
     // Kotlin 2.0 (K2) to consume lazily-kt's Kotlin 2.0 metadata (#lzpkgwire).
@@ -123,13 +126,56 @@ tasks {
 
     patchPluginXml {
         sinceBuild.set("242")
-        untilBuild.set(provider { null })
+        untilBuild.set("261.*")
         changeNotes.set("""
             <ul>
                 <li>Initial release</li>
                 <li>Submit current markdown file to agent-doc via terminal hotkey</li>
             </ul>
         """.trimIndent())
+    }
+
+    register("verifyClassicArtifact") {
+        group = "verification"
+        description = "Verify that the classic ZIP is limited to pre-262 IDE builds"
+        dependsOn("buildPlugin")
+        doLast {
+            val zip = layout.buildDirectory.dir("distributions").get().asFile
+                .listFiles()
+                .orEmpty()
+                .singleOrNull {
+                    it.name == "agent-doc-jetbrains-${project.version}.zip"
+                }
+                ?: error("missing exact classic plugin distribution for ${project.version}")
+            ZipFile(zip).use { archive ->
+                val rootJar = archive.entries().asSequence()
+                    .singleOrNull {
+                        it.name.endsWith(".jar") &&
+                            it.name.substringAfterLast('/').startsWith("agent-doc-jetbrains-")
+                    }
+                    ?: error("classic distribution is missing its root plugin JAR")
+                val pluginXml = JarInputStream(archive.getInputStream(rootJar)).use { jar ->
+                    var content: String? = null
+                    while (true) {
+                        val entry = jar.nextJarEntry ?: break
+                        if (entry.name == "META-INF/plugin.xml") {
+                            content = jar.readBytes().toString(Charsets.UTF_8)
+                            break
+                        }
+                    }
+                    content ?: error("classic root plugin JAR is missing META-INF/plugin.xml")
+                }
+                check(pluginXml.contains("since-build=\"242\"")) {
+                    "classic since-build was not patched"
+                }
+                check(pluginXml.contains("until-build=\"261.*\"")) {
+                    "classic until-build must stop before the 262 modular distribution"
+                }
+                check(pluginXml.contains("<id>com.github.btakita.agent-doc</id>")) {
+                    "classic distribution changed the shared Marketplace plugin ID"
+                }
+            }
+        }
     }
 
     signPlugin {

@@ -125,7 +125,7 @@ I claimed all four new heads:
 - ⏭️ do [#jetbrains262installselect]
 - ⏭️ do [#jetbrains262distribution]
 - 🚧 do [#previewartifactprovenance]
-- 🚧 do [#ci25gradle]
+- ~~do [#ci25gradle]~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/225
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/218
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/221
@@ -138,8 +138,8 @@ I claimed all four new heads:
 - [ ] 🚧 [#waypostauthorization] Add a way to post authorization from the queue item prompt to Claude Code subagents when the `subagents` queue attribute is used.
 - [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
 - [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
-- [ ] 🚧 [#ci25gradle] [agent-doc] Fix the red CI on draft PR 222 (head c39de1b04; run 37974793628 failed in dev-harness-test, Makefile:209). PR 222 moved ci.yml/release.yml to JDK 25 with Gradle 9.2.1 for editors/jetbrains-262, but the classic editors/jetbrains/gradlew still uses the Gradle 8.14 wrapper, which fails on JDK 25 ('Unsupported class file major version 69'). Run the classic build on JDK 21, or move its wrapper to Gradle 9.1 or later while keeping source/target 21 for 242–261. Apply the same fix to release.yml's classic step; that file is shared with jetbrains262distribution, so integrate after it. Verify make check locally under JDK 25 and green CI on the new PR 222 head; earlier head 254b75e also failed at make test (Makefile:97). Afterwards rebuild the jetbrains-262 preview prerelease from the new head and re-pin the previewartifactprovenance manifest.
 - [ ] 🚧 [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
+- [ ] [#previewrepin] [agent-doc] After CI run 37988803442 is green on PR 222 head 8abda947f (from ci25gradle), rebuild the jetbrains-262 preview prerelease from that head and re-pin the previewartifactprovenance manifest (preview-artifacts/*.json plus the constants in scripts/verify_jetbrains_preview.py) to the new asset digest, size, asset id and head. Then point the gh218remoteproof review text at the new preview tag. If CI is red, fix it first.
 <!-- /agent:backlog -->
 
 ## Review

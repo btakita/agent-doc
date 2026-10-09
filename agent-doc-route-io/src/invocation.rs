@@ -48,6 +48,11 @@ static ROUTE_DEFERRAL: RefCell<Option<String>> = const { RefCell::new(None) };
 /// `#claimedsteerwake`: a route that dispatched no new trigger but handed the
 /// operator's explicit send to the owning turn reports it here (exit 0).
 static ROUTE_STEERING_DELIVERY: RefCell<Option<String>> = const { RefCell::new(None) };
+/// GH #228 (`#routeliveturnverdict`): a route that met an open closeout which
+/// session-check classified as a live owner-scoped turn dispatched nothing
+/// because that turn is already doing the work. Benign: reported with exit 0,
+/// never as the `EX_TEMPFAIL` deferral or a recovery command.
+static ROUTE_LIVE_OWNER_TURN: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// Exit code for an editor route that completed without dispatching
@@ -69,6 +74,16 @@ pub fn record_route_steering_delivery(outcome: String) {
 /// Take (and clear) the steering delivery recorded by this thread's route.
 pub fn take_route_steering_delivery() -> Option<String> {
     ROUTE_STEERING_DELIVERY.with(|cell| cell.borrow_mut().take())
+}
+
+/// Record that this route yielded to a live owner turn (GH #228).
+pub fn record_route_live_owner_turn(outcome: String) {
+    ROUTE_LIVE_OWNER_TURN.with(|cell| *cell.borrow_mut() = Some(outcome));
+}
+
+/// Take (and clear) the live-owner-turn yield recorded by this thread's route.
+pub fn take_route_live_owner_turn() -> Option<String> {
+    ROUTE_LIVE_OWNER_TURN.with(|cell| cell.borrow_mut().take())
 }
 
 /// Take (and clear) the deferral recorded by this thread's route invocation.

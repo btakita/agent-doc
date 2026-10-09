@@ -167,14 +167,75 @@ pub enum CloseoutWaitRouteOutcome {
     SteeringDelivered(String),
     /// Nothing to send: the existing queue head waits behind the closeout.
     Deferred(String),
+    /// GH #228 (`#routeliveturnverdict`): the open closeout is a live
+    /// owner-scoped turn that is already doing the work. Benign and non-error
+    /// (exit 0): no second trigger, no recovery, nothing for the operator to do.
+    OwnerTurnBusy(String),
 }
 
 impl CloseoutWaitRouteOutcome {
     pub fn message(&self) -> &str {
         match self {
-            Self::SteeringDelivered(message) | Self::Deferred(message) => message,
+            Self::SteeringDelivered(message)
+            | Self::Deferred(message)
+            | Self::OwnerTurnBusy(message) => message,
         }
     }
+
+    /// Hand this outcome to the invocation so the editor route reports it with
+    /// the right exit status (only `Deferred` is a non-zero `EX_TEMPFAIL`).
+    fn record(self, file: &Path, explicit_items: usize) {
+        match self {
+            Self::SteeringDelivered(message) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_explicit_send_delivered_to_owner_turn file={} items={explicit_items} (#claimedsteerwake)",
+                        file.display()
+                    ),
+                );
+                crate::invocation::record_route_steering_delivery(message);
+            }
+            Self::Deferred(message) => crate::invocation::record_route_deferral(message),
+            Self::OwnerTurnBusy(message) => {
+                crate::invocation::record_route_live_owner_turn(message)
+            }
+        }
+    }
+}
+
+/// GH #228 (`#routeliveturnverdict`): pure outcome for a route that met an open
+/// closeout session-check classified as a live owner-scoped turn (IN
+/// PROGRESS). It reuses that verdict verbatim, never a re-derived
+/// `open_empty_preflight` recovery, and never claims the queue head "remains
+/// queued behind the closeout": the live turn owns the queue and is working it.
+pub fn live_owner_turn_route_outcome(
+    file: &Path,
+    head: Option<&str>,
+    owner_verdict: &str,
+    explicit_items: usize,
+) -> CloseoutWaitRouteOutcome {
+    let fields = route_closeout_user_outcome_fields(None, RouteOwnerTurnEvidence::Live);
+    if explicit_items > 0 {
+        return closeout_wait_route_outcome(
+            file,
+            head.unwrap_or_default(),
+            owner_verdict,
+            &fields,
+            explicit_items,
+            RouteOwnerTurnEvidence::Live,
+        );
+    }
+    let work = match head {
+        Some(head) => format!(
+            "The live turn owns the queue; head {head:?} is in its scope and is answered or drained at that turn's boundary."
+        ),
+        None => "Its response closes out at that turn's boundary.".to_string(),
+    };
+    CloseoutWaitRouteOutcome::OwnerTurnBusy(format!(
+        "[route] a turn is already running on {}; no second trigger was sent and nothing needs recovery. {work} Do not cancel or recover it (owner: {owner_verdict}) owner_turn=live {fields}",
+        file.display(),
+    ))
 }
 
 /// Pure outcome for the `WaitForActiveQueueHead` closeout block.
@@ -311,24 +372,67 @@ pub fn route_via_authoritative_actor(
             );
         }
         RouteCloseoutDrainOutcome::Blocked { reason, context } => {
+            // GH #228 (`#routeliveturnverdict`): session-check's live-turn
+            // verdict is the one classification source. Keep it verbatim; the
+            // recovery decision below is consulted only for queue-prompt and
+            // head facts and never re-labels a live turn as a recovery.
+            let live_owner_verdict = matches!(context, RouteCloseoutBlockContext::LiveOwnerTurn)
+                .then(|| agent_doc_secret_redact::redact(&reason));
             let (decision, dispatch_decision) = classify_route_closeout_block(
                 file,
                 reason,
                 prompt_context.is_some(),
                 effects.closeout_drain_effects,
             );
-            let owner_turn =
-                if agent_doc_turn_status_io::turn_active_for_pane_for_file(file, &dispatch_pane) {
-                    RouteOwnerTurnEvidence::Live
-                } else {
-                    RouteOwnerTurnEvidence::Absent
-                };
-            let blocked_recovery_command =
+            let owner_turn = if live_owner_verdict.is_some()
+                || agent_doc_turn_status_io::turn_active_for_pane_for_file(file, &dispatch_pane)
+            {
+                RouteOwnerTurnEvidence::Live
+            } else {
+                RouteOwnerTurnEvidence::Absent
+            };
+            let blocked_recovery_command = if live_owner_verdict.is_some() {
+                None
+            } else {
                 blocked_closeout_recovery_command(&decision).or_else(|| {
                     matches!(context, RouteCloseoutBlockContext::OpenEmptyPreflight)
                         .then(|| open_empty_preflight_recovery_command(file))
                         .flatten()
-                });
+                })
+            };
+            // GH #228: without a prompt to queue, a live owner turn is a benign
+            // yield, with or without a drainable head: never the
+            // "remains queued behind the closeout" wait or a FailClosed bail.
+            if let Some(verdict) = live_owner_verdict.as_deref()
+                && !matches!(
+                    dispatch_decision,
+                    CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout
+                )
+            {
+                let head = match &dispatch_decision {
+                    CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head } => {
+                        Some(head.as_str())
+                    }
+                    _ => None,
+                };
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_drain_closeout_live_owner_turn file={} head={} owner_verdict={}",
+                        file.display(),
+                        agent_doc_secret_redact::redact(head.unwrap_or_default()),
+                        verdict
+                    ),
+                );
+                let explicit =
+                    agent_doc_session_check_io::midturn_steering::explicit_send_pending_items(file)
+                        .map(|items| items.len())
+                        .unwrap_or(0);
+                let outcome = live_owner_turn_route_outcome(file, head, verdict, explicit);
+                eprintln!("{}", outcome.message());
+                outcome.record(file, explicit);
+                return Ok(dispatch_pane);
+            }
             match dispatch_decision {
                 CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout => {
                     let Some(context) = prompt_context else {
@@ -350,6 +454,21 @@ pub fn route_via_authoritative_actor(
                             effects.queue_effects,
                         )?,
                     };
+                    if let Some(verdict) = live_owner_verdict.as_deref() {
+                        let message = format!(
+                            "[route] a turn is already running on {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) for after that turn's boundary. Nothing needs recovery (owner: {}) owner_turn=live {}",
+                            file.display(),
+                            queued.prompt_text,
+                            queued.appended,
+                            queued.already_present,
+                            queued.superseded,
+                            verdict,
+                            route_closeout_user_outcome_fields(None, owner_turn)
+                        );
+                        eprintln!("{message}");
+                        crate::invocation::record_route_live_owner_turn(message);
+                        return Ok(dispatch_pane);
+                    }
                     let deferral = format!(
                         "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) {}",
                         file.display(),
@@ -399,21 +518,7 @@ pub fn route_via_authoritative_actor(
                         owner_turn,
                     );
                     eprintln!("{}", outcome.message());
-                    match outcome {
-                        CloseoutWaitRouteOutcome::SteeringDelivered(message) => {
-                            agent_doc_ops_log_io::log_op(
-                                file,
-                                &format!(
-                                    "route_explicit_send_delivered_to_owner_turn file={} items={explicit} (#claimedsteerwake)",
-                                    file.display()
-                                ),
-                            );
-                            crate::invocation::record_route_steering_delivery(message);
-                        }
-                        CloseoutWaitRouteOutcome::Deferred(message) => {
-                            crate::invocation::record_route_deferral(message);
-                        }
-                    }
+                    outcome.record(file, explicit);
                     return Ok(dispatch_pane);
                 }
                 CloseoutBlockDispatchDecision::FailClosed => {
@@ -1585,6 +1690,69 @@ mod tests {
         assert!(message.contains("no second send is required"), "{message}");
         assert!(message.contains("ui_outcome_class=blocked"), "{message}");
         assert!(!message.contains("steering_delivered=1"), "{message}");
+    }
+
+    /// GH #228 live repro (2026-10-09): a route during a healthy live turn
+    /// surfaced `replay_safe [open_empty_preflight]` with
+    /// `recovery_command=agent-doc session cancel-turn` and claimed the head
+    /// "remains queued behind the closeout", although session-check had just
+    /// classified the same cycle IN PROGRESS and the turn went on to commit.
+    #[test]
+    fn route_during_a_live_owner_turn_reuses_the_in_progress_verdict() {
+        let file = Path::new("/tmp/doc-a.md");
+        let head = "Read <url>: implement <name>'s directive";
+        let verdict = "[session-check] IN PROGRESS: cycle `cycle-1791582081192` remains `preflight_started` (preflight_started) while owning pane `%3` has a fresh active-turn lease";
+
+        let outcome = live_owner_turn_route_outcome(file, Some(head), verdict, 0);
+        let CloseoutWaitRouteOutcome::OwnerTurnBusy(message) = &outcome else {
+            panic!("a live owner turn is a benign yield, not a deferral: {outcome:?}");
+        };
+        for forbidden in [
+            "cancel-turn",
+            "open_empty_preflight",
+            "replay_safe",
+            "remains queued behind the closeout",
+            "nothing was dispatched",
+            "blocked_with_exact_unblocker",
+            "recovery_command=",
+            "ui_outcome_class=blocked",
+        ] {
+            assert!(!message.contains(forbidden), "{forbidden}: {message}");
+        }
+        assert!(message.contains("a turn is already running"), "{message}");
+        assert!(message.contains("cycle-1791582081192"), "{message}");
+        assert!(message.contains("is in its scope"), "{message}");
+        assert!(message.contains("ui_outcome_class=ok"), "{message}");
+        assert!(message.contains("owner_turn=live"), "{message}");
+
+        // No queue head (a plain trigger): still a benign yield, not FailClosed.
+        let outcome = live_owner_turn_route_outcome(file, None, verdict, 0);
+        assert!(
+            matches!(outcome, CloseoutWaitRouteOutcome::OwnerTurnBusy(_)),
+            "{outcome:?}"
+        );
+        assert!(!outcome.message().contains("cancel-turn"), "{outcome:?}");
+
+        // Pending explicit steering still goes to the live owner (exit 0).
+        let outcome = live_owner_turn_route_outcome(file, Some(head), verdict, 1);
+        let CloseoutWaitRouteOutcome::SteeringDelivered(message) = &outcome else {
+            panic!("{outcome:?}");
+        };
+        assert!(!message.contains("cancel-turn"), "{message}");
+    }
+
+    #[test]
+    fn live_owner_turn_yield_is_recorded_as_benign_not_deferred() {
+        let file = Path::new("/tmp/doc-a.md");
+        let _ = crate::invocation::take_route_deferral();
+        let _ = crate::invocation::take_route_live_owner_turn();
+        live_owner_turn_route_outcome(file, Some("do [#a]"), "[session-check] IN PROGRESS: x", 0)
+            .record(file, 0);
+        assert!(
+            crate::invocation::take_route_deferral().is_none(),
+            "a live-turn yield must not be the exit-75 deferral"
+        );
+        assert!(crate::invocation::take_route_live_owner_turn().is_some());
     }
 
     #[test]

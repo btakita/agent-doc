@@ -3622,6 +3622,12 @@ pub enum RouteCloseoutDrainOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteCloseoutBlockContext {
     OpenEmptyPreflight,
+    /// GH #228 (`#routeliveturnverdict`): session-check classified the open
+    /// cycle as a live owner-scoped `preflight_started` turn (IN PROGRESS) and
+    /// the live-turn guards refused to cancel or repair it. The owner is busy
+    /// doing the work; this is never a recovery request, so route reports a
+    /// benign wait and never surfaces `session cancel-turn`.
+    LiveOwnerTurn,
     Other,
 }
 

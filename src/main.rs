@@ -300,6 +300,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         // GH 91: clear any deferral a previous route on this worker left behind.
         let _ = agent_doc_route_io::invocation::take_route_deferral();
         let _ = agent_doc_route_io::invocation::take_route_steering_delivery();
+        let _ = agent_doc_route_io::invocation::take_route_live_owner_turn();
         match agent_doc_route_io::invocation::run_with_force_disk_and_prune(
             &invocation.file,
             invocation.pane.as_deref(),
@@ -327,7 +328,10 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                             exit_code: 0,
                             // `#claimedsteerwake`: an explicit send delivered
                             // to the owning turn reports what it delivered.
+                            // GH #228: yielding to a live owner turn is
+                            // benign too, never an error or a recovery.
                             output: agent_doc_route_io::invocation::take_route_steering_delivery()
+                                .or_else(agent_doc_route_io::invocation::take_route_live_owner_turn)
                                 .unwrap_or_else(|| {
                                     format!(
                                         "[route] dispatched via controller editor_route for {}",

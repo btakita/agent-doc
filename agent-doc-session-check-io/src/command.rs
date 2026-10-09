@@ -117,6 +117,25 @@ impl SessionCheckStatus {
             }
         }
     }
+
+    /// GH #228 (`#routeliveturnverdict`): whether this is the
+    /// `#sessioncheckliveturn` verdict — an open `preflight_started` cycle whose
+    /// exact durable owner pane holds a fresh active-turn lease. It still fails
+    /// the terminal boundary (`is_failure`), but it is a busy owner, not
+    /// abandoned closeout evidence, so no caller may turn it into a recovery
+    /// command. This is the one classification source route reuses.
+    pub fn is_live_owner_turn_in_progress(&self) -> bool {
+        matches!(self, Self::Interrupted(message) if is_live_owner_turn_verdict(message))
+    }
+}
+
+/// GH #228: whether a closeout blocker is session-check's live owner-turn
+/// verdict, whichever surface carried it — the `SessionCheckStatus` itself, or
+/// the error a closeout repair returned after running the same check.
+pub fn is_live_owner_turn_verdict(message: &str) -> bool {
+    message
+        .trim_start()
+        .starts_with(agent_doc_workflow::session_check::SESSION_CHECK_IN_PROGRESS_PREFIX)
 }
 
 pub struct SessionCheckReport {

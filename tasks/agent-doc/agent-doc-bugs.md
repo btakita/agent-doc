@@ -392,6 +392,62 @@ Bookkeeping this cycle:
 - I re-claimed GH #218, GH #221 and the three JetBrains heads as `coordinator:pr222-integration`, and `release + publish` as `coordinator:release-after-batch`. They are all coordinator work, not new subagent work.
 - GH #218 still needs the operator's Remote Dev proof on Coder. `release + publish` waits for PR #222 to merge.
 - The contracts.md fix and the three-pane fix are still running in their own subagents.
+
+### Re: PR #222 stacked; contractsroute + three-pane fixes in main batch — opus-5.5 · 2026-10-09T19:02-04:00
+
+> **Queue prompt:**
+>
+> do [#jetbrains262installselect]
+>
+> do [#jetbrains262distribution]
+>
+> do [#previewartifactprovenance]
+
+
+**PR #222 stack (pushed):** PR #222's head moved to `34842a23a` (fast-forward from `548a24874`, no force) with three `--no-ff` merges:
+- `#previewartifactprovenance` (`3c5d5da4c`)
+- `#jetbrains262distribution` (`67250c978`)
+- `#jetbrains262installselect` (`34842a23a`)
+
+Conflicts resolved:
+- `Makefile`: unioned targets. `check` now also runs `preview-artifact-check` and `jetbrains-repository-self-test`.
+- `PLUGIN-SPEC.md`: two §10 sections; Distribution renumbered to §11.
+- `release.yml`: kept JDK 21+25 from `#ci25gradle`.
+
+The second full `make check` exited 0: 9846 tests passed, and both JetBrains builds passed. The first run hit two load-sensitive tests at load ~60; each passed when rerun alone. No plugin version bump was needed, since no plugin sources changed. CI run 38002449411 is in progress.
+
+Item outcomes:
+- `#jetbrains262installselect`: done.
+- `#previewartifactprovenance`: done.
+- `#jetbrains262distribution`: gated. The code is done, but its acceptance needs a clean two-sided 262 Remote Dev install on Coder. That's the same live proof as `#gh218remoteproof`.
+
+**contracts.md fix (`fix/contractsroute-closeout-reroute`, `ae7f7a7bf`):** your edit is now accepted in that scenario.
+- **Controller (`#appliedresponsefold`):** when the editor receipt for a socket-applied response is still pending after the wait, and the controller's copy still has the pre-write text in the response's own section, the controller folds just those sections from the receipt into its copy, as a checked write tied to `patch_id`. Your newer text in other sections is kept, and it never touches a section you edited.
+- **Plugin lineage (`#agentpatchlineage`):** every captured edit carries the document length it was typed against plus the last agent `patch_id`.
+  - An edit made against a different length is never applied by offset.
+  - When the lineage proves the only missing text is that agent patch, your ops are shifted past it.
+  - Otherwise they wait and pull until the missing text arrives.
+- **Unblocker (`#editorbaseunblocker`):** the printed recovery now leads with `agent-doc admin reload-lib` or reopening the tab, which rebuilds the controller's copy from your editor text. It warns against `reset --from-current` while the editor shows text the controller lacks.
+- **Tests:**
+  - Rust: 4 unit tests and 2 real-replica tests (fold exactly once, keeps queue text, overlapping edit never folds).
+  - Kotlin: 6 tests, including a replay of the live 769-character corruption and a no-duplication check.
+  - Results: `make test` 9826/9826, Gradle 746/0.
+- api.md's divergence is a different issue: no socket patch for it appears in either log.
+
+**Three panes (`fix/stale-third-main-pane`, `943c6041e`, `#routelaterescue`):** none of the suspected causes was the culprit. Sequence:
+1. 22:17:47Z: the haiven-dev controller published the two-column layout, with `%149`/`%161` converged.
+2. During the route's ~35s readiness wait, the agent-loop controller saw the IDE's post-restart surface churn. It published generations 32–36, ending with api.md in and `%161` stashed.
+3. 22:18:23Z: the contracts route found `%161` in stash and joined it straight back. That was logged only to stderr, with no layout publication after it, so both controllers still believe their layout converged.
+
+Fix: once a controller's editor route has projected its layout, the route dispatches to the pane where it is and never rejoins it from stash; it logs `route_stash_rescue_skipped`. Standalone CLI routes keep the old rescue. Tested with a real-tmux IsolatedTmux regression, which fails when the fix is disabled; `make check` 9820/9820.
+
+The installed fix won't clear the current window by itself. If you haven't already run `break-pane`, switch IDE tabs or run Sync Tmux Layout once. Stashing doesn't kill the pane.
+
+Two follow-ups come out of this:
+- the two controllers can still disagree about which document holds the second column;
+- the idle pane's stale `harness_turn_live=true` flag.
+
+**Main batch now:** `integrate/mainbatch2-20261009` is origin/main (`b4681a617`, with `#fixruninfra`) plus both branches above. It also carries a classic plugin bump to **0.2.512**: the PR #222 line already uses 0.2.510 (classic) and 0.2.511 (262), so reusing either number would make IntelliJ treat the new plugin as already installed. The single authoritative `make check` is running. Then I push to main, run one `make install` (which reinstalls the editor plugins), and close the contracts.md queue item.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -403,9 +459,9 @@ Bookkeeping this cycle:
 - ~~do [#fixruninfra]~~
 - ~~do [#readyanotherpreview]~~
 - ~~do [#waypostauthorization]~~
-- 🚧 do [#jetbrains262installselect]
-- 🚧 do [#jetbrains262distribution]
-- 🚧 do [#previewartifactprovenance]
+- ~~do [#jetbrains262installselect]~~
+- ~~do [#jetbrains262distribution]~~
+- ~~do [#previewartifactprovenance]~~
 - ~~do [#ci25gradle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/225~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/218
@@ -418,15 +474,13 @@ Bookkeeping this cycle:
 
 <!-- agent:backlog priority -->
 - [ ] [#jb262dynupgrade] [agent-doc] Restart-free upgrade for the exact-262 modular JetBrains plugin: the 262 ZIP has no dynamic-upgrade launcher entry point, so updating a running 262 IDE falls back to file replacement + restart with a misleading 'predates restart-free dynamic upgrade support' warning; and the running-IDE jar probes (src/plugin.rs ~1366, plugin_activation.rs) only match agent-doc-jetbrains-*.jar, missing the 262 agent.doc-<v>.jar. Add a 262 entry point (or an accurate warning) and teach the probes the 262 jar name, with tests. Found by jetbrains262installselect (d82196a3f).
-- [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
-- [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
-- [ ] 🚧 [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
 - [ ] [#previewrepin] [agent-doc] CI run 37988803442 on PR 222 head 8abda947f FAILED: :backend:compileKotlin in make jetbrains-262-check could not resolve io.github.lazily:lazily:0.39.0, because editors/jetbrains-262/settings.gradle.kts only uses mavenLocal+mavenCentral while classic uses the guarded lazily-kt composite / GitHub Packages. A fix subagent (branch fix/pr222-ci-lazily) is landing that on the PR 222 head branch. After CI is green on the new head, rebuild the jetbrains-262 preview prerelease from it and re-pin the previewartifactprovenance manifest (preview-artifacts/*.json plus the constants in scripts/verify_jetbrains_preview.py) to the new asset digest, size, asset id and head. Then point the gh218remoteproof review text at the new preview tag.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
 - [/] [#releasepublishgate] [operator-verify] Authorize release + publish only after: (1) CI is green for the final PR 222 head after ci25gradle (run 37974793628 on c39de1b04 failed); (2) gh218remoteproof is resolved; (3) PR 222 is marked ready and merged and GH 221 is closed, resolving gh221mergeclose; and (4) repository secret HOMEBREW_TAP_TOKEN is provisioned (gh secret list on btakita/agent-doc showed nothing on 2026-10-09, possibly because the token lacks secret visibility). Only then perform the authorized release + publish and verify delivery.
 - [/] [#gh221mergeclose] [operator-verify] GH 221: keep open until draft PR 222 has green CI on its post-ci25gradle head (run 37974793628 on c39de1b04 failed) and merges. The shared/frontend/backend split is code-complete and available as prerelease jetbrains-262-preview-c39de1b; GH 218 separately retains the real IDEA 2026.2.3 Remote Dev acceptance gate. After 222 merges, close 221 as fixed by 222.
 - [/] [#gh218remoteproof] [operator-verify] GH 218 / draft PR 222: CI run 37974793628 on head c39de1b04 FAILED (classic gradlew 8.14 on JDK 25; see ci25gradle). After ci25gradle lands, require green CI on the new PR 222 head. Then require a real IDEA 2026.2.3 (262) Remote Dev proof using a preview prerelease rebuilt from that head, with the same agent-doc-jetbrains-262 ZIP installed on backend and Client/Gateway: detached-only isolated terminal; same-document main-wins read-only placeholder and byte-identical main; focus/sync/resize causes no main mutation; close/rejoin; backend restart/client reconnect before the first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Only then mark the PR ready, merge, and close 218.

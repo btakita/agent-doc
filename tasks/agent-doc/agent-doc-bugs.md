@@ -578,6 +578,7 @@ I am dispatching this as `#starttools` to an isolated subagent. The worker will 
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/223~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/224~~
+- do [#starttools]
 - do [#jetbrainsdualrelease]
 - release + publish
 <!-- /agent:queue -->

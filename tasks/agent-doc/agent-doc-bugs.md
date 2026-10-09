@@ -82,6 +82,20 @@ The read-only review subagent re-checked the gated items against live state. **C
 **Unchanged and still blocked:** `#pypiquotarecheck` (support#12214 has had no reply since 2026-09-10), `#grokmcpverify` (grok is still signed out), `#drivecapturedsplice` (needs a live editor and owner pane), and `#qsubattr5` (waiting for a real operator-created multi-head batch).
 
 The three JetBrains subagents' work is still to be merged. `#previewartifactprovenance` is done and pushed as `44281dda2`, and the other two are still running.
+
+### Re: subagent authorization head dispatched — opus-5.5 · 2026-10-09T16:13-04:00
+
+I claimed the new queue head `#waypostauthorization` and dispatched it to a background subagent in its own worktree: `~/worktrees/agent-doc-subagentauth-20261009`, branch `feat/subagent-queue-authorization`. Its spec is a binary-owned authorization brief on each `queue_subagent_dispatch` entry, containing:
+- the item text verbatim
+- the resolved backlog text for `do [#id]` heads
+- the queue `preset=` name and its expanded body
+- a ready-to-paste `subagent_prompt_preamble` that scopes the authorization to that item and restates the coordinator rules (own worktree, no `make install`/release, no session-document edits).
+
+A missing preset fails closed, with no invented authorization. An optional `agent-doc queue brief` command is in scope. The skill/runbook text and the spec will also tell coordinators to paste the preamble verbatim.
+
+This cycle had to write that authorization into the subagent prompt by hand, which is exactly the gap the item names.
+
+The JetBrains heads are still in flight. `#previewartifactprovenance` is done and pushed as `44281dda2`; `#jetbrains262installselect` and `#jetbrains262distribution` are still running their checks. All four branches will be merged in one batch with one `make check` and one `make install`.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -90,15 +104,17 @@ The three JetBrains subagents' work is still to be merged. `#previewartifactprov
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#waypostauthorization]
 - ~~#actionable-review~~
-- ⏭️ do [#jetbrains262installselect]
-- ⏭️ do [#jetbrains262distribution]
+- 🚧 do [#jetbrains262installselect]
+- 🚧 do [#jetbrains262distribution]
 - 🚧 do [#previewartifactprovenance]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#waypostauthorization] Add a way to post authorization from the queue item prompt to Claude Code subagents when the `subagents` queue attribute is used.
 - [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
 - [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
 - [ ] [#ci25gradle] [agent-doc] Fix the red CI on draft PR 222 (head c39de1b04; run 37974793628 failed in dev-harness-test, Makefile:209). PR 222 moved ci.yml/release.yml to JDK 25 with Gradle 9.2.1 for editors/jetbrains-262, but the classic editors/jetbrains/gradlew still uses the Gradle 8.14 wrapper, which fails on JDK 25 ('Unsupported class file major version 69'). Run the classic build on JDK 21, or move its wrapper to Gradle 9.1 or later while keeping source/target 21 for 242–261. Apply the same fix to release.yml's classic step; that file is shared with jetbrains262distribution, so integrate after it. Verify make check locally under JDK 25 and green CI on the new PR 222 head; earlier head 254b75e also failed at make test (Makefile:97). Afterwards rebuild the jetbrains-262 preview prerelease from the new head and re-pin the previewartifactprovenance manifest.

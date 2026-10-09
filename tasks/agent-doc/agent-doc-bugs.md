@@ -244,6 +244,24 @@ Plugin sources and digests are unchanged, so no plugin version bump was needed, 
 Side effect: the local test rebuilt `~/.m2/.../lazily/0.39.0` from the tag; the jar is the same size as before. New CI run 37997027534 is still in progress. Once it's green, `#previewrepin` can rebuild the preview.
 
 **`#fixruninfra`:** the subagent is still running its `make check`.
+
+### Re: unwedging contracts.md — opus-5.5 · 2026-10-09T18:14-04:00
+
+> **Chat prompt (#chatprompt):** Can I unwedge contracts.md now?
+
+**Yes.** I saved the wedged-state evidence first, so the reset won't destroy what the fix subagent needs. The saved copy (state.db plus recent ops/supervisor/session logs) is in the scratchpad under `contracts-evidence/`. The subagent has been told to diagnose from that copy, not the live files.
+
+Current state: `session-check` reports `cycle-1791583495987` still at `response_captured`. The captured response is the cancellation note for PR #123 in pane %161. Its commit was refused because the editor's copy didn't match the controller's. Pane %161 is idle at its prompt; its own `agent-doc commit` attempt was interrupted.
+
+Run this from any shell. Don't type it into pane %161's composer, and don't repeat the interrupted `agent-doc commit`:
+```sh
+cd ~/work/btakita/agent-loop/src/haiven-dev
+agent-doc reset --from-current --preserve-session tasks/contracts.md
+agent-doc session-check tasks/contracts.md
+```
+`--from-current` rebuilds the recovery projection from the editor's current text, so your edits stay. `--preserve-session` keeps the pane/session binding. The captured note should then finish through retained-write recovery; don't resubmit it. If `session-check` still shows `response_captured` after that, send me its output rather than forcing disk or recycling.
+
+One clue for the fix: ops.log still records `harness_turn_live=true` / `protected_live_turn` for that cycle while %161 sits idle. A stale live-turn flag may be what kept automatic recovery from running.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

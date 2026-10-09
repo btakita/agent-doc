@@ -419,6 +419,31 @@ def self_test() -> int:
         "the release job must reject colliding Marketplace update versions"
     )
 
+    # #ci25gradle: the classic build's Gradle 8.14 wrapper cannot compile its
+    # build script on JDK 25 (class file major version 69), which CI installs
+    # as the default for the modular Gradle 9 build. The classic daemon must
+    # stay pinned to JDK 21, and every workflow that builds it must install 21.
+    daemon_jvm_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "editors",
+        "jetbrains",
+        "gradle",
+        "gradle-daemon-jvm.properties",
+    )
+    daemon_jvm = open(daemon_jvm_path, encoding="utf-8").read().splitlines()
+    assert "toolchainVersion=21" in daemon_jvm, (
+        "the classic JetBrains Gradle daemon must be pinned to JDK 21"
+    )
+    for workflow_name in ("ci.yml", "release.yml"):
+        workflow_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".github", "workflows", workflow_name
+        )
+        workflow = open(workflow_path, encoding="utf-8").read()
+        assert re.search(r"java-version: \|\n\s+21\n\s+25\n", workflow), (
+            f"{workflow_name} must install JDK 21 for the classic plugin beside the default JDK 25"
+        )
+
     print("[self-test] check_plugin_versions: ok")
     return 0
 

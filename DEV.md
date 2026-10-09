@@ -20,6 +20,13 @@ the `lazily-spec/proto` sibling when the local `lazily-kt` composite build is
 present. `settings.gradle.kts` now fails with that exact missing path instead of
 an opaque Gradle variant error.
 
+The classic `editors/jetbrains` build keeps its Gradle 8.14 wrapper, which cannot
+compile build scripts on JDK 25 (`Unsupported class file major version 69`).
+`editors/jetbrains/gradle/gradle-daemon-jvm.properties` pins its Gradle daemon to
+Temurin 21, so `./gradlew` works whatever `java` is on `PATH`: Gradle uses a
+detected Temurin 21 or downloads one. The modular `editors/jetbrains-262` build
+uses Gradle 9.2+ on JDK 25. CI installs both JDKs (#ci25gradle).
+
 ### Linux binary compatibility
 
 Official GNU/Linux release archives use the compatibility `cross` image rather

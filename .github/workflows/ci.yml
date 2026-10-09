@@ -45,10 +45,18 @@ jobs:
       - name: Install tmux for integration tests
         run: sudo apt-get update && sudo apt-get install -y tmux
 
+      # #ci25gradle: JDK 25 (listed last, so it is the default JAVA_HOME) runs
+      # Gradle 9.2.1 for editors/jetbrains-262. The classic editors/jetbrains
+      # build stays on its Gradle 8.14 wrapper, whose Groovy cannot read JDK 25
+      # class files ("Unsupported class file major version 69"); its
+      # gradle/gradle-daemon-jvm.properties pins the daemon to Temurin 21,
+      # which this step installs so the daemon needs no download.
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: |
+            21
+            25
 
       - uses: gradle/actions/setup-gradle@v4
         with:

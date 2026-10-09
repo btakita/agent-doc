@@ -423,7 +423,7 @@ install-editor-plugins:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
 		python3 scripts/check_plugin_versions.py --bump JetBrains || exit 1; \
 		( cd editors/jetbrains && ./gradlew buildPlugin ) || { \
-			echo "JetBrains plugin build failed. Use a JDK 21-compatible Gradle runtime (set JAVA_HOME to JDK 21). Refusing to install a stale package." >&2; \
+			echo "JetBrains plugin build failed. Its Gradle daemon is pinned to Temurin 21 (gradle/gradle-daemon-jvm.properties); check that Gradle can detect or download it. Refusing to install a stale package." >&2; \
 			exit 1; \
 		}; \
 		agent-doc plugin install jetbrains --local --all-installed; \

@@ -29,7 +29,8 @@ cargo install --path .
 ```
 
 `make install` also rebuilds already-installed editor packages. The JetBrains
-build requires JDK 21. In a monorepo checkout, an initialized sibling `lazily-kt`
+build runs its Gradle daemon on JDK 21; Gradle provisions a Temurin 21 when
+none is installed. In a monorepo checkout, an initialized sibling `lazily-kt`
 development build also requires sibling `lazily-spec/proto`; standalone checkouts
 use the published Lazily dependency instead.
 

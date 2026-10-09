@@ -113,6 +113,31 @@ I claimed all four new heads:
 - **release + publish**: coordinator-owned (`coordinator:release-after-batch`) and sequenced last. It runs once at the batch boundary, after the PR #222 line and the #225 and `#waypostauthorization` branches are integrated, with one `make check` and one install. It does not run while CI on PR #222 is red.
 
 `#steergatedecision` and `#uvpython3148` are done as local superproject commits `bd82b842a` and `6ebc0721d`; agent-loop has no remote of its own, so nothing was pushed. Still in flight: `#waypostauthorization`, `#ci25gradle` (running `make check`) and `#jetbrains262installselect`.
+
+### Re: main batch integrated — waypostauthorization + GH 225 — opus-5.5 · 2026-10-09T17:58-04:00
+
+> **Queue prompt:**
+>
+> do [#waypostauthorization]
+
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/225
+
+The main-line batch is integrated and installed.
+
+- **Integration:** I merged `fix/gh225-pypi-prerelease` (`2369e9227`, PR #226) and `feat/subagent-queue-authorization` (`0a044eae2`) onto origin/main in `~/worktrees/agent-doc-mainbatch-20261009`. One authoritative `make check` passed with exit 0: 9820 of 9820 tests, plus the TLA and docs checks. I fast-forward pushed it to main as `67f19e420`, then ran one `make install` (exit 0). The editor extensions reinstalled.
+- **`#waypostauthorization` (done):** each `queue_subagent_dispatch` entry now carries `authorization` with:
+  - the item text verbatim
+  - the resolved backlog text
+  - the queue/item preset bodies
+  - a ready-to-paste `subagent_prompt_preamble`, scoped to the item and restating the coordinator rules.
+
+  Its `status` is `resolved`, `item_text_only` or `unresolved_preset`. `unresolved_preset` fails closed with an `AUTHORIZATION NOT RESOLVED` marker that forbids commit, push, install, release and publish. `agent-doc queue brief <FILE> --item <...> [--json]` prints the same text, and the skill, runbooks and specs now tell coordinators to paste it verbatim.
+- **GH #225 (closed):** `pypi.yml` `build` and `publish` are now gated to `v*` release tags, so editor-only prereleases no longer start a failing publish. Regression test: `test_release_published_workflows_gate_every_job_on_v_tags`. PR #226 shows as merged and the issue is closed.
+
+**Still in flight:**
+- PR #222 line: `#ci25gradle` is done (`8abda947f`); CI run 37988803442 is pending. `#jetbrains262installselect` is still running, and `#jetbrains262distribution` and `#previewartifactprovenance` are ready to stack.
+- GH #218, GH #221 and release + publish wait on PR #222. Merging it still needs your call on the operator-only Remote Dev proof (`#gh218remoteproof`).
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -121,12 +146,12 @@ I claimed all four new heads:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#waypostauthorization]
+- ~~⏭️ do [#waypostauthorization]~~
 - ⏭️ do [#jetbrains262installselect]
 - ⏭️ do [#jetbrains262distribution]
 - 🚧 do [#previewartifactprovenance]
 - ~~do [#ci25gradle]~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/225
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/225~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/218
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/221
 - 🚧 release + publish
@@ -135,7 +160,6 @@ I claimed all four new heads:
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] 🚧 [#waypostauthorization] Add a way to post authorization from the queue item prompt to Claude Code subagents when the `subagents` queue attribute is used.
 - [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
 - [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
 - [ ] 🚧 [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.

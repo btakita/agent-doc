@@ -123,13 +123,13 @@ I claimed all four new heads:
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ⏭️ do [#waypostauthorization]
 - ⏭️ do [#jetbrains262installselect]
-- 🚧 do [#jetbrains262distribution]
+- ⏭️ do [#jetbrains262distribution]
 - 🚧 do [#previewartifactprovenance]
 - 🚧 do [#ci25gradle]
-- #gh-fix https://github.com/btakita/agent-doc/issues/225
-- #gh-fix https://github.com/btakita/agent-doc/issues/218
-- #gh-fix https://github.com/btakita/agent-doc/issues/221
-- release + publish
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/225
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/218
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/221
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog

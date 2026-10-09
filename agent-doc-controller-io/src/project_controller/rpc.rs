@@ -32748,6 +32748,57 @@ mod tests {
     }
 
     #[test]
+    fn editor_view_snapshot_rejects_an_identity_mismatch_before_projection() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let detached = dir.path().join("detached.md");
+        std::fs::write(&detached, "# detached\n").unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: current_binary_identity().ok(),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let snapshot = editor_view_snapshot("rd-client-a", 7, 1, &[], &detached);
+
+        let error = handle_editor_view_snapshot_observe(
+            &bootstrap,
+            runtime.as_ref(),
+            ControllerRequest {
+                command: "editor_view_snapshot_observe".to_string(),
+                file: None,
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(7),
+                state: None,
+                caller: Some("rd-client-b".to_string()),
+                reason: Some("complete_editor_view_snapshot".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(serde_json::to_string(&snapshot).unwrap()),
+                sequence: Some(1),
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("envelope identity"));
+        assert!(
+            runtime
+                .main_layout_eligibility()
+                .permits(&detached.to_string_lossy())
+        );
+    }
+
+    #[test]
     fn controller_editor_surface_graph_fences_duplicate_stale_and_retired_generations() {
         let scope = agent_doc_state_scope::ProcessScope::new();
         let effects = Arc::new(Mutex::new(Vec::<SurfaceIntent>::new()));

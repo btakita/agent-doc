@@ -226,3 +226,18 @@ Each adapter must cover:
 10. Crash points at every state-machine transition converge under simulation.
 11. Refresh, reload, layout, and endpoint discovery stay within the bounded
     scope above and never block the editor event thread on native work.
+
+## 10. Preview acceptance artifact provenance
+
+A preview-only editor package used for a live acceptance gate must be bound to
+one source commit by a tracked manifest before the gate starts. The manifest
+records the release and asset identities, exact byte length and SHA-256, plugin
+id/version/build range, and required modular contents.
+
+Every independently downloaded copy used by a distributed editor deployment
+must pass one verifier invocation. The verifier checks the current PR head and
+release target, rejects release-asset replacement, hashes every local copy, and
+reads plugin metadata from the archive. A checksum-only comparison is
+insufficient: a wrong plugin generation or compatibility range must fail even
+when a test fixture records its digest. Any changed source head or artifact
+requires a new manifest and a new acceptance record.

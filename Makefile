@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -256,6 +256,17 @@ python-compat-check:
 artifact-purge-check:
 	@python3 scripts/purge-actions-artifacts.py --self-test
 
+# Offline refusal-path coverage for the immutable JetBrains 262 preview manifest.
+preview-artifact-check:
+	@python3 scripts/verify_jetbrains_preview.py --self-test
+
+# Verify separately downloaded backend and Client/Gateway copies plus live GitHub
+# release/PR provenance before running the GH #218 Remote Dev acceptance matrix.
+verify-jetbrains-262-preview:
+	@test -n "$(BACKEND_ZIP)" || (echo "ERROR: BACKEND_ZIP is required" >&2 && exit 1)
+	@test -n "$(CLIENT_GATEWAY_ZIP)" || (echo "ERROR: CLIENT_GATEWAY_ZIP is required" >&2 && exit 1)
+	@python3 scripts/verify_jetbrains_preview.py --backend "$(BACKEND_ZIP)" --client-gateway "$(CLIENT_GATEWAY_ZIP)"
+
 # PyPI storage headroom + limit-request status, unauthenticated (`#pypislim`).
 # Reads per-file sizes from the PEP 691 simple index, NOT `pypi.org/pypi/<name>/json`
 # (which has served a stale CDN view listing deleted releases) and NOT the
@@ -313,10 +324,10 @@ release-driver-self-test:
 
 # Fast edit-loop validation: helper checks plus Rust packages affected by the
 # diff and their reverse-dependency closure. This is not a release proof.
-check-fast: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test
+check-fast: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test
 	@python3 scripts/dev-check.py run
 
-check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity python-bootstrap-test lean tla
+check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity python-bootstrap-test lean tla
 	@AGENT_DOC_FULL_CHECK_SUCCEEDED=1 python3 scripts/dev-check.py record-full-check
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.

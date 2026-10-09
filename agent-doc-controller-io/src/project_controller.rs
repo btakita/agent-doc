@@ -530,6 +530,10 @@ pub(crate) struct PaneLayoutClaim {
     /// `ensure` route's own `--col` count). `None` derives it from the
     /// publisher (see [`PaneLayoutClaim::width_authority`]).
     pub asserted_columns: Option<usize>,
+    /// Desired generation from which a derived publication computed its
+    /// columns. The layout graph rebases an escalation when another publisher
+    /// advances the retained generation before the escalation is committed.
+    pub derived_from_generation: Option<u64>,
 }
 
 impl From<PaneLayoutPublisher> for PaneLayoutClaim {
@@ -539,6 +543,7 @@ impl From<PaneLayoutPublisher> for PaneLayoutClaim {
             route: None,
             plane_basis: None,
             asserted_columns: None,
+            derived_from_generation: None,
         }
     }
 }
@@ -550,6 +555,7 @@ impl PaneLayoutClaim {
             route: Some(route),
             plane_basis,
             asserted_columns: None,
+            derived_from_generation: None,
         }
     }
 
@@ -557,6 +563,12 @@ impl PaneLayoutClaim {
     /// asserts.
     pub(crate) fn asserting(mut self, columns: usize) -> Self {
         self.asserted_columns = Some(columns);
+        self
+    }
+
+    /// Fence a derived publication to the retained generation it read.
+    pub(crate) fn derived_from(mut self, generation: Option<u64>) -> Self {
+        self.derived_from_generation = generation;
         self
     }
 
@@ -925,6 +937,75 @@ fn invocation_columns_contain_document(
         .flat_map(|column| column.split(','))
         .map(str::trim)
         .any(|candidate| candidate == document)
+}
+
+/// Rebase a focus escalation that was derived from an older desired generation.
+///
+/// Escalations carry a semantic intent (make `focus` visible), not authority to
+/// restore the exact retained columns they happened to read. Keeping the rebase
+/// in the layout graph's publication critical section prevents a concurrently
+/// accepted editor split from being replaced by that stale read (GH #224).
+fn rebase_stale_focus_escalation(
+    mut invocation: ControllerTmuxLayoutSyncInvocation,
+    claim: PaneLayoutClaim,
+    current: Option<&PaneLayoutDesired>,
+) -> ControllerTmuxLayoutSyncInvocation {
+    if claim.publisher != PaneLayoutPublisher::Escalation {
+        return invocation;
+    }
+    let Some(basis_generation) = claim.derived_from_generation else {
+        return invocation;
+    };
+    let Some(current) = current.filter(|current| current.generation != basis_generation) else {
+        return invocation;
+    };
+    let Some(document) = invocation.focus.clone() else {
+        return invocation;
+    };
+    let mut columns = current.invocation.columns.clone();
+    if columns.is_empty() {
+        return invocation;
+    }
+    if !invocation_columns_contain_document(&current.invocation, &document) {
+        let replace_index = current
+            .invocation
+            .focus
+            .as_deref()
+            .and_then(|focused| {
+                columns.iter().position(|column| {
+                    column
+                        .split(',')
+                        .map(str::trim)
+                        .any(|candidate| candidate == focused)
+                })
+            })
+            .unwrap_or(columns.len() - 1);
+        columns[replace_index] = document;
+    }
+    invocation.columns = columns;
+    invocation.column_order = current.invocation.column_order;
+    invocation
+}
+
+/// A positive editor split buffered behind a route remains authoritative over
+/// a derived escalation for a document that split already contains. The
+/// escalation is the consequence of the same editor observation and must not
+/// replace its structure with a retained-layout reconstruction (GH #224).
+fn pending_editor_split_covers_escalation(
+    pending: &PendingPaneLayoutPublication,
+    incoming: &PendingPaneLayoutPublication,
+) -> bool {
+    pending.claim.width_authority()
+        == agent_doc_controller::pane_layout::LayoutWidthAuthority::EditorSplitObservation
+        && incoming.claim.width_authority()
+            == agent_doc_controller::pane_layout::LayoutWidthAuthority::Derived
+        && incoming
+            .invocation
+            .focus
+            .as_deref()
+            .is_some_and(|document| {
+                invocation_columns_contain_document(&pending.invocation, document)
+            })
 }
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -1648,6 +1729,8 @@ impl ControllerPaneLayoutGraph {
             invocation.caller_kind = "projection".to_string();
         }
         let mut publication_state = self.publication_state.lock();
+        let current = self.ctx.get(&self.desired);
+        invocation = rebase_stale_focus_escalation(invocation, claim, current.as_ref());
         if let Some(version) = source_plane_version {
             // A deferred or refused frame still counts as seen; wake a route
             // awaiting plane catch-up even when no generation is minted. The
@@ -1662,11 +1745,20 @@ impl ControllerPaneLayoutGraph {
                 && invocation.caller_kind == "automatic"
             {
                 if !invocation_columns_contain_document(&invocation, &active_route.document) {
-                    publication_state.pending_passive = Some(PendingPaneLayoutPublication {
+                    let incoming = PendingPaneLayoutPublication {
                         invocation,
                         source_plane_version,
                         claim,
-                    });
+                    };
+                    if !publication_state
+                        .pending_passive
+                        .as_ref()
+                        .is_some_and(|pending| {
+                            pending_editor_split_covers_escalation(pending, &incoming)
+                        })
+                    {
+                        publication_state.pending_passive = Some(incoming);
+                    }
                     return self
                         .ctx
                         .get(&self.desired)
@@ -4029,6 +4121,17 @@ struct RetainedPersistenceProjection {
     controller_generation: u64,
 }
 
+/// Exact bytes already present on disk are a terminal persistence receipt for
+/// this immutable delivery projection. A native-save route is needed only when
+/// disk has not reached the projection yet.
+fn retained_persistence_has_exact_disk_proof(
+    projection: &RetainedPersistenceProjection,
+) -> std::io::Result<bool> {
+    let bytes = std::fs::read(&projection.file)?;
+    Ok(bytes.len() == projection.content_len
+        && agent_doc_hash::bytes_hash(&bytes).eq_ignore_ascii_case(&projection.content_hash))
+}
+
 #[derive(Clone, Debug)]
 struct RetainedPersistenceCommand {
     document_hash: String,
@@ -4544,6 +4647,40 @@ impl RetainedWriteSettleSink {
         document_hash: &str,
         projection: &RetainedPersistenceProjection,
     ) -> bool {
+        // `#retaineddiskproof` / GH #223: a previous native save can land the
+        // exact immutable projection without its receipt reaching this worker.
+        // Requiring another editor route in that state cannot make progress and
+        // kept the durable frontier retrying forever. Disk equality is itself
+        // an exact persistence receipt; a later edit produces a newer delivery
+        // epoch and therefore cannot be acknowledged by this one.
+        match retained_persistence_has_exact_disk_proof(projection) {
+            Ok(true) => {
+                agent_doc_ops_log_io::log_op(
+                    &projection.file,
+                    &format!(
+                        "retained_persistence_applied document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} proof=exact_disk",
+                        projection.controller_generation,
+                        projection.delivery_version,
+                        projection.content_hash,
+                        projection.content_len,
+                    ),
+                );
+                return true;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                agent_doc_ops_log_io::log_op(
+                    &projection.file,
+                    &format!(
+                        "retained_persistence_disk_observation_failed document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} error={error}",
+                        projection.controller_generation,
+                        projection.delivery_version,
+                        projection.content_hash,
+                        projection.content_len,
+                    ),
+                );
+            }
+        }
         let outcome = agent_doc_crdt_relay_io::request_native_save_for_current_projection(
             &projection.file,
             &projection.content_hash,
@@ -11682,6 +11819,110 @@ mod tests {
         assert_eq!(projected.invocation, latest_passive);
         assert_eq!(projected.source_plane_version, Some(43));
         assert!(projected.generation > route.generation);
+    }
+
+    /// GH #224 case 1: an escalation may derive from retained columns, then
+    /// lose the race into the publication critical section to the editor's
+    /// positive split observation. It must rebase its focus intent over that
+    /// newer structure instead of restoring a document the editor removed.
+    #[test]
+    fn stale_focus_escalation_rebases_over_the_newer_editor_split() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+
+        let mut retained = pane_layout_desired_for_test(1).invocation;
+        retained.columns = vec!["tasks/c.md".to_string(), "tasks/b.md".to_string()];
+        retained.focus = Some("tasks/b.md".to_string());
+        let retained = graph.set_desired_attributed(
+            retained,
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::Command,
+        );
+
+        let mut editor = pane_layout_desired_for_test(2).invocation;
+        editor.columns = vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()];
+        editor.focus = Some("tasks/b.md".to_string());
+        editor.caller_kind = "automatic".to_string();
+        let editor = graph.set_desired_attributed(
+            editor,
+            None,
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::EditorSurface,
+        );
+
+        let mut stale_escalation = pane_layout_desired_for_test(3).invocation;
+        stale_escalation.columns = vec!["tasks/c.md".to_string(), "tasks/a.md".to_string()];
+        stale_escalation.focus = Some("tasks/a.md".to_string());
+        stale_escalation.caller_kind = "automatic".to_string();
+        let projected = graph.set_desired_attributed(
+            stale_escalation,
+            None,
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutClaim::from(PaneLayoutPublisher::Escalation)
+                .derived_from(Some(retained.generation)),
+        );
+
+        assert!(projected.generation > editor.generation);
+        assert_eq!(
+            projected.invocation.columns,
+            vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()]
+        );
+        assert_eq!(projected.invocation.focus.as_deref(), Some("tasks/a.md"));
+        assert_eq!(projected.provenance.publisher, PaneLayoutPublisher::Escalation);
+    }
+
+    /// GH #224 case 2: while a route lease is active, the accepted editor split
+    /// and its focus escalation are both deferred. The derived escalation must
+    /// not overwrite the positive editor observation in the single pending slot.
+    #[test]
+    fn route_lease_keeps_the_pending_editor_split_over_its_focus_escalation() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+
+        let mut route_invocation = pane_layout_desired_for_test(1).invocation;
+        route_invocation.columns = vec!["tasks/c.md".to_string(), "tasks/d.md".to_string()];
+        route_invocation.focus = Some("tasks/c.md".to_string());
+        route_invocation.caller_kind = "editor_route".to_string();
+        let route = graph.set_fresh_route_desired(route_invocation, None);
+
+        let mut editor = pane_layout_desired_for_test(2).invocation;
+        editor.columns = vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()];
+        editor.focus = Some("tasks/b.md".to_string());
+        editor.caller_kind = "automatic".to_string();
+        let retained = graph.set_desired_attributed(
+            editor,
+            None,
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::EditorSurface,
+        );
+        assert_eq!(retained.generation, route.generation);
+
+        let mut escalation = pane_layout_desired_for_test(3).invocation;
+        escalation.columns = vec!["tasks/b.md".to_string(), "tasks/d.md".to_string()];
+        escalation.focus = Some("tasks/b.md".to_string());
+        escalation.caller_kind = "automatic".to_string();
+        graph.set_desired_attributed(
+            escalation,
+            None,
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutClaim::from(PaneLayoutPublisher::Escalation)
+                .derived_from(Some(route.generation)),
+        );
+
+        graph.release_route_lease(route.generation);
+        let projected = graph.desired().unwrap();
+        assert_eq!(
+            projected.invocation.columns,
+            vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()]
+        );
+        assert_eq!(projected.invocation.focus.as_deref(), Some("tasks/b.md"));
+        assert_eq!(
+            projected.provenance.publisher,
+            PaneLayoutPublisher::EditorSurface
+        );
     }
 
     #[test]
@@ -20900,6 +21141,48 @@ mod state_event_ingress_slow_tests {
 #[cfg(test)]
 mod retained_persistence_retry_tests {
     use super::*;
+
+    #[test]
+    fn exact_disk_projection_is_terminal_without_a_native_save_route() {
+        // GH #223: native-save routing can disappear after the exact bytes have
+        // already landed. The durable frontier must settle from that disk proof
+        // instead of retrying `no_exact_native_save_receipt` every 30 seconds.
+        let project = tempfile::tempdir().unwrap();
+        let file = project.path().join("session.md");
+        let content = "already durable\n";
+        std::fs::write(&file, content).unwrap();
+        let projection = RetainedPersistenceProjection {
+            file,
+            content_hash: agent_doc_hash::content_hash(content),
+            content_len: content.len(),
+            delivery_version: 126,
+            controller_generation: 1,
+        };
+        let sink = RetainedWriteSettleSink {
+            project_root: project.path().to_path_buf(),
+            runtime: std::sync::Weak::new(),
+        };
+
+        assert!(sink.persist_current_delivery("document", &projection));
+    }
+
+    #[test]
+    fn stale_or_missing_disk_is_not_persistence_proof() {
+        let project = tempfile::tempdir().unwrap();
+        let file = project.path().join("session.md");
+        let target = "target\n";
+        let projection = RetainedPersistenceProjection {
+            file: file.clone(),
+            content_hash: agent_doc_hash::content_hash(target),
+            content_len: target.len(),
+            delivery_version: 9,
+            controller_generation: 1,
+        };
+
+        assert!(retained_persistence_has_exact_disk_proof(&projection).is_err());
+        std::fs::write(file, "stale\n").unwrap();
+        assert!(!retained_persistence_has_exact_disk_proof(&projection).unwrap());
+    }
 
     #[test]
     fn a_refused_current_epoch_retries_on_a_capped_backoff_until_superseded() {

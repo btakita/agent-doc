@@ -236,6 +236,15 @@ when its columns, order, and focus are identical to the retained escalation: sel
 `agent-doc` tmux window is itself the missing consequence. Other identical escalation reasons may
 coalesce; that branch writes `controller_editor_surface_focus_escalation_coalesced` with the
 document, reason, and retained generation so an inert publication is diagnosable (GH #154).
+An escalation is a derived focus intent, not a structural observation (GH #224). It is fenced to
+the desired generation from which it derived its retained columns. If a positive editor split
+publishes first, the layout graph rebases the escalation inside its publication critical section:
+it keeps the newer editor column order and only focuses or replaces that layout's focus column. A
+route lease may defer a positive editor split that omits the route document; a later derived
+escalation for a document already present in that pending split must not overwrite the pending
+split. Releasing the route projects the editor observation, so an accepted structural-sync
+observation remains the next authoritative layout rather than disappearing behind an escalation
+reconstructed from retained columns.
 - Realising a column is audited after tmux-router runs (GH #109). A column pane
 that moved windows (a stash → layout promotion), runs another document, or
 whose route-owned supervisor maps a superseded binary gets one
@@ -427,9 +436,14 @@ thread or in a detached periodic timer.
   asked. So `handle_focus_document_pane` resolves the document's own project
   root through `agent_doc_project_root_io::project_root_containing` first: when
   it differs from the controller's root, the request is delegated to that
-  root's controller and its receipt is returned verbatim, with
-  `controller_focus_delegated document=<doc> owner_root=<root> focused=<b>
-  reason=<r>` recorded on the receiving controller. The decision is pure
+  root's controller with its original missing-pane policy intact and its
+  receipt is returned verbatim. In particular, `ProvisionForLayout` must remain
+  structural across this hop: after a subproject document's tmux pane is killed,
+  manual **Sync Tmux Layout** asks the owning controller to create a replacement
+  pane; it must not be downgraded to `ObserveOnly`. The receiving controller
+  records
+  `controller_focus_delegated document=<doc> owner_root=<root> policy=<policy>
+  focused=<b> reason=<r>`. The decision is pure
   (`agent_doc_controller::focus_routing::focus_owner`) and terminates: the
   delegated call re-enters it on the owning controller, where the roots now
   match. An unknown document root is never delegated — with no proof of another

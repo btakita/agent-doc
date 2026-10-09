@@ -4,6 +4,7 @@ package com.github.btakita.agentdoc.split.backend
 
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
+import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.MAIN_SURFACE_PANE_ID
 import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.SurfaceIngressAck
@@ -34,6 +35,12 @@ internal class AuthenticatedSurfaceIngressService(project: Project) {
     suspend fun retire(authenticatedClientId: String, lease: SurfaceIngressLease) =
         state.retire(authenticatedClientId, lease)
 
+    suspend fun publishPresentationReceipt(
+        authenticatedClientId: String,
+        lease: SurfaceIngressLease,
+        receipt: FrontendPresentationReceipt,
+    ): SurfaceIngressAck = state.publishPresentationReceipt(authenticatedClientId, lease, receipt)
+
     companion object {
         fun getInstance(project: Project): AuthenticatedSurfaceIngressService = project.service()
     }
@@ -60,6 +67,7 @@ internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSn
             frontendInstanceId = frontendInstanceId,
             lease = lease,
             acceptedSequence = 0,
+            acceptedSurfaces = emptyMap(),
         )
         lease
     }
@@ -98,11 +106,53 @@ internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSn
         }
         connections[authenticatedClientId] = current.copy(
             acceptedSequence = snapshot.sequence,
+            acceptedSurfaces = snapshot.surfaces.associate { it.paneId to it.surfaceGeneration },
         )
         SurfaceIngressAck(
             status = SurfaceIngressStatus.ACCEPTED,
             connectionGeneration = lease.connectionGeneration,
             acceptedSequence = snapshot.sequence,
+            presentation = delivery.presentation,
+        )
+    }
+
+    suspend fun publishPresentationReceipt(
+        authenticatedClientId: String,
+        lease: SurfaceIngressLease,
+        receipt: FrontendPresentationReceipt,
+    ): SurfaceIngressAck = mutex.withLock {
+        val current = connections[authenticatedClientId]
+        if (current == null || current.lease != lease) {
+            return@withLock rejected(SurfaceIngressStatus.STALE_LEASE, lease, "lease is stale")
+        }
+        val expectedClientId = "jetbrains-rd:$authenticatedClientId"
+        if (receipt.identity.clientId != expectedClientId ||
+            receipt.identity.connectionGeneration != lease.connectionGeneration ||
+            receipt.presentationRevision != current.acceptedSequence ||
+            current.acceptedSurfaces[receipt.identity.surfaceId] != receipt.identity.surfaceGeneration
+        ) {
+            return@withLock rejected(
+                SurfaceIngressStatus.STALE_SEQUENCE,
+                lease,
+                "presentation receipt identity or revision is stale",
+            )
+        }
+        val delivery = publisher.publishPresentationReceipt(
+            clientId = authenticatedClientId,
+            generation = lease.connectionGeneration,
+            receipt = receipt,
+        )
+        if (!delivery.accepted) {
+            return@withLock rejected(
+                SurfaceIngressStatus.DELIVERY_FAILED,
+                lease,
+                delivery.diagnostic ?: "controller receipt delivery failed",
+            )
+        }
+        SurfaceIngressAck(
+            status = SurfaceIngressStatus.ACCEPTED,
+            connectionGeneration = lease.connectionGeneration,
+            acceptedSequence = receipt.presentationRevision,
         )
     }
 
@@ -129,6 +179,7 @@ internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSn
         val frontendInstanceId: String,
         val lease: SurfaceIngressLease,
         val acceptedSequence: Long,
+        val acceptedSurfaces: Map<String, Long>,
     )
 }
 

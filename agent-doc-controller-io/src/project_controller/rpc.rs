@@ -31,7 +31,8 @@ use agent_doc_editor_surface::terminal_ownership::{
 };
 use agent_doc_editor_surface::{
     EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
-    EditorViewId, EditorViewPolicy, EditorViewPolicyBinding, EditorViewPolicyProjection,
+    EditorViewId, EditorViewPlaceholderReason, EditorViewPolicy, EditorViewPolicyBinding,
+    EditorViewPolicyProjection, EditorViewPolicyStatus, EditorViewPresentation,
     EditorViewSessionKey, EditorViewSnapshot, SurfaceColumn, SurfaceIntent,
     SurfaceObservationReceipt, TmuxLayout, isolated_view_session_name,
 };
@@ -17474,6 +17475,9 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "editor_view_presentation_receipt" => controller_envelope(
+            handle_editor_view_presentation_receipt(&bootstrap_snapshot, runtime.as_ref(), request),
+        ),
         "document_path_transition_observe" => controller_envelope(
             handle_document_path_transition_observe(&bootstrap_snapshot, runtime.as_ref(), request),
         ),
@@ -24452,11 +24456,148 @@ fn reconcile_editor_view_lifecycle(
     Ok(receipt)
 }
 
+#[derive(Debug, Serialize)]
+struct EditorViewPresentationWire {
+    client_id: String,
+    connection_generation: u64,
+    surface_id: String,
+    surface_generation: u64,
+    presentation_revision: u64,
+    kind: &'static str,
+    document: Option<String>,
+    reason: Option<&'static str>,
+    view_session: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EditorViewProjectionWire {
+    status: &'static str,
+    presentation_revision: u64,
+    retry_suggested: bool,
+    presentations: Vec<EditorViewPresentationWire>,
+}
+
+fn editor_view_placeholder_reason(reason: EditorViewPlaceholderReason) -> &'static str {
+    match reason {
+        EditorViewPlaceholderReason::MainOwned => "main_owned",
+        EditorViewPlaceholderReason::OwnedByOtherDetachedSurface => {
+            "owned_by_other_detached_surface"
+        }
+        EditorViewPlaceholderReason::BindingPending => "binding_pending",
+        EditorViewPlaceholderReason::ReleasePending => "release_pending",
+    }
+}
+
+fn editor_view_projection_wire(
+    runtime: &ControllerRuntime,
+    projection: EditorViewPolicyProjection,
+    client_id: &str,
+    connection_generation: u64,
+    presentation_revision: u64,
+) -> EditorViewProjectionWire {
+    let status = match projection.status {
+        EditorViewPolicyStatus::Applied => "applied",
+        EditorViewPolicyStatus::Stale => "stale",
+        EditorViewPolicyStatus::Frozen { .. } => "frozen",
+    };
+    let mut retry_suggested = false;
+    let presentations = projection
+        .presentations
+        .into_iter()
+        .filter(|(surface, _)| {
+            surface.client_id == client_id && surface.connection_generation == connection_generation
+        })
+        .map(|(surface, presentation)| {
+            let (kind, document, reason, view_session) = match presentation {
+                EditorViewPresentation::Empty => ("empty", None, None, None),
+                EditorViewPresentation::Terminal { document, view_id } => {
+                    debug_assert_eq!(surface.view_id(), view_id);
+                    let document_hash = agent_doc_hash::document_id_for_path(Path::new(&document));
+                    let session = runtime
+                        .memory
+                        .lock()
+                        .state_projection
+                        .document(&document_hash)
+                        .and_then(|state| state.editor_view_binding.as_ref())
+                        .and_then(|binding| {
+                            matches!(
+                                &binding.state,
+                                agent_doc_state_backbone::EditorViewBindingState::Bound { .. }
+                            )
+                            .then(|| binding.state.binding())
+                        })
+                        .filter(|identity| {
+                            identity.client_family == surface.client_id
+                                && identity.connection_generation == surface.connection_generation
+                                && identity.surface_id == surface.surface_id
+                                && identity.surface_generation == surface.surface_generation
+                        })
+                        .map(|identity| identity.view_session.clone());
+                    if let Some(session) = session {
+                        ("terminal", Some(document), None, Some(session))
+                    } else {
+                        // A policy projection is not authority to invent an attach target.  Until
+                        // the durable Bound receipt is visible, keep the frontend noninteractive.
+                        retry_suggested = true;
+                        ("placeholder", Some(document), Some("binding_pending"), None)
+                    }
+                }
+                EditorViewPresentation::Placeholder {
+                    document, reason, ..
+                } => {
+                    retry_suggested |= matches!(
+                        reason,
+                        EditorViewPlaceholderReason::BindingPending
+                            | EditorViewPlaceholderReason::ReleasePending
+                    );
+                    (
+                        "placeholder",
+                        Some(document),
+                        Some(editor_view_placeholder_reason(reason)),
+                        None,
+                    )
+                }
+            };
+            EditorViewPresentationWire {
+                client_id: surface.client_id,
+                connection_generation: surface.connection_generation,
+                surface_id: surface.surface_id,
+                surface_generation: surface.surface_generation,
+                presentation_revision,
+                kind,
+                document,
+                reason,
+                view_session,
+            }
+        })
+        .collect();
+    EditorViewProjectionWire {
+        status,
+        presentation_revision,
+        retry_suggested,
+        presentations,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct EditorViewPresentationReceiptWire {
+    client_id: String,
+    connection_generation: u64,
+    surface_id: String,
+    surface_generation: u64,
+    presentation_revision: u64,
+    kind: String,
+    outcome: String,
+    document: Option<String>,
+    view_session: Option<String>,
+    diagnostic: Option<String>,
+}
+
 fn handle_editor_view_snapshot_observe(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     request: ControllerRequest,
-) -> Result<EditorViewPolicyProjection> {
+) -> Result<EditorViewProjectionWire> {
     let payload = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let snapshot: EditorViewSnapshot =
         serde_json::from_str(&payload).context("parse complete editor view snapshot")?;
@@ -24466,27 +24607,112 @@ fn handle_editor_view_snapshot_observe(
             && request.sequence == Some(snapshot.sequence),
         "editor view snapshot envelope identity does not match its authenticated payload"
     );
-    runtime
+    let client_id = snapshot.client_id.clone();
+    let connection_generation = snapshot.connection_generation;
+    let presentation_revision = snapshot.sequence;
+    let projection = runtime
         .editor_view_policy_graph
         .observe(snapshot, |projection| {
             persist_editor_view_transitions(bootstrap, runtime, projection)
-        })
+        })?;
+    Ok(editor_view_projection_wire(
+        runtime,
+        projection,
+        &client_id,
+        connection_generation,
+        presentation_revision,
+    ))
 }
 
 fn handle_editor_view_client_retire(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     request: ControllerRequest,
-) -> Result<EditorViewPolicyProjection> {
+) -> Result<EditorViewProjectionWire> {
     let client_id = request_string(&request.caller, "caller")?;
     let generation = request
         .generation
         .context("editor_view_client_retire requires generation")?;
-    runtime
-        .editor_view_policy_graph
-        .retire_client(&client_id, generation, |projection| {
-            persist_editor_view_transitions(bootstrap, runtime, projection)
-        })
+    let projection =
+        runtime
+            .editor_view_policy_graph
+            .retire_client(&client_id, generation, |projection| {
+                persist_editor_view_transitions(bootstrap, runtime, projection)
+            })?;
+    Ok(editor_view_projection_wire(
+        runtime, projection, &client_id, generation, 0,
+    ))
+}
+
+fn handle_editor_view_presentation_receipt(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let payload = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let receipt: EditorViewPresentationReceiptWire =
+        serde_json::from_str(&payload).context("parse editor view presentation receipt")?;
+    anyhow::ensure!(
+        request.caller.as_deref() == Some(receipt.client_id.as_str())
+            && request.generation == Some(receipt.connection_generation)
+            && request.sequence == Some(receipt.presentation_revision),
+        "editor view presentation receipt envelope identity does not match payload"
+    );
+    anyhow::ensure!(
+        matches!(receipt.kind.as_str(), "empty" | "terminal" | "placeholder"),
+        "unknown editor view presentation kind"
+    );
+    anyhow::ensure!(
+        matches!(receipt.outcome.as_str(), "applied" | "refused" | "stale"),
+        "unknown editor view presentation receipt outcome"
+    );
+    if receipt.kind == "terminal" && receipt.outcome == "applied" {
+        let document = receipt
+            .document
+            .as_deref()
+            .context("applied terminal receipt requires document")?;
+        let expected_session = receipt
+            .view_session
+            .as_deref()
+            .context("applied terminal receipt requires view_session")?;
+        let document_hash = agent_doc_hash::document_id_for_path(Path::new(document));
+        let memory = runtime.memory.lock();
+        let binding = memory
+            .state_projection
+            .document(&document_hash)
+            .and_then(|state| state.editor_view_binding.as_ref())
+            .context("applied terminal receipt has no durable binding")?;
+        let identity = binding.state.binding();
+        anyhow::ensure!(
+            matches!(
+                &binding.state,
+                agent_doc_state_backbone::EditorViewBindingState::Bound { .. }
+            ) && identity.client_family == receipt.client_id
+                && identity.connection_generation == receipt.connection_generation
+                && identity.surface_id == receipt.surface_id
+                && identity.surface_generation == receipt.surface_generation
+                && identity.view_session == expected_session,
+            "applied terminal receipt does not match the durable Bound identity"
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "editor_view_presentation_receipt client={} generation={} surface={} surface_generation={} revision={} kind={} outcome={} diagnostic={}",
+            receipt.client_id,
+            receipt.connection_generation,
+            receipt.surface_id,
+            receipt.surface_generation,
+            receipt.presentation_revision,
+            receipt.kind,
+            receipt.outcome,
+            receipt.diagnostic.as_deref().unwrap_or("none"),
+        ),
+    );
+    Ok(serde_json::json!({
+        "accepted": true,
+        "presentation_revision": receipt.presentation_revision,
+    }))
 }
 
 fn handle_document_path_transition_observe(

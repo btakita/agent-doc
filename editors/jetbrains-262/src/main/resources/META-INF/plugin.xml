@@ -3,7 +3,7 @@
     <name>Agent Doc</name>
     <vendor url="https://github.com/btakita">btakita</vendor>
     <description><![CDATA[
-        Submit markdown documents to AI agents via agent-doc. This 262+ distribution
+        Submit markdown documents to AI agents via agent-doc. This exact-262 distribution
         observes editor surfaces in JetBrains Client before path deduplication and
         transports authenticated, generation-fenced snapshots to the backend.
     ]]></description>

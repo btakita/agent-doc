@@ -2,6 +2,10 @@ package com.github.btakita.agentdoc.split.backend
 
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
+import com.github.btakita.agentdoc.split.FrontendPresentationKind
+import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
+import com.github.btakita.agentdoc.split.FrontendPresentationReceiptOutcome
+import com.github.btakita.agentdoc.split.FrontendSurfaceIdentity
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceRole
 import com.intellij.platform.project.ProjectId
@@ -62,6 +66,39 @@ class AuthenticatedSurfaceIngressStateTest {
         assertEquals(1, publisher.published.size)
     }
 
+    @Test
+    fun receiptIsFencedByCurrentProjectionRevisionAndSurfaceIncarnation() = runBlocking {
+        val publisher = RecordingPublisher()
+        val state = AuthenticatedSurfaceIngressState(publisher)
+        val lease = state.open("client-a", "frontend-a")
+        state.publish("client-a", lease, snapshot("frontend-a", 1))
+
+        val current = receipt(lease.connectionGeneration, revision = 1, surfaceGeneration = 1)
+        assertEquals(SurfaceIngressStatus.ACCEPTED, state.publishPresentationReceipt("client-a", lease, current).status)
+        assertEquals(
+            SurfaceIngressStatus.STALE_SEQUENCE,
+            state.publishPresentationReceipt("client-a", lease, current.copy(presentationRevision = 0)).status,
+        )
+        assertEquals(
+            SurfaceIngressStatus.STALE_SEQUENCE,
+            state.publishPresentationReceipt(
+                "client-a",
+                lease,
+                current.copy(identity = current.identity.copy(surfaceGeneration = 2)),
+            ).status,
+        )
+        assertEquals(1, publisher.receipts.size)
+    }
+
+    private fun receipt(generation: Long, revision: Long, surfaceGeneration: Long) =
+        FrontendPresentationReceipt(
+            projectId = projectId,
+            identity = FrontendSurfaceIdentity("jetbrains-rd:client-a", generation, "root", surfaceGeneration),
+            presentationRevision = revision,
+            kind = FrontendPresentationKind.EMPTY,
+            outcome = FrontendPresentationReceiptOutcome.APPLIED,
+        )
+
     private fun snapshot(frontendId: String, sequence: Long) = FrontendSurfaceSnapshot(
         frontendInstanceId = frontendId,
         sequence = sequence,
@@ -73,6 +110,7 @@ class AuthenticatedSurfaceIngressStateTest {
     private class RecordingPublisher : SurfaceSnapshotPublisher {
         val published = mutableListOf<Triple<String, Long, Long>>()
         val retired = mutableListOf<Pair<String, Long>>()
+        val receipts = mutableListOf<FrontendPresentationReceipt>()
 
         override suspend fun publish(
             clientId: String,
@@ -85,6 +123,15 @@ class AuthenticatedSurfaceIngressStateTest {
 
         override suspend fun retire(clientId: String, generation: Long) {
             retired += clientId to generation
+        }
+
+        override suspend fun publishPresentationReceipt(
+            clientId: String,
+            generation: Long,
+            receipt: FrontendPresentationReceipt,
+        ): SurfaceDeliveryResult {
+            receipts += receipt
+            return SurfaceDeliveryResult(true)
         }
     }
 }

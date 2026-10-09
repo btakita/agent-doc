@@ -4,6 +4,13 @@ import com.github.btakita.agentdoc.AgentDocSessionFiles
 import com.github.btakita.agentdoc.CpRouteClient
 import com.github.btakita.agentdoc.controllerFailureMessageUtil
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
+import com.github.btakita.agentdoc.split.FrontendPresentationKind
+import com.github.btakita.agentdoc.split.FrontendPresentationProjection
+import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
+import com.github.btakita.agentdoc.split.FrontendProjectionStatus
+import com.github.btakita.agentdoc.split.FrontendSurfaceIdentity
+import com.github.btakita.agentdoc.split.FrontendSurfacePresentation
+import com.github.btakita.agentdoc.split.admitsTerminalPresentation
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -21,6 +28,7 @@ import kotlinx.coroutines.withTimeout
 internal data class SurfaceDeliveryResult(
     val accepted: Boolean,
     val diagnostic: String? = null,
+    val presentation: FrontendPresentationProjection? = null,
 )
 
 internal interface SurfaceSnapshotPublisher {
@@ -31,6 +39,12 @@ internal interface SurfaceSnapshotPublisher {
     ): SurfaceDeliveryResult
 
     suspend fun retire(clientId: String, generation: Long)
+
+    suspend fun publishPresentationReceipt(
+        clientId: String,
+        generation: Long,
+        receipt: FrontendPresentationReceipt,
+    ): SurfaceDeliveryResult
 }
 
 /**
@@ -51,7 +65,7 @@ internal class ControllerSurfaceSnapshotPublisher(private val project: Project) 
             ?: return SurfaceDeliveryResult(false, "backend project has no base path")
         val wireClientId = wireClientId(clientId)
         return try {
-            send(
+            val response = send(
                 projectRoot,
                 ControllerSurfaceSnapshotWire.snapshotRequest(
                     wireClientId,
@@ -60,9 +74,35 @@ internal class ControllerSurfaceSnapshotPublisher(private val project: Project) 
                     ::isSessionDocument,
                 ),
             )
-            SurfaceDeliveryResult(true)
+            SurfaceDeliveryResult(
+                accepted = true,
+                presentation = ControllerSurfaceSnapshotWire.presentationProjection(response),
+            )
         } catch (failure: Exception) {
             LOG.warn("[split-surface] controller delivery failed", failure)
+            SurfaceDeliveryResult(false, failure.message)
+        }
+    }
+
+    override suspend fun publishPresentationReceipt(
+        clientId: String,
+        generation: Long,
+        receipt: FrontendPresentationReceipt,
+    ): SurfaceDeliveryResult {
+        val projectRoot = project.basePath
+            ?: return SurfaceDeliveryResult(false, "backend project has no base path")
+        return try {
+            send(
+                projectRoot,
+                ControllerSurfaceSnapshotWire.presentationReceiptRequest(
+                    wireClientId(clientId),
+                    generation,
+                    receipt,
+                ),
+            )
+            SurfaceDeliveryResult(true)
+        } catch (failure: Exception) {
+            LOG.warn("[split-surface] presentation receipt delivery failed", failure)
             SurfaceDeliveryResult(false, failure.message)
         }
     }
@@ -137,9 +177,12 @@ internal object ControllerSurfaceSnapshotWire {
                 payload.addProperty("connection_generation", generation)
                 payload.addProperty("sequence", snapshot.sequence)
                 payload.addProperty("complete", snapshot.complete)
-                // The 262 artifact has no proven per-surface terminal host yet. The controller
-                // policy must freeze rather than authorizing any legacy/main terminal effect.
-                payload.addProperty("terminal_capable", false)
+                // Capability is admitted by the frontend contract rather than inferred from the
+                // presence of a terminal plugin.  SNAPSHOT_ONLY is intentionally non-capable.
+                payload.addProperty(
+                    "terminal_capable",
+                    snapshot.presentationCapability.admitsTerminalPresentation(),
+                )
                 payload.add(
                     "surfaces",
                     JsonArray().also { surfaces ->
@@ -148,15 +191,14 @@ internal object ControllerSurfaceSnapshotWire {
                                 .flatMap { it.visiblePaths }
                                 .filter(isSessionDocument)
                                 .distinct()
-                            val focused = if (surface.focused) {
-                                surface.windows
-                                    .sortedBy { it.ordinal }
-                                    .firstNotNullOfOrNull { it.selectedPath?.takeIf(isSessionDocument) }
-                                    ?: visible.firstOrNull()
-                                    ?: ""
-                            } else {
-                                ""
-                            }
+                            // `focused` is the policy's selected document for this surface, not
+                            // the AWT active-frame bit.  Switching focus to main must not erase a
+                            // detached surface's owner candidate.
+                            val focused = surface.windows
+                                .sortedBy { it.ordinal }
+                                .firstNotNullOfOrNull { it.selectedPath?.takeIf(isSessionDocument) }
+                                ?: visible.firstOrNull()
+                                ?: ""
                             surfaces.add(
                                 JsonObject().also { encodedSurface ->
                                     encodedSurface.addProperty("surface_id", surface.paneId)
@@ -183,6 +225,68 @@ internal object ControllerSurfaceSnapshotWire {
             request.addProperty("caller", wireClientId)
             request.addProperty("reason", "editor_view_client_retired")
         }
+
+    fun presentationReceiptRequest(
+        wireClientId: String,
+        generation: Long,
+        receipt: FrontendPresentationReceipt,
+    ): JsonObject = JsonObject().also { request ->
+        request.addProperty("command", "editor_view_presentation_receipt")
+        request.addProperty("generation", generation)
+        request.addProperty("sequence", receipt.presentationRevision)
+        request.addProperty("caller", wireClientId)
+        request.addProperty("reason", "frontend_presentation_receipt")
+        request.addProperty(
+            "diagnostic_payload",
+            JsonObject().also { payload ->
+                payload.addProperty("client_id", receipt.identity.clientId)
+                payload.addProperty("connection_generation", receipt.identity.connectionGeneration)
+                payload.addProperty("surface_id", receipt.identity.surfaceId)
+                payload.addProperty("surface_generation", receipt.identity.surfaceGeneration)
+                payload.addProperty("presentation_revision", receipt.presentationRevision)
+                payload.addProperty("kind", receipt.kind.name.lowercase())
+                payload.addProperty("outcome", receipt.outcome.name.lowercase())
+                receipt.document?.let { payload.addProperty("document", it) }
+                receipt.viewSession?.let { payload.addProperty("view_session", it) }
+                receipt.diagnostic?.let { payload.addProperty("diagnostic", it) }
+            }.toString(),
+        )
+    }
+
+    fun presentationProjection(data: JsonObject): FrontendPresentationProjection {
+        val status = when (data.get("status")?.asString) {
+            "applied" -> FrontendProjectionStatus.APPLIED
+            "stale" -> FrontendProjectionStatus.STALE
+            "frozen" -> FrontendProjectionStatus.FROZEN
+            else -> error("controller presentation projection has unknown status")
+        }
+        val revision = data.get("presentation_revision")?.asLong
+            ?: error("controller presentation projection is missing revision")
+        val presentations = data.getAsJsonArray("presentations")
+            ?.map { element ->
+                val value = element.asJsonObject
+                FrontendSurfacePresentation(
+                    identity = FrontendSurfaceIdentity(
+                        clientId = value.get("client_id").asString,
+                        connectionGeneration = value.get("connection_generation").asLong,
+                        surfaceId = value.get("surface_id").asString,
+                        surfaceGeneration = value.get("surface_generation").asLong,
+                    ),
+                    presentationRevision = value.get("presentation_revision").asLong,
+                    kind = FrontendPresentationKind.valueOf(value.get("kind").asString.uppercase()),
+                    document = value.get("document")?.takeUnless { it.isJsonNull }?.asString,
+                    reason = value.get("reason")?.takeUnless { it.isJsonNull }?.asString,
+                    viewSession = value.get("view_session")?.takeUnless { it.isJsonNull }?.asString,
+                )
+            }
+            .orEmpty()
+        return FrontendPresentationProjection(
+            status = status,
+            revision = revision,
+            retrySuggested = data.get("retry_suggested")?.asBoolean == true,
+            presentations = presentations,
+        )
+    }
 
     private fun paths(values: List<String>): JsonArray =
         JsonArray().also { array -> values.distinct().forEach(array::add) }

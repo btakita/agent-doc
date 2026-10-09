@@ -4,8 +4,24 @@ import com.github.btakita.agentdoc.split.SurfaceRole
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 
 class FrontendSurfaceCollectorTest {
+    @Test
+    fun terminalCommandUsesOnlyControllerProvidedSession() {
+        assertEquals(
+            listOf("tmux", "attach-session", "-t", "agent-doc-view-bound"),
+            Exact262DetachedPresentationAdapter.terminalCommand("agent-doc-view-bound"),
+        )
+    }
+
+    @Test
+    fun exactWindowSelectionRejectsMissingAndAmbiguousSplits() {
+        assertEquals(1, exactWindowIndex(listOf(setOf("a.md"), setOf("b.md")), "b.md"))
+        assertNull(exactWindowIndex(listOf(setOf("a.md"), setOf("b.md")), "c.md"))
+        assertNull(exactWindowIndex(listOf(setOf("a.md"), setOf("a.md")), "a.md"))
+    }
+
     @Test
     fun rootIsMainAndDetachedPaneIsNotPromotedByFocus() {
         assertEquals(SurfaceRole.MAIN, FrontendSurfaceCollector.roleForPaneId("root"))
@@ -55,5 +71,13 @@ class FrontendSurfaceCollectorTest {
         val retained = tracker.assign(setOf(frame), null, complete = true).getValue(frame)
 
         assertEquals(first, retained)
+    }
+
+    @Test
+    fun closeOrRejoinMarksMountedSurfaceForRestoration() {
+        val mounted = setOf(SurfaceIncarnation("detached-1", 4), SurfaceIncarnation("detached-2", 7))
+        val live = setOf(SurfaceIncarnation("detached-2", 7))
+
+        assertEquals(setOf(SurfaceIncarnation("detached-1", 4)), mountedSurfaceKeysToRestore(mounted, live))
     }
 }

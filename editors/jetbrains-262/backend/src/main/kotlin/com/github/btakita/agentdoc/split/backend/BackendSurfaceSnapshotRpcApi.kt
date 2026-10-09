@@ -3,6 +3,7 @@
 package com.github.btakita.agentdoc.split.backend
 
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
+import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.SurfaceIngressAck
 import com.github.btakita.agentdoc.split.SurfaceIngressLease
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
@@ -50,4 +51,23 @@ internal class BackendSurfaceSnapshotRpcApi : SurfaceSnapshotRpcApi {
             snapshot = snapshot,
         )
     }
+
+    override suspend fun publishPresentationReceipt(
+        lease: SurfaceIngressLease,
+        receipt: FrontendPresentationReceipt,
+    ): SurfaceIngressAck {
+        val project = receipt.projectId.findProjectOrNull()
+            ?: return SurfaceIngressAck(
+                status = SurfaceIngressStatus.PROJECT_MISMATCH,
+                connectionGeneration = lease.connectionGeneration,
+                acceptedSequence = null,
+                diagnostic = "no backend project owns the authenticated presentation lease",
+            )
+        return AuthenticatedSurfaceIngressService.getInstance(project).publishPresentationReceipt(
+            authenticatedClientId = ClientId.current.value,
+            lease = lease,
+            receipt = receipt,
+        )
+    }
+
 }

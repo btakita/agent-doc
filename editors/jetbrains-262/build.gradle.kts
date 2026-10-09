@@ -86,7 +86,7 @@ intellijPlatform {
 tasks {
     patchPluginXml {
         sinceBuild.set("262")
-        untilBuild.set(provider { null })
+        untilBuild.set("262.*")
     }
 
     register("verifySplitArtifact") {
@@ -94,6 +94,22 @@ tasks {
         description = "Verify that the 262 ZIP contains all split plugin modules and range metadata"
         dependsOn("buildPlugin")
         doLast {
+            val frontendSources = projectDir.resolve("frontend/src/main/kotlin")
+            val internalImports = frontendSources.walkTopDown()
+                .filter { it.isFile && it.extension == "kt" }
+                .flatMap { source ->
+                    source.readLines().asSequence()
+                        .filter { line ->
+                            line.startsWith("import com.intellij.openapi.fileEditor.ex.") ||
+                                line.startsWith("import com.intellij.openapi.fileEditor.impl.") ||
+                                line.startsWith("import com.intellij.terminal.frontend.")
+                        }
+                        .map { source.relativeTo(frontendSources).invariantSeparatorsPath to it }
+                }
+                .toList()
+            check(internalImports.all { (path, _) -> path.endsWith("Exact262DetachedPresentationAdapter.kt") }) {
+                "exact-262 internal UI imports escaped the designated adapter: $internalImports"
+            }
             val zip = layout.buildDirectory.dir("distributions").get().asFile
                 .listFiles()
                 .orEmpty()
@@ -125,6 +141,7 @@ tasks {
                     content ?: error("root plugin jar is missing META-INF/plugin.xml")
                 }
                 check(pluginXml.contains("since-build=\"262\"")) { "262 since-build was not patched" }
+                check(pluginXml.contains("until-build=\"262.*\"")) { "262 until-build was not clamped" }
                 check(pluginXml.contains("<id>com.github.btakita.agent-doc</id>")) {
                     "split distribution changed the existing plugin ID"
                 }

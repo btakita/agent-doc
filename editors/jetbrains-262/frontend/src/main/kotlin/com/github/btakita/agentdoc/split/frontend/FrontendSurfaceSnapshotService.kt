@@ -2,9 +2,12 @@
 
 package com.github.btakita.agentdoc.split.frontend
 
-import com.github.btakita.agentdoc.split.EditorWindowSnapshot
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
+import com.github.btakita.agentdoc.split.FrontendPresentationCapability
+import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
+import com.github.btakita.agentdoc.split.FrontendPresentationReceiptOutcome
+import com.github.btakita.agentdoc.split.FrontendPresentationProjection
 import com.github.btakita.agentdoc.split.MAIN_SURFACE_PANE_ID
 import com.github.btakita.agentdoc.split.SurfaceIngressLease
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
@@ -18,25 +21,17 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
-import com.intellij.openapi.fileEditor.impl.EditorWindow
-import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.openapi.wm.WindowManager
 import com.intellij.platform.project.projectId
 import fleet.rpc.client.durable
 import java.awt.AWTEvent
-import java.awt.Component
-import java.awt.KeyboardFocusManager
-import java.awt.Point
 import java.awt.Toolkit
-import java.awt.Window
 import java.awt.event.AWTEventListener
 import java.util.IdentityHashMap
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import javax.swing.SwingUtilities
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
@@ -54,6 +49,7 @@ class FrontendSurfaceSnapshotService(
     private val sequence = AtomicLong(0)
     private val frontendInstanceId = UUID.randomUUID().toString()
     private val surfaceIdentities = FrontendSurfaceIdentityTracker()
+    private val presentationAdapter = Exact262DetachedPresentationAdapter.create(project, this)
     private val captures = MutableSharedFlow<Unit>(
         replay = 1,
         extraBufferCapacity = 1,
@@ -95,31 +91,106 @@ class FrontendSurfaceSnapshotService(
             // Coalesce the burst of file-editor, AWT hierarchy, and focus events produced by one
             // dock/undock operation, while still emitting a complete authoritative snapshot.
             delay(CAPTURE_DEBOUNCE_MS)
-            val snapshot = captureOnEdt()
-            val ack = SurfaceSnapshotRpcApi.getInstance().publishSnapshot(lease, snapshot)
-            if (ack.status != SurfaceIngressStatus.ACCEPTED) {
-                LOG.warn(
-                    "[split-surface] snapshot rejected status=${ack.status} " +
-                        "generation=${ack.connectionGeneration} diagnostic=${ack.diagnostic}",
-                )
+            var retry = 0
+            do {
+                val capture = captureOnEdt()
+                val ack = SurfaceSnapshotRpcApi.getInstance().publishSnapshot(lease, capture.snapshot)
+                if (ack.status != SurfaceIngressStatus.ACCEPTED) {
+                    LOG.warn(
+                        "[split-surface] snapshot rejected status=${ack.status} " +
+                            "generation=${ack.connectionGeneration} diagnostic=${ack.diagnostic}",
+                    )
+                    break
+                }
+                val projection = ack.presentation ?: break
+                val receipts = applyPresentationOnEdt(capture, projection)
+                receipts.forEach { receipt ->
+                    val receiptAck = SurfaceSnapshotRpcApi.getInstance()
+                        .publishPresentationReceipt(lease, receipt)
+                    if (receiptAck.status != SurfaceIngressStatus.ACCEPTED) {
+                        LOG.warn(
+                            "[split-surface] presentation receipt rejected " +
+                                "status=${receiptAck.status} diagnostic=${receiptAck.diagnostic}",
+                        )
+                    }
+                }
+                if (!projection.retrySuggested || retry++ >= MAX_PRESENTATION_RECAPTURES) break
+                delay(PRESENTATION_RECAPTURE_MS)
+            } while (true)
+            if (retry > MAX_PRESENTATION_RECAPTURES) {
+                LOG.warn("[split-surface] bounded presentation recapture exhausted")
             }
         }
     }
 
-    private suspend fun captureOnEdt(): FrontendSurfaceSnapshot {
-        val result = CompletableDeferred<FrontendSurfaceSnapshot>()
+    private suspend fun captureOnEdt(): CapturedFrontendSurfaces {
+        val result = CompletableDeferred<CapturedFrontendSurfaces>()
         ApplicationManager.getApplication().invokeLater {
             try {
                 result.complete(
-                    FrontendSurfaceCollector.capture(
+                    FrontendSurfaceCollector.captureWithTargets(
                         project = project,
                         frontendInstanceId = frontendInstanceId,
                         sequence = sequence.incrementAndGet(),
                         surfaceIdentities = surfaceIdentities,
-                    ),
+                    ).let { capture ->
+                        capture.copy(
+                            snapshot = capture.snapshot.copy(
+                                presentationCapability = presentationAdapter?.capability
+                                    ?: FrontendPresentationCapability.SNAPSHOT_ONLY,
+                            ),
+                        )
+                    },
                 )
             } catch (failure: Throwable) {
                 result.completeExceptionally(failure)
+            }
+        }
+        return result.await()
+    }
+
+    private suspend fun applyPresentationOnEdt(
+        capture: CapturedFrontendSurfaces,
+        projection: FrontendPresentationProjection,
+    ): List<FrontendPresentationReceipt> {
+        val result = CompletableDeferred<List<FrontendPresentationReceipt>>()
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                val adapter = presentationAdapter
+                result.complete(
+                    if (adapter != null) {
+                        adapter.apply(capture, projection)
+                    } else {
+                        projection.presentations.map { presentation ->
+                            FrontendPresentationReceipt(
+                                projectId = project.projectId(),
+                                identity = presentation.identity,
+                                presentationRevision = presentation.presentationRevision,
+                                kind = presentation.kind,
+                                document = presentation.document,
+                                viewSession = presentation.viewSession,
+                                outcome = FrontendPresentationReceiptOutcome.REFUSED,
+                                diagnostic = "exact-262 detached presentation API shape unavailable",
+                            )
+                        }
+                    },
+                )
+            } catch (failure: Throwable) {
+                LOG.warn("[split-surface] presentation apply failed closed", failure)
+                result.complete(
+                    projection.presentations.map { presentation ->
+                        FrontendPresentationReceipt(
+                            projectId = project.projectId(),
+                            identity = presentation.identity,
+                            presentationRevision = presentation.presentationRevision,
+                            kind = presentation.kind,
+                            document = presentation.document,
+                            viewSession = presentation.viewSession,
+                            outcome = FrontendPresentationReceiptOutcome.REFUSED,
+                            diagnostic = failure.message ?: failure.javaClass.simpleName,
+                        )
+                    },
+                )
             }
         }
         return result.await()
@@ -137,91 +208,12 @@ class FrontendSurfaceSnapshotService(
 
     companion object {
         private const val CAPTURE_DEBOUNCE_MS = 75L
+        private const val PRESENTATION_RECAPTURE_MS = 250L
+        private const val MAX_PRESENTATION_RECAPTURES = 60
         private val LOG = Logger.getInstance(FrontendSurfaceSnapshotService::class.java)
 
         fun getInstance(project: Project): FrontendSurfaceSnapshotService = project.service()
     }
-}
-
-internal object FrontendSurfaceCollector {
-    fun capture(
-        project: Project,
-        frontendInstanceId: String,
-        sequence: Long,
-        surfaceIdentities: FrontendSurfaceIdentityTracker,
-    ): FrontendSurfaceSnapshot {
-        check(SwingUtilities.isEventDispatchThread()) { "frontend surface capture must run on EDT" }
-        val activeFrame = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
-        val mainFrame = WindowManager.getInstance().getFrame(project)
-        val editorWindows = FileEditorManagerEx.getInstanceEx(project).windows.toList()
-        val tagged = editorWindows.mapNotNull { editorWindow ->
-            val component = editorWindow.tabbedPane.component
-            val frame = SwingUtilities.getWindowAncestor(component) ?: return@mapNotNull null
-            TaggedEditorWindow(
-                frame = frame,
-                position = componentPosition(component),
-                snapshot = editorWindowSnapshot(editorWindow),
-            )
-        }
-        val complete = mainFrame != null && tagged.size == editorWindows.size
-        val grouped = tagged.groupBy(TaggedEditorWindow::frame).toMutableMap()
-        if (mainFrame != null) grouped.putIfAbsent(mainFrame, emptyList())
-        val assignments = surfaceIdentities.assign(
-            frames = grouped.keys,
-            mainFrame = mainFrame,
-            complete = complete,
-        )
-        val surfaces = grouped
-            .map { (frame, surfaceWindows) ->
-                val identity = assignments.getValue(frame)
-                FrontendSurface(
-                    paneId = identity.paneId,
-                    surfaceGeneration = identity.surfaceGeneration,
-                    role = identity.role,
-                    focused = frame === activeFrame,
-                    windows = surfaceWindows
-                        .sortedWith(compareBy({ it.position.x }, { it.position.y }))
-                        .mapIndexed { ordinal, taggedWindow ->
-                            taggedWindow.snapshot.copy(ordinal = ordinal)
-                        },
-                )
-            }
-            .sortedWith(compareBy({ it.role != SurfaceRole.MAIN }, FrontendSurface::paneId))
-        return FrontendSurfaceSnapshot(
-            frontendInstanceId = frontendInstanceId,
-            sequence = sequence,
-            projectId = project.projectId(),
-            complete = complete,
-            surfaces = surfaces,
-        )
-    }
-
-    internal fun roleForPaneId(paneId: String): SurfaceRole =
-        if (paneId == MAIN_SURFACE_PANE_ID) SurfaceRole.MAIN else SurfaceRole.DETACHED
-
-    private fun editorWindowSnapshot(window: EditorWindow): EditorWindowSnapshot {
-        val openPaths = window.fileList.map(VirtualFile::getPath).distinct()
-        val selectedPath = window.selectedFile?.path
-        return EditorWindowSnapshot(
-            ordinal = 0,
-            selectedPath = selectedPath,
-            openPaths = openPaths,
-            visiblePaths = listOfNotNull(selectedPath),
-        )
-    }
-
-    private fun componentPosition(component: Component): Point =
-        try {
-            component.locationOnScreen
-        } catch (_: IllegalStateException) {
-            component.location
-        }
-
-    private data class TaggedEditorWindow(
-        val frame: Window,
-        val position: Point,
-        val snapshot: EditorWindowSnapshot,
-    )
 }
 
 /**

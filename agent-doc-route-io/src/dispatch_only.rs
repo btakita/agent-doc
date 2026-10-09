@@ -255,6 +255,7 @@ fn dispatch_only_starting_pane_settled_via_authoritative_actor(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DispatchOnlyBlockerAction {
     AlreadyQueuedTrigger,
+    StopHookOwnsQueueContinuation,
     SubmitPlainTrigger,
     QueuePrompt(&'static str),
     Refuse,
@@ -266,6 +267,7 @@ fn classify_dispatch_only_blocker(
     blocker_reason: &str,
     has_queue_prompt: bool,
     requested_trigger_already_queued: bool,
+    active_auto_queue_owns_codex_stop: bool,
 ) -> DispatchOnlyBlockerAction {
     // Codex leaves an accepted type-ahead message visible in the composer while
     // the active turn runs and labels that surface `tab to queue message`. If
@@ -274,6 +276,18 @@ fn classify_dispatch_only_blocker(
     // by the caller; a trigger plus any operator text remains fail-closed.
     if blocker_reason == "queued draft in composer" && requested_trigger_already_queued {
         return DispatchOnlyBlockerAction::AlreadyQueuedTrigger;
+    }
+    // Codex Stop `decision: "block"` is itself the queue continuation
+    // transport. Typing a second plain trigger into the active-turn composer
+    // races that host-generated follow-up and can strand both inputs. While an
+    // active auto queue has a pending prompt, the Stop hook exclusively owns
+    // the active -> continuation transition.
+    if active_auto_queue_owns_codex_stop
+        && intent == AuthoritativeActorDispatchIntent::PlainTrigger
+        && harness_binary == "codex"
+        && blocker_reason == "active codex turn"
+    {
+        return DispatchOnlyBlockerAction::StopHookOwnsQueueContinuation;
     }
     if intent == AuthoritativeActorDispatchIntent::PlainTrigger
         && agent_doc_queue::route_dispatch::dispatch_active_turn_accepts_plain_trigger(
@@ -806,6 +820,17 @@ pub fn dispatch_only_send_reopen(
     if let Some(reason) =
         agent_doc_harness::dispatch_only_blocker_reason(harness, &pre_submit_content)
     {
+        let active_auto_queue_owns_codex_stop = if options.intent
+            == AuthoritativeActorDispatchIntent::PlainTrigger
+            && harness.binary == "codex"
+            && reason == "active codex turn"
+        {
+            let content = std::fs::read_to_string(file)?;
+            !agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts(&content)?
+                .is_empty()
+        } else {
+            false
+        };
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -823,6 +848,7 @@ pub fn dispatch_only_send_reopen(
             options.queue_prompt_text.is_some(),
             dispatch_only_starting_pane_blocker(&pre_submit_projection, &route_trigger)
                 == StartingPaneBlocker::StrandedTrigger,
+            active_auto_queue_owns_codex_stop,
         ) {
             DispatchOnlyBlockerAction::AlreadyQueuedTrigger => {
                 agent_doc_ops_log_io::log_op(
@@ -842,6 +868,28 @@ pub fn dispatch_only_send_reopen(
                     dispatch_pane,
                     agent_doc_flow::outcome::user_outcome_fields(
                         agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                    )
+                );
+                return Ok(dispatch_pane);
+            }
+            DispatchOnlyBlockerAction::StopHookOwnsQueueContinuation => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_codex_stop_owns_queue_continuation file={} pane={} harness={} blocker={} outcome=queued_behind_owner",
+                        file.display(),
+                        dispatch_pane,
+                        harness.binary,
+                        reason,
+                    ),
+                );
+                eprintln!(
+                    "[route] coalesced dispatch-only {} reopen for {}: pane {} has an active turn and auto queue, so the Codex Stop hook owns the next continuation; no competing trigger was submitted {}",
+                    harness.binary,
+                    file.display(),
+                    dispatch_pane,
+                    agent_doc_flow::outcome::user_outcome_fields(
+                        agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner,
                     )
                 );
                 return Ok(dispatch_pane);
@@ -1548,7 +1596,7 @@ mod tests {
     }
 
     #[test]
-    fn blocker_policy_submits_only_plain_triggers_to_actual_active_turns() {
+    fn blocker_policy_does_not_compete_with_codex_stop_for_an_active_auto_queue() {
         assert_eq!(
             classify_dispatch_only_blocker(
                 AuthoritativeActorDispatchIntent::PlainTrigger,
@@ -1556,14 +1604,29 @@ mod tests {
                 "active codex turn",
                 false,
                 false,
+                true,
+            ),
+            DispatchOnlyBlockerAction::StopHookOwnsQueueContinuation,
+            "the active auto queue's Stop hook must be the sole continuation owner",
+        );
+        assert_eq!(
+            classify_dispatch_only_blocker(
+                AuthoritativeActorDispatchIntent::PlainTrigger,
+                "codex",
+                "active codex turn",
+                false,
+                false,
+                false,
             ),
             DispatchOnlyBlockerAction::SubmitPlainTrigger,
+            "plain active-turn triggers without an auto queue keep their existing behavior",
         );
         assert_eq!(
             classify_dispatch_only_blocker(
                 AuthoritativeActorDispatchIntent::PlainTrigger,
                 "claude",
                 "claude artifact picker open",
+                false,
                 false,
                 false,
             ),
@@ -1580,6 +1643,7 @@ mod tests {
                 "active codex turn",
                 true,
                 false,
+                false,
             ),
             DispatchOnlyBlockerAction::QueuePrompt("dispatch_only_codex_active_turn"),
         );
@@ -1588,6 +1652,7 @@ mod tests {
                 AuthoritativeActorDispatchIntent::PromptAware,
                 "codex",
                 "active codex turn",
+                false,
                 false,
                 false,
             ),
@@ -1604,6 +1669,7 @@ mod tests {
                 "queued draft in composer",
                 false,
                 true,
+                false,
             ),
             DispatchOnlyBlockerAction::AlreadyQueuedTrigger,
         );
@@ -1612,6 +1678,7 @@ mod tests {
                 AuthoritativeActorDispatchIntent::PlainTrigger,
                 "codex",
                 "queued draft in composer",
+                false,
                 false,
                 false,
             ),
@@ -1625,6 +1692,7 @@ mod tests {
                 "codex hook review prompt",
                 false,
                 true,
+                false,
             ),
             DispatchOnlyBlockerAction::Refuse,
             "an exact-looking draft cannot bypass a different protected substate",

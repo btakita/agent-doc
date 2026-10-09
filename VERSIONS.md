@@ -31,6 +31,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   the existing delivery and tracked-work landing witnesses and continues its commit tail. Unserved and rejecting editor
   endpoints still fail closed. The strict pending-capture gate remains explicit: mentioning or leaving existing work
   open does not replace `--no-followups` when the response intentionally creates no new tracked work.
+- **Healthy Codex queue continuations no longer read like hook failures.** Codex requires Stop continuations to use
+  `decision: "block"` and renders that protocol shape as `Blocked by hook`; agent-doc now leads normal auto-queue
+  handoffs with `Queue continuation, not an error:` and explains the host label before naming the next queue item.
+  Dispatch-only editor reopens now coalesce behind that Stop continuation while the Codex turn and auto queue are active,
+  preventing a competing composer trigger from wedging the handoff.
 
 ## 0.35.478
 

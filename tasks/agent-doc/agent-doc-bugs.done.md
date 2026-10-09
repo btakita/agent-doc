@@ -334,3 +334,26 @@
 - 2026-10-09 [#singleplugindistribution] Can we have a single plugin distribution that recognizes if it is the frontend or backend or both?
 - 2026-10-09 [#starttools] Fix Sync Tmux Panes recovery for tools.md: reproduce by running :kill-pane on the bound pane, then Sync Tmux Panes; the session must restart in a newly created pane and rebind cleanly. Identify the lifecycle/routing cause, add regression coverage, and verify the installed CLI/editor path end to end.
 - 2026-10-09 [#jetbrainsdualrelease] Complete PR #222 dual JetBrains release plumbing before release: assign distinct classic/modular JetBrains update versions, clamp the classic plugin to until-build="261.*", and add corresponding release-version, check, and release tests proving both artifacts remain distinct, compatibility-ranged, and collision-free.
+- 2026-10-09 [#fixsubagent] Fix in a subagent:
+  ```
+  • Blocked by hook
+  └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
+  dev/tasks/frontend.md. [session-check] INTERRUPTED: binary-owned captured closeout for `/home/brian/work/btakita/agent-
+  loop/src/haiven-dev/tasks/frontend.md` remains pending: response_captured: captured response is waiting for exact
+  authority/disk convergence before write-applied. The same capture is durable; do not issue another closeout payload and
+  do not force disk. Retry only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+  frontend.md`. The latest assistant text was captured into the pending/capture ledger before auto-close. The hook could
+  not finish the required commit boundary: refused editor IPC for /home/brian/work/btakita/agent-loop/src/haiven-dev/
+  tasks/frontend.md because reliable document liveness has no matching editor registration (reliable_editor_live=true,
+  registration_available=false); refresh or update the editor integration before retrying closeout. The retained capture
+  or projection is already durable and this exact retained intent commits itself once delivery converges — this is a
+  deferral, not a lost response. Wait for its controller-owned terminal state edge; do not use the document's current-
+  cycle status as proof because queue continuation can advance to a different cycle. Do NOT re-send the response, force
+  disk, or `admin recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own
+  either: `admin reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor
+  holding the document is not serving its replica, and then its remedy governs. Do not send the final answer yet. If the
+  response is missing from the document, run `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+  frontend.md` first. Then finish the commit boundary for this turn and end with `agent-doc session-check /home/brian/
+  work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md`.
+  ```
+- 2026-10-09 [#steergatemodelrerun] [agent-doc] Rerun the steergatenamo model evaluation on real pause points. Gate: at least 200 labelled steering_gate_log rows with a text_tail (66 as of 2026-10-06); src/agent-doc/scripts/steergate-model-eval --dataset currently exits insufficient_data. Then integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Proxy results and decision: tasks/agent-doc/eval-steergatenamo.md

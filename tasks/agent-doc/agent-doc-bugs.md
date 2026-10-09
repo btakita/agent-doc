@@ -65,6 +65,23 @@ Once the subagents report, I'll merge the three branches into agent-doc main one
 I claimed `#actionable-review` (`subagent:actionable-review`) and dispatched it to a read-only background subagent. It is re-checking each of the nine gated review items against current facts: CI run 37974793628, the state of PR #222 and issues #221/#218, the Homebrew tap secret, the steering-eval data count, and the pending capture in haiven-dev `frontend.md`. It excludes the three JetBrains heads, which other subagents are already working on.
 
 This cycle adds no backlog items: the capture belongs to the claimed subagent's result. When it reports back, I'll add the actionable items to the backlog and queue, convert or close stale review items, and release the claim. I hit one oddity along the way: the pre-write `pending_capture` gate fires for a preset head even after it has been claimed for subagent dispatch.
+
+### Re: actionable review results — opus-5.5 · 2026-10-09T15:58-04:00
+
+> **Queue prompt:** #actionable-review
+
+The read-only review subagent re-checked the gated items against live state. **CI run 37974793628 on PR #222 head c39de1b04 failed**, so three review items are now waiting on a fix rather than on CI.
+
+**New actionable items** (appended after the in-flight JetBrains heads):
+1. `#ci25gradle`: PR #222 moved CI and release to JDK 25, but the classic `editors/jetbrains/gradlew` still uses the Gradle 8.14 wrapper, which fails on JDK 25 (`Unsupported class file major version 69`). It shares `release.yml` with `#jetbrains262distribution`, so it is ordered after it. A preview rebuild and manifest re-pin follow.
+2. `#steergatedecision`: the 200-row gate is met (222 labelled rows). Neither turnsense (log-loss 0.2123) nor namo-en (0.2222) beats rules+perceptron (0.2110), so the decision to record is not to integrate. Re-gate on minority-label count (10 today).
+3. `#uvpython3148`: uv `--script` tools fail on `UV_PYTHON=3.14.8` from the uncommitted `.mise.toml` bump.
+
+**Review changes:** `#fixsubagent` is done (haiven-dev `frontend.md` session-check now reports committed with no pending capture). `#steergatemodelrerun` is replaced by `#steergatedecision`. `#gh218remoteproof`, `#gh221mergeclose` and `#releasepublishgate` were rewritten for the failed CI run. The Homebrew secret is still not shown as provisioned.
+
+**Unchanged and still blocked:** `#pypiquotarecheck` (support#12214 has had no reply since 2026-09-10), `#grokmcpverify` (grok is still signed out), `#drivecapturedsplice` (needs a live editor and owner pane), and `#qsubattr5` (waiting for a real operator-created multi-head batch).
+
+The three JetBrains subagents' work is still to be merged. `#previewartifactprovenance` is done and pushed as `44281dda2`, and the other two are still running.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -73,9 +90,9 @@ This cycle adds no backlog items: the capture belongs to the claimed subagent's 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #actionable-review
+- ~~#actionable-review~~
 - ⏭️ do [#jetbrains262installselect]
-- 🚧 do [#jetbrains262distribution]
+- ⏭️ do [#jetbrains262distribution]
 - 🚧 do [#previewartifactprovenance]
 <!-- /agent:queue -->
 
@@ -84,40 +101,20 @@ This cycle adds no backlog items: the capture belongs to the claimed subagent's 
 <!-- agent:backlog priority -->
 - [ ] 🚧 [#jetbrains262installselect] [agent-doc] Make JetBrains plugin install/update and local all-installed deployment select the compatibility-ranged artifact per target IDE build: branch/build 262 must receive agent-doc-jetbrains-262-<version>.zip, 242–261 must receive the classic ZIP, and an unprovable target must fail closed instead of silently choosing classic. Update make install-editor-plugins to build/deploy both packages without replacing a 262 modular install with classic. Verify mixed 261/262 targets choose distinct exact assets, update-all and local-all preserve each compatible line, unknown builds fail with actionable guidance, and make check passes.
 - [ ] 🚧 [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
+- [ ] [#ci25gradle] [agent-doc] Fix the red CI on draft PR 222 (head c39de1b04; run 37974793628 failed in dev-harness-test, Makefile:209). PR 222 moved ci.yml/release.yml to JDK 25 with Gradle 9.2.1 for editors/jetbrains-262, but the classic editors/jetbrains/gradlew still uses the Gradle 8.14 wrapper, which fails on JDK 25 ('Unsupported class file major version 69'). Run the classic build on JDK 21, or move its wrapper to Gradle 9.1 or later while keeping source/target 21 for 242–261. Apply the same fix to release.yml's classic step; that file is shared with jetbrains262distribution, so integrate after it. Verify make check locally under JDK 25 and green CI on the new PR 222 head; earlier head 254b75e also failed at make test (Makefile:97). Afterwards rebuild the jetbrains-262 preview prerelease from the new head and re-pin the previewartifactprovenance manifest.
+- [ ] [#steergatedecision] [agent-doc] The steergatenamo rerun gate is met: 223 rows, 222 labelled with a text_tail, against a minimum of 200. steergate-model-eval --dataset gives held-out log-loss of 0.2110 (AUC 0.9378) for rules+perceptron, 0.2123 with turnsense added and 0.2222 with namo-en added; neither beats the baseline. Record these results and a do-not-integrate-turnsense decision in tasks/agent-doc/eval-steergatenamo.md. Skip the fine-tune: there are only 10 minority labels (9 premature, 1 late). Re-gate on minority-label count (at least 50 premature/late) instead of total rows.
+- [ ] [#uvpython3148] [agent-loop] uv run --script tools (for example src/agent-doc/scripts/steergate-model-eval) fail with 'No interpreter found for Python 3.14.8'. The uncommitted superproject .mise.toml bump (python 3.12 to 3.14) exports UV_PYTHON=3.14.8, which uv does not manage (it has 3.14.6/3.14.2). Commit or revert the bump consistently, or stop exporting the exact patch version to uv, and verify the eval script runs without overrides.
 - [ ] 🚧 [#previewartifactprovenance] [agent-doc] Bind #gh218remoteproof to immutable preview bytes: publish or record a checksum manifest for agent-doc-jetbrains-262-0.2.511.zip, verify downloaded backend and Client/Gateway files against that digest and PR #222 head c39de1b045b8b5238f8e5b7fa6870062798d4114, and reject replaced or mismatched bytes before acceptance. Provide one command that verifies the preview digest and plugin range/version on both sides and fails on tampering.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#releasepublishgate] [operator-verify] Authorize release + publish only after: (1) CI run 37974793628 is green for exact PR #222 head c39de1b04; (2) #gh218remoteproof is resolved; (3) PR #222 is marked ready and merged and GH #221 is closed, resolving #gh221mergeclose; and (4) repository secret HOMEBREW_TAP_TOKEN is provisioned. Only then perform the authorized release + publish and verify delivery.
-- [/] [#gh221mergeclose] [operator-verify] GH #221: keep open until draft PR #222 exact head c39de1b045b8b5238f8e5b7fa6870062798d4114 has green CI and merges. The shared/frontend/backend split is code-complete and available as prerelease jetbrains-262-preview-c39de1b; GH #218 separately retains the real IDEA 2026.2.3 Remote Dev acceptance gate. After #222 merges, close #221 as fixed by #222.
-- [/] [#gh218remoteproof] [operator-verify] GH #218 / draft PR #222: require green CI run 37974793628 for exact head c39de1b045b8b5238f8e5b7fa6870062798d4114 and real IDEA 2026.2.3 (262) Remote Dev proof using prerelease jetbrains-262-preview-c39de1b, with the same agent-doc-jetbrains-262-0.2.511.zip installed on backend and Client/Gateway: detached-only isolated terminal; same-document main-wins read-only placeholder and byte-identical main; focus/sync/resize no main mutation; close/rejoin; backend restart/client reconnect before first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Only then mark PR ready, merge, and close #218.
-- [/] [#fixsubagent] Fix in a subagent:
-  ```
-  • Blocked by hook
-  └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
-  dev/tasks/frontend.md. [session-check] INTERRUPTED: binary-owned captured closeout for `/home/brian/work/btakita/agent-
-  loop/src/haiven-dev/tasks/frontend.md` remains pending: response_captured: captured response is waiting for exact
-  authority/disk convergence before write-applied. The same capture is durable; do not issue another closeout payload and
-  do not force disk. Retry only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
-  frontend.md`. The latest assistant text was captured into the pending/capture ledger before auto-close. The hook could
-  not finish the required commit boundary: refused editor IPC for /home/brian/work/btakita/agent-loop/src/haiven-dev/
-  tasks/frontend.md because reliable document liveness has no matching editor registration (reliable_editor_live=true,
-  registration_available=false); refresh or update the editor integration before retrying closeout. The retained capture
-  or projection is already durable and this exact retained intent commits itself once delivery converges — this is a
-  deferral, not a lost response. Wait for its controller-owned terminal state edge; do not use the document's current-
-  cycle status as proof because queue continuation can advance to a different cycle. Do NOT re-send the response, force
-  disk, or `admin recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own
-  either: `admin reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor
-  holding the document is not serving its replica, and then its remedy governs. Do not send the final answer yet. If the
-  response is missing from the document, run `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
-  frontend.md` first. Then finish the commit boundary for this turn and end with `agent-doc session-check /home/brian/
-  work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md`.
-  ```
+- [/] [#releasepublishgate] [operator-verify] Authorize release + publish only after: (1) CI is green for the final PR 222 head after ci25gradle (run 37974793628 on c39de1b04 failed); (2) gh218remoteproof is resolved; (3) PR 222 is marked ready and merged and GH 221 is closed, resolving gh221mergeclose; and (4) repository secret HOMEBREW_TAP_TOKEN is provisioned (gh secret list on btakita/agent-doc showed nothing on 2026-10-09, possibly because the token lacks secret visibility). Only then perform the authorized release + publish and verify delivery.
+- [/] [#gh221mergeclose] [operator-verify] GH 221: keep open until draft PR 222 has green CI on its post-ci25gradle head (run 37974793628 on c39de1b04 failed) and merges. The shared/frontend/backend split is code-complete and available as prerelease jetbrains-262-preview-c39de1b; GH 218 separately retains the real IDEA 2026.2.3 Remote Dev acceptance gate. After 222 merges, close 221 as fixed by 222.
+- [/] [#gh218remoteproof] [operator-verify] GH 218 / draft PR 222: CI run 37974793628 on head c39de1b04 FAILED (classic gradlew 8.14 on JDK 25; see ci25gradle). After ci25gradle lands, require green CI on the new PR 222 head. Then require a real IDEA 2026.2.3 (262) Remote Dev proof using a preview prerelease rebuilt from that head, with the same agent-doc-jetbrains-262 ZIP installed on backend and Client/Gateway: detached-only isolated terminal; same-document main-wins read-only placeholder and byte-identical main; focus/sync/resize causes no main mutation; close/rejoin; backend restart/client reconnect before the first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Only then mark the PR ready, merge, and close 218.
 - [/] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 - [/] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md). SETUP COMPLETE: tasks/software/tsift.md now has subagents=3 on branch qsubattr5-dogfood commit de5a8aa7c0d5e879547d4e321d159b1eff840073; gated pending the next real operator-created multi-head batch proof from distinct queue claims and ops.log that every eligible head dispatches exactly once and none drain inline.
-- [/] [#steergatemodelrerun] [agent-doc] Rerun the steergatenamo model evaluation on real pause points. Gate: at least 200 labelled steering_gate_log rows with a text_tail (66 as of 2026-10-06); src/agent-doc/scripts/steergate-model-eval --dataset currently exits insufficient_data. Then integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Proxy results and decision: tasks/agent-doc/eval-steergatenamo.md
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-06: 8.363 GiB of 10.0 GiB, 1.637 GiB headroom, 198 releases through 0.35.465, post-cutover mean 35.3 KiB, approximately 48,621 further releases fit; VERDICT headroom fine. The support issue remains open with only the github-actions bot comment and has not changed since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation. NEW BLOCKER 2026-09-30: grok 1.0.41 is now SIGNED OUT ('grok -p' -> 'Error: Not signed in'); operator runs 'grok login --device-code' (or sets XAI_API_KEY), and the free usage quota or the planned subscription must be active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed earlier; the last live MCP probe stopped at the usage limit before committed closeout. Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 <!-- /agent:review -->

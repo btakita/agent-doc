@@ -1337,14 +1337,18 @@ fn run_with_options_to_writer_in_pass(
     // idle-watch dispatches `[focused-cycle]`/`[clean-session]` heads via its own
     // `live_drainable_continuation_head` check, so suppressing the synthetic diff for
     // non-drainable heads does not strand legitimate supervisor-driven continuation.
+    //
+    // `#explicitrunqueue`: a head a live worker claim holds is never the
+    // synthetic continuation head. It used to be the `queue_prompts.first()`
+    // fallback (and `queue_supervisor_drainable` ignored claims), so an explicit
+    // Run Agent Doc on a queue whose only head a subagent had claimed
+    // synthesized `+do [#id]` on every press and opened a no-op cycle; the
+    // claimed head now yields `no_changes` naming its owner and expiry.
     let mut diff_from_queue_head_only = false;
     if diff_result.is_none()
         && !queue_state.queue_paused
         && queue_state.queue_supervisor_drainable
-        && let Some(head_prompt) = queue_state
-            .selected_queue_prompts
-            .first()
-            .or_else(|| queue_state.queue_prompts.first())
+        && let Some(head_prompt) = queue_state.continuation_head()
     {
         let slash_command = agent_doc_queue::queue_command::slash_command_text(head_prompt);
         let prompt_source = slash_command.as_deref().unwrap_or(head_prompt);
@@ -2587,6 +2591,7 @@ fn run_with_options_to_writer_in_pass(
             content: &diff_result_with_current.current,
             queue_runs: preflight_read_projection.queue.active == Some(true)
                 || preflight_read_projection.queue.deferred,
+            claimed_queue_items: &queue_state.claimed_queue_heads,
         })
     });
     let output = PreflightOutput {
@@ -3363,6 +3368,149 @@ mod tests {
             guidance.contains("`do [#lzwiremodel]`") && guidance.contains("`go`"),
             "{guidance}"
         );
+    }
+
+    /// `#explicitrunqueue`: the 2026-10-10 17:34Z `agent-doc-bugs.md` shape. The
+    /// only live queue head `do [#runctrlclaude]` was claimed by
+    /// `subagent:runctrlclaude`; every explicit Run Agent Doc still
+    /// synthesized `+do [#runctrlclaude]` as the cycle diff (with
+    /// `queue_drainable_head_count: 0`), opened a cycle, and forced a no-op
+    /// response that tripped `expect_done_or_gate_guard`.
+    const CLAIMED_HEAD_DOC: &str = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "queue: go\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: earlier — test\n\n",
+        "Answered.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Queue\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#runctrlclaude]\n",
+        "<!-- /agent:queue -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog queue -->\n",
+        "- [ ] [#runctrlclaude] Fix background supervisor thrash\n",
+        "<!-- /agent:backlog -->\n",
+    );
+
+    fn claimed_head_preflight(doc: &Path) -> serde_json::Value {
+        let mut output = Vec::new();
+        run_with_options_to_writer(doc, PreflightOptions::default(), &mut output).unwrap();
+        serde_json::from_slice(&output).unwrap()
+    }
+
+    fn seed_claimed_head_doc(dir: &tempfile::TempDir) -> std::path::PathBuf {
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, CLAIMED_HEAD_DOC).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            CLAIMED_HEAD_DOC,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        doc
+    }
+
+    #[test]
+    fn explicit_run_on_a_claimed_only_queue_head_opens_no_cycle_and_names_the_claim() {
+        let dir = setup_project();
+        let doc = seed_claimed_head_doc(&dir);
+        agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "do [#runctrlclaude]",
+            "subagent:runctrlclaude",
+            3600,
+        )
+        .unwrap();
+
+        // Two presses: the claimed head must not reappear as the cycle diff
+        // on either, and neither may open a response cycle.
+        for press in 1..=2 {
+            let parsed = claimed_head_preflight(&doc);
+            assert_eq!(parsed["no_changes"], true, "press {press}: {parsed:#}");
+            assert!(parsed["diff"].is_null(), "press {press}: {parsed:#}");
+            assert_eq!(parsed["queue_drainable_head_count"], 0, "{parsed:#}");
+            assert!(
+                !closeout_cycle_is_open(&doc).unwrap(),
+                "press {press}: a claimed-only queue must not open a cycle"
+            );
+            let explanation = &parsed["no_changes_explanation"];
+            assert_eq!(
+                explanation["claimed_queue_items"][0]["item"], "do [#runctrlclaude]",
+                "{parsed:#}"
+            );
+            assert_eq!(
+                explanation["claimed_queue_items"][0]["owner"], "subagent:runctrlclaude",
+                "{parsed:#}"
+            );
+            let guidance = explanation["guidance"].as_str().unwrap();
+            assert!(
+                guidance.contains("is claimed by subagent:runctrlclaude, expires "),
+                "{guidance}"
+            );
+            let state = agent_doc_cycle_state_io::load(&doc).unwrap();
+            assert!(
+                state
+                    .as_ref()
+                    .is_none_or(|state| state.expect_done_or_gate_ids.is_empty()),
+                "press {press}: no directive target may be recorded for a claimed head: {state:?}"
+            );
+        }
+
+        // The claim is left alone.
+        let claims =
+            agent_doc_queue_io::queue_claim::active_claims_for_content(&doc, CLAIMED_HEAD_DOC)
+                .unwrap();
+        assert_eq!(claims.len(), 1, "{claims:?}");
+        assert_eq!(claims[0].owner, "subagent:runctrlclaude");
+    }
+
+    /// Control for the test above: the same document with NO claim still
+    /// synthesizes the queue head as this cycle's work, so the claimed-only
+    /// outcome is caused by the claim, not by the fixture.
+    #[test]
+    fn unclaimed_queue_head_still_synthesizes_the_continuation_diff() {
+        let dir = setup_project();
+        let doc = seed_claimed_head_doc(&dir);
+        let parsed = claimed_head_preflight(&doc);
+        assert_eq!(parsed["no_changes"], false, "{parsed:#}");
+        assert!(
+            parsed["diff"]
+                .as_str()
+                .is_some_and(|diff| diff.contains("+do [#runctrlclaude]")),
+            "{parsed:#}"
+        );
+    }
+
+    /// A real operator edit still admits a cycle while a head is claimed.
+    #[test]
+    fn operator_edit_beside_a_claimed_head_still_opens_a_cycle() {
+        let dir = setup_project();
+        let doc = seed_claimed_head_doc(&dir);
+        agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "do [#runctrlclaude]",
+            "subagent:runctrlclaude",
+            3600,
+        )
+        .unwrap();
+        let edited = CLAIMED_HEAD_DOC.replace(
+            "Answered.\n",
+            "Answered.\n\nWhat is the status of the supervisor cleanup?\n",
+        );
+        std::fs::write(&doc, &edited).unwrap();
+        let parsed = claimed_head_preflight(&doc);
+        assert_eq!(parsed["no_changes"], false, "{parsed:#}");
+        let diff = parsed["diff"].as_str().unwrap_or_default();
+        assert!(
+            diff.contains("What is the status of the supervisor cleanup?"),
+            "{parsed:#}"
+        );
+        assert!(!diff.contains("+do [#runctrlclaude]"), "{parsed:#}");
     }
 
     #[test]

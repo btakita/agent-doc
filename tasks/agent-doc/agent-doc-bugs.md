@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -556,6 +557,17 @@ All three are fixed on agent-doc main (`248908c32`), installed, and closed on Gi
 - **#228:** fixed by PR #229. Routes reuse session-check's live-turn verdict and yield with exit 0, with no cancel-turn advice.
 
 The batch's single `make check` passed 9879/9879. All three ship in v0.35.481, which is still publishing.
+
+### Re: queue fan-out dispatch — opus-5.5 · 2026-10-09T22:19-04:00
+
+**Deferred:** all five new queue heads were added with subagent intent, so this cycle only claimed and dispatched them; none is answered yet.
+
+- Claimed each head with `agent-doc queue claim --owner subagent:<id>` (2h TTL) and dispatched one background subagent per item, each with the binary's verbatim authorization preamble.
+- Each agent-doc fix works in its own worktree under `~/work/btakita/worktrees/<id>` on branch `fix/<id>` (based on e8990627c) and pushes only that branch. Subagents never `make install`.
+- The preview re-pin agent first checks whether the PR 222 lazily CI fix has landed and CI is green on the new head. If not, it reports that external blocker and stops instead of polling.
+- Next: as each agent reports back, I release its claim, integrate serially, run one `make install` for the batch, and close the items.
+
+Exchange is 526 lines / 28 sections (accretion warn); the queue is active, so I am not compacting.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -564,6 +576,11 @@ The batch's single `make check` passed 9879/9879. All three ship in v0.35.481, w
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#ftstrikeclaimedmention]
+- do [#crossrootcolumnflip]
+- do [#staleharnessturnlive]
+- do [#jb262dynupgrade]
+- do [#previewrepin]
 <!-- /agent:queue -->
 
 ## Backlog

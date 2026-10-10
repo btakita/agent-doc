@@ -390,6 +390,29 @@ fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
         "expected repeated-stop recovery commit, got: {}",
         String::from_utf8_lossy(&log.stdout)
     );
+
+    // Deterministic cost oracle (independent of host speed): the repair's own
+    // strict closeout must be consumed as the terminal receipt. A stale
+    // pre-repair document memo used to make the receipt never match, so the
+    // hook ran a second full closeout inside its wall-clock budget, and under
+    // load that redundant pass is where the budget expired.
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops.contains("codex_stop_repeated_queue_recovery_success source=strict_replay_receipt"),
+        "repeated-stop recovery must reuse the strict replay receipt instead of re-running closeout:\n{ops}"
+    );
+    assert_eq!(
+        ops.matches("closeout_latency ").count(),
+        1,
+        "exactly one closeout must run for one recovered response:\n{ops}"
+    );
+    // A `test-support` build displaces the lazily launched controller with an
+    // in-process actor. That must ask with a reason a fresh controller
+    // accepts; a refused request used to cost a fixed connect-poll stall.
+    assert!(
+        !ops.contains("controller_shutdown_refused"),
+        "test actor shutdown was refused by a fresh controller:\n{ops}"
+    );
 }
 
 #[test]

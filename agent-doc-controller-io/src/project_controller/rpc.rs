@@ -5495,12 +5495,38 @@ pub(crate) fn reap_stale_duplicate_controllers(
     }
 }
 
+/// Stop whatever controller serves `project_root` before the in-process test
+/// actor takes over its socket.
+///
+/// This used to send `stale_controller_replacement`, which a controller on the
+/// SAME binary refuses (`fresh_controller_requires_explicit_shutdown_reason`):
+/// only a provably newer caller may displace a fresh controller that way. The
+/// refused controller kept accepting, so the connect poll spun for the full
+/// `CONNECT_WAIT` on every closeout-owner claim in a `test-support` build (every
+/// CLI closeout an integration test drives), and then the actor took the
+/// socket from under a still-live controller anyway. Ask with the reason a
+/// fresh controller accepts, and wait for the controller PROCESS to exit, not
+/// for its socket to stop answering: an exiting controller unlinks its socket
+/// path on the way out, which would delete the actor's freshly bound socket.
 #[cfg(feature = "test-support")]
 pub(crate) fn shutdown_stale_controller(project_root: &Path) {
-    let _ = request_with_reason(project_root, "shutdown", "stale_controller_replacement");
+    let controller_pid = read_bootstrap(project_root)
+        .ok()
+        .flatten()
+        .map(|bootstrap| bootstrap.pid)
+        .filter(|pid| *pid != std::process::id());
+    let accepted = request_with_reason(project_root, "shutdown", "test_shutdown").is_ok();
     let start = Instant::now();
     while start.elapsed() < CONNECT_WAIT {
-        if connect(project_root).is_err() {
+        let exited = match controller_pid {
+            // Zombie-aware: a controller this process launched stays a zombie
+            // until reaped, and a zombie has already released its socket.
+            Some(pid) if accepted => {
+                !crate::process::recorded_process_is_alive(pid, timestamp_secs())
+            }
+            _ => connect(project_root).is_err(),
+        };
+        if exited {
             return;
         }
         std::thread::sleep(CONNECT_POLL);

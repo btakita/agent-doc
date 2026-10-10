@@ -3491,9 +3491,20 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         true,
                         harness_turn_live,
                     ) {
-                        match agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(
+                        // `#runctrlclaude`: a `/clear`/interrupt receipt newer
+                        // than the cycle proves the orphan at once; the
+                        // owner-release + stall proof stays as the fallback.
+                        match agent_doc_repair_command_io::cancel_preflight_cycle_after_harness_turn_end(
                             &path,
-                        ) {
+                        )
+                        .and_then(|outcome| match outcome {
+                            agent_doc_turn::repair::CancelOutcome::Protected => {
+                                agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(
+                                    &path,
+                                )
+                            }
+                            other => Ok(other),
+                        }) {
                             Ok(outcome) => format!("{outcome:?}"),
                             Err(err) => {
                                 eprintln!(

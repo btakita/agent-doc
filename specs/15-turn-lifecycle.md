@@ -409,3 +409,41 @@ for ~90s after "unwedge agent-doc" was interrupted).
 This is harness-authored turn-boundary evidence, not prompt scraping: a
 rendered ready prompt is still never idle evidence, because harnesses redraw
 the composer between tool calls inside a live turn.
+
+### Harness turn-end receipts (`#runctrlclaude`)
+
+A cleared lease says only "no turn is known to be live"; it cannot prove that
+the conversation which opened a `preflight_started` cycle is gone. The
+receipts below do, and they survive the lease row being deleted. They are
+stored as one coordination row per pane (`scope_kind = 'turn_ended'`,
+`scope_id = <pane>`, `holder = <reason>`, `heartbeat_secs` = boundary time).
+Writes are monotonic: an older boundary never moves a receipt back.
+
+- **`SessionStart` with source `clear`, `startup` or `resume`.** The
+  `turn-status idle` hook reads the hook payload from stdin (same bounded read
+  as `turn-status active`) and records `session_start_clear` /
+  `session_start_startup` / `session_start_resume`. The decision is
+  `agent_doc_turn::turn_status::harness_turn_end_reason`.
+- **A settled interrupt record** that retires a lease (above) records
+  `interrupt` at the record's own timestamp.
+- **Not receipts:** `Stop` (a Stop hook may answer `decision: "block"` and the
+  harness keeps generating in the same turn), `SessionStart` source `compact`
+  (auto-compaction fires mid-turn), and a hook payload that is missing or
+  unparseable (fail closed).
+
+Consumer: the `HarnessTurnEnded` empty-preflight reclaim authority
+(`specs/07-core-commands.md` § cancel). It reclaims only when
+`harness_turn_end_proves_orphaned_preflight(turn_live, turn_ended_at,
+cycle.updated_at)` holds: no fresh turn-active lease for the authoritative
+actor's pane, and a receipt **strictly** newer than the cycle's `updated_at`.
+A re-entrant preflight keeps the cycle id but bumps `updated_at`, so a later
+turn that re-entered the cycle is never mistaken for the cleared one; a
+receipt in the same second is ambiguous and refuses.
+
+Observed 2026-10-10 on agent-doc-bugs.md (`cycle-1791653439493`): Ctrl-C
+landed while the `UserPromptSubmit` preflight hook was still running, so the
+transcript held no interrupt record. The operator then typed `/clear` 16s
+after preflight and ran Agent Doc again. The route refused
+`run_cancel_not_proven` and then `owner_released_cycle_not_stalled`, and its
+only unblocker was a manual `session cancel-turn`. The `/clear` receipt is the
+proof that was missing.

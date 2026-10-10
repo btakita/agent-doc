@@ -159,16 +159,14 @@ fn resolve_recovery_closeout_owner_after_first_claim(
 }
 
 impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
-    fn preflight_turn_fence(
-        &self,
-        file: &Path,
-    ) -> Result<agent_doc_repair_io::PreflightTurnFence> {
+    fn preflight_turn_fence(&self, file: &Path) -> Result<agent_doc_repair_io::PreflightTurnFence> {
         let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
             return Ok(agent_doc_repair_io::PreflightTurnFence {
                 session_id: None,
                 pane_id: None,
                 generation: None,
                 active: false,
+                turn_ended_at: None,
             });
         };
         let Some(actor) = agent_doc_controller_io::project_controller::authoritative_actor_binding(
@@ -181,14 +179,21 @@ impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
                 pane_id: None,
                 generation: None,
                 active: false,
+                turn_ended_at: None,
             });
         };
+        // Read liveness FIRST: the read retires a settled interrupted lease
+        // and records its turn-end receipt, which the receipt read then sees.
         let active = agent_doc_turn_status_io::turn_active_for_pane_for_file(file, &actor.pane_id);
+        let turn_ended_at =
+            agent_doc_turn_status_io::last_harness_turn_end_for_pane_for_file(file, &actor.pane_id)
+                .map(|receipt| receipt.ended_at);
         Ok(agent_doc_repair_io::PreflightTurnFence {
             session_id: Some(actor.session_id),
             pane_id: Some(actor.pane_id),
             generation: Some(actor.generation),
             active,
+            turn_ended_at,
         })
     }
 

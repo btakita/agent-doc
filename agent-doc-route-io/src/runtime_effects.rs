@@ -157,8 +157,14 @@ fn route_await_closeout_projection(
     )
 }
 
+/// `#runctrlclaude`: the drain's first, immediate reclaim carries the harness
+/// turn-end proof (a `/clear`/startup/resume `SessionStart` or a settled
+/// interrupt, newer than the cycle, with no live turn lease). Before this it
+/// carried no proof at all and could never succeed, so an interrupted-then-
+/// cleared turn wedged the route until the stall deadline or a manual
+/// `session cancel-turn`.
 fn route_cancel_empty_preflight(file: &Path) -> Result<bool> {
-    agent_doc_repair_io::cancel_preflight_cycle(
+    agent_doc_repair_io::cancel_preflight_cycle_after_harness_turn_end(
         &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
         file,
     )

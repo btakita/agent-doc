@@ -56,6 +56,44 @@ pub enum EmptyPreflightCancelAuthority {
     /// the pre-capture deadline, because this projection also reports a
     /// release when there was no owner to release.
     OwnerReleased,
+    /// `#runctrlclaude`: the owning pane's harness reported a session boundary
+    /// (a `SessionStart` for `/clear`, a fresh start, or a resume; or a settled
+    /// interrupt record in its transcript) strictly AFTER the cycle was last
+    /// (re)entered by preflight, and no newer turn-active lease exists for that
+    /// pane. A conversation that was cleared or interrupted cannot finish a
+    /// response into this cycle, and any NEW turn either holds a fresh lease or
+    /// re-entered the cycle (bumping its `updated_at` past the receipt), so
+    /// both halves together prove the cycle is orphaned without waiting out the
+    /// stall deadline. See [`harness_turn_end_proves_orphaned_preflight`].
+    HarnessTurnEnded,
+}
+
+/// `#runctrlclaude`: does a harness turn-end receipt prove an empty
+/// `preflight_started` cycle is orphaned?
+///
+/// - `turn_live`: a fresh turn-active lease exists for the owning pane NOW.
+///   A live lease always protects, whatever the receipt says.
+/// - `turn_ended_at`: the newest harness-authored turn-end receipt for the
+///   owning pane (Unix seconds), if any.
+/// - `cycle_updated_at`: the cycle's `updated_at`. A re-entrant preflight keeps
+///   the cycle id but bumps this, so a later turn that re-entered the cycle is
+///   never mistaken for the cleared one.
+///
+/// The comparison is STRICT. Receipts and cycle times are whole seconds, so a
+/// receipt in the same second as the preflight is ambiguous about order and
+/// must not authorize; the stall-deadline path still covers that case.
+pub const fn harness_turn_end_proves_orphaned_preflight(
+    turn_live: bool,
+    turn_ended_at: Option<u64>,
+    cycle_updated_at: u64,
+) -> bool {
+    if turn_live {
+        return false;
+    }
+    match turn_ended_at {
+        Some(ended_at) => ended_at > cycle_updated_at,
+        None => false,
+    }
 }
 
 impl EmptyPreflightCancelAuthority {
@@ -76,12 +114,25 @@ impl EmptyPreflightCancelAuthority {
         matches!(self, Self::OwnerReleased)
     }
 
+    /// Whether this proof must ALSO observe a harness turn-end receipt newer
+    /// than the cycle (and no live turn lease) before it may reclaim.
+    pub const fn requires_harness_turn_end(self) -> bool {
+        matches!(self, Self::HarnessTurnEnded)
+    }
+
+    /// Whether the reclaim must read the authoritative actor's turn fence and
+    /// abandon only while that fence is unchanged.
+    pub const fn requires_turn_fence(self) -> bool {
+        matches!(self, Self::OwnerReleased | Self::HarnessTurnEnded)
+    }
+
     /// Ops-log token naming which proof was (or was not) carried.
     pub const fn proof(self) -> &'static str {
         match self {
             Self::Unproven => "run_cancel_not_proven",
             Self::RunCancelled => "run_cancelled",
             Self::OwnerReleased => "owner_released",
+            Self::HarnessTurnEnded => "harness_turn_ended",
         }
     }
 }
@@ -207,6 +258,60 @@ mod tests {
         );
     }
 
+    #[test]
+    fn harness_turn_end_authority_needs_a_fence_but_never_a_stall() {
+        let authority = EmptyPreflightCancelAuthority::HarnessTurnEnded;
+        assert!(authority.authorizes_cancel());
+        assert!(authority.requires_harness_turn_end());
+        assert!(authority.requires_turn_fence());
+        assert!(
+            !authority.requires_stalled_cycle(),
+            "#runctrlclaude: a /clear receipt is the proof; waiting out the stall is the wedge"
+        );
+        assert!(EmptyPreflightCancelAuthority::OwnerReleased.requires_turn_fence());
+        assert!(!EmptyPreflightCancelAuthority::OwnerReleased.requires_harness_turn_end());
+        assert!(!EmptyPreflightCancelAuthority::RunCancelled.requires_turn_fence());
+        assert!(!EmptyPreflightCancelAuthority::Unproven.requires_turn_fence());
+    }
+
+    /// `#runctrlclaude` truth table. The only authorizing row is: no live
+    /// lease AND a receipt strictly newer than the cycle's last (re)entry.
+    #[test]
+    fn harness_turn_end_receipt_truth_table() {
+        let cycle_updated_at = 1_000;
+        // Live lease: a new turn holds the pane; never authorize.
+        for ended in [None, Some(999), Some(1_000), Some(1_001), Some(5_000)] {
+            assert!(!harness_turn_end_proves_orphaned_preflight(
+                true,
+                ended,
+                cycle_updated_at
+            ));
+        }
+        // No receipt: nothing proves the harness reached a boundary.
+        assert!(!harness_turn_end_proves_orphaned_preflight(
+            false,
+            None,
+            cycle_updated_at
+        ));
+        // A receipt from before the cycle, or the same ambiguous second.
+        assert!(!harness_turn_end_proves_orphaned_preflight(
+            false,
+            Some(999),
+            cycle_updated_at
+        ));
+        assert!(!harness_turn_end_proves_orphaned_preflight(
+            false,
+            Some(1_000),
+            cycle_updated_at
+        ));
+        // `/clear` after the preflight, no newer turn: orphaned.
+        assert!(harness_turn_end_proves_orphaned_preflight(
+            false,
+            Some(1_001),
+            cycle_updated_at
+        ));
+    }
+
     /// Each proof is distinguishable in the ops log, so a wedge can be told
     /// apart from a reclaim that was refused for want of proof.
     #[test]
@@ -215,6 +320,7 @@ mod tests {
             EmptyPreflightCancelAuthority::Unproven.proof(),
             EmptyPreflightCancelAuthority::RunCancelled.proof(),
             EmptyPreflightCancelAuthority::OwnerReleased.proof(),
+            EmptyPreflightCancelAuthority::HarnessTurnEnded.proof(),
         ];
 
         assert_eq!(
@@ -265,6 +371,33 @@ mod tests {
             "the drain effect must bind to the owner-release authority; binding \
              it to the unproven entry point is what made the original branch \
              structurally dead"
+        );
+    }
+
+    /// `#runctrlclaude`: the drain's FIRST reclaim step must carry the
+    /// harness turn-end proof. Bound to the unproven entry point it refused by
+    /// construction (`run_cancel_not_proven`), which is the exact wedge seen
+    /// after Ctrl-C + `/clear`.
+    #[test]
+    fn the_route_closeout_drain_first_reclaim_carries_the_harness_turn_end_proof() {
+        let runtime = include_str!("../../agent-doc-route-io/src/runtime_effects.rs");
+        let (_, cancel_fn) = runtime
+            .split_once("fn route_cancel_empty_preflight(file: &Path)")
+            .expect("the route still binds an empty-preflight cancel effect");
+        let body = cancel_fn.split("\nfn ").next().unwrap();
+        assert!(
+            body.contains("cancel_preflight_cycle_after_harness_turn_end("),
+            "route_cancel_empty_preflight must use the harness-turn-end authority: {body}"
+        );
+        assert!(
+            !body.contains("cancel_preflight_cycle(\n"),
+            "the unproven entry point can never reclaim"
+        );
+
+        let idle_watch = include_str!("../../agent-doc-start-runtime-io/src/idle_watch.rs");
+        assert!(
+            idle_watch.contains("cancel_preflight_cycle_after_harness_turn_end("),
+            "the idle supervisor must also try the harness-turn-end reclaim"
         );
     }
 

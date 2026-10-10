@@ -260,6 +260,17 @@ pub fn cancel_preflight_cycle_after_owner_release(
     )
 }
 
+/// Reclaim the empty preflight whose owning pane's harness reported a turn
+/// boundary after the cycle was last entered (`#runctrlclaude`).
+pub fn cancel_preflight_cycle_after_harness_turn_end(
+    file: &Path,
+) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    agent_doc_repair_io::cancel_preflight_cycle_after_harness_turn_end(
+        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+        file,
+    )
+}
+
 /// Return the stable operation key only when the durable cycle contains a
 /// non-empty captured response that is eligible for binary-owned closeout.
 pub fn captured_finalize_resume_key(file: &Path) -> Result<Option<CapturedFinalizeResumeKey>> {

@@ -45,6 +45,11 @@ const TURN_ACTIVE_SCOPE: &str = "turn_active";
 /// heartbeat equals the lease heartbeat it belongs to, so a binding left by an
 /// older turn never vouches for a newer lease.
 const TURN_ACTIVE_TRANSCRIPT_SCOPE: &str = "turn_active_transcript";
+/// `#runctrlclaude`: durable per-pane harness turn-end receipt. `holder` is the
+/// receipt reason, `heartbeat_secs` the boundary time (Unix seconds). It
+/// outlives the lease row on purpose: the lease answers "is a turn live now?",
+/// the receipt answers "did the harness reach a boundary after time T?".
+const TURN_ENDED_SCOPE: &str = "turn_ended";
 const SUPERVISOR_STALE_SCOPE: &str = "supervisor_stale";
 // Compatibility key written by agent-doc versions before turn-active leases
 // became pane-scoped.
@@ -117,6 +122,73 @@ pub fn clear_turn_active_marker(base: &Path, pane: &str) -> Result<()> {
     // must not erase the active owner written by an older installed binary.
     clear_coordination_lease_if_holder_in_db(&conn, TURN_ACTIVE_SCOPE, PROJECT_SCOPE_ID, pane)?;
     Ok(())
+}
+
+/// A harness turn-end receipt for one pane (`#runctrlclaude`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarnessTurnEnd {
+    pub pane: String,
+    /// Unix seconds of the boundary.
+    pub ended_at: u64,
+    /// Which boundary proved it (`session_start_clear`, `interrupt`, ...).
+    pub reason: String,
+}
+
+fn record_harness_turn_end_in_db(
+    conn: &Connection,
+    pane: &str,
+    ended_at: u64,
+    reason: &str,
+) -> Result<()> {
+    // Monotonic: a late-arriving older receipt never moves the boundary back.
+    if let Some(existing) = load_coordination_lease_from_db(conn, TURN_ENDED_SCOPE, pane)?
+        && existing.heartbeat_secs > ended_at
+    {
+        return Ok(());
+    }
+    upsert_coordination_lease_in_db(
+        conn,
+        &CoordinationLeaseRecord {
+            scope_kind: TURN_ENDED_SCOPE.to_string(),
+            scope_id: pane.to_string(),
+            holder: reason.to_string(),
+            holder_pid: Some(std::process::id()),
+            heartbeat_secs: ended_at,
+        },
+    )
+}
+
+/// Record that `pane`'s harness reached a turn-ending boundary at `ended_at`.
+/// Callers must only pass boundaries that
+/// [`agent_doc_turn::turn_status::harness_turn_end_reason`] (or a settled
+/// interrupt record) proves.
+pub fn record_harness_turn_end_at(
+    base: &Path,
+    pane: &str,
+    ended_at: u64,
+    reason: &str,
+) -> Result<()> {
+    let conn = open_state_db(base)?;
+    record_harness_turn_end_in_db(&conn, pane, ended_at, reason)
+}
+
+/// The newest harness turn-end receipt for `pane`, if any.
+pub fn last_harness_turn_end_for_pane(base: &Path, pane: &str) -> Option<HarnessTurnEnd> {
+    let conn = open_state_db(base).ok()?;
+    let row = load_coordination_lease_from_db(&conn, TURN_ENDED_SCOPE, pane)
+        .ok()
+        .flatten()?;
+    Some(HarnessTurnEnd {
+        pane: pane.to_string(),
+        ended_at: row.heartbeat_secs,
+        reason: row.holder,
+    })
+}
+
+/// [`last_harness_turn_end_for_pane`] for the project containing `file`.
+pub fn last_harness_turn_end_for_pane_for_file(file: &Path, pane: &str) -> Option<HarnessTurnEnd> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    last_harness_turn_end_for_pane(&root, pane)
 }
 
 fn marker_from_lease(lease: CoordinationLeaseRecord, now: u64) -> Option<TurnActiveMarker> {
@@ -205,6 +277,14 @@ fn retire_interrupted_turn_lease(
     now: u64,
 ) -> Option<InterruptedTurnLease> {
     let interrupted = interrupted_turn_lease(conn, marker, now)?;
+    // `#runctrlclaude`: the interrupt is a harness-authored turn boundary;
+    // keep it after the lease row is gone.
+    let _ = record_harness_turn_end_in_db(
+        conn,
+        &marker.pane,
+        interrupted.interrupted_at,
+        agent_doc_turn::turn_status::TURN_END_REASON_INTERRUPT,
+    );
     let _ = clear_coordination_lease_if_heartbeat_at_or_before_in_db(
         conn,
         TURN_ACTIVE_SCOPE,
@@ -522,12 +602,9 @@ pub fn run(active: bool) -> anyhow::Result<()> {
     // ancestor, skip the marker (the pane title still updated). Best-effort —
     // never fail the turn.
     if let Some(base) = base {
-        let result = if active {
-            let transcript = hook_transcript_path_from_stdin();
-            write_turn_active_marker_with_transcript(&base, &pane, transcript.as_deref())
-        } else {
-            clear_turn_active_marker(&base, &pane)
-        };
+        let payload = hook_payload_from_stdin();
+        let result =
+            apply_turn_status_hook_at(&base, &pane, active, payload.as_deref(), now_secs());
         if let Err(e) = result {
             eprintln!("[turn-status] warning: failed to update turn-active marker: {e:#}");
         }
@@ -558,10 +635,43 @@ fn hook_transcript_path_from_payload(payload: &str) -> Option<PathBuf> {
     }
 }
 
+/// Apply one `turn-status active|idle` hook invocation to the project state:
+/// `active` writes the pane's lease (bound to the payload's transcript);
+/// `idle` clears it and, when the payload is a turn-ending `SessionStart`
+/// (`#runctrlclaude`), records a durable turn-end receipt at `now`.
+pub fn apply_turn_status_hook_at(
+    base: &Path,
+    pane: &str,
+    active: bool,
+    payload: Option<&str>,
+    now: u64,
+) -> Result<()> {
+    if active {
+        let transcript = payload.and_then(hook_transcript_path_from_payload);
+        return write_turn_active_marker_with_transcript_at(base, pane, now, transcript.as_deref());
+    }
+    clear_turn_active_marker(base, pane)?;
+    match payload.and_then(hook_turn_end_reason_from_payload) {
+        Some(reason) => record_harness_turn_end_at(base, pane, now, reason),
+        None => Ok(()),
+    }
+}
+
+/// `#runctrlclaude`: the turn-end receipt a hook payload proves, if any.
+fn hook_turn_end_reason_from_payload(payload: &str) -> Option<&'static str> {
+    let value: serde_json::Value = serde_json::from_str(payload.trim()).ok()?;
+    agent_doc_turn::turn_status::harness_turn_end_reason(
+        value
+            .get("hook_event_name")
+            .and_then(serde_json::Value::as_str),
+        value.get("source").and_then(serde_json::Value::as_str),
+    )
+}
+
 /// Best-effort read of the hook payload from stdin. Never blocks the turn:
 /// an interactive stdin is skipped and a pipe that stays open is abandoned
 /// after [`HOOK_STDIN_WAIT`].
-fn hook_transcript_path_from_stdin() -> Option<PathBuf> {
+fn hook_payload_from_stdin() -> Option<String> {
     use std::io::IsTerminal;
     if std::io::stdin().is_terminal() {
         return None;
@@ -574,8 +684,7 @@ fn hook_transcript_path_from_stdin() -> Option<PathBuf> {
             .read_to_string(&mut payload);
         let _ = sender.send(payload);
     });
-    let payload = receiver.recv_timeout(HOOK_STDIN_WAIT).ok()?;
-    hook_transcript_path_from_payload(&payload)
+    receiver.recv_timeout(HOOK_STDIN_WAIT).ok()
 }
 
 /// Resolve the project root for the turn-active marker from the current working
@@ -1028,6 +1137,75 @@ mod tests {
         world.interrupt();
         world.tick(60);
         assert!(world.live());
+    }
+
+    /// `#runctrlclaude` (live 2026-10-10, agent-doc-bugs.md): Ctrl-C landed
+    /// while the `UserPromptSubmit` preflight hook was still running, so the
+    /// transcript holds NO interrupt record and the lease stays live. The
+    /// operator then typed `/clear`; Claude Code ran `SessionStart` (source
+    /// `clear`), whose `turn-status idle` hook cleared the lease. That boundary
+    /// must leave a durable receipt, while `Stop` and `compact` must not.
+    #[test]
+    fn sim_ctrl_c_during_hook_then_clear_leaves_a_turn_end_receipt() {
+        let mut world = TurnSimWorld::new("%149");
+        let submit = r#"{"hook_event_name":"UserPromptSubmit","transcript_path":"/nonexistent/t.jsonl","prompt":"/agent-doc x.md"}"#;
+        apply_turn_status_hook_at(&world.base, world.pane, true, Some(submit), world.now).unwrap();
+        world.tick(17);
+        // Ctrl-C mid-hook: nothing written, no Stop hook.
+        world.tick(15);
+        assert!(world.live(), "no harness evidence ends the lease yet");
+        assert_eq!(
+            last_harness_turn_end_for_pane(&world.base, world.pane),
+            None
+        );
+
+        let clear = r#"{"hook_event_name":"SessionStart","source":"clear","session_id":"n"}"#;
+        apply_turn_status_hook_at(&world.base, world.pane, false, Some(clear), world.now).unwrap();
+        assert!(!world.live());
+        let receipt = last_harness_turn_end_for_pane(&world.base, world.pane)
+            .expect("/clear is a turn-end receipt");
+        assert_eq!(receipt.ended_at, world.now);
+        assert_eq!(receipt.reason, "session_start_clear");
+
+        // A later Stop (possibly blocked into a continuation) and an
+        // auto-compaction SessionStart neither add nor move a receipt.
+        world.tick(40);
+        let stop = r#"{"hook_event_name":"Stop","stop_hook_active":false}"#;
+        apply_turn_status_hook_at(&world.base, world.pane, false, Some(stop), world.now).unwrap();
+        let compact = r#"{"hook_event_name":"SessionStart","source":"compact"}"#;
+        apply_turn_status_hook_at(&world.base, world.pane, false, Some(compact), world.now)
+            .unwrap();
+        apply_turn_status_hook_at(&world.base, world.pane, false, None, world.now).unwrap();
+        assert_eq!(
+            last_harness_turn_end_for_pane(&world.base, world.pane),
+            Some(receipt.clone())
+        );
+        // Receipts are monotonic: an older boundary never moves it back.
+        record_harness_turn_end_at(&world.base, world.pane, receipt.ended_at - 5, "interrupt")
+            .unwrap();
+        assert_eq!(
+            last_harness_turn_end_for_pane(&world.base, world.pane),
+            Some(receipt)
+        );
+        // Receipts are pane-scoped.
+        assert_eq!(last_harness_turn_end_for_pane(&world.base, "%150"), None);
+    }
+
+    /// `#runctrlclaude`: a settled interrupt that retires a lease also leaves
+    /// a receipt at the interrupt record's time, which survives the lease row.
+    #[test]
+    fn sim_interrupt_retirement_leaves_a_turn_end_receipt() {
+        let mut world = TurnSimWorld::new("%161");
+        world.submit_prompt("unwedge agent-doc");
+        world.tick(5);
+        world.interrupt();
+        let interrupted_at = world.now;
+        world.tick(agent_doc_turn::turn_status::TURN_INTERRUPT_SETTLE_SECS);
+        assert!(!world.live());
+        let receipt =
+            last_harness_turn_end_for_pane(&world.base, world.pane).expect("interrupt receipt");
+        assert_eq!(receipt.ended_at, interrupted_at);
+        assert_eq!(receipt.reason, "interrupt");
     }
 
     #[test]

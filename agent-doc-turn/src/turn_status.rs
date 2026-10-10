@@ -142,6 +142,43 @@ pub fn pane_title_status_marker_count(title: &str) -> usize {
 // a harness redraws between tool calls inside a live turn.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// `#runctrlclaude`: harness turn-end receipts.
+//
+// Clearing a lease only says "no turn is known to be live". Reclaiming an
+// empty preflight without waiting out the stall deadline needs the stronger,
+// POSITIVE fact that the harness reached a boundary after the cycle opened —
+// and it must survive the lease row being deleted. So boundaries that prove
+// the conversation which ran preflight can no longer answer it leave a durable
+// per-pane receipt. Only two kinds qualify:
+//
+// - `SessionStart` with source `clear`, `startup` or `resume`: the harness is
+//   at an idle prompt in a new or reloaded conversation. `compact` is excluded
+//   because auto-compaction fires `SessionStart` in the middle of a live turn.
+// - A settled `[Request interrupted by user…]` transcript record (above).
+//
+// `Stop` is deliberately NOT a receipt: a Stop hook may answer
+// `decision: "block"` (open cycle, queue continuation), and the harness then
+// keeps generating in the same turn.
+// ---------------------------------------------------------------------------
+
+/// Receipt reason for an interrupt record that retired a lease.
+pub const TURN_END_REASON_INTERRUPT: &str = "interrupt";
+
+/// The receipt reason a harness hook event proves, or `None` when the event
+/// does not prove the previous turn ended.
+pub fn harness_turn_end_reason(
+    hook_event_name: Option<&str>,
+    source: Option<&str>,
+) -> Option<&'static str> {
+    match (hook_event_name?, source?) {
+        ("SessionStart", "clear") => Some("session_start_clear"),
+        ("SessionStart", "startup") => Some("session_start_startup"),
+        ("SessionStart", "resume") => Some("session_start_resume"),
+        _ => None,
+    }
+}
+
 /// Text prefix of the record Claude Code appends to the session transcript
 /// when the operator interrupts a turn. Both observed forms share it:
 /// `[Request interrupted by user]` and `[Request interrupted by user for tool use]`.
@@ -332,6 +369,40 @@ pub fn turn_lease_ended_by_interrupt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#runctrlclaude`: only boundaries that end the conversation which ran
+    /// preflight are receipts. `Stop` can be blocked into a continuation and
+    /// `compact` fires mid-turn, so neither may vouch for an orphaned cycle.
+    #[test]
+    fn only_clear_startup_and_resume_session_starts_are_turn_end_receipts() {
+        assert_eq!(
+            harness_turn_end_reason(Some("SessionStart"), Some("clear")),
+            Some("session_start_clear")
+        );
+        assert_eq!(
+            harness_turn_end_reason(Some("SessionStart"), Some("startup")),
+            Some("session_start_startup")
+        );
+        assert_eq!(
+            harness_turn_end_reason(Some("SessionStart"), Some("resume")),
+            Some("session_start_resume")
+        );
+        for (event, source) in [
+            (Some("SessionStart"), Some("compact")),
+            (Some("SessionStart"), None),
+            (Some("Stop"), None),
+            (Some("Stop"), Some("clear")),
+            (Some("SubagentStop"), None),
+            (None, Some("clear")),
+            (None, None),
+        ] {
+            assert_eq!(
+                harness_turn_end_reason(event, source),
+                None,
+                "{event:?}/{source:?}"
+            );
+        }
+    }
 
     #[test]
     fn adoption_refresh_preserves_active_idle_and_custom_titles() {

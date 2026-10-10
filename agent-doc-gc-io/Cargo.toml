@@ -11,6 +11,7 @@ publish = false
 name = "agent_doc_gc_io"
 
 [dependencies]
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.484" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.484" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.484" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.484" }

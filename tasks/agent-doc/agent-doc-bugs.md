@@ -56,6 +56,12 @@ Briefs:
 Subagents commit and push only their own branches. Neither runs `make install`. When they report back, this coordinator integrates both, runs one `make install`, releases the claims, and closes the items.
 
 No new backlog follow-ups this cycle. Both items are already tracked: one by its `#runctrlclaude` backlog entry and both by active queue claims. Any remainder a subagent reports gets captured when it is integrated.
+
+### Re: `#runctrlclaude` re-trigger — already in flight — opus-5-5 · 2026-10-10T13:37-04:00
+
+`#runctrlclaude` is already claimed by `subagent:runctrlclaude`, which is working in `~/work/btakita/agent-doc-wt/runctrlclaude` on `fix/runctrlclaude`. This cycle does no inline work on it, to avoid two agents touching the same fix. The item stays open until the subagent reports back. Then the coordinator merges the branch, runs one `make install`, releases the claim, and records `--done`. The thrash item is also still in flight, under `subagent:supthrash`.
+
+This re-trigger produced no new follow-ups.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -64,14 +70,14 @@ No new backlog follow-ups this cycle. Both items are already tracked: one by its
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#runctrlclaude]
-- Several agent-doc processes have been background thrashing over the past few hours. Please fix agent-doc causes. Use formal logic to ensure proper cleanup happens for old supervisors.
+- ⏭️ do [#runctrlclaude]
+- ~~Several agent-doc processes have been background thrashing over the past few hours. Please fix agent-doc causes. Use formal logic to ensure proper cleanup happens for old supervisors. — auto-struck: tracked by backlog #runctrlclaude (#qftbklgstrike)~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#runctrlclaude] Run Agent Doc, then ctrl+c in Claude Code: Clear Session Context was wedged. After manually running `/clear` in Claude Code, Run Agent Doc is wedged: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "Several agent-doc processes have been background thrashing over the past few hours. Please fix agent-doc causes. Use formal logic to ensure proper cleanup happens for old supervisors." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
+- [ ] 🚧 [#runctrlclaude] Run Agent Doc, then ctrl+c in Claude Code: Clear Session Context was wedged. After manually running `/clear` in Claude Code, Run Agent Doc is wedged: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "Several agent-doc processes have been background thrashing over the past few hours. Please fix agent-doc causes. Use formal logic to ensure proper cleanup happens for old supervisors." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
 <!-- /agent:backlog -->
 
 ## Review

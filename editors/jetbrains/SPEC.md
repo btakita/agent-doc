@@ -112,7 +112,17 @@ jetbrains`, the `agent-doc upgrade` installed-plugin reconciliation, and `plugin
 --all-installed` derive each target's platform build from its versioned IDE data
 directory (`IntelliJIdea2026.2` -> 262) and select only that range's asset or
 local ZIP. A target whose build cannot be proven, or is outside both ranges, is
-refused with guidance; `--local --all-installed` resolves every target before
+refused with guidance. During `agent-doc upgrade` reconciliation (GH #233) a
+target whose proven build is outside both ranges is instead reported as
+`UnsupportedPlatform`: nothing is installed, its plugin stays in place, the
+summary prints one `WARNING:` line naming the build, the supported ranges and
+the installed version (no retry, `plugin install`, or "upgrade agent-doc"
+advice, since none can succeed on the newest release), `ops.log` records
+`unsupported_platform=<n>`, and the upgrade exits 0; it does not count as a
+change for the `--auto` watcher. The `stale_plugin` warning likewise drops its
+"install {expected} first" remedy when the live IDE's mapped plugin tree sits
+in such a data directory and names the build, the ranges and the plugin left
+installed instead; `--local --all-installed` resolves every target before
 replacing any, so one unprovable target or a missing modular build changes
 nothing. Both archive roots install into the canonical `agent-doc-jetbrains/`
 tree, and a stale `agent-doc-jetbrains-262/` tree is removed so one plugin ID

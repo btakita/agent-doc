@@ -20,8 +20,12 @@ The backend removes the `CLAUDECODE` environment variable to prevent nested sess
 
 Install and sign in to [Grok Build](https://docs.x.ai/build/overview), then run
 `agent-doc skill install --harness grok` in your project. This installs the
-shared skill and registers the project `agent-doc` MCP server. Enable/trust that
-server in Grok if prompted; existing server configuration is preserved.
+shared skill and registers the project `agent-doc` MCP server
+(`agent-doc mcp serve`). Trust the project in Grok if prompted: an untrusted
+project loads neither the project skill nor its MCP server (`grok inspect`
+shows `Project trusted: no`). Existing server configuration is preserved,
+except that an entry from an older installer with `args = ["mcp"]`, which
+never starts a server, is migrated to `["mcp", "serve"]`.
 
 Set `agent: grok` in document frontmatter (`grok-build` is also accepted).
 `agent-doc route notes.md` opens the managed interactive session;

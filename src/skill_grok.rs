@@ -43,6 +43,20 @@ fn install_bundle(dir: &Path, bundle: &[(&str, &str)]) -> Result<()> {
     Ok(())
 }
 
+fn serve_args() -> toml::Value {
+    toml::Value::Array(vec!["mcp".into(), "serve".into()])
+}
+
+/// The pre-`#grokmcpserveargs` installer entry: `agent-doc mcp` with no
+/// subcommand, which never starts a server.
+fn is_legacy_mcp_entry(entry: &toml::Value) -> bool {
+    entry.get("command").and_then(toml::Value::as_str) == Some("agent-doc")
+        && entry
+            .get("args")
+            .and_then(toml::Value::as_array)
+            .is_some_and(|args| args.len() == 1 && args[0].as_str() == Some("mcp"))
+}
+
 pub fn install(root: Option<&Path>) -> Result<()> {
     let base = root
         .map(Path::to_path_buf)
@@ -67,11 +81,27 @@ pub fn install(root: Option<&Path>) -> Result<()> {
         .as_table_mut()
         .context("Grok mcp_servers must be a table")?;
     // Preserve an explicitly configured server, including an intentional disable.
-    if !servers.contains_key("agent-doc") {
-        servers.insert(
-            "agent-doc".into(),
-            toml::from_str("command = 'agent-doc'\nargs = ['mcp']\nenabled = true\n")?,
-        );
+    // The one exception is the legacy installer shape `agent-doc mcp`: that
+    // command prints help and exits 2, so Grok's MCP handshake never completes
+    // and `agent_doc_admit` is never connected (`#grokmcpserveargs`). Only the
+    // args are migrated; `enabled` and every other key stay as configured.
+    let changed = match servers.get_mut("agent-doc") {
+        None => {
+            servers.insert(
+                "agent-doc".into(),
+                toml::from_str("command = 'agent-doc'\nargs = ['mcp', 'serve']\nenabled = true\n")?,
+            );
+            true
+        }
+        Some(entry) if is_legacy_mcp_entry(entry) => {
+            if let Some(table) = entry.as_table_mut() {
+                table.insert("args".into(), serve_args());
+            }
+            true
+        }
+        Some(_) => false,
+    };
+    if changed {
         write_if_changed(&path, &toml::to_string_pretty(&config)?)?;
     }
     eprintln!(
@@ -103,6 +133,21 @@ pub(super) fn audit(base: &Path) -> Result<()> {
             path.display()
         );
     }
+    let config_path = base.join(".grok/config.toml");
+    if config_path.exists() {
+        let config: toml::Value = toml::from_str(&std::fs::read_to_string(&config_path)?)
+            .context("parse Grok project config")?;
+        if config
+            .get("mcp_servers")
+            .and_then(|servers| servers.get("agent-doc"))
+            .is_some_and(is_legacy_mcp_entry)
+        {
+            anyhow::bail!(
+                "broken Grok MCP server args in {} (`agent-doc mcp` exits without serving); run agent-doc skill install --harness grok",
+                config_path.display()
+            );
+        }
+    }
     for (subdir, bundle) in [("runbooks", BUNDLED_RUNBOOKS), ("okf", BUNDLED_OKF)] {
         for (name, expected) in bundle {
             if std::fs::read_to_string(dir.join(subdir).join(name))? != *expected {
@@ -133,10 +178,13 @@ mod tests {
             config["mcp_servers"]["agent-doc"]["command"].as_str(),
             Some("agent-doc")
         );
-        assert_eq!(
-            config["mcp_servers"]["agent-doc"]["args"][0].as_str(),
-            Some("mcp")
-        );
+        let args: Vec<_> = config["mcp_servers"]["agent-doc"]["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect();
+        assert_eq!(args, vec!["mcp", "serve"]);
         audit(dir.path()).unwrap();
         check(Some(dir.path())).unwrap();
     }
@@ -159,5 +207,73 @@ mod tests {
         assert!(!text.contains("When all of these hold, invoke the `Skill` tool"));
         std::fs::write(dir.path().join(REL_PATH).join("SKILL.md"), "stale").unwrap();
         assert!(audit(dir.path()).is_err());
+    }
+
+    #[test]
+    fn install_migrates_legacy_mcp_args_and_keeps_operator_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".grok")).unwrap();
+        let path = dir.path().join(".grok/config.toml");
+        std::fs::write(
+            &path,
+            "[mcp_servers.agent-doc]\nargs = [\"mcp\"]\ncommand = \"agent-doc\"\nenabled = false\n",
+        )
+        .unwrap();
+        install(Some(dir.path())).unwrap();
+        let config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let entry = &config["mcp_servers"]["agent-doc"];
+        assert_eq!(entry["args"], serve_args());
+        assert_eq!(entry["enabled"].as_bool(), Some(false));
+        audit(dir.path()).unwrap();
+        let migrated = std::fs::read_to_string(&path).unwrap();
+        install(Some(dir.path())).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), migrated);
+    }
+
+    #[test]
+    fn audit_rejects_legacy_mcp_args_that_never_serve() {
+        let dir = tempfile::tempdir().unwrap();
+        install(Some(dir.path())).unwrap();
+        let path = dir.path().join(".grok/config.toml");
+        std::fs::write(
+            &path,
+            "[mcp_servers.agent-doc]\nargs = [\"mcp\"]\ncommand = \"agent-doc\"\nenabled = true\n",
+        )
+        .unwrap();
+        let err = audit(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("broken Grok MCP server args"), "{err}");
+        assert!(check(Some(dir.path())).is_err());
+    }
+
+    #[test]
+    fn installed_mcp_args_name_a_real_server_subcommand() {
+        // Guard against the installer drifting from the CLI again: the args
+        // Grok spawns must parse as the stdio server, not the bare group.
+        // The full clap tree needs more than the default test-thread stack.
+        let mut argv = vec!["agent-doc".to_string()];
+        argv.extend(
+            serve_args()
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|arg| arg.as_str().unwrap().to_string()),
+        );
+        let (installed, bare) = std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                use clap::Parser;
+                (
+                    crate::Cli::try_parse_from(&argv).is_ok(),
+                    crate::Cli::try_parse_from(["agent-doc", "mcp"]).is_ok(),
+                )
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(installed, "installed Grok MCP args must parse");
+        assert!(
+            !bare,
+            "bare `agent-doc mcp` must not be the installed command"
+        );
     }
 }

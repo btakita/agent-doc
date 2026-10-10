@@ -739,6 +739,36 @@ Verification:
 The sibling code patch is committed transactionally with this closeout and will be fast-forwarded to `origin/main` immediately afterward. No additional follow-up was created: the Beta-readiness question is already the next queued prompt.
 
 Session accretion is in warning range; I continued draining the queue without compaction.
+
+### Re: Lazily Beta readiness — gpt-5 · 2026-10-10T15:46:43-04:00
+
+> **Queue prompt:**
+>
+> I want to promote Lazily to Beta. Do you think our featureset + api is stable enough?
+
+**Verdict: not yet for an unqualified, family-wide “Lazily Beta”; yes, nearly, for a deliberately scoped “Lazily Core public beta.”** The feature set is already more than sufficient. The remaining risk is not a shortage of capability—it is whether the compatibility promise, conformance claims, wire contract, documentation, and release paths are trustworthy enough to put “Beta” on them.
+
+The positive case is strong: the mature bindings broadly cover the core capability families; the conformance corpus has 162 fixtures; current main-branch CI is green across the audited repositories; releases are current across the major registries; and the Rust kernel (`Context`, `Cell`, `Effect`, reactive graph, and typed context) has remained unchanged since v0.49.0. Rust also has substantial unit, integration, conformance, formal, and benchmark coverage. This is enough engineering maturity for real external validation.
+
+I would define the Beta promise narrowly:
+
+- Compatibility-managed: `Context`, source/computed values, effects, batching/scopes, typed contexts, and only the keyed collections, queues, and statecharts that are uniformly supported and documented.
+- Protocol v1 only after the wire-contract inconsistencies below are fixed.
+- Preview/Experimental: durable backends, reliable sync, lossless-tree support, protobuf, advanced egress/transports, native FFI/export, accelerated hosts, and GDScript.
+
+Before announcing even that scoped Beta, I would require these gates:
+
+1. **Name the contract.** Publish the exact Beta surface and supported bindings. Add public-API compatibility checks, require every deprecation to carry a `since` version, and state a minimum compatibility window (for example, two releases or 90 days). Prove the surface through at least two release candidates or a four-week freeze without an unplanned break.
+2. **Make the compatibility evidence truthful.** The coverage matrix currently marks merge algebra complete for Python, Kotlin, and JavaScript even though their runners explicitly skip those merge fixtures. Kotlin’s C-ABI row is also marked complete while its own README says real `extern "C"` export is not implemented. The claim guard must account for runner skip ledgers, and these rows must be downgraded until exercised.
+3. **Resolve the wire contract.** Public docs describe a `type` discriminant while the protocol and fixtures use externally tagged single-key objects; schema docs say seven `DeltaOp` variants while the protocol defines ten; and the published `https://lazily.dev/schemas/...` identifiers do not resolve. Also reconcile strict closed-record decoders with the promise that minor-version additions are compatible—either negotiate a minor/capability level or specify tolerant decoding rules.
+4. **Prove releases from a consumer’s point of view.** Repair Rust Trusted Publishing (recent Release runs fail because the repository is not configured), move Python wheels off the retired `macos-14` image and add installed-wheel smoke tests, and provide a usable Kotlin distribution path (Maven Central or a documented/authenticated installation flow with a consumer test). Complete `#lzreleasepins` so one tested cross-language cohort is reproducible.
+5. **Align docs and support policy.** Replace stale Rust `Slot`/`Cell` and removed `Context::memo` guidance, refresh Python/Kotlin quickstarts, declare and test supported Node versions, test the declared Rust MSRV, and publish one canonical support/feature matrix.
+
+So my recommendation is: **announce “Lazily Core public beta” once those gates are green; do not wait for every advanced feature.** Beta is the right phase for external API feedback, but the label should attach only to a surface we can accurately describe and compatibly maintain. A whole-family Beta today would overstate several bindings and distribution paths; GA is not yet justified.
+
+Confidence: **high**, based on repository history, CI/release status, registry availability, conformance manifests/runners, schemas, and public documentation reviewed on 2026-10-10.
+
+Session accretion remains in the warning range; I completed this assessment without compaction because only an explicit operator clear may reset the session.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -746,12 +776,13 @@ Session accretion is in warning range; I continued draining the queue without co
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~[#lzmacosrunner]: setup OSX build on gh CI~~
-- I want to promote Lazily to Beta. Do you think our featureset + api is stable enough?
+- 🚧 I want to promote Lazily to Beta. Do you think our featureset + api is stable enough?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#lzbetascope] [operator-decision] Approve a scoped “Lazily Core public beta” and its compatibility-managed surface; after approval, close the Beta entry gate: correct conformance/FFI/wire/schema claims, publish API/deprecation and support policies with API/MSRV/consumer gates, repair Rust Trusted Publishing/Python macOS wheels/Kotlin installation, and require #lzreleasepins green while keeping advanced durability/reliable-sync/lossless-tree/egress/FFI/GDScript experimental.
 <!-- /agent:backlog -->
 
 ## Review

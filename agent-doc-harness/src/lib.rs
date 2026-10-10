@@ -787,6 +787,47 @@ impl HarnessConfig {
         }
     }
 
+    /// `#runfrontendcrashed`: whether the pane's latest prompt is evidence of a
+    /// LIVE harness strong enough to outweigh a bare-shell foreground command.
+    ///
+    /// A lone prompt glyph (`❯`, `>`, `›`, `$`, ...) is not: Powerlevel10k,
+    /// starship and pure all render `❯` as the shell prompt character, which is
+    /// byte-identical to an empty Claude composer. On 2026-10-10 that collision
+    /// let route type `/agent-doc <file>` into a zsh pane three times after its
+    /// harness had been killed. A bare glyph therefore only counts when the
+    /// harness's composer frame is visible around it (a horizontal rule on the
+    /// line above, as Claude/Codex render) or the harness's idle status chrome
+    /// is on screen; harness-specific placeholders (`❯ Try "..."`, `⏵⏵ ...
+    /// (shift+tab to cycle)`) count on their own.
+    pub fn prompt_proves_harness_over_shell(&self, content: &str) -> bool {
+        let Some(candidate) = self.last_prompt_candidate(content) else {
+            return false;
+        };
+        if !self.is_dispatch_ready_prompt_line(&candidate) {
+            return false;
+        }
+        if !is_shell_ambiguous_prompt_glyph(&candidate) {
+            return true;
+        }
+        let lines: Vec<String> = content
+            .lines()
+            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
+            .map(|line| line.trim().to_string())
+            .collect();
+        let framed = lines
+            .iter()
+            .rposition(|line| *line == candidate)
+            .and_then(|index| lines[..index].iter().rev().find(|line| !line.is_empty()))
+            .is_some_and(|above| is_horizontal_rule_line(above));
+        framed
+            || lines
+                .iter()
+                .rev()
+                .filter(|line| !line.is_empty())
+                .take(12)
+                .any(|line| self.is_idle_status_line(line))
+    }
+
     /// Return true when the line is harness UI chrome that should not be treated as
     /// prompt-bearing user/agent output.
     pub fn is_ignorable_output_line(&self, line: &str) -> bool {
@@ -1407,6 +1448,21 @@ impl HarnessConfig {
     pub fn cmdline_is_agent(&self, cmdline: &str) -> bool {
         self.process_names.iter().any(|name| cmdline.contains(name))
     }
+}
+
+/// `#runfrontendcrashed`: prompt lines that common interactive shell prompts
+/// render identically to an empty harness composer.
+pub fn is_shell_ambiguous_prompt_glyph(line: &str) -> bool {
+    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
+    matches!(
+        stripped.trim(),
+        "❯" | "⏵" | ">" | "›" | "$" | "%" | "#" | "λ" | "➜" | "→" | "»"
+    )
+}
+
+fn is_horizontal_rule_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.chars().count() >= 8 && trimmed.chars().all(|c| matches!(c, '─' | '━' | '═' | '-'))
 }
 
 /// Result of one bounded bottom-of-pane idle-chrome scan.
@@ -3464,6 +3520,52 @@ mod tests {
                 "must not be treated as status chrome: {line:?}"
             );
         }
+    }
+
+    /// `#runfrontendcrashed`: the pane captured at 2026-10-10 18:16:04 — the
+    /// killed Claude's composer remnant above, then zsh with a Powerlevel10k
+    /// `❯` prompt. The trailing `❯` is the SHELL, not an empty composer.
+    #[test]
+    fn powerlevel10k_shell_prompt_is_not_proof_of_a_live_claude() {
+        let harness = HarnessConfig::claude();
+        let pane = "\
+✻ Baked for 2m 37s · done 11:52 PM
+
+───────────────────────────────────────────────
+❯ [1]    1989646 terminated  /home/brian/.cargo/bin/agent-doc start --route-owned
+───────────────────────────────────────────────
+~/work/btakita/agent-loop/src/haiven-dev docs/fpe-ser…emporal-plan ⇡1302 !4 ?1        ✘ TERM 11s 14:15:56
+                                                                                        ❯
+";
+        assert_eq!(harness.last_prompt_candidate(pane).as_deref(), Some("❯"));
+        assert!(
+            harness.is_dispatch_ready_prompt_line("❯"),
+            "the glyph alone is byte-identical to an empty Claude composer"
+        );
+        assert!(!harness.prompt_proves_harness_over_shell(pane));
+    }
+
+    #[test]
+    fn framed_or_placeholder_claude_composer_still_proves_a_live_harness() {
+        let harness = HarnessConfig::claude();
+        let framed = "\
+● done
+
+───────────────────────────────────────────────
+❯\u{a0}
+───────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+";
+        assert!(
+            harness.prompt_proves_harness_over_shell(framed),
+            "candidate={:?}",
+            harness.last_prompt_candidate(framed)
+        );
+        assert!(!harness.prompt_proves_harness_over_shell("$ ls\nfoo\n$\n"));
+        assert!(is_shell_ambiguous_prompt_glyph("\u{1b}[35m❯\u{1b}[0m"));
+        assert!(!is_shell_ambiguous_prompt_glyph(
+            "❯ Try \"fix lint errors\""
+        ));
     }
 
     #[test]

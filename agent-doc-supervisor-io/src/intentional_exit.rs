@@ -93,6 +93,37 @@ pub fn clear_intentional_exit(project_root: &Path, document_id: &str) -> Result<
     clear_intentional_exit_in_db(&conn, document_id)
 }
 
+/// `#runfrontendcrashed`: after a controller replacement has stopped the old
+/// supervisor, replace its exit marker with a time-bounded cold-start marker so
+/// the crash watchdog does not issue a second replacement that kills the
+/// booting successor. Returns the marker written, or `None` when neither the
+/// handler's marker nor the kill outcome identified the stopped pid (the row is
+/// then cleared, preserving the historical crash-recovery behaviour).
+pub fn mark_replacement_cold_start_pending(
+    project_root: &Path,
+    document_id: &str,
+    killed_pid: Option<u32>,
+    generation: u64,
+    pane_id: &str,
+    session_id: &str,
+) -> Result<Option<IntentionalExitMarker>> {
+    let conn = state_store::open_state_db(project_root)?;
+    let prior = load_intentional_exit_from_db(&conn, document_id)?;
+    let Some(marker) = agent_doc_supervisor::intentional_exit::replacement_cold_start_marker(
+        prior.as_ref(),
+        killed_pid,
+        generation,
+        pane_id,
+        session_id,
+        now_ms(),
+    ) else {
+        clear_intentional_exit_in_db(&conn, document_id)?;
+        return Ok(None);
+    };
+    record_intentional_exit_in_db(&conn, document_id, &marker)?;
+    Ok(Some(marker))
+}
+
 /// Who and what is exiting — captured when the supervisor registers, so the
 /// handler never has to consult shared runtime state from signal context.
 #[derive(Debug, Clone)]
@@ -256,12 +287,14 @@ mod tests {
         let conn = state_store::open_state_db(dir.path()).unwrap();
         let before = load_intentional_exit_from_db(&conn, DOCUMENT_ID).unwrap();
         assert_eq!(
-            watchdog_intentional_exit_decision(before.as_ref(), 77, 4),
+            watchdog_intentional_exit_decision(before.as_ref(), 77, 4, now_ms()),
             IntentionalExitDecision::Intentional
         );
         clear_intentional_exit(dir.path(), DOCUMENT_ID).unwrap();
         let after = load_intentional_exit_from_db(&conn, DOCUMENT_ID).unwrap();
-        assert!(watchdog_intentional_exit_decision(after.as_ref(), 77, 4).allows_restart());
+        assert!(
+            watchdog_intentional_exit_decision(after.as_ref(), 77, 4, now_ms()).allows_restart()
+        );
     }
 
     /// Child-process body for [`sigterm_records_intentional_exit_marker_and_still_exits`].
@@ -336,7 +369,7 @@ mod tests {
             .expect("SIGTERM handler recorded the marker");
         assert_eq!(marker.supervisor_pid, child.id());
         assert_eq!(
-            watchdog_intentional_exit_decision(Some(&marker), child.id(), 4),
+            watchdog_intentional_exit_decision(Some(&marker), child.id(), 4, now_ms()),
             IntentionalExitDecision::Intentional,
             "watchdog must not respawn a deliberately terminated supervisor"
         );

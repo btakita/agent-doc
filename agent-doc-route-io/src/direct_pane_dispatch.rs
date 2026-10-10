@@ -459,11 +459,12 @@ pub fn dead_harness_shell_dispatch_block(
         .map(|c| c.trim().to_string())
         .filter(|c| !c.is_empty())
         .filter(|cmd| pane_current_command_is_bare_shell(cmd))?;
+    // `#runfrontendcrashed`: with a bare shell in the foreground, a lone `❯`
+    // is the shell's own (Powerlevel10k/starship) prompt as often as it is an
+    // empty composer — demand harness-specific evidence.
     let pane_shows_harness_prompt = agent_doc_tmux_io::capture_pane(tmux, pane)
         .ok()
-        .and_then(|content| harness.last_prompt_candidate(&content))
-        .map(|line| harness.is_dispatch_ready_prompt_line(&line))
-        .unwrap_or(false);
+        .is_some_and(|content| harness.prompt_proves_harness_over_shell(&content));
     classify_dead_harness_shell_dispatch_block(DeadHarnessShellDispatchFacts {
         pane_shows_harness_prompt,
         bare_shell_command: Some(bare_shell_command),

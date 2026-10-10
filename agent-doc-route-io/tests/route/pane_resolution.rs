@@ -1926,7 +1926,9 @@ mod tests {
         send_keys_with_retry(
             &iso,
             &actor_pane,
-            r#"exec /bin/sh -c 'printf "❯ \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+            // `#runfrontendcrashed`: the foreground is `sh`, so a lone `❯` is no
+            // longer proof of a live harness — render the composer frame.
+            r#"exec /bin/sh -c 'printf "────────────────\n❯ \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
         );
         let _ = wait_for_pane_contains(&iso, &actor_pane, "❯ ", std::time::Duration::from_secs(3));
 

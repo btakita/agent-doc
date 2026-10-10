@@ -699,6 +699,11 @@ pub fn run_with_reap_policy_resume_and_harness(
     let preserved_child_survived = pending_adopt
         .as_ref()
         .is_some_and(|state| state.child_survived());
+    if !preserved_child_survived {
+        // `#runfrontendcrashed`: a predecessor killed mid-session leaves the
+        // pane raw; normalize before the first status line so it doesn't stair-step.
+        crate::normalize_inherited_terminal();
+    }
     let agent_doc_start_io::StartRuntime {
         session_id,
         fm,
@@ -2634,6 +2639,10 @@ fn install_intentional_exit_handler(
         identity,
         agent_doc_supervisor_io::intentional_exit::HANDLER_WRITE_BUDGET,
         move |identity, outcome| {
+            // `#runfrontendcrashed`: the default SIGTERM disposition re-raised
+            // after this callback skips `RawMode::drop`; hand the operator's
+            // shell back a cooked terminal first.
+            crate::restore_outer_terminal_on_exit();
             let (status, detail) = match outcome {
                 IntentionalExitRecordOutcome::Recorded => ("recorded", String::new()),
                 IntentionalExitRecordOutcome::TimedOut => ("timed_out", String::new()),

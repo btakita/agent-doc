@@ -4524,6 +4524,35 @@ pub fn mark_open_dispatches_turn_started(conn: &Connection, document_id: &str) -
     Ok(promoted)
 }
 
+/// GH #232: is a dispatched turn for this document observed
+/// RUNNING right now? True only for a receipt promoted to `running` by
+/// [`mark_open_dispatches_turn_started`] (the `caller=dispatch` `Busy` edge or the
+/// turn's own preflight) and not yet settled by a `Ready` transition — positive
+/// evidence that the harness is executing this document's turn, independent of what
+/// the pane's composer happens to render between tool calls. Bounded by
+/// [`OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS`] so a leaked row cannot pin the
+/// operator-clear guard forever.
+pub fn has_running_dispatch_turn_as_of(
+    conn: &Connection,
+    document_id: &str,
+    now_secs: i64,
+) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM dispatch_attempts
+        WHERE document_id = ?1
+          AND failed_stage IS NULL
+          AND COALESCE(result_status, '') = 'running'
+          AND dispatch_start_proven = 0
+          AND timestamp > ?2
+        "#,
+        params![document_id, now_secs - OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 /// `#qflood`: mark every open in-flight dispatch for this document consumed. Called
 /// when the actor transitions to `Ready`, keeping the open-dispatch set accurate for
 /// the next busy episode's coalescing and for restart recovery. Returns the number of
@@ -6059,6 +6088,42 @@ mod tests {
             "an observed turn reaching Ready consumes its receipt immediately"
         );
         assert!(!has_open_in_flight_dispatch(&conn, "doc", 1)?);
+        Ok(())
+    }
+
+    /// GH #232: only an observed, unsettled turn counts as a
+    /// running dispatch turn — not a pre-turn receipt, not a settled one, not another
+    /// document's, and not a leaked row past the in-flight horizon.
+    #[test]
+    fn running_dispatch_turn_is_observed_unsettled_and_bounded() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        insert_open_dispatch(&conn, "doc", now - 5, "accepted")?;
+        assert!(
+            !has_running_dispatch_turn_as_of(&conn, "doc", now)?,
+            "a pre-turn receipt is not a running turn"
+        );
+
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert!(has_running_dispatch_turn_as_of(&conn, "doc", now)?);
+        assert!(
+            !has_running_dispatch_turn_as_of(&conn, "other-doc", now)?,
+            "another document's running turn does not count"
+        );
+        assert!(
+            !has_running_dispatch_turn_as_of(
+                &conn,
+                "doc",
+                now + OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS + 10
+            )?,
+            "a running row past the in-flight horizon is leaked state"
+        );
+
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 1);
+        assert!(
+            !has_running_dispatch_turn_as_of(&conn, "doc", now)?,
+            "a Ready-settled turn is no longer running"
+        );
         Ok(())
     }
 

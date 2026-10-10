@@ -842,6 +842,21 @@ Both issues are closed. `runfrontenddispatch` and `dispatchreadyselfheal` are cl
 It closes once the GitHub release assets and PyPI 0.35.483 are verified.
 
 The exchange is now 794 lines / 45 sections (block level). I'm not compacting while the queue is active.
+
+### Re: v0.35.483 released and published — opus-5.5 · 2026-10-10T04:05-04:00
+
+> **Queue prompt:** release + publish
+
+**v0.35.483 is released and published.**
+- **GitHub:** Release run 38034996746 passed every job: `plugins`, all 6 binary builds, `release` and `homebrew / bump-formula`.
+- **Release page:** v0.35.483 is **Latest** (published 07:56:44Z) with 13 assets.
+- **PyPI:** 0.35.483 is live.
+- **Local:** `main` and the tag are `d2d82c041`, and `install-full` installed agent-doc 0.35.483.
+- **Before tagging:** `make check` passed on the version-projected tree (9910 of 9910) and so did `make tmux-ci`, on the rerun with no other suite competing for the host.
+
+**Shipped in 0.35.483:** `runfrontenddispatch`, `dispatchreadyselfheal`, GH #232 (closed), GH #233 (closed). The live frontend.md check is still the `frontendlivedispatch` review item. It needs pane %166's supervisor to restart.
+
+**Batch 0.35.484** (Grok `20bf36eb8` + IDEA/Rider `9796d8c8a` + plugin bumps): the nextest suite passed 9913 of 9913, and the rest of `make check` is finishing. Next: `make install`, push, migrate agent-loop's `.grok/config.toml`, then close `grokbuildaccount`, `idearidereditors` and `#grokmcpverify`.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -850,14 +865,14 @@ The exchange is now 794 lines / 45 sections (block level). I'm not compacting wh
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#idearidereditors]
+- ⏭️ do [#idearidereditors]
 - ⏭️ do [#grokbuildaccount]
 - ~~do [#runfrontenddispatch]~~
 - ~~do [#dispatchreadyselfhealdis]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/231~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/232~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/233~~
-- release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

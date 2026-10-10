@@ -413,6 +413,14 @@ mod tests {
     /// never match, and every preflight and session-check on that document died
     /// with `must point to a .done.md file`. The document was unusable until the
     /// quotes were hand-stripped out of the marker.
+    fn temp_project_document() -> (tempfile::TempDir, std::path::PathBuf) {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+        let doc = project.path().join("session.md");
+        std::fs::write(&doc, "# session\n").unwrap();
+        (project, doc)
+    }
+
     #[test]
     fn quoted_archive_attribute_resolves() {
         let quoted = archive_attr("archive=\"tasks/software/lazily.done.md\"");
@@ -421,9 +429,11 @@ mod tests {
             "the parsed attribute must not carry its quotes"
         );
 
-        // The resolver is what actually bailed. Run it inside this repo, where a
-        // project root exists.
-        let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/done_archive.rs");
+        // The resolver is what actually bailed. Run it inside a project root.
+        // `#testisolationtests`: a hermetic temp project, never this checkout's
+        // ancestors (in a worktree outside the IDE project that walk reached the
+        // operator's `$HOME/.agent-doc`).
+        let (_project, here) = temp_project_document();
         resolve_done_archive_target(&here, &quoted)
             .expect("a quoted archive attribute must resolve, not fail the document");
     }
@@ -432,7 +442,7 @@ mod tests {
     /// is the entire defect.
     #[test]
     fn quoted_and_unquoted_archive_agree() {
-        let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/done_archive.rs");
+        let (_project, here) = temp_project_document();
 
         let quoted = archive_attr("archive=\"tasks/x.done.md\"");
         let bare = archive_attr("archive=tasks/x.done.md");
@@ -449,7 +459,7 @@ mod tests {
     /// have widened it into accepting anything.
     #[test]
     fn non_done_md_archive_is_still_rejected() {
-        let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/done_archive.rs");
+        let (_project, here) = temp_project_document();
         for attr in ["archive=\"tasks/x.md\"", "archive=tasks/x.md"] {
             let value = archive_attr(attr);
             assert!(

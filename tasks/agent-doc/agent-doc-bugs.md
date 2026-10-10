@@ -96,6 +96,18 @@ Each press still opens a full no-op cycle, even though zero heads are drainable.
 **New defect captured:** the supervisor-thrash queue line was auto-struck as "tracked by backlog #runctrlclaude" only because that backlog item's text quotes it. I added this to the backlog as its own item. The thrash work itself is unaffected, still under its own claim.
 
 `#runctrlclaude` and the thrash item close once the release has installed and the thrash branch is integrated and installed.
+
+### Re: two new ids — one re-claimed, one dispatched — opus-5-5 · 2026-10-10T14:30-04:00
+
+- **`#runfrontendcrashed`** is the frontend.md crash item, including the `img_3.png` terminal-formatting screenshot, after promotion to the backlog. When the free-text head became an id, its existing claim did not move with it, so it showed up again as an unclaimed dispatch. I re-claimed it under the subagent already working on it, `subagent:frontendcrash`, so no second subagent runs. The fix for the claim not following a promoted item is folded into `#freetextqueue`.
+- **`#freetextqueue`** is dispatched to `subagent:freetextqueue` (worktree `agent-doc-wt/freetextqueue`, based on `cebc7972b`). Its brief: a free-text head counts as tracked by a backlog item only through exact promotion lineage, never because its text appears inside unrelated prose. A claim also moves with an item when it is promoted.
+- The orphaned "route-owned host supervisor (pid 1989646)…" line is gone from the queue. `subagent:queuecruft` is still fixing the cause.
+
+**Release 0.35.484:** full nextest passed (9921/9921). tmux-ci, tag, publish and `install-full` are still running.
+
+**Still in flight:** `#runfrontenderror`, `#explicitrunqueue`, queue cruft, `#runfrontendcrashed`, `#freetextqueue`. The supervisor-thrash fix (`fix/supthrash`) merges after the release.
+
+This cycle had no new follow-ups: the claim-transfer defect is covered by `#freetextqueue`.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -104,22 +116,22 @@ Each press still opens a full no-op cycle, even though zero heads are drainable.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#runfrontenderror]
+- do [#runfrontendcrashed]
+- 🚧 do [#runfrontenderror]
 - ⏭️ do [#runctrlclaude]
-- ~~Several agent-doc processes have been background thrashing over the past few hours. Please fix agent-doc causes. Use formal logic to ensure proper cleanup happens for old supervisors. — auto-struck: tracked by backlog #runctrlclaude (#qftbklgstrike)~~
-- do [#explicitrunqueue]
-the route-owned host supervisor (pid 1989646) serving this document is mapping a STALE agent-doc binary while a newer build is installed, so it can keep producing File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). Refresh it without discarding the live turn: `agent-doc admin recycle` (recycles at the next idle boundary) or `agent-doc session restart-supervisor <FILE>` (refuses busy panes).
-- Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.
-- Run Agent Doc on frontend.md crashed my Claude Code session and unsuccessfully restarted. The raw prompt was the end state.
+- 🚧 do [#explicitrunqueue]
+- do [#freetextqueue]
+- 🚧 Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.
 - 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#runfrontendcrashed] Run Agent Doc on frontend.md crashed my Claude Code session and unsuccessfully restarted. The raw prompt was the end state. The terminal formatting is also messed up ![img_3.png](img_3.png).
 - [ ] [#freetextqueue] Free-text queue head wrongly auto-struck by #qftbklgstrike: the supervisor-thrash queue line was struck as 'tracked by backlog #runctrlclaude' only because #runctrlclaude's backlog text QUOTES that line (inside the route error message), even though the two are different defects and the thrash fix was still in flight under its own claim (subagent:supthrash). Containment of a head's text inside an unrelated backlog item's prose must not count as tracking; require an exact promotion lineage/receipt. 2026-10-10 ~17:45Z, agent-doc-bugs.md.
-- [ ] [#runfrontenderror] Run Agent Doc on frontend.md error: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
-- [ ] [#explicitrunqueue] Explicit Run Agent Doc on a queue head that is claimed by a live subagent (agent-doc queue claims shows an unexpired owner) still admits a full cycle with queue_drainable_head_count=0, so each press commits a no-op in-flight response and trips expect_done_or_gate_guard. The route/preflight should answer 'claimed by <owner>, expires <t>' without opening a cycle. Repro: 2026-10-10 17:34Z, ops.log preflight_turn_admission explicit_route=true for the claimed #runctrlclaude.
+- [ ] 🚧 [#runfrontenderror] Run Agent Doc on frontend.md error: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
+- [ ] 🚧 [#explicitrunqueue] Explicit Run Agent Doc on a queue head that is claimed by a live subagent (agent-doc queue claims shows an unexpired owner) still admits a full cycle with queue_drainable_head_count=0, so each press commits a no-op in-flight response and trips expect_done_or_gate_guard. The route/preflight should answer 'claimed by <owner>, expires <t>' without opening a cycle. Repro: 2026-10-10 17:34Z, ops.log preflight_turn_admission explicit_route=true for the claimed #runctrlclaude.
 - [ ] 🚧 [#runctrlclaude] Run Agent Doc, then ctrl+c in Claude Code: Clear Session Context was wedged. After manually running `/clear` in Claude Code, Run Agent Doc is wedged: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "Several agent-doc processes have been background thrashing over the past few hours. Please fix agent-doc causes. Use formal logic to ensure proper cleanup happens for old supervisors." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
 <!-- /agent:backlog -->
 

@@ -8,7 +8,17 @@ use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
 
 fn agent_doc() -> Command {
-    cargo_bin_cmd!("agent-doc")
+    let mut cmd = cargo_bin_cmd!("agent-doc");
+    // `#stophookbudgetflake`: these tests assert what the Stop hook does, not
+    // how fast a loaded host runs it. The wall-clock budget has its own
+    // deterministic tests in `agent-doc-codex-stop-io`; without this, a host at
+    // load average ~100 made the hook fail closed at 45s and the assertion
+    // measured the machine.
+    cmd.env(
+        "AGENT_DOC_CODEX_STOP_HOOK_BUDGET_SECS",
+        agent_doc_codex_stop_io::STOP_HOOK_BUDGET_UNBOUNDED,
+    );
+    cmd
 }
 
 fn template_doc_content() -> String {

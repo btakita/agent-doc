@@ -24,6 +24,32 @@ class CpRouteClientCommandPlaneTest {
     }
 
     @Test
+    fun `editor surface client family is scoped to one IDE installation`() {
+        val idea = CpRouteClient.editorInstallationId("IU", "/home/u/.config/JetBrains/IntelliJIdea2026.1")
+        val rider = CpRouteClient.editorInstallationId("RD", "/home/u/.config/JetBrains/Rider2026.1")
+        assertTrue(idea.matches(Regex("IU\\.[0-9a-f]{8}")))
+        assertTrue(rider.matches(Regex("RD\\.[0-9a-f]{8}")))
+        assertEquals(
+            "a restarted JVM of the same install keeps its family",
+            idea,
+            CpRouteClient.editorInstallationId("IU", "/home/u/.config/JetBrains/IntelliJIdea2026.1"),
+        )
+        assertFalse(
+            "a second install of the same product is a distinct family",
+            idea == CpRouteClient.editorInstallationId("IU", "/home/u/.config/JetBrains/IntelliJIdea2026.2"),
+        )
+        assertTrue(CpRouteClient.editorInstallationId(null, null).startsWith("ide."))
+
+        val surface = CpRouteClient.editorSurfaceClientId("jetbrains", rider, 42)
+        assertEquals("jetbrains@$rider-pid:42", surface)
+        assertEquals("jetbrains@$rider", surface.substringBefore("-pid:"))
+        assertEquals(
+            "jetbrains-focus@$rider",
+            CpRouteClient.editorSurfaceClientId("jetbrains-focus", rider, 42).substringBefore("-pid:"),
+        )
+    }
+
+    @Test
     fun `editor surface observation is an ordered fact for the existing controller`() {
         val request =
             CpRouteClient.editorSurfaceObserveRequest(

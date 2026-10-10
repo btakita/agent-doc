@@ -162,12 +162,55 @@ internal object CpRouteClient {
     private const val PANE_LAYOUT_DESIRED_TYPE_TAG = "agent-doc.pane-layout.desired.v1"
     private val statePlaneProducerId = "jetbrains-" + java.util.UUID.randomUUID().toString()
     private val statePlaneEpoch = java.util.concurrent.atomic.AtomicLong(0)
-    private val editorSurfaceClientId = "jetbrains-pid:${ProcessHandle.current().pid()}"
+    private val editorInstallationId: String = currentEditorInstallationId()
+    private val editorSurfaceClientId =
+        editorSurfaceClientId("jetbrains", editorInstallationId, ProcessHandle.current().pid())
     private val editorSurfaceGeneration = System.nanoTime().coerceAtLeast(1L)
     private val editorSurfaceSequence = java.util.concurrent.atomic.AtomicLong(0)
-    private val editorFocusClientId = "jetbrains-focus-pid:${ProcessHandle.current().pid()}"
+    private val editorFocusClientId =
+        editorSurfaceClientId("jetbrains-focus", editorInstallationId, ProcessHandle.current().pid())
     private val editorFocusGeneration = System.nanoTime().coerceAtLeast(1L)
     private val editorFocusSequence = java.util.concurrent.atomic.AtomicLong(0)
+
+    /**
+     * `#idearidereditors`: the controller retires a whole client *family* when a replacement JVM
+     * starts, so a family must name one IDE installation rather than every JetBrains IDE. IntelliJ
+     * IDEA and Rider open on the same project are concurrent editors; without the installation
+     * scope, the later-started IDE's root retirement (a cross-root focus move or its shutdown)
+     * permanently silenced the other IDE's editor-surface subscription on that root.
+     *
+     * The family is `<lane>@<installation>`; the controller parses everything before `-pid:`.
+     */
+    internal fun editorSurfaceClientId(lane: String, installationId: String, pid: Long): String =
+        "$lane@$installationId-pid:$pid"
+
+    /**
+     * `<productCode>.<config-dir hash>`. The IntelliJ Platform admits one running instance per
+     * config directory, so a restart of the same IDE keeps this identity while a second product or
+     * install (IDEA vs Rider, stable vs EAP) gets its own.
+     */
+    internal fun editorInstallationId(productCode: String?, configPath: String?): String {
+        val product =
+            productCode
+                ?.filter { it.isLetterOrDigit() }
+                ?.takeIf { it.isNotEmpty() }
+                ?: "ide"
+        val digest =
+            java.security.MessageDigest.getInstance("SHA-256")
+                .digest((configPath ?: "").toByteArray(Charsets.UTF_8))
+                .take(4)
+                .joinToString("") { "%02x".format(it) }
+        return "$product.$digest"
+    }
+
+    private fun currentEditorInstallationId(): String =
+        editorInstallationId(
+            productCode =
+                runCatching {
+                    com.intellij.openapi.application.ApplicationInfo.getInstance().build.productCode
+                }.getOrNull(),
+            configPath = runCatching { com.intellij.openapi.application.PathManager.getConfigPath() }.getOrNull(),
+        )
 
     /**
      * Publish one ordered editor fact directly to the already-running Project Controller.

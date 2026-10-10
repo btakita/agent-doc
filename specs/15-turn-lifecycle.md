@@ -365,3 +365,47 @@ TURN_ACTIVE_TTL_SECS`) nothing is expired and nothing is deleted. The per-pane
 idle clear (`clear_turn_active_marker`) remains the normal retirement path; the
 sweep and the read reclaim exist only for rows whose owner can no longer clear
 them.
+
+### Interrupted turns (`#staleharnessturnlive`)
+
+Claude Code does not run the `Stop` hook when the operator interrupts a turn
+(Esc / Ctrl-C), so the idle clear above never runs and the lease outlives the
+harness turn until the next prompt's `Stop` or the TTL. Every consumer that
+treats a fresh lease as an unconditional live-turn veto (`#reclaimliveturn`)
+then defers recycle and empty-preflight reclaim for an owner pane that is idle
+at its prompt (observed: contracts.md pane %161, 2026-10-09, `harness_turn_live=true`
+for ~90s after "unwedge agent-doc" was interrupted).
+
+- **Transcript binding.** `turn-status active` reads the hook payload from
+  stdin (bounded size, 500ms wait, skipped for an interactive stdin) and stores
+  its `transcript_path` as a sibling coordination row
+  (`scope_kind = 'turn_active_transcript'`, `scope_id = <pane>`,
+  `holder = <path>`, `heartbeat_secs` = the lease heartbeat). A binding whose
+  heartbeat differs from the lease belongs to another turn and is ignored. A
+  lease written without a payload has no binding and keeps the `Stop`/TTL
+  contract unchanged. The idle clear, the age sweep, and the interrupt
+  retirement remove the binding with the lease.
+- **Interrupt evidence.** Claude Code appends a `user` record whose text starts
+  with `[Request interrupted by user` to the transcript. The probe reads at
+  most `TRANSCRIPT_TAIL_PROBE_BYTES` from the end of the bound transcript and
+  classifies the newest conversation record (`classify_transcript_tail`,
+  owned by `agent_doc_turn::turn_status`): bookkeeping records and subagent
+  sidechain records are skipped; an unparseable record, a record still being
+  written, or a leading fragment-only window reads as `Unknown`, so the probe
+  never reaches past a record it cannot read to an older interrupt.
+  Unrecognised transcript shapes (Codex rollouts) are `Unknown`.
+- **Retirement.** A fresh lease is retired only when the newest conversation
+  record is an interrupt no older than the lease heartbeat that has settled for
+  `TURN_INTERRUPT_SETTLE_SECS` (`turn_lease_ended_by_interrupt`). The settle
+  window lets a prompt submitted in the same second as the interrupt land its
+  own record first. The delete is conditioned on the observed heartbeat
+  (`clear_coordination_lease_if_heartbeat_at_or_before_in_db`), so a lease
+  rewritten by a newer prompt survives. Every pane-scoped and project-wide
+  read applies the retirement, and the supervisor's live-turn probe
+  (`turn_active_for_owned_pane_with_idle_evidence`) additionally resets the
+  pane title and logs `turn_status_projection_repaired
+  reason=harness_turn_interrupted (#staleharnessturnlive)`.
+
+This is harness-authored turn-boundary evidence, not prompt scraping: a
+rendered ready prompt is still never idle evidence, because harnesses redraw
+the composer between tool calls inside a live turn.

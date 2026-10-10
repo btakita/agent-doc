@@ -343,7 +343,7 @@ fn turn_active_for_owned_pane_with_idle_evidence(
     file: &Path,
     shared: &SupervisorShared,
     _prompt_visible: bool,
-    _session_log: &mut Option<SessionLog>,
+    session_log: &mut Option<SessionLog>,
 ) -> bool {
     match owned_pane_id(shared) {
         // The harness-owned marker is stronger evidence than a rendered ready
@@ -351,9 +351,40 @@ fn turn_active_for_owned_pane_with_idle_evidence(
         // turn is still live; clearing here let idle-watch inject another
         // drain trigger into that active turn. The Stop/idle hook owns normal
         // retirement, and the marker TTL remains the missed-hook fail-safe.
-        Some(pane) => agent_doc_turn_status_io::turn_active_for_pane_for_file(file, pane),
+        //
+        // `#staleharnessturnlive`: an operator interrupt ends the turn without
+        // a Stop hook. The harness transcript bound to the lease records that
+        // interrupt, which is harness-authored turn-boundary evidence (not a
+        // scraped prompt), so the lease is retired here and the projection
+        // repaired instead of vetoing recovery until the TTL.
+        Some(pane) => {
+            if let Some(interrupted) =
+                agent_doc_turn_status_io::reclaim_interrupted_turn_for_pane_for_file(file, pane)
+            {
+                log_interrupted_turn_lease_retired(file, shared, &interrupted, session_log);
+            }
+            agent_doc_turn_status_io::turn_active_for_pane_for_file(file, pane)
+        }
         None => agent_doc_turn_status_io::read_turn_active_marker_for_file(file).is_some(),
     }
+}
+
+fn log_interrupted_turn_lease_retired(
+    file: &Path,
+    shared: &SupervisorShared,
+    interrupted: &agent_doc_turn_status_io::InterruptedTurnLease,
+    session_log: &mut Option<SessionLog>,
+) {
+    clear_turn_status_title_for_owned_pane(file, shared);
+    let event = format!(
+        "turn_status_projection_repaired file={} pane={} reason=harness_turn_interrupted lease_written_at={} interrupted_at={} (#staleharnessturnlive)",
+        file.display(),
+        interrupted.pane,
+        interrupted.written_at,
+        interrupted.interrupted_at,
+    );
+    log_event(session_log, &event);
+    agent_doc_ops_log_io::log_op(file, &event);
 }
 
 fn complete_idle_queue_slash_command_head(
@@ -3745,6 +3776,90 @@ mod tests {
         ));
 
         agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%owner").unwrap();
+        assert!(turn_active_for_owned_pane_with_idle_evidence(
+            &doc,
+            &shared,
+            false,
+            &mut session_log,
+        ));
+    }
+
+    /// `#staleharnessturnlive`: contracts.md pane %161 sat idle at its prompt
+    /// after the operator interrupted "unwedge agent-doc" (Claude Code runs no
+    /// Stop hook on an interrupt), yet every empty-preflight reclaim probe
+    /// reported `harness_turn_live=true` until the next prompt's Stop. The
+    /// probe now retires the lease from the transcript's interrupt record.
+    #[test]
+    fn reclaim_probe_retires_interrupted_turn_lease_without_stop_hook() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("contracts.md");
+        std::fs::write(&doc, "doc").unwrap();
+        let transcript = dir.path().join("session.jsonl");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let stamp = agent_doc_turn::turn_status::format_rfc3339_utc_secs;
+        let records = [
+            serde_json::json!({"type": "user", "timestamp": stamp(now - 60),
+                "message": {"role": "user", "content": "unwedge agent-doc"}}),
+            serde_json::json!({"type": "assistant", "timestamp": stamp(now - 50),
+                "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "Bash", "input": {}}]}}),
+            serde_json::json!({"type": "user", "timestamp": stamp(now - 49),
+                "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": ""}]}}),
+            serde_json::json!({"type": "user", "timestamp": stamp(now - 49),
+                "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user for tool use]"}]}}),
+            serde_json::json!({"type": "pr-link", "timestamp": stamp(now - 48)}),
+        ];
+        let body: String = records.iter().map(|record| format!("{record}\n")).collect();
+        std::fs::write(&transcript, body).unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker_with_transcript_at(
+            dir.path(),
+            "%owner",
+            now - 60,
+            Some(&transcript),
+        )
+        .unwrap();
+
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "claude",
+            None,
+            Some(agent_doc_controller::actor::ActorState::Ready),
+            Some("%owner".to_string()),
+        );
+        let mut session_log = None;
+        assert!(
+            !turn_active_for_owned_pane_with_idle_evidence(&doc, &shared, false, &mut session_log),
+            "an interrupted turn must not veto empty-preflight reclaim"
+        );
+        assert!(!agent_doc_turn_status_io::turn_active_for_pane_for_file(
+            &doc, "%owner"
+        ));
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("turn_status_projection_repaired")
+                && ops.contains("reason=harness_turn_interrupted")
+                && ops.contains("(#staleharnessturnlive)"),
+            "{ops}"
+        );
+
+        // A turn whose newest record is still activity stays live.
+        let resumed = serde_json::json!({"type": "user", "timestamp": stamp(now - 5),
+            "message": {"role": "user", "content": "unwedge agent-doc for contracts.md"}});
+        let mut body = std::fs::read_to_string(&transcript).unwrap();
+        body.push_str(&format!("{resumed}\n"));
+        std::fs::write(&transcript, body).unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker_with_transcript_at(
+            dir.path(),
+            "%owner",
+            now - 5,
+            Some(&transcript),
+        )
+        .unwrap();
         assert!(turn_active_for_owned_pane_with_idle_evidence(
             &doc,
             &shared,

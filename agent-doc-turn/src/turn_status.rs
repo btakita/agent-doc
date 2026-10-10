@@ -125,6 +125,210 @@ pub fn pane_title_status_marker_count(title: &str) -> usize {
     title.matches('⚠').count() + title.matches('⟳').count()
 }
 
+// ---------------------------------------------------------------------------
+// `#staleharnessturnlive`: interrupted turns retire their lease.
+//
+// Claude Code does not run the `Stop` hook when the operator interrupts a turn
+// (Esc / Ctrl-C). The `UserPromptSubmit` hook wrote the turn-active lease, the
+// matching `turn-status idle` never runs, and the lease outlived the harness
+// turn until the next prompt's `Stop` or the one-hour TTL. Every consumer that
+// treats the lease as an unconditional live-turn veto (`#reclaimliveturn`)
+// then deferred recovery for an owner pane sitting idle at its prompt.
+//
+// The harness does record the interrupt: it appends a user record whose text
+// is `[Request interrupted by user]` (or `... for tool use]`) to the session
+// transcript the hook named in its `transcript_path`. That record is
+// harness-authored turn-boundary evidence, unlike a scraped ready prompt, which
+// a harness redraws between tool calls inside a live turn.
+// ---------------------------------------------------------------------------
+
+/// Text prefix of the record Claude Code appends to the session transcript
+/// when the operator interrupts a turn. Both observed forms share it:
+/// `[Request interrupted by user]` and `[Request interrupted by user for tool use]`.
+pub const HARNESS_INTERRUPT_MARKER_PREFIX: &str = "[Request interrupted by user";
+
+/// Seconds an interrupt record must have settled before it retires a lease.
+/// A prompt submitted in the same second as the interrupt writes its lease
+/// before its own transcript record lands; the settle window lets that record
+/// appear so a fresh turn is never mistaken for the interrupted one.
+pub const TURN_INTERRUPT_SETTLE_SECS: u64 = 3;
+
+/// Bytes of transcript tail the interrupt probe reads. Bounded so a large
+/// transcript costs one small read; a record longer than the window is never
+/// seen whole and therefore reads as [`TranscriptTailEvidence::Unknown`].
+pub const TRANSCRIPT_TAIL_PROBE_BYTES: u64 = 256 * 1024;
+
+/// What the newest conversation record of a harness transcript proves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranscriptTailEvidence {
+    /// The newest conversation record is a harness interrupt record written at
+    /// `at_secs` (Unix seconds, UTC).
+    Interrupted { at_secs: u64 },
+    /// The newest conversation record is ordinary turn activity (a prompt, an
+    /// assistant message, a tool result).
+    Activity,
+    /// Nothing provable: no complete conversation record in the window, an
+    /// unparseable or still-being-written record, or a transcript shape this
+    /// policy does not recognise (for example a Codex rollout).
+    Unknown,
+}
+
+/// True when `text` is a harness interrupt record.
+pub fn is_harness_interrupt_marker_text(text: &str) -> bool {
+    text.trim_start()
+        .starts_with(HARNESS_INTERRUPT_MARKER_PREFIX)
+}
+
+/// Parse `YYYY-MM-DDTHH:MM:SS[.fraction]Z` (UTC) into Unix seconds.
+pub fn parse_rfc3339_utc_secs(value: &str) -> Option<u64> {
+    let value = value.strip_suffix('Z')?;
+    let (date, time) = value.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year: i64 = date_parts.next()?.parse().ok()?;
+    let month: u32 = date_parts.next()?.parse().ok()?;
+    let day: u32 = date_parts.next()?.parse().ok()?;
+    if date_parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let time = time.split_once('.').map_or(time, |(whole, _)| whole);
+    let mut time_parts = time.split(':');
+    let hour: u64 = time_parts.next()?.parse().ok()?;
+    let minute: u64 = time_parts.next()?.parse().ok()?;
+    let second: u64 = time_parts.next()?.parse().ok()?;
+    if time_parts.next().is_some() || hour > 23 || minute > 59 || second > 60 {
+        return None;
+    }
+    let days = u64::try_from(days_from_civil(year, month, day)).ok()?;
+    Some(days * 86_400 + hour * 3_600 + minute * 60 + second)
+}
+
+/// Format Unix seconds as `YYYY-MM-DDTHH:MM:SS.000Z`, the shape Claude Code
+/// writes into transcript `timestamp` fields.
+pub fn format_rfc3339_utc_secs(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.000Z",
+        rem / 3_600,
+        (rem % 3_600) / 60,
+        rem % 60
+    )
+}
+
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = y - era * 400;
+    let mp = ((m + 9) % 12) as i64;
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    (y, m, d)
+}
+
+fn record_text_is_interrupt(content: &serde_json::Value) -> bool {
+    match content {
+        serde_json::Value::String(text) => is_harness_interrupt_marker_text(text),
+        serde_json::Value::Array(blocks) => blocks.iter().any(|block| {
+            block.get("type").and_then(serde_json::Value::as_str) == Some("text")
+                && block
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(is_harness_interrupt_marker_text)
+        }),
+        _ => false,
+    }
+}
+
+/// Classify the newest conversation record in a transcript tail.
+///
+/// `tail` is the last bytes of a JSONL transcript; `starts_mid_file` is true
+/// when the window does not begin at byte 0, so its first segment may be a
+/// fragment and is discarded. Records are scanned newest first. Bookkeeping
+/// records (attachments, links, system summaries, queue operations, file
+/// history) and subagent sidechain records are skipped; the first `user` or
+/// `assistant` record decides. Any unparseable segment met before that record,
+/// including a trailing line still being written, yields
+/// [`TranscriptTailEvidence::Unknown`]: the probe never reaches past a record
+/// it cannot read to an older interrupt.
+pub fn classify_transcript_tail(tail: &str, starts_mid_file: bool) -> TranscriptTailEvidence {
+    let mut segments: Vec<&str> = tail.split('\n').collect();
+    if starts_mid_file && !segments.is_empty() {
+        segments.remove(0);
+    }
+    for segment in segments.iter().rev() {
+        let line = segment.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            return TranscriptTailEvidence::Unknown;
+        };
+        if record
+            .get("isSidechain")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            continue;
+        }
+        match record.get("type").and_then(serde_json::Value::as_str) {
+            Some("user") => {
+                let content = record
+                    .get("message")
+                    .and_then(|message| message.get("content"));
+                if content.is_some_and(record_text_is_interrupt) {
+                    return record
+                        .get("timestamp")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(parse_rfc3339_utc_secs)
+                        .map_or(TranscriptTailEvidence::Unknown, |at_secs| {
+                            TranscriptTailEvidence::Interrupted { at_secs }
+                        });
+                }
+                return TranscriptTailEvidence::Activity;
+            }
+            Some("assistant") => return TranscriptTailEvidence::Activity,
+            _ => continue,
+        }
+    }
+    TranscriptTailEvidence::Unknown
+}
+
+/// True when the harness transcript proves the turn that wrote `marker` was
+/// interrupted and has not been followed by any newer conversation activity.
+///
+/// Requires all of: the newest conversation record is an interrupt record; the
+/// interrupt is no older than the lease (an interrupt of an earlier turn says
+/// nothing about this one); and the interrupt has settled for
+/// [`TURN_INTERRUPT_SETTLE_SECS`]. Anything else keeps the lease live, so the
+/// probe can only shorten a lease the harness itself already ended.
+pub fn turn_lease_ended_by_interrupt(
+    marker: &TurnActiveMarker,
+    evidence: TranscriptTailEvidence,
+    now: u64,
+) -> bool {
+    match evidence {
+        TranscriptTailEvidence::Interrupted { at_secs } => {
+            at_secs >= marker.written_at
+                && now.saturating_sub(at_secs) >= TURN_INTERRUPT_SETTLE_SECS
+        }
+        TranscriptTailEvidence::Activity | TranscriptTailEvidence::Unknown => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +506,163 @@ mod tests {
             pane_title_with_freshness("", Some("sample-session.md"), false),
             "sample-session.md"
         );
+    }
+
+    fn interrupt_line(at: u64, text: &str) -> String {
+        serde_json::json!({
+            "type": "user",
+            "isSidechain": false,
+            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            "timestamp": format_rfc3339_utc_secs(at),
+        })
+        .to_string()
+    }
+
+    fn tool_result_line(at: u64) -> String {
+        serde_json::json!({
+            "type": "user",
+            "isSidechain": false,
+            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]},
+            "timestamp": format_rfc3339_utc_secs(at),
+        })
+        .to_string()
+    }
+
+    fn assistant_line(at: u64) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "working"}]},
+            "timestamp": format_rfc3339_utc_secs(at),
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn rfc3339_round_trips_and_matches_the_observed_interrupt() {
+        // contracts.md pane %161 interrupt record, 2026-10-09.
+        let at = parse_rfc3339_utc_secs("2026-10-09T22:11:18.947Z").unwrap();
+        assert_eq!(at, 1_791_583_878);
+        assert_eq!(format_rfc3339_utc_secs(at), "2026-10-09T22:11:18.000Z");
+        for secs in [0, 951_782_400, 1_709_164_800, 1_791_583_878, 4_102_444_800] {
+            assert_eq!(
+                parse_rfc3339_utc_secs(&format_rfc3339_utc_secs(secs)),
+                Some(secs)
+            );
+        }
+        for bad in [
+            "",
+            "2026-10-09 22:11:18Z",
+            "2026-13-09T22:11:18Z",
+            "2026-10-09T22:11:18",
+        ] {
+            assert_eq!(parse_rfc3339_utc_secs(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn transcript_tail_reports_interrupt_only_when_it_is_the_newest_conversation_record() {
+        let tail = [
+            tool_result_line(100),
+            interrupt_line(101, "[Request interrupted by user for tool use]"),
+            r#"{"type":"attachment"}"#.to_string(),
+            r#"{"type":"pr-link"}"#.to_string(),
+            String::new(),
+        ]
+        .join("\n");
+        assert_eq!(
+            classify_transcript_tail(&tail, false),
+            TranscriptTailEvidence::Interrupted { at_secs: 101 }
+        );
+        let bare = interrupt_line(7, "[Request interrupted by user]");
+        assert_eq!(
+            classify_transcript_tail(&bare, false),
+            TranscriptTailEvidence::Interrupted { at_secs: 7 }
+        );
+
+        // A newer prompt, assistant message, or tool result supersedes it.
+        for newer in [assistant_line(102), tool_result_line(102)] {
+            let tail = format!(
+                "{}\n{newer}\n",
+                interrupt_line(101, "[Request interrupted by user]")
+            );
+            assert_eq!(
+                classify_transcript_tail(&tail, false),
+                TranscriptTailEvidence::Activity
+            );
+        }
+        // A subagent sidechain record after the interrupt is not main-turn activity.
+        let sidechain = r#"{"type":"assistant","isSidechain":true}"#;
+        let tail = format!(
+            "{}\n{sidechain}\n",
+            interrupt_line(101, "[Request interrupted by user]")
+        );
+        assert_eq!(
+            classify_transcript_tail(&tail, false),
+            TranscriptTailEvidence::Interrupted { at_secs: 101 }
+        );
+    }
+
+    #[test]
+    fn transcript_tail_never_reaches_past_an_unreadable_record() {
+        let interrupt = interrupt_line(101, "[Request interrupted by user]");
+        // A trailing record still being written.
+        let tail = format!("{interrupt}\n{{\"type\":\"user\",\"mess");
+        assert_eq!(
+            classify_transcript_tail(&tail, false),
+            TranscriptTailEvidence::Unknown
+        );
+        // A window that starts mid-file discards its leading fragment.
+        let tail = format!("pe\":\"assistant\"}}\n{interrupt}\n");
+        assert_eq!(
+            classify_transcript_tail(&tail, true),
+            TranscriptTailEvidence::Interrupted { at_secs: 101 }
+        );
+        // A record longer than the window leaves only its fragment: nothing provable.
+        assert_eq!(
+            classify_transcript_tail("tail of a huge tool result\"}\n", true),
+            TranscriptTailEvidence::Unknown
+        );
+        // A transcript shape this policy does not know (Codex rollout) proves nothing.
+        let codex = r#"{"type":"event_msg","payload":{"type":"turn_aborted"}}"#;
+        assert_eq!(
+            classify_transcript_tail(codex, false),
+            TranscriptTailEvidence::Unknown
+        );
+        assert_eq!(
+            classify_transcript_tail("", false),
+            TranscriptTailEvidence::Unknown
+        );
+    }
+
+    #[test]
+    fn interrupt_retires_only_the_lease_it_ended_after_settling() {
+        let marker = TurnActiveMarker {
+            pane: "%161".to_string(),
+            written_at: 1_000,
+        };
+        let interrupted = TranscriptTailEvidence::Interrupted { at_secs: 1_011 };
+        assert!(turn_lease_ended_by_interrupt(
+            &marker,
+            interrupted,
+            1_011 + TURN_INTERRUPT_SETTLE_SECS
+        ));
+        // Not yet settled: a same-second prompt may still be landing.
+        assert!(!turn_lease_ended_by_interrupt(
+            &marker,
+            interrupted,
+            1_011 + TURN_INTERRUPT_SETTLE_SECS - 1
+        ));
+        // An interrupt of an earlier turn says nothing about this lease.
+        assert!(!turn_lease_ended_by_interrupt(
+            &marker,
+            TranscriptTailEvidence::Interrupted { at_secs: 999 },
+            5_000
+        ));
+        for evidence in [
+            TranscriptTailEvidence::Activity,
+            TranscriptTailEvidence::Unknown,
+        ] {
+            assert!(!turn_lease_ended_by_interrupt(&marker, evidence, 5_000));
+        }
     }
 }

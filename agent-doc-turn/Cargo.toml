@@ -25,6 +25,7 @@ agent-doc-template = { path = "../agent-doc-template", version = "0.35.481" }
 lazily = { version = "0.57.1", features = ["thread-safe"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 similar = "3"
 
 [dev-dependencies]
@@ -33,4 +34,3 @@ similar = "3"
 # change cannot satisfy some readers and silently break others.
 agent-doc-topic = { path = "../agent-doc-topic", version = "0.35.481" }
 proptest = "1"
-serde_json = "1"

@@ -2,6 +2,37 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.481
+
+- **Exact-262 modular JetBrains plugin with isolated detached views (GH #218, GH #221, PR #222).** A new
+  `agent-doc-jetbrains-262` package (IDEA 2026.2.x, `since-build=262`/`until-build=262.*`) splits the plugin into
+  shared/frontend/backend modules for Remote Dev. A detached editor window gets its own `agent-doc-view-*` tmux
+  session and never mutates the main layout, and a document that is also visible in main shows a read-only
+  placeholder. The classic 242–261 package is unchanged and ships separately. Install/update and
+  `--local --all-installed` choose the package per target IDE build and fail closed on an unprovable build. The
+  release publishes ranged, non-overlapping updates, and `make verify-jetbrains-262-preview` checks preview bytes
+  on both Remote Dev sides. The live IDEA 2026.2.3 Remote Dev acceptance pass for GH #218 is still outstanding.
+- **Operator edits on top of an applied response are accepted (`#appliedresponsefold`, `#agentpatchlineage`).**
+  A socket-applied response that never reached the controller's copy is now folded in from the editor receipt,
+  limited to the response's own sections. Editor ops carry the document length they were typed against and the
+  last agent `patch_id`, so an edit is never spliced at shifted offsets. The baseline-drift unblocker now
+  recommends `agent-doc admin reload-lib` instead of `reset --from-current` while the editor holds text the
+  authority lacks.
+- **Routes during a live turn yield instead of failing (GH #228).** The route drain reuses session-check's
+  live-turn verdict, never recommends `session cancel-turn` for a protected live turn, and exits 0.
+- **No stash rejoin under a controller-owned layout (`#routelaterescue`).** An editor route no longer joins its
+  pane back from stash after a newer layout publication moved it there, which had left a stray third pane in the
+  main window.
+- **Stale-epoch recycle settle is re-minted (`#fixruninfra`).** A supervisor recycle settle stamped with the
+  previous epoch no longer leaves a document permanently "mid-recycle", which falsely refused Run Agent Doc.
+- **`preset=""` means explicitly no queue preset (GH #227).** It no longer trips `agent-doc/empty-attr-value` and is
+  preserved byte for byte. `compact` gains `--lint off|warn|strict`, and JetBrains notifications escape hint text.
+- **Queue subagent authorization (`#waypostauthorization`).** `queue_subagent_dispatch` entries carry the operator's
+  verbatim authorization and a ready-to-paste preamble, and `agent-doc queue brief` prints it.
+- **CI/release.** PyPI publish is gated to `v*` tags (GH #225). The classic Gradle daemon is pinned to JDK 21 under
+  JDK 25 CI, and CI publishes the pinned lazily-kt release to mavenLocal for the 262 build.
+- JetBrains plugins: classic **0.2.513**, exact-262 **0.2.514**.
+
 ## 0.35.479
 
 - **External done-archive publication is not a fresh turn (`#donearchive-stop-race`).** Clearing the body of an

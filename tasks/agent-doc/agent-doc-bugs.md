@@ -119,6 +119,29 @@ I sent this directive to four of the five running subagents: `#runfrontenderror`
 **Likely trigger:** the machine's load average is about 128, from 5 full `make check` suites plus the 0.35.484 release running at once. That load exposes tests that depend on wall-clock timing. The load explains when the tests fail, but the tests still have to be fixed so load can't make them fail.
 
 **Release 0.35.484:** still running, with no failures or retries in its log so far.
+
+### Re: 0.35.484 released; `#runctrlclaude` closed — opus-5-5 · 2026-10-10T15:35-04:00
+
+> **Queue prompt:** release + publish
+
+**v0.35.484 is released and installed.** Tag `v0.35.484` is pushed, `make release` exited 0 with `tag_publish_handoff=complete` and `local_install_full=complete`, and `agent-doc --version` reports 0.35.484. The release ran 9921/9921 nextest plus tmux-ci on the version-projected tree. It contains the `#runctrlclaude` fix (`b555f6f0e`), so `#runctrlclaude` is done.
+
+Two steps were needed to get there:
+- The first `make release` failed in `release-preflight` because `editors/release-parity.tsv` had no row for 0.35.484. I added the row (`cebc7972b`).
+- This cycle re-surfaced `#runctrlclaude` as an unclaimed subagent dispatch because its 2-hour claim TTL had expired. Closing it here resolves that, and I refreshed every live claim so no other in-flight item re-dispatches.
+
+**The supervisor-thrash fix is held from `main`.** I rebased it onto 0.35.484 (`b7b472719`), resolving only a version conflict in `agent-doc-gc-io/Cargo.toml`. Its `make check` then failed one test:
+- **Failing test:** `codex_hook_integration::codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop`.
+- **What happened:** the Stop hook hit its 45s budget, with `auto_queue_continuation` running for 42.5s at load average ~100–128. About 30s of that was a silent wait.
+- **Next:** per your directive I didn't rerun it. `subagent:codexstopflake` (worktree `agent-doc-wt/codexstopflake`) is finding the wait, deciding whether supthrash caused it, and fixing the cause with load-stress proof. Once that lands, supthrash integrates with one `make install`.
+
+**Test-isolation hazard, filed in the backlog.** Subagents had pointed TMPDIR under `$HOME`. agent-doc tests then walked up to `~/.agent-doc` and wrote your real `state.db`, `ops.log` and snapshots, and started controllers rooted at `/home/brian`.
+- That caused some of the "flaky" failures, such as `database is locked`.
+- All subagents now use `/tmp` paths and stop only their own leftover processes.
+- No test controller rooted at `$HOME` is still running.
+- The backlog item asks for a project-root ceiling under test, plus a harness guard against a TMPDIR with an `.agent-doc` ancestor. `~/.agent-doc` is not cleaned yet; that waits for your OK.
+
+**Still in flight:** `#runfrontenderror`, `#explicitrunqueue`, `#runfrontendcrashed`, `#freetextqueue`, the multi-line queue cruft, and the codex Stop-hook flake.
 <!-- agent:boundary:a19d933a -->
 <!-- /agent:exchange -->
 
@@ -127,23 +150,23 @@ I sent this directive to four of the five running subagents: `#runfrontenderror`
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#runfrontendcrashed]
-- 🚧 do [#runfrontenderror]
+- 🚧 do [#runfrontendcrashed]
+- ⏭️ do [#runfrontenderror]
 - ⏭️ do [#runctrlclaude]
 - 🚧 do [#explicitrunqueue]
-- do [#freetextqueue]
+- 🚧 do [#freetextqueue]
 - 🚧 Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.
-- 🚧 release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#runfrontendcrashed] Run Agent Doc on frontend.md crashed my Claude Code session and unsuccessfully restarted. The raw prompt was the end state. The terminal formatting is also messed up ![img_3.png](img_3.png).
-- [ ] [#freetextqueue] Free-text queue head wrongly auto-struck by #qftbklgstrike: the supervisor-thrash queue line was struck as 'tracked by backlog #runctrlclaude' only because #runctrlclaude's backlog text QUOTES that line (inside the route error message), even though the two are different defects and the thrash fix was still in flight under its own claim (subagent:supthrash). Containment of a head's text inside an unrelated backlog item's prose must not count as tracking; require an exact promotion lineage/receipt. 2026-10-10 ~17:45Z, agent-doc-bugs.md.
+- [ ] [#testisolationtests] Test isolation: agent-doc tests whose TMPDIR sits under $HOME walk up past their tempdir, adopt /home/brian/.agent-doc as the project root, and write the operator's real ~/.agent-doc/state.db, ops.log, proof-ledger and snapshots, and spawn controllers with --project-root /home/brian (seen 2026-10-10: 'failed to save registry to /home/brian/.agent-doc/state.db: database is locked', a leaked test controller, and subagent scratch paths in ~/.agent-doc/logs/ops.log). Project-root discovery under test must stop at a ceiling (the test tempdir / an AGENT_DOC_ROOT_CEILING like GIT_CEILING_DIRECTORIES), and the test harness must refuse a TMPDIR that has an .agent-doc ancestor. Then scrub the test-written entries from ~/.agent-doc with the operator's OK.
+- [ ] 🚧 [#runfrontendcrashed] Run Agent Doc on frontend.md crashed my Claude Code session and unsuccessfully restarted. The raw prompt was the end state. The terminal formatting is also messed up ![img_3.png](img_3.png).
+- [ ] 🚧 [#freetextqueue] Free-text queue head wrongly auto-struck by #qftbklgstrike: the supervisor-thrash queue line was struck as 'tracked by backlog #runctrlclaude' only because #runctrlclaude's backlog text QUOTES that line (inside the route error message), even though the two are different defects and the thrash fix was still in flight under its own claim (subagent:supthrash). Containment of a head's text inside an unrelated backlog item's prose must not count as tracking; require an exact promotion lineage/receipt. 2026-10-10 ~17:45Z, agent-doc-bugs.md.
 - [ ] 🚧 [#runfrontenderror] Run Agent Doc on frontend.md error: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
 - [ ] 🚧 [#explicitrunqueue] Explicit Run Agent Doc on a queue head that is claimed by a live subagent (agent-doc queue claims shows an unexpired owner) still admits a full cycle with queue_drainable_head_count=0, so each press commits a no-op in-flight response and trips expect_done_or_gate_guard. The route/preflight should answer 'claimed by <owner>, expires <t>' without opening a cycle. Repro: 2026-10-10 17:34Z, ops.log preflight_turn_admission explicit_route=true for the claimed #runctrlclaude.
-- [ ] 🚧 [#runctrlclaude] Run Agent Doc, then ctrl+c in Claude Code: Clear Session Context was wedged. After manually running `/clear` in Claude Code, Run Agent Doc is wedged: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "Several agent-doc processes have been background thrashing over the past few hours. Please fix agent-doc causes. Use formal logic to ensure proper cleanup happens for old supervisors." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
 <!-- /agent:backlog -->
 
 ## Review

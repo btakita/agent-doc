@@ -207,7 +207,20 @@ The exchange is now 143 lines across 9 response sections. I'm not compacting, be
 Both are integrating now with one `make install`. GH #234 closes after that.
 
 **`~/.agent-doc` cleanup, approved: back up first, then remove only test-written state.** I'll run it after the install. The `$HOME` bootstrap row, `scratch_16.md`, and everything written before September stay.
-<!-- agent:boundary:eea96e0d:agent-doc-bugs -->
+> **Chat prompt (#chatprompt):** did you release?
+
+### Re: did you release? — opus-5-5 · 2026-10-10T18:05-04:00
+
+Yes. **v0.35.485 is fully published.**
+
+- **Tag and local install:** `v0.35.485` was tagged by `make release`, which exited 0. The local `agent-doc --version` reports 0.35.485.
+- **GitHub Release:** published at 21:47Z with 13 assets. All six platform builds, the editor plugins, and the Homebrew formula bump succeeded.
+- **PyPI:** now at **0.35.485**, after one fix-up described below.
+
+**The PyPI publish first failed on timing, not code.** Its job polls at most 30 minutes for the GitHub Release's `SHA256SUMS`, but the release builds took about 33 minutes. The job gave up at 21:45:30Z, two minutes before the Release went up. I reran only the failed job once the assets existed, and it published. The race will recur whenever the macOS builds run long. I filed it in the backlog: trigger the PyPI publish from the published-release event instead of a fixed wall-clock poll.
+
+**Not in a release yet:** the GH #234 layout fix and `#testisolationtests`. They go to `main` plus a single `make install` once their `make check` finishes. Queue another `release + publish` if you want them published.
+<!-- agent:boundary:971f0665 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -229,6 +242,7 @@ Both are integrating now with one `make install`. GH #234 closes after that.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#pypireleaseworkflow] PyPI release workflow races the GitHub Release: the PyPI job polls at most 30 minutes for the Release's SHA256SUMS, but v0.35.485's cross-platform builds took about 33 minutes, so publish failed at 21:45:30Z and the Release went up at 21:47:24Z (run 38086853278; a rerun of the failed job published it). Trigger PyPI from the release:published event, or from the Release workflow after its assets upload, instead of a fixed wall-clock poll.
 - [ ] 🚧 [#testisolationtests] Test isolation: agent-doc tests whose TMPDIR sits under $HOME walk up past their tempdir, adopt /home/brian/.agent-doc as the project root, and write the operator's real ~/.agent-doc/state.db, ops.log, proof-ledger and snapshots, and spawn controllers with --project-root /home/brian (seen 2026-10-10: 'failed to save registry to /home/brian/.agent-doc/state.db: database is locked', a leaked test controller, and subagent scratch paths in ~/.agent-doc/logs/ops.log). Project-root discovery under test must stop at a ceiling (the test tempdir / an AGENT_DOC_ROOT_CEILING like GIT_CEILING_DIRECTORIES), and the test harness must refuse a TMPDIR that has an .agent-doc ancestor. Then scrub the test-written entries from ~/.agent-doc with the operator's OK.
 <!-- /agent:backlog -->
 

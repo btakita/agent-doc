@@ -426,6 +426,25 @@ impl SimWorld {
                     self.coverage.record_block(&err.to_string());
                 }
             }
+            SimCommand::WedgeRecycleOnSupersededOwner => {
+                // The live `frontend.md` facts: `started-4351` at 02:00:14,
+                // owner pid 1989646 on 0.35.481 (deleted exe), no stamp,
+                // first refused at 18:15:38.
+                self.route.recycle_inflight = true;
+                self.route.recycle_gate = super::RecycleGateModel {
+                    marked_secs: 1_791_597_614,
+                    now_secs: 1_791_656_138,
+                    owner_alive: true,
+                    owner_binary_superseded: Some(true),
+                    ready_registered_secs: None,
+                    owner_reaped_after_request_ms: None,
+                };
+            }
+            SimCommand::DispatchThroughRecycleGate => {
+                if let Err(err) = self.dispatch_through_recycle_gate() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
             SimCommand::BusyInterruptRecoveryReady => {
                 if let Err(err) = self.recover_busy_interrupt_to_ready() {
                     self.coverage.record_block(&err.to_string());
@@ -2627,6 +2646,100 @@ impl SimWorld {
             "route_dispatch_submit_recycle_settle pane={} generation={} settled=true action=submit_once_after_settle",
             pane_id, self.route.durable.generation
         ));
+        self.dispatch_route_prompt_with(true)
+    }
+
+    /// `#runfrontenderror`: the dispatch-only recycle gate loop
+    /// (`agent-doc-route-io` `wait_for_dispatch_only_recycle_inflight_settle`)
+    /// over the model's facts, decided by the production predicates. Each
+    /// re-arm stands for one blocking settle-wait RPC (10s). It injects only
+    /// through a proceed verdict, and never while the owner is alive.
+    pub(crate) fn dispatch_through_recycle_gate(&mut self) -> Result<()> {
+        use agent_doc_controller::dispatch::{
+            RECYCLE_INFLIGHT_SETTLE_TTL_SECS, RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS,
+            RECYCLE_SUPERSEDED_OWNER_UNBLOCKER, RecycleInflightUnsettledVerdict,
+            SupersededOwnerReplacementStep, recycle_inflight_unsettled_verdict_with_evidence,
+            superseded_owner_replacement_step,
+        };
+        const SETTLE_WAIT_MS: u128 = 10_000;
+        let pane_id = self.current_dispatch_pane()?;
+        let mut elapsed_ms: u128 = 0;
+        let mut requested_at_ms: Option<u128> = None;
+        // Bounded by construction: the TTL re-arm only applies inside the TTL,
+        // and the superseded wait refuses at its bound. The cap guards the model.
+        for _ in 0..64 {
+            if !self.route.recycle_inflight {
+                break;
+            }
+            let gate = self.route.recycle_gate.clone();
+            if let (Some(requested), Some(reap_after)) =
+                (requested_at_ms, gate.owner_reaped_after_request_ms)
+                && elapsed_ms.saturating_sub(requested) >= reap_after
+            {
+                self.route.recycle_gate.owner_alive = false;
+            }
+            let gate = self.route.recycle_gate.clone();
+            let verdict = recycle_inflight_unsettled_verdict_with_evidence(
+                gate.marked_secs,
+                gate.now_secs,
+                RECYCLE_INFLIGHT_SETTLE_TTL_SECS,
+                gate.owner_alive,
+                gate.ready_registered_secs,
+                gate.owner_binary_superseded,
+            );
+            match verdict {
+                RecycleInflightUnsettledVerdict::ProceedAbandoned
+                | RecycleInflightUnsettledVerdict::ProceedReadyAfterStart => {
+                    self.record_ops_proof(format!(
+                        "route_dispatch_only_recycle_inflight_proceed pane={} verdict={:?} waited_ms={}",
+                        pane_id, verdict, elapsed_ms
+                    ));
+                    self.route.recycle_inflight = false;
+                    break;
+                }
+                RecycleInflightUnsettledVerdict::FailClosed => {
+                    bail!("recycle gate refused: unstamped_recycle_mark pane={pane_id}");
+                }
+                RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling => {
+                    self.coverage.recycle_gate_owner_still_recycling_refusals += 1;
+                    bail!(
+                        "recycle gate refused: recycle_ttl_elapsed_supervisor_alive pane={pane_id} unblocker=wait_for_supervisor_recycle_settle"
+                    );
+                }
+                RecycleInflightUnsettledVerdict::ReplaceSupersededOwner => {
+                    match superseded_owner_replacement_step(
+                        requested_at_ms,
+                        elapsed_ms,
+                        RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS,
+                    ) {
+                        SupersededOwnerReplacementStep::RequestReplacement => {
+                            self.coverage.superseded_owner_replacement_requests += 1;
+                            requested_at_ms = Some(elapsed_ms);
+                            self.record_ops_proof(format!(
+                                "route_dispatch_only_recycle_inflight_superseded_owner pane={pane_id} action=replacement_requested"
+                            ));
+                        }
+                        SupersededOwnerReplacementStep::KeepWaiting => {}
+                        SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor => {
+                            self.coverage.superseded_owner_refusals += 1;
+                            self.record_ops_proof(format!(
+                                "route_dispatch_only_recycle_inflight_refused pane={pane_id} refusal=superseded_owner_not_replaced unblocker={RECYCLE_SUPERSEDED_OWNER_UNBLOCKER}"
+                            ));
+                            bail!(
+                                "recycle gate refused: superseded_owner_not_replaced pane={pane_id} unblocker={RECYCLE_SUPERSEDED_OWNER_UNBLOCKER}"
+                            );
+                        }
+                    }
+                }
+                RecycleInflightUnsettledVerdict::KeepWaiting => {}
+            }
+            // One blocking settle-wait RPC.
+            elapsed_ms += SETTLE_WAIT_MS;
+            self.route.recycle_gate.now_secs += (SETTLE_WAIT_MS / 1_000) as u64;
+        }
+        if self.route.recycle_inflight {
+            bail!("recycle gate model did not terminate pane={pane_id}");
+        }
         self.dispatch_route_prompt_with(true)
     }
 

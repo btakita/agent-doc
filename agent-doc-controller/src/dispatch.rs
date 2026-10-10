@@ -2388,6 +2388,68 @@ pub enum RecycleInflightUnsettledVerdict {
     /// minted at the stale epoch 4350 and dropped, refused for hours). Proceed,
     /// and have the controller re-mint the settle at the in-flight epoch.
     ProceedReadyAfterStart,
+    /// `#runfrontenderror`: the R9 case, except the live supervisor maps a
+    /// *superseded* binary (its `/proc/<pid>/exe` is older than the install).
+    /// Such a supervisor can never end the refusal by itself: it registered
+    /// `ready` under a build that predates the `#dispatchreadyselfheal` stamp
+    /// (or its `execve` failed and it kept serving the old bytes), so no
+    /// covering settle or readiness evidence will ever arrive for this epoch,
+    /// and its own next self-recycle would mint a NEW epoch, not settle this
+    /// one. Waiting on it is unbounded (observed 2026-10-10 on `frontend.md`:
+    /// pid 1989646 on 0.35.481, `InFlight@4351` from 02:00:14, refused at
+    /// 18:15:38). The remedy is replacing that supervisor, so the gate requests
+    /// the turn-safe stale-supervisor recycle and waits a bounded
+    /// [`RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS`] for the owner to go
+    /// away or re-register; it still never injects while that owner is alive.
+    ReplaceSupersededOwner,
+}
+
+/// `#runfrontenderror`: how long the dispatch-only gate waits for a superseded
+/// supervisor to be replaced (it exits, or its successor registers `ready`)
+/// after requesting the replacement, before refusing with the actionable
+/// `restart_stale_supervisor` unblocker. The live replacement on `frontend.md`
+/// reaped the stale owner 32s after it was requested; 45s covers that with
+/// margin and stays well inside the 120s the gate already spends on a pending
+/// recycle.
+pub const RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS: u64 = 45;
+pub const RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS_ENV: &str =
+    "AGENT_DOC_RECYCLE_SUPERSEDED_OWNER_WAIT_SECS";
+
+/// The unblocker the gate names when a superseded owner was not replaced
+/// within the bounded wait. Unlike `wait_for_supervisor_recycle_settle`, it is
+/// something the operator can do: the settle the gate was waiting for cannot
+/// arrive from that process.
+pub const RECYCLE_SUPERSEDED_OWNER_UNBLOCKER: &str = "restart_stale_supervisor";
+
+/// One step of the `#runfrontenderror` superseded-owner wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupersededOwnerReplacementStep {
+    /// First observation: request the turn-safe replacement, then wait.
+    RequestReplacement,
+    /// Replacement requested and still inside the bounded wait: re-arm.
+    KeepWaiting,
+    /// The bounded wait elapsed with the superseded owner still alive: refuse
+    /// with [`RECYCLE_SUPERSEDED_OWNER_UNBLOCKER`].
+    RefuseRestartStaleSupervisor,
+}
+
+/// Classify one [`RecycleInflightUnsettledVerdict::ReplaceSupersededOwner`]
+/// observation. `requested_at_ms` is the gate's own elapsed time when it
+/// requested the replacement (`None` before it has), so the bound is measured
+/// from the request, never from the recycle mark: a 16-hour-old mark must
+/// still get its full replacement window.
+pub fn superseded_owner_replacement_step(
+    requested_at_ms: Option<u128>,
+    now_ms: u128,
+    wait_secs: u64,
+) -> SupersededOwnerReplacementStep {
+    match requested_at_ms {
+        None => SupersededOwnerReplacementStep::RequestReplacement,
+        Some(requested) if now_ms.saturating_sub(requested) >= u128::from(wait_secs) * 1_000 => {
+            SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor
+        }
+        Some(_) => SupersededOwnerReplacementStep::KeepWaiting,
+    }
 }
 
 /// How many times the gated recycle may be replaced by a NEW epoch before the
@@ -2495,6 +2557,69 @@ pub fn recycle_inflight_unsettled_verdict_with_readiness(
         return RecycleInflightUnsettledVerdict::ProceedReadyAfterStart;
     }
     recycle_inflight_unsettled_verdict_with_owner(marked_secs, now_secs, ttl_secs, supervisor_alive)
+}
+
+/// [`recycle_inflight_unsettled_verdict_with_readiness`] plus the live owner's
+/// binary freshness (`#runfrontenderror`).
+///
+/// Only the R9 refusal is refined: past the TTL, alive, no readiness evidence,
+/// and `owner_binary_superseded == Some(true)` becomes
+/// [`RecycleInflightUnsettledVerdict::ReplaceSupersededOwner`]. Unknown
+/// freshness (`None`) or a current binary keeps the R9 refusal; every other
+/// verdict is unchanged, so this never turns a wait or refusal into an
+/// injection by itself.
+pub fn recycle_inflight_unsettled_verdict_with_evidence(
+    marked_secs: u64,
+    now_secs: u64,
+    ttl_secs: u64,
+    supervisor_alive: bool,
+    ready_registered_secs: Option<u64>,
+    owner_binary_superseded: Option<bool>,
+) -> RecycleInflightUnsettledVerdict {
+    match recycle_inflight_unsettled_verdict_with_readiness(
+        marked_secs,
+        now_secs,
+        ttl_secs,
+        supervisor_alive,
+        ready_registered_secs,
+    ) {
+        RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling
+            if owner_binary_superseded == Some(true) =>
+        {
+            RecycleInflightUnsettledVerdict::ReplaceSupersededOwner
+        }
+        verdict => verdict,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyRecycleSupersededOwnerMessageFacts<'a> {
+    pub harness_binary: &'a str,
+    pub pane: &'a str,
+    pub file_display: &'a str,
+    pub reason: &'a str,
+    pub supervisor_pid: u32,
+    pub waited_secs: u64,
+    pub outcome_fields: &'a str,
+}
+
+/// `#runfrontenderror`: the refusal for a superseded owner that was not
+/// replaced within the bounded wait. It names the process and the concrete
+/// remedy instead of "retry once the supervisor settles", which that process
+/// cannot do.
+pub fn dispatch_only_recycle_superseded_owner_message(
+    facts: DispatchOnlyRecycleSupersededOwnerMessageFacts<'_>,
+) -> String {
+    format!(
+        "dispatch-only {} reopen refused to inject into pane {} for {}: its recycle (reason={}) never settled and the route-owned supervisor (pid {}) is still serving a SUPERSEDED agent-doc binary, so that settle cannot arrive from it. A turn-safe replacement was requested and did not complete within {}s. Restart the stale supervisor (`agent-doc admin recycle`, or close and reopen the session pane), then rerun Run Agent Doc {}",
+        facts.harness_binary,
+        facts.pane,
+        facts.file_display,
+        facts.reason,
+        facts.supervisor_pid,
+        facts.waited_secs,
+        facts.outcome_fields
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4562,6 +4687,152 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 Some(ready)
             ),
             RecycleInflightUnsettledVerdict::FailClosed
+        );
+    }
+
+    /// `#runfrontenderror`: the same `frontend.md` ledger (`InFlight@4351`,
+    /// marked 02:00:14) after the 0.35.483 self-heal shipped. The live owner,
+    /// pid 1989646, was still the 0.35.481 process: it registered `ready`
+    /// before readiness stamps existed (`ready_registered_at` NULL) and mapped
+    /// a superseded binary, so the R9 refusal could never end on its own.
+    #[test]
+    fn superseded_owner_past_ttl_requests_replacement_instead_of_refusing_forever() {
+        let ttl = RECYCLE_INFLIGHT_SETTLE_TTL_SECS;
+        let marked = 1_791_597_614; // 2026-10-10T02:00:14Z
+        let refused_at = 1_791_656_138; // 2026-10-10T18:15:38Z
+
+        // The production refusal: no stamp, owner alive.
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_evidence(
+                marked,
+                refused_at,
+                ttl,
+                true,
+                None,
+                Some(true)
+            ),
+            RecycleInflightUnsettledVerdict::ReplaceSupersededOwner
+        );
+        // Unknown or current binary: R9 stands (no new proceed path).
+        for freshness in [None, Some(false)] {
+            assert_eq!(
+                recycle_inflight_unsettled_verdict_with_evidence(
+                    marked, refused_at, ttl, true, None, freshness
+                ),
+                RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling
+            );
+        }
+        // Inside the TTL a superseded owner may be the one mid-`execve`: wait.
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_evidence(
+                marked,
+                marked + 5,
+                ttl,
+                true,
+                None,
+                Some(true)
+            ),
+            RecycleInflightUnsettledVerdict::KeepWaiting
+        );
+        // Owner gone (the replacement reaped it at 18:15:45): abandoned.
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_evidence(
+                marked,
+                refused_at + 25,
+                ttl,
+                false,
+                None,
+                Some(true)
+            ),
+            RecycleInflightUnsettledVerdict::ProceedAbandoned
+        );
+        // Successor registered ready after the start: readiness wins.
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_evidence(
+                marked,
+                refused_at + 140,
+                ttl,
+                true,
+                Some(refused_at + 138),
+                Some(false)
+            ),
+            RecycleInflightUnsettledVerdict::ProceedReadyAfterStart
+        );
+        // Unstamped mark stays fail-closed regardless of freshness.
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_evidence(
+                0,
+                refused_at,
+                ttl,
+                true,
+                None,
+                Some(true)
+            ),
+            RecycleInflightUnsettledVerdict::FailClosed
+        );
+    }
+
+    /// `#runfrontenderror`: the superseded-owner wait is bounded from the
+    /// replacement REQUEST, never from the (hours-old) recycle mark, and its
+    /// terminal state is an actionable refusal rather than another re-arm.
+    #[test]
+    fn superseded_owner_replacement_wait_is_bounded_from_the_request() {
+        let wait = RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS;
+        assert_eq!(
+            superseded_owner_replacement_step(None, 10, wait),
+            SupersededOwnerReplacementStep::RequestReplacement
+        );
+        let requested = 10_u128;
+        for now in [
+            requested,
+            requested + 1,
+            requested + u128::from(wait) * 1_000 - 1,
+        ] {
+            assert_eq!(
+                superseded_owner_replacement_step(Some(requested), now, wait),
+                SupersededOwnerReplacementStep::KeepWaiting
+            );
+        }
+        for now in [
+            requested + u128::from(wait) * 1_000,
+            requested + u128::from(wait) * 10_000,
+        ] {
+            assert_eq!(
+                superseded_owner_replacement_step(Some(requested), now, wait),
+                SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor
+            );
+        }
+        // A zero budget still requests first, then refuses on the next step.
+        assert_eq!(
+            superseded_owner_replacement_step(None, 0, 0),
+            SupersededOwnerReplacementStep::RequestReplacement
+        );
+        assert_eq!(
+            superseded_owner_replacement_step(Some(0), 0, 0),
+            SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor
+        );
+    }
+
+    #[test]
+    fn superseded_owner_refusal_names_the_process_and_an_actionable_unblocker() {
+        let message = dispatch_only_recycle_superseded_owner_message(
+            DispatchOnlyRecycleSupersededOwnerMessageFacts {
+                harness_binary: "claude",
+                pane: "%166",
+                file_display: "tasks/frontend.md",
+                reason: "auto_install_reexec",
+                supervisor_pid: 1_989_646,
+                waited_secs: RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS,
+                outcome_fields: "ui_outcome=blocked_with_exact_unblocker unblocker=restart_stale_supervisor",
+            },
+        );
+        assert!(message.contains("pid 1989646"));
+        assert!(message.contains("SUPERSEDED"));
+        assert!(message.contains("unblocker=restart_stale_supervisor"));
+        assert!(!message.contains("Retry once the supervisor settles"));
+        assert_eq!(
+            RECYCLE_SUPERSEDED_OWNER_UNBLOCKER,
+            "restart_stale_supervisor"
         );
     }
 

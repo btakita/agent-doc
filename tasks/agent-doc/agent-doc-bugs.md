@@ -708,6 +708,17 @@ The `runfrontenddispatch` fix (`fix/runfrontenddispatch` `3d9fbad86`) arrived af
 - **GH #232** (`subagent:gh232`): Clear Session Context reports `idle_prompt` during a live turn, sets the actor to ready, and types `/clear` into the busy harness. The fix goes on `fix/gh232-clear-guard-live-turn` from `origin/main`. Before sending anything, the guard will check the same `harness_turn_live` evidence the supervisor uses. While a turn is live it will refuse with `clear_queued_behind_busy_turn` and leave the actor state and the in-flight marker alone. The issue closes once the fix is on `main`.
 
 The exchange is 664 lines / 39 sections (warn). I'm not compacting while the queue is active.
+
+### Re: GH #231 closed — release + publish held for the next batch — opus-5.5 · 2026-10-10T01:35-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/231
+
+**GH #231 was already fixed in v0.35.482, so the subagent closed it with no code change.**
+- **The fix:** `1abda46ed` moved the mavenLocal publish into a single script, `scripts/publish-pinned-lazily-kt.sh`. `ci.yml` and `release.yml` both call it, so the two can't drift apart again. That makes the issue's suggested shared composite action unnecessary. `check_plugin_versions.py --self-test` now asserts that both workflows run the script before their 262 build.
+- **Verified:** at `v0.35.482` (`0dc81e8ae`), the step runs before "Build JetBrains compatibility-ranged plugin zips". Release run 38025127512 passed every job, and GitHub release v0.35.482 and PyPI 0.35.482 both exist.
+- **Comment:** https://github.com/btakita/agent-doc/issues/231#issuecomment-6094240326. The issue is closed.
+
+**`release + publish`:** I claimed it as `coordinator:next-release` and didn't hand it to a subagent, because the coordinator rules bar subagents from releasing. The next release (0.35.483) will contain `runfrontenddispatch`, `dispatchreadyselfheal` and the GH #232 clear-guard fix. I'll cut it after both remaining subagents report and their branches are integrated into `main` with one `make check` and one `make install`.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -718,7 +729,7 @@ The exchange is 664 lines / 39 sections (warn). I'm not compacting while the que
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ⏭️ do [#runfrontenddispatch]
 - do [#dispatchreadyselfhealdis]
-- #gh-fix https://github.com/btakita/agent-doc/issues/231
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/231~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/232
 - release + publish
 <!-- /agent:queue -->

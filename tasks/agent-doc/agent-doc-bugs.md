@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -38,6 +39,23 @@ Released agent-doc v0.35.475. v0.35.476 is not yet tagged or published; the acti
 Compacted content:
 - Archived 48 response topic(s): actionable review; queue subagent dispatch (claude coordinator takeover); actionable-review dispatch; 45 more
 - Prior summary/context: prior compacted content: Archived 31 response topic(s): retained closeouts, queue integrity, GH #181–#184, and v0.35....
+
+### Re: queue go — two subagent heads dispatched — opus-5-5 · 2026-10-10T13:35-04:00
+
+Both new queue heads carry subagent intent under `#spec-test-build-install-commit-push`, so each was claimed and handed to its own background subagent in a separate agent-doc worktree outside the IDE-watched tree, based on `origin/main` (`ca98f7926`). The local `src/agent-doc` checkout is 356 commits behind, so neither worktree branches from it.
+
+| Item | Claim owner | Worktree / branch |
+|---|---|---|
+| `#runctrlclaude`: route wedged on an `open_empty_preflight` closeout after ctrl+c and `/clear` | `subagent:runctrlclaude` | `~/work/btakita/agent-doc-wt/runctrlclaude` · `fix/runctrlclaude` |
+| Background supervisor thrashing, plus formal cleanup invariants for old supervisors | `subagent:supthrash` | `~/work/btakita/agent-doc-wt/supthrash` · `fix/supthrash` |
+
+Briefs:
+- **`#runctrlclaude`:** when the owning harness run is provably gone (for example interrupted, then `/clear`ed), the route should abandon an empty, replay-safe preflight closeout automatically. It should stay fail-closed only while that run may still be live. The subagent will add a regression test and update the spec.
+- **Thrash:** the subagent starts from live process and log evidence (CPU use, superseded binaries, processes orphaned to PID 1, controllers stuck in `preparing`). It writes the supervisor lifecycle down as a state machine with explicit invariants: one live supervisor per (document, root), superseded or ownerless supervisors terminate within a bounded time, every spawn has a reaper, and no busy loop runs without progress. Those invariants go into the spec and into tests, and the code paths that break them get fixed. The subagent reports any orphans for the operator to kill instead of killing live supervisors itself.
+
+Subagents commit and push only their own branches. Neither runs `make install`. When they report back, this coordinator integrates both, runs one `make install`, releases the claims, and closes the items.
+
+No new backlog follow-ups this cycle. Both items are already tracked: one by its `#runctrlclaude` backlog entry and both by active queue claims. Any remainder a subagent reports gets captured when it is integrated.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -45,12 +63,15 @@ Compacted content:
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#runctrlclaude]
+- Several agent-doc processes have been background thrashing over the past few hours. Please fix agent-doc causes. Use formal logic to ensure proper cleanup happens for old supervisors.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#runctrlclaude] Run Agent Doc, then ctrl+c in Claude Code: Clear Session Context was wedged. After manually running `/clear` in Claude Code, Run Agent Doc is wedged: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "Several agent-doc processes have been background thrashing over the past few hours. Please fix agent-doc causes. Use formal logic to ensure proper cleanup happens for old supervisors." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
 <!-- /agent:backlog -->
 
 ## Review

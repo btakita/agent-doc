@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test jetbrains-repository-self-test python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla fuzz
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -77,6 +77,7 @@ release-macos-assets:
 release-version:
 	@test -n "$(VERSION)" || (echo "ERROR: VERSION is required (for example, make release-version VERSION=0.35.89)" && exit 1)
 	@python3 scripts/agent-doc-dev release-version "$(VERSION)"
+	@python3 scripts/check_plugin_versions.py --release-version "$(VERSION)"
 	@# `#skillinstallstalemirror`: installed copies are the installer's output,
 	@# not a sed target. `--root .` reaches the submodule-local install that bare
 	@# root resolution skips in favour of the superproject.
@@ -213,6 +214,14 @@ dev-harness-test: $(VSCODE_NODE_LOCK)
 editor-parity: dev-harness-test cross-editor-simworld
 	@python3 scripts/check_editor_parity.py
 
+# The classic and 262 modular ZIPs share one Marketplace plugin ID, so both
+# compatibility ranges and the modular role/sandbox contract are release gates.
+jetbrains-classic-check:
+	@cd editors/jetbrains && ./gradlew --no-daemon --console=plain verifyClassicArtifact
+
+jetbrains-262-check:
+	@cd editors/jetbrains-262 && gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes
+
 # Bump JB plugin patch version (when its sources changed) and build both zips.
 # `#installgenskew`: the bump goes through check_plugin_versions.py so it also
 # records `pluginSourceDigest`. A bare `sed` bump left the digest stale, and the
@@ -224,6 +233,13 @@ bump-plugin:
 	new=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
 	./gradlew buildPlugin signPlugin && \
 	ls -1 build/distributions/agent-doc-jetbrains-$$new*.zip
+
+bump-plugin-262:
+	@python3 scripts/check_plugin_versions.py --bump "JetBrains 262"
+	@cd editors/jetbrains-262 && \
+	new=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
+	gradle --no-daemon --console=plain buildPlugin verifySplitArtifact && \
+	ls -1 build/distributions/agent-doc-jetbrains-262-$$new.zip
 
 # `#installgenskew`: the binary embeds the JetBrains generation it expects
 # (agent-doc-reliable-sync-io/build.rs reads gradle.properties), so any bump
@@ -255,6 +271,17 @@ python-compat-check:
 # (`python3 scripts/purge-actions-artifacts.py`).
 artifact-purge-check:
 	@python3 scripts/purge-actions-artifacts.py --self-test
+
+# Offline refusal-path coverage for the immutable JetBrains 262 preview manifest.
+preview-artifact-check:
+	@python3 scripts/verify_jetbrains_preview.py --self-test
+
+# Verify separately downloaded backend and Client/Gateway copies plus live GitHub
+# release/PR provenance before running the GH #218 Remote Dev acceptance matrix.
+verify-jetbrains-262-preview:
+	@test -n "$(BACKEND_ZIP)" || (echo "ERROR: BACKEND_ZIP is required" >&2 && exit 1)
+	@test -n "$(CLIENT_GATEWAY_ZIP)" || (echo "ERROR: CLIENT_GATEWAY_ZIP is required" >&2 && exit 1)
+	@python3 scripts/verify_jetbrains_preview.py --backend "$(BACKEND_ZIP)" --client-gateway "$(CLIENT_GATEWAY_ZIP)"
 
 # PyPI storage headroom + limit-request status, unauthenticated (`#pypislim`).
 # Reads per-file sizes from the PEP 691 simple index, NOT `pypi.org/pypi/<name>/json`
@@ -311,12 +338,15 @@ dev-check-self-test:
 release-driver-self-test:
 	@python3 scripts/release-driver.py --self-test
 
+jetbrains-repository-self-test:
+	@python3 scripts/jetbrains-custom-repository.py --self-test
+
 # Fast edit-loop validation: helper checks plus Rust packages affected by the
 # diff and their reverse-dependency closure. This is not a release proof.
-check-fast: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test
+check-fast: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test jetbrains-repository-self-test
 	@python3 scripts/dev-check.py run
 
-check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity python-bootstrap-test lean tla
+check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test jetbrains-repository-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-classic-check jetbrains-262-check python-bootstrap-test lean tla
 	@AGENT_DOC_FULL_CHECK_SUCCEEDED=1 python3 scripts/dev-check.py record-full-check
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
@@ -403,13 +433,26 @@ install-full: editor-generation-bump
 # version, so this adds no churn to a no-op `make install`.
 # The native cdylib and editor package are separate install surfaces: updating
 # only the former leaves running turns reporting the older package generation.
+# The classic (242-261) and modular (262) packages are disjoint artifacts with
+# one plugin ID. Build both before the all-installed convergence command so each
+# target can select its own range; never let a classic-only build replace 262.
+# Without the modular project, 262 targets fail closed in the Rust selector.
 install-editor-plugins:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
 		python3 scripts/check_plugin_versions.py --bump JetBrains || exit 1; \
 		( cd editors/jetbrains && ./gradlew buildPlugin ) || { \
-			echo "JetBrains plugin build failed. Use a JDK 21-compatible Gradle runtime (set JAVA_HOME to JDK 21). Refusing to install a stale package." >&2; \
+			echo "JetBrains classic plugin build failed. Its Gradle daemon is pinned to Temurin 21 (gradle/gradle-daemon-jvm.properties); check that Gradle can detect or download it. Refusing to install a stale package." >&2; \
 			exit 1; \
 		}; \
+		if [ -f editors/jetbrains-262/gradle.properties ]; then \
+			python3 scripts/check_plugin_versions.py --bump "JetBrains 262" || exit 1; \
+			( cd editors/jetbrains-262 && gradle --no-daemon --console=plain buildPlugin verifySplitArtifact ) || { \
+				echo "JetBrains 262 modular plugin build failed. Refusing to install the classic package into a 262 IDE." >&2; \
+				exit 1; \
+			}; \
+		else \
+			echo "WARNING: this checkout has no editors/jetbrains-262 project; any build-262 IDE target is refused rather than given the classic package." >&2; \
+		fi; \
 		agent-doc plugin install jetbrains --local --all-installed; \
 	else \
 		echo "No existing JetBrains agent-doc package; editor package sync skipped."; \

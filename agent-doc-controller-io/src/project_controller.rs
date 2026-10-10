@@ -30,6 +30,8 @@ use lazily::{Computed, Source, ThreadSafeContext};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+pub use agent_doc_controller::pane_layout::MainLayoutEligibility;
+
 // The SQLite state layer (the only `rusqlite::Connection` surface) lives in
 // `agent-doc-sqlite::state_store`. Keep persistence types private to this
 // orchestration module. Domain/controller vocabulary belongs to the model
@@ -1028,9 +1030,7 @@ pub(crate) fn pane_layout_route_readiness(
         | PaneLayoutProjection::RetryPending(_) => PaneLayoutRouteReadiness::Wait,
         PaneLayoutProjection::Absent
         | PaneLayoutProjection::Refused(_)
-        | PaneLayoutProjection::OperatorOwned(_) => {
-            PaneLayoutRouteReadiness::Refused
-        }
+        | PaneLayoutProjection::OperatorOwned(_) => PaneLayoutRouteReadiness::Refused,
     }
 }
 
@@ -1437,6 +1437,87 @@ struct ControllerPaneLayoutGraph {
     width_memory: Mutex<PaneLayoutWidthMemory>,
     waiters: Condvar,
     wait_lock: Mutex<()>,
+}
+
+/// Process-scoped derivative of the durable document-to-view binding
+/// projection. Controller hydration supplies the first complete snapshot
+/// before any request can publish layout, and every accepted state fact
+/// replaces it atomically before a tmux effect can consume it.
+struct ControllerMainLayoutEligibilityGraph {
+    ctx: ThreadSafeContext,
+    value: Source<MainLayoutEligibility>,
+}
+
+fn main_layout_eligibility_from_state(
+    state: &agent_doc_state_backbone::StateBackboneProjection,
+) -> MainLayoutEligibility {
+    MainLayoutEligibility::new(
+        state
+            .active_editor_view_bindings()
+            .into_values()
+            .map(|binding| binding.canonical_path),
+    )
+}
+
+fn editor_view_policy_bindings_from_state(
+    state: &agent_doc_state_backbone::StateBackboneProjection,
+) -> Vec<agent_doc_editor_surface::EditorViewPolicyBinding> {
+    use agent_doc_editor_surface::{
+        EditorViewBindingPhase, EditorViewId, EditorViewPolicyBinding, EditorViewSurfaceKey,
+    };
+    use agent_doc_state_backbone::EditorViewBindingState;
+
+    state
+        .active_editor_view_bindings()
+        .into_values()
+        .map(|projection| {
+            let identity = projection.state.binding();
+            let phase = match projection.state {
+                EditorViewBindingState::BindPending { .. } => EditorViewBindingPhase::BindPending,
+                EditorViewBindingState::Bound { .. } => EditorViewBindingPhase::Bound,
+                EditorViewBindingState::ReleasePending { .. } => {
+                    EditorViewBindingPhase::ReleasePending
+                }
+                EditorViewBindingState::Released { .. } => {
+                    unreachable!("active_editor_view_bindings excludes released projections")
+                }
+            };
+            let owner = EditorViewSurfaceKey {
+                client_id: identity.client_family.clone(),
+                connection_generation: identity.connection_generation,
+                surface_id: identity.surface_id.clone(),
+                surface_generation: identity.surface_generation,
+            };
+            EditorViewPolicyBinding {
+                document: projection.canonical_path,
+                binding_epoch: projection.binding_epoch,
+                view_id: EditorViewId {
+                    client_id: owner.client_id.clone(),
+                    connection_generation: owner.connection_generation,
+                    surface_id: owner.surface_id.clone(),
+                    surface_generation: owner.surface_generation,
+                },
+                owner,
+                phase,
+            }
+        })
+        .collect()
+}
+
+impl ControllerMainLayoutEligibilityGraph {
+    fn new_in(scope: &agent_doc_state_scope::ProcessScope, initial: MainLayoutEligibility) -> Self {
+        let ctx = scope.ctx().clone();
+        let value = ctx.source(initial);
+        Self { ctx, value }
+    }
+
+    fn get(&self) -> MainLayoutEligibility {
+        self.ctx.get(&self.value)
+    }
+
+    fn set(&self, value: MainLayoutEligibility) {
+        self.ctx.set(&self.value, value);
+    }
 }
 
 /// Publication semantics for the retained desired-layout Source.
@@ -2638,6 +2719,7 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         &self,
         project_root: &Path,
         invocation: ControllerTmuxLayoutSyncInvocation,
+        main_layout_eligibility: &MainLayoutEligibility,
     ) -> Result<ControllerTmuxLayoutSyncReceipt>;
 
     /// Surface a proven live-owner pane that is parked in the tmux stash.
@@ -2813,6 +2895,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         &self,
         _project_root: &Path,
         invocation: ControllerTmuxLayoutSyncInvocation,
+        _main_layout_eligibility: &MainLayoutEligibility,
     ) -> Result<ControllerTmuxLayoutSyncReceipt> {
         let routes_created_panes = invocation.routes_created_panes();
         Ok(ControllerTmuxLayoutSyncReceipt {
@@ -2999,9 +3082,13 @@ pub(crate) struct ControllerRuntime {
     captured_finalize_wake_publication: Mutex<()>,
     captured_finalize_wakes: Mutex<BTreeMap<String, rpc::CapturedFinalizeWakeProjection>>,
     pane_layout_graph: ControllerPaneLayoutGraph,
+    main_layout_eligibility_graph: ControllerMainLayoutEligibilityGraph,
     /// Editor facts, history-dependent intent, and tmux consequences share the
     /// controller ProcessScope. Editors retain only transport/projection caches.
     editor_surface_graph: rpc::ControllerEditorSurfaceGraph,
+    /// Complete frame-tagged Remote Dev snapshots. This graph is separate from
+    /// the legacy per-surface graph because only it owns main precedence.
+    editor_view_policy_graph: rpc::ControllerEditorViewPolicyGraph,
     /// Retained old-path → new-path observations and their convergence
     /// receipts. Requests carry effects; this projection owns rename truth.
     document_path_transition_graph: rpc::ControllerDocumentPathTransitionGraph,
@@ -4397,11 +4484,8 @@ impl RetainedWriteSettleSink {
         };
         // Persistence needs a wall-clock timestamp, but a backwards clock
         // adjustment must not extend this controller's bounded wait.
-        let delay = Duration::from_millis(
-            deadline_ms
-                .saturating_sub(now_ms)
-                .min(deadline_window_ms),
-        );
+        let delay =
+            Duration::from_millis(deadline_ms.saturating_sub(now_ms).min(deadline_window_ms));
         let runtime = self.runtime.clone();
         let project_root = self.project_root.clone();
         let error_document_hash = command.document_hash.clone();
@@ -7317,6 +7401,10 @@ impl ControllerRuntime {
         );
         let pane_layout_graph =
             ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
+        let main_layout_eligibility_graph = ControllerMainLayoutEligibilityGraph::new_in(
+            &scope,
+            main_layout_eligibility_from_state(&memory.state_projection),
+        );
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         let editor_surface_graph =
             rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {
@@ -7326,6 +7414,10 @@ impl ControllerRuntime {
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
             }));
+        let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::new_in(
+            &scope,
+            editor_view_policy_bindings_from_state(&memory.state_projection),
+        );
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
         for (document_hash, projection) in &memory.state_projection.documents {
@@ -7343,7 +7435,9 @@ impl ControllerRuntime {
             captured_finalize_wake_publication: Mutex::new(()),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
+            main_layout_eligibility_graph,
             editor_surface_graph,
+            editor_view_policy_graph,
             document_path_transition_graph,
             async_editor_commands,
             supervisor_recycle_waiters: Condvar::new(),
@@ -7372,6 +7466,28 @@ impl ControllerRuntime {
         runtime
             .document_graphs
             .install_settle_sink(project_root.clone(), &runtime);
+        runtime
+            .editor_view_policy_graph
+            .install_lifecycle_sink(&runtime);
+        let pending_editor_views = runtime
+            .memory
+            .lock()
+            .state_projection
+            .active_editor_view_bindings();
+        for (document_hash, binding) in pending_editor_views {
+            if matches!(
+                binding.state,
+                agent_doc_state_backbone::EditorViewBindingState::BindPending { .. }
+                    | agent_doc_state_backbone::EditorViewBindingState::ReleasePending { .. }
+            ) {
+                runtime.editor_view_policy_graph.apply_durable_binding(
+                    &document_hash,
+                    &binding.canonical_path,
+                    binding.binding_epoch,
+                    &binding.state,
+                );
+            }
+        }
         rpc::install_state_plane_projection_sinks(&runtime);
         #[cfg(not(any(test, feature = "test-support")))]
         rpc::install_pane_layout_projection_sink(&runtime);
@@ -7384,6 +7500,10 @@ impl ControllerRuntime {
             }),
         );
         Ok(runtime)
+    }
+
+    pub(crate) fn main_layout_eligibility(&self) -> MainLayoutEligibility {
+        self.main_layout_eligibility_graph.get()
     }
 
     /// `#ctlrecycle` R2 — mark this controller for a two-phase handoff.
@@ -7651,6 +7771,8 @@ impl ControllerRuntime {
         let project_root = self.bootstrap_snapshot()?.project_root;
         let (next, next_actor_store) = ControllerMemoryState::load(&project_root)?;
         let recycle = next.state_projection.project_supervisor_recycle();
+        let main_layout_eligibility =
+            main_layout_eligibility_from_state(&next.state_projection);
         let next_documents = next.state_projection.documents.clone();
         let mut memory = self.memory.lock();
         let previous_documents = memory.state_projection.documents.clone();
@@ -7658,6 +7780,8 @@ impl ControllerRuntime {
         drop(memory);
         self.actor_graph.set(next_actor_store);
         self.supervisor_recycle_graph.set(recycle);
+        self.main_layout_eligibility_graph
+            .set(main_layout_eligibility);
         for document_hash in previous_documents
             .keys()
             .chain(next_documents.keys())
@@ -7676,7 +7800,7 @@ impl ControllerRuntime {
 
     fn apply_state_event(&self, event: &agent_doc_state_backbone::StateEvent) -> Result<()> {
         let document_hash = event.fact.document_hash().to_string();
-        let (recycle, document_projection) = {
+        let (recycle, document_projection, main_layout_eligibility) = {
             let mut memory = self.memory.lock();
             // SQLite accepted the unique event id before this transition. Keep
             // only the current projection and epoch in the process: the durable
@@ -7691,6 +7815,7 @@ impl ControllerRuntime {
             (
                 memory.state_projection.project_supervisor_recycle(),
                 document_projection,
+                main_layout_eligibility_from_state(&memory.state_projection),
             )
         };
         let captured_finalize_wake_reason = match &event.fact {
@@ -7713,7 +7838,30 @@ impl ControllerRuntime {
         );
         let captured_finalize_wake_projection =
             captured_finalize_wake_reason.and_then(|_| document_projection.as_ref().cloned());
+        if let agent_doc_state_backbone::StateFact::EditorViewBindingObserved {
+            document_hash,
+            canonical_path,
+            binding_epoch,
+            state,
+            ..
+        } = &event.fact
+            && document_projection
+                .as_ref()
+                .and_then(|document| document.editor_view_binding.as_ref())
+                .is_some_and(|binding| {
+                    binding.binding_epoch == *binding_epoch && binding.state == *state
+                })
+        {
+            self.editor_view_policy_graph.apply_durable_binding(
+                document_hash,
+                canonical_path,
+                *binding_epoch,
+                state,
+            );
+        }
         self.supervisor_recycle_graph.set(recycle);
+        self.main_layout_eligibility_graph
+            .set(main_layout_eligibility);
         // `#retainedsettlereactive`: publish the applied *projection* as the fact
         // lands; the retained-intent facts and the settlement verdict are derived
         // from it. Pushing a pre-computed intent here instead would put the
@@ -9494,9 +9642,8 @@ pub fn fresh_foreign_supervisor_lease_holds_document(
     // `#netadv5` R6: heartbeat age is a timer, not evidence; an idle live
     // supervisor that still names this document keeps holding it.
     let supervisor_owns_document = lease.supervisor_pid.is_some_and(|pid| {
-        crate::process::open_supervisor_document(pid).is_some_and(|document| {
-            same_document_path(&document, Path::new(document_id))
-        })
+        crate::process::open_supervisor_document(pid)
+            .is_some_and(|document| same_document_path(&document, Path::new(document_id)))
     });
     status::supervisor_lease_holds_against_takeover(
         lease.last_heartbeat,
@@ -9676,9 +9823,11 @@ where
                 agent_doc_supervisor_io::selfkill::selfkill_grace(),
                 dry_run,
             ) {
-                Ok(agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::RefusedSelfAncestor(
-                    pid,
-                )) => {
+                Ok(
+                    agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::RefusedSelfAncestor(
+                        pid,
+                    ),
+                ) => {
                     agent_doc_ops_log_io::log_op(
                         Path::new(&record.document_id),
                         &format!(
@@ -12773,10 +12922,7 @@ mod tests {
         }
     }
 
-    fn seed_reliable_sync_editor_open(
-        doc: &std::path::Path,
-        tag: &str,
-    ) -> ReliableSyncOpenFixture {
+    fn seed_reliable_sync_editor_open(doc: &std::path::Path, tag: &str) -> ReliableSyncOpenFixture {
         use std::sync::atomic::{AtomicU64, Ordering};
 
         // The reliable-sync plane is process-global, while Rust tests execute
@@ -12833,7 +12979,10 @@ mod tests {
         let summary =
             checkpoint_route_owned_documents_for_project(dir.path(), "test_recycle").unwrap();
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert_eq!(summary.failed, 0, "checkpoint summary={summary:?}\n{ops_log}");
+        assert_eq!(
+            summary.failed, 0,
+            "checkpoint summary={summary:?}\n{ops_log}"
+        );
         assert_eq!(summary.detached, 0);
         assert_eq!(summary.skipped, 1);
         assert!(ops_log.contains("controller_crdt_checkpoint"));
@@ -16638,6 +16787,8 @@ agent:queue\n\
         );
         let pane_layout_graph =
             ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
+        let main_layout_eligibility_graph =
+            ControllerMainLayoutEligibilityGraph::new_in(&scope, MainLayoutEligibility::default());
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         let editor_surface_graph =
             rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {
@@ -16647,6 +16798,10 @@ agent:queue\n\
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
             }));
+        let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::new_in(
+            &scope,
+            editor_view_policy_bindings_from_state(&state_projection),
+        );
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
         ControllerRuntime {
@@ -16669,7 +16824,9 @@ agent:queue\n\
             captured_finalize_wake_publication: Mutex::new(()),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
+            main_layout_eligibility_graph,
             editor_surface_graph,
+            editor_view_policy_graph,
             document_path_transition_graph,
             async_editor_commands,
             recycle_requested: AtomicBool::new(false),
@@ -16678,6 +16835,61 @@ agent:queue\n\
             recycle_declined_target: Mutex::new(None),
             _scope: scope,
         }
+    }
+
+    #[test]
+    fn durable_editor_view_projection_updates_main_layout_eligibility() {
+        use agent_doc_state_backbone::{
+            EditorViewBindingIdentity, EditorViewBindingState, EditorViewReleaseDestination,
+            EditorViewReleaseReason, StateEvent, StateFact,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = runtime_for_bootstrap(test_bootstrap(&dir));
+        let document = dir.path().join("tasks/detached.md");
+        let canonical_path = document.to_string_lossy().to_string();
+        let binding = EditorViewBindingIdentity {
+            view_id: "view-a".to_string(),
+            client_family: "jetbrains".to_string(),
+            connection_generation: 2,
+            surface_id: "detached-1".to_string(),
+            surface_generation: 3,
+            view_session: "agent-doc-view-a".to_string(),
+        };
+        let fact = |event_id: &str, state| {
+            StateEvent::new(
+                event_id,
+                StateFact::EditorViewBindingObserved {
+                    document_hash: "detached-document".to_string(),
+                    canonical_path: canonical_path.clone(),
+                    binding_epoch: 7,
+                    state,
+                },
+            )
+        };
+
+        runtime
+            .apply_state_event(&fact(
+                "bind-pending",
+                EditorViewBindingState::BindPending {
+                    binding: binding.clone(),
+                },
+            ))
+            .unwrap();
+        assert!(!runtime.main_layout_eligibility().permits(&canonical_path));
+
+        runtime
+            .apply_state_event(&fact(
+                "released",
+                EditorViewBindingState::Released {
+                    binding,
+                    pane: None,
+                    reason: EditorViewReleaseReason::OwnerClosed,
+                    destination: EditorViewReleaseDestination::MainStash,
+                },
+            ))
+            .unwrap();
+        assert!(runtime.main_layout_eligibility().permits(&canonical_path));
     }
 
     #[test]
@@ -19752,7 +19964,10 @@ revised operator request
                 )
             })
             .count();
-        assert_eq!(timed_out, 1, "the deadline receipt is identity-fenced and idempotent");
+        assert_eq!(
+            timed_out, 1,
+            "the deadline receipt is identity-fenced and idempotent"
+        );
     }
 
     #[test]

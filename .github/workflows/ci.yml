@@ -45,10 +45,22 @@ jobs:
       - name: Install tmux for integration tests
         run: sudo apt-get update && sudo apt-get install -y tmux
 
+      # #ci25gradle: JDK 25 (listed last, so it is the default JAVA_HOME) runs
+      # Gradle 9.2.1 for editors/jetbrains-262. The classic editors/jetbrains
+      # build stays on its Gradle 8.14 wrapper, whose Groovy cannot read JDK 25
+      # class files ("Unsupported class file major version 69"); its
+      # gradle/gradle-daemon-jvm.properties pins the daemon to Temurin 21,
+      # which this step installs so the daemon needs no download.
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: |
+            21
+            25
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.2.1'
 
       - uses: actions/setup-node@v4
         with:
@@ -69,6 +81,32 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: nextest
+
+      # #lz262resolve: editors/jetbrains-262 resolves io.github.lazily:lazily
+      # from mavenLocal()+mavenCentral() only, and lazily is NOT on Maven
+      # Central, so CI failed with "Could not find io.github.lazily:lazily:0.39.0".
+      # (The classic build gets it from the ../lazily-kt composite above, which
+      # is lazily-kt HEAD, not the pinned release.) Publish the EXACT version the
+      # 262 backend pins, from its release tag, into mavenLocal so the CI build
+      # bundles the same lazily-<v>.jar the released plugin ZIP does. The pin is
+      # read from the build file so this cannot drift; a classic/262 pin
+      # mismatch fails here rather than as an opaque resolution error.
+      - name: Publish pinned lazily-kt release to mavenLocal (JetBrains 262)
+        run: |
+          pin() { sed -n 's/.*implementation("io\.github\.lazily:lazily:\([^"]*\)").*/\1/p' "$1"; }
+          v262=$(pin editors/jetbrains-262/backend/build.gradle.kts)
+          vclassic=$(pin editors/jetbrains/build.gradle.kts)
+          test -n "$v262" || { echo "no io.github.lazily:lazily pin in editors/jetbrains-262/backend/build.gradle.kts"; exit 1; }
+          test "$v262" = "$vclassic" || { echo "lazily pin mismatch: jetbrains-262=$v262 classic=$vclassic"; exit 1; }
+          git clone --depth 1 --branch "v$v262" https://github.com/lazily-hub/lazily-kt "$RUNNER_TEMP/lazily-kt-$v262"
+          cd "$RUNNER_TEMP/lazily-kt-$v262"
+          JAVA_HOME="$JAVA_HOME_21_X64" ./gradlew --no-daemon --console=plain -q publishToMavenLocal
+          test -f "$HOME/.m2/repository/io/github/lazily/lazily/$v262/lazily-$v262.jar"
+
+      - name: Verify collision-free JetBrains release contract
+        run: |
+          python3 scripts/check_plugin_versions.py --self-test
+          python3 scripts/check_plugin_versions.py
 
       - name: Run make check
         run: make check

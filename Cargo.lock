@@ -505,6 +505,7 @@ dependencies = [
 name = "agent-doc-controller"
 version = "0.35.480"
 dependencies = [
+ "agent-doc-editor-surface",
  "agent-doc-element-backlog",
  "agent-doc-flow",
  "agent-doc-fs",
@@ -788,6 +789,7 @@ dependencies = [
 name = "agent-doc-editor-surface"
 version = "0.35.480"
 dependencies = [
+ "agent-doc-hash",
  "agent-doc-state-scope",
  "agent-doc-turn",
  "lazily 0.57.1",
@@ -802,6 +804,7 @@ dependencies = [
  "agent-doc-controller-io",
  "agent-doc-editor-surface",
  "agent-doc-state-scope",
+ "agent-doc-tmux-io",
  "anyhow",
  "lazily 0.57.1",
  "serde",
@@ -2278,6 +2281,7 @@ dependencies = [
  "agent-doc-diff",
  "agent-doc-frontmatter",
  "agent-doc-log-time",
+ "agent-doc-state-backbone",
  "agent-doc-topic",
  "agent-doc-turn",
  "anyhow",
@@ -2748,14 +2752,18 @@ dependencies = [
 name = "agent-doc-tmux-io"
 version = "0.35.480"
 dependencies = [
+ "agent-doc-editor-surface",
  "agent-doc-fs",
  "agent-doc-process-owner-io",
  "agent-doc-project-config-io",
+ "agent-doc-state-backbone",
  "agent-doc-state-scope",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "anyhow",
  "lazily 0.57.1",
+ "serde",
+ "serde_json",
  "tmux-router",
 ]
 

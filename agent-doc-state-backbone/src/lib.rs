@@ -52,6 +52,7 @@ pub enum StateDomain {
     Transport,
     Supervisor,
     Route,
+    EditorView,
     Proof,
 }
 
@@ -166,8 +167,128 @@ impl StateDomain {
             Self::Transport => "transport",
             Self::Supervisor => "supervisor",
             Self::Route => "route",
+            Self::EditorView => "editor_view",
             Self::Proof => "proof",
         }
+    }
+}
+
+/// Stable detached-view identity authenticated by the editor/backend boundary.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct EditorViewBindingIdentity {
+    pub view_id: String,
+    pub client_family: String,
+    /// Backend-authenticated Remote Dev connection generation. Kept separate
+    /// from the stable client family so a reconnect cannot inherit an older
+    /// frame binding.
+    #[serde(default)]
+    pub connection_generation: u64,
+    pub surface_id: String,
+    pub surface_generation: u64,
+    pub view_session: String,
+}
+
+/// Verified pane placement carried by a settled binding or release intent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorViewPaneReceipt {
+    pub pane_id: String,
+    pub actor_generation: u64,
+    pub session_name: String,
+    pub window_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EditorViewReleaseReason {
+    MainVisible,
+    OwnerClosed,
+    OwnerChangedDocument,
+    ClientRetired,
+    RecoveryCompensation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EditorViewReleaseDestination {
+    MainStash,
+}
+
+/// Complete superseding state for one document's detached-view binding.
+///
+/// Pending bind/release phases remain main-layout exclusions. `Released` is a
+/// durable receipt rather than absence so an older effect receipt cannot
+/// resurrect the binding after restart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum EditorViewBindingState {
+    BindPending {
+        binding: EditorViewBindingIdentity,
+    },
+    Bound {
+        binding: EditorViewBindingIdentity,
+        pane: EditorViewPaneReceipt,
+    },
+    ReleasePending {
+        binding: EditorViewBindingIdentity,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<EditorViewPaneReceipt>,
+        reason: EditorViewReleaseReason,
+        destination: EditorViewReleaseDestination,
+    },
+    Released {
+        binding: EditorViewBindingIdentity,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<EditorViewPaneReceipt>,
+        reason: EditorViewReleaseReason,
+        destination: EditorViewReleaseDestination,
+    },
+}
+
+impl EditorViewBindingState {
+    pub fn binding(&self) -> &EditorViewBindingIdentity {
+        match self {
+            Self::BindPending { binding }
+            | Self::Bound { binding, .. }
+            | Self::ReleasePending { binding, .. }
+            | Self::Released { binding, .. } => binding,
+        }
+    }
+
+    pub fn excludes_from_main(&self) -> bool {
+        !matches!(self, Self::Released { .. })
+    }
+
+    fn phase_rank(&self) -> u8 {
+        match self {
+            Self::BindPending { .. } => 0,
+            Self::Bound { .. } => 1,
+            Self::ReleasePending { .. } => 2,
+            Self::Released { .. } => 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorViewBindingProjection {
+    pub canonical_path: String,
+    pub binding_epoch: u64,
+    pub state: EditorViewBindingState,
+}
+
+impl EditorViewBindingProjection {
+    pub fn excludes_from_main(&self) -> bool {
+        self.state.excludes_from_main()
+    }
+
+    /// Whether a later durable observation may supersede this projection.
+    ///
+    /// Epoch advances start a new lifecycle. Within one epoch, receipts must
+    /// name the same view and may only move forward through the lifecycle.
+    pub fn accepts(&self, binding_epoch: u64, state: &EditorViewBindingState) -> bool {
+        binding_epoch > self.binding_epoch
+            || (binding_epoch == self.binding_epoch
+                && state.binding().view_id == self.state.binding().view_id
+                && state.phase_rank() >= self.state.phase_rank())
     }
 }
 
@@ -914,6 +1035,13 @@ pub enum StateFact {
         actor_generation: u64,
         event: RouteReadinessEvent,
     },
+    /// Superseding durable snapshot of one document's detached editor view.
+    EditorViewBindingObserved {
+        document_hash: String,
+        canonical_path: String,
+        binding_epoch: u64,
+        state: EditorViewBindingState,
+    },
     DispatchProofObserved {
         document_hash: String,
         actor_generation: u64,
@@ -1001,6 +1129,7 @@ impl StateFact {
             | Self::StartupMissCleared { document_hash, .. }
             | Self::RoutePaneObserved { document_hash, .. }
             | Self::RouteReadinessObserved { document_hash, .. }
+            | Self::EditorViewBindingObserved { document_hash, .. }
             | Self::DispatchProofObserved { document_hash, .. }
             | Self::RouteSubmitStarted { document_hash, .. }
             | Self::RouteSubmitSettled { document_hash, .. }
@@ -1089,6 +1218,7 @@ impl StateFact {
             | Self::RouteSubmitStarted { .. }
             | Self::RouteSubmitSettled { .. }
             | Self::RouteSubmitBlocked { .. } => StateDomain::Route,
+            Self::EditorViewBindingObserved { .. } => StateDomain::EditorView,
             Self::ProofMarkerObserved { .. }
             | Self::ProofMarkerDisproved { .. }
             | Self::TerminalCloseoutProofRecorded { .. }
@@ -1186,6 +1316,7 @@ impl StateFact {
             Self::StartupMissCleared { .. } => "startup_miss_cleared",
             Self::RoutePaneObserved { .. } => "route_pane_observed",
             Self::RouteReadinessObserved { .. } => "route_readiness_observed",
+            Self::EditorViewBindingObserved { .. } => "editor_view_binding_observed",
             Self::DispatchProofObserved { .. } => "dispatch_proof_observed",
             Self::RouteSubmitStarted { .. } => "route_submit_started",
             Self::RouteSubmitSettled { .. } => "route_submit_settled",
@@ -1325,6 +1456,29 @@ impl StateBackboneProjection {
             .unwrap_or_default()
     }
 
+    /// Latest durable detached-view fact for every document, including
+    /// `Released` receipts needed to fence stale lifecycle effects.
+    pub fn editor_view_bindings(&self) -> BTreeMap<String, EditorViewBindingProjection> {
+        self.documents
+            .iter()
+            .filter_map(|(document_hash, document)| {
+                document
+                    .editor_view_binding
+                    .clone()
+                    .map(|binding| (document_hash.clone(), binding))
+            })
+            .collect()
+    }
+
+    /// Bindings that must be excluded from main layout publication during
+    /// startup hydration and live operation.
+    pub fn active_editor_view_bindings(&self) -> BTreeMap<String, EditorViewBindingProjection> {
+        self.editor_view_bindings()
+            .into_iter()
+            .filter(|(_, binding)| binding.excludes_from_main())
+            .collect()
+    }
+
     pub fn apply(&mut self, event: &StateEvent) {
         if !self.seen_event_ids.insert(event.event_id.clone()) {
             return;
@@ -1361,6 +1515,8 @@ pub struct DocumentStateProjection {
     pub visible_write: VisibleWriteProjection,
     pub supervisor: SupervisorProjection,
     pub route: RouteProjection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor_view_binding: Option<EditorViewBindingProjection>,
     pub proof: ProofProjection,
     /// Pane→document host binding for this document (`#xdocsuper1`/`#xdocsuper3`).
     /// Tracks which `pane_session` currently hosts the document and the hosting
@@ -1551,6 +1707,7 @@ impl DocumentStateProjection {
             visible_write: VisibleWriteProjection::default(),
             supervisor: SupervisorProjection::default(),
             route: RouteProjection::default(),
+            editor_view_binding: None,
             proof: ProofProjection::default(),
             hosting: None,
             rejected_stale_events: Vec::new(),
@@ -2833,6 +2990,26 @@ impl DocumentStateProjection {
                     self.route.apply_readiness_event(*event);
                 } else {
                     self.reject_stale(StateDomain::Route, StateOwner::RouteDispatch);
+                }
+            }
+            StateFact::EditorViewBindingObserved {
+                canonical_path,
+                binding_epoch,
+                state,
+                ..
+            } => {
+                let accept = self
+                    .editor_view_binding
+                    .as_ref()
+                    .is_none_or(|current| current.accepts(*binding_epoch, state));
+                if accept {
+                    self.editor_view_binding = Some(EditorViewBindingProjection {
+                        canonical_path: canonical_path.clone(),
+                        binding_epoch: *binding_epoch,
+                        state: state.clone(),
+                    });
+                } else {
+                    self.reject_stale(StateDomain::EditorView, StateOwner::EditorIpcBridge);
                 }
             }
             StateFact::DispatchProofObserved {
@@ -10195,5 +10372,193 @@ mod tests {
         assert_eq!(retained.base_hash, "base");
         assert_eq!(projection.document.editor_op_capture_generation, 5);
         assert_eq!(projection.closeout.phase, Some(CyclePhase::Abandoned));
+    }
+
+    fn editor_view_identity(view_id: &str) -> EditorViewBindingIdentity {
+        EditorViewBindingIdentity {
+            view_id: view_id.to_string(),
+            client_family: "jetbrains-client-a".to_string(),
+            connection_generation: 2,
+            surface_id: "dock-window-1".to_string(),
+            surface_generation: 3,
+            view_session: "agent-doc-view-a1b2".to_string(),
+        }
+    }
+
+    fn editor_view_fact(epoch: u64, state: EditorViewBindingState) -> StateFact {
+        StateFact::EditorViewBindingObserved {
+            document_hash: "doc-view".to_string(),
+            canonical_path: "/tmp/view.md".to_string(),
+            binding_epoch: epoch,
+            state,
+        }
+    }
+
+    #[test]
+    fn editor_view_binding_fact_round_trips_every_phase() {
+        let binding = editor_view_identity("view-a");
+        let pane = EditorViewPaneReceipt {
+            pane_id: "%9".to_string(),
+            actor_generation: 7,
+            session_name: binding.view_session.clone(),
+            window_id: "@4".to_string(),
+        };
+        let states = [
+            EditorViewBindingState::BindPending {
+                binding: binding.clone(),
+            },
+            EditorViewBindingState::Bound {
+                binding: binding.clone(),
+                pane: pane.clone(),
+            },
+            EditorViewBindingState::ReleasePending {
+                binding: binding.clone(),
+                pane: Some(pane.clone()),
+                reason: EditorViewReleaseReason::MainVisible,
+                destination: EditorViewReleaseDestination::MainStash,
+            },
+            EditorViewBindingState::Released {
+                binding,
+                pane: Some(pane),
+                reason: EditorViewReleaseReason::MainVisible,
+                destination: EditorViewReleaseDestination::MainStash,
+            },
+        ];
+        for state in states {
+            let event = StateEvent::new("event", editor_view_fact(11, state));
+            let json = serde_json::to_string(&event).unwrap();
+            let decoded: StateEvent = serde_json::from_str(&json).unwrap();
+            assert_eq!(decoded, event);
+            assert_eq!(decoded.domain(), StateDomain::EditorView);
+            assert_eq!(decoded.fact.label(), "editor_view_binding_observed");
+        }
+    }
+
+    #[test]
+    fn editor_view_projection_fences_epoch_view_and_phase_regressions() {
+        let binding = editor_view_identity("view-a");
+        let pane = EditorViewPaneReceipt {
+            pane_id: "%9".to_string(),
+            actor_generation: 7,
+            session_name: binding.view_session.clone(),
+            window_id: "@4".to_string(),
+        };
+        let mut projection = DocumentStateProjection::new("doc-view");
+        projection.apply_fact(&editor_view_fact(
+            5,
+            EditorViewBindingState::BindPending {
+                binding: binding.clone(),
+            },
+        ));
+        projection.apply_fact(&editor_view_fact(
+            5,
+            EditorViewBindingState::Bound {
+                binding: binding.clone(),
+                pane: pane.clone(),
+            },
+        ));
+        projection.apply_fact(&editor_view_fact(
+            5,
+            EditorViewBindingState::Released {
+                binding: binding.clone(),
+                pane: Some(pane.clone()),
+                reason: EditorViewReleaseReason::OwnerClosed,
+                destination: EditorViewReleaseDestination::MainStash,
+            },
+        ));
+        projection.apply_fact(&editor_view_fact(
+            5,
+            EditorViewBindingState::Bound {
+                binding: binding.clone(),
+                pane: pane.clone(),
+            },
+        ));
+        projection.apply_fact(&editor_view_fact(
+            4,
+            EditorViewBindingState::BindPending {
+                binding: binding.clone(),
+            },
+        ));
+        projection.apply_fact(&editor_view_fact(
+            5,
+            EditorViewBindingState::Released {
+                binding: editor_view_identity("view-b"),
+                pane: Some(pane),
+                reason: EditorViewReleaseReason::OwnerClosed,
+                destination: EditorViewReleaseDestination::MainStash,
+            },
+        ));
+
+        let current = projection.editor_view_binding.as_ref().unwrap();
+        assert_eq!(current.binding_epoch, 5);
+        assert!(matches!(
+            current.state,
+            EditorViewBindingState::Released { .. }
+        ));
+        assert_eq!(current.state.binding().view_id, "view-a");
+        assert_eq!(
+            projection
+                .rejected_stale_events
+                .iter()
+                .filter(|rejected| rejected.domain == StateDomain::EditorView)
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn editor_view_hydration_excludes_pending_and_bound_but_not_released() {
+        let binding = editor_view_identity("view-a");
+        let events = [
+            StateEvent::new(
+                "a",
+                StateFact::EditorViewBindingObserved {
+                    document_hash: "pending".to_string(),
+                    canonical_path: "/tmp/pending.md".to_string(),
+                    binding_epoch: 1,
+                    state: EditorViewBindingState::BindPending {
+                        binding: binding.clone(),
+                    },
+                },
+            ),
+            StateEvent::new(
+                "b",
+                StateFact::EditorViewBindingObserved {
+                    document_hash: "releasing".to_string(),
+                    canonical_path: "/tmp/releasing.md".to_string(),
+                    binding_epoch: 2,
+                    state: EditorViewBindingState::ReleasePending {
+                        binding: binding.clone(),
+                        pane: None,
+                        reason: EditorViewReleaseReason::RecoveryCompensation,
+                        destination: EditorViewReleaseDestination::MainStash,
+                    },
+                },
+            ),
+            StateEvent::new(
+                "c",
+                StateFact::EditorViewBindingObserved {
+                    document_hash: "released".to_string(),
+                    canonical_path: "/tmp/released.md".to_string(),
+                    binding_epoch: 3,
+                    state: EditorViewBindingState::Released {
+                        binding,
+                        pane: None,
+                        reason: EditorViewReleaseReason::OwnerClosed,
+                        destination: EditorViewReleaseDestination::MainStash,
+                    },
+                },
+            ),
+        ];
+        let projection = StateBackboneProjection::from_events(&events);
+        assert_eq!(projection.editor_view_bindings().len(), 3);
+        assert_eq!(
+            projection
+                .active_editor_view_bindings()
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["pending".to_string(), "releasing".to_string()])
+        );
     }
 }

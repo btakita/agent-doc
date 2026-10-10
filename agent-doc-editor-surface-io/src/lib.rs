@@ -26,6 +26,8 @@ use agent_doc_editor_surface::{
 use agent_doc_state_scope::ProcessScope;
 use anyhow::{Context as _, Result};
 
+pub use agent_doc_tmux_io::editor_view as editor_view_tmux;
+
 pub use agent_doc_editor_surface::SurfaceObservationReceipt;
 
 /// Compatibility consequence for a locally derived intent.

@@ -247,6 +247,43 @@ pub fn update_session_file_in(
     Ok(updated)
 }
 
+/// Rewrite only the physical pane/window placement for one existing document.
+///
+/// Detached editor-view lifecycle effects preserve the logical session id,
+/// supervisor identity, process, and document. They may therefore update the
+/// registry only after the tmux receipt proves that the same pane moved. A
+/// mismatched or absent pane fails closed instead of manufacturing ownership.
+pub fn update_file_pane_placement_in(
+    base_dir: &Path,
+    file: &Path,
+    expected_pane: &str,
+    window_id: &str,
+) -> Result<bool> {
+    let registry_path = registry_path_in(base_dir);
+    if !registry_path.exists() {
+        return Ok(false);
+    }
+    let _lock = RegistryLock::acquire(&registry_path)?;
+    let mut registry = load_in(base_dir)?;
+    let key = canonical_registry_key_in(base_dir, &file.to_string_lossy());
+    let Some(entry) = registry.get_mut(&key) else {
+        return Ok(false);
+    };
+    anyhow::ensure!(
+        entry.pane == expected_pane,
+        "refusing registry placement update for {}: pane {} owns it, expected {}",
+        file.display(),
+        entry.pane,
+        expected_pane,
+    );
+    if entry.window == window_id {
+        return Ok(true);
+    }
+    entry.window = window_id.to_string();
+    save_in(base_dir, &registry)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,6 +409,28 @@ mod tests {
         assert_eq!(entry.pane, "%80");
         assert_eq!(entry.window, "@12");
         assert_eq!(loaded.len(), 1);
+    }
+
+    #[test]
+    fn placement_update_preserves_logical_registry_identity() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("placed.md");
+        std::fs::write(&file, "body").unwrap();
+        let mut registry = Registry::new();
+        registry.insert(
+            file.display().to_string(),
+            entry("placed-session", "%81", &file.display().to_string()),
+        );
+        save_in(dir.path(), &registry).unwrap();
+        let before = lookup_file_entry_in(dir.path(), &file).unwrap().unwrap();
+
+        assert!(update_file_pane_placement_in(dir.path(), &file, "%81", "@14").unwrap());
+        let after = lookup_file_entry_in(dir.path(), &file).unwrap().unwrap();
+        assert_eq!(after.window, "@14");
+        assert_eq!(after.pane, before.pane);
+        assert_eq!(after.session_id, before.session_id);
+        assert_eq!(after.supervisor_instance_id, before.supervisor_instance_id);
+        assert!(update_file_pane_placement_in(dir.path(), &file, "%99", "@15").is_err());
     }
 
     #[test]

@@ -31,7 +31,10 @@ use agent_doc_editor_surface::terminal_ownership::{
 };
 use agent_doc_editor_surface::{
     EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
-    SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
+    EditorViewId, EditorViewPlaceholderReason, EditorViewPolicy, EditorViewPolicyBinding,
+    EditorViewPolicyProjection, EditorViewPolicyStatus, EditorViewPresentation,
+    EditorViewSessionKey, EditorViewSnapshot, SurfaceColumn, SurfaceIntent,
+    SurfaceObservationReceipt, TmuxLayout, isolated_view_session_name,
 };
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use std::collections::{BTreeMap, BTreeSet};
@@ -110,6 +113,37 @@ struct ControllerEditorSurfaceRoot {
     outcome: Arc<Mutex<Option<Result<String, String>>>>,
 }
 
+#[cfg(test)]
+mod main_layout_eligibility_tests {
+    use super::*;
+
+    #[test]
+    fn eligibility_filter_canonicalizes_aliases_and_removes_empty_columns() {
+        let root = tempfile::tempdir().unwrap();
+        let tasks = root.path().join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let detached = tasks.join("detached.md");
+        std::fs::write(&detached, "# detached\n").unwrap();
+        let eligibility = MainLayoutEligibility::new([detached
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()]);
+
+        assert_eq!(
+            main_layout_eligible_columns(
+                root.path(),
+                &eligibility,
+                &[
+                    "tasks/main.md,tasks/detached.md".to_string(),
+                    detached.to_string_lossy().to_string(),
+                ],
+            ),
+            vec!["tasks/main.md"]
+        );
+    }
+}
+
 /// Project-Controller-owned editor observation graph.
 ///
 /// The editor process publishes ordered facts. The controller's ProcessScope
@@ -120,6 +154,228 @@ pub(super) struct ControllerEditorSurfaceGraph {
     roots: Mutex<BTreeMap<(PathBuf, String, String), ControllerEditorSurfaceRoot>>,
     terminal_ownership: Mutex<BTreeMap<PathBuf, SurfaceTerminalOwnership>>,
     run_intent: ControllerEditorSurfaceIntentRunner,
+}
+
+/// Controller-owned, restart-hydrated owner of detached editor view policy.
+///
+/// A complete frontend snapshot is folded here as one atomic fact. It never
+/// passes through the legacy per-surface focus/sync graph above.
+pub(super) struct ControllerEditorViewPolicyGraph {
+    ctx: lazily::ThreadSafeContext,
+    policy: Mutex<EditorViewPolicy>,
+    lifecycle_commands:
+        lazily::Source<BTreeMap<EditorViewLifecycleEffectKey, EditorViewLifecycleEffectCommand>>,
+    _lifecycle_effect: Mutex<Option<lazily::Effect>>,
+    lifecycle_sender: Arc<OnceLock<std::sync::mpsc::Sender<EditorViewLifecycleEffectCommand>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct EditorViewLifecycleEffectKey {
+    document_hash: String,
+    binding_epoch: u64,
+    binding: agent_doc_state_backbone::EditorViewBindingIdentity,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EditorViewLifecycleEffectCommand {
+    document_hash: String,
+    canonical_path: String,
+    binding_epoch: u64,
+    state: agent_doc_state_backbone::EditorViewBindingState,
+}
+
+impl EditorViewLifecycleEffectCommand {
+    fn key(&self) -> EditorViewLifecycleEffectKey {
+        EditorViewLifecycleEffectKey {
+            document_hash: self.document_hash.clone(),
+            binding_epoch: self.binding_epoch,
+            binding: self.state.binding().clone(),
+        }
+    }
+}
+
+impl ControllerEditorViewPolicyGraph {
+    pub(super) fn new_in(
+        scope: &agent_doc_state_scope::ProcessScope,
+        bindings: impl IntoIterator<Item = EditorViewPolicyBinding>,
+    ) -> Self {
+        let ctx = scope.ctx().clone();
+        let lifecycle_commands = ctx.source(BTreeMap::new());
+        let lifecycle_sender = Arc::new(OnceLock::<
+            std::sync::mpsc::Sender<EditorViewLifecycleEffectCommand>,
+        >::new());
+        let sender_for_effect = Arc::clone(&lifecycle_sender);
+        let delivered_for_effect = Arc::new(Mutex::new(BTreeMap::<
+            EditorViewLifecycleEffectKey,
+            EditorViewLifecycleEffectCommand,
+        >::new()));
+        let lifecycle_effect = ctx.effect(move |ctx| {
+            let commands = ctx.get(&lifecycle_commands);
+            let Some(sender) = sender_for_effect.get() else {
+                return;
+            };
+            let mut delivered = delivered_for_effect.lock();
+            delivered.retain(|key, command| commands.get(key) == Some(command));
+            for (key, command) in commands {
+                if delivered.get(&key) == Some(&command) {
+                    continue;
+                }
+                if let Err(error) = sender.send(command.clone()) {
+                    eprintln!("[controller] editor-view lifecycle enqueue failed: {error}");
+                    continue;
+                }
+                delivered.insert(key, command);
+            }
+        });
+        Self {
+            ctx,
+            policy: Mutex::new(EditorViewPolicy::hydrate(bindings)),
+            lifecycle_commands,
+            _lifecycle_effect: Mutex::new(Some(lifecycle_effect)),
+            lifecycle_sender,
+        }
+    }
+
+    pub(super) fn install_lifecycle_sink(&self, runtime: &Arc<ControllerRuntime>) {
+        if self.lifecycle_sender.get().is_some() {
+            return;
+        }
+        let (sender, receiver) = std::sync::mpsc::channel::<EditorViewLifecycleEffectCommand>();
+        let weak_runtime = Arc::downgrade(runtime);
+        match std::thread::Builder::new()
+            .name("agent-doc-editor-view-lifecycle".to_string())
+            .spawn(move || {
+                while let Ok(command) = receiver.recv() {
+                    let Some(runtime) = weak_runtime.upgrade() else {
+                        break;
+                    };
+                    let bootstrap = match runtime.bootstrap_snapshot() {
+                        Ok(bootstrap) => bootstrap,
+                        Err(error) => {
+                            eprintln!(
+                                "[controller] editor-view lifecycle bootstrap unavailable: {error:#}"
+                            );
+                            continue;
+                        }
+                    };
+                    if let Err(error) = reconcile_editor_view_lifecycle(
+                        &bootstrap,
+                        runtime.as_ref(),
+                        &agent_doc_tmux_io::configured_tmux(),
+                        command,
+                    ) {
+                        agent_doc_ops_log_io::log_op(
+                            &bootstrap.project_root,
+                            &format!("editor_view_lifecycle_deferred reason={error:#}"),
+                        );
+                    }
+                }
+            })
+        {
+            Ok(_) => {
+                if self.lifecycle_sender.set(sender).is_err() {
+                    eprintln!(
+                        "[controller] editor-view lifecycle sender was installed concurrently"
+                    );
+                }
+            }
+            Err(error) => {
+                eprintln!("[controller] failed to start editor-view lifecycle worker: {error}");
+            }
+        }
+    }
+
+    fn publish_lifecycle_command(&self, command: EditorViewLifecycleEffectCommand) {
+        let mut commands = self.ctx.get(&self.lifecycle_commands);
+        commands.insert(command.key(), command);
+        self.ctx.set(&self.lifecycle_commands, commands);
+    }
+
+    fn retire_lifecycle_command(
+        &self,
+        document_hash: &str,
+        binding_epoch: u64,
+        state: &agent_doc_state_backbone::EditorViewBindingState,
+    ) {
+        let key = EditorViewLifecycleEffectKey {
+            document_hash: document_hash.to_string(),
+            binding_epoch,
+            binding: state.binding().clone(),
+        };
+        let mut commands = self.ctx.get(&self.lifecycle_commands);
+        if commands.remove(&key).is_some() {
+            self.ctx.set(&self.lifecycle_commands, commands);
+        }
+    }
+
+    fn observe(
+        &self,
+        snapshot: EditorViewSnapshot,
+        persist: impl FnOnce(&EditorViewPolicyProjection) -> Result<()>,
+    ) -> Result<EditorViewPolicyProjection> {
+        let mut policy = self.policy.lock();
+        let mut candidate = policy.clone();
+        let projection = candidate.observe(snapshot);
+        persist(&projection)?;
+        *policy = candidate;
+        Ok(projection)
+    }
+
+    fn retire_client(
+        &self,
+        client_id: &str,
+        connection_generation: u64,
+        persist: impl FnOnce(&EditorViewPolicyProjection) -> Result<()>,
+    ) -> Result<EditorViewPolicyProjection> {
+        let mut policy = self.policy.lock();
+        let mut candidate = policy.clone();
+        let projection = candidate.retire_client(client_id, connection_generation);
+        persist(&projection)?;
+        *policy = candidate;
+        Ok(projection)
+    }
+
+    pub(super) fn apply_durable_binding(
+        &self,
+        document_hash: &str,
+        canonical_path: &str,
+        binding_epoch: u64,
+        state: &agent_doc_state_backbone::EditorViewBindingState,
+    ) {
+        use agent_doc_state_backbone::EditorViewBindingState;
+
+        if matches!(
+            state,
+            EditorViewBindingState::BindPending { .. }
+                | EditorViewBindingState::ReleasePending { .. }
+        ) {
+            self.publish_lifecycle_command(EditorViewLifecycleEffectCommand {
+                document_hash: document_hash.to_string(),
+                canonical_path: canonical_path.to_string(),
+                binding_epoch,
+                state: state.clone(),
+            });
+            return;
+        }
+        self.retire_lifecycle_command(document_hash, binding_epoch, state);
+        let identity = state.binding();
+        let view_id = EditorViewId {
+            client_id: identity.client_family.clone(),
+            connection_generation: identity.connection_generation,
+            surface_id: identity.surface_id.clone(),
+            surface_generation: identity.surface_generation,
+        };
+        let mut policy = self.policy.lock();
+        match state {
+            EditorViewBindingState::Bound { .. } => {
+                let _ = policy.settle_bound(canonical_path, binding_epoch, &view_id);
+            }
+            EditorViewBindingState::Released { .. } => {
+                let _ = policy.settle_released(canonical_path, binding_epoch, &view_id);
+            }
+            _ => unreachable!("pending states returned before locking the policy"),
+        }
+    }
 }
 
 fn editor_surface_client_family(client_id: &str) -> Option<&str> {
@@ -2466,6 +2722,23 @@ pub fn tmux_focus_state(project_root: &Path) -> Result<ControllerTmuxFocusState>
     )
 }
 
+/// Read the controller's process-scoped projection of durable editor-view
+/// bindings. Callers that can mutate tmux must carry this snapshot into their
+/// effect rather than independently re-reading policy state mid-operation.
+pub fn main_layout_eligibility(project_root: &Path) -> Result<MainLayoutEligibility> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let _ = project_root;
+        Ok(MainLayoutEligibility::default())
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    request_controller(
+        project_root,
+        empty_controller_request("main_layout_eligibility"),
+    )
+}
+
 /// Content observations the caller resolved, sent to the controller so the
 /// verdict is derived in the one live graph rather than in each caller.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3063,6 +3336,65 @@ pub fn observe_editor_surface_existing(
             sequence: None,
         },
         CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
+    )
+}
+
+/// Publish one complete frame-tagged Remote Dev snapshot atomically.
+///
+/// Unlike [`observe_editor_surface_existing`], this ingress never runs the
+/// legacy focus/sync consequence. The controller's `EditorViewPolicy` first
+/// derives main precedence, durable binding intents, and placeholders from the
+/// complete cross-frame snapshot.
+pub fn observe_editor_view_snapshot_existing(
+    project_root: &Path,
+    snapshot: &EditorViewSnapshot,
+) -> Result<EditorViewPolicyProjection> {
+    request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "editor_view_snapshot_observe".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(snapshot.connection_generation),
+            state: None,
+            caller: Some(snapshot.client_id.clone()),
+            reason: Some("complete_editor_view_snapshot".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(snapshot)?),
+            sequence: Some(snapshot.sequence),
+        },
+        CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
+    )
+}
+
+pub fn retire_editor_view_client_existing(
+    project_root: &Path,
+    client_id: &str,
+    connection_generation: u64,
+) -> Result<EditorViewPolicyProjection> {
+    request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "editor_view_client_retire".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(connection_generation),
+            state: None,
+            caller: Some(client_id.to_string()),
+            reason: Some("editor_view_client_retired".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        },
+        CONTROLLER_RPC_TIMEOUT,
     )
 }
 
@@ -9976,6 +10308,20 @@ fn handle_editor_route_rpc_with_tmux(
         .unwrap_or_else(|_| canonical.clone())
         .to_string_lossy()
         .to_string();
+    let main_layout_eligibility = runtime.main_layout_eligibility();
+    anyhow::ensure!(
+        document_is_main_layout_eligible(
+            &bootstrap.project_root,
+            &main_layout_eligibility,
+            &routed_document,
+        ),
+        "editor route is bound to an isolated editor view and cannot mutate the main tmux layout"
+    );
+    layout_invocation.columns = main_layout_eligible_columns(
+        &bootstrap.project_root,
+        &main_layout_eligibility,
+        &layout_invocation.columns,
+    );
     if let Some(retarget) = retarget_editor_route_focus(&mut layout_invocation, &routed_document) {
         agent_doc_ops_log_io::log_op(
             &canonical,
@@ -10004,6 +10350,18 @@ fn handle_editor_route_rpc_with_tmux(
             )
         })
         .unwrap_or_default();
+    let retained_columns = main_layout_eligible_columns(
+        &bootstrap.project_root,
+        &main_layout_eligibility,
+        &retained_columns,
+    );
+    let retained_focus = retained_focus.filter(|document| {
+        document_is_main_layout_eligible(
+            &bootstrap.project_root,
+            &main_layout_eligibility,
+            document,
+        )
+    });
     // GH #136 follow-up (b): a controller that just took over (handoff or
     // restart) has no retained layout, and a replayed `ensure` route used to
     // "seed" from its own single column — an exact one-column publication
@@ -10030,6 +10388,11 @@ fn handle_editor_route_rpc_with_tmux(
             )
         },
         &canonical,
+    );
+    let retained_columns = main_layout_eligible_columns(
+        &bootstrap.project_root,
+        &main_layout_eligibility,
+        &retained_columns,
     );
     let (merged_columns, layout_merge, dropped_columns) = merge_editor_route_columns_within(
         layout_mode,
@@ -12002,17 +12365,10 @@ fn observe_live_layout_documents_with_tmux(
         documents.push(document);
     }
     if documents.is_empty() {
-        return LiveLayoutDocumentsObservation::unavailable(
-            "no_project_documents",
-            session_source,
-        );
+        return LiveLayoutDocumentsObservation::unavailable("no_project_documents", session_source);
     }
     LiveLayoutDocumentsObservation::positive(
-        respell_live_documents_like_route(
-            &bootstrap.project_root,
-            &route.columns,
-            documents,
-        ),
+        respell_live_documents_like_route(&bootstrap.project_root, &route.columns, documents),
         session_source,
     )
 }
@@ -13854,8 +14210,7 @@ pub(crate) enum ServingProbe {
 pub(crate) fn classify_serving_probe(result: &Result<String>) -> ServingProbe {
     match result {
         Ok(response) => {
-            if serde_json::from_str::<ControllerStatus>(response)
-                .is_ok_and(|status| status.active)
+            if serde_json::from_str::<ControllerStatus>(response).is_ok_and(|status| status.active)
             {
                 ServingProbe::Serving
             } else {
@@ -13865,7 +14220,10 @@ pub(crate) fn classify_serving_probe(result: &Result<String>) -> ServingProbe {
         Err(error) => {
             let not_bound = error.chain().any(|cause| {
                 cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
-                    matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+                    matches!(
+                        io.kind(),
+                        ErrorKind::ConnectionRefused | ErrorKind::NotFound
+                    )
                 })
             });
             if not_bound {
@@ -13902,7 +14260,9 @@ fn ensure_serving_controller_with(
             };
             agent_doc_ops_log_io::log_op(
                 project_root,
-                &format!("controller_self_heal_deferred reason=status_unresponsive detail={detail}"),
+                &format!(
+                    "controller_self_heal_deferred reason=status_unresponsive detail={detail}"
+                ),
             );
             anyhow::bail!("{CONTROLLER_BUSY_RETRY_LATER}: {detail}")
         }
@@ -17093,6 +17453,7 @@ pub(crate) fn handle_request_locked(
             &bootstrap_snapshot,
             Some(runtime.as_ref()),
         )),
+        "main_layout_eligibility" => controller_envelope(Ok(runtime.main_layout_eligibility())),
         "tmux_layout_sync_state" => controller_envelope(handle_tmux_layout_sync_state(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -17108,6 +17469,19 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "editor_view_snapshot_observe" => controller_envelope(handle_editor_view_snapshot_observe(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "editor_view_client_retire" => controller_envelope(handle_editor_view_client_retire(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "editor_view_presentation_receipt" => controller_envelope(
+            handle_editor_view_presentation_receipt(&bootstrap_snapshot, runtime.as_ref(), request),
+        ),
         "document_path_transition_observe" => controller_envelope(
             handle_document_path_transition_observe(&bootstrap_snapshot, runtime.as_ref(), request),
         ),
@@ -18340,7 +18714,10 @@ pub(crate) fn editor_live_on_controller_connect_failure(
 ) -> bool {
     let nothing_bound = error.chain().any(|cause| {
         cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
-            matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+            matches!(
+                io.kind(),
+                ErrorKind::ConnectionRefused | ErrorKind::NotFound
+            )
         })
     });
     !nothing_bound || controller_process_present()
@@ -20266,12 +20643,14 @@ fn closeout_advance_outcome(
 
     let mut terminal_events = Vec::new();
     if checkpoint {
-        terminal_events.push(agent_doc_cycle_state_io::build_turn_intent_checkpoint_event(
-            &document_hash,
-            checkpoint_sequence,
-            &state,
-        )
-        .map_err(|e| format!("{e:#}"))?);
+        terminal_events.push(
+            agent_doc_cycle_state_io::build_turn_intent_checkpoint_event(
+                &document_hash,
+                checkpoint_sequence,
+                &state,
+            )
+            .map_err(|e| format!("{e:#}"))?,
+        );
     }
     for fact in &facts {
         if let Some(phase_event) =
@@ -20296,18 +20675,20 @@ fn closeout_advance_outcome(
             .map_err(|e| format!("serialize fenced closeout event: {e}"))?;
         let inserts = encoded
             .iter()
-            .map(|(event, json)| agent_doc_sqlite::state_store::StateEventInsert {
-                event_id: &event.event_id,
-                document_hash: event.document_hash(),
-                domain: event.domain().label(),
-                fact_type: event.fact.label(),
-                payload_json: json,
-            })
+            .map(
+                |(event, json)| agent_doc_sqlite::state_store::StateEventInsert {
+                    event_id: &event.event_id,
+                    document_hash: event.document_hash(),
+                    domain: event.domain().label(),
+                    fact_type: event.fact.label(),
+                    payload_json: json,
+                },
+            )
             .collect::<Vec<_>>();
         let mut conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root)
             .map_err(|e| format!("{e:#}"))?;
-        let active_after_secs = timestamp_secs()
-            .saturating_sub(agent_doc_turn::turn_status::TURN_ACTIVE_TTL_SECS);
+        let active_after_secs =
+            timestamp_secs().saturating_sub(agent_doc_turn::turn_status::TURN_ACTIVE_TTL_SECS);
         match agent_doc_sqlite::state_store::insert_state_events_if_terminal_turn_fence_in_db(
             &mut conn,
             &agent_doc_sqlite::state_store::TerminalTurnFenceCheck {
@@ -20327,7 +20708,9 @@ fn closeout_advance_outcome(
             agent_doc_sqlite::state_store::FencedStateEventInsert::Applied(inserted) => {
                 for (event, inserted) in terminal_events.iter().zip(inserted) {
                     if inserted {
-                        runtime.apply_state_event(event).map_err(|e| format!("{e:#}"))?;
+                        runtime
+                            .apply_state_event(event)
+                            .map_err(|e| format!("{e:#}"))?;
                     }
                 }
             }
@@ -22546,22 +22929,26 @@ fn pane_layout_observation_session(
     registered_supervisor_file_panes: &[(String, String)],
     mut pane_session: impl FnMut(&str) -> Option<String>,
 ) -> Option<(String, PaneLayoutObservationSessionSource)> {
-    let configured_session = configured_session
-        .map(|session| (session, PaneLayoutObservationSessionSource::ConfiguredSession));
+    let configured_session = configured_session.map(|session| {
+        (
+            session,
+            PaneLayoutObservationSessionSource::ConfiguredSession,
+        )
+    });
     if multi_session {
         pane_layout_session_from_panes(
             effect_file_panes,
             PaneLayoutObservationSessionSource::LayoutEffectPane,
             &mut pane_session,
         )
-            .or(configured_session)
-            .or_else(|| {
-                pane_layout_session_from_panes(
-                    registered_supervisor_file_panes,
-                    PaneLayoutObservationSessionSource::RegisteredSupervisorPane,
-                    &mut pane_session,
-                )
-            })
+        .or(configured_session)
+        .or_else(|| {
+            pane_layout_session_from_panes(
+                registered_supervisor_file_panes,
+                PaneLayoutObservationSessionSource::RegisteredSupervisorPane,
+                &mut pane_session,
+            )
+        })
     } else {
         configured_session
             .or_else(|| {
@@ -22651,6 +23038,38 @@ fn canonical_layout_document_id(project_root: &Path, file: &str) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .to_string()
+}
+
+/// Remove editor-view-bound documents before a value reaches any main-layout
+/// merge, width calculation, focus decision, or tmux effect. Empty columns are
+/// removed; document order within surviving columns is preserved.
+fn main_layout_eligible_columns(
+    project_root: &Path,
+    eligibility: &MainLayoutEligibility,
+    columns: &[String],
+) -> Vec<String> {
+    columns
+        .iter()
+        .filter_map(|column| {
+            let kept = column
+                .split(',')
+                .map(str::trim)
+                .filter(|document| !document.is_empty())
+                .filter(|document| {
+                    eligibility.permits(&canonical_layout_document_id(project_root, document))
+                })
+                .collect::<Vec<_>>();
+            (!kept.is_empty()).then(|| kept.join(","))
+        })
+        .collect()
+}
+
+fn document_is_main_layout_eligible(
+    project_root: &Path,
+    eligibility: &MainLayoutEligibility,
+    document: &str,
+) -> bool {
+    eligibility.permits(&canonical_layout_document_id(project_root, document))
 }
 
 /// GH #136: `columns` without the documents the layout effect acknowledged it
@@ -22962,12 +23381,17 @@ fn focus_escalation_columns(
     document: &str,
     columns: &[SurfaceColumn],
 ) -> std::result::Result<FocusEscalationColumns, &'static str> {
+    let eligibility = runtime.main_layout_eligibility();
+    if !document_is_main_layout_eligible(&bootstrap.project_root, &eligibility, document) {
+        return Err("document_bound_to_editor_view");
+    }
     if !columns.is_empty() {
+        let supplied = columns
+            .iter()
+            .map(|column| column.files.join(","))
+            .collect::<Vec<_>>();
         return Ok(FocusEscalationColumns {
-            columns: columns
-                .iter()
-                .map(|column| column.files.join(","))
-                .collect(),
+            columns: main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &supplied),
             source: "editor_surface",
             replaced: None,
             basis_generation: None,
@@ -22983,6 +23407,10 @@ fn focus_escalation_columns(
     let (mut retained, mut retained_focus) = retained_desired
         .map(|desired| (desired.invocation.columns, desired.invocation.focus))
         .unwrap_or_default();
+    retained = main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &retained);
+    retained_focus = retained_focus.filter(|focused| {
+        document_is_main_layout_eligible(&bootstrap.project_root, &eligibility, focused)
+    });
     let mut basis_source = "retained_layout";
     if retained.is_empty() {
         // GH #166: a promoted controller's layout graph starts empty even
@@ -23012,7 +23440,10 @@ fn focus_escalation_columns(
                 live.len(),
             ),
         );
-        retained = live;
+        retained = main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &live);
+        if retained.is_empty() {
+            return Err("no_main_layout_eligible_columns");
+        }
         retained_focus = None;
         basis_source = "live_tmux_layout";
     }
@@ -23814,6 +24245,576 @@ fn handle_editor_surface_forget(
         "forgotten": forgotten_clients > 0,
         "forgotten_clients": forgotten_clients,
         "terminal_decision": terminal_decision,
+    }))
+}
+
+fn editor_view_identity(
+    project_root: &Path,
+    binding: &EditorViewPolicyBinding,
+) -> Result<agent_doc_state_backbone::EditorViewBindingIdentity> {
+    let view_id = serde_json::to_string(&binding.view_id)?;
+    let session_key = EditorViewSessionKey {
+        project_id: project_root.display().to_string(),
+        client_id: binding.owner.client_id.clone(),
+        connection_generation: binding.owner.connection_generation,
+        surface_id: binding.owner.surface_id.clone(),
+        surface_generation: binding.owner.surface_generation,
+    };
+    Ok(agent_doc_state_backbone::EditorViewBindingIdentity {
+        view_id,
+        client_family: binding.owner.client_id.clone(),
+        connection_generation: binding.owner.connection_generation,
+        surface_id: binding.owner.surface_id.clone(),
+        surface_generation: binding.owner.surface_generation,
+        view_session: isolated_view_session_name(&session_key),
+    })
+}
+
+fn editor_view_release_reason(
+    reason: agent_doc_editor_surface::EditorViewReleaseReason,
+) -> agent_doc_state_backbone::EditorViewReleaseReason {
+    use agent_doc_editor_surface::EditorViewReleaseReason as Source;
+    use agent_doc_state_backbone::EditorViewReleaseReason as Target;
+    match reason {
+        Source::MainVisible => Target::MainVisible,
+        Source::OwnerClosed => Target::OwnerClosed,
+        Source::OwnerChangedDocument => Target::OwnerChangedDocument,
+        Source::ClientRetired => Target::ClientRetired,
+        Source::RecoveryCompensation => Target::RecoveryCompensation,
+    }
+}
+
+fn persist_editor_view_transitions(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    projection: &EditorViewPolicyProjection,
+) -> Result<()> {
+    use agent_doc_editor_surface::EditorViewLifecycleTransition;
+    use agent_doc_state_backbone::{
+        EditorViewBindingState, EditorViewReleaseDestination, StateEvent, StateFact,
+    };
+
+    for transition in &projection.transitions {
+        let (binding, state, phase) = match transition {
+            EditorViewLifecycleTransition::BindPending { binding, .. } => {
+                let identity = editor_view_identity(&bootstrap.project_root, binding)?;
+                (
+                    binding,
+                    EditorViewBindingState::BindPending { binding: identity },
+                    "bind_pending",
+                )
+            }
+            EditorViewLifecycleTransition::ReleasePending {
+                binding, reason, ..
+            } => {
+                let document_hash =
+                    agent_doc_hash::document_id_for_path(Path::new(&binding.document));
+                let pane = runtime
+                    .memory
+                    .lock()
+                    .state_projection
+                    .document(&document_hash)
+                    .and_then(|document| document.editor_view_binding.as_ref())
+                    .and_then(|binding| match &binding.state {
+                        EditorViewBindingState::Bound { pane, .. }
+                        | EditorViewBindingState::ReleasePending {
+                            pane: Some(pane), ..
+                        } => Some(pane.clone()),
+                        _ => None,
+                    });
+                let identity = editor_view_identity(&bootstrap.project_root, binding)?;
+                (
+                    binding,
+                    EditorViewBindingState::ReleasePending {
+                        binding: identity,
+                        pane,
+                        reason: editor_view_release_reason(*reason),
+                        destination: EditorViewReleaseDestination::MainStash,
+                    },
+                    "release_pending",
+                )
+            }
+        };
+        let document_hash = agent_doc_hash::document_id_for_path(Path::new(&binding.document));
+        let event_id = format!(
+            "editor-view:{}:{}:{}:{}",
+            document_hash,
+            binding.binding_epoch,
+            phase,
+            agent_doc_hash::short_content_hash(&binding.owner.surface_id),
+        );
+        append_apply_state_event(
+            bootstrap,
+            runtime,
+            StateEvent::new(
+                event_id,
+                StateFact::EditorViewBindingObserved {
+                    document_hash,
+                    canonical_path: binding.document.clone(),
+                    binding_epoch: binding.binding_epoch,
+                    state,
+                },
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+fn current_editor_view_command(
+    runtime: &ControllerRuntime,
+    command: &EditorViewLifecycleEffectCommand,
+) -> bool {
+    runtime
+        .memory
+        .lock()
+        .state_projection
+        .document(&command.document_hash)
+        .and_then(|document| document.editor_view_binding.as_ref())
+        .is_some_and(|binding| {
+            binding.binding_epoch == command.binding_epoch
+                && binding.canonical_path == command.canonical_path
+                && binding.state == command.state
+        })
+}
+
+fn editor_view_actor_record(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    command: &EditorViewLifecycleEffectCommand,
+) -> Result<agent_doc_controller::actor::ActorRecord> {
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &bootstrap.project_root,
+        &command.canonical_path,
+    );
+    actor_record_from_authority(bootstrap, Some(runtime), &document_id)?
+        .with_context(|| format!("missing editor-view actor for {}", command.canonical_path))
+}
+
+fn editor_view_main_session(
+    bootstrap: &ControllerBootstrap,
+    tmux: &tmux_router::Tmux,
+    command: &EditorViewLifecycleEffectCommand,
+    pane_id: &str,
+) -> Result<String> {
+    if let Some(session) = configured_tmux_session_for_project(&bootstrap.project_root) {
+        return Ok(session);
+    }
+    if matches!(
+        command.state,
+        agent_doc_state_backbone::EditorViewBindingState::BindPending { .. }
+    ) {
+        let session = tmux.pane_session(pane_id)?;
+        anyhow::ensure!(
+            session != command.state.binding().view_session,
+            "bind source already belongs to its isolated view session"
+        );
+        return Ok(session);
+    }
+    let listing = agent_doc_tmux_io::list_windows_all(tmux, "#{session_name}\t#{window_name}")?;
+    let sessions = listing
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .filter_map(|(session, window)| (window == "agent-doc").then_some(session.to_string()))
+        .collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        sessions.len() == 1,
+        "release requires a configured main tmux session when {} agent-doc sessions exist",
+        sessions.len(),
+    );
+    Ok(sessions
+        .into_iter()
+        .next()
+        .expect("checked one main session"))
+}
+
+fn persist_editor_view_pane_placement(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    actor: &agent_doc_controller::actor::ActorRecord,
+    receipt: &agent_doc_tmux_io::editor_view::EditorViewTmuxReceipt,
+) -> Result<()> {
+    anyhow::ensure!(
+        actor.pane_id == receipt.pane.pane_id,
+        "editor-view receipt pane {} does not match actor pane {}",
+        receipt.pane.pane_id,
+        actor.pane_id,
+    );
+    let receipt_actor_generation = match &receipt.settled_state {
+        agent_doc_state_backbone::EditorViewBindingState::Bound { pane, .. } => {
+            pane.actor_generation
+        }
+        agent_doc_state_backbone::EditorViewBindingState::Released {
+            pane: Some(pane), ..
+        } => pane.actor_generation,
+        _ => anyhow::bail!("editor-view effect did not produce a settled pane receipt"),
+    };
+    anyhow::ensure!(
+        actor.generation == receipt_actor_generation,
+        "editor-view receipt actor generation is stale",
+    );
+    let mut relocated = actor.clone();
+    relocated.window_id = receipt.pane.window_id.clone();
+    relocated.last_transition = agent_doc_controller::actor::ActorLastTransition {
+        caller: "editor_view_lifecycle".to_string(),
+        reason: match receipt.effect {
+            agent_doc_tmux_io::editor_view::EditorViewTmuxEffect::Bind => {
+                "detached_view_bound".to_string()
+            }
+            agent_doc_tmux_io::editor_view::EditorViewTmuxEffect::Release => {
+                "detached_view_released".to_string()
+            }
+        },
+        timestamp: timestamp_secs(),
+        prior_generation: actor.generation,
+        new_generation: actor.generation,
+    };
+    store_actor_record_for_runtime(
+        &bootstrap.project_root,
+        Some(actor.generation),
+        &relocated,
+        Some(runtime),
+    )?;
+    anyhow::ensure!(
+        agent_doc_session_registry_io::update_file_pane_placement_in(
+            &bootstrap.project_root,
+            Path::new(&receipt.canonical_path),
+            &receipt.pane.pane_id,
+            &receipt.pane.window_id,
+        )?,
+        "missing registry placement for {}",
+        receipt.canonical_path,
+    );
+    Ok(())
+}
+
+fn reconcile_editor_view_lifecycle(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    tmux: &tmux_router::Tmux,
+    command: EditorViewLifecycleEffectCommand,
+) -> Result<agent_doc_tmux_io::editor_view::EditorViewTmuxReceipt> {
+    anyhow::ensure!(
+        current_editor_view_command(runtime, &command),
+        "stale editor-view lifecycle command"
+    );
+    let actor = editor_view_actor_record(bootstrap, runtime, &command)?;
+    let main_session = editor_view_main_session(bootstrap, tmux, &command, &actor.pane_id)?;
+    let main_window_id = resolve_agent_doc_window_id_for_session(tmux, &main_session)
+        .with_context(|| format!("missing agent-doc window in main session {main_session}"))?;
+    let identity = command.state.binding();
+    let request = agent_doc_tmux_io::editor_view::EditorViewTmuxRequest {
+        document_hash: command.document_hash.clone(),
+        canonical_path: command.canonical_path.clone(),
+        binding_epoch: command.binding_epoch,
+        state: command.state.clone(),
+        pane_id: actor.pane_id.clone(),
+        actor_generation: actor.generation,
+        main_session,
+        main_window_id,
+        project_root: bootstrap.project_root.clone(),
+        session_key: EditorViewSessionKey {
+            project_id: bootstrap.project_root.display().to_string(),
+            client_id: identity.client_family.clone(),
+            connection_generation: identity.connection_generation,
+            surface_id: identity.surface_id.clone(),
+            surface_generation: identity.surface_generation,
+        },
+    };
+    let receipt = agent_doc_tmux_io::editor_view::reconcile_editor_view_tmux(tmux, &request)?;
+    persist_editor_view_pane_placement(bootstrap, runtime, &actor, &receipt)?;
+    anyhow::ensure!(
+        current_editor_view_command(runtime, &command),
+        "editor-view lifecycle authority changed while applying effect"
+    );
+    let phase = match receipt.effect {
+        agent_doc_tmux_io::editor_view::EditorViewTmuxEffect::Bind => "bound",
+        agent_doc_tmux_io::editor_view::EditorViewTmuxEffect::Release => "released",
+    };
+    append_apply_state_event(
+        bootstrap,
+        runtime,
+        agent_doc_state_backbone::StateEvent::new(
+            format!(
+                "editor-view:{}:{}:{}:{}",
+                command.document_hash,
+                command.binding_epoch,
+                phase,
+                agent_doc_hash::short_content_hash(&identity.surface_id),
+            ),
+            receipt.settled_fact(),
+        ),
+    )?;
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "editor_view_lifecycle_settled document_hash={} binding_epoch={} phase={} pane={} session={} window={}",
+            command.document_hash,
+            command.binding_epoch,
+            phase,
+            receipt.pane.pane_id,
+            receipt.pane.session_name,
+            receipt.pane.window_id,
+        ),
+    );
+    Ok(receipt)
+}
+
+#[derive(Debug, Serialize)]
+struct EditorViewPresentationWire {
+    client_id: String,
+    connection_generation: u64,
+    surface_id: String,
+    surface_generation: u64,
+    presentation_revision: u64,
+    kind: &'static str,
+    document: Option<String>,
+    reason: Option<&'static str>,
+    view_session: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EditorViewProjectionWire {
+    status: &'static str,
+    presentation_revision: u64,
+    retry_suggested: bool,
+    presentations: Vec<EditorViewPresentationWire>,
+}
+
+fn editor_view_placeholder_reason(reason: EditorViewPlaceholderReason) -> &'static str {
+    match reason {
+        EditorViewPlaceholderReason::MainOwned => "main_owned",
+        EditorViewPlaceholderReason::OwnedByOtherDetachedSurface => {
+            "owned_by_other_detached_surface"
+        }
+        EditorViewPlaceholderReason::BindingPending => "binding_pending",
+        EditorViewPlaceholderReason::ReleasePending => "release_pending",
+    }
+}
+
+fn editor_view_projection_wire(
+    runtime: &ControllerRuntime,
+    projection: EditorViewPolicyProjection,
+    client_id: &str,
+    connection_generation: u64,
+    presentation_revision: u64,
+) -> EditorViewProjectionWire {
+    let status = match projection.status {
+        EditorViewPolicyStatus::Applied => "applied",
+        EditorViewPolicyStatus::Stale => "stale",
+        EditorViewPolicyStatus::Frozen { .. } => "frozen",
+    };
+    let mut retry_suggested = false;
+    let presentations = projection
+        .presentations
+        .into_iter()
+        .filter(|(surface, _)| {
+            surface.client_id == client_id && surface.connection_generation == connection_generation
+        })
+        .map(|(surface, presentation)| {
+            let (kind, document, reason, view_session) = match presentation {
+                EditorViewPresentation::Empty => ("empty", None, None, None),
+                EditorViewPresentation::Terminal { document, view_id } => {
+                    debug_assert_eq!(surface.view_id(), view_id);
+                    let document_hash = agent_doc_hash::document_id_for_path(Path::new(&document));
+                    let session = runtime
+                        .memory
+                        .lock()
+                        .state_projection
+                        .document(&document_hash)
+                        .and_then(|state| state.editor_view_binding.as_ref())
+                        .and_then(|binding| {
+                            matches!(
+                                &binding.state,
+                                agent_doc_state_backbone::EditorViewBindingState::Bound { .. }
+                            )
+                            .then(|| binding.state.binding())
+                        })
+                        .filter(|identity| {
+                            identity.client_family == surface.client_id
+                                && identity.connection_generation == surface.connection_generation
+                                && identity.surface_id == surface.surface_id
+                                && identity.surface_generation == surface.surface_generation
+                        })
+                        .map(|identity| identity.view_session.clone());
+                    if let Some(session) = session {
+                        ("terminal", Some(document), None, Some(session))
+                    } else {
+                        // A policy projection is not authority to invent an attach target.  Until
+                        // the durable Bound receipt is visible, keep the frontend noninteractive.
+                        retry_suggested = true;
+                        ("placeholder", Some(document), Some("binding_pending"), None)
+                    }
+                }
+                EditorViewPresentation::Placeholder {
+                    document, reason, ..
+                } => {
+                    retry_suggested |= matches!(
+                        reason,
+                        EditorViewPlaceholderReason::BindingPending
+                            | EditorViewPlaceholderReason::ReleasePending
+                    );
+                    (
+                        "placeholder",
+                        Some(document),
+                        Some(editor_view_placeholder_reason(reason)),
+                        None,
+                    )
+                }
+            };
+            EditorViewPresentationWire {
+                client_id: surface.client_id,
+                connection_generation: surface.connection_generation,
+                surface_id: surface.surface_id,
+                surface_generation: surface.surface_generation,
+                presentation_revision,
+                kind,
+                document,
+                reason,
+                view_session,
+            }
+        })
+        .collect();
+    EditorViewProjectionWire {
+        status,
+        presentation_revision,
+        retry_suggested,
+        presentations,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct EditorViewPresentationReceiptWire {
+    client_id: String,
+    connection_generation: u64,
+    surface_id: String,
+    surface_generation: u64,
+    presentation_revision: u64,
+    kind: String,
+    outcome: String,
+    document: Option<String>,
+    view_session: Option<String>,
+    diagnostic: Option<String>,
+}
+
+fn handle_editor_view_snapshot_observe(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<EditorViewProjectionWire> {
+    let payload = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let snapshot: EditorViewSnapshot =
+        serde_json::from_str(&payload).context("parse complete editor view snapshot")?;
+    anyhow::ensure!(
+        request.caller.as_deref() == Some(snapshot.client_id.as_str())
+            && request.generation == Some(snapshot.connection_generation)
+            && request.sequence == Some(snapshot.sequence),
+        "editor view snapshot envelope identity does not match its authenticated payload"
+    );
+    let client_id = snapshot.client_id.clone();
+    let connection_generation = snapshot.connection_generation;
+    let presentation_revision = snapshot.sequence;
+    let projection = runtime
+        .editor_view_policy_graph
+        .observe(snapshot, |projection| {
+            persist_editor_view_transitions(bootstrap, runtime, projection)
+        })?;
+    Ok(editor_view_projection_wire(
+        runtime,
+        projection,
+        &client_id,
+        connection_generation,
+        presentation_revision,
+    ))
+}
+
+fn handle_editor_view_client_retire(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<EditorViewProjectionWire> {
+    let client_id = request_string(&request.caller, "caller")?;
+    let generation = request
+        .generation
+        .context("editor_view_client_retire requires generation")?;
+    let projection =
+        runtime
+            .editor_view_policy_graph
+            .retire_client(&client_id, generation, |projection| {
+                persist_editor_view_transitions(bootstrap, runtime, projection)
+            })?;
+    Ok(editor_view_projection_wire(
+        runtime, projection, &client_id, generation, 0,
+    ))
+}
+
+fn handle_editor_view_presentation_receipt(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let payload = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let receipt: EditorViewPresentationReceiptWire =
+        serde_json::from_str(&payload).context("parse editor view presentation receipt")?;
+    anyhow::ensure!(
+        request.caller.as_deref() == Some(receipt.client_id.as_str())
+            && request.generation == Some(receipt.connection_generation)
+            && request.sequence == Some(receipt.presentation_revision),
+        "editor view presentation receipt envelope identity does not match payload"
+    );
+    anyhow::ensure!(
+        matches!(receipt.kind.as_str(), "empty" | "terminal" | "placeholder"),
+        "unknown editor view presentation kind"
+    );
+    anyhow::ensure!(
+        matches!(receipt.outcome.as_str(), "applied" | "refused" | "stale"),
+        "unknown editor view presentation receipt outcome"
+    );
+    if receipt.kind == "terminal" && receipt.outcome == "applied" {
+        let document = receipt
+            .document
+            .as_deref()
+            .context("applied terminal receipt requires document")?;
+        let expected_session = receipt
+            .view_session
+            .as_deref()
+            .context("applied terminal receipt requires view_session")?;
+        let document_hash = agent_doc_hash::document_id_for_path(Path::new(document));
+        let memory = runtime.memory.lock();
+        let binding = memory
+            .state_projection
+            .document(&document_hash)
+            .and_then(|state| state.editor_view_binding.as_ref())
+            .context("applied terminal receipt has no durable binding")?;
+        let identity = binding.state.binding();
+        anyhow::ensure!(
+            matches!(
+                &binding.state,
+                agent_doc_state_backbone::EditorViewBindingState::Bound { .. }
+            ) && identity.client_family == receipt.client_id
+                && identity.connection_generation == receipt.connection_generation
+                && identity.surface_id == receipt.surface_id
+                && identity.surface_generation == receipt.surface_generation
+                && identity.view_session == expected_session,
+            "applied terminal receipt does not match the durable Bound identity"
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "editor_view_presentation_receipt client={} generation={} surface={} surface_generation={} revision={} kind={} outcome={} diagnostic={}",
+            receipt.client_id,
+            receipt.connection_generation,
+            receipt.surface_id,
+            receipt.surface_generation,
+            receipt.presentation_revision,
+            receipt.kind,
+            receipt.outcome,
+            receipt.diagnostic.as_deref().unwrap_or("none"),
+        ),
+    );
+    Ok(serde_json::json!({
+        "accepted": true,
+        "presentation_revision": receipt.presentation_revision,
     }))
 }
 
@@ -25554,7 +26555,11 @@ fn pane_layout_effect_worker(
         );
         let _effect_cancel_guard = StructuralEffectCancelGuard;
         let effect_result = match runtime_effects() {
-            Ok(effects) => effects.sync_tmux_layout(&bootstrap.project_root, guarded_invocation),
+            Ok(effects) => effects.sync_tmux_layout(
+                &bootstrap.project_root,
+                guarded_invocation,
+                &runtime.main_layout_eligibility(),
+            ),
             Err(error) => Err(error),
         };
         let effect_file_panes = effect_result
@@ -25984,6 +26989,21 @@ pub(crate) fn handle_tmux_focus_state(
         .as_ref()
         .map(|record| record.document_id.clone())
         .or(process_owner_document);
+    if let (Some(runtime), Some(document)) = (runtime, document_id.as_deref())
+        && !document_is_main_layout_eligible(
+            &bootstrap.project_root,
+            &runtime.main_layout_eligibility(),
+            document,
+        )
+    {
+        return Ok(inactive_tmux_focus_state(
+            "document_bound_to_editor_view",
+            Some(session_name),
+            window_id,
+            window_name,
+            pane_id,
+        ));
+    }
     Ok(ControllerTmuxFocusState {
         active: document_id.is_some(),
         reason: if record.is_some() {
@@ -27168,6 +28188,12 @@ fn publish_pane_layout_desired_invocation(
             bootstrap.handoff_state
         );
     }
+    let eligibility = runtime.main_layout_eligibility();
+    invocation.columns =
+        main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &invocation.columns);
+    invocation.focus = invocation.focus.filter(|document| {
+        document_is_main_layout_eligible(&bootstrap.project_root, &eligibility, document)
+    });
     let desired_columns = layout_sync_state_expected_documents(
         &bootstrap.project_root,
         &ControllerTmuxLayoutSyncStateInvocation {
@@ -27268,10 +28294,15 @@ fn bound_pane_layout_publication_width(
     use agent_doc_controller::pane_layout::{
         LayoutWidthDecision, LayoutWidthExtent, bound_layout_width,
     };
+    let eligibility = runtime.main_layout_eligibility();
+    let columns = main_layout_eligible_columns(project_root, &eligibility, &columns);
     let memory = runtime.pane_layout_width_memory();
     let retained_generation = retained.map(|desired| desired.generation);
     let retained_columns = retained
-        .map(|desired| desired.invocation.columns.len())
+        .map(|desired| {
+            main_layout_eligible_columns(project_root, &eligibility, &desired.invocation.columns)
+                .len()
+        })
         .unwrap_or_default();
     // Only the pass that realised the RETAINED generation speaks for it.
     let observed_panes = memory
@@ -27289,7 +28320,9 @@ fn bound_pane_layout_publication_width(
         asserted_columns: claim.asserted_column_count(),
     };
     let authority = claim.width_authority();
-    let focus_id = focus.map(|focus| canonical_layout_document_id(project_root, focus));
+    let focus_id = focus
+        .filter(|focus| document_is_main_layout_eligible(project_root, &eligibility, focus))
+        .map(|focus| canonical_layout_document_id(project_root, focus));
     let holds_focus = |column: &str| {
         focus_id.as_ref().is_some_and(|focus_id| {
             column
@@ -27608,7 +28641,11 @@ fn await_sync_tmux_layout_projection(
         let _ = (&desired, await_timeout);
         let mut invocation = invocation;
         invocation.actor_bindings = runtime.pane_layout_actor_bindings();
-        return runtime_effects()?.sync_tmux_layout(&bootstrap.project_root, invocation);
+        return runtime_effects()?.sync_tmux_layout(
+            &bootstrap.project_root,
+            invocation,
+            &runtime.main_layout_eligibility(),
+        );
     }
     #[cfg(not(any(test, feature = "test-support")))]
     {
@@ -27734,7 +28771,11 @@ fn reobserve_editor_route_layout(
         let _ = timeout;
         let mut invocation = published.invocation.clone();
         invocation.actor_bindings = runtime.pane_layout_actor_bindings();
-        runtime_effects()?.sync_tmux_layout(&bootstrap.project_root, invocation)
+        runtime_effects()?.sync_tmux_layout(
+            &bootstrap.project_root,
+            invocation,
+            &runtime.main_layout_eligibility(),
+        )
     }
     #[cfg(not(any(test, feature = "test-support")))]
     {
@@ -28688,7 +29729,10 @@ pub(crate) fn handle_queue_control(
             &operation_kind,
             document_id.as_deref(),
             "stale_sequence",
-            &format!("{diagnostic_payload} stamp={:?} newest={newest}", request.sequence),
+            &format!(
+                "{diagnostic_payload} stamp={:?} newest={newest}",
+                request.sequence
+            ),
             request.generation,
             record.as_ref().map(|record| record.generation),
         );
@@ -30312,20 +31356,31 @@ mod tests {
         .unwrap_err();
         assert!(format!("{err:#}").contains(CONTROLLER_BUSY_RETRY_LATER));
         assert_eq!(reaped.get(), 0, "a late receipt must not authorize a kill");
-        assert_eq!(launched.get(), 0, "a late receipt must not launch a duplicate");
+        assert_eq!(
+            launched.get(),
+            0,
+            "a late receipt must not launch a duplicate"
+        );
 
         // A reset mid-recycle is equally inconclusive.
-        let reset = || -> Result<String> {
-            Err(std::io::Error::from(ErrorKind::ConnectionReset).into())
-        };
+        let reset =
+            || -> Result<String> { Err(std::io::Error::from(ErrorKind::ConnectionReset).into()) };
         assert!(
-            ensure_serving_controller_with(root.path(), reset, || reaped.set(9), || Ok(()), || Ok(()))
-                .is_err()
+            ensure_serving_controller_with(
+                root.path(),
+                reset,
+                || reaped.set(9),
+                || Ok(()),
+                || Ok(())
+            )
+            .is_err()
         );
         assert_eq!(reaped.get(), 0);
 
         // Eventual progress: the controller finishes its work and answers.
-        let serving = || -> Result<String> { Ok(r#"{"active":true,"project_root":"/p","socket_path":"/p/.agent-doc/controller.sock"}"#.to_string()) };
+        let serving = || -> Result<String> {
+            Ok(r#"{"active":true,"project_root":"/p","socket_path":"/p/.agent-doc/controller.sock"}"#.to_string())
+        };
         assert_eq!(classify_serving_probe(&serving()), ServingProbe::Serving);
         let reconnected = std::cell::Cell::new(false);
         ensure_serving_controller_with(
@@ -30354,8 +31409,11 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("tasks/netadv5r8.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "---\nagent_doc_session: session-r8\nagent: codex\n---\nBody\n")
-            .unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-r8\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
         agent_doc_session_actor_io::record_session_start_direct(&doc, "session-r8", "%48", "@1", 1)
             .unwrap();
         agent_doc_session_actor_io::transition_state_direct(
@@ -30399,7 +31457,9 @@ mod tests {
         let attempts = || -> i64 {
             open_state_db(root)
                 .unwrap()
-                .query_row("SELECT COUNT(*) FROM dispatch_attempts", [], |row| row.get(0))
+                .query_row("SELECT COUNT(*) FROM dispatch_attempts", [], |row| {
+                    row.get(0)
+                })
                 .unwrap()
         };
         let keyed =
@@ -30409,17 +31469,33 @@ mod tests {
 
         // The ACK was lost; the caller retransmits the same request.
         let copy = handle_dispatch(&bootstrap, None, request(&keyed)).unwrap();
-        assert_eq!(copy, first, "a duplicate is answered with the original outcome");
-        assert_eq!(attempts(), after_first, "a duplicate never creates a second dispatch");
+        assert_eq!(
+            copy, first,
+            "a duplicate is answered with the original outcome"
+        );
+        assert_eq!(
+            attempts(),
+            after_first,
+            "a duplicate never creates a second dispatch"
+        );
 
         // Durable: a restarted controller (fresh schema memo) still answers it.
         state_store::reset_state_db_schema_convergence_memo();
         let after_restart = handle_dispatch(&bootstrap, None, request(&keyed)).unwrap();
         assert_eq!(after_restart, first);
         assert_eq!(attempts(), after_first);
-        let ops_log = std::fs::read_to_string(doc.parent().unwrap().parent().unwrap().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
-        assert!(ops_log.contains("dispatch_request_duplicate_answered"), "{ops_log}");
+        let ops_log = std::fs::read_to_string(
+            doc.parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join(".agent-doc/logs/ops.log"),
+        )
+        .unwrap_or_default();
+        assert!(
+            ops_log.contains("dispatch_request_duplicate_answered"),
+            "{ops_log}"
+        );
 
         // Eventual progress: a new logical request (new key) is evaluated fresh.
         let fresh =
@@ -30509,12 +31585,17 @@ mod tests {
             "refused with no controller process: the durable plane is authoritative"
         );
         let missing = anyhow::Error::new(std::io::Error::from(ErrorKind::NotFound));
-        assert!(!editor_live_on_controller_connect_failure(&missing, || false));
+        assert!(!editor_live_on_controller_connect_failure(&missing, || {
+            false
+        }));
         // A slow/blocked connect proves nothing, even without a visible process.
         let slow = anyhow::Error::new(std::io::Error::from(ErrorKind::TimedOut));
         assert!(editor_live_on_controller_connect_failure(&slow, || false));
         let path_rejected = anyhow::anyhow!("socket path too long");
-        assert!(editor_live_on_controller_connect_failure(&path_rejected, || false));
+        assert!(editor_live_on_controller_connect_failure(
+            &path_rejected,
+            || false
+        ));
     }
 
     /// Positive evidence (nothing bound) still recovers: reap verified
@@ -30523,8 +31604,10 @@ mod tests {
     fn refused_status_connect_is_positive_evidence_for_relaunch() {
         let root = tempfile::tempdir().unwrap();
         let refused = || -> Result<String> {
-            Err(anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
-                .context("failed to connect to project controller"))
+            Err(
+                anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+                    .context("failed to connect to project controller"),
+            )
         };
         assert_eq!(classify_serving_probe(&refused()), ServingProbe::NotBound);
         let order = std::cell::RefCell::new(Vec::new());
@@ -32173,6 +33256,758 @@ mod tests {
             canonical_controller_request_file(&bootstrap, &archive),
             archive,
             "an independently addressed done document keeps its own identity",
+        );
+    }
+
+    fn editor_view_snapshot(
+        client_id: &str,
+        generation: u64,
+        sequence: u64,
+        main_visible: &[&Path],
+        detached_focused: &Path,
+    ) -> EditorViewSnapshot {
+        use agent_doc_editor_surface::{EditorSurfaceRole, EditorViewSurface};
+
+        EditorViewSnapshot {
+            client_id: client_id.to_string(),
+            connection_generation: generation,
+            sequence,
+            complete: true,
+            terminal_capable: true,
+            surfaces: vec![
+                EditorViewSurface {
+                    surface_id: "root".to_string(),
+                    surface_generation: 1,
+                    role: EditorSurfaceRole::Main,
+                    focused: main_visible
+                        .first()
+                        .map_or_else(String::new, |path| path.to_string_lossy().into_owned()),
+                    visible: main_visible
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect(),
+                },
+                EditorViewSurface {
+                    surface_id: "detached-1".to_string(),
+                    surface_generation: 4,
+                    role: EditorSurfaceRole::Detached,
+                    focused: detached_focused.to_string_lossy().into_owned(),
+                    visible: vec![detached_focused.to_string_lossy().into_owned()],
+                },
+            ],
+        }
+    }
+
+    fn test_editor_view_identity(
+        project_root: &Path,
+    ) -> agent_doc_state_backbone::EditorViewBindingIdentity {
+        test_editor_view_identity_for(project_root, "detached-1", 4)
+    }
+
+    fn test_editor_view_identity_for(
+        project_root: &Path,
+        surface_id: &str,
+        surface_generation: u64,
+    ) -> agent_doc_state_backbone::EditorViewBindingIdentity {
+        let key = EditorViewSessionKey {
+            project_id: project_root.display().to_string(),
+            client_id: "rd-client-a".to_string(),
+            connection_generation: 7,
+            surface_id: surface_id.to_string(),
+            surface_generation,
+        };
+        agent_doc_state_backbone::EditorViewBindingIdentity {
+            view_id: format!("rd-client-a/7/{surface_id}/{surface_generation}"),
+            client_family: key.client_id.clone(),
+            connection_generation: key.connection_generation,
+            surface_id: key.surface_id.clone(),
+            surface_generation: key.surface_generation,
+            view_session: isolated_view_session_name(&key),
+        }
+    }
+
+    #[test]
+    fn durable_pending_bindings_are_keyed_and_settle_independently() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let graph = ControllerEditorViewPolicyGraph::new_in(&scope, []);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        graph
+            .lifecycle_sender
+            .set(sender)
+            .expect("install test lifecycle sink");
+        let state = agent_doc_state_backbone::EditorViewBindingState::BindPending {
+            binding: test_editor_view_identity(Path::new("/project")),
+        };
+        let expected = EditorViewLifecycleEffectCommand {
+            document_hash: "doc-hash".to_string(),
+            canonical_path: "/project/detached.md".to_string(),
+            binding_epoch: 11,
+            state: state.clone(),
+        };
+
+        graph.apply_durable_binding(
+            &expected.document_hash,
+            &expected.canonical_path,
+            expected.binding_epoch,
+            &state,
+        );
+
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            expected,
+            "the retained Source/Effect edge must dispatch the durable pending fact",
+        );
+        let other_state = agent_doc_state_backbone::EditorViewBindingState::BindPending {
+            binding: test_editor_view_identity_for(Path::new("/project"), "detached-2", 9),
+        };
+        let other = EditorViewLifecycleEffectCommand {
+            document_hash: "other-hash".to_string(),
+            canonical_path: "/project/other.md".to_string(),
+            binding_epoch: 12,
+            state: other_state.clone(),
+        };
+        graph.apply_durable_binding(
+            &other.document_hash,
+            &other.canonical_path,
+            other.binding_epoch,
+            &other_state,
+        );
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            other,
+        );
+        assert_eq!(graph.ctx.get(&graph.lifecycle_commands).len(), 2);
+
+        graph.apply_durable_binding(
+            "doc-hash",
+            "/project/detached.md",
+            11,
+            &agent_doc_state_backbone::EditorViewBindingState::Bound {
+                binding: test_editor_view_identity(Path::new("/project")),
+                pane: agent_doc_state_backbone::EditorViewPaneReceipt {
+                    pane_id: "%9".to_string(),
+                    actor_generation: 3,
+                    session_name: "view".to_string(),
+                    window_id: "@9".to_string(),
+                },
+            },
+        );
+        let remaining = graph.ctx.get(&graph.lifecycle_commands);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining.values().next(), Some(&other));
+        graph.apply_durable_binding(
+            &other.document_hash,
+            &other.canonical_path,
+            other.binding_epoch,
+            &other_state,
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "settling one key and replaying an identical pending fact must not clear or duplicate the other key",
+        );
+        graph.apply_durable_binding(
+            &other.document_hash,
+            &other.canonical_path,
+            other.binding_epoch,
+            &agent_doc_state_backbone::EditorViewBindingState::Bound {
+                binding: test_editor_view_identity_for(Path::new("/project"), "detached-2", 9),
+                pane: agent_doc_state_backbone::EditorViewPaneReceipt {
+                    pane_id: "%10".to_string(),
+                    actor_generation: 4,
+                    session_name: "view-2".to_string(),
+                    window_id: "@10".to_string(),
+                },
+            },
+        );
+        assert!(graph.ctx.get(&graph.lifecycle_commands).is_empty());
+    }
+
+    #[test]
+    fn one_complete_snapshot_settles_two_detached_view_effects() {
+        use agent_doc_editor_surface::{EditorSurfaceRole, EditorViewSurface};
+        use agent_doc_state_backbone::EditorViewBindingState;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"main\"\n",
+        )
+        .unwrap();
+        let first_file = dir.path().join("first.md");
+        let second_file = dir.path().join("second.md");
+        std::fs::write(&first_file, "# first\n").unwrap();
+        std::fs::write(&second_file, "# second\n").unwrap();
+        let first_path = first_file
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let second_path = second_file
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new(bootstrap.clone()).unwrap();
+        let (lifecycle_sender, lifecycle_receiver) = std::sync::mpsc::channel();
+        runtime
+            .editor_view_policy_graph
+            .lifecycle_sender
+            .set(lifecycle_sender)
+            .expect("install isolated multi-view lifecycle sink");
+
+        let tmux = tmux_router::IsolatedTmux::new("gh218-controller-multi-lifecycle");
+        let main_pane = tmux.new_session("main", dir.path()).unwrap();
+        tmux.raw_cmd(&["rename-window", "-t", &main_pane, "agent-doc"])
+            .unwrap();
+        tmux.split_window(&main_pane, dir.path(), "-dh").unwrap();
+        tmux.select_pane(&main_pane).unwrap();
+        let stash_window = tmux.ensure_stash_window("main").unwrap();
+        let stash_anchor = tmux.list_window_panes(&stash_window).unwrap()[0].clone();
+        let first_pane = tmux.split_window(&stash_anchor, dir.path(), "-dv").unwrap();
+        let second_pane = tmux.split_window(&stash_anchor, dir.path(), "-dv").unwrap();
+
+        let mut registry = tmux_router::Registry::new();
+        let documents = [
+            (&first_path, &first_pane, "first-session", 3_u64),
+            (&second_path, &second_pane, "second-session", 4_u64),
+        ];
+        for (path, pane, session_id, generation) in documents {
+            let document_id =
+                agent_doc_session_actor_io::canonical_document_id_in(dir.path(), path);
+            store_actor_record_for_runtime(
+                dir.path(),
+                None,
+                &agent_doc_controller::actor::ActorRecord {
+                    document_id: document_id.clone(),
+                    session_id: session_id.to_string(),
+                    generation,
+                    pane_id: pane.clone(),
+                    window_id: stash_window.clone(),
+                    harness: "codex".to_string(),
+                    state: agent_doc_controller::actor::ActorState::Ready,
+                    last_transition: agent_doc_controller::actor::ActorLastTransition {
+                        caller: "test".to_string(),
+                        reason: "ready".to_string(),
+                        timestamp: 1,
+                        prior_generation: generation - 1,
+                        new_generation: generation,
+                    },
+                },
+                Some(&runtime),
+            )
+            .unwrap();
+            registry.insert(
+                document_id,
+                tmux_router::RegistryEntry {
+                    pane: pane.clone(),
+                    pid: std::process::id(),
+                    cwd: dir.path().to_string_lossy().into_owned(),
+                    started: "test".to_string(),
+                    session_id: session_id.to_string(),
+                    file: path.clone(),
+                    window: stash_window.clone(),
+                    supervisor_instance_id: "test-supervisor".to_string(),
+                },
+            );
+        }
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
+
+        let snapshot = EditorViewSnapshot {
+            client_id: "rd-client-a".to_string(),
+            connection_generation: 7,
+            sequence: 1,
+            complete: true,
+            terminal_capable: true,
+            surfaces: vec![
+                EditorViewSurface {
+                    surface_id: "root".to_string(),
+                    surface_generation: 1,
+                    role: EditorSurfaceRole::Main,
+                    focused: String::new(),
+                    visible: Vec::new(),
+                },
+                EditorViewSurface {
+                    surface_id: "detached-1".to_string(),
+                    surface_generation: 4,
+                    role: EditorSurfaceRole::Detached,
+                    focused: first_path.clone(),
+                    visible: vec![first_path.clone()],
+                },
+                EditorViewSurface {
+                    surface_id: "detached-2".to_string(),
+                    surface_generation: 9,
+                    role: EditorSurfaceRole::Detached,
+                    focused: second_path.clone(),
+                    visible: vec![second_path.clone()],
+                },
+            ],
+        };
+        let projection = handle_editor_view_snapshot_observe(
+            &bootstrap,
+            &runtime,
+            ControllerRequest {
+                command: "editor_view_snapshot_observe".to_string(),
+                file: None,
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(7),
+                state: None,
+                caller: Some("rd-client-a".to_string()),
+                reason: Some("complete_editor_view_snapshot".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(serde_json::to_string(&snapshot).unwrap()),
+                sequence: Some(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(projection.presentations.len(), 2);
+        assert!(projection.retry_suggested);
+        assert!(projection.presentations.iter().all(|presentation| {
+            presentation.kind == "placeholder" && presentation.reason == Some("binding_pending")
+        }));
+
+        let mut commands = vec![
+            lifecycle_receiver
+                .recv_timeout(Duration::from_secs(1))
+                .expect("first durable pending binding"),
+            lifecycle_receiver
+                .recv_timeout(Duration::from_secs(1))
+                .expect("second durable pending binding"),
+        ];
+        assert!(lifecycle_receiver.try_recv().is_err());
+        commands.sort_by(|left, right| left.canonical_path.cmp(&right.canonical_path));
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| command.canonical_path.as_str())
+                .collect::<Vec<_>>(),
+            vec![first_path.as_str(), second_path.as_str()],
+        );
+
+        let first_command = commands.remove(0);
+        reconcile_editor_view_lifecycle(&bootstrap, &runtime, &tmux, first_command).unwrap();
+        let remaining = runtime
+            .editor_view_policy_graph
+            .ctx
+            .get(&runtime.editor_view_policy_graph.lifecycle_commands);
+        assert_eq!(
+            remaining.len(),
+            1,
+            "settling one view keeps the other queued"
+        );
+        assert_eq!(
+            remaining.values().next().unwrap().canonical_path,
+            second_path,
+        );
+        reconcile_editor_view_lifecycle(&bootstrap, &runtime, &tmux, commands.remove(0)).unwrap();
+        assert!(
+            runtime
+                .editor_view_policy_graph
+                .ctx
+                .get(&runtime.editor_view_policy_graph.lifecycle_commands)
+                .is_empty(),
+            "both independently verified receipts retire their own pending key",
+        );
+
+        let durable = runtime.memory.lock();
+        for file in [&first_file, &second_file] {
+            let hash = agent_doc_hash::document_id_for_path(file);
+            assert!(matches!(
+                durable
+                    .state_projection
+                    .document(&hash)
+                    .and_then(|document| document.editor_view_binding.as_ref())
+                    .map(|binding| &binding.state),
+                Some(EditorViewBindingState::Bound { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn controller_reconciles_detached_view_and_persists_verified_placement() {
+        use agent_doc_state_backbone::{
+            EditorViewBindingState, EditorViewReleaseDestination, EditorViewReleaseReason,
+            StateEvent, StateFact,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"main\"\n",
+        )
+        .unwrap();
+        let document = dir.path().join("detached.md");
+        std::fs::write(&document, "# detached\n").unwrap();
+        let canonical_path = document
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let document_hash = agent_doc_hash::document_id_for_path(&document);
+        let bootstrap = test_bootstrap(&dir);
+        // Construct without `new_arc`: this test calls the concrete effect with
+        // an isolated tmux server instead of installing the production sink.
+        let runtime = ControllerRuntime::new(bootstrap.clone()).unwrap();
+        let (lifecycle_sender, lifecycle_receiver) = std::sync::mpsc::channel();
+        runtime
+            .editor_view_policy_graph
+            .lifecycle_sender
+            .set(lifecycle_sender)
+            .expect("install isolated lifecycle sink");
+
+        let tmux = tmux_router::IsolatedTmux::new("gh218-controller-lifecycle");
+        let main_pane = tmux.new_session("main", dir.path()).unwrap();
+        tmux.raw_cmd(&["rename-window", "-t", &main_pane, "agent-doc"])
+            .unwrap();
+        let second_main = tmux.split_window(&main_pane, dir.path(), "-dh").unwrap();
+        tmux.select_pane(&main_pane).unwrap();
+        let stash_window = tmux.ensure_stash_window("main").unwrap();
+        let stash_anchor = tmux.list_window_panes(&stash_window).unwrap()[0].clone();
+        let detached_pane = tmux.split_window(&stash_anchor, dir.path(), "-dv").unwrap();
+        let main_window = tmux.pane_window(&main_pane).unwrap();
+        assert_ne!(main_pane, second_main);
+
+        let document_id =
+            agent_doc_session_actor_io::canonical_document_id_in(dir.path(), &canonical_path);
+        let actor_generation = 3;
+        let actor = agent_doc_controller::actor::ActorRecord {
+            document_id: document_id.clone(),
+            session_id: "detached-doc".to_string(),
+            generation: actor_generation,
+            pane_id: detached_pane.clone(),
+            window_id: stash_window.clone(),
+            harness: "codex".to_string(),
+            state: agent_doc_controller::actor::ActorState::Ready,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "ready".to_string(),
+                timestamp: 1,
+                prior_generation: 2,
+                new_generation: actor_generation,
+            },
+        };
+        store_actor_record_for_runtime(dir.path(), None, &actor, Some(&runtime)).unwrap();
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            document_id.clone(),
+            tmux_router::RegistryEntry {
+                pane: detached_pane.clone(),
+                pid: std::process::id(),
+                cwd: dir.path().to_string_lossy().into_owned(),
+                started: "test".to_string(),
+                session_id: actor.session_id.clone(),
+                file: canonical_path.clone(),
+                window: stash_window.clone(),
+                supervisor_instance_id: "test-supervisor".to_string(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
+
+        let binding_epoch = 11;
+        let binding = test_editor_view_identity(dir.path());
+        let pending_bind = EditorViewBindingState::BindPending {
+            binding: binding.clone(),
+        };
+        append_apply_state_event(
+            &bootstrap,
+            &runtime,
+            StateEvent::new(
+                "editor-view-controller-bind-pending",
+                StateFact::EditorViewBindingObserved {
+                    document_hash: document_hash.clone(),
+                    canonical_path: canonical_path.clone(),
+                    binding_epoch,
+                    state: pending_bind.clone(),
+                },
+            ),
+        )
+        .unwrap();
+        let bind_command = lifecycle_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("durable BindPending dispatches only after append/apply");
+        assert_eq!(bind_command.state, pending_bind);
+        let bind_receipt =
+            reconcile_editor_view_lifecycle(&bootstrap, &runtime, &tmux, bind_command).unwrap();
+        assert_eq!(bind_receipt.pane.pane_id, detached_pane);
+        assert_eq!(bind_receipt.pane.session_name, binding.view_session);
+        assert!(bind_receipt.verified_exact_pane_placement);
+        assert_eq!(
+            tmux.active_pane("main").as_deref(),
+            Some(main_pane.as_str())
+        );
+        assert_eq!(bind_receipt.main_after.current_window, main_window);
+
+        let bound_pane = match &bind_receipt.settled_state {
+            EditorViewBindingState::Bound { pane, .. } => pane.clone(),
+            other => panic!("expected bound receipt, got {other:?}"),
+        };
+        let moved_actor = actor_record_from_authority(&bootstrap, Some(&runtime), &document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(moved_actor.window_id, bound_pane.window_id);
+        let moved_registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
+        assert_eq!(moved_registry[&document_id].window, bound_pane.window_id);
+
+        let pending_release = EditorViewBindingState::ReleasePending {
+            binding: binding.clone(),
+            pane: Some(bound_pane),
+            reason: EditorViewReleaseReason::MainVisible,
+            destination: EditorViewReleaseDestination::MainStash,
+        };
+        append_apply_state_event(
+            &bootstrap,
+            &runtime,
+            StateEvent::new(
+                "editor-view-controller-release-pending",
+                StateFact::EditorViewBindingObserved {
+                    document_hash: document_hash.clone(),
+                    canonical_path: canonical_path.clone(),
+                    binding_epoch,
+                    state: pending_release.clone(),
+                },
+            ),
+        )
+        .unwrap();
+        let release_command = lifecycle_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("durable ReleasePending dispatches only after append/apply");
+        assert_eq!(release_command.state, pending_release);
+        let release_receipt =
+            reconcile_editor_view_lifecycle(&bootstrap, &runtime, &tmux, release_command).unwrap();
+        assert!(release_receipt.view_session_removed);
+        assert!(!tmux.session_exists(&binding.view_session));
+        assert_eq!(release_receipt.pane.window_id, stash_window);
+        assert_eq!(
+            serde_json::to_vec(&bind_receipt.main_before).unwrap(),
+            serde_json::to_vec(&release_receipt.main_after).unwrap(),
+            "main pane membership, stash membership, current window, active pane, layout, and geometry must be byte-identical",
+        );
+
+        let released_actor = actor_record_from_authority(&bootstrap, Some(&runtime), &document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(released_actor.window_id, release_receipt.pane.window_id);
+        let released_registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
+        assert_eq!(
+            released_registry[&document_id].window,
+            release_receipt.pane.window_id,
+        );
+        let durable = runtime.memory.lock();
+        assert!(matches!(
+            durable
+                .state_projection
+                .document(&document_hash)
+                .and_then(|document| document.editor_view_binding.as_ref())
+                .map(|binding| &binding.state),
+            Some(EditorViewBindingState::Released { .. })
+        ));
+    }
+
+    #[test]
+    fn complete_editor_view_snapshot_is_durable_before_main_exclusion_and_restart() {
+        use agent_doc_editor_surface::{
+            EditorViewLifecycleTransition, EditorViewPlaceholderReason, EditorViewPresentation,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let detached = dir.path().join("detached.md");
+        std::fs::write(&detached, "# detached\n").unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: current_binary_identity().ok(),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let snapshot = editor_view_snapshot("rd-client-a", 7, 1, &[], &detached);
+        let projection = handle_editor_view_snapshot_observe(
+            &bootstrap,
+            runtime.as_ref(),
+            ControllerRequest {
+                command: "editor_view_snapshot_observe".to_string(),
+                file: None,
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(7),
+                state: None,
+                caller: Some("rd-client-a".to_string()),
+                reason: Some("complete_editor_view_snapshot".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(serde_json::to_string(&snapshot).unwrap()),
+                sequence: Some(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(projection.presentations.len(), 1);
+        assert!(projection.retry_suggested);
+        assert_eq!(projection.presentations[0].kind, "placeholder");
+        assert_eq!(projection.presentations[0].reason, Some("binding_pending"));
+        let (pending_binding_epoch, pending_binding) = {
+            let document_hash = agent_doc_hash::document_id_for_path(&detached);
+            let durable = runtime.memory.lock();
+            match durable
+                .state_projection
+                .document(&document_hash)
+                .and_then(|document| document.editor_view_binding.as_ref())
+            {
+                Some(projection) => match &projection.state {
+                    agent_doc_state_backbone::EditorViewBindingState::BindPending {
+                        binding,
+                    } => (projection.binding_epoch, binding.clone()),
+                    other => panic!("expected durable BindPending, got {other:?}"),
+                },
+                other => panic!("expected durable BindPending, got {other:?}"),
+            }
+        };
+        assert!(
+            !runtime
+                .main_layout_eligibility()
+                .permits(&detached.to_string_lossy())
+        );
+
+        let restarted = ControllerRuntime::new_arc(ControllerBootstrap {
+            controller_generation: 2,
+            ..bootstrap
+        })
+        .unwrap();
+        assert!(
+            !restarted
+                .main_layout_eligibility()
+                .permits(&detached.to_string_lossy()),
+            "durable BindPending must exclude before the restarted controller serves layout",
+        );
+
+        append_apply_state_event(
+            &restarted.bootstrap_snapshot().unwrap(),
+            restarted.as_ref(),
+            agent_doc_state_backbone::StateEvent::new(
+                "editor-view-test-bound",
+                agent_doc_state_backbone::StateFact::EditorViewBindingObserved {
+                    document_hash: agent_doc_hash::document_id_for_path(&detached),
+                    canonical_path: detached.to_string_lossy().into_owned(),
+                    binding_epoch: pending_binding_epoch,
+                    state: agent_doc_state_backbone::EditorViewBindingState::Bound {
+                        binding: pending_binding,
+                        pane: agent_doc_state_backbone::EditorViewPaneReceipt {
+                            pane_id: "%9".to_string(),
+                            actor_generation: 3,
+                            session_name: isolated_view_session_name(&EditorViewSessionKey {
+                                project_id: dir.path().display().to_string(),
+                                client_id: "rd-client-a".to_string(),
+                                connection_generation: 7,
+                                surface_id: "detached-1".to_string(),
+                                surface_generation: 4,
+                            }),
+                            window_id: "@9".to_string(),
+                        },
+                    },
+                },
+            ),
+        )
+        .unwrap();
+        let bound = restarted
+            .editor_view_policy_graph
+            .observe(
+                editor_view_snapshot("rd-client-a", 7, 2, &[], &detached),
+                |_| Ok(()),
+            )
+            .unwrap();
+        assert!(
+            bound.presentations.values().any(|presentation| matches!(
+                presentation,
+                EditorViewPresentation::Terminal { document, .. }
+                    if document == &detached.to_string_lossy()
+            )),
+            "{bound:?}"
+        );
+
+        let main_duplicate = editor_view_snapshot("rd-client-a", 7, 3, &[&detached], &detached);
+        let projection = restarted
+            .editor_view_policy_graph
+            .observe(main_duplicate, |_| Ok(()))
+            .unwrap();
+        assert!(
+            projection
+                .presentations
+                .values()
+                .any(|presentation| matches!(
+                    presentation,
+                    EditorViewPresentation::Placeholder {
+                        reason: EditorViewPlaceholderReason::MainOwned,
+                        ..
+                    }
+                ))
+        );
+        assert!(matches!(
+            projection.transitions.as_slice(),
+            [EditorViewLifecycleTransition::ReleasePending { .. }]
+        ));
+    }
+
+    #[test]
+    fn editor_view_snapshot_rejects_an_identity_mismatch_before_projection() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let detached = dir.path().join("detached.md");
+        std::fs::write(&detached, "# detached\n").unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: current_binary_identity().ok(),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let snapshot = editor_view_snapshot("rd-client-a", 7, 1, &[], &detached);
+
+        let error = handle_editor_view_snapshot_observe(
+            &bootstrap,
+            runtime.as_ref(),
+            ControllerRequest {
+                command: "editor_view_snapshot_observe".to_string(),
+                file: None,
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(7),
+                state: None,
+                caller: Some("rd-client-b".to_string()),
+                reason: Some("complete_editor_view_snapshot".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(serde_json::to_string(&snapshot).unwrap()),
+                sequence: Some(1),
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("envelope identity"));
+        assert!(
+            runtime
+                .main_layout_eligibility()
+                .permits(&detached.to_string_lossy())
         );
     }
 
@@ -38387,9 +40222,9 @@ mod tests {
                 cycle_id_hint: Some(cycle_id),
                 terminal_turn_fence: Some(
                     agent_doc_cycle_state_io::command_plane::TerminalTurnFence {
-                    session_id: Some("session-fenced".to_string()),
-                    pane_id: Some("%91".to_string()),
-                    generation: Some(1),
+                        session_id: Some("session-fenced".to_string()),
+                        pane_id: Some("%91".to_string()),
+                        generation: Some(1),
                     },
                 ),
             },
@@ -40248,9 +42083,7 @@ mod tests {
                         let status_stream = listener.accept().unwrap();
                         let (reader_half, _writer_half) = status_stream.split();
                         let mut request = String::new();
-                        BufReader::new(reader_half)
-                            .read_line(&mut request)
-                            .unwrap();
+                        BufReader::new(reader_half).read_line(&mut request).unwrap();
                         assert!(request.contains("status"), "{request}");
                     }
                     let _adopted_stream = listener.accept().unwrap();
@@ -41481,10 +43314,7 @@ mod tests {
             focused: focused.to_string(),
             open: vec!["/a.md".to_string(), "/b.md".to_string()],
             visible: vec!["/a.md".to_string(), "/b.md".to_string()],
-            columns: vec![
-                SurfaceColumn::new(["/a.md"]),
-                SurfaceColumn::new(["/b.md"]),
-            ],
+            columns: vec![SurfaceColumn::new(["/a.md"]), SurfaceColumn::new(["/b.md"])],
             force_reconcile: false,
             focus_only: false,
             preserve_focus: false,
@@ -41494,7 +43324,10 @@ mod tests {
         assert!(matches!(intent, SurfaceIntent::Focus { .. }));
         // The select-pane effect errored. Pre-fix, the same focus is now Idle.
         let (_, idle) = tracking.advance(&surface("/b.md"), Some(true));
-        assert!(idle.is_idle(), "the wedge: graph advanced before the effect");
+        assert!(
+            idle.is_idle(),
+            "the wedge: graph advanced before the effect"
+        );
         let focus_intent = SurfaceIntent::Focus {
             document: "/b.md".to_string(),
         };
@@ -41563,8 +43396,11 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/simf1.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "---\nagent_doc_session: session-sf\nagent: codex\n---\nBody\n")
-            .unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-sf\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
         agent_doc_session_actor_io::record_session_start_direct(&doc, "session-sf", "%51", "@1", 1)
             .unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -41664,7 +43500,10 @@ mod tests {
         )
         .unwrap()
         .expect("queue control row");
-        assert_eq!(effective.state, "resumed", "the newer resume stays in force");
+        assert_eq!(
+            effective.state, "resumed",
+            "the newer resume stays in force"
+        );
     }
 
     #[test]

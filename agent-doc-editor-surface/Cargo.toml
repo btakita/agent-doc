@@ -11,6 +11,7 @@ publish = false
 name = "agent_doc_editor_surface"
 
 [dependencies]
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.480" }
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.480" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.480" }
 lazily = { version = "0.57.1", features = ["thread-safe"] }

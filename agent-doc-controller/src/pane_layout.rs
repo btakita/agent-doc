@@ -4,6 +4,8 @@
 //! decision: a newer input revision published while the current effect is
 //! finishing must keep one worker active.
 
+pub use agent_doc_editor_surface::editor_view_policy::MainLayoutEligibility;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LatestProjectionWorkerState {
     pending_revision: u64,
@@ -591,4 +593,5 @@ mod tests {
         assert!(!pane_window_binding_drifted("   ", Some("@904")));
         assert!(!pane_window_binding_drifted("", None));
     }
+
 }

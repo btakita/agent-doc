@@ -29,6 +29,14 @@ Rust binary.
   splices even when the host reports the reload as an incremental range edit.
 - Missing capabilities, an incompatible ABI, an unknown intent, or ambiguous
   structure fails closed without mutating the buffer or disk.
+- A plugin package is selected per target editor build, never per release or
+  per most recent local build. JetBrains publishes two disjoint packages under
+  one plugin ID: builds 242-261 receive `agent-doc-jetbrains-<version>.zip` and
+  build 262 receives `agent-doc-jetbrains-262-<version>.zip`. The installer
+  proves the build from the versioned IDE data directory; an unprovable or
+  unsupported target fails closed with guidance instead of defaulting to the
+  classic package. Update numbers are compared only within one line; a target
+  holding the other line is always replaced with its own line's package.
 
 There is no filesystem delivery queue, live-value projection, receipt file,
 plugin-owner file, queue journal, or file-signal compatibility transport.
@@ -226,3 +234,36 @@ Each adapter must cover:
 10. Crash points at every state-machine transition converge under simulation.
 11. Refresh, reload, layout, and endpoint discovery stay within the bounded
     scope above and never block the editor event thread on native work.
+
+## 10. Preview acceptance artifact provenance
+
+A preview-only editor package used for a live acceptance gate must be bound to
+one source commit by a tracked manifest before the gate starts. The manifest
+records the release and asset identities, exact byte length and SHA-256, plugin
+id/version/build range, and required modular contents.
+
+Every independently downloaded copy used by a distributed editor deployment
+must pass one verifier invocation. The verifier checks the current PR head and
+release target, rejects release-asset replacement, hashes every local copy, and
+reads plugin metadata from the archive. A checksum-only comparison is
+insufficient: a wrong plugin generation or compatibility range must fail even
+when a test fixture records its digest. Any changed source head or artifact
+requires a new manifest and a new acceptance record.
+
+## 11. Distribution
+
+An adapter that ships more than one artifact under one plugin identity must:
+
+1. Give every artifact a distinct update version and a declared, closed
+   compatibility range; the ranges must not overlap, so every host build
+   selects at most one artifact and a build matching two is a release defect.
+2. Validate identity, versions, and ranges from the built artifacts themselves
+   before publishing any channel entry, and publish all entries or none.
+3. Keep host-side pieces of a multi-process artifact (for example a JetBrains
+   Remote Dev backend and its Client/Gateway) on the same artifact and
+   generation; a one-sided or mismatched install fails closed with no fallback
+   to a different artifact's code path.
+
+The JetBrains classic (`242`..`261.*`) and exact-262 modular (`262`..`262.*`)
+updates and their per-range custom-repository listings are specified in
+[`docs/reference/jetbrains-distribution.md`](../docs/reference/jetbrains-distribution.md).

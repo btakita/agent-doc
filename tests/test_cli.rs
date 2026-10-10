@@ -14244,6 +14244,20 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
         install_target.contains("Refusing to install a stale package."),
         "a failed JetBrains build must explicitly refuse stale package installation"
     );
+    // `#jetbrains262installselect`: the modular 262 package is built (and fails
+    // closed) before the all-installed convergence, so a 262 IDE is never handed
+    // the classic package as a substitute.
+    let modular_build = install_target
+        .find("( cd editors/jetbrains-262 && gradle --no-daemon --console=plain buildPlugin verifySplitArtifact ) || {")
+        .expect("JetBrains 262 build must fail closed");
+    assert!(
+        modular_build < install,
+        "the 262 modular package must build before local installation"
+    );
+    assert!(
+        install_target.contains("Refusing to install the classic package into a 262 IDE."),
+        "a failed 262 build must refuse classic substitution"
+    );
 
     let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
     assert!(
@@ -14345,22 +14359,35 @@ fn test_every_release_publishes_the_editor_packages() {
         .find("  plugins:")
         .expect("editor-package build job")..];
     for required in [
-        "./gradlew --no-daemon --console=plain buildPlugin",
+        "./gradlew --no-daemon --console=plain buildPlugin verifyClassicArtifact",
+        "gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes",
+        "scripts/jetbrains-custom-repository.py",
+        "agent-doc-jetbrains-classic.xml",
+        "agent-doc-jetbrains-262.xml",
+        "--verify-listings \"$classic_version\" \"$modular_version\"",
         "npm run package --prefix editors/vscode",
-        "expected 1 JetBrains zip and 1 vsix",
+        "expected classic + modular JetBrains zips, 2 ranged feeds, and 1 vsix",
     ] {
         assert!(
             plugins.contains(required),
-            "the editor-package job must build and verify both packages: {required}"
+            "the editor-package job must build and verify both ranged updates and feeds: {required}"
         );
     }
     // `build/distributions/` accumulates every version it has built plus
     // `-signed` siblings, so a glob is one cache restore away from attaching a
     // stale artifact and reporting success.
     assert!(
-        plugins.contains("agent-doc-jetbrains-$version.zip")
+        plugins.contains("agent-doc-jetbrains-$classic_version.zip")
+            && plugins.contains("agent-doc-jetbrains-262-$modular_version.zip")
             && plugins.contains("agent-doc-$version.vsix"),
         "editor packages must be copied by declared version, never globbed"
+    );
+    assert!(
+        plugins.contains("test \"$classic_version\" != \"$modular_version\"")
+            && plugins.contains(
+                "--download-base-url \"https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}\""
+            ),
+        "same-ID updates must have distinct versions and tag-pinned download URLs"
     );
 
     // `SHA256SUMS` is generated over `artifacts/` and consumed by the PyPI

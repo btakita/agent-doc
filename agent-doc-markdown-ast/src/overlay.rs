@@ -205,6 +205,91 @@ pub(crate) fn strip_bullet(line: &str) -> Option<&str> {
     None
 }
 
+/// True when `line` may continue the queue list item directly above it
+/// (`#queuecruft`).
+///
+/// Markdown folds a non-blank line that follows a list item, with or without
+/// indentation (a "lazy continuation"), into that item's paragraph. A pasted
+/// free-text queue item that wraps onto a second line is therefore ONE item.
+/// Before this predicate the queue parser kept only the bulleted first line and
+/// demoted the rest to inert `Freeform` residue, so promoting the item to the
+/// backlog removed the first line and left the continuation orphaned in the
+/// queue, where later reorders detached it from its parent entirely.
+///
+/// The line-local rule here is the single source of truth shared by this
+/// overlay and `document_queue::parse_spans`. A line is NOT a continuation when
+/// it is blank, carries its own list marker, is a component/HTML comment marker,
+/// opens a fence (```` ``` ````, `~~~`, `---`), is a queue-native directive
+/// (`preset`, `dispatch`, a `/command`), is an ATX heading, or is an id-bearing
+/// directive (`do [#id]`, `re [#id]`, a bare `[#id]` line) — the last keeps the
+/// `#qfoldedhead` re-segmentation of folded `do [#id]` pastes intact.
+/// Whether the item above accepts continuation is decided separately by
+/// [`queue_item_accepts_continuation`].
+pub fn queue_continuation_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Own list marker (including an empty `-` / `N.` placeholder and the
+    // tolerated stray-backtick `` `- `` mistype).
+    if strip_bullet(line).is_some()
+        || strip_bullet(trimmed.trim_start_matches('`')).is_some()
+        || trimmed.starts_with("+ ")
+        || matches!(trimmed, "-" | "*" | "+")
+        || trimmed.strip_suffix('.').is_some_and(|digits| {
+            !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return false;
+    }
+    if trimmed.starts_with("<!--")
+        || trimmed.starts_with("```")
+        || trimmed.starts_with("~~~")
+        || trimmed.starts_with("---")
+        || trimmed.starts_with("preset ")
+        || trimmed.starts_with("dispatch ")
+    {
+        return false;
+    }
+    // ATX heading interrupts a paragraph.
+    let hashes = trimmed.bytes().take_while(|b| *b == b'#').count();
+    if (1..=6).contains(&hashes) && matches!(trimmed.as_bytes().get(hashes), None | Some(b' ')) {
+        return false;
+    }
+    // A `/command` line (but not an absolute path such as `/home/x/y`).
+    if let Some(rest) = trimmed.strip_prefix('/') {
+        let token = rest.split_whitespace().next().unwrap_or("");
+        if !token.is_empty() && !token.contains('/') {
+            return false;
+        }
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("do [#")
+        || lower.starts_with("do #")
+        || lower.starts_with("re [#")
+        || lower.starts_with("re #")
+        || trimmed.starts_with("[#")
+    {
+        return false;
+    }
+    true
+}
+
+/// True when a queue list item whose content (after the bullet) is
+/// `item_content` absorbs following [`queue_continuation_line`]s
+/// (`#queuecruft`). Only an unstruck free-text item does: an id-backed
+/// `do`/`re` directive never has prose continuation (its indented residue is a
+/// folded paste that `#qfoldedhead` re-segments), and a line already struck on
+/// its own keeps any bullet-less line below it as separate residue so a
+/// completed item can never be resurrected as live text.
+pub fn queue_item_accepts_continuation(item_content: &str) -> bool {
+    let item = parse_item(item_content, 0, item_content.len());
+    !item.struck
+        && item.kind == ItemKind::FreeText
+        && !item.text.is_empty()
+        && !item.text.starts_with("[#")
+}
+
 fn strip_one_pin(text: &str) -> Option<(&str, bool)> {
     let t = text.trim_start();
     for m in OPERATOR_PIN_MARKERS {
@@ -456,14 +541,31 @@ pub fn components(source: &str) -> Vec<Component> {
     let mut open: Option<Component> = None;
 
     let mut offset = 0usize;
+    // `#queuecruft`: byte offset where the open queue list item's content
+    // starts, while that item still accepts continuation lines.
+    let mut continuable_item_start: Option<usize> = None;
     for line in source.split_inclusive('\n') {
         let line_start = offset;
         offset += line.len();
         if in_code(&ranges, line_start) {
+            continuable_item_start = None;
             continue;
         }
         let content = line.trim_end_matches('\n');
+        let content = content.strip_suffix('\r').unwrap_or(content);
         let trimmed = content.trim();
+
+        if let Some(raw_start) = continuable_item_start {
+            if queue_continuation_line(content)
+                && let Some(comp) = open.as_mut()
+                && let Some(last) = comp.items.last_mut()
+            {
+                let joined = &source[raw_start..line_start + content.len()];
+                *last = parse_item(joined, last.start_byte, offset);
+                continue;
+            }
+            continuable_item_start = None;
+        }
 
         if let Some(name) = parse_close_marker(trimmed) {
             if let Some(mut comp) = open.take() {
@@ -498,6 +600,11 @@ pub fn components(source: &str) -> Vec<Component> {
         {
             comp.items
                 .push(parse_item(item_content, line_start, offset));
+            if comp.name == "queue" && queue_item_accepts_continuation(item_content) {
+                // `item_content` is a suffix slice of `content`, which starts at
+                // `line_start`.
+                continuable_item_start = Some(line_start + (content.len() - item_content.len()));
+            }
         }
     }
     if let Some(mut comp) = open.take() {
@@ -530,6 +637,89 @@ mod tests {
             .into_iter()
             .find(|c| c.name == "queue")
             .unwrap()
+    }
+
+    /// `#queuecruft`: the live shape. A pasted free-text item wrapped onto an
+    /// unindented (lazy) second line, followed by an indented-continuation item.
+    /// Each is ONE node whose span covers every one of its lines, so a node-keyed
+    /// remove/strike/move can never leave a continuation line behind.
+    const CONTINUATION_DOC: &str = "\
+<!-- agent:queue -->
+- Run Agent Doc on frontend.md error: dispatch-only claude reopen refused
+the route-owned host supervisor (pid 1989646) is mapping a STALE binary.
+- Indented item first line
+  indented second line
+- do [#alpha]
+  do [#beta]
+- ~~struck alone~~
+trailing residue
+<!-- /agent:queue -->
+";
+
+    #[test]
+    fn queue_item_spans_lazy_and_indented_continuation_lines() {
+        let queue = components(CONTINUATION_DOC)
+            .into_iter()
+            .find(|c| c.name == "queue")
+            .unwrap();
+        let texts: Vec<&str> = queue.items.iter().map(|i| i.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n\
+                 the route-owned host supervisor (pid 1989646) is mapping a STALE binary.",
+                "Indented item first line\n  indented second line",
+                "do [#alpha]",
+                "struck alone",
+            ]
+        );
+        let first = &queue.items[0];
+        assert_eq!(
+            &CONTINUATION_DOC[first.start_byte..first.end_byte],
+            "- Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n\
+             the route-owned host supervisor (pid 1989646) is mapping a STALE binary.\n"
+        );
+        // The id directive's folded `do [#beta]` and the residue under a line
+        // struck on its own are NOT continuation.
+        assert!(!queue.items[2].text.contains("beta"));
+        assert!(queue.items[3].struck);
+        assert!(!queue.items[3].text.contains("residue"));
+    }
+
+    #[test]
+    fn continuation_line_predicate_rejects_queue_native_syntax() {
+        for line in [
+            "",
+            "   ",
+            "- item",
+            "  - nested",
+            "1. ordered",
+            "-",
+            "`- stray backtick",
+            "<!-- /agent:queue -->",
+            "```",
+            "~~~prompt",
+            "---",
+            "--- stop",
+            "preset #x",
+            "dispatch #x",
+            "/clear",
+            "# Heading",
+            "do [#a]",
+            "  re #b",
+            "[#c] [#d]",
+        ] {
+            assert!(!queue_continuation_line(line), "{line:?}");
+        }
+        for line in [
+            "the route-owned host supervisor (pid 1989646)",
+            "  indented prose",
+            "/home/brian/work/x is a path, not a command",
+            "#fcc0 is a tag, not a heading",
+            "> quoted log",
+        ] {
+            assert!(queue_continuation_line(line), "{line:?}");
+        }
     }
 
     #[test]

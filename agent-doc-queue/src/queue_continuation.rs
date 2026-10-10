@@ -851,14 +851,22 @@ pub fn queue_stale_noise_lines(content: &str) -> usize {
     };
     entries
         .iter()
-        .filter(|entry| match entry {
-            QueueEntry::Prompt(prompt) => {
-                is_noise_queue_head(&prompt.text, queue_facts.preset_supplies_directive)
+        .map(|entry| match entry {
+            QueueEntry::Prompt(prompt)
+                if is_noise_queue_head(&prompt.text, queue_facts.preset_supplies_directive) =>
+            {
+                // `#queuecruft`: a bulleted item owns its continuation lines,
+                // so a noise item counts every source line it spans.
+                if prompt.multiline {
+                    1
+                } else {
+                    prompt.text.lines().count().max(1)
+                }
             }
-            QueueEntry::Freeform(line) => document_queue::is_noise_freeform_line(line),
-            _ => false,
+            QueueEntry::Freeform(line) => usize::from(document_queue::is_noise_freeform_line(line)),
+            _ => 0,
         })
-        .count()
+        .sum()
 }
 
 #[derive(Debug, Clone)]
@@ -1330,6 +1338,16 @@ pub fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directiv
     }
     if text.contains('\n') || text.contains("```") || text.contains("~~~") {
         if !multiline_head_has_prose_lead(text) {
+            return false;
+        }
+        // `#queuecruft`: a bulleted item that wraps onto continuation lines is
+        // one head; a pasted artifact line (`[route] …`) does not become work
+        // because the console paste below it was folded into the same item.
+        if !text.contains("```")
+            && !text.contains("~~~")
+            && let Some(first) = text.lines().next()
+            && is_single_line_artifact_noise(&normalize_queue_head_text(first))
+        {
             return false;
         }
         return true;

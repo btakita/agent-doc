@@ -2629,8 +2629,63 @@ pub struct QueueState {
     /// `run` commits maintenance itself when this is set and nothing else
     /// changed.
     pub maintenance_mutated: bool,
+    /// `#explicitrunqueue`: live queue heads held by an unexpired worker claim
+    /// (owner + expiry). They are excluded from selection, drainability, and
+    /// the synthetic queue-head diff; a `no_changes` preflight names them so an
+    /// explicit Run Agent Doc answers "claimed by <owner>, expires <t>" instead
+    /// of opening a no-op cycle for in-flight work.
+    pub claimed_queue_heads: Vec<agent_doc_queue::no_changes_explanation::ClaimedQueueItemFact>,
     pub synced_queue_ids: Vec<String>,
     pub warnings: Vec<PreflightWarning>,
+}
+
+impl QueueState {
+    /// Whether `prompt` is a live head held by a worker claim.
+    pub fn head_is_claimed(&self, prompt: &str) -> bool {
+        let identity = agent_doc_queue::queue_claim::claim_identity(prompt);
+        self.claimed_queue_heads
+            .iter()
+            .any(|claimed| agent_doc_queue::queue_claim::claim_identity(&claimed.item) == identity)
+    }
+
+    /// The queue head this cycle would continue on: the first selected head,
+    /// else the first live head that no worker claimed (`#explicitrunqueue`).
+    /// A claimed head is in flight elsewhere and is never a continuation head.
+    pub fn continuation_head(&self) -> Option<&String> {
+        self.selected_queue_prompts.first().or_else(|| {
+            self.queue_prompts
+                .iter()
+                .find(|prompt| !self.head_is_claimed(prompt))
+        })
+    }
+}
+
+/// Owner + expiry of every live queue head an unexpired worker claim holds
+/// (`#explicitrunqueue`). An unreadable ledger reports no claims, matching
+/// [`agent_doc_queue_io::queue_claim::claimed_items_for_content`].
+fn claimed_queue_head_facts(
+    file: &Path,
+    content: &str,
+) -> Vec<agent_doc_queue::no_changes_explanation::ClaimedQueueItemFact> {
+    let claims = agent_doc_queue_io::queue_claim::active_claims_for_content(file, content)
+        .unwrap_or_default();
+    let heads =
+        agent_doc_queue::queue_continuation::live_queue_head_texts(content).unwrap_or_default();
+    claims
+        .into_iter()
+        .map(|claim| {
+            let item = heads
+                .iter()
+                .find(|head| agent_doc_queue::queue_claim::claim_identity(head) == claim.identity)
+                .map(|head| strip_in_progress_marker(head))
+                .unwrap_or_else(|| claim.item_text.trim().to_string());
+            agent_doc_queue::no_changes_explanation::ClaimedQueueItemFact {
+                item,
+                owner: claim.owner,
+                expires_at: agent_doc_log_time::format_log_timestamp(claim.expires_at_secs),
+            }
+        })
+        .collect()
 }
 
 fn record_selected_queue_head_state(
@@ -2961,6 +3016,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             queue_supervisor_drainable: false,
             // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
             maintenance_mutated: false,
+            claimed_queue_heads: vec![],
             synced_queue_ids: vec![],
             warnings: vec![],
         });
@@ -2986,6 +3042,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             queue_supervisor_drainable: false,
             // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
             maintenance_mutated: false,
+            claimed_queue_heads: vec![],
             synced_queue_ids: vec![],
             warnings: vec![],
         });
@@ -3038,6 +3095,11 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             &claimed_queue_items,
         )
         .is_some();
+    let claimed_queue_heads = if activation.active && !claimed_queue_items.is_empty() {
+        claimed_queue_head_facts(file, &content)
+    } else {
+        Vec::new()
+    };
     let skipped_queue_head_ids: std::collections::HashSet<String> =
         agent_doc_cycle_state_io::load(file)
             .ok()
@@ -3100,6 +3162,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         queue_supervisor_drainable,
         // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
         maintenance_mutated: false,
+        claimed_queue_heads,
         synced_queue_ids: vec![],
         warnings: vec![],
     })
@@ -5234,6 +5297,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                 queue_supervisor_drainable: false,
                 // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
                 maintenance_mutated: false,
+                claimed_queue_heads: vec![],
                 synced_queue_ids,
                 warnings: Vec::new(),
             });
@@ -5268,6 +5332,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                 queue_supervisor_drainable: false,
                 // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
                 maintenance_mutated: false,
+                claimed_queue_heads: vec![],
                 synced_queue_ids,
                 warnings: Vec::new(),
             });
@@ -5961,12 +6026,24 @@ pub fn run_queue_maintenance_with_coin_gate(
     // `#rt83`: supervisor-scope drainability (defers `[operator-verify]`/noise only).
     // Used to gate the preflight synthetic queue-head diff so an operator-verify-only
     // (or otherwise non-actionable) head stops perpetually reporting `no_changes:false`.
+    //
+    // `#explicitrunqueue`: claimed heads are excluded exactly as the read-only
+    // probe path and `queue_drainable_head_count` exclude them. A head a live
+    // subagent claimed is in flight elsewhere; counting it here made an explicit
+    // Run Agent Doc synthesize `+do [#id]` for the claimed head on every press,
+    // opening a no-op cycle that tripped `expect_done_or_gate_guard`.
     let queue_supervisor_drainable = activation.active
-        && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+        && agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
             &current_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            &claimed_queue_items,
         )
         .is_some();
+    let claimed_queue_heads = if activation.active && !claimed_queue_items.is_empty() {
+        claimed_queue_head_facts(file, &current_content)
+    } else {
+        Vec::new()
+    };
     // Publish the final authority frontier before worklist/selection facts.
     // Lifecycle persistence remains a projection Effect, not a maintenance
     // companion write.
@@ -6021,6 +6098,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         // the earlier stop-fence / time-gate returns exit before that persist, so
         // they report `false` and leave no plane split behind.
         maintenance_mutated: mutated,
+        claimed_queue_heads,
         synced_queue_ids,
         warnings: queue_warnings,
     })

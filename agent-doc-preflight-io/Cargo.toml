@@ -32,6 +32,7 @@ agent-doc-gc-io = { path = "../agent-doc-gc-io", version = "0.35.484" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.484" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.484" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.484" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.484" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.484" }
 agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.484" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.484" }

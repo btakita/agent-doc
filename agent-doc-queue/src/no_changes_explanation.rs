@@ -50,6 +50,17 @@ impl NoChangesReadSource {
     }
 }
 
+/// A live queue head an unexpired worker claim holds (`#explicitrunqueue`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimedQueueItemFact {
+    /// The queue head text, lifecycle markers stripped.
+    pub item: String,
+    /// The claim owner, e.g. `subagent:runctrlclaude`.
+    pub owner: String,
+    /// When the claim expires, ISO-8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`).
+    pub expires_at: String,
+}
+
 /// Facts the preflight already holds when it reports `no_changes`.
 #[derive(Debug, Clone, Copy)]
 pub struct NoChangesFacts<'a> {
@@ -59,6 +70,9 @@ pub struct NoChangesFacts<'a> {
     /// Whether the queue will run on its own: active, or deferred to a start
     /// time. Waiting items are only reported when it will not.
     pub queue_runs: bool,
+    /// Live heads a worker claim holds. They are in flight elsewhere, so a
+    /// running queue whose only heads are claimed has nothing for this session.
+    pub claimed_queue_items: &'a [ClaimedQueueItemFact],
 }
 
 /// Binary-authored explanation of a `no_changes` preflight.
@@ -69,6 +83,11 @@ pub struct NoChangesExplanation {
     /// stripped). They are why an operator may expect work that never starts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub waiting_queue_items: Vec<String>,
+    /// Queue heads held by a live worker claim (`#explicitrunqueue`): why an
+    /// explicit Run Agent Doc on a queue whose heads are all claimed opens no
+    /// cycle. Relay "claimed by <owner>, expires <t>" and leave the claim alone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claimed_queue_items: Vec<ClaimedQueueItemFact>,
     /// What to tell the operator. Relay this instead of improvising a cause.
     pub guidance: String,
 }
@@ -93,6 +112,28 @@ pub fn queue_item_texts(content: &str) -> Vec<String> {
             (!text.is_empty() && !text.starts_with("~~")).then(|| text.to_string())
         })
         .collect()
+}
+
+/// `#explicitrunqueue`: the non-error outcome for queue heads a live worker
+/// claim holds — `` `do [#id]` is claimed by <owner>, expires <t> `` — plus the
+/// instruction the mid-turn steering path already gives for a claimed item
+/// (`dispatch=forward_to_owner`): nothing to dispatch, do not re-claim.
+pub fn claimed_queue_guidance(claimed: &[ClaimedQueueItemFact]) -> String {
+    let listed = claimed
+        .iter()
+        .map(|fact| {
+            format!(
+                "`{}` is claimed by {}, expires {}",
+                fact.item, fact.owner, fact.expires_at
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!(
+        "Queue work is in flight elsewhere: {listed}. Nothing to dispatch in this session; \
+         do NOT respond to, re-dispatch, re-claim, or release a claimed item. It returns to \
+         the queue when its owner finishes or the claim expires."
+    )
 }
 
 /// Build the explanation for a `no_changes` preflight.
@@ -131,9 +172,17 @@ pub fn explain_no_changes(facts: NoChangesFacts<'_>) -> NoChangesExplanation {
             waiting_queue_items.len()
         ));
     }
+    let claimed_queue_items = facts.claimed_queue_items.to_vec();
+    if !claimed_queue_items.is_empty() {
+        guidance.push_str(&format!(
+            " {}",
+            claimed_queue_guidance(&claimed_queue_items)
+        ));
+    }
     NoChangesExplanation {
         read_source: facts.read_source,
         waiting_queue_items,
+        claimed_queue_items,
         guidance,
     }
 }
@@ -160,6 +209,7 @@ mod tests {
             read_source: NoChangesReadSource::LiveEditor,
             content: STOPPED_QUEUE_DOC,
             queue_runs: false,
+            claimed_queue_items: &[],
         });
         assert_eq!(explanation.read_source, NoChangesReadSource::LiveEditor);
         assert_eq!(explanation.waiting_queue_items, vec!["do [#lzwiremodel]"]);
@@ -184,6 +234,7 @@ mod tests {
             read_source: NoChangesReadSource::Disk,
             content: "no queue here\n",
             queue_runs: false,
+            claimed_queue_items: &[],
         });
         assert!(explanation.waiting_queue_items.is_empty());
         assert!(explanation.guidance.contains("saved to disk"));
@@ -196,9 +247,43 @@ mod tests {
             read_source: NoChangesReadSource::LiveEditor,
             content: STOPPED_QUEUE_DOC,
             queue_runs: true,
+            claimed_queue_items: &[],
         });
         assert!(explanation.waiting_queue_items.is_empty());
         assert!(!explanation.guidance.contains("agent:queue"));
+    }
+
+    /// `#explicitrunqueue`: an explicit Run Agent Doc whose only live head is
+    /// claimed by a subagent names the owner and expiry as a non-error outcome
+    /// and tells the agent to leave the claim alone.
+    #[test]
+    fn claimed_heads_are_named_with_owner_and_expiry() {
+        let claimed = [ClaimedQueueItemFact {
+            item: "do [#runctrlclaude]".to_string(),
+            owner: "subagent:runctrlclaude".to_string(),
+            expires_at: "2026-10-10T19:32:32Z".to_string(),
+        }];
+        let explanation = explain_no_changes(NoChangesFacts {
+            read_source: NoChangesReadSource::LiveEditor,
+            content: "<!-- agent:queue -->\n- do [#runctrlclaude]\n<!-- /agent:queue -->\n",
+            queue_runs: true,
+            claimed_queue_items: &claimed,
+        });
+        assert_eq!(explanation.claimed_queue_items, claimed.to_vec());
+        assert!(explanation.waiting_queue_items.is_empty());
+        assert!(
+            explanation.guidance.contains(
+                "`do [#runctrlclaude]` is claimed by subagent:runctrlclaude, expires 2026-10-10T19:32:32Z"
+            ),
+            "{}",
+            explanation.guidance
+        );
+        assert!(explanation.guidance.contains("Nothing to dispatch"));
+        let json = serde_json::to_value(&explanation).unwrap();
+        assert_eq!(
+            json["claimed_queue_items"][0]["owner"],
+            "subagent:runctrlclaude"
+        );
     }
 
     #[test]

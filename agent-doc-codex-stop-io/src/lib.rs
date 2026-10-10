@@ -1905,6 +1905,7 @@ fn try_recover_repeated_queue_head_response(
         .into_iter()
         .collect::<Vec<_>>();
 
+    stop_phase("repeated_queue_save_pending");
     agent_doc_repair_io::pending::save_pending(file, &response_to_write)?;
     agent_doc_ops_log_io::log_op(file, "codex_stop_repeated_queue_response_saved");
     let mut note = format!(
@@ -1912,6 +1913,7 @@ fn try_recover_repeated_queue_head_response(
         prompt
     );
 
+    stop_phase("repeated_queue_repair");
     let repair_outcome = agent_doc_repair_io::run_with_queue_completion_ids(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
@@ -1919,6 +1921,8 @@ fn try_recover_repeated_queue_head_response(
         file,
         &queue_completion_ids,
     )?;
+    // Repair wrote the document; the pre-repair memo is now stale.
+    invalidate_stop_document_cache();
     if repair_outcome.replayed_response() {
         note.push_str(" The response was written through the normal repair/write path.");
     } else if repair_outcome == agent_doc_turn::repair::RepairOutcome::AlreadyApplied {
@@ -1931,6 +1935,7 @@ fn try_recover_repeated_queue_head_response(
         });
     }
 
+    stop_phase("repeated_queue_consume_head");
     if active_auto_queue_prompt(file)?.as_deref() == Some(prompt) {
         match consume_recovered_queue_head(file, prompt, &queue_completion_ids) {
             Ok(Some(outcome)) => {
@@ -1958,10 +1963,11 @@ fn try_recover_repeated_queue_head_response(
         });
     }
 
+    stop_phase("repeated_queue_replay_receipt");
     if repair_outcome.replayed_response()
         && agent_doc_flow_io::closeout::replay_closeout_still_proven(
             file,
-            &current_document_content(file, "codex_stop_queue_replay_terminal_receipt")?,
+            &fresh_document_content(file, "codex_stop_queue_replay_terminal_receipt")?,
         )?
     {
         agent_doc_ops_log_io::log_op(
@@ -1970,6 +1976,7 @@ fn try_recover_repeated_queue_head_response(
         );
         return Ok(RepeatedQueueHeadRecovery::Recovered { note });
     }
+    stop_phase("repeated_queue_closeout");
     match agent_doc_closeout_runtime_io::complete_required_closeout(file, false) {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
@@ -2022,6 +2029,7 @@ fn tracked_repeated_queue_recovery_response(
     prompt: &str,
     note: String,
 ) -> Result<StopResponse> {
+    stop_phase("repeated_queue_next_head");
     let Some(next_prompt) = active_auto_queue_prompt(file)? else {
         park_state_across_roots(cleanup_roots, loaded_root, state)?;
         return Ok(StopResponse::Continue { continue_: true });
@@ -2488,6 +2496,8 @@ fn attempt_stop_closeout(
             return Ok(StopCloseAttempt::StillOpen { note });
         }
     };
+    // Repair wrote the document; the pre-repair memo is now stale.
+    invalidate_stop_document_cache();
     log_slow_stop_closeout_phase(file, "intent_repair", &mut phase_started);
     if repair_outcome.replayed_response() {
         note.push_str(" The hook replayed the response through the normal write path.");
@@ -2534,7 +2544,7 @@ fn attempt_stop_closeout(
     if repair_outcome.replayed_response()
         && agent_doc_flow_io::closeout::replay_closeout_still_proven(
             file,
-            &current_document_content(file, "codex_stop_replay_terminal_receipt")?,
+            &fresh_document_content(file, "codex_stop_replay_terminal_receipt")?,
         )?
     {
         agent_doc_ops_log_io::log_op(
@@ -2942,6 +2952,21 @@ fn resolve_document_content_uncached(file: &Path, source: &str) -> Result<String
             )
         },
     )
+}
+
+/// Re-resolve the document after this invocation may have written it.
+///
+/// Stale-memo receipt (stop-receipt-stale-memo): the strict replay receipt compares the CURRENT
+/// document against the hash its terminal closeout recorded. Both recovery
+/// paths memoize the document before repair (to classify the queue head), and
+/// repair then writes the response and commits it. Reading the receipt through
+/// the memo compared the pre-repair text against the post-commit hash, so the
+/// receipt never matched and every replay ran a second, redundant full
+/// closeout (commit authority + session-check, several seconds per pass and
+/// proportionally more under load) inside the Stop hook's wall-clock budget.
+fn fresh_document_content(file: &Path, source: &str) -> Result<String> {
+    invalidate_stop_document_cache();
+    current_document_content(file, source)
 }
 
 fn current_document_content(file: &Path, source: &str) -> Result<String> {
@@ -3412,6 +3437,61 @@ mod tests {
             "invalidation must force a re-materialization: {third}"
         );
         invalidate_stop_document_cache();
+    }
+
+    /// Stale-memo receipt: a terminal-receipt read must observe the document
+    /// the repair just wrote, not the pre-repair memo. Reading it through the
+    /// memo compared pre-repair text against the post-commit hash, so the strict
+    /// replay receipt never matched and the hook re-ran a full closeout.
+    #[test]
+    fn terminal_receipt_reads_bypass_the_pre_repair_memo() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("session.md");
+        std::fs::write(&doc, "---\nagent_doc_format: template\n---\n\nbefore\n").unwrap();
+
+        invalidate_stop_document_cache();
+        let before = current_document_content(&doc, "test_before_repair").unwrap();
+        assert!(before.contains("before"));
+
+        // Stand-in for the repair's write + commit.
+        std::fs::write(&doc, "---\nagent_doc_format: template\n---\n\nrepaired\n").unwrap();
+        let receipt = fresh_document_content(&doc, "test_terminal_receipt").unwrap();
+        assert!(
+            receipt.contains("repaired"),
+            "the terminal receipt must see the repaired document: {receipt}"
+        );
+        // The fresh read re-seeds the memo with the post-write content.
+        let after = current_document_content(&doc, "test_after_receipt").unwrap();
+        assert_eq!(after, receipt);
+        invalidate_stop_document_cache();
+    }
+
+    /// Both replay paths must drop the memo after repair and read the strict
+    /// replay receipt fresh.
+    #[test]
+    fn replay_paths_read_the_terminal_receipt_after_invalidating_the_memo() {
+        let source = include_str!("lib.rs");
+        for (function, receipt_source) in [
+            (
+                "fn try_recover_repeated_queue_head_response(",
+                "codex_stop_queue_replay_terminal_receipt",
+            ),
+            ("fn attempt_stop_closeout(", "codex_stop_replay_terminal_receipt"),
+        ] {
+            let body = source.split(function).nth(1).unwrap();
+            let body = &body[..body.find("\nfn ").unwrap()];
+            let repair = body
+                .find("run_with_queue_completion_ids(")
+                .expect("path runs repair");
+            let invalidate = body[repair..]
+                .find("invalidate_stop_document_cache();")
+                .map(|offset| repair + offset)
+                .expect("repair must drop the pre-repair memo");
+            let receipt = body
+                .find(&format!("fresh_document_content(file, \"{receipt_source}\")"))
+                .expect("terminal receipt must be read fresh");
+            assert!(invalidate < receipt, "{function} invalidates before the receipt");
+        }
     }
 
     struct EnvGuard {

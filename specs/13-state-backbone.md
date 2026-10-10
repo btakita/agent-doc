@@ -84,6 +84,19 @@ its own `execve`, and the settling process is what that `execve` produced. The
 stale row stays in the append-only log; the covering row after it settles the
 recycle on replay as well as live (`#fixruninfra`).
 
+The re-mint verifies against the controller's *live* projection, so that
+projection must never regress below a fact the controller already applied. The
+controller's durable reload (`refresh_memory`, run after external appends and
+before serving editor state) loads off every lock; an append that commits and
+applies during the load would otherwise be erased when the stale snapshot is
+swapped in (observed 2026-10-10 on `frontend.md`: `started-4351` applied, a
+racing reload restored `Requested@4350`, the settle minted `settled-4350`
+against it and read back `Settled`, and the ledger replayed `InFlight@4351`
+forever). Every controller-owned append+apply therefore holds the state-event
+ingress lock and bumps an apply generation; the reload publishes its swap under
+that lock and, when the generation moved during its unlocked load, reloads
+again under the lock before swapping (`#runfrontenddispatch`).
+
 Events must carry stable ids where available: document hash, session id, cycle
 id, actor generation, patch id, queue node key, backlog id, and causation id.
 The event log is append-only on the write path. Corrections are new events that

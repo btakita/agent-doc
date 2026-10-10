@@ -732,6 +732,31 @@ The exchange is 664 lines / 39 sections (warn). I'm not compacting while the que
 **Still running:** `dispatchreadyselfheal` and GH #232. Both are running `make check` in their own worktrees. `release + publish` stays claimed by the coordinator.
 
 **Next:** when the subagents report, I'll merge every ready branch into agent-doc `main` (`runfrontenddispatch` + `dispatchreadyselfheal`, #232, #233), run one `make check` and one `make install`, push, check that frontend.md dispatches, close the items and GH issues, and cut 0.35.483.
+
+### Re: grokbuildaccount dispatched — batch 0.35.483 under make check — opus-5.5 · 2026-10-10T02:37-04:00
+
+> **Queue prompt:** do [#runfrontenddispatch]
+
+**Deferred:** `runfrontenddispatch` is now in the integration batch, and the batch `make check` is still running.
+
+**Sent to a background subagent (claimed `subagent:grok`): `grokbuildaccount`.** The question is whether agent-doc supports Grok Build now that your account is attached. The subagent will:
+- summarize what is supported today (harness detection, `skill install --harness grok`, MCP admit/read/plan/finalize, steering polling, queue continuation)
+- check whether `grok` is signed in
+- if it is, run the `#grokmcpverify` live proof against a throwaway scratch document, not this one. That review item has been blocked since 2026-09-30 only on Grok being signed out.
+
+You get the answer, and a verdict on whether `#grokmcpverify` can close, when it reports.
+
+**All subagents have reported, and all four fixes are on pushed branches.** They are merged without conflicts onto `origin/main` (v0.35.482) in `agent-doc-wt/batch-0483`:
+- `runfrontenddispatch`, `3d9fbad86`: a durable reload no longer regresses an applied recycle fact.
+- `dispatchreadyselfheal`, `81b9e1910`: the dispatch-only gate proceeds when the supervisor registered ready after the recycle start. A new `ready_registered_at` stamp drives this, and the controller re-mints the settle at the in-flight epoch.
+- GH #232, `97e659bef`: the clear guard reads the supervisor's `harness_turn_live` evidence (the turn lease or a running dispatch receipt). While a turn is live it refuses or defers, never projects `ready`, and never types `/clear`.
+- GH #233, `fb7b4242e`: on an unsupported JetBrains build, `upgrade` leaves the plugin in place, prints one warning and exits 0. The `stale_plugin` advice is fixed too.
+
+Each branch passed `make check` in its own worktree. #232's run had 2 load-timing failures in the untouched `agent-doc-write-runtime-io` poll tests, which passed when rerun alone. The batch `make check` is the authoritative gate.
+
+**Next:** if the batch is green, `make install` and push `main`. Then check that Run Agent Doc on frontend.md dispatches. The frontend supervisor must re-register first: its registration predates the new column, so it has no `ready_registered_at` stamp yet. Then close the four items and #232 / #233 (#232 closes itself via `Fixes #232`), and cut 0.35.483.
+
+I refreshed the coordinator claims; the `runfrontenddispatch` claim had passed its 2-hour TTL.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -740,19 +765,21 @@ The exchange is 664 lines / 39 sections (warn). I'm not compacting while the que
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#grokbuildaccount]
 - ⏭️ do [#runfrontenddispatch]
 - ⏭️ do [#dispatchreadyselfhealdis]
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/231~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/232
-- #gh-fix https://github.com/btakita/agent-doc/issues/233
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/233
 - 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#grokbuildaccount] I have my grok build account attached. Does agent-doc current support grok build?
 - [ ] 🚧 [#dispatchreadyselfhealdis] dispatchreadyselfheal [agent-doc] Dispatch-only recycle gate self-heal: agent-doc-route-io/src/dispatch_only/proof.rs refuses with recycle_ttl_elapsed_supervisor_alive whenever an InFlight recycle is past TTL and the supervisor is alive, even when that supervisor registered state=ready AFTER the recycle start (frontend.md in haiven-dev: started 4351 at 02:00:14Z, ready 02:00:18Z, settled written at stale 4350, refused for hours). Treat ready-after-start as settled (and re-mint the settle at the in-flight epoch), with regression coverage; then confirm Run Agent Doc on frontend.md dispatches. Ship together with fix/runfrontenddispatch 3d9fbad86.
-- [ ] 🚧 [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
+- [ ] [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
 <!-- /agent:backlog -->
 
 ## Review

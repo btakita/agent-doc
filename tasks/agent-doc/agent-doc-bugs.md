@@ -62,6 +62,12 @@ No new backlog follow-ups this cycle. Both items are already tracked: one by its
 `#runctrlclaude` is already claimed by `subagent:runctrlclaude`, which is working in `~/work/btakita/agent-doc-wt/runctrlclaude` on `fix/runctrlclaude`. This cycle does no inline work on it, to avoid two agents touching the same fix. The item stays open until the subagent reports back. Then the coordinator merges the branch, runs one `make install`, releases the claim, and records `--done`. The thrash item is also still in flight, under `subagent:supthrash`.
 
 This re-trigger produced no new follow-ups.
+
+### Re: `#runctrlclaude` pressed again — still in flight — opus-5-5 · 2026-10-10T13:39-04:00
+
+According to ops.log, this cycle came from an explicit Run Agent Doc (`explicit_route=true`), not the supervisor. The head still belongs to `subagent:runctrlclaude`, and its claim runs until 1791660752, about two hours out. That subagent is in the middle of the fix on `fix/runctrlclaude`, so this cycle does no inline work on it. The item closes after the coordinator merges that branch and runs `make install`.
+
+Each press still opens a full no-op cycle, even though zero heads are drainable. I've filed that as a separate backlog follow-up: route/preflight should report which subagent owns the claimed head and when the claim expires, without opening a cycle.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -77,6 +83,7 @@ This re-trigger produced no new follow-ups.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#explicitrunqueue] Explicit Run Agent Doc on a queue head that is claimed by a live subagent (agent-doc queue claims shows an unexpired owner) still admits a full cycle with queue_drainable_head_count=0, so each press commits a no-op in-flight response and trips expect_done_or_gate_guard. The route/preflight should answer 'claimed by <owner>, expires <t>' without opening a cycle. Repro: 2026-10-10 17:34Z, ops.log preflight_turn_admission explicit_route=true for the claimed #runctrlclaude.
 - [ ] 🚧 [#runctrlclaude] Run Agent Doc, then ctrl+c in Claude Code: Clear Session Context was wedged. After manually running `/clear` in Claude Code, Run Agent Doc is wedged: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "Several agent-doc processes have been background thrashing over the past few hours. Please fix agent-doc causes. Use formal logic to ensure proper cleanup happens for old supervisors." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
 <!-- /agent:backlog -->
 

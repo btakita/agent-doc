@@ -174,6 +174,12 @@ Add `release + publish` to the queue, or answer here, and I'll run the release i
 | `#testisolationtests` | `subagent:testisolation` | Add a project-root ceiling (like `GIT_CEILING_DIRECTORIES`) under test and a harness guard against a TMPDIR with an `.agent-doc` ancestor. It also inventories what test runs wrote into `~/.agent-doc`, as a cleanup plan for your approval. It does not scrub anything. |
 
 Both finished after the 0.35.485 batch boundary, so they go into the next release.
+
+### Re: `#testisolationtests` re-trigger — in flight — opus-5-5 · 2026-10-10T16:55-04:00
+
+`#testisolationtests` is already claimed by `subagent:testisolation`, so this cycle does no inline work on it. This empty cycle is the `#explicitrunqueue` defect showing up again: a claimed head still opens a no-op cycle. The fix is in the pending 0.35.485 batch, and the full `make check` on that batch is still running. Once it's installed, a claimed head reports its owner instead of opening a cycle.
+
+The exchange is now 143 lines across 9 response sections. I'm not compacting, because the queue is active.
 <!-- agent:boundary:eea96e0d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -182,11 +188,11 @@ Both finished after the 0.35.485 batch boundary, so they go into the next releas
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#testisolationtests]
+- 🚧 do [#testisolationtests]
 - ⏭️ do [#runfrontendcrashed]
 - ⏭️ do [#runfrontenderror]
 - ~~do [#runctrlclaude]~~
-- 🚧 do [#explicitrunqueue]
+- ⏭️ do [#explicitrunqueue]
 - 🚧 do [#freetextqueue]
 - 🚧 Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.
 - 🚧 #gt-fix https://github.com/btakita/agent-doc/issues/234
@@ -196,7 +202,7 @@ Both finished after the 0.35.485 batch boundary, so they go into the next releas
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#testisolationtests] Test isolation: agent-doc tests whose TMPDIR sits under $HOME walk up past their tempdir, adopt /home/brian/.agent-doc as the project root, and write the operator's real ~/.agent-doc/state.db, ops.log, proof-ledger and snapshots, and spawn controllers with --project-root /home/brian (seen 2026-10-10: 'failed to save registry to /home/brian/.agent-doc/state.db: database is locked', a leaked test controller, and subagent scratch paths in ~/.agent-doc/logs/ops.log). Project-root discovery under test must stop at a ceiling (the test tempdir / an AGENT_DOC_ROOT_CEILING like GIT_CEILING_DIRECTORIES), and the test harness must refuse a TMPDIR that has an .agent-doc ancestor. Then scrub the test-written entries from ~/.agent-doc with the operator's OK.
+- [ ] 🚧 [#testisolationtests] Test isolation: agent-doc tests whose TMPDIR sits under $HOME walk up past their tempdir, adopt /home/brian/.agent-doc as the project root, and write the operator's real ~/.agent-doc/state.db, ops.log, proof-ledger and snapshots, and spawn controllers with --project-root /home/brian (seen 2026-10-10: 'failed to save registry to /home/brian/.agent-doc/state.db: database is locked', a leaked test controller, and subagent scratch paths in ~/.agent-doc/logs/ops.log). Project-root discovery under test must stop at a ceiling (the test tempdir / an AGENT_DOC_ROOT_CEILING like GIT_CEILING_DIRECTORIES), and the test harness must refuse a TMPDIR that has an .agent-doc ancestor. Then scrub the test-written entries from ~/.agent-doc with the operator's OK.
 - [ ] 🚧 [#runfrontendcrashed] Run Agent Doc on frontend.md crashed my Claude Code session and unsuccessfully restarted. The raw prompt was the end state. The terminal formatting is also messed up ![img_3.png](img_3.png).
 - [ ] 🚧 [#freetextqueue] Free-text queue head wrongly auto-struck by #qftbklgstrike: the supervisor-thrash queue line was struck as 'tracked by backlog #runctrlclaude' only because #runctrlclaude's backlog text QUOTES that line (inside the route error message), even though the two are different defects and the thrash fix was still in flight under its own claim (subagent:supthrash). Containment of a head's text inside an unrelated backlog item's prose must not count as tracking; require an exact promotion lineage/receipt. 2026-10-10 ~17:45Z, agent-doc-bugs.md.
 - [ ] 🚧 [#runfrontenderror] Run Agent Doc on frontend.md error: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle

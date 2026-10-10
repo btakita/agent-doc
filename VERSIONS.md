@@ -2,6 +2,36 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.482
+
+v0.35.481 was tagged but never published (its Release run failed before the release job), so this is the first
+published release carrying the 0.35.481 notes below.
+
+- **Release workflow builds the exact-262 plugin again (`#relcimavenlocal`).** The tag's `plugins` job now publishes
+  the pinned lazily-kt release to mavenLocal before the JetBrains 262 build, through the same
+  `scripts/publish-pinned-lazily-kt.sh` that CI uses. A `check_plugin_versions` self-test guard fails if either
+  workflow drops the step or runs it after the 262 build.
+- **Claimed queue heads strike only on an exact agent echo (`#ftstrikeclaimedmention`).** A status response that
+  merely mentions a claimed free-text head, quotes its shared preset body, or names it in a heading no longer
+  strikes it, and the leading-head consume never takes or synthesizes an echo for a claimed head
+  (`queue_consume_refused_claimed_head`). Preset heads also require their own argument (for example the issue URL)
+  in the response. An exact, undeferred `> **Queue prompt:**` echo still strikes a claimed head and releases its
+  claim (`#claimstrike`).
+- **One layout owner per shared tmux main window (`#crossrootcolumnflip`).** When nested project controllers
+  (for example agent-loop and haiven-dev) share a main window, the outermost root's controller publishes the layout;
+  a nested controller hands its route layout over through `editor_route_layout` instead of publishing a competing
+  generation, so a column no longer flips between documents after an IDE restart.
+- **Interrupted turns no longer pin the live-turn lease (`#staleharnessturnlive`).** Claude Code skips the Stop hook
+  on an operator interrupt, which left `harness_turn_live=true` on an idle pane and blocked recycle/reclaim. The
+  lease now records its transcript and is retired when the transcript's newest record is that turn's interrupt.
+- **Accurate 262 upgrade refusal and probes (`#jb262dynupgrade`).** Updating a running IDE with the exact-262
+  modular package reports that it has no restart-free entry point (`declined_by=modular_package`) instead of the
+  misleading "predates" warning, and the running-IDE jar probes recognise both `agent-doc-jetbrains-<v>.jar` and the
+  262 `agent.doc-<v>.jar`.
+- **JetBrains 262 preview re-pinned (`#previewrepin`).** The preview provenance manifest now pins
+  `jetbrains-262-preview-34842a2`, and the verifier accepts a newer PR head only when the diff since the pin touches
+  the pin files alone.
+
 ## 0.35.481
 
 - **Exact-262 modular JetBrains plugin with isolated detached views (GH #218, GH #221, PR #222).** A new

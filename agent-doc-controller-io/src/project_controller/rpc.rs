@@ -383,6 +383,27 @@ fn editor_surface_client_family(client_id: &str) -> Option<&str> {
     (!family.is_empty() && !process_id.is_empty()).then_some(family)
 }
 
+/// Whether a family retirement requested by `requester` may retire a retained
+/// observation of `retained` (`#idearidereditors`).
+///
+/// A family names one editor *installation*, not one editor brand: the
+/// JetBrains plugin publishes `jetbrains@<product>.<config-hash>-pid:<pid>`, so
+/// a restarted IntelliJ IDEA retires its own dead predecessor while a
+/// concurrently running Rider (or a second IDE install) on the same project
+/// keeps its own subscription. A legacy unscoped family (`jetbrains-pid:` from
+/// a pre-`#idearidereditors` plugin) is the predecessor of every scoped family
+/// on the same lane, so an upgraded JVM still retires the surface its
+/// pre-upgrade self left behind.
+fn editor_surface_family_retires(requester: &str, retained: &str) -> bool {
+    if requester == retained {
+        return true;
+    }
+    match (requester.split_once('@'), retained.contains('@')) {
+        (Some((lane, _installation)), false) => lane == retained,
+        _ => false,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentPathTransitionObservation {
     pub transition_id: String,
@@ -715,7 +736,9 @@ impl ControllerEditorSurfaceGraph {
             if root != project_root
                 || current.retired
                 || current.generation > generation
-                || editor_surface_client_family(retained_client_id) != Some(client_family)
+                || !editor_surface_client_family(retained_client_id).is_some_and(
+                    |retained_family| editor_surface_family_retires(client_family, retained_family),
+                )
             {
                 continue;
             }
@@ -34703,6 +34726,74 @@ mod tests {
                 ("vscode-pid:51".to_string(), 10, 1),
             ],
         );
+    }
+
+    #[test]
+    fn concurrent_jetbrains_installations_keep_independent_surface_families() {
+        // `#idearidereditors`: IntelliJ IDEA and Rider open on one project are
+        // two concurrent editors, not a JVM and its replacement. Rider moving
+        // its own focus off a root (or closing) must not permanently silence
+        // IDEA's subscription on that root.
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(|_, _| Ok("recorded".to_string())));
+        let root = Path::new("/project");
+        let observe = |client_id: &str, generation, sequence, file: &str| {
+            graph
+                .observe(
+                    &scope,
+                    root,
+                    EditorSurfaceObservation {
+                        client_id: client_id.to_string(),
+                        surface_id: "project".to_string(),
+                        generation,
+                        sequence,
+                        surface: test_editor_surface(file),
+                    },
+                    None,
+                )
+                .0
+        };
+        let idea = "jetbrains@IU.0a1b2c3d-pid:41";
+        let rider = "jetbrains@RD.9f8e7d6c-pid:42";
+        let legacy = "jetbrains-pid:40";
+
+        assert!(observe(legacy, 90, 1, "/project/legacy.md"));
+        assert!(observe(idea, 100, 1, "/project/idea.md"));
+        assert!(observe(rider, 101, 1, "/project/rider.md"));
+        assert_eq!(
+            graph.forget_client_family(root, rider, 101),
+            2,
+            "Rider retires its own observation and the legacy unscoped predecessor only",
+        );
+        assert_eq!(
+            graph.active_observation_generations(root),
+            vec![(idea.to_string(), 100, 1)],
+            "a newer concurrent installation must not retire IDEA's live subscription",
+        );
+        assert!(
+            observe(idea, 100, 2, "/project/idea-next.md"),
+            "IDEA keeps publishing after Rider leaves the root",
+        );
+
+        let restarted_idea = "jetbrains@IU.0a1b2c3d-pid:43";
+        assert_eq!(
+            graph.forget_client_family(root, restarted_idea, 102),
+            1,
+            "a restart of the same installation still retires its predecessor",
+        );
+        assert!(graph.active_observation_generations(root).is_empty());
+        assert!(
+            !editor_surface_family_retires("jetbrains-focus@IU.0a1b2c3d", "jetbrains"),
+            "a scoped focus lane never retires the legacy surface lane",
+        );
+        assert!(editor_surface_family_retires(
+            "jetbrains-focus@IU.0a1b2c3d",
+            "jetbrains-focus"
+        ));
+        assert!(!editor_surface_family_retires(
+            "jetbrains",
+            "jetbrains@IU.0a1b2c3d"
+        ));
     }
 
     #[test]

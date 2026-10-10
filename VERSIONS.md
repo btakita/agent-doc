@@ -2,6 +2,26 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.483
+
+- **Durable reload never regresses an applied recycle fact (`#runfrontenddispatch`).** A controller reload that ran
+  without the lock could overwrite a just-recorded recycle start, so the supervisor's settle landed at the stale
+  epoch and the dispatch-only gate refused `Run Agent Doc` for hours (`recycle_ttl_elapsed_supervisor_alive`). The
+  reload now keeps any newer applied recycle fact.
+- **Dispatch-only recycle gate self-heals on ready-after-start (`#dispatchreadyselfheal`).** Supervisors record
+  `ready_registered_at` when they register `state=ready`. When that stamp is strictly later than an in-flight
+  recycle's start, the gate proceeds and the controller re-mints the settle at exactly the in-flight epoch
+  (`reason=dispatch_ready_after_start`), so an already-wedged ledger heals without a session restart.
+- **Clear Session Context respects a live turn (GH #232).** The operator guard now reads the supervisor's own
+  live-turn evidence (the harness turn-active lease or an unsettled running dispatch receipt) before sending any
+  input. While a turn is live it refuses with `unblocker=clear_queued_behind_busy_turn` (or defers under an active
+  auto-queue loop), never projects `state=ready reason=live_pane_idle`, never releases the dispatch in-flight
+  marker, and never types `/clear` into the busy harness.
+- **Unsupported JetBrains builds are not install failures (GH #233).** When a target's platform build is outside
+  every published package range (for example 263), `agent-doc upgrade` leaves the installed plugin in place, prints
+  one warning naming the build, the supported ranges and the plugin left installed, and exits 0. `plugin install`
+  and the `stale_plugin` preflight warning no longer prescribe remedies that cannot succeed.
+
 ## 0.35.482
 
 v0.35.481 was tagged but never published (its Release run failed before the release job), so this is the first

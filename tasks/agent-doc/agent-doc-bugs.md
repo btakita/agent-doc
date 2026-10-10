@@ -152,7 +152,7 @@ Two steps were needed to get there:
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#runfrontendcrashed]
 - ⏭️ do [#runfrontenderror]
-- ⏭️ do [#runctrlclaude]
+- ~~⏭️ do [#runctrlclaude]~~
 - 🚧 do [#explicitrunqueue]
 - 🚧 do [#freetextqueue]
 - 🚧 Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.

@@ -12117,7 +12117,6 @@ mod tests {
         initial_delay: std::time::Duration,
     ) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
-            let started = std::time::Instant::now();
             std::thread::sleep(initial_delay);
             let mut projected = 0usize;
             loop {
@@ -12151,10 +12150,12 @@ mod tests {
                         return;
                     }
                 }
-                assert!(
-                    started.elapsed() < std::time::Duration::from_secs(3),
-                    "timed out waiting for CRDT delivery"
-                );
+                // Wait for the delivery EVENT (an update
+                // in the replica queue), never a wall clock. A 3s deadline here
+                // fired on a loaded host before the foreground write had even
+                // submitted, panicked the simulated editor, and the foreground
+                // then failed for want of the ack. A genuine hang is still
+                // named by nextest's per-test terminate-after guard.
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
         })
@@ -13746,7 +13747,6 @@ mod tests {
         let race_response_target = response_target.clone();
         let race_operator_cut = operator_cut.clone();
         let race = std::thread::spawn(move || {
-            let started = std::time::Instant::now();
             loop {
                 let pull = test_support_pull_replica_updates_for_file(&race_file, identity)
                     .expect("pull repair delivery")
@@ -13765,10 +13765,8 @@ mod tests {
                     .unwrap();
                     return;
                 }
-                assert!(
-                    started.elapsed() < std::time::Duration::from_secs(3),
-                    "timed out waiting for the repair delivery race"
-                );
+                // Wait for the delivery event, not a
+                // wall clock (see `project_crdt_deliveries`).
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
         });

@@ -6676,6 +6676,10 @@ mod tests {
         .unwrap();
         std::fs::write(&doc, "doc\n").unwrap();
         agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
+        // Hermetic: never scan the operator's real `~/.codex/sessions`.
+        let _codex_home = agent_doc_codex_hook_io::override_codex_home_for_current_thread(
+            &dir.path().join("codex-home"),
+        );
 
         let head = "ordinary queue head";
         let reason = agent_doc_codex_hook_io::codex_queue_context_reset_reason(&doc, None)

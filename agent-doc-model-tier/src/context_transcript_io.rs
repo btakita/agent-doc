@@ -82,9 +82,19 @@ pub fn latest_claude_transcript(projects_subdir: &Path) -> Option<PathBuf> {
     newest.map(|(_, path)| path)
 }
 
+/// Only the leading records can carry `session_meta` (the parser scans the
+/// first 20 lines), so read just those instead of the whole transcript: a
+/// rollout file grows to many MB, and the locator visits every one under
+/// `~/.codex/sessions` (thousands of files, GBs) on each opted-in Stop hook.
 fn codex_session_meta_cwd_from_file(path: &Path) -> Option<PathBuf> {
-    let content = std::fs::read_to_string(path).ok()?;
-    parse_codex_jsonl_session_meta_cwd(&content)
+    use std::io::BufRead;
+    let reader = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    let mut head = String::new();
+    for line in reader.lines().take(20) {
+        head.push_str(&line.ok()?);
+        head.push('\n');
+    }
+    parse_codex_jsonl_session_meta_cwd(&head)
 }
 
 fn path_matches_project_dir(path: &Path, project_dir: &Path) -> bool {
@@ -286,5 +296,26 @@ mod tests {
         .unwrap();
 
         assert_eq!(latest_codex_transcript(home.path(), &project), Some(newer));
+    }
+
+    /// The session-meta probe reads only the leading records. Bytes past them
+    /// (a multi-MB transcript tail, or a torn/non-UTF-8 write in progress)
+    /// are never read, so they can neither slow the locator nor hide the cwd.
+    #[test]
+    fn codex_session_meta_cwd_reads_only_the_leading_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout-x.jsonl");
+        let mut bytes =
+            b"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/tmp/proj\"}}\n".to_vec();
+        for _ in 0..25 {
+            bytes.extend_from_slice(b"{\"type\":\"event_msg\"}\n");
+        }
+        bytes.extend_from_slice(&[0xff, 0xfe, b'\n']);
+        std::fs::write(&path, bytes).unwrap();
+
+        assert_eq!(
+            codex_session_meta_cwd_from_file(&path),
+            Some(PathBuf::from("/tmp/proj"))
+        );
     }
 }

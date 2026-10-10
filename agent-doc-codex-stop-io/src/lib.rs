@@ -3414,33 +3414,20 @@ mod tests {
         invalidate_stop_document_cache();
     }
 
-    struct EnvGuard {
-        key: &'static str,
-        old: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: &Path) -> Self {
-            let old = std::env::var_os(key);
-            unsafe { std::env::set_var(key, value) };
-            Self { key, old }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            if let Some(value) = self.old.as_ref() {
-                unsafe { std::env::set_var(self.key, value) };
-            } else {
-                unsafe { std::env::remove_var(self.key) };
-            }
-        }
-    }
-
     fn setup_project() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+        // Hermetic Codex transcript lookup: an opted-in Stop hook scans
+        // `<home>/.codex/sessions`, and the operator's real one (GBs, thousands
+        // of rollouts) made these tests take minutes and time out under load.
+        // Thread-scoped (libtest runs each test on its own thread), so no
+        // process-wide `HOME` mutation races parallel tests.
+        std::mem::forget(
+            agent_doc_codex_hook_io::override_codex_home_for_current_thread(
+                &dir.path().join("codex-home"),
+            ),
+        );
         dir
     }
 
@@ -6903,7 +6890,8 @@ Reviewed the gated items.\n\
         )
         .unwrap();
         let home = tempfile::tempdir().unwrap();
-        let _home_guard = EnvGuard::set("HOME", home.path());
+        let _home_guard =
+            agent_doc_codex_hook_io::override_codex_home_for_current_thread(home.path());
         let sessions = home
             .path()
             .join(".codex")

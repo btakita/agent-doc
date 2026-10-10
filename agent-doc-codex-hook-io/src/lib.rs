@@ -802,10 +802,44 @@ pub fn is_context_clear_prompt(prompt: &str) -> bool {
     agent_doc_queue::queue_command::is_context_clear_command(prompt)
 }
 
+thread_local! {
+    static CODEX_HOME_OVERRIDE: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Restores the previous thread-scoped Codex home on drop.
+#[doc(hidden)]
+pub struct CodexHomeOverrideGuard(Option<std::path::PathBuf>);
+
+impl Drop for CodexHomeOverrideGuard {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        CODEX_HOME_OVERRIDE.with(|cell| *cell.borrow_mut() = previous);
+    }
+}
+
+/// Test seam: resolve the Codex transcript home (`<home>/.codex/sessions`)
+/// from `home` instead of `$HOME`, for the CURRENT THREAD only. Tests must
+/// never scan the operator's real `~/.codex/sessions` (14 GB / ~8k transcripts
+/// on the dev box made every opted-in Stop-hook test take minutes and time out
+/// under load), and mutating process-wide `HOME` races parallel test threads.
+#[doc(hidden)]
+pub fn override_codex_home_for_current_thread(home: &Path) -> CodexHomeOverrideGuard {
+    let previous = CODEX_HOME_OVERRIDE.with(|cell| cell.replace(Some(home.to_path_buf())));
+    CodexHomeOverrideGuard(previous)
+}
+
 /// `#clearcodex`: resolve the Codex Stop-hook continuation context-reset reason
 /// and emit the structured proof lines an operator greps for in ops.log.
 pub fn codex_live_context_pct(file: &Path) -> Option<f64> {
-    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
+    let home = CODEX_HOME_OVERRIDE
+        .with(|cell| cell.borrow().clone())
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|h| !h.is_empty())
+                .map(std::path::PathBuf::from)
+        })?;
     let project_dir = project_roots_for(file)
         .into_iter()
         .next()

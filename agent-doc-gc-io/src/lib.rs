@@ -971,15 +971,11 @@ fn clean_orphaned_handoff_sockets(agent_doc_dir: &Path, dry_run: bool) -> Result
             Some(n) => n.to_string_lossy(),
             None => continue,
         };
-        // `controller-handoff-<pid>-<seq>.sock`
-        let Some(rest) = file_name
-            .strip_prefix("controller-handoff-")
-            .and_then(|r| r.strip_suffix(".sock"))
+        // `controller-handoff-<pid>-<seq>.sock`, or its compact
+        // `h<pid36><seq36>.sock` form under a long root (`#handoffsockcompact`).
+        let Some((pid, _generation)) =
+            agent_doc_controller::paths::parse_handoff_socket_file_name(&file_name)
         else {
-            continue;
-        };
-        // `<pid>` is the first `-`-separated numeric field.
-        let Some(pid) = rest.split('-').next().and_then(|p| p.parse::<u32>().ok()) else {
             continue;
         };
         if pid_alive(pid) {
@@ -1086,6 +1082,42 @@ mod tests {
         assert!(!dead.exists(), "dead-PID handoff socket must be removed");
         assert!(live.exists(), "live-PID handoff socket must be preserved");
         assert!(other.exists(), "unrelated files must be ignored");
+    }
+
+    /// `#handoffsockcompact`: under a long root the handoff socket uses the
+    /// compact `h<pid36><gen36>.sock` name; the reaper must recognise it too, or
+    /// a leaked compact socket would never be reclaimed.
+    #[test]
+    fn clean_orphaned_handoff_sockets_reaps_compact_names() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(&agent_doc_dir).unwrap();
+        let compact = |pid: u32, generation: u64| {
+            let long_root = std::path::PathBuf::from(format!("/{}", "r".repeat(75)));
+            agent_doc_controller::paths::handoff_socket_path(&long_root, pid, generation)
+                .file_name()
+                .unwrap()
+                .to_owned()
+        };
+        // PID_MAX_LIMIT on Linux; never a live process.
+        let dead = agent_doc_dir.join(compact(4_194_304, 9));
+        let live = agent_doc_dir.join(compact(std::process::id(), 3));
+        assert!(
+            dead.file_name().unwrap().to_string_lossy().starts_with('h'),
+            "the long root must select the compact form: {}",
+            dead.display()
+        );
+        std::fs::write(&dead, "").unwrap();
+        std::fs::write(&live, "").unwrap();
+        let unrelated = agent_doc_dir.join("hooks");
+        std::fs::create_dir_all(&unrelated).unwrap();
+
+        let (deleted, kept) = clean_orphaned_handoff_sockets(&agent_doc_dir, false).unwrap();
+
+        assert_eq!((deleted, kept), (1, 1));
+        assert!(!dead.exists());
+        assert!(live.exists());
+        assert!(unrelated.exists());
     }
 
     #[test]

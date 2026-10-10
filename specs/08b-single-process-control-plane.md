@@ -496,6 +496,79 @@ deterministic tests.
 - Actor state transitions are append-only facts in `actor_transitions`; current
   rows are materialized views over those facts for fast reads.
 
+## Controller process lifecycle
+
+`#supthrash`. The invariants above govern document actors; this section governs
+the controller PROCESSES that host them. Model:
+`formal/tla/ControllerLifecycle.tla` (checked by `make tla`, with one wedge
+config per guard). Pure decisions: `agent_doc_controller::recycle`
+(`idle_controller_should_retire`, `live_owned_document_count`,
+`HandoffRetryBackoff`); handoff socket naming: `agent_doc_controller::paths`.
+
+State machine, per project root (`launch_mode = lazy`):
+
+```text
+            first client (lazy launch)
+  Absent ─────────────────────────────▶ Stable(current binary)
+    ▲                                     │  install replaces the binary
+    │ retire: Idle ∧ quiet ≥ 30 min       ▼
+    ├──────────────────────────────── Stale(superseded binary)
+    │ retire: Idle ∧ quiet ≥ 60 s         │
+    │                                     │ ¬Idle ∧ may_attempt(now)
+    │                                     ▼
+    │                                 HandingOff ── promoted ──▶ Stable (successor)
+    │                                     │
+    │                                     │ failed: variant += 1
+    │                                     ├── RetryAfter(min(5 s·2ⁿ⁻¹, 10 min)) ─▶ Stale
+    │                                     └── Abandon (permanent ∨ n = 6) ─▶ Stable*(keeps
+    │                                                 serving; target declined)
+    └──────────────── retire (idle tick) ◀──────────────────────────────────┘
+```
+
+`Idle(root) ≜ live_editor_endpoints = 0 ∧ open_supervisors = 0 ∧
+active_clients = 0 ∧ live_owned_documents = 0`, where
+`live_owned_documents` counts actor rows whose state is not `closed`
+(`None`, an unreadable store, is never idle). A `managed` controller belongs to
+its launcher and never self-retires.
+
+Invariants:
+
+- **L1 — one public controller per root.** Only a promoted controller owns
+  `<root>/.agent-doc/controller.sock`; a replacement serves on its private
+  handoff socket until promotion renames it over the public path (existing
+  `#stuckhandoff2` watchdog and handoff tests).
+- **L2 — idle roots are reclaimed in bounded time.** A lazy controller whose
+  root is `Idle` reaches `Absent` within the quiet window plus one probe interval
+  (60 s), on a stale binary OR on the current one. `closed` actor rows are
+  history and never count as ownership. Violated before `#supthrash`: `$HOME`
+  reached controller generation 175 and `agent-loop/.agent-doc` generation 361 —
+  every install handed an idle controller off to another idle controller because
+  their `closed` rows counted as owned documents, and nothing retired a
+  current-binary controller at all.
+- **L3 — never retire in use.** No retire edge fires while any conjunct of
+  `Idle` is false; an in-flight RPC blocks before any evidence is probed.
+- **L4 — every retry loop has a variant.** A failed self-handoff advances
+  `(target identity, consecutive_failures)`: each failure doubles the delay
+  (capped at 10 min) and the count is bounded by 6, after which — or immediately
+  for a permanent failure such as a `sun_path` overflow — the controller abandons
+  the request, declines the current on-disk identity, and keeps serving. A
+  success, a further install, or an explicit operator request resets it.
+  Violated before `#supthrash`: 104,411 failed handoffs in six days on
+  `editors/jetbrains`, and one spawned-and-immediately-dead replacement process
+  every ~5 s on `monsterrodholders-dev`.
+- **L5 — a handoff socket fits whenever the public socket fits.** The private
+  socket is `controller-handoff-<pid>-<gen>.sock` when that fits `sun_path`,
+  otherwise the same-directory compact `h<pid:5 base36><gen base36>.sock`, which
+  for every Linux pid and generation < 36⁴ is no longer than `controller.sock`.
+  `agent-doc gc` reaps both forms by embedded pid.
+
+Known open hazard (not changed by `#supthrash`): a route-owned supervisor on a
+superseded binary defers its re-exec until a turn boundary
+(`supervisor_binary_stale_recycle_deferred reason=await_turn_boundary`). If the
+turn never closes, the deferral is unbounded — a supervisor on 0.35.460 was
+observed still deferring on 2026-10-10. Bounding it requires a turn-level
+timeout and is tracked separately.
+
 ## Dispatch API
 
 The dispatch actor exposes a small real-time API:

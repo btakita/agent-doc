@@ -1128,6 +1128,7 @@ dependencies = [
 name = "agent-doc-gc-io"
 version = "0.35.483"
 dependencies = [
+ "agent-doc-controller",
  "agent-doc-fs",
  "agent-doc-git-io",
  "agent-doc-project-root-io",

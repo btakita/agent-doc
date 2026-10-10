@@ -7595,6 +7595,15 @@ impl ControllerRuntime {
         self.recycle_forced.load(Ordering::SeqCst)
     }
 
+    /// `#supthrash` L4 — a self-handoff that cannot make progress drops every
+    /// pending recycle request so the serve loop stops re-attempting it. A
+    /// further operator request or install re-arms it.
+    fn abandon_recycle_request(&self) {
+        self.recycle_requested.store(false, Ordering::SeqCst);
+        self.recycle_forced.store(false, Ordering::SeqCst);
+        self.recycle_urgent.store(false, Ordering::SeqCst);
+    }
+
     fn recycle_declined_target(&self) -> Option<ControllerBinaryIdentity> {
         self.recycle_declined_target.lock().clone()
     }

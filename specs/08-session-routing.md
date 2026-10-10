@@ -411,6 +411,16 @@ of leaving `agent-doc <FILE>` as un-run text in a shell. This closes the
 crash-mid-dispatch race observed when a `/model` switch / restart dropped the
 harness to a shell right as "Run Agent Doc" routed the trigger.
 
+A lone prompt glyph is not a harness prompt for this guard (`#runfrontendcrashed`).
+Powerlevel10k, starship and pure render the shell prompt as `❯` (or `>`/`›`/`$`),
+byte-identical to an empty Claude composer, so with a bare shell in the foreground
+the guard accepts only harness-specific evidence
+(`HarnessConfig::prompt_proves_harness_over_shell`): a placeholder or footer
+composer line, a bare glyph framed by the composer's horizontal rule on the line
+above, or the harness's idle status chrome. On 2026-10-10 the bare-glyph match let
+the degraded (`supervisor_health=no_socket`) direct-pane fallback type
+`/agent-doc <FILE>` into a zsh pane three times after its harness was killed.
+
 ## Multi-Session Projects (`ghmultitmux`)
 
 GH #17: one editor may manage panes across several tmux sessions, for example a

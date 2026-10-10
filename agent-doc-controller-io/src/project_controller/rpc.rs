@@ -16870,6 +16870,25 @@ fn supervisor_watchdog_intentional_exit_decision(
     dead_pid: u32,
     generation: u64,
 ) -> agent_doc_supervisor::intentional_exit::IntentionalExitDecision {
+    supervisor_watchdog_intentional_exit_decision_at(
+        conn,
+        document_id,
+        dead_pid,
+        generation,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0),
+    )
+}
+
+fn supervisor_watchdog_intentional_exit_decision_at(
+    conn: &state_store::Connection,
+    document_id: &str,
+    dead_pid: u32,
+    generation: u64,
+    now_ms: u64,
+) -> agent_doc_supervisor::intentional_exit::IntentionalExitDecision {
     agent_doc_supervisor::intentional_exit::watchdog_intentional_exit_decision(
         agent_doc_supervisor_io::intentional_exit::load_intentional_exit_from_db(conn, document_id)
             .ok()
@@ -16877,6 +16896,7 @@ fn supervisor_watchdog_intentional_exit_decision(
             .as_ref(),
         dead_pid,
         generation,
+        now_ms,
     )
 }
 
@@ -31022,12 +31042,24 @@ fn drive_supervisor_replacement_background(
         ),
     );
     reap_dead_supervisor_socket(&work.file, &socket);
-    // `#gh133sigterm`: the kill above was controller intent to CONTINUE this
-    // document, not operator intent to stop it. Clear the marker the old
-    // supervisor's SIGTERM handler (or self-kill) recorded, so a failed cold
-    // start below still leaves the crash watchdog able to recover it.
-    clear_replacement_intentional_exit(&work);
+    // `#gh133sigterm` + `#runfrontendcrashed`: the kill above was controller
+    // intent to CONTINUE this document, not operator intent to stop it — but
+    // the cold start below is typed into the pane's shell and needs seconds to
+    // register its lease. Clearing the marker outright let the crash watchdog
+    // read this kill as a crash one tick later and issue a SECOND replacement
+    // that force-killed the booting successor (bare shell). Hold the watchdog
+    // off with a time-bounded cold-start marker instead; a failed cold start
+    // clears it so the watchdog can recover immediately.
+    let killed_pid = match kill_outcome {
+        agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::Graceful(pid)
+        | agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::Forced(pid) => Some(pid),
+        _ => None,
+    };
+    mark_replacement_cold_start_pending(&work, killed_pid);
     let cold_start_result = cold_start_supervisor_replacement(&work);
+    if cold_start_result.is_err() {
+        clear_replacement_intentional_exit(&work);
+    }
     let pane = if defer_admission_until_cold_start {
         complete_deferred_supervisor_replacement_admission(&admission_sender, cold_start_result)?
     } else {
@@ -31046,6 +31078,44 @@ fn drive_supervisor_replacement_background(
         ),
     );
     Ok(())
+}
+
+/// `#runfrontendcrashed`: replace the stopped supervisor's exit marker with a
+/// time-bounded cold-start marker so the crash watchdog leaves the successor's
+/// cold start alone. See
+/// [`agent_doc_supervisor::intentional_exit::REPLACEMENT_COLD_START_SIGNAL`].
+#[cfg_attr(all(feature = "test-support", not(test)), allow(dead_code))]
+fn mark_replacement_cold_start_pending(work: &SupervisorReplacementWork, killed_pid: Option<u32>) {
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &work.project_root,
+        &work.file.to_string_lossy(),
+    );
+    let outcome = agent_doc_supervisor_io::intentional_exit::mark_replacement_cold_start_pending(
+        &work.project_root,
+        &document_id,
+        killed_pid,
+        work.generation,
+        &work.pane_id,
+        &work.session_id,
+    );
+    agent_doc_ops_log_io::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_cold_start_marker session={} generation={} receipt_id={} outcome={}",
+            work.session_id,
+            work.generation,
+            work.operator_receipt_id,
+            match &outcome {
+                Ok(Some(marker)) => format!(
+                    "pending pid={} grace_ms={}",
+                    marker.supervisor_pid,
+                    agent_doc_supervisor::intentional_exit::REPLACEMENT_COLD_START_GRACE_MS
+                ),
+                Ok(None) => "cleared_no_pid".to_string(),
+                Err(err) => format!("failed error={err}"),
+            }
+        ),
+    );
 }
 
 /// `#gh133sigterm`: clear the intentional-exit marker left by the supervisor a
@@ -32482,6 +32552,76 @@ mod tests {
             supervisor_watchdog_intentional_exit_decision(&conn, &document_id, 4242, 5)
                 .allows_restart(),
             "a controller replacement is not operator intent"
+        );
+    }
+
+    /// `#runfrontendcrashed` regression (2026-10-10, haiven-dev frontend.md):
+    /// replacement receipt 3275 force-killed stale supervisor 1989646 and typed
+    /// the cold start into pane %166; one second later the watchdog saw the
+    /// lease still naming 1989646 with its marker CLEARED, called it a crash,
+    /// and its own replacement (receipt 3277) force-killed the booting
+    /// successor 3708335, leaving a bare shell. The replacement path must keep
+    /// the watchdog off the replaced pid while the cold start is in flight, and
+    /// a failed cold start must still be recoverable.
+    #[test]
+    fn controller_replacement_cold_start_keeps_watchdog_off_the_replaced_pid() {
+        let (dir, file, document_id) = intentional_exit_fixture();
+        agent_doc_supervisor_io::intentional_exit::record_intentional_exit(
+            &sigterm_identity(dir.path(), &document_id, 4242),
+            "SIGTERM",
+        )
+        .unwrap();
+        let work = SupervisorReplacementWork {
+            project_root: dir.path().to_path_buf(),
+            file,
+            session_id: "session".to_string(),
+            pane_id: "%3".to_string(),
+            generation: 5,
+            mode: "continue".to_string(),
+            force: true,
+            operator_receipt_id: 1,
+        };
+        mark_replacement_cold_start_pending(&work, Some(4242));
+        let conn = state_store::open_state_db(dir.path()).unwrap();
+        let marker = agent_doc_supervisor_io::intentional_exit::load_intentional_exit_from_db(
+            &conn,
+            &document_id,
+        )
+        .unwrap()
+        .expect("cold-start marker recorded");
+        let tick = supervisor_watchdog_intentional_exit_decision_at(
+            &conn,
+            &document_id,
+            4242,
+            5,
+            marker.recorded_at_ms + 1_000,
+        );
+        assert_eq!(
+            tick,
+            agent_doc_supervisor::intentional_exit::IntentionalExitDecision::ReplacementColdStartPending
+        );
+        assert!(
+            !tick.allows_restart(),
+            "the watchdog must not replace (and kill) a successor that is still booting"
+        );
+        let expired = supervisor_watchdog_intentional_exit_decision_at(
+            &conn,
+            &document_id,
+            4242,
+            5,
+            marker.recorded_at_ms
+                + agent_doc_supervisor::intentional_exit::REPLACEMENT_COLD_START_GRACE_MS,
+        );
+        assert!(
+            expired.allows_restart(),
+            "a cold start that never registered is recovered after the grace"
+        );
+
+        // A cold start that failed synchronously clears the marker: immediate recovery.
+        clear_replacement_intentional_exit(&work);
+        assert!(
+            supervisor_watchdog_intentional_exit_decision(&conn, &document_id, 4242, 5)
+                .allows_restart()
         );
     }
 

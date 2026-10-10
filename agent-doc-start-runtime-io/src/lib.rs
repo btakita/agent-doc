@@ -2076,6 +2076,88 @@ fn prompt_termios_from_original(original: &libc::termios) -> libc::termios {
     prompt
 }
 
+/// `#runfrontendcrashed`: the termios the outer terminal must be returned to
+/// when this supervisor exits — recorded by [`RawMode::enable`] so the SIGTERM
+/// handler (which re-raises the default disposition and therefore never runs
+/// `RawMode`'s `Drop`) can still put the operator's shell back in a cooked mode.
+#[cfg(unix)]
+static OUTER_TERMINAL_RESTORE: std::sync::Mutex<Option<libc::termios>> =
+    std::sync::Mutex::new(None);
+
+/// Bytes that undo the terminal modes a TUI harness may have switched on
+/// through this supervisor's PTY passthrough (alternate screen, bracketed
+/// paste, mouse + focus reporting, hidden cursor). A harness killed together
+/// with its supervisor never sends these itself, so the operator's shell would
+/// inherit them.
+pub const OUTER_TERMINAL_RESET_SEQUENCE: &str =
+    "\x1b[?1049l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?25h\r\n";
+
+/// `#runfrontendcrashed`: the termios to hand back to the operator's shell.
+///
+/// The inherited mode is NOT a safe restore target: a supervisor started into a
+/// pane whose previous supervisor was SIGKILLed / SIGTERMed mid-session
+/// inherits that one's raw mode (`-opost -onlcr -icanon -echo`) and would
+/// faithfully "restore" it, leaving the staircase output the operator saw on
+/// 2026-10-10. Always restore a cooked, output-post-processed mode.
+#[cfg(unix)]
+fn outer_terminal_restore_target(inherited: &libc::termios) -> libc::termios {
+    prompt_termios_from_original(inherited)
+}
+
+/// `#runfrontendcrashed`: put `fd`'s terminal into a cooked mode (newline
+/// translation, canonical input, echo) if it is a terminal. Returns whether a
+/// terminal was normalized.
+#[cfg(unix)]
+pub fn normalize_terminal_fd(fd: libc::c_int) -> bool {
+    unsafe {
+        if libc::isatty(fd) != 1 {
+            return false;
+        }
+        let mut current: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(fd, &mut current) != 0 {
+            return false;
+        }
+        let cooked = outer_terminal_restore_target(&current);
+        libc::tcsetattr(fd, libc::TCSANOW, &cooked) == 0
+    }
+}
+
+/// `#runfrontendcrashed`: normalize a terminal inherited from a supervisor that
+/// died without restoring it, before this start prints anything.
+#[cfg(unix)]
+pub fn normalize_inherited_terminal() -> bool {
+    normalize_terminal_fd(libc::STDIN_FILENO)
+}
+
+#[cfg(not(unix))]
+pub fn normalize_inherited_terminal() -> bool {
+    false
+}
+
+/// `#runfrontendcrashed`: restore the operator's terminal from signal-exit
+/// context (the supervisor SIGTERM handler), where `RawMode`'s `Drop` never
+/// runs. Restores the recorded cooked mode and resets TUI terminal modes.
+#[cfg(unix)]
+pub fn restore_outer_terminal_on_exit() {
+    let target = OUTER_TERMINAL_RESTORE.lock().ok().and_then(|guard| *guard);
+    unsafe {
+        if let Some(target) = target {
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &target);
+        }
+        if libc::isatty(libc::STDOUT_FILENO) == 1 {
+            let bytes = OUTER_TERMINAL_RESET_SEQUENCE.as_bytes();
+            libc::write(
+                libc::STDOUT_FILENO,
+                bytes.as_ptr() as *const libc::c_void,
+                bytes.len(),
+            );
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub fn restore_outer_terminal_on_exit() {}
+
 #[cfg(unix)]
 struct RawMode {
     original: libc::termios,
@@ -2085,9 +2167,18 @@ struct RawMode {
 impl RawMode {
     fn enable() -> Self {
         unsafe {
-            let mut original: libc::termios = std::mem::zeroed();
-            libc::tcgetattr(libc::STDIN_FILENO, &mut original);
-            let mut raw = original;
+            let mut inherited: libc::termios = std::mem::zeroed();
+            let is_terminal = libc::tcgetattr(libc::STDIN_FILENO, &mut inherited) == 0;
+            let original = if is_terminal {
+                let target = outer_terminal_restore_target(&inherited);
+                if let Ok(mut guard) = OUTER_TERMINAL_RESTORE.lock() {
+                    *guard = Some(target);
+                }
+                target
+            } else {
+                inherited
+            };
+            let mut raw = inherited;
             libc::cfmakeraw(&mut raw);
             libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw);
             Self { original }
@@ -4145,6 +4236,67 @@ mod tests {
         assert!(subject.contains("agent-doc"), "{subject}");
     }
     #[cfg(unix)]
+    /// `#runfrontendcrashed` regression: a supervisor killed by SIGTERM never
+    /// ran `RawMode::drop`, so the pane's tty stayed `cfmakeraw` (no ONLCR) and
+    /// every later line staircased. Driven on a real pty pair: a raw-inherited
+    /// terminal must come back cooked, and the restore target recorded from a
+    /// raw inherited mode must itself be cooked.
+    #[test]
+    fn raw_inherited_terminal_is_normalized_to_cooked_output_mode() {
+        unsafe {
+            let mut master: libc::c_int = -1;
+            let mut slave: libc::c_int = -1;
+            assert_eq!(
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                ),
+                0
+            );
+            let mut raw: libc::termios = std::mem::zeroed();
+            assert_eq!(libc::tcgetattr(slave, &mut raw), 0);
+            libc::cfmakeraw(&mut raw);
+            assert_eq!(libc::tcsetattr(slave, libc::TCSANOW, &raw), 0);
+
+            let target = outer_terminal_restore_target(&raw);
+            assert_ne!(target.c_oflag & libc::ONLCR, 0);
+            assert_ne!(target.c_oflag & libc::OPOST, 0);
+            assert_ne!(target.c_lflag & libc::ICANON, 0);
+            assert_ne!(target.c_lflag & libc::ECHO, 0);
+
+            assert!(normalize_terminal_fd(slave));
+            let mut after: libc::termios = std::mem::zeroed();
+            assert_eq!(libc::tcgetattr(slave, &mut after), 0);
+            assert_ne!(
+                after.c_oflag & libc::ONLCR,
+                0,
+                "newlines must get a CR again"
+            );
+            assert_ne!(after.c_oflag & libc::OPOST, 0);
+            assert_ne!(after.c_lflag & libc::ICANON, 0);
+            assert_ne!(after.c_lflag & libc::ECHO, 0);
+            libc::close(slave);
+            libc::close(master);
+        }
+        assert!(
+            !normalize_terminal_fd(-1),
+            "a non-terminal fd is left alone"
+        );
+    }
+
+    #[test]
+    fn outer_terminal_reset_sequence_undoes_tui_modes() {
+        for mode in ["?1049l", "?2004l", "?1000l", "?1006l", "?25h"] {
+            assert!(
+                OUTER_TERMINAL_RESET_SEQUENCE.contains(mode),
+                "reset must include {mode}"
+            );
+        }
+    }
+
     #[test]
     fn prompt_termios_forces_canonical_enter_friendly_prompt_mode() {
         let mut original: libc::termios = unsafe { std::mem::zeroed() };

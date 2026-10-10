@@ -5049,6 +5049,14 @@ enum SimCommand {
     /// recycle settles (`SettleSupervisorRecycle`) the same dispatch injects the
     /// trigger exactly once. Proves R1+R3's defer-until-settle + submit-once.
     DispatchDuringSupervisorRecycle,
+    /// `#runfrontenderror`: pin the `frontend.md` wedge — `InFlight` marked
+    /// hours ago, its owner alive on a superseded binary with no readiness
+    /// stamp. Targeted tests only; not in the random generator.
+    WedgeRecycleOnSupersededOwner,
+    /// `#runfrontenderror`: one dispatch-only reopen through the recycle gate,
+    /// driven by the production verdict and replacement-step predicates; each
+    /// re-arm advances the model clock by one settle-wait RPC.
+    DispatchThroughRecycleGate,
     BusyInterruptRecoveryReady,
     RepairBusyProjectionWithReadyPrompt,
     AdminPauseQueue,
@@ -5607,6 +5615,9 @@ struct RouteModel {
     /// (lib-install auto-recycle / operator restart). Models the project-scoped
     /// `recycle_inflight` marker the live `route` dispatch reads before typing.
     recycle_inflight: bool,
+    /// `#runfrontenderror`: the facts the dispatch-only recycle gate reads
+    /// while `recycle_inflight` is set.
+    recycle_gate: RecycleGateModel,
     /// `#supdead-coldstart-fallback`: connect-liveness of the supervisor socket
     /// file. A live supervisor binds a `Live` socket; an abandoned (crashed) one
     /// leaves a `StaleRefused` socket; a cold-start reaps it back to `Absent` then
@@ -5628,9 +5639,24 @@ impl RouteModel {
             level_marks: std::collections::BTreeMap::new(),
             supervisor_lease_generation: Some(1),
             recycle_inflight: false,
+            recycle_gate: RecycleGateModel::default(),
             socket: SupervisorSocket::Live,
         }
     }
+}
+
+/// `#runfrontenderror`: what the dispatch-only recycle gate observes about an
+/// `InFlight` recycle and its owner. Times are model seconds/milliseconds.
+#[derive(Debug, Clone, Default)]
+struct RecycleGateModel {
+    marked_secs: u64,
+    now_secs: u64,
+    owner_alive: bool,
+    owner_binary_superseded: Option<bool>,
+    ready_registered_secs: Option<u64>,
+    /// When (gate-elapsed ms after the replacement request) the controller's
+    /// stale-supervisor replacement reaps the owner; `None` = never.
+    owner_reaped_after_request_ms: Option<u128>,
 }
 
 /// Models the operator **recycle + clear pipeline** (`#clearcontresume`) so the
@@ -5832,6 +5858,12 @@ struct Coverage {
     /// `dispatch_into_recycling_pane` instead of typing across the hot-reload
     /// boundary (where the submit Enter is dropped).
     dispatch_into_recycling_pane_blocks: usize,
+    /// `#runfrontenderror`: superseded-owner replacements the gate requested.
+    superseded_owner_replacement_requests: usize,
+    /// `#runfrontenderror`: gate refusals naming `restart_stale_supervisor`.
+    superseded_owner_refusals: usize,
+    /// `#netadv5` R9 refusals (live owner, current or unknown binary).
+    recycle_gate_owner_still_recycling_refusals: usize,
     busy_dispatch_blocks: usize,
     closed_dispatch_blocks: usize,
     busy_interrupt_recoveries: usize,
@@ -6108,6 +6140,10 @@ impl Coverage {
         self.auto_start_starting_pane_blocks += other.auto_start_starting_pane_blocks;
         self.drain_into_restarting_pane_blocks += other.drain_into_restarting_pane_blocks;
         self.dispatch_into_recycling_pane_blocks += other.dispatch_into_recycling_pane_blocks;
+        self.superseded_owner_replacement_requests += other.superseded_owner_replacement_requests;
+        self.superseded_owner_refusals += other.superseded_owner_refusals;
+        self.recycle_gate_owner_still_recycling_refusals +=
+            other.recycle_gate_owner_still_recycling_refusals;
         self.busy_dispatch_blocks += other.busy_dispatch_blocks;
         self.closed_dispatch_blocks += other.closed_dispatch_blocks;
         self.busy_interrupt_recoveries += other.busy_interrupt_recoveries;
@@ -7842,6 +7878,89 @@ fn route_sim_harness_switch_disabled_restart_bails_explicitly_no_silent_proceed(
         world.coverage.actor_switch_restarts_performed, 0,
         "a knob-off idle-watch must never perform a restart"
     );
+}
+
+#[test]
+fn route_sim_superseded_recycle_owner_is_replaced_then_injects_once() {
+    // `#runfrontenderror`: `InFlight@4351` since 02:00:14, owner on a
+    // superseded binary with no readiness stamp. Before the fix this was the
+    // R9 refusal on every reopen, for as long as the owner lived.
+    let mut world = SimWorld::new(2_026);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world
+        .apply(SimCommand::WedgeRecycleOnSupersededOwner)
+        .unwrap();
+    // The controller's replacement reaps the owner 32s after the request
+    // (18:15:13 -> 18:15:45 live).
+    world.route.recycle_gate.owner_reaped_after_request_ms = Some(32_000);
+
+    world.apply(SimCommand::DispatchThroughRecycleGate).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+
+    assert_eq!(world.coverage.superseded_owner_replacement_requests, 1);
+    assert_eq!(world.coverage.superseded_owner_refusals, 0);
+    assert_eq!(
+        world.coverage.recycle_gate_owner_still_recycling_refusals,
+        0
+    );
+    assert!(!world.route.recycle_inflight);
+    assert_eq!(
+        world.coverage.dispatch_injects, 1,
+        "the reopen must inject exactly once, after the owner is gone"
+    );
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+    let ops_log = world.ops_log.join("\n");
+    let requested = ops_log
+        .find("action=replacement_requested")
+        .expect("replacement requested");
+    let proceeded = ops_log
+        .find("verdict=ProceedAbandoned")
+        .expect("proceeded only once the owner was gone");
+    let injected = ops_log.find("dispatch_inject pane=").expect("injected");
+    assert!(requested < proceeded && proceeded < injected, "{ops_log}");
+}
+
+#[test]
+fn route_sim_superseded_recycle_owner_never_replaced_refuses_with_actionable_unblocker() {
+    // `#runfrontenderror`: the bound. An owner that is never replaced ends in
+    // `restart_stale_supervisor`, not an indefinite settle wait, and nothing is
+    // injected while it lives.
+    let mut world = SimWorld::new(2_027);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world
+        .apply(SimCommand::WedgeRecycleOnSupersededOwner)
+        .unwrap();
+    world.apply(SimCommand::DispatchThroughRecycleGate).unwrap();
+
+    assert_eq!(world.coverage.superseded_owner_replacement_requests, 1);
+    assert_eq!(world.coverage.superseded_owner_refusals, 1);
+    assert_eq!(world.coverage.dispatch_injects, 0);
+    assert!(world.route.recycle_inflight, "still fail-closed");
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("unblocker=restart_stale_supervisor"),
+        "{ops_log}"
+    );
+    assert!(!ops_log.contains("dispatch_inject"), "{ops_log}");
+
+    // Same wedge, but the owner maps the CURRENT binary: R9 stands unchanged
+    // (no replacement request, no new proceed path).
+    let mut world = SimWorld::new(2_028);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world
+        .apply(SimCommand::WedgeRecycleOnSupersededOwner)
+        .unwrap();
+    world.route.recycle_gate.owner_binary_superseded = Some(false);
+    world.apply(SimCommand::DispatchThroughRecycleGate).unwrap();
+    assert_eq!(
+        world.coverage.recycle_gate_owner_still_recycling_refusals,
+        1
+    );
+    assert_eq!(world.coverage.superseded_owner_replacement_requests, 0);
+    assert_eq!(world.coverage.dispatch_injects, 0);
 }
 
 #[test]

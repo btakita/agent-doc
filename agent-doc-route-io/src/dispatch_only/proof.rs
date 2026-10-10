@@ -4,15 +4,18 @@ use std::time::Duration;
 
 use agent_doc_controller::dispatch::{
     DispatchOnlyProofOutcomeFacts, DispatchOnlyRecycleInflightMessageFacts,
-    DispatchOnlyReopenDelivery, DispatchStartProofDecision, DispatchStartProofFacts,
-    RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES, RecycleInflightUnsettledVerdict, RoutedDispatchStartProof,
-    RoutedReopenGuardReason, accepted_only_dispatch_start_log_message,
-    accepted_only_dispatch_start_refusal_message,
+    DispatchOnlyRecycleSupersededOwnerMessageFacts, DispatchOnlyReopenDelivery,
+    DispatchStartProofDecision, DispatchStartProofFacts, RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES,
+    RECYCLE_SUPERSEDED_OWNER_UNBLOCKER, RecycleInflightUnsettledVerdict, RoutedDispatchStartProof,
+    RoutedReopenGuardReason, SupersededOwnerReplacementStep,
+    accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
-    dispatch_only_recycle_inflight_message, dispatch_only_sent_console_message,
-    dispatch_only_sent_log_message, dispatch_proof_failed_event,
+    dispatch_only_recycle_inflight_message, dispatch_only_recycle_superseded_owner_message,
+    dispatch_only_sent_console_message, dispatch_only_sent_log_message,
+    dispatch_proof_failed_event, recycle_inflight_unsettled_verdict_with_evidence,
     recycle_inflight_unsettled_verdict_with_owner,
     recycle_inflight_unsettled_verdict_with_readiness, routed_dispatch_start_timeout_for_binary,
+    superseded_owner_replacement_step,
 };
 use agent_doc_harness::HarnessConfig;
 
@@ -47,6 +50,9 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
     // `#netadv3` RSD-1: consecutive round trips where both the settle wait and
     // the status re-read failed.
     let mut unreachable: u32 = 0;
+    // `#runfrontenderror`: when (in this gate's own elapsed time) the turn-safe
+    // replacement of a superseded owner was requested.
+    let mut superseded_replacement_requested_at_ms: Option<u128> = None;
 
     // `#recycleinflightwedge` / `#recyclesettlewaitshort`: a recycle older than
     // the settle TTL lost its settle transition — the supervisor died between
@@ -64,9 +70,9 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
         let ttl_secs = recycle_inflight_settle_ttl_secs();
         // `#netadv5` R9: the TTL alone is a timer; abandonment needs the
         // supervisor to be gone.
-        let supervisor_alive =
-            agent_doc_supervisor_io::process::supervisor_pid_for_doc(Path::new(file_path))
-                .is_some();
+        let supervisor_pid =
+            agent_doc_supervisor_io::process::supervisor_pid_for_doc(Path::new(file_path));
+        let supervisor_alive = supervisor_pid.is_some();
         // `#dispatchreadyselfheal`: a supervisor `ready` registration stamped
         // after this recycle started is the settle itself, observed directly.
         let ready_registered_secs =
@@ -130,6 +136,80 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
                 }
             }
         }
+        // `#runfrontenderror`: an R9 refusal against an owner that maps a
+        // superseded binary cannot end by waiting; only the owner's
+        // replacement ends it. The freshness probe is read only on this path.
+        let mut superseded_owner_pid = None;
+        if verdict == RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling
+            && let Some(pid) = supervisor_pid
+        {
+            let owner_binary_superseded =
+                agent_doc_controller_io::project_controller::host_supervisor_pid_binary_is_stale(
+                    pid,
+                );
+            verdict = recycle_inflight_unsettled_verdict_with_evidence(
+                marked_secs,
+                now_secs(),
+                ttl_secs,
+                supervisor_alive,
+                None,
+                owner_binary_superseded,
+            );
+            superseded_owner_pid = Some(pid);
+        }
+        if verdict == RecycleInflightUnsettledVerdict::ReplaceSupersededOwner {
+            let pid = superseded_owner_pid.unwrap_or_default();
+            let wait_secs = recycle_superseded_owner_wait_secs();
+            match superseded_owner_replacement_step(
+                superseded_replacement_requested_at_ms,
+                started.elapsed().as_millis(),
+                wait_secs,
+            ) {
+                SupersededOwnerReplacementStep::RequestReplacement => {
+                    // Turn-safe and idempotent: the owner recycles at its
+                    // next safe boundary; a live turn is never interrupted.
+                    let request_status =
+                        agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+                            Path::new(file_path),
+                            "dispatch_only_recycle_gate",
+                        );
+                    superseded_replacement_requested_at_ms = Some(started.elapsed().as_millis());
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "route_dispatch_only_recycle_inflight_superseded_owner file={} pane={} harness={} recycle_cause={} marked_secs={} recycle_epoch={} supervisor_pid={} wait_secs={} action=replacement_requested request_status={:?} (#runfrontenderror)",
+                            file.display(),
+                            pane,
+                            harness_binary,
+                            reason,
+                            marked_secs,
+                            recycle_epoch,
+                            pid,
+                            wait_secs,
+                            request_status
+                                .as_deref()
+                                .map(|status| status.replace('\n', " "))
+                                .unwrap_or_else(|| "not_scheduled".to_string()),
+                        ),
+                    );
+                }
+                SupersededOwnerReplacementStep::KeepWaiting => {}
+                SupersededOwnerReplacementStep::RefuseRestartStaleSupervisor => {
+                    return Err(recycle_superseded_owner_refusal(
+                        file,
+                        pane,
+                        harness_binary,
+                        &reason,
+                        marked_secs,
+                        recycle_epoch,
+                        pid,
+                        wait_secs,
+                        started.elapsed().as_millis(),
+                        attempt,
+                    ));
+                }
+            }
+        }
         match verdict {
             RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling => {
                 return Err(recycle_inflight_refusal(
@@ -178,8 +258,12 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
             // `ProceedReadyAfterStart` is resolved above (it proceeds, re-keys,
             // or is re-classified without the evidence), so it cannot reach
             // here; re-arming the wait is the safe reading if it ever did.
+            //
+            // `ReplaceSupersededOwner` was resolved just above (requested, or
+            // still inside its bounded wait): re-arm, never inject.
             RecycleInflightUnsettledVerdict::KeepWaiting
-            | RecycleInflightUnsettledVerdict::ProceedReadyAfterStart => {}
+            | RecycleInflightUnsettledVerdict::ProceedReadyAfterStart
+            | RecycleInflightUnsettledVerdict::ReplaceSupersededOwner => {}
         }
 
         attempt += 1;
@@ -470,6 +554,68 @@ fn recycle_inflight_refusal(
             outcome_fields: &outcome_fields,
         },
     ))
+}
+
+/// `#runfrontenderror`: the refusal once a superseded owner outlived its
+/// bounded replacement wait. Distinct refusal and unblocker from the R9 shape:
+/// the operator is told which process to restart, not to wait for a settle it
+/// cannot produce.
+#[allow(clippy::too_many_arguments)]
+fn recycle_superseded_owner_refusal(
+    file: &Path,
+    pane: &str,
+    harness_binary: &str,
+    reason: &str,
+    marked_secs: u64,
+    recycle_epoch: u64,
+    supervisor_pid: u32,
+    wait_secs: u64,
+    waited_ms: u128,
+    attempts: u32,
+) -> anyhow::Error {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_recycle_inflight_refused file={} pane={} harness={} recycle_cause={} marked_secs={} recycle_epoch={} waited_ms={} attempts={} refusal=superseded_owner_not_replaced supervisor_pid={} wait_secs={} unblocker={} (#runfrontenderror)",
+            file.display(),
+            pane,
+            harness_binary,
+            reason,
+            marked_secs,
+            recycle_epoch,
+            waited_ms,
+            attempts,
+            supervisor_pid,
+            wait_secs,
+            RECYCLE_SUPERSEDED_OWNER_UNBLOCKER,
+        ),
+    );
+    let file_display = file.display().to_string();
+    let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+        RECYCLE_SUPERSEDED_OWNER_UNBLOCKER,
+    );
+    anyhow::anyhow!(dispatch_only_recycle_superseded_owner_message(
+        DispatchOnlyRecycleSupersededOwnerMessageFacts {
+            harness_binary,
+            pane,
+            file_display: &file_display,
+            reason,
+            supervisor_pid,
+            waited_secs: wait_secs,
+            outcome_fields: &outcome_fields,
+        },
+    ))
+}
+
+/// Resolve the superseded-owner replacement wait, honoring
+/// `AGENT_DOC_RECYCLE_SUPERSEDED_OWNER_WAIT_SECS` so a test can shrink it.
+fn recycle_superseded_owner_wait_secs() -> u64 {
+    std::env::var(
+        agent_doc_controller::dispatch::RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS_ENV,
+    )
+    .ok()
+    .and_then(|raw| raw.trim().parse::<u64>().ok())
+    .unwrap_or(agent_doc_controller::dispatch::RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS)
 }
 
 fn now_secs() -> u64 {

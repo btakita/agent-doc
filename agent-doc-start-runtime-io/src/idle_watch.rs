@@ -102,6 +102,31 @@ fn log_reexec_child_refusal(
     );
 }
 
+/// `#runfrontenderror`: an in-place `execve` that returned (refused or failed)
+/// never crossed the hot-reload boundary, yet `supervisor_recycle_started` was
+/// already published for it. Nothing else settles that epoch: this process
+/// keeps serving its current binary, so the watch-loop settle a re-entered
+/// process would publish never comes, and the dispatch-only gate would see a
+/// live owner past the TTL and refuse every reopen (`#netadv5` R9). Settle it
+/// here, best effort, with the abort as the reason.
+fn settle_recycle_after_aborted_reexec(path: &Path, trigger: &str, outcome: &str) {
+    let result = agent_doc_controller_io::project_controller::supervisor_recycle_settled_for_file(
+        path,
+        "reexec_aborted",
+    );
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "supervisor_recycle_settled_after_aborted_reexec file={} trigger={trigger} outcome={outcome} settle={} (#runfrontenderror)",
+            path.display(),
+            match &result {
+                Ok(projection) => format!("{:?}@{}", projection.phase, projection.recycle_epoch),
+                Err(err) => format!("failed:{:?}", format!("{err:#}")),
+            },
+        ),
+    );
+}
+
 fn supervisor_may_reclaim_empty_preflight(attempt_tick: bool, harness_turn_live: bool) -> bool {
     attempt_tick && !harness_turn_live
 }
@@ -3609,8 +3634,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     &shared,
                                     "restart_drain",
                                     refusal, &mut reexec_child_refusal_logged);
+                                settle_recycle_after_aborted_reexec(&path, "restart_drain", "refused");
                             }
                             Err(SupervisorReexecError::Io(err)) => {
+                                settle_recycle_after_aborted_reexec(&path, "restart_drain", "io_error");
                                 // A failed execve must NOT strand the restart. Clear the
                                 // reexec intent so the in-process host loop's restart-kill
                                 // condition fires and relaunches the child on the current
@@ -4335,8 +4362,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     &shared,
                                     "stale_recycle",
                                     refusal, &mut reexec_child_refusal_logged);
+                                settle_recycle_after_aborted_reexec(&path, "stale_recycle", "refused");
                             }
                             Err(SupervisorReexecError::Io(err)) => {
+                                settle_recycle_after_aborted_reexec(&path, "stale_recycle", "io_error");
                                 // `#suprecyclestall` — a failed execve must NOT kill
                                 // the session. Previously we `process::exit(0)` here,
                                 // which orphaned the live harness child and hung the

@@ -124,6 +124,46 @@ direct evidence that the recycle is over (`#dispatchreadyselfheal`):
   unreachable controller does not refuse, because the stamp alone proves the
   boundary passed and the next dispatch retries the re-mint.
 
+The readiness stamp is written by the controller when a supervisor *registers*,
+so it only exists for registrations made after `#dispatchreadyselfheal`
+shipped. A supervisor that registered `ready` under an older build never
+re-registers while it lives, and the same `frontend.md` ledger refused again
+after 0.35.483 (observed 2026-10-10 18:15:38: `InFlight@4351` still from
+02:00:14, owner pid 1989646 on 0.35.481 with a deleted exe,
+`ready_registered_at` NULL, R9 refusal; the controller's own stale-supervisor
+replacement reaped it at 18:15:45 and the next dispatch proceeded). That
+owner can never end the refusal itself: it will not stamp, and its own next
+self-recycle publishes a *new* epoch rather than settling this one. The gate
+therefore refines R9 by the owner's binary freshness (`#runfrontenderror`):
+
+- `recycle_inflight_unsettled_verdict_with_evidence` returns
+  `ReplaceSupersededOwner` only where the verdict would otherwise be
+  `RefuseOwnerStillRecycling` *and* the live owner's `/proc/<pid>/exe` is
+  stale against the installed binary (`host_supervisor_pid_binary_is_stale`).
+  Unknown freshness or a current binary keeps the R9 refusal; inside the TTL
+  a superseded owner may be the one mid-`execve`, so it keeps waiting.
+- On that verdict the gate requests the owner's turn-safe stale-supervisor
+  recycle once (`recycle_stale_supervisor_for_turn_stage`, stage
+  `dispatch_only_recycle_gate`; it recycles at the owner's next safe
+  boundary and never interrupts a live turn) and keeps re-arming the settle
+  wait for at most `RECYCLE_SUPERSEDED_OWNER_REPLACEMENT_WAIT_SECS` (45s,
+  `AGENT_DOC_RECYCLE_SUPERSEDED_OWNER_WAIT_SECS`), measured from the request,
+  never from the hours-old mark. It still never injects while that owner is
+  alive: it proceeds only through the existing verdicts (owner gone ⇒
+  `ProceedAbandoned`, successor registered ⇒ `ProceedReadyAfterStart`, a
+  settle ⇒ settled).
+- If the bound elapses with the superseded owner still alive, the gate
+  refuses with `refusal=superseded_owner_not_replaced` and
+  `unblocker=restart_stale_supervisor`, naming the pid, instead of
+  `wait_for_supervisor_recycle_settle`, which that process cannot satisfy.
+
+The supervisor also stops creating this shape: an in-place `execve` that
+returns (`Refused` or an IO error) after `supervisor_recycle_started` was
+published never crossed the boundary, and the process keeps serving its
+current binary, so it settles the epoch itself (reason `reexec_aborted`,
+`supervisor_recycle_settled_after_aborted_reexec`) instead of leaving a live
+owner pinned `InFlight` past the TTL.
+
 Events must carry stable ids where available: document hash, session id, cycle
 id, actor generation, patch id, queue node key, backlog id, and causation id.
 The event log is append-only on the write path. Corrections are new events that

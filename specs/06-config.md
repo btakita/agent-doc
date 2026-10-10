@@ -42,6 +42,18 @@ persistent project volume is backed by 9p or another filesystem without
 project-specific runtime directory. Listener startup fails immediately with
 this recovery instruction when the selected directory cannot host the socket.
 
+## AGENT_DOC_ROOT_CEILING_DIRECTORIES
+
+Optional environment bound on `.agent-doc` project-root discovery, with
+`GIT_CEILING_DIRECTORIES` semantics: a `PATH`-style list of absolute
+directories (relative and empty entries are ignored). Discovery examines the
+starting directory and then each parent, but never climbs into a ceiling
+directory or anything above it. Unset, discovery walks to the filesystem root
+as before. The test harness (`make test`/`check`, the nextest
+`test-isolation` setup script) sets it to `<TMPDIR>:<workspace>` and refuses a
+`TMPDIR` with an `.agent-doc` ancestor (`#testisolationtests`); a cargo test
+binary without it bounds in-process discovery at its temp root.
+
 ## codex_network_access
 
 Explicit Codex network policy for agent-doc-launched sessions.

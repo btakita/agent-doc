@@ -507,13 +507,11 @@ pub fn common_ancestor_dir(paths: &[PathBuf]) -> Option<PathBuf> {
 /// Return the `.agent-doc` root shared by the current sync candidate set.
 pub fn shared_sync_scope_root(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> {
     let files = canonical_sync_candidate_files(col_args, focus);
-    let mut current = common_ancestor_dir(&files)?;
-    loop {
-        if current.join(".agent-doc").is_dir() {
-            return Some(current);
-        }
-        current = current.parent()?.to_path_buf();
-    }
+    let common = common_ancestor_dir(&files)?;
+    // `#testisolationtests`: bounded by `AGENT_DOC_ROOT_CEILING_DIRECTORIES`.
+    agent_doc_fs::ancestors_within_root_ceiling(&common)
+        .into_iter()
+        .find(|dir| dir.join(".agent-doc").is_dir())
 }
 
 /// Resolve the root used for sync layout and prune state.
@@ -1307,13 +1305,22 @@ mod tests {
             sync_lock_disposition(AutoStartMode::Full, false, false),
             SyncLockDisposition::Proceed
         );
-        assert_eq!(sync_lock_wait_budget_from_env_value(None), SYNC_LOCK_WAIT_BUDGET);
+        assert_eq!(
+            sync_lock_wait_budget_from_env_value(None),
+            SYNC_LOCK_WAIT_BUDGET
+        );
         assert_eq!(
             sync_lock_wait_budget_from_env_value(Some("15000")),
             Duration::from_secs(15)
         );
-        assert_eq!(sync_lock_wait_budget_from_env_value(Some("0")), SYNC_LOCK_WAIT_BUDGET);
-        assert_eq!(sync_lock_wait_budget_from_env_value(Some("x")), SYNC_LOCK_WAIT_BUDGET);
+        assert_eq!(
+            sync_lock_wait_budget_from_env_value(Some("0")),
+            SYNC_LOCK_WAIT_BUDGET
+        );
+        assert_eq!(
+            sync_lock_wait_budget_from_env_value(Some("x")),
+            SYNC_LOCK_WAIT_BUDGET
+        );
     }
 
     #[test]

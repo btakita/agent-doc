@@ -89,7 +89,21 @@ release-version:
 # concurrently. Controller-heavy packages use one cargo-test process per test
 # binary instead: nextest's one-process-per-test model repeatedly paid controller
 # initialization cost. The fallback remains one workspace-wide cargo-test run.
-test sim-medium sim-net cross-editor-simworld dev-harness-test editor-parity tmux-ci check: export TMPDIR := $(AGENT_DOC_TEST_TMPDIR)
+TEST_ISOLATION_GOALS := test sim-medium sim-net cross-editor-simworld dev-harness-test editor-parity tmux-ci check
+$(TEST_ISOLATION_GOALS): export TMPDIR := $(AGENT_DOC_TEST_TMPDIR)
+
+# `#testisolationtests`: a TMPDIR under a directory holding `.agent-doc/` (e.g.
+# `$$HOME/.agent-doc`) lets tests adopt that real project as their root and
+# write the operator's state. Refuse it before any test runs, and bound every
+# test process -- and the agent-doc binaries and controllers they spawn -- with
+# a discovery ceiling at the test temp root and this workspace.
+ifneq ($(filter $(TEST_ISOLATION_GOALS),$(MAKECMDGOALS)),)
+AGENT_DOC_TEST_ROOT_CEILING := $(shell env -u AGENT_DOC_ROOT_CEILING_DIRECTORIES scripts/check-test-tmpdir "$(AGENT_DOC_TEST_TMPDIR)" || echo __refused__)
+ifneq ($(filter __refused__,$(AGENT_DOC_TEST_ROOT_CEILING)),)
+$(error refusing to run tests with TMPDIR=$(AGENT_DOC_TEST_TMPDIR); see the error above (#testisolationtests))
+endif
+$(TEST_ISOLATION_GOALS): export AGENT_DOC_ROOT_CEILING_DIRECTORIES := $(AGENT_DOC_TEST_ROOT_CEILING)
+endif
 
 $(VSCODE_NODE_LOCK): editors/vscode/package.json editors/vscode/package-lock.json
 	npm ci --prefix editors/vscode

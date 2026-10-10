@@ -110,21 +110,19 @@ fn codex_hooks_visible_from_file(file: &Path, hook_root: &Path) -> bool {
 
 fn codex_tracking_roots(file: &Path) -> Vec<PathBuf> {
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let mut roots = Vec::new();
-    let mut current = if canonical.is_file() {
+    let start = if canonical.is_file() {
         canonical.parent()
     } else {
         Some(canonical.as_path())
     };
-
-    while let Some(path) = current {
-        if path.join(".agent-doc").is_dir() {
-            roots.push(path.to_path_buf());
-        }
-        current = path.parent();
-    }
-
-    roots
+    let Some(start) = start else {
+        return Vec::new();
+    };
+    // `#testisolationtests`: bounded by `AGENT_DOC_ROOT_CEILING_DIRECTORIES`.
+    agent_doc_fs::ancestors_within_root_ceiling(start)
+        .into_iter()
+        .filter(|path| path.join(".agent-doc").is_dir())
+        .collect()
 }
 
 pub fn build_routed_dispatch_start_tracker(

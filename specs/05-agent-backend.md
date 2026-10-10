@@ -15,7 +15,13 @@ supervisor scopes. Grok's boxed composer is ready only when empty, structurally
 complete, and free of active cancel/stop evidence or unrecognized footer UI.
 The Grok skill is rendered from the shared workflow; its passive hooks require
 connected MCP admission/finalize and in-turn queue continuation. The installer
-preserves existing project MCP server configuration.
+writes `[mcp_servers.agent-doc]` as `command = "agent-doc"`,
+`args = ["mcp", "serve"]`, and preserves any other existing project MCP server
+configuration, including an intentional disable. The one migration is the
+legacy installer entry `args = ["mcp"]` (`#grokmcpserveargs`): bare
+`agent-doc mcp` prints help and exits 2, so Grok's MCP handshake fails and
+`agent_doc_admit` is never connected. Install rewrites only those args, and
+the skill audit (`skill check --harness grok`) rejects the legacy shape.
 
 ## Trait
 

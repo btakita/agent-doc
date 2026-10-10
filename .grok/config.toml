@@ -1,4 +1,4 @@
 [mcp_servers.agent-doc]
-args = ["mcp"]
+args = ["mcp", "serve"]
 command = "agent-doc"
 enabled = true

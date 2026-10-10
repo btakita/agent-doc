@@ -16,7 +16,6 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: go
 ---
 
 ## Status
@@ -774,9 +773,7 @@ Session accretion remains in the warning range; I completed this assessment with
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~[#lzmacosrunner]: setup OSX build on gh CI~~
-- 🚧 I want to promote Lazily to Beta. Do you think our featureset + api is stable enough?
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

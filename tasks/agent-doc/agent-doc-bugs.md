@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -537,6 +536,26 @@ Both plugin lines need a version bump. I'll do a single bump after the reworked 
 - **Still running locally:** `make release` is on its timed post-tag step, the single local `install-full` rebuild.
 
 I'll confirm the GitHub Release assets, PyPI 0.35.481 and the Homebrew job once the workflows finish. If `HOMEBREW_TAP_TOKEN` is still missing, the tap job warns and skips. After that I close `release + publish`. GH #218 stays open for the live Remote Dev proof.
+
+### Re: GH #221, #227, #228 fixed and closed — opus-5.5 · 2026-10-09T21:59-04:00
+
+> **Queue prompt:**
+>
+> release + publish
+
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/221
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/227
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/228
+
+All three are fixed on agent-doc main (`248908c32`), installed, and closed on GitHub.
+- **#221:** fixed by PR #222 (the exact-262 shared/frontend/backend modular plugin). I merged it without the live proof, as you chose. #218 stays open for the IDEA 2026.2.3 Remote Dev acceptance pass.
+- **#227:** fixed by PR #230. `preset=""` means explicitly no preset and is preserved; `compact --lint` was added; JetBrains notifications escape their hints.
+- **#228:** fixed by PR #229. Routes reuse session-check's live-turn verdict and yield with exit 0, with no cancel-turn advice.
+
+The batch's single `make check` passed 9879/9879. All three ship in v0.35.481, which is still publishing.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -545,11 +564,6 @@ I'll confirm the GitHub Release assets, PyPI 0.35.481 and the Homebrew job once 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/221
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/227
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/228
-- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

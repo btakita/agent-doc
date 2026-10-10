@@ -282,6 +282,172 @@ pub fn idle_stale_binary_controller_should_retire(
         && quiet_for >= quiet_for_at_least
 }
 
+/// `#supthrash`: how many route-owned documents still pin a controller to its
+/// root. A `Closed` actor row is history, not ownership — it never closes again,
+/// is never respawned by the supervisor watchdog, and survives forever in
+/// `state.db`. Counting it made [`idle_stale_binary_controller_should_retire`]
+/// false for every root that ever hosted a document, so each install handed an
+/// idle controller off to a fresh one instead of retiring it (observed
+/// 2026-10-10: `$HOME` at generation 175, `agent-loop/.agent-doc` at 361, and
+/// three git worktrees, every one with only `closed` rows).
+pub fn live_owned_document_count<'a>(
+    records: impl IntoIterator<Item = &'a crate::actor::ActorRecord>,
+) -> usize {
+    records
+        .into_iter()
+        .filter(|record| record.state != crate::actor::ActorState::Closed)
+        .count()
+}
+
+/// `#supthrash`: quiet window after which a lazy controller on the CURRENT
+/// binary retires from an idle root. Without it, the only exits for an idle
+/// lazy controller were a stale-binary recycle (which needs another install) or
+/// a temp root; every other idle root kept a controller forever.
+pub const IDLE_CONTROLLER_RETIRE_QUIET: Duration = Duration::from_secs(30 * 60);
+
+/// How often the serve loop re-collects idle-root use evidence (a `/proc` scan
+/// plus editor-socket probes). The cheap gates run every tick; this bounds the
+/// expensive ones.
+pub const IDLE_CONTROLLER_RETIRE_PROBE_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Which serve-loop edge is asking whether an idle controller may retire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdleRetireTrigger {
+    /// The routine stale-binary recycle (`#installworktreecontrollers`).
+    StaleBinaryRecycle,
+    /// The periodic idle tick of a lazy controller on its current binary.
+    IdleTick,
+}
+
+impl IdleRetireTrigger {
+    pub fn quiet_for_at_least(self, stale_binary_quiet: Duration) -> Duration {
+        match self {
+            Self::StaleBinaryRecycle => stale_binary_quiet,
+            Self::IdleTick => IDLE_CONTROLLER_RETIRE_QUIET,
+        }
+    }
+}
+
+/// `#supthrash` lifecycle invariant L2 (specs/08b § Controller process
+/// lifecycle): a lazy controller whose root has no use evidence, no live owned
+/// document, and no client must reach `Retired` within bounded time, on a
+/// stale binary OR on the current one. A `Managed` controller is owned by its
+/// launcher and never self-retires.
+pub fn idle_controller_should_retire(
+    trigger: IdleRetireTrigger,
+    lazy_launch: bool,
+    evidence: ProjectRootUseEvidence,
+    live_owned_documents: Option<usize>,
+    active_clients: usize,
+    quiet_for: Duration,
+    stale_binary_quiet: Duration,
+) -> bool {
+    lazy_launch
+        && idle_stale_binary_controller_should_retire(
+            true,
+            evidence,
+            live_owned_documents,
+            active_clients,
+            quiet_for,
+            trigger.quiet_for_at_least(stale_binary_quiet),
+        )
+}
+
+// ---------------------------------------------------------------------------
+// `#supthrash` — a failed self-handoff must make progress or stop.
+// ---------------------------------------------------------------------------
+
+/// First retry delay after a failed self-handoff.
+pub const HANDOFF_RETRY_BASE: Duration = Duration::from_secs(5);
+/// Upper bound on the retry delay.
+pub const HANDOFF_RETRY_CAP: Duration = Duration::from_secs(10 * 60);
+/// Consecutive failures after which the controller abandons the recycle for
+/// this target and keeps serving on its current image.
+pub const HANDOFF_MAX_CONSECUTIVE_FAILURES: u32 = 6;
+
+/// Whether retrying the same handoff can ever succeed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoffFailureClass {
+    /// May succeed on a later attempt (claim contention, slow hydration, ...).
+    Transient,
+    /// The same inputs fail the same way every time (`sun_path` overflow).
+    Permanent,
+}
+
+/// Classify a self-handoff error by its rendered chain.
+pub fn classify_handoff_failure(error_chain: &str) -> HandoffFailureClass {
+    if error_chain.contains("sun_path limit") {
+        HandoffFailureClass::Permanent
+    } else {
+        HandoffFailureClass::Transient
+    }
+}
+
+/// What the serve loop does after a failed self-handoff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoffFailureVerdict {
+    /// Try again, but not before this delay elapses.
+    RetryAfter(Duration),
+    /// Drop the recycle request, decline the current target identity, and keep
+    /// serving. A further install or an explicit operator request re-arms it.
+    Abandon,
+}
+
+/// `#supthrash` lifecycle invariant L4: every retry loop has a variant. The
+/// serve loop used to retry a failed handoff every recycle debounce with no
+/// memory of the failure — 104,411 attempts in six days on one root, each
+/// launching (and immediately losing) a replacement process on another.
+///
+/// The variant is `(target identity, consecutive_failures)`: within one target,
+/// each failure strictly increases `consecutive_failures` and doubles the delay
+/// (capped), and the count is bounded by [`HANDOFF_MAX_CONSECUTIVE_FAILURES`],
+/// at which point the controller abandons that target. A permanent failure
+/// abandons immediately. A success, or a new target (a further install),
+/// resets the variant.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HandoffRetryBackoff {
+    consecutive_failures: u32,
+    retry_not_before: Option<Instant>,
+}
+
+impl HandoffRetryBackoff {
+    pub fn consecutive_failures(&self) -> u32 {
+        self.consecutive_failures
+    }
+
+    /// May the serve loop start a handoff attempt at `now`?
+    pub fn may_attempt(&self, now: Instant) -> bool {
+        self.retry_not_before
+            .is_none_or(|not_before| now >= not_before)
+    }
+
+    /// Record a failed attempt and decide what happens next.
+    pub fn record_failure(
+        &mut self,
+        now: Instant,
+        class: HandoffFailureClass,
+    ) -> HandoffFailureVerdict {
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+        if class == HandoffFailureClass::Permanent
+            || self.consecutive_failures >= HANDOFF_MAX_CONSECUTIVE_FAILURES
+        {
+            *self = Self::default();
+            return HandoffFailureVerdict::Abandon;
+        }
+        let exponent = self.consecutive_failures.saturating_sub(1).min(16);
+        let delay = HANDOFF_RETRY_BASE
+            .saturating_mul(1u32 << exponent)
+            .min(HANDOFF_RETRY_CAP);
+        self.retry_not_before = Some(now + delay);
+        HandoffFailureVerdict::RetryAfter(delay)
+    }
+
+    /// A handoff promoted (or was superseded/deferred): reset the variant.
+    pub fn record_success(&mut self) {
+        *self = Self::default();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GH #128 — a stale-binary recycle must report the image it actually re-exec'd
 // into, and a stale-binary restart must not be re-requested for a pid and
@@ -848,5 +1014,278 @@ mod tests {
         assert!(controller_recycle_is_urgent(false, true));
         assert!(controller_recycle_is_urgent(true, true));
         assert!(!controller_recycle_is_urgent(false, false));
+    }
+}
+
+/// `#supthrash` — controller process lifecycle invariants (specs/08b §
+/// Controller process lifecycle, formal/tla/ControllerLifecycle.tla).
+#[cfg(test)]
+mod supthrash_tests {
+    use super::*;
+    use crate::actor::{ActorLastTransition, ActorRecord, ActorState};
+
+    fn record(state: ActorState) -> ActorRecord {
+        ActorRecord {
+            document_id: format!("/root/{}.md", state.as_str()),
+            session_id: "s".to_string(),
+            generation: 1,
+            pane_id: "%1".to_string(),
+            window_id: "@1".to_string(),
+            harness: "default".to_string(),
+            state,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "test".to_string(),
+                timestamp: 0,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        }
+    }
+
+    /// L2 premise: closed rows are history, never ownership.
+    #[test]
+    fn closed_actor_rows_do_not_pin_a_controller_to_its_root() {
+        let closed = [record(ActorState::Closed), record(ActorState::Closed)];
+        assert_eq!(live_owned_document_count(closed.iter()), 0);
+        for live in [
+            ActorState::Starting,
+            ActorState::Ready,
+            ActorState::Busy,
+            ActorState::WaitingInput,
+            ActorState::Blocked,
+        ] {
+            let rows = [record(ActorState::Closed), record(live)];
+            assert_eq!(live_owned_document_count(rows.iter()), 1, "{live:?}");
+        }
+    }
+
+    /// L2: an idle lazy root retires on the current binary after the long quiet
+    /// window, and on a stale binary after the short one; every use proof,
+    /// a live owned document, an unknown store, a client, or managed launch
+    /// mode each block it on their own.
+    #[test]
+    fn idle_controller_retire_is_exactly_the_conjunction_of_idle_proofs() {
+        let short = Duration::from_secs(60);
+        let idle = ProjectRootUseEvidence::default();
+        let quiet = IDLE_CONTROLLER_RETIRE_QUIET;
+        for trigger in [
+            IdleRetireTrigger::StaleBinaryRecycle,
+            IdleRetireTrigger::IdleTick,
+        ] {
+            assert!(idle_controller_should_retire(
+                trigger,
+                true,
+                idle,
+                Some(0),
+                0,
+                quiet,
+                short
+            ));
+            assert!(!idle_controller_should_retire(
+                trigger,
+                false,
+                idle,
+                Some(0),
+                0,
+                quiet,
+                short
+            ));
+            assert!(!idle_controller_should_retire(
+                trigger,
+                true,
+                idle,
+                Some(1),
+                0,
+                quiet,
+                short
+            ));
+            assert!(!idle_controller_should_retire(
+                trigger, true, idle, None, 0, quiet, short
+            ));
+            assert!(!idle_controller_should_retire(
+                trigger,
+                true,
+                idle,
+                Some(0),
+                1,
+                quiet,
+                short
+            ));
+            let editor = ProjectRootUseEvidence {
+                live_editor_endpoints: 1,
+                open_supervisors: 0,
+            };
+            let supervisor = ProjectRootUseEvidence {
+                live_editor_endpoints: 0,
+                open_supervisors: 1,
+            };
+            assert!(!idle_controller_should_retire(
+                trigger,
+                true,
+                editor,
+                Some(0),
+                0,
+                quiet,
+                short
+            ));
+            assert!(!idle_controller_should_retire(
+                trigger,
+                true,
+                supervisor,
+                Some(0),
+                0,
+                quiet,
+                short
+            ));
+        }
+        // The current-binary tick needs the long window; the stale-binary
+        // recycle keeps its short one.
+        let between = Duration::from_secs(120);
+        assert!(idle_controller_should_retire(
+            IdleRetireTrigger::StaleBinaryRecycle,
+            true,
+            idle,
+            Some(0),
+            0,
+            between,
+            short
+        ));
+        assert!(!idle_controller_should_retire(
+            IdleRetireTrigger::IdleTick,
+            true,
+            idle,
+            Some(0),
+            0,
+            between,
+            short
+        ));
+    }
+
+    /// Deterministic serve-loop simulation: virtual clock, one recycle tick
+    /// every `tick`, a handoff whose outcome is `outcome(attempt_index)`.
+    /// Returns (attempts, abandoned_at_attempt).
+    fn simulate(
+        horizon: Duration,
+        tick: Duration,
+        outcome: impl Fn(u32) -> Option<HandoffFailureClass>,
+    ) -> (u32, Option<u32>, Vec<Duration>) {
+        let start = Instant::now();
+        let mut now = start;
+        let mut backoff = HandoffRetryBackoff::default();
+        let mut wants_recycle = true;
+        let mut attempts = 0u32;
+        let mut abandoned = None;
+        let mut delays = Vec::new();
+        while now.duration_since(start) < horizon && wants_recycle {
+            if backoff.may_attempt(now) {
+                attempts += 1;
+                match outcome(attempts) {
+                    None => {
+                        backoff.record_success();
+                        wants_recycle = false;
+                    }
+                    Some(class) => match backoff.record_failure(now, class) {
+                        HandoffFailureVerdict::RetryAfter(delay) => delays.push(delay),
+                        HandoffFailureVerdict::Abandon => {
+                            abandoned = Some(attempts);
+                            wants_recycle = false;
+                        }
+                    },
+                }
+            }
+            now += tick;
+        }
+        (attempts, abandoned, delays)
+    }
+
+    /// L4, the incident shape: a permanent `sun_path` failure under the old
+    /// loop retried every ~5s for six days. With the variant it is attempted
+    /// exactly once.
+    #[test]
+    fn permanent_handoff_failure_is_attempted_once_then_abandoned() {
+        let err = "project controller socket path is 112 bytes, over the 107-byte AF_UNIX sun_path limit: /x";
+        assert_eq!(
+            classify_handoff_failure(err),
+            HandoffFailureClass::Permanent
+        );
+        let (attempts, abandoned, _) = simulate(
+            Duration::from_secs(6 * 24 * 3600),
+            Duration::from_secs(5),
+            |_| Some(classify_handoff_failure(err)),
+        );
+        assert_eq!((attempts, abandoned), (1, Some(1)));
+    }
+
+    /// L4: an always-failing transient handoff is bounded by the variant, and
+    /// every retry waits strictly longer than the previous one until the cap.
+    #[test]
+    fn transient_handoff_failures_back_off_and_are_bounded() {
+        let (attempts, abandoned, delays) = simulate(
+            Duration::from_secs(7 * 24 * 3600),
+            Duration::from_millis(250),
+            |_| Some(HandoffFailureClass::Transient),
+        );
+        assert_eq!(attempts, HANDOFF_MAX_CONSECUTIVE_FAILURES);
+        assert_eq!(abandoned, Some(HANDOFF_MAX_CONSECUTIVE_FAILURES));
+        assert_eq!(delays.first(), Some(&HANDOFF_RETRY_BASE));
+        for pair in delays.windows(2) {
+            assert!(
+                pair[1] > pair[0] || pair[1] == HANDOFF_RETRY_CAP,
+                "{delays:?}"
+            );
+        }
+        assert!(delays.iter().all(|delay| *delay <= HANDOFF_RETRY_CAP));
+    }
+
+    /// Exhaustive over every outcome sequence up to length 8: the loop never
+    /// makes more than `HANDOFF_MAX_CONSECUTIVE_FAILURES` attempts against one
+    /// target, always terminates (promoted or abandoned) within that bound, and
+    /// a success always resets the variant.
+    #[test]
+    fn every_outcome_sequence_terminates_within_the_variant_bound() {
+        let choices = [
+            None,
+            Some(HandoffFailureClass::Transient),
+            Some(HandoffFailureClass::Permanent),
+        ];
+        let len = 8u32;
+        for code in 0..3u32.pow(len) {
+            let sequence: Vec<_> = (0..len)
+                .map(|i| choices[((code / 3u32.pow(i)) % 3) as usize])
+                .collect();
+            let (attempts, abandoned, _) = simulate(
+                Duration::from_secs(24 * 3600),
+                Duration::from_secs(1),
+                |attempt| sequence.get((attempt - 1) as usize).copied().flatten(),
+            );
+            assert!(attempts <= HANDOFF_MAX_CONSECUTIVE_FAILURES, "{sequence:?}");
+            let first_success = sequence.iter().position(Option::is_none);
+            let first_permanent = sequence
+                .iter()
+                .position(|o| *o == Some(HandoffFailureClass::Permanent));
+            let expected_stop = [
+                first_success.map(|i| i as u32 + 1),
+                first_permanent.map(|i| i as u32 + 1),
+                Some(HANDOFF_MAX_CONSECUTIVE_FAILURES),
+            ]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap();
+            assert_eq!(attempts, expected_stop, "{sequence:?}");
+            assert_eq!(
+                abandoned.is_none(),
+                first_success.map(|i| i as u32 + 1) == Some(expected_stop),
+                "{sequence:?}"
+            );
+        }
+        let mut backoff = HandoffRetryBackoff::default();
+        let now = Instant::now();
+        backoff.record_failure(now, HandoffFailureClass::Transient);
+        assert!(!backoff.may_attempt(now));
+        backoff.record_success();
+        assert_eq!(backoff, HandoffRetryBackoff::default());
+        assert!(backoff.may_attempt(now));
     }
 }

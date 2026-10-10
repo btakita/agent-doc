@@ -14084,11 +14084,13 @@ fn handoff_controller_generation(
 ) -> Result<(interprocess::local_socket::Stream, ControllerStatus)> {
     let public_sock = socket_path(project_root);
     let new_generation = old_generation.saturating_add(1).max(1);
-    let temp_sock = project_root.join(".agent-doc").join(format!(
-        "controller-handoff-{}-{}.sock",
+    // `#handoffsockcompact`: compact name when the canonical one would overflow
+    // `sun_path` under a root whose public socket fits.
+    let temp_sock = agent_doc_controller::paths::handoff_socket_path(
+        project_root,
         std::process::id(),
-        new_generation
-    ));
+        new_generation,
+    );
     let _ = std::fs::remove_file(&temp_sock);
     let _ = request(project_root, "prepare_handoff");
 
@@ -15373,38 +15375,79 @@ fn controller_idle_root_use_evidence(
 
 fn controller_idle_root_should_retire(
     project_root: &Path,
+    trigger: agent_doc_controller::recycle::IdleRetireTrigger,
+    launch_mode: LaunchMode,
     active_clients: usize,
     quiet_for: Duration,
 ) -> bool {
+    controller_idle_root_should_retire_with(
+        project_root,
+        trigger,
+        launch_mode,
+        active_clients,
+        quiet_for,
+        || controller_idle_root_use_evidence(project_root),
+    )
+}
+
+/// Injectable core of [`controller_idle_root_should_retire`]: the use-evidence
+/// probe is process-global (`/proc`, liveness plane), so tests supply it.
+fn controller_idle_root_should_retire_with(
+    project_root: &Path,
+    trigger: agent_doc_controller::recycle::IdleRetireTrigger,
+    launch_mode: LaunchMode,
+    active_clients: usize,
+    quiet_for: Duration,
+    use_evidence: impl FnOnce() -> agent_doc_controller::recycle::ProjectRootUseEvidence,
+) -> bool {
+    use agent_doc_controller::recycle::IdleRetireTrigger;
     // Cheap gates first: the /proc scan and socket probes run only for a
     // controller that is otherwise quiet.
-    if active_clients != 0 || quiet_for < IDLE_ROOT_RETIRE_QUIET {
+    if launch_mode != LaunchMode::Lazy
+        || active_clients != 0
+        || quiet_for < trigger.quiet_for_at_least(IDLE_ROOT_RETIRE_QUIET)
+    {
         return false;
     }
-    let evidence = controller_idle_root_use_evidence(project_root);
-    let owned_documents = load_actor_store(project_root).ok().map(|store| store.len());
-    let retire = agent_doc_controller::recycle::idle_stale_binary_controller_should_retire(
+    let evidence = use_evidence();
+    // `#supthrash`: `closed` rows are history; only live actors own the root.
+    let live_owned_documents = load_actor_store(project_root)
+        .ok()
+        .map(|store| agent_doc_controller::recycle::live_owned_document_count(store.values()));
+    let retire = agent_doc_controller::recycle::idle_controller_should_retire(
+        trigger,
         true,
         evidence,
-        owned_documents,
+        live_owned_documents,
         active_clients,
         quiet_for,
         IDLE_ROOT_RETIRE_QUIET,
     );
     if retire {
+        let (event, reason, tag, message) = match trigger {
+            IdleRetireTrigger::StaleBinaryRecycle => (
+                "controller_idle_root_retired_instead_of_handoff",
+                "stale_binary",
+                "#installworktreecontrollers",
+                "is idle on a replaced binary; retiring instead of launching a replacement",
+            ),
+            IdleRetireTrigger::IdleTick => (
+                "controller_idle_root_retired",
+                "idle_current_binary",
+                "#supthrash",
+                "has been idle with no editor, supervisor, or live document; retiring (the next client relaunches it lazily)",
+            ),
+        };
         agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
-                "controller_idle_root_retired_instead_of_handoff project_root={} reason=stale_binary owned_documents=0 {} quiet_secs={} (#installworktreecontrollers)",
+                "{event} project_root={} reason={reason} live_owned_documents=0 {} quiet_secs={} ({tag})",
                 project_root.display(),
                 evidence.as_log_fields(),
                 quiet_for.as_secs(),
             ),
         );
-        eprintln!(
-            "[controller] project {} is idle on a replaced binary; retiring instead of launching a replacement",
-            project_root.display()
-        );
+        eprintln!("[controller] project {} {message}", project_root.display());
     }
     retire
 }
@@ -15620,6 +15663,13 @@ pub(crate) fn serve_with_options(
     let mut supervisor_watchdog_binding_skip_notified: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     let mut last_client_activity = Instant::now();
+    // `#supthrash` L2/L4: throttle for the idle-root evidence probe, and the
+    // variant that bounds self-handoff retries.
+    use agent_doc_controller::recycle::IDLE_CONTROLLER_RETIRE_PROBE_INTERVAL;
+    let mut idle_retire_probe_last: Option<Instant> = None;
+    let recycle_retry_backoff = Arc::new(Mutex::new(
+        agent_doc_controller::recycle::HandoffRetryBackoff::default(),
+    ));
     while !should_stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok(stream) => {
@@ -15658,6 +15708,35 @@ pub(crate) fn serve_with_options(
                     );
                     should_stop.store(true, Ordering::SeqCst);
                     break;
+                }
+                // `#supthrash` L2: an idle lazy controller on its CURRENT binary
+                // must also reach a terminal state. Before this, an idle root's
+                // controller lived until the next install, which then handed it
+                // off to another idle controller. Only a stable public
+                // controller retires here (a replacement is the watchdog's).
+                if handoff_temp_socket.is_none()
+                    && !recycle_handoff_in_flight.load(Ordering::SeqCst)
+                    && idle_retire_probe_last
+                        .is_none_or(|last| last.elapsed() >= IDLE_CONTROLLER_RETIRE_PROBE_INTERVAL)
+                    && last_client_activity.elapsed()
+                        >= agent_doc_controller::recycle::IDLE_CONTROLLER_RETIRE_QUIET
+                {
+                    idle_retire_probe_last = Some(Instant::now());
+                    let stable = runtime.bootstrap_snapshot().is_ok_and(|bootstrap| {
+                        bootstrap.handoff_state == ControllerHandoffState::Stable
+                    });
+                    if stable
+                        && controller_idle_root_should_retire(
+                            project_root,
+                            agent_doc_controller::recycle::IdleRetireTrigger::IdleTick,
+                            launch_mode,
+                            active_clients.load(Ordering::SeqCst),
+                            last_client_activity.elapsed(),
+                        )
+                    {
+                        should_stop.store(true, Ordering::SeqCst);
+                        break;
+                    }
                 }
                 // The temp-socket marker is process-local and predates the
                 // external handoff client's atomic rename. Retire it as soon as
@@ -15760,8 +15839,9 @@ pub(crate) fn serve_with_options(
                 // controller drains already-accepted clients before retiring. A
                 // durable harness dispatch may remain open because its child belongs
                 // to the route-owned supervisor.
-                let wants_recycle_at_safe_tick =
-                    controller_wants_recycle(&runtime) && controller_recycle_ready(&runtime);
+                let wants_recycle_at_safe_tick = controller_wants_recycle(&runtime)
+                    && controller_recycle_ready(&runtime)
+                    && recycle_retry_backoff.lock().may_attempt(Instant::now());
                 // An IPC build mismatch on the ACK-recovery path proves
                 // that this binary cannot reach the editor that owns the
                 // delivery frontier. Once every request and durable
@@ -15806,6 +15886,8 @@ pub(crate) fn serve_with_options(
                     if reason == "stale_binary"
                         && controller_idle_root_should_retire(
                             project_root,
+                            agent_doc_controller::recycle::IdleRetireTrigger::StaleBinaryRecycle,
+                            launch_mode,
                             active_clients.load(Ordering::SeqCst),
                             last_client_activity.elapsed(),
                         )
@@ -15828,6 +15910,7 @@ pub(crate) fn serve_with_options(
                     let recycle_reason = reason.to_string();
                     let handoff_in_flight = Arc::clone(&recycle_handoff_in_flight);
                     let handoff_promoted = Arc::clone(&recycle_handoff_promoted);
+                    let retry_backoff = Arc::clone(&recycle_retry_backoff);
                     let stop_after_handoff = Arc::clone(&should_stop);
                     let draining_clients = Arc::clone(&active_clients);
                     let draining_runtime = Arc::clone(&runtime);
@@ -15872,6 +15955,7 @@ pub(crate) fn serve_with_options(
                         })();
                         match result {
                             Ok(SelfRecycleHandoff::DeferredTargetNotNewer { target }) => {
+                                retry_backoff.lock().record_success();
                                 // Ignore this exact on-disk identity until a
                                 // further install changes it.
                                 draining_runtime
@@ -15920,6 +16004,7 @@ pub(crate) fn serve_with_options(
                                 // replacement. No new client can reach this
                                 // predecessor; let every already-accepted RPC
                                 // drain before retiring it.
+                                retry_backoff.lock().record_success();
                                 handoff_promoted.store(true, Ordering::SeqCst);
                                 drain_predecessor_after_promotion(
                                     &draining_runtime,
@@ -15930,16 +16015,47 @@ pub(crate) fn serve_with_options(
                                 stop_after_handoff.store(true, Ordering::SeqCst);
                             }
                             Err(err) => {
+                                use agent_doc_controller::recycle::{
+                                    HandoffFailureVerdict, classify_handoff_failure,
+                                };
+                                let error_chain = format!("{err:#}").replace('\n', " | ");
+                                let class = classify_handoff_failure(&error_chain);
+                                // `#supthrash` L4: every failure advances the
+                                // variant; the loop either backs off or stops.
+                                let verdict =
+                                    retry_backoff.lock().record_failure(Instant::now(), class);
+                                let next = match verdict {
+                                    HandoffFailureVerdict::RetryAfter(delay) => {
+                                        format!("retry_after_secs={}", delay.as_secs())
+                                    }
+                                    HandoffFailureVerdict::Abandon => {
+                                        // Decline the current on-disk identity so
+                                        // stale detection does not re-arm on it, and
+                                        // drop any operator/urgent request. A
+                                        // further install or request re-arms.
+                                        draining_runtime.abandon_recycle_request();
+                                        draining_runtime
+                                            .decline_recycle_target(current_binary_identity().ok());
+                                        "action=abandoned_keep_serving".to_string()
+                                    }
+                                };
                                 handoff_in_flight.store(false, Ordering::SeqCst);
                                 agent_doc_ops_log_io::log_op(
                                     &handoff_root,
                                     &format!(
-                                        "controller_self_handoff_failed pid={own_pid} reason={recycle_reason} old_version={} generation={} error={}",
+                                        "controller_self_handoff_failed pid={own_pid} reason={recycle_reason} old_version={} generation={} failure_class={class:?} {next} error={error_chain}",
                                         identity_version_label(recorded_binary.as_ref()),
                                         old_generation,
-                                        format!("{err:#}").replace('\n', " | "),
                                     ),
                                 );
+                                if verdict == HandoffFailureVerdict::Abandon {
+                                    agent_doc_ops_log_io::log_op(
+                                        &handoff_root,
+                                        &format!(
+                                            "controller_self_handoff_abandoned pid={own_pid} reason={recycle_reason} generation={old_generation} failure_class={class:?} note=controller_keeps_serving_current_image (#supthrash)",
+                                        ),
+                                    );
+                                }
                             }
                         }
                     });
@@ -48360,5 +48476,140 @@ mod install_fanout_idle_root_tests {
             project_root_use_evidence(&root, &BTreeSet::from([root.join("tasks/plan.md")]));
         assert_eq!(supervised.open_supervisors, 1);
         assert!(supervised.in_use());
+    }
+}
+
+/// `#supthrash` L2 at the IO boundary: the retire decision reads the real
+/// `state.db` actor store, where an idle root's rows are `closed` history.
+#[cfg(test)]
+mod supthrash_idle_root_tests {
+    use super::*;
+    use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
+    use agent_doc_controller::recycle::{
+        IDLE_CONTROLLER_RETIRE_QUIET, IdleRetireTrigger, ProjectRootUseEvidence,
+    };
+
+    fn actor(root: &Path, name: &str, state: ActorState) -> ActorRecord {
+        ActorRecord {
+            document_id: root.join(name).display().to_string(),
+            session_id: format!("session-{name}"),
+            generation: 1,
+            pane_id: "%9".to_string(),
+            window_id: "@9".to_string(),
+            harness: "default".to_string(),
+            state,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "supthrash".to_string(),
+                timestamp: 1,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        }
+    }
+
+    fn retire(root: &Path, trigger: IdleRetireTrigger, mode: LaunchMode, quiet: Duration) -> bool {
+        controller_idle_root_should_retire_with(root, trigger, mode, 0, quiet, || {
+            ProjectRootUseEvidence::default()
+        })
+    }
+
+    #[test]
+    fn idle_root_with_only_closed_history_retires_on_both_triggers() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        // The incident shape: `$HOME` and two worktrees held only closed rows.
+        store_actor_record(root, None, &actor(root, "old.md", ActorState::Closed)).unwrap();
+        store_actor_record(root, None, &actor(root, "older.md", ActorState::Closed)).unwrap();
+
+        assert!(retire(
+            root,
+            IdleRetireTrigger::StaleBinaryRecycle,
+            LaunchMode::Lazy,
+            IDLE_ROOT_RETIRE_QUIET
+        ));
+        assert!(retire(
+            root,
+            IdleRetireTrigger::IdleTick,
+            LaunchMode::Lazy,
+            IDLE_CONTROLLER_RETIRE_QUIET
+        ));
+        // The current-binary tick waits out its own longer window.
+        assert!(!retire(
+            root,
+            IdleRetireTrigger::IdleTick,
+            LaunchMode::Lazy,
+            IDLE_ROOT_RETIRE_QUIET
+        ));
+        // A managed controller belongs to its launcher.
+        assert!(!retire(
+            root,
+            IdleRetireTrigger::IdleTick,
+            LaunchMode::Managed,
+            IDLE_CONTROLLER_RETIRE_QUIET
+        ));
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("controller_idle_root_retired_instead_of_handoff"),
+            "{log}"
+        );
+        assert!(
+            log.contains("controller_idle_root_retired project_root="),
+            "{log}"
+        );
+        assert!(log.contains("reason=idle_current_binary"), "{log}");
+    }
+
+    #[test]
+    fn a_live_actor_or_any_use_evidence_keeps_the_controller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        store_actor_record(root, None, &actor(root, "old.md", ActorState::Closed)).unwrap();
+        store_actor_record(root, None, &actor(root, "live.md", ActorState::Ready)).unwrap();
+        for trigger in [
+            IdleRetireTrigger::StaleBinaryRecycle,
+            IdleRetireTrigger::IdleTick,
+        ] {
+            assert!(!retire(
+                root,
+                trigger,
+                LaunchMode::Lazy,
+                IDLE_CONTROLLER_RETIRE_QUIET
+            ));
+        }
+
+        let idle_dir = tempfile::TempDir::new().unwrap();
+        let idle_root = idle_dir.path();
+        std::fs::create_dir_all(idle_root.join(".agent-doc")).unwrap();
+        for evidence in [
+            ProjectRootUseEvidence {
+                live_editor_endpoints: 1,
+                open_supervisors: 0,
+            },
+            ProjectRootUseEvidence {
+                live_editor_endpoints: 0,
+                open_supervisors: 1,
+            },
+        ] {
+            assert!(!controller_idle_root_should_retire_with(
+                idle_root,
+                IdleRetireTrigger::IdleTick,
+                LaunchMode::Lazy,
+                0,
+                IDLE_CONTROLLER_RETIRE_QUIET,
+                || evidence,
+            ));
+        }
+        // An in-flight RPC blocks before any evidence is collected.
+        assert!(!controller_idle_root_should_retire_with(
+            idle_root,
+            IdleRetireTrigger::IdleTick,
+            LaunchMode::Lazy,
+            1,
+            IDLE_CONTROLLER_RETIRE_QUIET,
+            || panic!("evidence must not be probed while a client is active"),
+        ));
     }
 }

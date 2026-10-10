@@ -46,6 +46,24 @@ ownership:
 - a pending request eventually replaces the supervisor after the cycle closes
   and IPC drains under weak fairness.
 
+`ControllerLifecycle.tla` (`#supthrash`) checks the project-controller process
+lifecycle for one root across installs, use starting/stopping, and actors
+opening/closing (specs/08b § Controller process lifecycle):
+
+- failed self-handoffs against one target are bounded (the retry variant), and
+  an abandoned target is quiescent;
+- a controller never retires from a root an editor, supervisor, client, or
+  live actor uses;
+- a root nothing uses eventually has no controller process, whether its
+  controller is on a stale or the current binary; and
+- a superseded controller is eventually replaced, retired, or abandons the
+  target and keeps serving.
+
+`ControllerLifecycleRetryWedge` (no variant), `ControllerLifecycleClosedOwnerWedge`
+(`closed` rows count as ownership), and `ControllerLifecycleNoIdleTickWedge` (only
+a stale-binary recycle can retire) each reproduce one 2026-10-10 thrash class and
+must violate; three Reach configs witness retire, abandon, and promotion.
+
 `ReactiveTopology.tla` checks the shared lifetime-scoped graph contract used by
 agent-doc's Lazily state machines:
 

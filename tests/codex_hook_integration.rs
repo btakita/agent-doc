@@ -8,7 +8,13 @@ use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
 
 fn agent_doc() -> Command {
-    cargo_bin_cmd!("agent-doc")
+    let mut cmd = cargo_bin_cmd!("agent-doc");
+    // These tests assert the Stop hook's recovery OUTCOME. Its 45s wall-clock
+    // budget made that outcome depend on host load (a correct recovery ran
+    // >45s under a load-128 parallel `make check` and failed closed); the
+    // budget itself is unit-tested with an injected short budget.
+    cmd.env("AGENT_DOC_CODEX_STOP_HOOK_BUDGET_SECS", "unbounded");
+    cmd
 }
 
 fn template_doc_content() -> String {

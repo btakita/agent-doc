@@ -285,8 +285,24 @@ fn stop_phase(phase: &str) {
     });
 }
 
-fn stop_hook_budget() -> std::time::Duration {
-    resolve_stop_hook_budget(std::env::var(STOP_HOOK_BUDGET_ENV).ok().as_deref())
+/// `AGENT_DOC_CODEX_STOP_HOOK_BUDGET_SECS=unbounded`: run the hook without
+/// the wall-clock budget. For behavioural integration tests only: their oracle
+/// is the recovery outcome, which must not depend on host load. Under a
+/// load-128 parallel `make check` a correct recovery took >45s and the budget
+/// (correctly, for production) failed it closed, so the test result depended
+/// on the clock. The budget itself is covered by unit tests with an injected
+/// short budget.
+const STOP_HOOK_BUDGET_UNBOUNDED: &str = "unbounded";
+
+fn stop_hook_budget() -> Option<std::time::Duration> {
+    resolve_stop_hook_budget_mode(std::env::var(STOP_HOOK_BUDGET_ENV).ok().as_deref())
+}
+
+fn resolve_stop_hook_budget_mode(raw: Option<&str>) -> Option<std::time::Duration> {
+    if raw.is_some_and(|raw| raw.trim() == STOP_HOOK_BUDGET_UNBOUNDED) {
+        return None;
+    }
+    Some(resolve_stop_hook_budget(raw))
 }
 
 fn resolve_stop_hook_budget(raw: Option<&str>) -> std::time::Duration {
@@ -300,8 +316,13 @@ fn resolve_stop_hook_budget(raw: Option<&str>) -> std::time::Duration {
 pub fn handle_stop() -> Result<()> {
     let run = match read_stdin_payload()
         .and_then(|payload| serde_json::from_str::<StopInput>(&payload).context("parse stop JSON"))
-        .and_then(|input| apply_stop_within_budget(input, stop_hook_budget()))
-    {
+        .and_then(|input| match stop_hook_budget() {
+            Some(budget) => apply_stop_within_budget(input, budget),
+            None => apply_stop(&input).map(|response| StopHookRun {
+                response,
+                timed_out: false,
+            }),
+        }) {
         Ok(run) => run,
         Err(err) => StopHookRun {
             response: StopResponse::Stop {
@@ -3258,6 +3279,16 @@ mod tests {
         assert_eq!(
             resolve_stop_hook_budget(Some("0")),
             std::time::Duration::from_secs(STOP_HOOK_BUDGET_SECS)
+        );
+        assert_eq!(resolve_stop_hook_budget_mode(Some("unbounded")), None);
+        assert_eq!(
+            resolve_stop_hook_budget_mode(None),
+            Some(std::time::Duration::from_secs(STOP_HOOK_BUDGET_SECS))
+        );
+        assert_eq!(
+            resolve_stop_hook_budget_mode(Some("bogus")),
+            Some(std::time::Duration::from_secs(STOP_HOOK_BUDGET_SECS)),
+            "only the exact opt-out disables the budget"
         );
     }
 

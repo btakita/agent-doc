@@ -9435,10 +9435,136 @@ fn realtime_steering_event_for_text(
     )
 }
 
+/// Publish an editor route's layout on THIS controller's single arbiter and
+/// await its convergence gates (GH #110/#111, `layoutpublisherarbiter`).
+///
+/// Returns the converged receipt, the number of layout observations, and the
+/// route lease that holds passive publications back until the caller drops it.
+#[allow(clippy::too_many_arguments)]
+fn publish_editor_route_layout_locally<'a>(
+    bootstrap: &ControllerBootstrap,
+    runtime: &'a ControllerRuntime,
+    canonical: &Path,
+    routed_document: &str,
+    mut layout_invocation: ControllerTmuxLayoutSyncInvocation,
+    explicit_layout_mode: Option<&str>,
+    route_deadline: Instant,
+) -> Result<(
+    ControllerTmuxLayoutSyncReceipt,
+    u32,
+    PaneLayoutRouteLeaseGuard<'a>,
+)> {
+    let layout_mode =
+        EditorRouteLayoutMode::resolve(explicit_layout_mode, layout_invocation.columns.len())?;
+    // `layoutpublisherarbiter`: merge over every editor state-plane frame
+    // ordered before this route, then stamp the route with that plane head.
+    let plane_basis = await_editor_route_plane_catch_up(canonical, runtime, route_deadline);
+    let (retained_columns, retained_focus, retained_owner) = runtime
+        .pane_layout_desired()
+        .map(|desired| {
+            (
+                desired.invocation.columns,
+                desired.invocation.focus,
+                desired.provenance.structure_owner,
+            )
+        })
+        .unwrap_or_default();
+    let (merged_columns, layout_merge, dropped_columns) = merge_editor_route_columns_within(
+        layout_mode,
+        &retained_columns,
+        retained_focus.as_deref(),
+        &layout_invocation.columns,
+        Some(routed_document),
+        EnsureRouteWidening::for_structure_owner(retained_owner),
+    );
+    if !dropped_columns.is_empty() {
+        log_pane_layout_supersessions(
+            &bootstrap.project_root,
+            &[PaneLayoutSupersession {
+                winner: PaneLayoutPublisher::PluginPublication,
+                loser: PaneLayoutPublisher::Route,
+                reason: "ensure_route_cannot_widen_plugin_split",
+                winner_generation: runtime.pane_layout_desired().map(|d| d.generation),
+                loser_generation: None,
+                winner_plane_basis: runtime
+                    .pane_layout_desired()
+                    .and_then(|d| d.provenance.plane_basis),
+                loser_plane_basis: plane_basis,
+                winner_columns: retained_columns.clone(),
+                loser_columns: dropped_columns,
+            }],
+        );
+    }
+    layout_invocation.columns = merged_columns;
+    agent_doc_ops_log_io::log_op(
+        canonical,
+        &format!(
+            "controller_editor_route_layout_mode file={} mode={} explicit={} merge={} route_columns={} retained_columns={} published_columns={}",
+            canonical.display(),
+            layout_mode.label(),
+            explicit_layout_mode.is_some(),
+            layout_merge.label(),
+            layout_merge.route_columns,
+            retained_columns.len(),
+            layout_invocation.columns.len(),
+        ),
+    );
+    if let Some(refusal) = editor_route_focus_refusal(&layout_invocation, routed_document) {
+        anyhow::bail!(refusal);
+    }
+    // Publish exactly once; the lease holds passive publications back until
+    // dispatch settles. The gates then re-observe this publication.
+    let (first_receipt, route_layout_lease, published_layout) = handle_editor_route_layout(
+        bootstrap,
+        runtime,
+        layout_invocation,
+        PaneLayoutClaim::route(layout_mode.claim(), plane_basis),
+        route_deadline.saturating_duration_since(Instant::now()),
+    )?;
+    let (layout_receipt, layout_observations) = await_editor_route_layout_gates(
+        routed_document,
+        route_deadline,
+        first_receipt,
+        |refusal, remaining| {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "controller_editor_route_layout_reobserve file={} remaining_ms={} refusal={}",
+                    canonical.display(),
+                    remaining.as_millis(),
+                    refusal,
+                ),
+            );
+            reobserve_editor_route_layout(bootstrap, runtime, &published_layout, remaining)
+        },
+    )?;
+    Ok((layout_receipt, layout_observations, route_layout_lease))
+}
+
 fn handle_editor_route_rpc(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     request: ControllerRequest,
+) -> Result<ControllerEditorRouteResult> {
+    handle_editor_route_rpc_with_layout_delegate(
+        bootstrap,
+        runtime,
+        request,
+        delegate_editor_route_layout,
+    )
+}
+
+/// [`handle_editor_route_rpc`] with the cross-root layout transport injected,
+/// so a test can stand the enclosing controller up in-process and inspect the
+/// one arbiter that received the publication (`#crossrootcolumnflip`).
+fn handle_editor_route_rpc_with_layout_delegate(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+    delegate_layout: impl FnOnce(
+        &Path,
+        &EditorRouteLayoutDelegation,
+    ) -> Result<EditorRouteLayoutDelegationReceipt>,
 ) -> Result<ControllerEditorRouteResult> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
@@ -9492,92 +9618,17 @@ fn handle_editor_route_rpc(
             ),
         );
     }
-    let layout_mode = EditorRouteLayoutMode::resolve(
-        payload.layout_mode.as_deref(),
-        layout_invocation.columns.len(),
-    )?;
-    // `layoutpublisherarbiter`: merge over every editor state-plane frame
-    // ordered before this route, then stamp the route with that plane head.
-    let plane_basis = await_editor_route_plane_catch_up(&canonical, runtime, route_deadline);
-    let (retained_columns, retained_focus, retained_owner) = runtime
-        .pane_layout_desired()
-        .map(|desired| {
-            (
-                desired.invocation.columns,
-                desired.invocation.focus,
-                desired.provenance.structure_owner,
-            )
-        })
-        .unwrap_or_default();
-    let (merged_columns, layout_merge, dropped_columns) = merge_editor_route_columns_within(
-        layout_mode,
-        &retained_columns,
-        retained_focus.as_deref(),
-        &layout_invocation.columns,
-        Some(routed_document.as_str()),
-        EnsureRouteWidening::for_structure_owner(retained_owner),
-    );
-    if !dropped_columns.is_empty() {
-        log_pane_layout_supersessions(
-            &bootstrap.project_root,
-            &[PaneLayoutSupersession {
-                winner: PaneLayoutPublisher::PluginPublication,
-                loser: PaneLayoutPublisher::Route,
-                reason: "ensure_route_cannot_widen_plugin_split",
-                winner_generation: runtime.pane_layout_desired().map(|d| d.generation),
-                loser_generation: None,
-                winner_plane_basis: runtime
-                    .pane_layout_desired()
-                    .and_then(|d| d.provenance.plane_basis),
-                loser_plane_basis: plane_basis,
-                winner_columns: retained_columns.clone(),
-                loser_columns: dropped_columns,
-            }],
-        );
-    }
-    layout_invocation.columns = merged_columns;
-    agent_doc_ops_log_io::log_op(
-        &canonical,
-        &format!(
-            "controller_editor_route_layout_mode file={} mode={} explicit={} merge={} route_columns={} retained_columns={} published_columns={}",
-            canonical.display(),
-            layout_mode.label(),
-            payload.layout_mode.is_some(),
-            layout_merge.label(),
-            layout_merge.route_columns,
-            retained_columns.len(),
-            layout_invocation.columns.len(),
-        ),
-    );
-    if let Some(refusal) = editor_route_focus_refusal(&layout_invocation, &routed_document) {
-        anyhow::bail!(refusal);
-    }
-    // Publish exactly once; the lease holds passive publications back until
-    // dispatch settles. The gates then re-observe this publication.
-    let (first_receipt, _route_layout_lease, published_layout) = handle_editor_route_layout(
-        bootstrap,
-        runtime,
-        layout_invocation,
-        PaneLayoutClaim::route(layout_mode.claim(), plane_basis),
-        route_deadline.saturating_duration_since(Instant::now()),
-    )?;
-    let (layout_receipt, layout_observations) = await_editor_route_layout_gates(
-        &routed_document,
-        route_deadline,
-        first_receipt,
-        |refusal, remaining| {
-            agent_doc_ops_log_io::log_op(
-                &canonical,
-                &format!(
-                    "controller_editor_route_layout_reobserve file={} remaining_ms={} refusal={}",
-                    canonical.display(),
-                    remaining.as_millis(),
-                    refusal,
-                ),
-            );
-            reobserve_editor_route_layout(bootstrap, runtime, &published_layout, remaining)
-        },
-    )?;
+    let (layout_receipt, layout_observations, _route_layout_lease) =
+        route_editor_layout_with_owner(
+            bootstrap,
+            runtime,
+            &canonical,
+            &routed_document,
+            layout_invocation,
+            payload.layout_mode.as_deref(),
+            route_deadline,
+            delegate_layout,
+        )?;
     let harness_ready_secs = route_deadline
         .saturating_duration_since(Instant::now())
         .as_secs();
@@ -9651,6 +9702,276 @@ fn handle_editor_route_rpc(
         exit_code: result.exit_code,
         output,
     })
+}
+
+/// `#crossrootcolumnflip`: one editor-route layout publication re-addressed to
+/// the controller that owns the shared main window
+/// ([`agent_doc_controller::layout_owner::main_window_layout_owner`]).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct EditorRouteLayoutDelegation {
+    /// The route's layout, already canonicalized and focus-retargeted by the
+    /// delegating controller.
+    invocation: ControllerTmuxLayoutSyncInvocation,
+    /// The route payload's raw `layout_mode`, resolved again by the owner.
+    #[serde(default)]
+    layout_mode: Option<String>,
+    /// The document the route dispatches (the focus the gates require).
+    routed_document: String,
+    /// What remains of the route's `--wait-for-ready` budget.
+    budget_ms: u64,
+    /// The delegating controller's project root, for attribution only.
+    delegated_by: String,
+}
+
+/// The owner's typed answer. A layout the owner refused comes back as
+/// `refusal`, never as a transport error, so the delegating controller can
+/// tell "the owner said no" (terminal for this route) from "the owner could
+/// not be reached" (publish locally: no competing publisher is running).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct EditorRouteLayoutDelegationReceipt {
+    #[serde(default)]
+    receipt: Option<ControllerTmuxLayoutSyncReceipt>,
+    #[serde(default)]
+    observations: u32,
+    #[serde(default)]
+    refusal: Option<String>,
+}
+
+/// Route an editor route's layout to the single arbiter that owns the shared
+/// main window (`#crossrootcolumnflip`).
+///
+/// A nested controller whose layout names a document from an enclosing project
+/// root does not publish it: two controllers each minting generations into
+/// one tmux window let whichever projected last win, so a column flipped
+/// between documents after an IDE restart. The enclosing controller merges the
+/// route into the same generation sequence as its editor-surface publications
+/// instead. Dispatch stays on this controller either way.
+#[allow(clippy::too_many_arguments)]
+fn route_editor_layout_with_owner<'a>(
+    bootstrap: &ControllerBootstrap,
+    runtime: &'a ControllerRuntime,
+    canonical: &Path,
+    routed_document: &str,
+    layout_invocation: ControllerTmuxLayoutSyncInvocation,
+    explicit_layout_mode: Option<&str>,
+    route_deadline: Instant,
+    delegate_layout: impl FnOnce(
+        &Path,
+        &EditorRouteLayoutDelegation,
+    ) -> Result<EditorRouteLayoutDelegationReceipt>,
+) -> Result<(
+    ControllerTmuxLayoutSyncReceipt,
+    u32,
+    Option<PaneLayoutRouteLeaseGuard<'a>>,
+)> {
+    let controller_root = bootstrap
+        .project_root
+        .canonicalize()
+        .unwrap_or_else(|_| bootstrap.project_root.clone());
+    let column_roots = layout_invocation
+        .columns
+        .iter()
+        .flat_map(|column| column.split(','))
+        .map(str::trim)
+        .filter(|document| !document.is_empty())
+        .filter_map(|document| {
+            agent_doc_project_root_io::project_root_containing(Path::new(document))
+                .map(|root| root.canonicalize().unwrap_or(root))
+        })
+        .collect::<Vec<_>>();
+    let owner = agent_doc_controller::layout_owner::main_window_layout_owner(
+        &controller_root,
+        column_roots.iter().map(|root| Some(root.as_path())),
+    );
+    let agent_doc_controller::layout_owner::LayoutOwner::Delegate(owner_root) = owner else {
+        let (receipt, observations, lease) = publish_editor_route_layout_locally(
+            bootstrap,
+            runtime,
+            canonical,
+            routed_document,
+            layout_invocation,
+            explicit_layout_mode,
+            route_deadline,
+        )?;
+        return Ok((receipt, observations, Some(lease)));
+    };
+    let delegation = EditorRouteLayoutDelegation {
+        invocation: layout_invocation.clone(),
+        layout_mode: explicit_layout_mode.map(str::to_string),
+        routed_document: routed_document.to_string(),
+        budget_ms: route_deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX),
+        delegated_by: controller_root.display().to_string(),
+    };
+    match delegate_layout(owner_root, &delegation) {
+        Ok(EditorRouteLayoutDelegationReceipt {
+            receipt: Some(receipt),
+            observations,
+            refusal: None,
+        }) => {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "controller_editor_route_layout_delegated file={} owner_root={} columns={} focus={} applied={} reason={} observations={}",
+                    canonical.display(),
+                    owner_root.display(),
+                    receipt.columns.len(),
+                    receipt.focus.as_deref().unwrap_or("none"),
+                    receipt.applied,
+                    receipt.reason,
+                    observations,
+                ),
+            );
+            Ok((receipt, observations, None))
+        }
+        Ok(answer) => {
+            let refusal = answer
+                .refusal
+                .unwrap_or_else(|| "owner returned no layout receipt".to_string());
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "controller_editor_route_layout_delegation_refused file={} owner_root={} refusal={}",
+                    canonical.display(),
+                    owner_root.display(),
+                    refusal.replace('\n', " "),
+                ),
+            );
+            anyhow::bail!(
+                "editor route layout refused by the main-window owner {}: {refusal}",
+                owner_root.display()
+            )
+        }
+        Err(error) => {
+            // No owning controller is running, so nothing competes for the
+            // window: the local publication is the only one, as before.
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "controller_editor_route_layout_delegation_failed file={} owner_root={} fallback=local_publish error={}",
+                    canonical.display(),
+                    owner_root.display(),
+                    format!("{error:#}").replace('\n', " "),
+                ),
+            );
+            let (receipt, observations, lease) = publish_editor_route_layout_locally(
+                bootstrap,
+                runtime,
+                canonical,
+                routed_document,
+                layout_invocation,
+                explicit_layout_mode,
+                route_deadline,
+            )?;
+            Ok((receipt, observations, Some(lease)))
+        }
+    }
+}
+
+/// Owner side of [`route_editor_layout_with_owner`]: publish a delegated route
+/// layout on this controller's arbiter. The route lease is released when this
+/// returns, because the delegating controller's dispatch runs elsewhere.
+fn handle_editor_route_layout_rpc(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<EditorRouteLayoutDelegationReceipt> {
+    // A handoff refusal stays a transport error so the client's handoff retry
+    // applies (and, once exhausted, its local fallback) instead of reading it
+    // as the owner refusing this route's layout.
+    if bootstrap.handoff_state != ControllerHandoffState::Stable {
+        anyhow::bail!(
+            "editor route layout refused: controller not authoritative (handoff_state={:?})",
+            bootstrap.handoff_state
+        );
+    }
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let delegation: EditorRouteLayoutDelegation = serde_json::from_str(&payload_json)
+        .context("failed to parse delegated editor route layout")?;
+    Ok(publish_delegated_editor_route_layout(
+        bootstrap, runtime, delegation,
+    ))
+}
+
+fn publish_delegated_editor_route_layout(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    delegation: EditorRouteLayoutDelegation,
+) -> EditorRouteLayoutDelegationReceipt {
+    let canonical = PathBuf::from(&delegation.routed_document);
+    let route_deadline = Instant::now() + Duration::from_millis(delegation.budget_ms);
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_editor_route_layout_delegation_received file={} delegated_by={} columns={} budget_ms={}",
+            canonical.display(),
+            delegation.delegated_by,
+            delegation.invocation.columns.len(),
+            delegation.budget_ms,
+        ),
+    );
+    match publish_editor_route_layout_locally(
+        bootstrap,
+        runtime,
+        &canonical,
+        &delegation.routed_document,
+        delegation.invocation,
+        delegation.layout_mode.as_deref(),
+        route_deadline,
+    ) {
+        Ok((receipt, observations, _lease)) => EditorRouteLayoutDelegationReceipt {
+            receipt: Some(receipt),
+            observations,
+            refusal: None,
+        },
+        Err(error) => EditorRouteLayoutDelegationReceipt {
+            receipt: None,
+            observations: 0,
+            refusal: Some(format!("{error:#}")),
+        },
+    }
+}
+
+/// Client side: ask the running main-window owner to publish a route layout.
+/// Never launches a controller — an owner that is not running publishes
+/// nothing, so the caller falls back to its own publication.
+fn delegate_editor_route_layout(
+    owner_root: &Path,
+    delegation: &EditorRouteLayoutDelegation,
+) -> Result<EditorRouteLayoutDelegationReceipt> {
+    let diagnostic_payload =
+        serde_json::to_string(delegation).context("serialize delegated editor route layout")?;
+    let timeout = Duration::from_millis(delegation.budget_ms) + Duration::from_secs(2);
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let _ = (owner_root, diagnostic_payload, timeout);
+        anyhow::bail!("cross-root layout delegation has no transport under test-support")
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        request_existing_controller_with_timeout(
+            owner_root,
+            ControllerRequest {
+                command: "editor_route_layout".to_string(),
+                file: Some(PathBuf::from(&delegation.routed_document)),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(diagnostic_payload),
+            },
+            timeout,
+        )
+    }
 }
 
 /// Shadow endpoint for the lazily command/RPC message plane (`command-plane-v1`,
@@ -15991,6 +16312,11 @@ pub(crate) fn handle_request_locked(
             controller_envelope(handle_focus_document_pane(&bootstrap_snapshot, request))
         }
         "sync_tmux_layout" => controller_envelope(handle_sync_tmux_layout(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "editor_route_layout" => controller_envelope(handle_editor_route_layout_rpc(
             &bootstrap_snapshot,
             runtime.as_ref(),
             request,
@@ -30395,6 +30721,273 @@ mod tests {
         assert_eq!(second.invocation, first.invocation);
     }
 
+    /// `#crossrootcolumnflip` fixture: a superproject root and a nested root
+    /// with its own `.agent-doc/`, each with one agent document, mirroring
+    /// agent-loop (`agent-doc-bugs.md`) + `src/haiven-dev` (`contracts.md`).
+    struct CrossRootLayoutFixture {
+        _outer: tempfile::TempDir,
+        outer_bootstrap: ControllerBootstrap,
+        outer_runtime: Arc<ControllerRuntime>,
+        inner_bootstrap: ControllerBootstrap,
+        inner_runtime: Arc<ControllerRuntime>,
+        bugs: String,
+        contracts: String,
+        api: String,
+    }
+
+    impl CrossRootLayoutFixture {
+        fn new() -> Self {
+            let outer = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir_all(outer.path().join(".agent-doc")).unwrap();
+            let inner_root = outer.path().join("src/haiven-dev");
+            std::fs::create_dir_all(inner_root.join(".agent-doc")).unwrap();
+            let write_doc = |path: PathBuf, name: &str| {
+                std::fs::write(
+                    &path,
+                    format!("---\nagent_doc_session: {name}\nagent: codex\n---\n# {name}\n"),
+                )
+                .unwrap();
+                path.canonicalize().unwrap().display().to_string()
+            };
+            let bugs = write_doc(outer.path().join("agent-doc-bugs.md"), "bugs");
+            let contracts = write_doc(inner_root.join("contracts.md"), "contracts");
+            let api = write_doc(inner_root.join("api.md"), "api");
+            let outer_bootstrap = test_bootstrap(&outer);
+            let inner_bootstrap = ControllerBootstrap {
+                project_root: inner_root.clone(),
+                socket_path: socket_path(&inner_root),
+                ..test_bootstrap(&outer)
+            };
+            Self {
+                outer_runtime: test_controller_runtime(&outer_bootstrap),
+                inner_runtime: test_controller_runtime(&inner_bootstrap),
+                _outer: outer,
+                outer_bootstrap,
+                inner_bootstrap,
+                bugs,
+                contracts,
+                api,
+            }
+        }
+
+        fn route_request(&self, file: &str, columns: &[&str]) -> ControllerRequest {
+            let mut layout_args = Vec::new();
+            for column in columns {
+                layout_args.push("--col".to_string());
+                layout_args.push((*column).to_string());
+            }
+            layout_args.push("--focus".to_string());
+            layout_args.push(file.to_string());
+            ControllerRequest {
+                command: "editor_route".to_string(),
+                file: Some(PathBuf::from(file)),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(
+                    serde_json::json!({
+                        "layout_args": layout_args,
+                        "layout_mode": "exact",
+                        "dispatch_only": true,
+                        "plain_trigger": true
+                    })
+                    .to_string(),
+                ),
+            }
+        }
+
+        /// The in-process transport to the outer (main-window owner)
+        /// controller, as the real `editor_route_layout` RPC would reach it.
+        fn deliver_to_outer(
+            &self,
+            owner_root: &Path,
+            delegation: &EditorRouteLayoutDelegation,
+        ) -> Result<EditorRouteLayoutDelegationReceipt> {
+            assert_eq!(
+                owner_root,
+                self.outer_bootstrap.project_root.canonicalize().unwrap(),
+                "the enclosing root owns the shared main window"
+            );
+            Ok(publish_delegated_editor_route_layout(
+                &self.outer_bootstrap,
+                self.outer_runtime.as_ref(),
+                delegation.clone(),
+            ))
+        }
+    }
+
+    /// `#crossrootcolumnflip` regression: a nested controller's editor route
+    /// whose layout names a superproject document used to publish its own
+    /// generation into the shared window (haiven-dev gen 21) while the
+    /// superproject controller's editor-surface churn published gens 32-36;
+    /// whichever projected last won. The nested controller must now publish
+    /// nothing and the one owner must order the route beside its own
+    /// editor-surface publications, so the later editor observation wins.
+    #[test]
+    fn cross_root_editor_route_publishes_layout_on_the_main_window_owner_only() {
+        let fx = CrossRootLayoutFixture::new();
+        let request = fx.route_request(&fx.contracts, &[&fx.bugs, &fx.contracts]);
+        let result = handle_editor_route_rpc_with_layout_delegate(
+            &fx.inner_bootstrap,
+            fx.inner_runtime.as_ref(),
+            request,
+            |owner, delegation| fx.deliver_to_outer(owner, delegation),
+        )
+        .unwrap();
+        assert_eq!(
+            result.exit_code, 0,
+            "dispatch still runs on the nested controller"
+        );
+        assert!(
+            fx.inner_runtime.pane_layout_desired().is_none(),
+            "the nested controller must not mint a competing layout generation"
+        );
+        let routed = fx.outer_runtime.pane_layout_desired().unwrap();
+        assert_eq!(
+            routed.invocation.columns,
+            vec![fx.bugs.clone(), fx.contracts.clone()]
+        );
+        assert_eq!(
+            routed.invocation.focus.as_deref(),
+            Some(fx.contracts.as_str())
+        );
+        assert_eq!(routed.provenance.publisher, PaneLayoutPublisher::Route);
+
+        // Post-restart editor-surface churn on the owner: the editor's real
+        // visible set is [bugs, api]. It lands in the SAME generation sequence.
+        let (surface, _) = publish_pane_layout_desired_invocation(
+            &fx.outer_bootstrap,
+            fx.outer_runtime.as_ref(),
+            automatic_editor_surface_sync_invocation(
+                &[
+                    SurfaceColumn {
+                        files: vec![fx.bugs.clone()],
+                    },
+                    SurfaceColumn {
+                        files: vec![fx.api.clone()],
+                    },
+                ],
+                &fx.api,
+                false,
+            ),
+            None,
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::EditorSurface,
+        )
+        .unwrap();
+        assert!(surface.generation > routed.generation);
+        let converged = fx.outer_runtime.pane_layout_desired().unwrap();
+        assert_eq!(
+            converged.invocation.columns,
+            vec![fx.bugs.clone(), fx.api.clone()]
+        );
+        assert!(
+            fx.inner_runtime.pane_layout_desired().is_none(),
+            "nothing on the nested controller can re-project the stale route layout"
+        );
+        let inner_log = std::fs::read_to_string(
+            fx.inner_bootstrap
+                .project_root
+                .join(".agent-doc/logs/ops.log"),
+        )
+        .unwrap_or_default();
+        assert!(
+            inner_log.contains("controller_editor_route_layout_delegated"),
+            "{inner_log}"
+        );
+        assert!(
+            !inner_log.contains("pane_layout_desired_published"),
+            "{inner_log}"
+        );
+    }
+
+    #[test]
+    fn superproject_editor_route_over_a_submodule_column_never_delegates() {
+        let fx = CrossRootLayoutFixture::new();
+        let request = fx.route_request(&fx.bugs, &[&fx.bugs, &fx.contracts]);
+        let result = handle_editor_route_rpc_with_layout_delegate(
+            &fx.outer_bootstrap,
+            fx.outer_runtime.as_ref(),
+            request,
+            |owner, _| panic!("the owner must not delegate to {}", owner.display()),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            fx.outer_runtime
+                .pane_layout_desired()
+                .unwrap()
+                .invocation
+                .columns,
+            vec![fx.bugs.clone(), fx.contracts.clone()]
+        );
+    }
+
+    #[test]
+    fn cross_root_editor_route_publishes_locally_when_the_owner_is_not_running() {
+        let fx = CrossRootLayoutFixture::new();
+        let request = fx.route_request(&fx.contracts, &[&fx.bugs, &fx.contracts]);
+        let result = handle_editor_route_rpc_with_layout_delegate(
+            &fx.inner_bootstrap,
+            fx.inner_runtime.as_ref(),
+            request,
+            |_, _| anyhow::bail!("controller socket not found"),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            fx.inner_runtime
+                .pane_layout_desired()
+                .unwrap()
+                .invocation
+                .columns,
+            vec![fx.bugs.clone(), fx.contracts.clone()],
+            "with no owner running nothing competes, so the legacy local publish stands"
+        );
+        let inner_log = std::fs::read_to_string(
+            fx.inner_bootstrap
+                .project_root
+                .join(".agent-doc/logs/ops.log"),
+        )
+        .unwrap_or_default();
+        assert!(
+            inner_log.contains("controller_editor_route_layout_delegation_failed")
+                && inner_log.contains("fallback=local_publish"),
+            "{inner_log}"
+        );
+    }
+
+    #[test]
+    fn cross_root_editor_route_owner_refusal_is_terminal_and_publishes_nothing_locally() {
+        let fx = CrossRootLayoutFixture::new();
+        let request = fx.route_request(&fx.contracts, &[&fx.bugs, &fx.contracts]);
+        let error = handle_editor_route_rpc_with_layout_delegate(
+            &fx.inner_bootstrap,
+            fx.inner_runtime.as_ref(),
+            request,
+            |_, _| {
+                Ok(EditorRouteLayoutDelegationReceipt {
+                    receipt: None,
+                    observations: 0,
+                    refusal: Some("routed document is not visible".to_string()),
+                })
+            },
+        )
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("refused by the main-window owner"),
+            "{error:#}"
+        );
+        assert!(fx.inner_runtime.pane_layout_desired().is_none());
+    }
+
     /// GH #111 fixture: agent documents in one project plus a route request
     /// builder shaped like the JetBrains plugin's `cp:editor_route` payload.
     struct RouteLayoutFixture {
@@ -32174,13 +32767,24 @@ mod tests {
     fn the_editor_route_handler_publishes_layout_once() {
         let source = include_str!("rpc.rs");
         let route = &source[source
-            .find("fn handle_editor_route_rpc(")
+            .find("fn handle_editor_route_rpc_with_layout_delegate(")
             .expect("editor route handler")..];
         let route = &route[..route
             .find("controller_editor_route_layout_converged")
             .expect("layout convergence log")];
         assert_eq!(
-            route.matches("handle_editor_route_layout(").count(),
+            route.matches("route_editor_layout_with_owner(").count(),
+            1,
+            "the route resolves the main-window owner once (`#crossrootcolumnflip`)"
+        );
+        let publish = &source[source
+            .find("fn publish_editor_route_layout_locally<")
+            .expect("local route layout publication")..];
+        let publish = &publish[..publish
+            .find("Ok((layout_receipt, layout_observations, route_layout_lease))")
+            .expect("local publication tail")];
+        assert_eq!(
+            publish.matches("handle_editor_route_layout(").count(),
             1,
             "semantic supersession belongs to the layout graph, not an RPC republish loop"
         );

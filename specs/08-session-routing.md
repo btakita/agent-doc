@@ -208,6 +208,47 @@ not one. A route lease's deferred plugin publication is arbitrated and logged
 when the lease releases. The width can therefore change only through a newer
 plugin publication or an `exact` route, each attributable from one log line.
 
+**Single main-window layout owner (`#crossrootcolumnflip`):** the arbitration
+above orders publications *within one controller*. A superproject and a nested
+project root with its own `.agent-doc/` each run a project controller, and a
+superproject IDE that shows a superproject document beside a submodule
+document puts both panes in ONE tmux `agent-doc` window. Each controller's
+layout graph is its own arbiter with its own generation counter, so two
+controllers projecting into that window resolved as "whichever projects last
+wins" (observed 2026-10-09 after an IDE restart: the haiven-dev `editor_route`
+published gen 21 `[agent-doc-bugs, contracts]` while the agent-loop
+controller's editor-surface churn published gens 32-36 ending
+`[agent-doc-bugs, api.md]`, and a column could flip between documents). The
+shared window therefore has exactly one layout publisher:
+`agent_doc_controller::layout_owner::main_window_layout_owner` names the
+controller of the **outermost project root that strictly encloses the
+publishing controller's root and contains one of the layout's column
+documents**. A controller `editor_route` whose layout names such a document
+must not publish that layout itself; it re-addresses it to the owner with the
+`editor_route_layout` controller RPC (payload: the canonicalized,
+focus-retargeted invocation, the raw `layout_mode`, the routed document, and
+the remaining `--wait-for-ready` budget). The owner runs the normal route
+publication on its own arbiter (plane catch-up, `exact`/`ensure` merge,
+`PaneLayoutClaim::route`, and the GH #110 convergence gates), so the route is
+ordered against the owner's editor-surface and plugin publications in one
+generation sequence and the later editor observation wins. The delegating
+controller logs `controller_editor_route_layout_delegated` (owner root,
+columns, focus, reason, observations), mints no `pane_layout_desired_published`
+generation, and still runs the route's dispatch. An owner refusal comes back
+typed (never as a transport error) and is terminal for the route
+(`controller_editor_route_layout_delegation_refused`). The client never
+launches the owner: when no owning controller is reachable nothing competes
+for the window, so the route publishes locally as before and logs
+`controller_editor_route_layout_delegation_failed ... fallback=local_publish`.
+Delegation is decided per publication and terminates on the owner (no column
+root encloses it). A layout of only the controller's own or nested roots (the
+superproject showing submodule columns), a sibling root, and a document whose
+root cannot be resolved never delegate. Covered by the
+`cross_root_main_window_layout_model` SimWorld reference model (every seeded
+projection schedule converges to the newest publication with only the owner
+writing the window; per-controller routing reproduces the flip) and the
+`cross_root_editor_route_*` controller tests.
+
 *A plugin win never strands a routed document (GH #126).* A passive
 single-column plugin publication (a tab switch; on a Remote Dev / Coder backend
 every publication is one undetected column) correctly supersedes a route by

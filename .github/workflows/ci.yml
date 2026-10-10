@@ -82,26 +82,10 @@ jobs:
         with:
           tool: nextest
 
-      # #lz262resolve: editors/jetbrains-262 resolves io.github.lazily:lazily
-      # from mavenLocal()+mavenCentral() only, and lazily is NOT on Maven
-      # Central, so CI failed with "Could not find io.github.lazily:lazily:0.39.0".
-      # (The classic build gets it from the ../lazily-kt composite above, which
-      # is lazily-kt HEAD, not the pinned release.) Publish the EXACT version the
-      # 262 backend pins, from its release tag, into mavenLocal so the CI build
-      # bundles the same lazily-<v>.jar the released plugin ZIP does. The pin is
-      # read from the build file so this cannot drift; a classic/262 pin
-      # mismatch fails here rather than as an opaque resolution error.
+      # #lz262resolve: publish the lazily-kt release the 262 backend pins into
+      # mavenLocal. Shared with release.yml via the script (#relcimavenlocal).
       - name: Publish pinned lazily-kt release to mavenLocal (JetBrains 262)
-        run: |
-          pin() { sed -n 's/.*implementation("io\.github\.lazily:lazily:\([^"]*\)").*/\1/p' "$1"; }
-          v262=$(pin editors/jetbrains-262/backend/build.gradle.kts)
-          vclassic=$(pin editors/jetbrains/build.gradle.kts)
-          test -n "$v262" || { echo "no io.github.lazily:lazily pin in editors/jetbrains-262/backend/build.gradle.kts"; exit 1; }
-          test "$v262" = "$vclassic" || { echo "lazily pin mismatch: jetbrains-262=$v262 classic=$vclassic"; exit 1; }
-          git clone --depth 1 --branch "v$v262" https://github.com/lazily-hub/lazily-kt "$RUNNER_TEMP/lazily-kt-$v262"
-          cd "$RUNNER_TEMP/lazily-kt-$v262"
-          JAVA_HOME="$JAVA_HOME_21_X64" ./gradlew --no-daemon --console=plain -q publishToMavenLocal
-          test -f "$HOME/.m2/repository/io/github/lazily/lazily/$v262/lazily-$v262.jar"
+        run: bash scripts/publish-pinned-lazily-kt.sh
 
       - name: Verify collision-free JetBrains release contract
         run: |

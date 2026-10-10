@@ -444,6 +444,27 @@ def self_test() -> int:
             f"{workflow_name} must install JDK 21 for the classic plugin beside the default JDK 25"
         )
 
+    # #relcimavenlocal: both workflows that build editors/jetbrains-262 must
+    # publish the pinned lazily-kt release to mavenLocal BEFORE the 262 build,
+    # through the one shared script, or the tag's plugins job cannot resolve
+    # io.github.lazily:lazily (v0.35.481 failed to publish exactly this way).
+    lazily_step = "bash scripts/publish-pinned-lazily-kt.sh"
+    for workflow_name, build_marker in (
+        ("ci.yml", "run: make check"),
+        ("release.yml", "Build JetBrains compatibility-ranged plugin zips"),
+    ):
+        workflow_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".github", "workflows", workflow_name
+        )
+        workflow = open(workflow_path, encoding="utf-8").read()
+        assert lazily_step in workflow, (
+            f"{workflow_name} must publish the pinned lazily-kt release via {lazily_step}"
+        )
+        assert build_marker in workflow, (workflow_name, build_marker)
+        assert workflow.index(lazily_step) < workflow.index(build_marker), (
+            f"{workflow_name} must publish lazily-kt to mavenLocal before the JetBrains 262 build"
+        )
+
     print("[self-test] check_plugin_versions: ok")
     return 0
 

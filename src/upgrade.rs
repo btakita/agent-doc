@@ -906,6 +906,24 @@ mod tests {
         assert!(message.contains("JetBrains: download refused"), "{message}");
     }
 
+    /// GH #233: an IDE whose build no published package declares is reported
+    /// as a warning and the one-shot upgrade still succeeds (exit 0), so a
+    /// script gating on the status cannot mistake it for a failed install.
+    #[test]
+    fn one_shot_plugin_reconciliation_succeeds_on_unsupported_build() {
+        let result = reconcile_installed_plugins_once("0.35.482", || {
+            Ok(crate::plugin::PluginReconcileReport {
+                targets: vec![crate::plugin::PluginTargetReport {
+                    family: crate::plugin::PluginEditorFamily::JetBrains,
+                    label: "IntelliJIdea2026.3".to_string(),
+                    version: "0.2.508".to_string(),
+                    outcome: crate::plugin::PluginTargetOutcome::UnsupportedPlatform { build: 263 },
+                }],
+            })
+        });
+        assert!(result.is_ok(), "{result:?}");
+    }
+
     #[test]
     fn one_shot_plugin_reconciliation_runs_and_succeeds() {
         let mut called = false;

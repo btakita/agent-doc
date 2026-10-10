@@ -357,7 +357,30 @@ pub fn stale_plugin_message(
     installed: Option<&str>,
     staged_for_restart: bool,
 ) -> String {
+    stale_plugin_message_for_platform(kind, running, expected, installed, staged_for_restart, None)
+}
+
+/// [`stale_plugin_message`] with the live IDE's proven platform build when it
+/// lies outside every published package range (GH #233). Such an IDE cannot
+/// receive {expected} — the classic package is capped at 261 and the modular
+/// one at 262 — so "install {expected} first" is unreachable advice there; the
+/// message names the build, the supported ranges and what stays installed.
+pub fn stale_plugin_message_for_platform(
+    kind: &str,
+    running: &str,
+    expected: &str,
+    installed: Option<&str>,
+    staged_for_restart: bool,
+    unsupported_platform_build: Option<u32>,
+) -> String {
     match stale_generation_side(running, expected) {
+        Some(StaleGenerationSide::Plugin) if let Some(build) = unsupported_platform_build => {
+            let kept = installed.unwrap_or(running);
+            format!(
+                "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with, but this IDE runs platform build {build}, outside every published agent-doc-jetbrains range ({ranges}). No {expected} package can be installed into it, so plugin {kept} stays installed and no install, upgrade or restart reaches parity on this IDE until an agent-doc-jetbrains package declares build {build}. This warning is ADVISORY: continue the current document task; editor delivery may run the older plugin code. `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot change the reported plugin version. A later live registration at {expected} or newer supersedes this warning.",
+                ranges = agent_doc_fs::jetbrains_install::JETBRAINS_SUPPORTED_RANGES,
+            )
+        }
         Some(StaleGenerationSide::Plugin)
             if staged_for_restart && installed.is_none_or(|v| v.trim() != expected) =>
         {
@@ -474,14 +497,19 @@ pub fn live_plugin_generation_statuses(file: &Path) -> Vec<LivePluginGenerationS
 pub fn report_live_plugin_generation_refresh(file: &Path) {
     for status in live_plugin_generation_statuses(file) {
         if status.stale {
+            // GH #233: an IDE on an unsupported platform build must hear the
+            // same no-install remedy here as in the preflight warning.
+            let unsupported_platform_build =
+                live_plugin_install_state(&status).unsupported_platform_build;
             eprintln!(
                 "[editor] {}",
-                stale_plugin_message(
+                stale_plugin_message_for_platform(
                     &status.kind,
                     &status.running,
                     &status.expected,
                     installed_plugin_version(&status.kind).as_deref(),
                     plugin_staged_for_restart(&status.kind, &status.expected),
+                    unsupported_platform_build,
                 ),
             );
         } else {
@@ -597,6 +625,9 @@ pub fn installed_plugin_version(kind: &str) -> Option<String> {
 struct PluginInstallState {
     installed: Option<String>,
     staged_for_restart: bool,
+    /// GH #233: the live IDE's proven platform build, when no published
+    /// package range declares it.
+    unsupported_platform_build: Option<u32>,
 }
 
 /// Resolve install evidence from the plugin tree used by this live editor, not
@@ -639,9 +670,12 @@ fn plugin_install_state_for_mapped_jar(
         system_roots,
         expected,
     );
+    let unsupported_platform_build =
+        agent_doc_fs::jetbrains_install::jetbrains_unsupported_platform_build(&plugins_dir);
     PluginInstallState {
         installed,
         staged_for_restart,
+        unsupported_platform_build,
     }
 }
 
@@ -682,12 +716,13 @@ fn stale_plugin_warnings_from_statuses(
                 return None;
             }
             let install_state = install_state_for_status(&status);
-            let message = stale_plugin_message(
+            let message = stale_plugin_message_for_platform(
                 &status.kind,
                 &status.running,
                 &status.expected,
                 install_state.installed.as_deref(),
                 install_state.staged_for_restart,
+                install_state.unsupported_platform_build,
             );
             if !seen.insert(message.clone()) {
                 return None;
@@ -1439,6 +1474,77 @@ mod tests {
         }
     }
 
+    /// GH #233: a live IDE whose platform build no published package declares
+    /// (263, past the classic 261 cap and the modular 262 range) must not be
+    /// told to "install {expected} first": no package can be installed there.
+    #[test]
+    fn stale_plugin_on_unsupported_platform_build_names_no_unreachable_install() {
+        let tmp = TempDir::new().unwrap();
+        let live = tmp.path().join("data/IntelliJIdea2026.3");
+        let lib = live.join("agent-doc-jetbrains/lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        let live_jar = lib.join("agent-doc-jetbrains-0.2.508.jar");
+        std::fs::write(&live_jar, b"live").unwrap();
+        let mapped = MappedPluginJar::Current {
+            path: live_jar.to_string_lossy().into_owned(),
+            inode: 1,
+        };
+        let state = plugin_install_state_for_mapped_jar("jetbrains", "0.2.517", &mapped, &[]);
+        assert_eq!(state.installed.as_deref(), Some("0.2.508"));
+        assert_eq!(state.unsupported_platform_build, Some(263));
+
+        let status = LivePluginGenerationStatus {
+            editor_id: Some("e".to_string()),
+            pid: 1,
+            kind: "jetbrains".to_string(),
+            running: "0.2.508".to_string(),
+            expected: "0.2.517".to_string(),
+            timestamp_ms: 1,
+            stale: true,
+        };
+        let warnings = stale_plugin_warnings_from_statuses(vec![status], |_| state.clone());
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, "stale_plugin");
+        let message = &warnings[0].message;
+        for needle in [
+            "platform build 263",
+            "242-261 (agent-doc-jetbrains-<version>.zip)",
+            "262 (agent-doc-jetbrains-262-<version>.zip)",
+            "plugin 0.2.508 stays installed",
+            "ADVISORY",
+        ] {
+            assert!(message.contains(needle), "missing {needle:?}: {message}");
+        }
+        for remedy in [
+            "Install 0.2.517 first",
+            "agent-doc plugin install",
+            "--local",
+        ] {
+            assert!(!message.contains(remedy), "offers {remedy:?}: {message}");
+        }
+
+        // A supported 262 IDE with the same skew keeps the install-first remedy.
+        let supported = stale_plugin_message_for_platform(
+            "jetbrains",
+            "0.2.508",
+            "0.2.517",
+            Some("0.2.508"),
+            false,
+            None,
+        );
+        assert!(supported.contains("Install 0.2.517 first"), "{supported}");
+        // The binary-is-stale branch is unaffected by the platform build.
+        let binary = stale_plugin_message_for_platform(
+            "jetbrains",
+            "0.2.520",
+            "0.2.517",
+            Some("0.2.520"),
+            false,
+            Some(263),
+        );
+        assert!(binary.starts_with("stale agent-doc binary"), "{binary}");
+    }
+
     /// GH #180: an idle IDE data directory can hold a newer jar or a pending
     /// staging. Neither is evidence about the live IDE whose mapped jar names a
     /// different plugin tree.
@@ -1474,7 +1580,10 @@ mod tests {
             staged.installed.as_deref(),
             staged.staged_for_restart,
         );
-        assert!(staged_message.contains("ALREADY STAGED"), "{staged_message}");
+        assert!(
+            staged_message.contains("ALREADY STAGED"),
+            "{staged_message}"
+        );
         assert!(
             !staged_message.contains("ALREADY installed on disk"),
             "{staged_message}"
@@ -1501,7 +1610,10 @@ mod tests {
             update_message.contains("on-disk install is 0.2.502"),
             "{update_message}"
         );
-        assert!(!update_message.contains("ALREADY STAGED"), "{update_message}");
+        assert!(
+            !update_message.contains("ALREADY STAGED"),
+            "{update_message}"
+        );
     }
 
     #[test]
@@ -1550,6 +1662,7 @@ mod tests {
             stale_plugin_warnings_from_statuses(statuses.clone(), |_| PluginInstallState {
                 installed: Some("0.2.451".into()),
                 staged_for_restart: false,
+                unsupported_platform_build: None,
             });
         assert!(warnings[0].message.contains("on-disk install is 0.2.451"));
 
@@ -1558,6 +1671,7 @@ mod tests {
         let staged = stale_plugin_warnings_from_statuses(statuses, |_| PluginInstallState {
             installed: Some("0.2.451".into()),
             staged_for_restart: true,
+            unsupported_platform_build: None,
         });
         assert!(
             staged[0].message.contains("ALREADY STAGED"),

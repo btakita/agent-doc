@@ -35,7 +35,11 @@ Rust binary.
   build 262 receives `agent-doc-jetbrains-262-<version>.zip`. The installer
   proves the build from the versioned IDE data directory; an unprovable or
   unsupported target fails closed with guidance instead of defaulting to the
-  classic package. Update numbers are compared only within one line; a target
+  classic package. During installed-plugin reconciliation (`agent-doc
+  upgrade`), a target whose proven build is outside every published range is
+  not a failure (GH #233): its installed plugin is left in place and one
+  warning names the build, the supported ranges and the version left
+  installed, with no retry or manual-install advice, and the upgrade exits 0. Update numbers are compared only within one line; a target
   holding the other line is always replaced with its own line's package.
 - Restart-free dynamic upgrade is a per-line capability. The JetBrains classic
   line ships an attach launcher; the exact-262 modular line does not, so a live

@@ -117,6 +117,50 @@ pub fn is_jetbrains_ide_data_dir(name: &str) -> bool {
         && PRODUCTS.iter().any(|product| name.starts_with(product))
 }
 
+/// The operator-facing ranges every published JetBrains package covers. Kept
+/// beside [`jetbrains_platform_build`] so the installer refusal, the upgrade
+/// summary and the `stale_plugin` warning name the same ranges (GH #233).
+pub const JETBRAINS_SUPPORTED_RANGES: &str =
+    "242-261 (agent-doc-jetbrains-<version>.zip) and 262 (agent-doc-jetbrains-262-<version>.zip)";
+
+/// Whether any published agent-doc JetBrains package declares `build`.
+pub fn jetbrains_platform_build_supported(build: u32) -> bool {
+    matches!(build, 242..=262)
+}
+
+/// The JetBrains platform build (`262` for `IntelliJIdea2026.2`) a versioned
+/// IDE data directory, or its `plugins` child, belongs to. `None` when the path
+/// does not name a versioned IDE data directory, so no build can be proven.
+pub fn jetbrains_platform_build(target_dir: &Path) -> Option<u32> {
+    let named = if target_dir.file_name().is_some_and(|name| name == "plugins") {
+        target_dir.parent()
+    } else {
+        Some(target_dir)
+    };
+    let label = named?.file_name()?.to_string_lossy().into_owned();
+    if !is_jetbrains_ide_data_dir(&label) {
+        return None;
+    }
+    let version_start = label.find(|ch: char| ch.is_ascii_digit())?;
+    let (year, release) = label[version_start..].split_once('.')?;
+    if year.len() != 4 || release.is_empty() || !release.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    let year = year.parse::<u32>().ok()?;
+    let release = release.parse::<u32>().ok()?;
+    if !(2000..=2099).contains(&year) || !(1..=9).contains(&release) {
+        return None;
+    }
+    Some((year - 2000) * 10 + release)
+}
+
+/// GH #233: the proven platform build of `target_dir` when it lies outside
+/// every published package range. Such a target cannot receive any package
+/// this agent-doc knows of; the plugin already installed there stays in place.
+pub fn jetbrains_unsupported_platform_build(target_dir: &Path) -> Option<u32> {
+    jetbrains_platform_build(target_dir).filter(|build| !jetbrains_platform_build_supported(*build))
+}
+
 /// `#gh76secondary`: the newest on-disk installed JetBrains plugin version.
 pub fn installed_jetbrains_plugin_version() -> Option<String> {
     newest_installed_artifact(&jetbrains_plugin_dirs()).map(|artifact| artifact.version)

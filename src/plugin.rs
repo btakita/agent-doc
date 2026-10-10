@@ -5,7 +5,7 @@
 //! - `install(editor)` — fetches the latest GitHub Release for `btakita/agent-doc`, selects the appropriate asset (signed variant preferred), downloads it, and installs it.
 //! - `install_local(editor)` — installs from a locally built artifact found by walking up from CWD to locate an `editors/` directory.
 //! - `update(editor)` — for JetBrains, skips re-install if the installed plugin version matches the latest package asset; for VS Code, reinstalls through the editor CLI.
-//! - `update_all_installed()` — release-watcher entry point that updates every existing agent-doc JetBrains/VS Code installation without installing into a new editor. Returns a `PluginReconcileReport` with one `PluginTargetOutcome` per target (GH #114), from which `PluginReconcileReport::summary` derives the upgrade's closing lines: separate hot-upgraded / installed / staged / restart-required / unchanged counts, each target that needs a restart by name, and no "if it does not reload on its own" hedge where a reload is known not to happen.
+//! - `update_all_installed()` — release-watcher entry point that updates every existing agent-doc JetBrains/VS Code installation without installing into a new editor. Returns a `PluginReconcileReport` with one `PluginTargetOutcome` per target (GH #114), from which `PluginReconcileReport::summary` derives the upgrade's closing lines: separate hot-upgraded / installed / staged / restart-required / unchanged counts, each target that needs a restart by name, and no "if it does not reload on its own" hedge where a reload is known not to happen. A target whose proven platform build is outside every published package range is reported as `UnsupportedPlatform` (GH #233): left in place, one warning, no failure.
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
@@ -501,6 +501,7 @@ fn release_version(release: &Value) -> &str {
 
 // --- JetBrains ---
 
+#[cfg(test)]
 use agent_doc_fs::jetbrains_install::is_jetbrains_ide_data_dir;
 pub(crate) use agent_doc_fs::jetbrains_install::jetbrains_plugin_dirs;
 #[cfg(test)]
@@ -543,21 +544,7 @@ impl JetbrainsPackageRange {
 }
 
 fn jetbrains_platform_build(target_dir: &Path) -> Option<u32> {
-    let label = jetbrains_target_label(target_dir);
-    if !is_jetbrains_ide_data_dir(&label) {
-        return None;
-    }
-    let version_start = label.find(|ch: char| ch.is_ascii_digit())?;
-    let (year, release) = label[version_start..].split_once('.')?;
-    if year.len() != 4 || release.is_empty() || !release.chars().all(|ch| ch.is_ascii_digit()) {
-        return None;
-    }
-    let year = year.parse::<u32>().ok()?;
-    let release = release.parse::<u32>().ok()?;
-    if !(2000..=2099).contains(&year) || !(1..=9).contains(&release) {
-        return None;
-    }
-    Some((year - 2000) * 10 + release)
+    agent_doc_fs::jetbrains_install::jetbrains_platform_build(target_dir)
 }
 
 fn jetbrains_package_range(target_dir: &Path) -> Result<JetbrainsPackageRange> {
@@ -571,8 +558,11 @@ fn jetbrains_package_range(target_dir: &Path) -> Result<JetbrainsPackageRange> {
     match build {
         242..=261 => Ok(JetbrainsPackageRange::Classic242To261),
         262 => Ok(JetbrainsPackageRange::Modular262),
+        // GH #233: no remedy this binary can offer installs into such a build,
+        // so the message names none; the installed plugin is left alone.
         _ => bail!(
-            "JetBrains target {label} uses unsupported platform build {build}; supported artifact ranges are 242-261 (agent-doc-jetbrains-<version>.zip) and 262 (agent-doc-jetbrains-262-<version>.zip). Upgrade agent-doc for newer IDE builds; refusing to install an incompatible package"
+            "JetBrains target {label} uses unsupported platform build {build}; supported artifact ranges are {}. No published agent-doc-jetbrains package declares build {build}, so nothing was installed and the plugin already in {label} was left in place",
+            agent_doc_fs::jetbrains_install::JETBRAINS_SUPPORTED_RANGES
         ),
     }
 }
@@ -2933,6 +2923,11 @@ pub enum PluginTargetOutcome {
     /// The files were replaced on disk while a live IDE keeps the previous
     /// generation loaded.
     RestartRequired,
+    /// GH #233: the target's proven platform build lies outside every
+    /// published package range, so nothing was installed and the plugin
+    /// already there (`version` on the report) stays in place. Not a failure:
+    /// no retry or manual install can succeed until a release declares `build`.
+    UnsupportedPlatform { build: u32 },
 }
 
 impl PluginTargetOutcome {
@@ -2980,7 +2975,31 @@ impl PluginReconcileReport {
 
     /// Targets whose bytes or staged package changed in this reconciliation.
     pub fn changed(&self) -> usize {
-        self.count(|outcome| *outcome != PluginTargetOutcome::Unchanged)
+        self.count(|outcome| {
+            !matches!(
+                outcome,
+                PluginTargetOutcome::Unchanged | PluginTargetOutcome::UnsupportedPlatform { .. }
+            )
+        })
+    }
+
+    /// GH #233: one warning per target left on its installed plugin because
+    /// its platform build is outside every published range. Names the build,
+    /// the supported ranges and the version left installed; offers no retry or
+    /// manual-install remedy, because none can succeed.
+    pub fn unsupported_platform_warnings(&self) -> Vec<String> {
+        self.targets
+            .iter()
+            .filter_map(|target| match target.outcome {
+                PluginTargetOutcome::UnsupportedPlatform { build } => Some(format!(
+                    "WARNING: {label} runs JetBrains platform build {build}, outside every published agent-doc-jetbrains range ({ranges}); left plugin v{version} installed there unchanged. This is not an install failure: no agent-doc-jetbrains package declares build {build} yet.",
+                    label = target.label,
+                    version = target.version,
+                    ranges = agent_doc_fs::jetbrains_install::JETBRAINS_SUPPORTED_RANGES,
+                )),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Targets that proved a running editor replaced its plugin generation.
@@ -2988,7 +3007,7 @@ impl PluginReconcileReport {
         self.count(|outcome| *outcome == PluginTargetOutcome::HotUpgraded)
     }
 
-    fn counts(&self) -> [(usize, &'static str, &'static str); 5] {
+    fn counts(&self) -> [(usize, &'static str, &'static str); 6] {
         use PluginTargetOutcome as O;
         [
             (
@@ -3008,6 +3027,11 @@ impl PluginReconcileReport {
                 "restart_required",
             ),
             (self.count(|o| *o == O::Unchanged), "unchanged", "unchanged"),
+            (
+                self.count(|o| matches!(o, O::UnsupportedPlatform { .. })),
+                "unsupported platform",
+                "unsupported_platform",
+            ),
         ]
     }
 
@@ -3016,7 +3040,28 @@ impl PluginReconcileReport {
     /// instruction; the conditional "if it does not pick it up on its own" is
     /// kept for VS Code, whose running window may genuinely reload by itself.
     pub fn summary(&self, release: &str) -> String {
+        let summary = self.reconciled_summary(release);
+        let unsupported = self.unsupported_platform_warnings();
+        if unsupported.is_empty() {
+            return summary;
+        }
+        let mut lines = vec![summary];
+        lines.extend(unsupported);
+        lines.join("\n")
+    }
+
+    fn reconciled_summary(&self, release: &str) -> String {
         if self.changed() == 0 {
+            if self.targets.iter().any(|target| {
+                matches!(
+                    target.outcome,
+                    PluginTargetOutcome::UnsupportedPlatform { .. }
+                )
+            }) {
+                return format!(
+                    "Installed editor plugins on supported IDE builds already match v{release}."
+                );
+            }
             return format!("Installed editor plugins already match v{release}.");
         }
         let counts = self
@@ -3047,7 +3092,12 @@ impl PluginReconcileReport {
                 (PluginEditorFamily::VsCode, PluginTargetOutcome::Installed) => format!(
                     "{label}: extension v{version} installed; reload the editor window if it does not pick it up on its own."
                 ),
-                (_, PluginTargetOutcome::HotUpgraded | PluginTargetOutcome::Unchanged) => continue,
+                (
+                    _,
+                    PluginTargetOutcome::HotUpgraded
+                    | PluginTargetOutcome::Unchanged
+                    | PluginTargetOutcome::UnsupportedPlatform { .. },
+                ) => continue,
             };
             lines.push(line);
         }
@@ -3127,6 +3177,9 @@ struct JetbrainsReleasePlanEntry {
 struct JetbrainsReleasePlan {
     releases: BTreeMap<JetbrainsPackageRange, Value>,
     entries: Vec<JetbrainsReleasePlanEntry>,
+    /// GH #233: targets whose proven platform build no published package
+    /// declares. They are left untouched and reported, never counted as errors.
+    unsupported: Vec<(PathBuf, u32)>,
     errors: Vec<String>,
 }
 
@@ -3142,6 +3195,12 @@ fn plan_jetbrains_release_reconcile(
     let mut plan = JetbrainsReleasePlan::default();
     let mut targets_by_range = BTreeMap::<JetbrainsPackageRange, Vec<PathBuf>>::new();
     for target in targets {
+        if let Some(build) =
+            agent_doc_fs::jetbrains_install::jetbrains_unsupported_platform_build(&target)
+        {
+            plan.unsupported.push((target, build));
+            continue;
+        }
         match jetbrains_package_range(&target) {
             Ok(range) => targets_by_range.entry(range).or_default().push(target),
             Err(error) => plan.errors.push(format!("{}: {error:#}", target.display())),
@@ -3204,6 +3263,15 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
             fetch_release_for_asset(prefix, "zip")
         });
         errors.extend(plan.errors);
+        for (target, build) in plan.unsupported {
+            report.targets.push(PluginTargetReport {
+                family: PluginEditorFamily::JetBrains,
+                label: jetbrains_target_label(&target),
+                version: installed_jetbrains_plugin_version(&target)
+                    .unwrap_or_else(|| "unknown".to_string()),
+                outcome: PluginTargetOutcome::UnsupportedPlatform { build },
+            });
+        }
         for entry in plan.entries {
             let mut record = |outcome| {
                 report.targets.push(PluginTargetReport {
@@ -3278,6 +3346,11 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
     if errors.is_empty() {
         Ok(report)
     } else {
+        // GH #233: a real failure elsewhere bails before the summary prints;
+        // keep the unsupported-build warnings visible on that path too.
+        for line in report.unsupported_platform_warnings() {
+            eprintln!("{line}");
+        }
         bail!(
             "one or more installed plugins failed to update:\n{}",
             errors.join("\n")
@@ -3970,6 +4043,27 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let future = PathBuf::from("/tmp/JetBrains/IntelliJIdea2026.3/plugins");
         let error = jetbrains_package_range(&future).unwrap_err().to_string();
         assert!(error.contains("unsupported platform build 263"));
+        // GH #233: the explicit-install refusal names no remedy that cannot
+        // succeed on the newest release.
+        assert!(error.contains("left in place"), "{error}");
+        assert!(!error.contains("Upgrade agent-doc"), "{error}");
+        assert_eq!(
+            agent_doc_fs::jetbrains_install::jetbrains_unsupported_platform_build(&future),
+            Some(263)
+        );
+        assert_eq!(
+            agent_doc_fs::jetbrains_install::jetbrains_unsupported_platform_build(&modular),
+            None
+        );
+        assert_eq!(
+            agent_doc_fs::jetbrains_install::jetbrains_unsupported_platform_build(&unknown),
+            None
+        );
+        let old = PathBuf::from("/tmp/JetBrains/IntelliJIdea2024.1/plugins");
+        assert_eq!(
+            agent_doc_fs::jetbrains_install::jetbrains_unsupported_platform_build(&old),
+            Some(241)
+        );
     }
 
     #[test]
@@ -4197,6 +4291,109 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
         assert_eq!(plan.errors.len(), 1);
         assert!(plan.errors[0].contains("agent-doc-jetbrains-262"));
+    }
+
+    /// GH #233: a target whose proven build no published range declares is
+    /// left in place and reported as unsupported, never as a failed install,
+    /// and no release is fetched on its behalf.
+    #[test]
+    fn update_all_plan_leaves_an_unsupported_build_in_place_without_an_error() {
+        let tmp = TempDir::new().unwrap();
+        let supported = tmp.path().join("IntelliJIdea2026.2/plugins");
+        install_test_jar(&supported, "agent.doc-0.2.509.jar");
+        let future = tmp.path().join("IntelliJIdea2026.3/plugins");
+        install_test_jar(&future, "agent-doc-jetbrains-0.2.508.jar");
+
+        let mut fetched = Vec::new();
+        let plan = super::plan_jetbrains_release_reconcile(
+            vec![supported.clone(), future.clone()],
+            |prefix| {
+                fetched.push(prefix.to_string());
+                Ok(dual_range_release())
+            },
+        );
+
+        assert!(plan.errors.is_empty(), "{:?}", plan.errors);
+        assert_eq!(plan.unsupported, vec![(future.clone(), 263)]);
+        assert!(plan.entries.iter().all(|entry| entry.target != future));
+        assert_eq!(plan.entries.len(), 1);
+        assert_eq!(plan.entries[0].target, supported);
+        assert_eq!(fetched, ["agent-doc-jetbrains-262"]);
+        assert_eq!(
+            super::installed_jetbrains_plugin_version(&future).as_deref(),
+            Some("0.2.508")
+        );
+    }
+
+    /// GH #233: the unsupported-build outcome is one warning that names the
+    /// build, the supported ranges and the version left installed, offers no
+    /// remedy that cannot succeed, and does not count as a change.
+    #[test]
+    fn reconcile_summary_reports_unsupported_build_once_without_retry_advice() {
+        use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};
+        let report = super::PluginReconcileReport {
+            targets: vec![
+                reconcile_target(JetBrains, "IntelliJIdea2026.2", "0.2.518", O::Unchanged),
+                reconcile_target(
+                    JetBrains,
+                    "IntelliJIdea2026.3",
+                    "0.2.508",
+                    O::UnsupportedPlatform { build: 263 },
+                ),
+            ],
+        };
+        assert_eq!(report.changed(), 0);
+        assert_eq!(report.hot_upgraded(), 0);
+        let summary = report.summary("0.35.482");
+        assert!(
+            summary.starts_with(
+                "Installed editor plugins on supported IDE builds already match v0.35.482."
+            ),
+            "{summary}"
+        );
+        let warnings = summary
+            .lines()
+            .filter(|line| line.starts_with("WARNING:"))
+            .collect::<Vec<_>>();
+        assert_eq!(warnings.len(), 1, "{summary}");
+        let warning = warnings[0];
+        for needle in [
+            "IntelliJIdea2026.3",
+            "platform build 263",
+            "242-261",
+            "262 (agent-doc-jetbrains-262-<version>.zip)",
+            "left plugin v0.2.508 installed",
+            "not an install failure",
+        ] {
+            assert!(warning.contains(needle), "missing {needle:?}: {warning}");
+        }
+        for remedy in [
+            "re-run",
+            "retry",
+            "plugin install",
+            "Upgrade agent-doc",
+            "skewed",
+        ] {
+            assert!(!summary.contains(remedy), "offers {remedy:?}: {summary}");
+        }
+        let logged = report.ops_log_line("0.35.482");
+        assert!(logged.contains("unsupported_platform=1"), "{logged}");
+        assert!(logged.contains("unchanged=1"), "{logged}");
+        assert!(logged.contains("restart_targets=\"\""), "{logged}");
+
+        // A report with no unsupported target keeps its original wording.
+        let plain = super::PluginReconcileReport {
+            targets: vec![reconcile_target(
+                JetBrains,
+                "IntelliJIdea2026.2",
+                "0.2.518",
+                O::Unchanged,
+            )],
+        };
+        assert_eq!(
+            plain.summary("0.35.482"),
+            "Installed editor plugins already match v0.35.482."
+        );
     }
 
     fn write_local_dual_build(project: &Path, classic: &str, modular: &str) {

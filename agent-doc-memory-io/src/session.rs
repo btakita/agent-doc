@@ -679,6 +679,34 @@ Shipped cache repair.
         );
     }
 
+    /// `#freetextqueue`: 2026-10-10 agent-doc-bugs.md incident shape. An active
+    /// backlog item for a DIFFERENT defect quotes the live free-text head inside
+    /// its route error message; that containment must not strike the head as
+    /// "tracked by backlog".
+    #[test]
+    fn queue_strike_ignores_unrelated_backlog_item_that_quotes_the_head() {
+        let tmp = tempdir().unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r#"
+<!-- agent:queue auto -->
+- supervisor thrash: route refused the dispatch because the claude pane was busy
+<!-- /agent:queue -->
+
+<!-- agent:backlog -->
+- [ ] [#runctrlclaude] Run controller for claude fails to start; route error message was `supervisor thrash: route refused the dispatch because the claude pane was busy` while the controller handoff was pending.
+<!-- /agent:backlog -->
+"#,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+        let matches =
+            semantic_queue_strike_matches(&doc, Some(&db), QUEUE_STRIKE_THRESHOLD, 5).unwrap();
+        assert!(
+            matches.is_empty(),
+            "a backlog item that only quotes the head is not its lineage: {matches:?}"
+        );
+    }
+
     #[test]
     fn queue_strike_does_not_match_unrelated_operator_prompt() {
         // #qftbklgstrike false-strike safety: an unrelated operator prompt that

@@ -514,12 +514,26 @@ pub struct FreeTextAdmission {
     pub execution_label: &'static str,
 }
 
+/// Exact lineage receipt of one promoted free-text queue head
+/// (`#freetextqueue`): admission minted backlog `id` from `source_text` and
+/// removed that queue line. Claims follow this receipt to the `do [#id]` head;
+/// no text-similarity guess is involved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreeTextPromotion {
+    /// The queue line's prompt text as it stood before promotion.
+    pub source_text: String,
+    /// The lowercase backlog id minted (or matched) for it.
+    pub id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedFreeTextAdmission {
     pub content: String,
     pub unique_ids: Vec<String>,
     pub admitted_count: usize,
     pub warnings: Vec<String>,
+    /// Queue heads promoted into backlog ids by this admission.
+    pub promotions: Vec<FreeTextPromotion>,
     queue_entries: Vec<crate::document_queue::QueueEntry>,
     queue_start_required: bool,
 }
@@ -750,6 +764,7 @@ pub fn prepare_free_text_admission(
         .filter(|key| id_by_text.contains_key(*key))
         .cloned()
         .collect::<HashSet<_>>();
+    let mut promotions = Vec::new();
     let queue_entries = entries
         .iter()
         .filter(|entry| {
@@ -762,7 +777,17 @@ pub fn prepare_free_text_admission(
             let key = crate::queue_response::normalize_for_answer_match(
                 &normalize_admitted_free_text(&prompt.text),
             );
-            !admitted_keys.contains(&key)
+            if !admitted_keys.contains(&key) {
+                return true;
+            }
+            // `#freetextqueue`: the exact promotion receipt for this head.
+            if let Some(id) = id_by_text.get(&key) {
+                promotions.push(FreeTextPromotion {
+                    source_text: prompt.text.clone(),
+                    id: id.trim().to_ascii_lowercase(),
+                });
+            }
+            false
         })
         .cloned()
         .collect();
@@ -772,6 +797,7 @@ pub fn prepare_free_text_admission(
         unique_ids,
         admitted_count: admitted_keys.len(),
         warnings,
+        promotions,
         queue_entries,
         queue_start_required,
     }))

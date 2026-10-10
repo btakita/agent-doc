@@ -330,6 +330,71 @@ impl QueueClaimLedger {
         followed
     }
 
+    /// Carry live claims across free-text promotion (`#freetextqueue`). Each
+    /// `(source_head, id)` pair is an exact promotion receipt: free-text
+    /// admission minted backlog `#id` from `source_head` and replaced the head
+    /// with `do [#id]`. A live claim whose identity is exactly
+    /// `claim_identity(source_head)` gains a copy keyed on the `#id` head (same
+    /// owner, same expiry), so the promoted head stays claimed instead of
+    /// resurfacing as unclaimed dispatch work. The source claim is kept (it is
+    /// pruned as closed once the free-text head is gone), which keeps the
+    /// transfer idempotent and safe if the promotion write is retried. An `#id`
+    /// head another owner already holds is never taken over. Returns
+    /// `(source_head, id, owner)` per transferred claim.
+    pub fn transfer_promoted(
+        &mut self,
+        now_secs: u64,
+        promotions: &[(String, String)],
+    ) -> Vec<(String, String, String)> {
+        let mut transferred = Vec::new();
+        for (source, id) in promotions {
+            let id = id.trim().trim_start_matches('#').to_ascii_lowercase();
+            if id.is_empty() {
+                continue;
+            }
+            let source_identity = claim_identity(source);
+            let Some(source_claim) = self
+                .claims
+                .iter()
+                .find(|claim| claim.identity == source_identity && !claim.is_expired(now_secs))
+                .cloned()
+            else {
+                continue;
+            };
+            let target_text = format!("do [#{id}]");
+            let target_identity = claim_identity(&target_text);
+            if target_identity == source_identity {
+                continue;
+            }
+            match self
+                .claims
+                .iter_mut()
+                .find(|claim| claim.identity == target_identity)
+            {
+                Some(existing)
+                    if !existing.is_expired(now_secs) && existing.owner != source_claim.owner =>
+                {
+                    continue;
+                }
+                Some(existing) => {
+                    existing.owner = source_claim.owner.clone();
+                    existing.item_text = target_text;
+                    existing.expires_at_secs =
+                        existing.expires_at_secs.max(source_claim.expires_at_secs);
+                }
+                None => self.claims.push(QueueClaim {
+                    identity: target_identity,
+                    item_text: target_text,
+                    owner: source_claim.owner.clone(),
+                    claimed_at_secs: source_claim.claimed_at_secs,
+                    expires_at_secs: source_claim.expires_at_secs,
+                }),
+            }
+            transferred.push((source.clone(), id, source_claim.owner));
+        }
+        transferred
+    }
+
     /// Owner of every active claim, by identity (after any
     /// [`Self::follow_edits`] the caller applied).
     pub fn owners(
@@ -720,6 +785,100 @@ impl ClaimedQueueItems {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#freetextqueue`: a claimed free-text head promoted into `do [#id]`
+    /// keeps its claim under the new id (2026-10-10: the claimed
+    /// "Run Agent Doc on frontend.md crashed …" head became
+    /// `do [#runfrontendcrashed]` and resurfaced as unclaimed dispatch work).
+    #[test]
+    fn transfer_promoted_carries_claim_to_the_minted_id_head() {
+        let head = "Run Agent Doc on frontend.md crashed with a panic in the route";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(head, "subagent:frontendcrash", 100, 600);
+
+        let moved =
+            ledger.transfer_promoted(200, &[(head.to_string(), "RunFrontendCrashed".to_string())]);
+        assert_eq!(
+            moved,
+            vec![(
+                head.to_string(),
+                "runfrontendcrashed".to_string(),
+                "subagent:frontendcrash".to_string()
+            )]
+        );
+
+        let live: HashSet<QueueItemIdentity> =
+            [claim_identity("🚧 do [#runfrontendcrashed]")].into();
+        let owners = ledger.owners(200, Some(&live));
+        assert_eq!(
+            owners.get(&claim_identity("do [#runfrontendcrashed]")),
+            Some(&"subagent:frontendcrash".to_string())
+        );
+        assert!(
+            ledger
+                .claimed_items(200, Some(&live))
+                .claims("do [#runfrontendcrashed]")
+        );
+        let target = ledger
+            .claims
+            .iter()
+            .find(|claim| claim.identity == claim_identity("[#runfrontendcrashed]"))
+            .unwrap();
+        assert_eq!(
+            target.expires_at_secs, 700,
+            "expiry is inherited, not renewed"
+        );
+
+        // Idempotent on retry, and survives the on-load re-key.
+        let before = ledger.clone();
+        ledger.transfer_promoted(200, &[(head.to_string(), "runfrontendcrashed".to_string())]);
+        assert_eq!(ledger, before);
+        assert!(!ledger.rekey());
+    }
+
+    #[test]
+    fn transfer_promoted_requires_exact_source_identity_and_live_claim() {
+        let head = "Run Agent Doc on frontend.md crashed with a panic in the route";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(head, "subagent:frontendcrash", 100, 600);
+
+        // A different head (even one containing the claimed text) is not lineage.
+        assert!(
+            ledger
+                .transfer_promoted(
+                    200,
+                    &[(format!("{head} and also the backend"), "other".to_string())]
+                )
+                .is_empty()
+        );
+        // An expired claim is not carried.
+        assert!(
+            ledger
+                .transfer_promoted(800, &[(head.to_string(), "late".to_string())])
+                .is_empty()
+        );
+        assert_eq!(ledger.claims.len(), 1);
+    }
+
+    #[test]
+    fn transfer_promoted_never_takes_over_another_owners_live_id_claim() {
+        let head = "Run Agent Doc on frontend.md crashed with a panic in the route";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(head, "subagent:a", 100, 600);
+        ledger.claim("do [#x]", "subagent:b", 100, 600);
+        assert!(
+            ledger
+                .transfer_promoted(200, &[(head.to_string(), "x".to_string())])
+                .is_empty()
+        );
+        let live: HashSet<QueueItemIdentity> = [claim_identity("do [#x]")].into();
+        assert_eq!(
+            ledger
+                .owners(200, Some(&live))
+                .get(&claim_identity("do [#x]")),
+            Some(&"subagent:b".to_string())
+        );
+    }
 
     #[test]
     fn identity_is_marker_invariant_and_id_backed() {

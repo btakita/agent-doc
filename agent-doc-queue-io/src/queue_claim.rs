@@ -368,6 +368,31 @@ pub fn release_closed_head(file: &Path, head: &str) -> Result<Option<QueueClaim>
     Ok(released)
 }
 
+/// Carry live claims from promoted free-text heads to their minted `do [#id]`
+/// heads (`#freetextqueue`). `promotions` are exact `(source_head, id)`
+/// receipts from free-text admission. A no-op (and no state.db access) when
+/// nothing was promoted or the ledger holds no claims.
+pub fn transfer_promoted_claims(
+    file: &Path,
+    promotions: &[(String, String)],
+) -> Result<Vec<(String, String, String)>> {
+    if promotions.is_empty() || load_ledger(file)?.claims.is_empty() {
+        return Ok(Vec::new());
+    }
+    let now = now_secs();
+    let transferred = mutate_ledger(file, |ledger| Ok(ledger.transfer_promoted(now, promotions)))?;
+    for (source, id, owner) in &transferred {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_transferred_on_promotion owner={owner} id={id} source_bytes={} (#freetextqueue)",
+                source.trim().len()
+            ),
+        );
+    }
+    Ok(transferred)
+}
+
 /// Active claims for `file` judged against `content`: expired claims and claims
 /// on items no longer in the queue are excluded.
 pub fn active_claims_for_content(file: &Path, content: &str) -> Result<Vec<QueueClaim>> {

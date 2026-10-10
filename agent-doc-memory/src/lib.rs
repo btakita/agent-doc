@@ -267,9 +267,27 @@ pub fn semantic_queue_strike_matches(
         let best_done = rank_task_equivalence_events(&candidate.text, &done_events)
             .into_iter()
             .next();
-        let best_backlog = rank_task_equivalence_events(&candidate.text, &backlog_events)
+        // `#freetextqueue`: "tracked by backlog" needs exact lineage, never a
+        // lexical near-match. The lexical scorer's `+1.0` substring bonus lets a
+        // backlog item whose prose merely QUOTES the head (an error message, a
+        // cross-reference) clear the threshold even though it tracks a
+        // different defect. Only a backlog item whose own text IS the head's
+        // text (the identity free-text admission mints a backlog id from) may
+        // retire the head.
+        let lineage_backlog = backlog_events
+            .iter()
+            .filter(|event| backlog_event_is_exact_lineage_of(&candidate.text, event))
+            .cloned()
+            .collect::<Vec<_>>();
+        // Exact lineage is itself the proof, so it clears the strike threshold
+        // even when markdown/punctuation differences defeat the substring bonus.
+        let best_backlog = rank_task_equivalence_events(&candidate.text, &lineage_backlog)
             .into_iter()
-            .next();
+            .next()
+            .map(|mut result| {
+                result.score = result.score.max(threshold);
+                result
+            });
         let chosen = match (best_done, best_backlog) {
             (Some(d), Some(b)) => {
                 if d.score >= b.score {
@@ -307,6 +325,49 @@ pub fn semantic_queue_strike_matches(
     });
     matches.truncate(limit.max(1));
     matches
+}
+
+/// Lowercase alphanumeric words joined by single spaces: the cosmetic-insensitive
+/// prompt identity (same shape as the queue crate's
+/// `normalize_for_answer_match`, which free-text admission keys backlog ids on).
+fn normalize_prompt_identity(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut pending_space = false;
+    for ch in text.chars() {
+        if ch.is_alphanumeric() {
+            if pending_space && !out.is_empty() {
+                out.push(' ');
+            }
+            pending_space = false;
+            out.extend(ch.to_lowercase());
+        } else {
+            pending_space = true;
+        }
+    }
+    out
+}
+
+/// Whether the backlog `event` is the exact-lineage record of free-text queue
+/// head `head_text` (`#freetextqueue`): the item's own text, with its leading
+/// `#id` stripped, normalizes to exactly the head's text. That is the identity
+/// free-text admission mints a backlog id from (and the one a promoted head's
+/// replay row would carry), so it proves the backlog item IS this head. A
+/// backlog item that merely contains or quotes the head inside other prose is
+/// not lineage, however high its lexical score.
+pub fn backlog_event_is_exact_lineage_of(head_text: &str, event: &MemoryEvent) -> bool {
+    let head = normalize_prompt_identity(head_text);
+    if head.is_empty() {
+        return false;
+    }
+    let text = event.text.trim_start();
+    let body = event
+        .metadata
+        .get("item_id")
+        .filter(|id| !id.starts_with("anon:"))
+        .and_then(|id| text.strip_prefix(&format!("#{id}")))
+        .or_else(|| text.strip_prefix('#'))
+        .unwrap_or(text);
+    normalize_prompt_identity(body) == head
 }
 
 pub fn is_done_tracked_work_event(event: &MemoryEvent) -> bool {
@@ -912,6 +973,75 @@ mod tests {
             semantic_queue_strike_matches(&candidates, &events, QUEUE_STRIKE_THRESHOLD, 5);
 
         assert!(matches.is_empty());
+    }
+
+    /// `#freetextqueue`: the 2026-10-10 incident. The supervisor-thrash free-text
+    /// head was struck as "tracked by backlog #runctrlclaude" only because that
+    /// unrelated backlog item QUOTED the head inside its route error message.
+    /// Containment in other prose is not tracking.
+    #[test]
+    fn semantic_queue_strike_ignores_backlog_item_that_only_quotes_the_head() {
+        let head = "Supervisor thrash: route refused dispatch because the pane was busy";
+        let candidates = vec![queue_candidate(0, head, false)];
+        let events = vec![tracked_event(
+            "doc#backlog:runctrlclaude",
+            "runctrlclaude",
+            &format!(
+                "#runctrlclaude Run controller for claude fails; route error: `{head}` \
+                 while the controller handoff was pending. Different defect."
+            ),
+        )];
+
+        let general_search = rank_events(head, &events);
+        assert!(
+            general_search
+                .first()
+                .is_some_and(|result| result.score >= QUEUE_STRIKE_THRESHOLD),
+            "the lexical scorer must reproduce the unsafe substring-bonus strike: {general_search:?}"
+        );
+        assert!(
+            semantic_queue_strike_matches(&candidates, &events, QUEUE_STRIKE_THRESHOLD, 5)
+                .is_empty(),
+            "a backlog item that only quotes a head must not retire it"
+        );
+    }
+
+    #[test]
+    fn semantic_queue_strike_backlog_requires_exact_identity_not_superset() {
+        let head = "Repair cache duplication on save";
+        let candidates = vec![queue_candidate(0, head, false)];
+        let superset = vec![tracked_event(
+            "doc#backlog:cachefix",
+            "cachefix",
+            "#cachefix Repair cache duplication on save and also on reload",
+        )];
+        assert!(
+            semantic_queue_strike_matches(&candidates, &superset, QUEUE_STRIKE_THRESHOLD, 5)
+                .is_empty()
+        );
+
+        // Cosmetic differences (case, punctuation, markdown) keep the identity.
+        let exact = vec![tracked_event(
+            "doc#backlog:cachefix",
+            "cachefix",
+            "#cachefix repair `cache` duplication, on save.",
+        )];
+        let matches = semantic_queue_strike_matches(&candidates, &exact, QUEUE_STRIKE_THRESHOLD, 5);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].matched_kind, QueueStrikeMatchKind::Backlog);
+        assert_eq!(matches[0].matched_id.as_deref(), Some("cachefix"));
+    }
+
+    #[test]
+    fn backlog_lineage_strips_only_the_items_own_leading_id() {
+        let event = tracked_event("doc#backlog:a1", "a1", "#a1 Fix the thing");
+        assert!(backlog_event_is_exact_lineage_of("fix the thing", &event));
+        assert!(!backlog_event_is_exact_lineage_of(
+            "a1 fix the thing",
+            &event
+        ));
+        assert!(!backlog_event_is_exact_lineage_of("fix the", &event));
+        assert!(!backlog_event_is_exact_lineage_of("", &event));
     }
 
     #[test]

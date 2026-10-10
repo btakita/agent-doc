@@ -20,15 +20,28 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MANIFEST = ROOT / "preview-artifacts/jetbrains-262-preview-c39de1b.json"
+DEFAULT_MANIFEST = ROOT / "preview-artifacts/jetbrains-262-preview-34842a2.json"
 GITHUB_API = "https://api.github.com"
-PINNED_SOURCE_COMMIT = "c39de1b045b8b5238f8e5b7fa6870062798d4114"
-PINNED_RELEASE_ID = 408229042
-PINNED_RELEASE_TAG = "jetbrains-262-preview-c39de1b"
-PINNED_ASSET_ID = 625841715
+PINNED_SOURCE_COMMIT = "34842a23a57739c9ad97e0de7c80b036770a7dc9"
+PINNED_RELEASE_ID = 408534966
+PINNED_RELEASE_TAG = "jetbrains-262-preview-34842a2"
+PINNED_ASSET_ID = 626772959
 PINNED_ASSET_NAME = "agent-doc-jetbrains-262-0.2.511.zip"
-PINNED_ASSET_SIZE = 2569299
-PINNED_SHA256 = "44474f85ab7f3d8ababb0f99feba244986e24c1b663f6d699895aa9e0819b0d9"
+PINNED_ASSET_SIZE = 2556136
+PINNED_SHA256 = "2ef328588d1491446f1a45a83775ee220c13507f5cdd9bca4f5c2111f9e864a7"
+# Recording the manifest is itself a commit on the PR head branch, so the PR
+# head necessarily moves past the pinned source commit. A descendant head is
+# admissible only when every change since the source commit is provenance
+# bookkeeping that cannot reach the plugin ZIP (#previewrepin).
+PROVENANCE_ONLY_PREFIXES = ("preview-artifacts/",)
+PROVENANCE_ONLY_PATHS = frozenset(
+    {
+        "scripts/verify_jetbrains_preview.py",
+        "docs/reference/jetbrains-262-preview-provenance.md",
+    }
+)
+# GitHub's compare API truncates the file list at 300 entries.
+COMPARE_FILE_LIMIT = 300
 
 
 class VerificationError(RuntimeError):
@@ -184,15 +197,65 @@ def github_json(path: str) -> Dict[str, Any]:
         raise VerificationError(f"GitHub provenance lookup failed for {path}: {error}") from error
 
 
+def is_provenance_only_path(path: Any) -> bool:
+    return isinstance(path, str) and (
+        path in PROVENANCE_ONLY_PATHS
+        or any(path.startswith(prefix) for prefix in PROVENANCE_ONLY_PREFIXES)
+    )
+
+
+def verify_head_descends_by_provenance_only(
+    source_commit: str, head_sha: Any, comparison: Dict[str, Any] | None
+) -> None:
+    """Admit a PR head past the source commit only for provenance-only commits."""
+    if comparison is None:
+        raise VerificationError(
+            f"PR head: expected {source_commit!r} or a provenance-only descendant, "
+            f"got {head_sha!r} with no comparison"
+        )
+    require_equal("PR head comparison status", comparison.get("status"), "ahead")
+    require_equal(
+        "PR head comparison base",
+        comparison.get("merge_base_commit", {}).get("sha"),
+        source_commit,
+    )
+    require_equal(
+        "PR head comparison base",
+        comparison.get("base_commit", {}).get("sha"),
+        source_commit,
+    )
+    commits = comparison.get("commits") or []
+    require_equal(
+        "PR head comparison tip", commits[-1].get("sha") if commits else None, head_sha
+    )
+    files = comparison.get("files")
+    if not isinstance(files, list) or not files:
+        raise VerificationError("PR head: descendant comparison lists no changed files")
+    if len(files) >= COMPARE_FILE_LIMIT:
+        raise VerificationError(
+            "PR head: descendant comparison file list may be truncated"
+        )
+    for entry in files:
+        for key in ("filename", "previous_filename"):
+            if key in entry and not is_provenance_only_path(entry[key]):
+                raise VerificationError(
+                    f"PR head: descendant {head_sha!r} changes non-provenance path "
+                    f"{entry[key]!r} since {source_commit!r}"
+                )
+
+
 def verify_remote_provenance(
     manifest: Dict[str, Any],
     pull_request: Dict[str, Any],
     release: Dict[str, Any],
+    comparison: Dict[str, Any] | None = None,
 ) -> None:
     repository = manifest["repository"]
     source_commit = manifest["source_commit"]
     require_equal("PR number", pull_request.get("number"), manifest["pull_request"])
-    require_equal("PR head", pull_request.get("head", {}).get("sha"), source_commit)
+    head_sha = pull_request.get("head", {}).get("sha")
+    if head_sha != source_commit:
+        verify_head_descends_by_provenance_only(source_commit, head_sha, comparison)
     require_equal(
         "PR head repository",
         pull_request.get("head", {}).get("repo", {}).get("full_name"),
@@ -221,7 +284,13 @@ def fetch_and_verify_remote_provenance(manifest: Dict[str, Any]) -> None:
     tag = manifest["release"]["tag"]
     pull_request = github_json(f"/repos/{repository}/pulls/{pr_number}")
     release = github_json(f"/repos/{repository}/releases/tags/{tag}")
-    verify_remote_provenance(manifest, pull_request, release)
+    comparison = None
+    head_sha = pull_request.get("head", {}).get("sha")
+    if isinstance(head_sha, str) and head_sha != manifest["source_commit"]:
+        comparison = github_json(
+            f"/repos/{repository}/compare/{manifest['source_commit']}...{head_sha}"
+        )
+    verify_remote_provenance(manifest, pull_request, release, comparison)
 
 
 def build_fixture(path: Path, manifest: Dict[str, Any], **overrides: str) -> None:
@@ -401,6 +470,68 @@ def self_test() -> int:
     advanced = copy.deepcopy(pr)
     advanced["head"]["sha"] = "0" * 40
     expect_failure("PR head", lambda: verify_remote_provenance(recorded, advanced, release))
+
+    # The manifest commit itself advances the head: provenance-only descendants pass.
+    def comparison(*paths: str, status: str = "ahead", renamed_from: str = "") -> Dict[str, Any]:
+        files = [{"filename": path} for path in paths]
+        if renamed_from:
+            files[0]["previous_filename"] = renamed_from
+        return {
+            "status": status,
+            "base_commit": {"sha": recorded["source_commit"]},
+            "merge_base_commit": {"sha": recorded["source_commit"]},
+            "commits": [{"sha": "0" * 40}],
+            "files": files,
+        }
+
+    provenance = comparison(
+        "preview-artifacts/jetbrains-262-preview-next.json",
+        "scripts/verify_jetbrains_preview.py",
+        "docs/reference/jetbrains-262-preview-provenance.md",
+        renamed_from="preview-artifacts/jetbrains-262-preview-prev.json",
+    )
+    verify_remote_provenance(recorded, advanced, release, provenance)
+    plugin_edit = comparison(
+        "preview-artifacts/x.json", "editors/jetbrains-262/backend/src/main/kotlin/X.kt"
+    )
+    expect_failure(
+        "non-provenance path",
+        lambda: verify_remote_provenance(recorded, advanced, release, plugin_edit),
+    )
+    smuggled_rename = comparison(
+        "preview-artifacts/x.json", renamed_from="editors/jetbrains-262/gradle.properties"
+    )
+    expect_failure(
+        "non-provenance path",
+        lambda: verify_remote_provenance(recorded, advanced, release, smuggled_rename),
+    )
+    diverged = comparison("preview-artifacts/x.json", status="diverged")
+    expect_failure(
+        "comparison status",
+        lambda: verify_remote_provenance(recorded, advanced, release, diverged),
+    )
+    rebased = comparison("preview-artifacts/x.json")
+    rebased["merge_base_commit"]["sha"] = "2" * 40
+    expect_failure(
+        "comparison base",
+        lambda: verify_remote_provenance(recorded, advanced, release, rebased),
+    )
+    other_tip = comparison("preview-artifacts/x.json")
+    other_tip["commits"][-1]["sha"] = "3" * 40
+    expect_failure(
+        "comparison tip",
+        lambda: verify_remote_provenance(recorded, advanced, release, other_tip),
+    )
+    truncated_list = comparison(*[f"preview-artifacts/{i}.json" for i in range(COMPARE_FILE_LIMIT)])
+    expect_failure(
+        "truncated",
+        lambda: verify_remote_provenance(recorded, advanced, release, truncated_list),
+    )
+    empty = comparison()
+    expect_failure(
+        "no changed files",
+        lambda: verify_remote_provenance(recorded, advanced, release, empty),
+    )
     redigested = copy.deepcopy(release)
     redigested["assets"][0]["digest"] = "sha256:" + "0" * 64
     expect_failure(

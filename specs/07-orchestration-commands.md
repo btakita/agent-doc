@@ -328,6 +328,9 @@ They are canonicalized as bare tokens, never `key=true`: preflight repairs
 boolean-serialized forms such as `priority=true` / `go=true` and the malformed
 `preset="#name"=true` suffix back to `priority` / `go` and `preset="#name"` in
 both the visible document and snapshot before continuing queue maintenance.
+Queue-tag rewriters never rewrite an explicit empty preset: `preset=""` means
+"no preset" (GH #227), is preserved byte for byte in the document and snapshot,
+and resolves to no preset everywhere a queue preset is read.
 
 Queue maintenance binds the marker gesture and `queue:` frontmatter
 bidirectionally (`#qactsync`). It compares the current editor-authoritative

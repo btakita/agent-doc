@@ -3813,6 +3813,23 @@ Fix applied to skip non-agent <!-- sequences.
         );
     }
 
+    /// GH #227: toggling `auto` rewrites the queue tag; the operator's explicit
+    /// `preset=""` ("no preset") survives unchanged, and the parser reads it as
+    /// no preset.
+    #[test]
+    fn converge_queue_auto_preserves_explicit_empty_preset() {
+        let doc =
+            "<!-- agent:queue subagents preset=\"\" priority -->\n- a\n<!-- /agent:queue -->\n";
+        let converged = converge_queue_auto(doc, true).unwrap();
+        assert_eq!(
+            converged,
+            "<!-- agent:queue auto subagents preset=\"\" priority -->\n- a\n<!-- /agent:queue -->\n"
+        );
+        assert_eq!(converge_queue_auto(&converged, false).unwrap(), doc);
+        let components = parse(doc).unwrap();
+        assert_eq!(components[0].attrs.get("preset"), None);
+    }
+
     #[test]
     fn converge_queue_auto_noop_when_already_matching() {
         let active = "<!-- agent:queue auto -->\n- do [#x]\n<!-- /agent:queue -->\n";

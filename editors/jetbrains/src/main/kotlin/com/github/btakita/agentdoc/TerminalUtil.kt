@@ -1946,6 +1946,25 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         notify(project, content, NotificationType.ERROR)
     }
 
+    /**
+     * IntelliJ renders notification content as HTML, so CLI text such as the
+     * lint hint `preset=<value>` lost `<value>` as an unknown tag (GH #227).
+     * Escape the plain-text message and keep its line breaks visible.
+     */
+    internal fun notificationHtml(content: String): String = buildString(content.length + 16) {
+        for (ch in content) {
+            when (ch) {
+                '&' -> append("&amp;")
+                '<' -> append("&lt;")
+                '>' -> append("&gt;")
+                '"' -> append("&quot;")
+                '\n' -> append("<br>")
+                '\r' -> Unit
+                else -> append(ch)
+            }
+        }
+    }
+
     internal fun buildCommandFailureMessage(action: String, exitCode: Int, output: String): String {
         val diagnostic = LINT_DIAGNOSTIC_REGEX.findAll(output.trim()).lastOrNull()
         if (diagnostic != null) {
@@ -1987,7 +2006,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, NotificationType.WARNING)
+                .createNotification(notificationHtml(summary), NotificationType.WARNING)
             notification.isImportant = true
             if (refusal.protectedReason.isBlank()) {
                 notification.addAction(NotificationAction.createSimple("Refresh and retry") {
@@ -2021,7 +2040,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, NotificationType.WARNING)
+                .createNotification(notificationHtml(summary), NotificationType.WARNING)
             notification.isImportant = true
             notification.addAction(NotificationAction.createSimple("Interrupt and restart") {
                 interruptAndRestartSession(project, file)
@@ -2050,7 +2069,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, NotificationType.WARNING)
+                .createNotification(notificationHtml(summary), NotificationType.WARNING)
             notification.isImportant = true
             notification.addAction(NotificationAction.createSimple("Interrupt and restart") {
                 interruptAndRestartSession(project, file)
@@ -2079,7 +2098,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, NotificationType.WARNING)
+                .createNotification(notificationHtml(summary), NotificationType.WARNING)
             notification.isImportant = true
             // No "Interrupt and restart" action: --force does not bypass the editor
             // guard. The operator must close the editor manually (#hj7s).
@@ -2194,7 +2213,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(content, type)
+                .createNotification(notificationHtml(content), type)
                 .notify(project)
         } catch (_: Exception) {
             System.err.println("[agent-doc] $content")
@@ -2307,7 +2326,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, NotificationType.WARNING)
+                .createNotification(notificationHtml(summary), NotificationType.WARNING)
             notification.isImportant = true
             notification.addAction(NotificationAction.createSimple("Copy details") {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
@@ -2325,7 +2344,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, NotificationType.WARNING)
+                .createNotification(notificationHtml(summary), NotificationType.WARNING)
             notification.isImportant = true
             notification.addAction(NotificationAction.createSimple("Copy details") {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
@@ -2349,7 +2368,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, NotificationType.WARNING)
+                .createNotification(notificationHtml(summary), NotificationType.WARNING)
             notification.isImportant = true
             notification.addAction(NotificationAction.createSimple("Copy details") {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
@@ -2380,7 +2399,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, NotificationType.INFORMATION)
+                .createNotification(notificationHtml(summary), NotificationType.INFORMATION)
             notification.isImportant = true
             if (paused.restartSupervisorRedirect) {
                 notification.addAction(NotificationAction.createSimple("Restart Supervisor and resume") {
@@ -2422,7 +2441,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, if (deferred.forceRequired) NotificationType.WARNING else NotificationType.INFORMATION)
+                .createNotification(notificationHtml(summary), if (deferred.forceRequired) NotificationType.WARNING else NotificationType.INFORMATION)
             notification.isImportant = true
             when {
                 deferred.queuePaused -> {
@@ -2463,7 +2482,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, NotificationType.WARNING)
+                .createNotification(notificationHtml(summary), NotificationType.WARNING)
             notification.isImportant = true
             notification.addAction(NotificationAction.createSimple("Copy details") {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
@@ -2542,7 +2561,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(summary, NotificationType.ERROR)
+                .createNotification(notificationHtml(summary), NotificationType.ERROR)
             notification.isImportant = true
             notification.addAction(NotificationAction.createSimple("Copy route error") {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
@@ -2609,7 +2628,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(content, NotificationType.INFORMATION)
+                .createNotification(notificationHtml(content), NotificationType.INFORMATION)
             notification.notify(project)
             // Auto-expire after 3 seconds
             Thread {

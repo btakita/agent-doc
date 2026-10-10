@@ -21,6 +21,11 @@ hint; warnings and blocking findings are retained in the Agent Doc Event Log so
 the full rule, position, and hint remain available even when a compact/write
 failure notification is intentionally concise.
 
+IDE notifications render their content as HTML, so every Agent Doc notification
+escapes the plain-text message (`&`, `<`, `>`, `"`) and turns line breaks into
+`<br>`. CLI text such as a lint hint's `preset=<value>` placeholder must reach the
+operator verbatim instead of being swallowed as an unknown tag (GH #227).
+
 When registration carries a retained native CRDT state vector, a controller may
 force a full canonical bootstrap for a durable projection without discarding the
 vector. The response reports whether canonical causally covers that frontier.

@@ -6399,6 +6399,30 @@ mod tests {
         assert_eq!(normalize_queue_tag_attrs(tag), tag);
     }
 
+    /// GH #227 (operator decision): `preset=""` is the operator's explicit "no
+    /// preset". Every queue-tag rewriter preserves it byte for byte.
+    #[test]
+    fn queue_tag_rewriters_preserve_explicit_empty_preset() {
+        let tag = "<!-- agent:queue subagents preset=\"\" priority go -->\n";
+        assert_eq!(normalize_queue_tag_attrs(tag), tag);
+        assert_eq!(set_control_in_tag(tag, Some("go")), tag);
+        assert_eq!(
+            strip_control_from_tag(tag),
+            "<!-- agent:queue subagents preset=\"\" priority -->\n"
+        );
+        assert_eq!(
+            set_control_in_tag(
+                "<!-- agent:queue subagents preset=\"\" priority -->",
+                Some("go")
+            ),
+            "<!-- agent:queue subagents preset=\"\" priority go -->"
+        );
+        assert_eq!(
+            strip_auto_from_tag("<!-- agent:queue auto preset=\"\" -->"),
+            "<!-- agent:queue preset=\"\" -->"
+        );
+    }
+
     #[test]
     fn strip_auto_from_tag_removes_auto() {
         assert_eq!(

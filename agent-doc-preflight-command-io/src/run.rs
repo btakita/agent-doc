@@ -4940,6 +4940,51 @@ mod tests {
             "snapshot malformed attrs repaired:\n{snap}"
         );
     }
+    /// GH #227 (operator decision): `preset=""` on the queue marker is the
+    /// operator's explicit "no preset". Queue maintenance rewrites the tag each
+    /// cycle, so it must leave that marker byte-identical in both the document
+    /// and the snapshot.
+    #[test]
+    fn run_queue_maintenance_preserves_explicit_empty_preset() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let marker = "<!-- agent:queue subagents preset=\"\" priority go -->\n";
+        let content = format!(
+            "---\n\
+             agent_doc_session: test\n\
+             agent_doc_format: template\n\
+             agent_doc_write: crdt\n\
+             queue: go\n\
+             ---\n\n\
+             <!-- agent:exchange patch=append -->\n\
+             ### Re: prior — gpt-5\n\nDone.\n\
+             <!-- /agent:exchange -->\n\n\
+             {marker}\
+             - do [#alpha]\n\
+             <!-- /agent:queue -->\n\n\
+             <!-- agent:backlog -->\n\
+             - [ ] [#alpha] run the alpha task\n\
+             <!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(marker),
+            "explicit empty preset preserved:\n{updated}"
+        );
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(snap.contains(marker), "snapshot preserved too:\n{snap}");
+    }
     #[test]
     fn preflight_flags_inactive_queue_when_changed_this_cycle() {
         // Counterpart guard (Scenario B): when the operator adds content to an

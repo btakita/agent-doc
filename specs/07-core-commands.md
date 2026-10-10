@@ -41,6 +41,13 @@ commands do not wait for the recycle and never interrupt an active turn.
 
 `agent-doc compact <FILE> [--component NAME] [--keep N] [--message TEXT|-] [--tag NAME|skip] [--commit]`
 
+- `--lint off|warn|strict` overrides the dialect lint gate mode exactly like
+  `agent-doc write --lint` (CLI > frontmatter `agent_doc_lint_dialect` >
+  `.agent-doc/config.toml` `[lint] dialect` > default `warn`). The CLI forwards
+  it to the controller as the optional `lint` field of the compact invocation;
+  an absent field resolves the mode as before. The mandatory integrity gate is
+  never bypassed by `--lint off` (GH #227).
+
 - A component compact has a component-scoped compare-and-swap boundary. For
   `--component exchange`, only the attributes and content of `agent:exchange`
   participate in drift detection. Frontmatter and all sibling components are

@@ -881,7 +881,10 @@ fn queue_component_entries(content: &str) -> Option<(QueueFacts, Vec<QueueEntry>
         QueueFacts {
             has_auto: document_queue::has_auto_attr(&queue_component.attrs),
             attrs: queue_component.attrs.clone(),
-            preset_supplies_directive: queue_component.attrs.contains_key("preset"),
+            preset_supplies_directive: crate::prompt_component_attrs::component_preset(
+                &queue_component.attrs,
+            )
+            .is_some(),
         },
         entries,
     ))

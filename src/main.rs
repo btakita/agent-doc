@@ -537,6 +537,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                 invocation.tag.as_deref(),
                 invocation.commit,
                 invocation.force_disk,
+                agent_doc_compact_io::parse_invocation_lint(invocation.lint.as_deref())?,
             )
         })
     }
@@ -3016,6 +3017,11 @@ enum Commands {
         /// Allow compact to bypass editor IPC when no listener is attached
         #[arg(long)]
         force_disk: bool,
+        /// Lint gate mode: off | warn | strict. Overrides the frontmatter
+        /// `agent_doc_lint_dialect` and `.agent-doc/config.toml` `[lint] dialect`,
+        /// matching `agent-doc write --lint` (GH #227).
+        #[arg(long, value_name = "MODE")]
+        lint: Option<String>,
     },
     /// Convert a document between append and template modes
     Convert {
@@ -5920,15 +5926,26 @@ fn try_main() -> anyhow::Result<()> {
             tag,
             commit,
             force_disk,
-        } => agent_doc_compact_io::run(
-            &file,
-            keep,
-            component.as_deref(),
-            message.as_deref(),
-            tag.as_deref(),
-            commit,
-            force_disk,
-        ),
+            lint,
+        } => {
+            let lint_override = match lint.as_deref() {
+                None => None,
+                Some(s) => Some(
+                    agent_doc_frontmatter::lint::LintCliMode::parse(s)
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                ),
+            };
+            agent_doc_compact_io::run(
+                &file,
+                keep,
+                component.as_deref(),
+                message.as_deref(),
+                tag.as_deref(),
+                commit,
+                force_disk,
+                lint_override,
+            )
+        }
         Commands::Convert {
             file,
             mode,

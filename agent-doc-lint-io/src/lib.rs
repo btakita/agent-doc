@@ -506,8 +506,62 @@ fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec
         .filter(|finding| {
             !is_registry_known_unknown_component_finding(finding)
                 && !is_agent_doc_queue_bare_flag_finding(finding)
+                && !is_explicit_no_preset_finding(finding)
         })
+        .map(rewrite_empty_attr_value_hint)
         .collect()
+}
+
+/// GH #227 (operator decision): `preset=""` on a prompt component
+/// (`agent:queue`, `agent:exchange`) is an explicit "no preset", not a malformed
+/// pair. The element attribute parser already drops an empty value, so every
+/// preset resolver sees no preset; the lint gate must agree instead of blocking
+/// compact/write on operator text agent-doc deliberately preserves.
+///
+/// Only `preset` gets this meaning. Every other empty value stays an error:
+/// `patch=`, `archive=`, and backlog `queue=` need a value to mean anything, and
+/// an empty `subagents=` / `fan-out=` is ambiguous (the bare flag means "all
+/// eligible heads", while the parser drops the empty pair, i.e. "off").
+fn is_explicit_no_preset_finding(finding: &LintFinding) -> bool {
+    if finding.rule != "agent-doc/empty-attr-value" {
+        return false;
+    }
+    let mut quoted = finding.message.split('`');
+    let Some(attribute) = quoted.nth(1) else {
+        return false;
+    };
+    let Some(component) = quoted.nth(1) else {
+        return false;
+    };
+    attribute.trim_end_matches('=') == "preset"
+        && matches!(component, "agent:queue" | "agent:exchange")
+}
+
+/// GH #227: tagpath's `agent-doc/empty-attr-value` hint says
+/// ``provide a value: `key=<value>` `` — whose `<value>` placeholder is
+/// swallowed as an HTML tag by editor notification renderers, and which hides
+/// the usually-correct fix of deleting an attribute that carries nothing.
+/// Replace it with an agent-doc hint that offers both and uses no angle-bracket
+/// placeholder.
+fn rewrite_empty_attr_value_hint(mut finding: LintFinding) -> LintFinding {
+    if finding.rule != "agent-doc/empty-attr-value" {
+        return finding;
+    }
+    let Some(key) = finding
+        .message
+        .split('`')
+        .nth(1)
+        .map(|token| token.trim_end_matches('='))
+        .filter(|key| !key.is_empty())
+    else {
+        return finding;
+    };
+    finding.fix_hint = Some(empty_attr_value_hint(key));
+    finding
+}
+
+fn empty_attr_value_hint(key: &str) -> String {
+    format!("remove the empty `{key}=` attribute, or give it a value: `{key}=VALUE`")
 }
 
 /// Tagpath's generic attribute grammar requires values for attributes that the
@@ -599,10 +653,10 @@ fn classify_and_emit(
     let header = format!(
         "[lint-gate] INTERRUPTED: {} blocking lint finding(s) for {} (mode={}, source={}). \
          Error-severity findings block in every mode; strict mode also blocks warnings. \
-         Fix the directives below, then retry the interrupted command, or set \
-         `agent_doc_lint_dialect: off` in \
-         frontmatter / `[lint] dialect = \"off\"` in `.agent-doc/config.toml` \
-         to temporarily skip this gate.",
+         Fix the directives below, then retry the interrupted command, or \
+         temporarily skip this gate with `--lint off` on `agent-doc write` / \
+         `agent-doc compact`, `agent_doc_lint_dialect: off` in \
+         frontmatter, or `[lint] dialect = \"off\"` in `.agent-doc/config.toml`.",
         errors_owned.len(),
         file.display(),
         dialect_label(mode),
@@ -1081,6 +1135,74 @@ operator-owned scratch state\n\
         assert!(message.contains("agent-doc/malformed-attr"), "{message}");
         assert!(message.contains("attribute `preset`"), "{message}");
         assert!(message.contains("missing `=value`"), "{message}");
+    }
+
+    /// GH #227 (operator decision): `preset=""` means explicitly no preset. It
+    /// must not block lint (and therefore compact/write) on queue or exchange.
+    #[test]
+    fn empty_preset_is_explicit_no_preset_and_passes_lint() {
+        let dir = TempDir::new().unwrap();
+        for (name, doc) in [
+            (
+                "queue.md",
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange -->\n\
+                 prompt\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents preset=\"\" priority go -->\n\
+                 - do [#a]\n\
+                 <!-- /agent:queue -->\n",
+            ),
+            (
+                "exchange.md",
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange preset=\"\" -->\n\
+                 prompt\n\
+                 <!-- /agent:exchange -->\n",
+            ),
+        ] {
+            let file = write_doc(&dir, name, doc);
+            run(&file, None).unwrap_or_else(|error| {
+                panic!("`preset=\"\"` in {name} must pass lint: {error:#}")
+            });
+            run(&file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
+                panic!("`preset=\"\"` in {name} must pass strict lint: {error:#}")
+            });
+        }
+    }
+
+    /// Other empty attribute values stay malformed; their hint leads with
+    /// removal, carries no `<value>` placeholder, and the header names
+    /// `--lint off` on write/compact as an escape.
+    #[test]
+    fn other_empty_attr_values_still_block_with_actionable_hint() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:done archive=\"\" -->\n\
+            <!-- /agent:done -->\n";
+        let file = write_doc(&dir, "empty-archive.md", doc);
+        let message = format!("{:#}", run(&file, None).expect_err("empty archive blocks"));
+        assert!(message.contains("agent-doc/empty-attr-value"), "{message}");
+        assert!(
+            message.contains("hint: remove the empty `archive=` attribute"),
+            "{message}"
+        );
+        assert!(!message.contains("<value>"), "{message}");
+        assert!(message.contains("`--lint off`"), "{message}");
+        assert!(message.contains("`agent-doc compact`"), "{message}");
+
+        run(&file, Some(LintCliMode::Off)).expect("--lint off skips the dialect gate");
+    }
+
+    #[test]
+    fn empty_non_preset_attr_hint_suggests_removal_or_value() {
+        assert_eq!(
+            empty_attr_value_hint("archive"),
+            "remove the empty `archive=` attribute, or give it a value: `archive=VALUE`"
+        );
     }
 
     #[test]

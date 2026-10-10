@@ -526,6 +526,17 @@ Both plugin lines need a version bump. I'll do a single bump after the reworked 
 4. close #221, #227 and #228.
 
 **#218** stays open: its live IDEA 2026.2.3 Remote Dev proof is still undone, and `#gh218remoteproof` stays in review. **`release + publish`** is re-claimed as `coordinator:release-after-batch` and comes after this batch.
+
+### Re: v0.35.481 publish status — opus-5.5 · 2026-10-09T21:59-04:00
+
+> **Chat prompt (#chatprompt):** is the release published?
+
+**Not yet; publishing is in progress.**
+- **Done:** `make release` reran the full suite on the version-projected tree (9879/9879 passed). It then pushed tag **`v0.35.481`** at `dbb7e763e`, which is on origin.
+- **In progress:** the tag-triggered **Release** and **PyPI** workflows. `gh release view v0.35.481` doesn't find a release yet, and PyPI doesn't have 0.35.481 yet.
+- **Still running locally:** `make release` is on its timed post-tag step, the single local `install-full` rebuild.
+
+I'll confirm the GitHub Release assets, PyPI 0.35.481 and the Homebrew job once the workflows finish. If `HOMEBREW_TAP_TOKEN` is still missing, the tap job warns and skips. After that I close `release + publish`. GH #218 stays open for the live Remote Dev proof.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

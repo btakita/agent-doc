@@ -4005,7 +4005,23 @@ pub fn run_queue_maintenance_with_coin_gate(
             ResolvedFreeTextExecution::Goal => FreeTextAdmissionExecution::Goal,
             ResolvedFreeTextExecution::Queue => FreeTextAdmissionExecution::Queue,
         };
+        let promotions = prepared_admission
+            .promotions
+            .iter()
+            .map(|promotion| (promotion.source_text.clone(), promotion.id.clone()))
+            .collect::<Vec<_>>();
         let admission = prepared_admission.finish(execution)?;
+        // `#freetextqueue`: a claimed free-text head promoted into `do [#id]`
+        // keeps its owner — the claim follows the exact promotion receipt, so
+        // the new id head never resurfaces as unclaimed dispatch work.
+        // Best-effort: a claim-store failure must not abort maintenance.
+        if let Err(err) =
+            agent_doc_queue_io::queue_claim::transfer_promoted_claims(file, &promotions)
+        {
+            eprintln!(
+                "[preflight] queue: WARNING: could not carry claims onto promoted heads: {err:#}"
+            );
+        }
         current_content = admission.content;
         content = current_content.clone();
         components = agent_doc_element::element::parse(&current_content)?;
@@ -5005,9 +5021,10 @@ pub fn run_queue_maintenance_with_coin_gate(
     //
     // SAFETY: only `QueueEntry::Prompt` heads that are free-text (no `#id` — id
     // heads have their own done-strike) are eligible, the match must clear the
-    // conservative `QUEUE_STRIKE_THRESHOLD` (set above the `+1.0`
-    // substring-contains bonus so an unrelated operator prompt can never reach
-    // it), and a committed-snapshot gate (mirroring the `#qheadresidue` gate)
+    // conservative `QUEUE_STRIKE_THRESHOLD`, a backlog match must be the head's
+    // exact lineage (`#freetextqueue`: the item's own text IS the head's text —
+    // a backlog item that merely quotes the head never counts), and a
+    // committed-snapshot gate (mirroring the `#qheadresidue` gate)
     // restricts the strike to heads already present in the committed queue so an
     // in-flight operator edit convergence just added is never struck. The strike
     // is annotation-only: the head is converted to a `Completed` entry whose text
@@ -8145,6 +8162,69 @@ mod tests {
         assert_eq!(
             state.selected_queue_prompts.first(),
             Some(&format!("do [#{id}]"))
+        );
+    }
+
+    /// `#freetextqueue`: a CLAIMED free-text head promoted into a backlog id
+    /// keeps its claim on the new `do [#id]` head (2026-10-10: the claimed
+    /// "Run Agent Doc on frontend.md crashed …" head became
+    /// `do [#runfrontendcrashed]` and re-surfaced as unclaimed dispatch work).
+    #[test]
+    fn run_queue_maintenance_carries_claim_onto_promoted_free_text_head() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: codex\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#existing]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#existing] existing work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let head = "Run Agent Doc on frontend.md crashed with a route panic";
+        let content = snapshot_content.replace(
+            "- do [#existing]\n",
+            &format!("- do [#existing]\n- {head}\n"),
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, head, "subagent:frontendcrash", 3600).unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let id = backlog_id_for_text(&updated, head);
+        let queue = component_body(&updated, "queue");
+        assert!(
+            queue.contains(&format!("do [#{id}]")) && !queue.contains(head),
+            "the claimed free-text head must be promoted:\n{updated}"
+        );
+
+        let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(&doc, &updated);
+        assert!(
+            claimed.claims(&format!("do [#{id}]")),
+            "the promoted id head must inherit the free-text head's claim:\n{updated}"
+        );
+        let owners = agent_doc_queue_io::queue_claim::claim_owners_for_content(&doc, &updated);
+        assert_eq!(
+            owners.get(&agent_doc_queue::queue_claim::claim_identity(&format!(
+                "do [#{id}]"
+            ))),
+            Some(&"subagent:frontendcrash".to_string())
         );
     }
 

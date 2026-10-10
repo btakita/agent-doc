@@ -499,6 +499,17 @@ GH #218, GH #221 and `release + publish` are unchanged. They wait on PR #222, wh
 The binary added a `> **Queue prompt:**` echo for the #218 driver line, and the `#ftstrike` heuristic then struck every claimed head the response *named*. I restored the four lines with `agent-doc patch <FILE> queue`, leaving every other queue line unchanged. I also re-claimed them: #218/#221 as `coordinator:pr222-integration`, #227 as `subagent:gh227`, #228 as `subagent:gh228`.
 
 New follow-up `#ftstrikeclaimedmention`: `#ftstrike` must not strike a claimed head merely because the response mentions it, and the binary must not add its own queue-prompt echo for a coordinator-claimed driver line.
+
+### Re: preset="" is yours, so it means "no preset" — opus-5.5 · 2026-10-09T20:42-04:00
+
+> **Chat prompt (#chatprompt):** I wrote the empty `preset=""`
+
+Thanks, that settles the part of GH #227 the subagent couldn't trace: no agent-doc writer produced it. You chose for `preset=""` to mean **explicitly no queue preset**, so the #227 fix is being reworked:
+- **Lint:** `preset=""` is valid. There is no `empty-attr-value` error for it, and Compact and write pass without `--lint off`. The rule stays for attributes where an empty value really is malformed.
+- **No rewrite of your text:** the auto-strip that branch had added to the queue-marker writers and to preflight queue maintenance is removed. Your marker round-trips byte-identical, and every resolver treats an empty preset as no preset. Regression tests assert both.
+- **Kept:** `compact --lint off|warn|strict` (so Compact has the same escape as write), and the JetBrains notification escaping (`notificationHtml()`), which fixes the dropped placeholder in hints.
+
+The subagent is amending `fix/gh227-empty-preset-attr` (PR #230). I cancelled the main-batch `make check` I had started on the old #227 head. Once the amended branch reports, I'll redo the batch: #228 (PR #229, ready, `make check` green) plus the new #227, JetBrains plugin 0.2.513, then one `make check`, push to main, `make install`, and close both issues.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -507,19 +518,10 @@ New follow-up `#ftstrikeclaimedmention`: `#ftstrike` must not strike a claimed h
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#fixruninfra]~~
-- ~~do [#readyanotherpreview]~~
-- ~~do [#waypostauthorization]~~
-- ~~do [#jetbrains262installselect]~~
-- ~~do [#jetbrains262distribution]~~
-- ~~do [#previewartifactprovenance]~~
-- ~~do [#ci25gradle]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/225~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/218
 - #gh-fix https://github.com/btakita/agent-doc/issues/221
 - #gh-fix https://github.com/btakita/agent-doc/issues/227
 - #gh-fix https://github.com/btakita/agent-doc/issues/228
-- ~~fix: Run Agent Doc on contracts.md: [route] active closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md could not be drained before reroute; nothing was dispatched and existing queue head "#rebase-conflicts https://github.com/haiven-dev/haiven-contracts/pull/123" remains queued behind the closeout (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md. Rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md`; resume durable checkpoint cycle=cycle-1791583495987 phase=response_captured capture_id=cycle-1791583495987; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md) ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 release + publish
 <!-- /agent:queue -->
 

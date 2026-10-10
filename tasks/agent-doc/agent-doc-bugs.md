@@ -180,6 +180,33 @@ Both finished after the 0.35.485 batch boundary, so they go into the next releas
 `#testisolationtests` is already claimed by `subagent:testisolation`, so this cycle does no inline work on it. This empty cycle is the `#explicitrunqueue` defect showing up again: a claimed head still opens a no-op cycle. The fix is in the pending 0.35.485 batch, and the full `make check` on that batch is still running. Once it's installed, a claimed head reports its owner instead of opening a cycle.
 
 The exchange is now 143 lines across 9 response sections. I'm not compacting, because the queue is active.
+
+### Re: v0.35.485 released — batch closed — opus-5-5 · 2026-10-10T17:45-04:00
+
+> **Queue prompt:** Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.
+
+**v0.35.485 is released and installed.**
+- Tag `v0.35.485` was pushed by `make release` (`34e9a95c2`), and the run exited 0 with `tag_publish_handoff=complete` and `local_install_full=complete`.
+- `agent-doc --version` reports 0.35.485.
+- Gate: the authoritative `make check` on the integrated tree passed 9956/9956 nextest with 0 failed. TLA passed, including `ControllerLifecycle` with its 3 wedge and 3 reach configs. The release reran its checks on the version-projected tree.
+
+**Closed in this release:**
+- **Supervisor thrash (supthrash):** controller lifecycle invariants L1–L5. Handoff retries are bounded with backoff and give up; short handoff socket names are used; idle-root controllers retire.
+- **`#runfrontendcrashed`:** the watchdog no longer misreads a restart in flight as a crash. A bare shell prompt is never treated as a live harness. A killed supervisor restores the terminal mode, which caused the formatting in `img_3.png`.
+- **`#runfrontenderror`:** a stale-binary supervisor with no ready stamp gets one turn-safe recycle request and a 45s bound, instead of an indefinite refusal.
+- **`#explicitrunqueue`:** a claimed-only queue head opens no cycle and reports its owner.
+- **`#freetextqueue`:** strikes and claims follow exact promotion lineage.
+- **Multi-line queue cruft (above):** a multi-line free-text item is now one item through promotion, strike, remove, and reorder.
+- **Codex Stop-hook flake (`#codexstopflake`):** the root cause was a stale document cache that made every recovery run a second full closeout. Tests keep a single event-driven `worker_completion` hatch. Separately, the Codex transcript lookup no longer reads every 14 GB rollout in full.
+- **Flaky tests fixed at the cause, not rerun:** a relay 3s wall clock, a preflight debounce timeout, CRDT-delivery and typing-hold timers, and two archive tests that leaned on `~/.agent-doc`.
+
+**Next batch, not in 0.35.485:**
+- **GH #234** (`fix/gh234`, `cf9bf7bb9`): survivors keep their edge and relative order across width changes. Per your answer the edge rule stays, so `[A|B]` widens to `[A|C|B]`.
+- **`#testisolationtests`** (`fix/testisolation`): adds `AGENT_DOC_ROOT_CEILING_DIRECTORIES`, a Makefile and nextest TMPDIR guard, and bounds all 7 root walkers. `$HOME` stays a valid lazy root, because `state.db` shows it is in real use.
+
+Both are integrating now with one `make install`. GH #234 closes after that.
+
+**`~/.agent-doc` cleanup, approved: back up first, then remove only test-written state.** I'll run it after the install. The `$HOME` bootstrap row, `scratch_16.md`, and everything written before September stay.
 <!-- agent:boundary:eea96e0d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -189,12 +216,12 @@ The exchange is now 143 lines across 9 response sections. I'm not compacting, be
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#testisolationtests]
-- ⏭️ do [#runfrontendcrashed]
-- ⏭️ do [#runfrontenderror]
+- ~~⏭️ do [#runfrontendcrashed]~~
+- ~~⏭️ do [#runfrontenderror]~~
 - ~~do [#runctrlclaude]~~
-- ⏭️ do [#explicitrunqueue]
-- 🚧 do [#freetextqueue]
-- 🚧 Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.
+- ~~⏭️ do [#explicitrunqueue]~~
+- ~~do [#freetextqueue]~~
+- ~~Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 #gt-fix https://github.com/btakita/agent-doc/issues/234
 - ~~release + publish~~
 <!-- /agent:queue -->
@@ -203,10 +230,6 @@ The exchange is now 143 lines across 9 response sections. I'm not compacting, be
 
 <!-- agent:backlog priority queue -->
 - [ ] 🚧 [#testisolationtests] Test isolation: agent-doc tests whose TMPDIR sits under $HOME walk up past their tempdir, adopt /home/brian/.agent-doc as the project root, and write the operator's real ~/.agent-doc/state.db, ops.log, proof-ledger and snapshots, and spawn controllers with --project-root /home/brian (seen 2026-10-10: 'failed to save registry to /home/brian/.agent-doc/state.db: database is locked', a leaked test controller, and subagent scratch paths in ~/.agent-doc/logs/ops.log). Project-root discovery under test must stop at a ceiling (the test tempdir / an AGENT_DOC_ROOT_CEILING like GIT_CEILING_DIRECTORIES), and the test harness must refuse a TMPDIR that has an .agent-doc ancestor. Then scrub the test-written entries from ~/.agent-doc with the operator's OK.
-- [ ] 🚧 [#runfrontendcrashed] Run Agent Doc on frontend.md crashed my Claude Code session and unsuccessfully restarted. The raw prompt was the end state. The terminal formatting is also messed up ![img_3.png](img_3.png).
-- [ ] 🚧 [#freetextqueue] Free-text queue head wrongly auto-struck by #qftbklgstrike: the supervisor-thrash queue line was struck as 'tracked by backlog #runctrlclaude' only because #runctrlclaude's backlog text QUOTES that line (inside the route error message), even though the two are different defects and the thrash fix was still in flight under its own claim (subagent:supthrash). Containment of a head's text inside an unrelated backlog item's prose must not count as tracking; require an exact promotion lineage/receipt. 2026-10-10 ~17:45Z, agent-doc-bugs.md.
-- [ ] 🚧 [#runfrontenderror] Run Agent Doc on frontend.md error: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
-- [ ] 🚧 [#explicitrunqueue] Explicit Run Agent Doc on a queue head that is claimed by a live subagent (agent-doc queue claims shows an unexpired owner) still admits a full cycle with queue_drainable_head_count=0, so each press commits a no-op in-flight response and trips expect_done_or_gate_guard. The route/preflight should answer 'claimed by <owner>, expires <t>' without opening a cycle. Repro: 2026-10-10 17:34Z, ops.log preflight_turn_admission explicit_route=true for the claimed #runctrlclaude.
 <!-- /agent:backlog -->
 
 ## Review

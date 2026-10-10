@@ -659,6 +659,11 @@ I went through all 9 review items and checked each item's blocker against its cu
   - `pypiquotarecheck`: pypi/support#12214 is still open and unchanged since 2026-09-10.
 
 There were no actionable follow-up items, so nothing new was added to the backlog or queue.
+
+### Re: committing the actionable-review strike — opus-5.5 · 2026-10-10T00:10-04:00
+
+This cycle only commits leftovers from my previous write: the `#actionable-review` strike and the `(HEAD)` marker had reached the editor but not git. The `#actionable-review` sweep was answered last cycle: `gh221mergeclose` and `qsubattr5` were resolved and 7 review items remain. The remaining queue heads are all claimed (the batch merge, the release, and the `runfrontenddispatch` subagent), so there is nothing for the loop to drain. Exchange is 628 lines / 36 sections (warn); not compacting while the queue is active.
+There are no actionable follow-up items to add to the backlog or queue.
 <!-- agent:boundary:85b8d79b -->
 <!-- /agent:exchange -->
 
@@ -667,27 +672,27 @@ There were no actionable follow-up items, so nothing new was added to the backlo
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#runfrontenddispatch]
+- 🚧 do [#runfrontenddispatch]
 - ~~do [#jb262dynlauncherrecommen]~~
-- do [#relcimavenlocalreleasepu]
+- 🚧 do [#relcimavenlocalreleasepu]
 - ⏭️ do [#ftstrikeclaimedmention]
-- do [#crossrootcolumnflip]
-- do [#staleharnessturnlive]
-- do [#jb262dynupgrade]
+- 🚧 do [#crossrootcolumnflip]
+- 🚧 do [#staleharnessturnlive]
+- 🚧 do [#jb262dynupgrade]
 - ~~do [#previewrepin]~~
-- #actionable-review
+- ~~#actionable-review~~
 - 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
-- [ ] [#relcimavenlocalreleasepu] relcimavenlocal: [agent-doc] Release v0.35.481 did NOT publish: Release run 38014769297 (2026-10-10T01:51Z) failed in the plugins job at :backend:compileKotlin, Could not find io.github.lazily:lazily:0.39.0, so release + homebrew were skipped. Latest published is still v0.35.480 (GitHub + PyPI). Cause: 548a24874 (lz262resolve) added the publish-pinned-lazily-kt-to-mavenLocal step to ci.yml only; release.yml checks out ../lazily-kt but never publishes it to mavenLocal for the JetBrains 262 build. Port that step into release.yml (with a parity test/guard so ci.yml and release.yml cannot drift), then re-run the release by cutting v0.35.482 (the existing v0.35.481 tag runs its own old release.yml).
-- [ ] [#ftstrikeclaimedmention] [agent-doc] ftstrike over-strikes claimed free-text queue heads: on 2026-10-09 ~19:27 a status response that only MENTIONED GH 218/221/227/228 (all claimed: two coordinator-held awaiting PR 222, two with live subagents) struck all four as answered this cycle, and the binary itself synthesized a queue-prompt echo for the coordinator-claimed 218 driver line, consuming it. Restored by hand with agent-doc patch FILE queue. A claimed head must strike only via an explicit exact queue-prompt echo authored by the agent (or a claim release), never via a mention or a binary-synthesized echo; add regression coverage.
-- [ ] [#crossrootcolumnflip] [agent-doc] Two project controllers sharing one tmux main window (agent-loop + haiven-dev, cross-root layout) publish competing layouts: after an IDEA restart the haiven-dev route published [agent-doc-bugs, contracts] (gen 21) while the agent-loop controller's editor-surface churn published gens 32-36 ending [agent-doc-bugs, api.md]; whichever publishes last wins and a column can flip between documents. Make cross-root main-window layout single-owner (or merge both controllers' desired columns through one arbiter) so post-restart churn converges to the editor's real visible set. Evidence: src/haiven-dev/.agent-doc/logs/ops.log 22:17:47Z-22:18:23Z on 2026-10-09; see fix/stale-third-main-pane (943c6041e) report.
-- [ ] [#staleharnessturnlive] [agent-doc] supervisor_empty_preflight_reclaim_probe reports outcome=protected_live_turn harness_turn_live=true for an IDLE owner pane (contracts.md pane %161 at its prompt, 2026-10-09 22:11:37Z, cycle-1791583495987 response_captured), which deferred recycle/reclaim and kept automatic recovery from running. Find why the live-turn lease outlives the harness turn and make it expire/clear at the turn's Stop boundary, with regression coverage.
-- [ ] [#jb262dynupgrade] [agent-doc] Restart-free upgrade for the exact-262 modular JetBrains plugin: the 262 ZIP has no dynamic-upgrade launcher entry point, so updating a running 262 IDE falls back to file replacement + restart with a misleading 'predates restart-free dynamic upgrade support' warning; and the running-IDE jar probes (src/plugin.rs ~1366, plugin_activation.rs) only match agent-doc-jetbrains-*.jar, missing the 262 agent.doc-<v>.jar. Add a 262 entry point (or an accurate warning) and teach the probes the 262 jar name, with tests. Found by jetbrains262installselect (d82196a3f).
+- [ ] 🚧 [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
+- [ ] 🚧 [#relcimavenlocalreleasepu] relcimavenlocal: [agent-doc] Release v0.35.481 did NOT publish: Release run 38014769297 (2026-10-10T01:51Z) failed in the plugins job at :backend:compileKotlin, Could not find io.github.lazily:lazily:0.39.0, so release + homebrew were skipped. Latest published is still v0.35.480 (GitHub + PyPI). Cause: 548a24874 (lz262resolve) added the publish-pinned-lazily-kt-to-mavenLocal step to ci.yml only; release.yml checks out ../lazily-kt but never publishes it to mavenLocal for the JetBrains 262 build. Port that step into release.yml (with a parity test/guard so ci.yml and release.yml cannot drift), then re-run the release by cutting v0.35.482 (the existing v0.35.481 tag runs its own old release.yml).
+- [ ] 🚧 [#ftstrikeclaimedmention] [agent-doc] ftstrike over-strikes claimed free-text queue heads: on 2026-10-09 ~19:27 a status response that only MENTIONED GH 218/221/227/228 (all claimed: two coordinator-held awaiting PR 222, two with live subagents) struck all four as answered this cycle, and the binary itself synthesized a queue-prompt echo for the coordinator-claimed 218 driver line, consuming it. Restored by hand with agent-doc patch FILE queue. A claimed head must strike only via an explicit exact queue-prompt echo authored by the agent (or a claim release), never via a mention or a binary-synthesized echo; add regression coverage.
+- [ ] 🚧 [#crossrootcolumnflip] [agent-doc] Two project controllers sharing one tmux main window (agent-loop + haiven-dev, cross-root layout) publish competing layouts: after an IDEA restart the haiven-dev route published [agent-doc-bugs, contracts] (gen 21) while the agent-loop controller's editor-surface churn published gens 32-36 ending [agent-doc-bugs, api.md]; whichever publishes last wins and a column can flip between documents. Make cross-root main-window layout single-owner (or merge both controllers' desired columns through one arbiter) so post-restart churn converges to the editor's real visible set. Evidence: src/haiven-dev/.agent-doc/logs/ops.log 22:17:47Z-22:18:23Z on 2026-10-09; see fix/stale-third-main-pane (943c6041e) report.
+- [ ] 🚧 [#staleharnessturnlive] [agent-doc] supervisor_empty_preflight_reclaim_probe reports outcome=protected_live_turn harness_turn_live=true for an IDLE owner pane (contracts.md pane %161 at its prompt, 2026-10-09 22:11:37Z, cycle-1791583495987 response_captured), which deferred recycle/reclaim and kept automatic recovery from running. Find why the live-turn lease outlives the harness turn and make it expire/clear at the turn's Stop boundary, with regression coverage.
+- [ ] 🚧 [#jb262dynupgrade] [agent-doc] Restart-free upgrade for the exact-262 modular JetBrains plugin: the 262 ZIP has no dynamic-upgrade launcher entry point, so updating a running 262 IDE falls back to file replacement + restart with a misleading 'predates restart-free dynamic upgrade support' warning; and the running-IDE jar probes (src/plugin.rs ~1366, plugin_activation.rs) only match agent-doc-jetbrains-*.jar, missing the 262 agent.doc-<v>.jar. Add a 262 entry point (or an accurate warning) and teach the probes the 262 jar name, with tests. Found by jetbrains262installselect (d82196a3f).
 <!-- /agent:backlog -->
 
 ## Review

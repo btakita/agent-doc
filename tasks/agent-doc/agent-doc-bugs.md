@@ -587,6 +587,14 @@ No. **v0.35.481 did not publish.** The latest published version is still **v0.35
 - **Tests:** `editors/jetbrains-262` gradle test + buildPlugin + split verification all passed (backend 9, frontend 7, shared 2 tests); `make check-fast` exit 0; live `make verify-jetbrains-262-preview` OK.
 - **Catch:** PR 222 was already merged into `main` before the agent pushed, so `87d6a60a7` sits on the merged head branch, not on `main`. It touches only those three files and I'll cherry-pick it onto `main` during the batch integration.
 - **`#gh218remoteproof`:** I rewrote its review text to point at the new preview and its digest. It now notes that PR 222 is merged and that the 0.2.514 ZIP of the next published release is an alternative to test. v0.35.481 still has not published; see `relcimavenlocal`.
+
+### Re: preview pin landed on main — opus-5.5 · 2026-10-09T22:27-04:00
+
+> **Queue prompt:** do [#previewrepin]
+
+Done. I cherry-picked `87d6a60a7` onto agent-doc `origin/main` in a separate worktree and pushed it as **`4b374bea0`** (fast-forward from `dbb7e763e`). `main` now pins `jetbrains-262-preview-34842a2` instead of `c39de1b`. Verification: `verify_jetbrains_preview.py --self-test` ok, and `make check-fast` exit 0 with no affected Rust packages. The only remaining `c39de1b` mention is a history comment in `.github/workflows/pypi.yml`.
+
+The ftstrike, cross-root column, stale live-turn and jb262 upgrade agents are still running.
 <!-- agent:boundary:79909a6b -->
 <!-- /agent:exchange -->
 
@@ -599,7 +607,7 @@ No. **v0.35.481 did not publish.** The latest published version is still **v0.35
 - do [#crossrootcolumnflip]
 - do [#staleharnessturnlive]
 - do [#jb262dynupgrade]
-- do [#previewrepin]
+- ~~do [#previewrepin]~~
 <!-- /agent:queue -->
 
 ## Backlog
@@ -610,7 +618,6 @@ No. **v0.35.481 did not publish.** The latest published version is still **v0.35
 - [ ] [#crossrootcolumnflip] [agent-doc] Two project controllers sharing one tmux main window (agent-loop + haiven-dev, cross-root layout) publish competing layouts: after an IDEA restart the haiven-dev route published [agent-doc-bugs, contracts] (gen 21) while the agent-loop controller's editor-surface churn published gens 32-36 ending [agent-doc-bugs, api.md]; whichever publishes last wins and a column can flip between documents. Make cross-root main-window layout single-owner (or merge both controllers' desired columns through one arbiter) so post-restart churn converges to the editor's real visible set. Evidence: src/haiven-dev/.agent-doc/logs/ops.log 22:17:47Z-22:18:23Z on 2026-10-09; see fix/stale-third-main-pane (943c6041e) report.
 - [ ] [#staleharnessturnlive] [agent-doc] supervisor_empty_preflight_reclaim_probe reports outcome=protected_live_turn harness_turn_live=true for an IDLE owner pane (contracts.md pane %161 at its prompt, 2026-10-09 22:11:37Z, cycle-1791583495987 response_captured), which deferred recycle/reclaim and kept automatic recovery from running. Find why the live-turn lease outlives the harness turn and make it expire/clear at the turn's Stop boundary, with regression coverage.
 - [ ] [#jb262dynupgrade] [agent-doc] Restart-free upgrade for the exact-262 modular JetBrains plugin: the 262 ZIP has no dynamic-upgrade launcher entry point, so updating a running 262 IDE falls back to file replacement + restart with a misleading 'predates restart-free dynamic upgrade support' warning; and the running-IDE jar probes (src/plugin.rs ~1366, plugin_activation.rs) only match agent-doc-jetbrains-*.jar, missing the 262 agent.doc-<v>.jar. Add a 262 entry point (or an accurate warning) and teach the probes the 262 jar name, with tests. Found by jetbrains262installselect (d82196a3f).
-- [ ] [#previewrepin] [agent-doc] Preview re-pinned: prerelease jetbrains-262-preview-34842a2 built from CI-green PR 222 head 34842a23a; manifest, verifier and provenance doc re-pinned in 87d6a60a7 (pushed fast-forward to the already-merged postrelease/gh218-isolated-detached-view branch). The verifier now also accepts a newer PR head only when the diff since the pin touches only the pin files. Remaining: land 87d6a60a7 (3 files only) onto agent-doc main during the batch integration; main still pins c39de1b.
 <!-- /agent:backlog -->
 
 ## Review

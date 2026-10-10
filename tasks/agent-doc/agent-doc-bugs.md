@@ -142,7 +142,23 @@ Two steps were needed to get there:
 - The backlog item asks for a project-root ceiling under test, plus a harness guard against a TMPDIR with an `.agent-doc` ancestor. `~/.agent-doc` is not cleaned yet; that waits for your OK.
 
 **Still in flight:** `#runfrontenderror`, `#explicitrunqueue`, `#runfrontendcrashed`, `#freetextqueue`, the multi-line queue cruft, and the codex Stop-hook flake.
-<!-- agent:boundary:a19d933a -->
+
+> **Chat prompt (#chatprompt):** are we going through the release process?
+
+### Re: release for this batch? — opus-5-5 · 2026-10-10T16:40-04:00
+
+Not yet. The batch is set up for local install only. These queue items carry `#spec-test-build-install-commit-push`, which authorizes building, a local install, and a commit + push to `main`. It doesn't authorize a release. The one "release + publish" item you queued is done: that was v0.35.484, carrying `#runctrlclaude`.
+
+**Current plan:**
+1. The combined branch, `integrate-0485` (11 commits), passes its full `make check`.
+2. Fast-forward onto `main` and push.
+3. Run one `make install` and release the claims.
+4. Close supervisor thrash, `#runfrontendcrashed`, `#explicitrunqueue`, `#freetextqueue`, the multi-line cruft, and `#runfrontenderror`.
+
+**Should it be released?** I'd recommend it. The supervisor-thrash, bare-shell-restart, and stale-supervisor dispatch fixes are production behavior that every installed user hits, not just this machine. Releasing would be `make release` as v0.35.485 after the merge to `main`: a VERSIONS.md entry, an editor parity row, and the same check/tmux-ci/tag/publish/install-full path as 0.35.484. That release would then replace the separate `make install`.
+
+Add `release + publish` to the queue, or answer here, and I'll run the release in place of the plain install.
+<!-- agent:boundary:eea96e0d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -156,6 +172,7 @@ Two steps were needed to get there:
 - 🚧 do [#explicitrunqueue]
 - 🚧 do [#freetextqueue]
 - 🚧 Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.
+- #
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 

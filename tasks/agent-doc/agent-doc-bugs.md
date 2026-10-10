@@ -220,6 +220,44 @@ Yes. **v0.35.485 is fully published.**
 **The PyPI publish first failed on timing, not code.** Its job polls at most 30 minutes for the GitHub Release's `SHA256SUMS`, but the release builds took about 33 minutes. The job gave up at 21:45:30Z, two minutes before the Release went up. I reran only the failed job once the assets existed, and it published. The race will recur whenever the macOS builds run long. I filed it in the backlog: trigger the PyPI publish from the published-release event instead of a fixed wall-clock poll.
 
 **Not in a release yet:** the GH #234 layout fix and `#testisolationtests`. They go to `main` plus a single `make install` once their `make check` finishes. Queue another `release + publish` if you want them published.
+
+### Re: GH #234 + `#testisolationtests` integrated and installed — opus-5-5 · 2026-10-10T18:20-04:00
+
+> **Queue prompt:**
+>
+> do [#testisolationtests]
+
+
+> **Queue prompt:** #gt-fix https://github.com/btakita/agent-doc/issues/234
+
+**Integrated on `main` (`fb38011ab`, on top of v0.35.485) and installed.**
+- Authoritative `make check`: exit 0, 9964/9964 nextest passed, 0 `result: FAILED`.
+- `make install` exited 0.
+- The only conflict was a version constraint in `agent-doc-sqlite/Cargo.toml`, resolved to 0.35.485. The lockfile verifies.
+
+**GH #234: fixed (`f33493ea2`), closed on GitHub with a comment.**
+- **Rule:** survivors keep their relative order and their edge across split width changes, and new documents fill vacated slots.
+- **Behavior change:** per your answer the edge rule stays, so widening `[A|B]` gives `[A|C|B]`.
+- **Tests:** the issue's 2→3→2 trace is a regression test, and two property tests cover arbitrary changes.
+
+**`#testisolationtests`: done.**
+- **Ceiling:** `AGENT_DOC_ROOT_CEILING_DIRECTORIES` bounds all 7 `.agent-doc` root walkers.
+- **Guard:** the Makefile, nextest setup, and `tests/test_cli.rs` refuse a TMPDIR that has an `.agent-doc` ancestor, and export the ceiling to every test process and the controllers they spawn.
+- **Regression test:** it reproduces the outer-root adoption with the ceiling off, and proves it's blocked with the ceiling on.
+- **Exposed tests:** two archive tests that leaned on checkout ancestors now build their own temp project.
+- **Production:** unchanged. `$HOME` stays a valid lazy root, because `state.db` shows real use.
+
+**`~/.agent-doc` cleanup is done, as you approved.**
+- **Backup:** `~/agent-doc-home-backup-20261010-191502.tar.zst`.
+- **`state.db`:** removed 218 test-path rows (17 `document_cycles`, 9 `coordination_leases`, 192 `state_events`). `integrity_check` is ok.
+- **Logs:** 6,907 `ops.log` lines, 98 `cycles.jsonl` lines, and 16 `debug.log` lines, plus 4 test-only logs.
+- **Files:** 513 test-written snapshot, proof-ledger, annotation, and archive files.
+- **Kept:** the `$HOME` bootstrap row, `scratch_16.md` and its snapshot, everything from before September, and `live-buffer`, `crdt`, `op-capture`, and `typing`.
+- **Stopped:** one more leaked debug controller rooted at `$HOME`, from `agent-doc-wt/.build-macos-ci`.
+
+**Still on disk:** the subagent scratch dirs a hook blocked them from deleting: `~/work/qct`, `~/.t-rfe`, `~/.cache/freetextqueue-agent`, and `~/work/btakita/agent-doc-wt/.scratch-runfrontenderror`.
+
+These two fixes are not released. Queue `release + publish` to ship them as 0.35.486.
 <!-- agent:boundary:971f0665 -->
 <!-- /agent:exchange -->
 
@@ -228,14 +266,14 @@ Yes. **v0.35.485 is fully published.**
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#testisolationtests]
+- ~~do [#testisolationtests]~~
 - ~~⏭️ do [#runfrontendcrashed]~~
 - ~~⏭️ do [#runfrontenderror]~~
 - ~~do [#runctrlclaude]~~
 - ~~⏭️ do [#explicitrunqueue]~~
 - ~~do [#freetextqueue]~~
 - ~~Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 #gt-fix https://github.com/btakita/agent-doc/issues/234
+- ~~#gt-fix https://github.com/btakita/agent-doc/issues/234~~
 - ~~release + publish~~
 <!-- /agent:queue -->
 
@@ -243,7 +281,6 @@ Yes. **v0.35.485 is fully published.**
 
 <!-- agent:backlog priority queue -->
 - [ ] [#pypireleaseworkflow] PyPI release workflow races the GitHub Release: the PyPI job polls at most 30 minutes for the Release's SHA256SUMS, but v0.35.485's cross-platform builds took about 33 minutes, so publish failed at 21:45:30Z and the Release went up at 21:47:24Z (run 38086853278; a rerun of the failed job published it). Trigger PyPI from the release:published event, or from the Release workflow after its assets upload, instead of a fixed wall-clock poll.
-- [ ] 🚧 [#testisolationtests] Test isolation: agent-doc tests whose TMPDIR sits under $HOME walk up past their tempdir, adopt /home/brian/.agent-doc as the project root, and write the operator's real ~/.agent-doc/state.db, ops.log, proof-ledger and snapshots, and spawn controllers with --project-root /home/brian (seen 2026-10-10: 'failed to save registry to /home/brian/.agent-doc/state.db: database is locked', a leaked test controller, and subagent scratch paths in ~/.agent-doc/logs/ops.log). Project-root discovery under test must stop at a ceiling (the test tempdir / an AGENT_DOC_ROOT_CEILING like GIT_CEILING_DIRECTORIES), and the test harness must refuse a TMPDIR that has an .agent-doc ancestor. Then scrub the test-written entries from ~/.agent-doc with the operator's OK.
 <!-- /agent:backlog -->
 
 ## Review

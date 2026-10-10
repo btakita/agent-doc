@@ -637,6 +637,28 @@ That's deliberate. Those heads are not done, so striking them now would claim wo
 Leaving them unstruck while they are claimed is also exactly the `#ftstrikeclaimedmention` fix in this batch: a status message that only mentions a claimed head must not strike it.
 
 Progress: the batch `make check` has passed all 9901 Rust tests, and its later stages are still running.
+
+### Re: actionable review sweep — opus-5.5 · 2026-10-10T00:08-04:00
+
+> **Queue prompt:** #actionable-review
+
+I went through all 9 review items and checked each item's blocker against its current external state:
+
+- **Resolved: `gh221mergeclose`.** GH 221 was closed at 01:28Z on 2026-10-10, after PR 222 merged.
+- **Resolved: `qsubattr5`.** This session's batch is the proof it was waiting for. Five operator-added heads got five distinct `subagent:*` claims in one turn (ops.log `queue_claim outcome=Created`, 02:18:07–02:18:08Z, cycle-1791598646708). Each was dispatched once to its own background subagent, and the inline consume refused to take them (`queue_consume_refused_id_backed_head_without_explicit_signal`). None drained inline.
+- **Superseded by the queued release: `releasepublishgate`.**
+  - CI on PR 222's final head is green (run 38002449411).
+  - PR 222 is merged and GH 221 is closed.
+  - GH 218's live proof is still open, and `gh secret list` still shows nothing.
+  - The operator's `release + publish` queue item now authorizes the release, so I'll close this when v0.35.482 is verified.
+- **Still gated, nothing an agent can act on:**
+  - `jb262dynlauncherrecommen`: needs an operator decision.
+  - `gh218remoteproof` and `jetbrains262distribution`: need a live IDEA 2026.2.3 Remote Dev install on both sides.
+  - `drivecapturedsplice`: needs a live editor and owner pane.
+  - `grokmcpverify`: grok is still signed out; `grok -p` says to set `XAI_API_KEY` or run `grok login`.
+  - `pypiquotarecheck`: pypi/support#12214 is still open and unchanged since 2026-09-10.
+
+There were no actionable follow-up items, so nothing new was added to the backlog or queue.
 <!-- agent:boundary:85b8d79b -->
 <!-- /agent:exchange -->
 
@@ -647,17 +669,19 @@ Progress: the batch `make check` has passed all 9901 Rust tests, and its later s
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - do [#runfrontenddispatch]
 - ~~do [#jb262dynlauncherrecommen]~~
+- do [#relcimavenlocalreleasepu]
 - ⏭️ do [#ftstrikeclaimedmention]
 - do [#crossrootcolumnflip]
 - do [#staleharnessturnlive]
 - do [#jb262dynupgrade]
 - ~~do [#previewrepin]~~
+- #actionable-review
 - 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog priority -->
+<!-- agent:backlog priority queue -->
 - [ ] [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
 - [ ] [#relcimavenlocalreleasepu] relcimavenlocal: [agent-doc] Release v0.35.481 did NOT publish: Release run 38014769297 (2026-10-10T01:51Z) failed in the plugins job at :backend:compileKotlin, Could not find io.github.lazily:lazily:0.39.0, so release + homebrew were skipped. Latest published is still v0.35.480 (GitHub + PyPI). Cause: 548a24874 (lz262resolve) added the publish-pinned-lazily-kt-to-mavenLocal step to ci.yml only; release.yml checks out ../lazily-kt but never publishes it to mavenLocal for the JetBrains 262 build. Port that step into release.yml (with a parity test/guard so ci.yml and release.yml cannot drift), then re-run the release by cutting v0.35.482 (the existing v0.35.481 tag runs its own old release.yml).
 - [ ] [#ftstrikeclaimedmention] [agent-doc] ftstrike over-strikes claimed free-text queue heads: on 2026-10-09 ~19:27 a status response that only MENTIONED GH 218/221/227/228 (all claimed: two coordinator-held awaiting PR 222, two with live subagents) struck all four as answered this cycle, and the binary itself synthesized a queue-prompt echo for the coordinator-claimed 218 driver line, consuming it. Restored by hand with agent-doc patch FILE queue. A claimed head must strike only via an explicit exact queue-prompt echo authored by the agent (or a claim release), never via a mention or a binary-synthesized echo; add regression coverage.
@@ -672,10 +696,8 @@ Progress: the batch `make check` has passed all 9901 Rust tests, and its later s
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
 - [/] [#releasepublishgate] [operator-verify] Authorize release + publish only after: (1) CI is green for the final PR 222 head after ci25gradle (run 37974793628 on c39de1b04 failed); (2) gh218remoteproof is resolved; (3) PR 222 is marked ready and merged and GH 221 is closed, resolving gh221mergeclose; and (4) repository secret HOMEBREW_TAP_TOKEN is provisioned (gh secret list on btakita/agent-doc showed nothing on 2026-10-09, possibly because the token lacks secret visibility). Only then perform the authorized release + publish and verify delivery.
-- [/] [#gh221mergeclose] [operator-verify] GH 221: keep open until draft PR 222 has green CI on its post-ci25gradle head (run 37974793628 on c39de1b04 failed) and merges. The shared/frontend/backend split is code-complete and available as prerelease jetbrains-262-preview-c39de1b; GH 218 separately retains the real IDEA 2026.2.3 Remote Dev acceptance gate. After 222 merges, close 221 as fixed by 222.
 - [/] [#gh218remoteproof] [operator-verify] GH 218: PR 222 is MERGED (01:25Z 2026-10-10, merge cc6e458c6) at head 34842a23a, CI run 38002449411 green. Run the real IDEA 2026.2.3 (262) Remote Dev acceptance matrix against prerelease jetbrains-262-preview-34842a2 (asset agent-doc-jetbrains-262-0.2.511.zip, id 626772959, 2556136 bytes, sha256 2ef328588d1491446f1a45a83775ee220c13507f5cdd9bca4f5c2111f9e864a7), or against the 0.2.514 ZIP of the next published release. Verify both downloaded copies with make verify-jetbrains-262-preview BACKEND_ZIP=... CLIENT_GATEWAY_ZIP=... first, and install the same ZIP on backend and Client/Gateway. Check: detached-only isolated terminal; same-document main-wins read-only placeholder with byte-identical main; focus/sync/resize causes no main mutation; close/rejoin; backend restart/client reconnect before the first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Post results on 218 citing that tag and commit, then close 218. jetbrains-262-preview-c39de1b is superseded.
 - [/] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
-- [/] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md). SETUP COMPLETE: tasks/software/tsift.md now has subagents=3 on branch qsubattr5-dogfood commit de5a8aa7c0d5e879547d4e321d159b1eff840073; gated pending the next real operator-created multi-head batch proof from distinct queue claims and ops.log that every eligible head dispatches exactly once and none drain inline.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-06: 8.363 GiB of 10.0 GiB, 1.637 GiB headroom, 198 releases through 0.35.465, post-cutover mean 35.3 KiB, approximately 48,621 further releases fit; VERDICT headroom fine. The support issue remains open with only the github-actions bot comment and has not changed since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation. NEW BLOCKER 2026-09-30: grok 1.0.41 is now SIGNED OUT ('grok -p' -> 'Error: Not signed in'); operator runs 'grok login --device-code' (or sets XAI_API_KEY), and the free usage quota or the planned subscription must be active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed earlier; the last live MCP probe stopped at the usage limit before committed closeout. Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 <!-- /agent:review -->

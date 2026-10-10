@@ -793,6 +793,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-turn",
  "lazily 0.57.1",
+ "proptest",
  "serde",
  "serde_json",
 ]

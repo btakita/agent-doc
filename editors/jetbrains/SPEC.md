@@ -256,11 +256,21 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   evidence and no retained split does the observation stay `unknown`. The controller's coalesced ingress receipt joins
   `layout=unknown|observed|focus_only` to `pane_action=none|focus_only|structural_sync` on one
   line so every pane effect names its authority.
-- When a Remote Dev observation has the same width as retained memory and exactly one document
-  leaves while one enters, the new document inherits the dropped document's column slot. The
-  client `visible`/`open` lists prove membership, not geometry, so this memory-derived result is
-  published as `column_order=retained`, never `editor` (GH #185). A retained publication is
-  already resolved and passes through controller ordering unchanged.
+- A Remote Dev split observation is folded against retained memory, never against the client's
+  list order: the client `visible`/`open` lists prove membership, not geometry (GH #185, GH #234).
+  With previous columns `P`, new visible set `V`, survivors `P ∩ V`, and added documents `V \ P`
+  in visible order, the published columns hold exactly `V`, one document each, and:
+  survivors keep their previous relative order; added documents take the slots that departed
+  documents vacated, left to right, so at the same width every survivor keeps its exact slot;
+  a width change never moves a survivor across the split — a surviving `P[0]` stays leftmost,
+  and when `P` had two or more columns a surviving last column stays rightmost, so extra added
+  documents are inserted just before that surviving rightmost column (otherwise appended) and
+  shrinking drops the vacated slots no added document filled; added documents keep their
+  visible order among themselves. With any survivor the result is memory-derived and published
+  as `column_order=retained`, never `editor`; with none it is the visible order as
+  `column_order=unknown`. Example: `[a | b]` → `[c | b]` → visible `{d,b,e}` → `[d | e | b]`
+  → visible `{g,b}` → `[g | b]`, so a later `{a,b}` publishes `[a | b]`, not `[b | a]`. A
+  retained publication is already resolved and passes through controller ordering unchanged.
 - Explicit layout publications (`Sync Tmux Pane`, claim, resync, and the Run Agent Doc route's
   `--col` list) name their order source as `column_order` (GH #112). Only locally detected
   multi-column geometry is `editor`; the undetected fallback lists `selectedFiles`, which IntelliJ

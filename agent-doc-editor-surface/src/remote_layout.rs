@@ -256,54 +256,70 @@ impl RemoteLayoutMemory {
         }
     }
 
-    /// One column per file; files from the previous layout keep its order.
-    /// A same-width one-out/one-in observation gives the added file the exact
-    /// slot of the dropped file instead of appending it (GH #185).
+    /// One column per file, folded against the previous layout (GH #185, GH #234).
+    ///
+    /// Remote Dev proves membership, not geometry, so the previous columns are
+    /// the only order authority. With `P` the previous files, `V` the new
+    /// visible set, survivors `S = P ∩ V`, dropped `D = P \ V` and added
+    /// `A = V \ P` (in visible order), the result `O` satisfies:
+    ///
+    /// 1. `O` holds exactly `V`, one file per column.
+    /// 2. Survivors keep their previous relative order.
+    /// 3. Added files take the slots dropped files vacated, left to right.
+    ///    At the same width every survivor therefore keeps its exact index.
+    /// 4. A survivor never crosses the split on a width change: if `P[0]`
+    ///    survives it stays first, and if `P` had two or more columns and its
+    ///    last file survives, that file stays last. So growth beyond the
+    ///    vacated slots inserts the extra added files just before a surviving
+    ///    rightmost column, and otherwise appends them; shrinking removes the
+    ///    vacated slots that no added file filled.
+    /// 5. Added files keep their visible order among themselves.
+    /// 6. With no survivors the order is the visible order, reported as
+    ///    `Unknown`; otherwise the order is memory-derived and `Retained`.
     fn ordered_columns(&self, files: &[String]) -> (Vec<SurfaceColumn>, RemoteLayoutColumnOrder) {
         let previous = distinct(self.columns.iter().flat_map(|column| column.files.iter()));
-        let added: Vec<&String> = files
+        let files = distinct(files.iter());
+        let mut added = files
             .iter()
             .filter(|file| !previous.contains(file))
-            .collect();
-        let dropped: Vec<String> = previous
-            .iter()
-            .filter(|file| !files.contains(file))
-            .cloned()
-            .collect();
+            .cloned();
 
-        if previous.len() == files.len() && added.len() == 1 && dropped.len() == 1 {
-            let mut ordered = previous;
-            let dropped_index = ordered
-                .iter()
-                .position(|file| file == &dropped[0])
-                .expect("the dropped file came from the previous layout");
-            ordered[dropped_index] = added[0].clone();
-            return (
-                ordered
-                    .into_iter()
-                    .map(|file| SurfaceColumn::new([file]))
-                    .collect(),
-                RemoteLayoutColumnOrder::Retained,
-            );
-        }
-
-        let mut ordered: Vec<String> = previous
+        // Survivors stay in place; each dropped slot takes the next added
+        // file, or stays vacant (`None`) when the added files run out.
+        let mut slots: Vec<Option<String>> = previous
             .iter()
-            .filter(|file| files.contains(file))
-            .cloned()
+            .map(|file| {
+                if files.contains(file) {
+                    Some(file.clone())
+                } else {
+                    added.next()
+                }
+            })
             .collect();
-        let retained_order = !ordered.is_empty();
-        for file in files {
-            if !ordered.contains(file) {
-                ordered.push(file.clone());
-            }
+        let survived = slots
+            .iter()
+            .zip(&previous)
+            .any(|(slot, file)| slot.as_ref() == Some(file));
+        let extra: Vec<String> = added.collect();
+        if !extra.is_empty() {
+            let last_survives = previous.len() >= 2
+                && previous
+                    .last()
+                    .is_some_and(|file| slots.last() == Some(&Some(file.clone())));
+            let at = if last_survives {
+                slots.len() - 1
+            } else {
+                slots.len()
+            };
+            slots.splice(at..at, extra.into_iter().map(Some));
         }
+        let ordered: Vec<String> = slots.into_iter().flatten().collect();
         (
             ordered
                 .into_iter()
                 .map(|file| SurfaceColumn::new([file]))
                 .collect(),
-            if retained_order {
+            if survived {
                 RemoteLayoutColumnOrder::Retained
             } else {
                 RemoteLayoutColumnOrder::Unknown
@@ -637,6 +653,8 @@ mod tests {
 
     /// A re-detected split keeps the previous column order, so a frontend that
     /// reports visible editors in a different order does not reorder tmux.
+    /// The new column opens between the survivors: the previous rightmost
+    /// column `B` stays rightmost (GH #234).
     #[test]
     fn gh134_redetected_split_keeps_previous_column_order() {
         let (memory, _) = RemoteLayoutMemory::default()
@@ -646,10 +664,180 @@ mod tests {
             columns(&resolution),
             vec![
                 vec![A.to_string()],
-                vec![B.to_string()],
-                vec![C.to_string()]
+                vec![C.to_string()],
+                vec![B.to_string()]
             ]
         );
+    }
+
+    /// GH #234: the issue's `idea.log` trace. A 2->3->2 width change used to
+    /// put the lone survivor `b` (the right split) in slot 0, and later
+    /// slot-keeping replacements carried the swap forward until the IDE's
+    /// `[a | b]` was published as `[b | a]`. `b` must stay rightmost.
+    #[test]
+    fn gh234_width_change_keeps_the_right_survivor_right() {
+        let steps: [(&[&str], &[&str]); 8] = [
+            (&["a", "b"], &["a", "b"]),
+            (&["a", "b"], &["a", "b"]),
+            (&["b", "c"], &["c", "b"]),
+            (&["d", "b", "e"], &["d", "e", "b"]),
+            (&["d", "f", "b"], &["d", "f", "b"]),
+            (&["g", "b"], &["g", "b"]),
+            (&["d", "b"], &["d", "b"]),
+            (&["a", "b"], &["a", "b"]),
+        ];
+        let mut memory = RemoteLayoutMemory::default();
+        for (step, (visible, expected)) in steps.into_iter().enumerate() {
+            let (next, resolution) =
+                memory.advance(&evidence(vec![client(visible, &["b"], visible)], &["b"]));
+            assert_eq!(
+                resolution.source,
+                RemoteLayoutSource::RemoteClientVisibleEditors,
+                "step {step}"
+            );
+            assert_eq!(
+                columns(&resolution),
+                expected
+                    .iter()
+                    .map(|file| vec![file.to_string()])
+                    .collect::<Vec<_>>(),
+                "step {step}: visible={visible:?}"
+            );
+            memory = next;
+        }
+    }
+
+    mod gh234_properties {
+        use super::super::*;
+        use proptest::prelude::*;
+
+        fn fold(previous: &[String], visible: &[String]) -> (Vec<String>, RemoteLayoutColumnOrder) {
+            let memory = RemoteLayoutMemory {
+                columns: previous
+                    .iter()
+                    .map(|file| SurfaceColumn::new([file.clone()]))
+                    .collect(),
+                focused: None,
+            };
+            let (columns, order) = memory.ordered_columns(visible);
+            (
+                columns
+                    .into_iter()
+                    .map(|column| {
+                        let [file]: [String; 1] = column.files.try_into().unwrap();
+                        file
+                    })
+                    .collect(),
+                order,
+            )
+        }
+
+        /// Distinct file names drawn from a small universe so survivors,
+        /// departures and arrivals all occur often.
+        fn layout(max: usize) -> impl Strategy<Value = Vec<String>> {
+            proptest::sample::subsequence((0..8).collect::<Vec<u8>>(), 0..=max)
+                .prop_shuffle()
+                .prop_map(|ids| ids.into_iter().map(|id| format!("doc-{id}.md")).collect())
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(2048))]
+
+            /// The `ordered_columns` invariant over arbitrary membership
+            /// changes, `(previous columns, new visible set) -> columns`.
+            #[test]
+            fn survivors_keep_relative_order_and_sides(
+                previous in layout(5),
+                visible in layout(5),
+            ) {
+                let (ordered, order) = fold(&previous, &visible);
+                let survivors: Vec<&String> =
+                    previous.iter().filter(|file| visible.contains(file)).collect();
+                let added: Vec<&String> =
+                    visible.iter().filter(|file| !previous.contains(file)).collect();
+
+                // 1. Exactly the visible set, one file per column.
+                prop_assert_eq!(ordered.len(), visible.len());
+                prop_assert!(visible.iter().all(|file| ordered.contains(file)));
+
+                // 2. Survivors keep their previous relative order.
+                let kept: Vec<&String> =
+                    ordered.iter().filter(|file| previous.contains(file)).collect();
+                prop_assert_eq!(&kept, &survivors);
+
+                // 3. Same width: every survivor keeps its exact slot.
+                if previous.len() == visible.len() {
+                    for (index, file) in previous.iter().enumerate() {
+                        if visible.contains(file) {
+                            prop_assert_eq!(&ordered[index], file);
+                        }
+                    }
+                }
+
+                // 4. No survivor crosses the split on a width change.
+                if let Some(first) = previous.first().filter(|f| visible.contains(f)) {
+                    prop_assert_eq!(ordered.first(), Some(first));
+                }
+                if previous.len() >= 2 {
+                    if let Some(last) = previous.last().filter(|f| visible.contains(f)) {
+                        prop_assert_eq!(ordered.last(), Some(last));
+                    }
+                }
+
+                // 5. Added files keep their visible order.
+                let arrivals: Vec<&String> =
+                    ordered.iter().filter(|file| !previous.contains(file)).collect();
+                prop_assert_eq!(&arrivals, &added);
+
+                // 6. Order authority: memory-derived iff something survived.
+                if survivors.is_empty() {
+                    prop_assert_eq!(order, RemoteLayoutColumnOrder::Unknown);
+                    prop_assert_eq!(&ordered, &visible);
+                } else {
+                    prop_assert_eq!(order, RemoteLayoutColumnOrder::Retained);
+                }
+            }
+
+            /// Across a whole sequence of split observations, a survivor's
+            /// side never flips: not relative to another survivor, and not
+            /// relative to the split's edges (the GH #234 swap kept pairwise
+            /// order but moved the right survivor to slot 0).
+            #[test]
+            fn survivor_pairs_never_swap_across_a_sequence(
+                steps in proptest::collection::vec(layout(4), 1..8),
+            ) {
+                let mut previous: Vec<String> = Vec::new();
+                for visible in steps {
+                    if visible.len() < 2 {
+                        continue;
+                    }
+                    let (ordered, _) = fold(&previous, &visible);
+                    let position =
+                        |list: &[String], file: &String| list.iter().position(|f| f == file);
+                    for left in &previous {
+                        for right in &previous {
+                            if let (Some(pl), Some(pr), Some(ol), Some(or)) = (
+                                position(&previous, left),
+                                position(&previous, right),
+                                position(&ordered, left),
+                                position(&ordered, right),
+                            ) {
+                                prop_assert_eq!(pl < pr, ol < or);
+                            }
+                        }
+                    }
+                    if let Some(first) = previous.first().filter(|f| visible.contains(f)) {
+                        prop_assert_eq!(ordered.first(), Some(first));
+                    }
+                    if previous.len() >= 2 {
+                        if let Some(last) = previous.last().filter(|f| visible.contains(f)) {
+                            prop_assert_eq!(ordered.last(), Some(last));
+                        }
+                    }
+                    previous = ordered;
+                }
+            }
+        }
     }
 
     /// End to end through the surface fold: a resolved Remote Dev split drives

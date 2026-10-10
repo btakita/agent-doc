@@ -112,6 +112,7 @@ use agent_doc_document::compact_projection::{
 };
 use agent_doc_element::element;
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_frontmatter::lint::LintCliMode;
 use agent_doc_sqlite::archive_index;
 
 use agent_doc_topic::parse_topic_sections_with_tail;
@@ -484,6 +485,7 @@ pub(crate) mod test_support {
 /// - `message`: summary marker text (default: auto-generated).
 /// - `tag`: git tag to create at HEAD before compaction. `None` auto-generates
 ///   `agent-doc/<doc-name>/pre-compact-N`. Pass `Some("skip")` to skip tagging entirely.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     file: &Path,
     keep: Option<usize>,
@@ -492,6 +494,7 @@ pub fn run(
     tag: Option<&str>,
     commit: bool,
     force_disk: bool,
+    lint: Option<LintCliMode>,
 ) -> Result<()> {
     if file.exists() {
         let _ =
@@ -515,7 +518,17 @@ pub fn run(
 
     #[cfg(test)]
     {
-        run_in_controller(file, keep, component_name, message, tag, commit, force_disk).map(|_| ())
+        run_in_controller(
+            file,
+            keep,
+            component_name,
+            message,
+            tag,
+            commit,
+            force_disk,
+            lint,
+        )
+        .map(|_| ())
     }
     #[cfg(not(test))]
     agent_doc_controller_io::project_controller::compact_document_via_controller(
@@ -527,8 +540,17 @@ pub fn run(
             tag: tag.map(str::to_string),
             commit,
             force_disk,
+            lint: lint.map(|mode| mode.as_str().to_string()),
         },
     )
+}
+
+/// Parse the controller-wire `lint` field of a compact invocation back into the
+/// CLI override (GH #227). Unknown text fails closed rather than silently
+/// falling back to the resolved mode.
+pub fn parse_invocation_lint(lint: Option<&str>) -> Result<Option<LintCliMode>> {
+    lint.map(|value| LintCliMode::parse(value).map_err(|error| anyhow::anyhow!(error)))
+        .transpose()
 }
 
 /// What a compact should record about the replayed editor-op epoch.
@@ -632,6 +654,7 @@ fn clear_replayed_editor_ops_after_compact(file: &Path, replayed: bool) {
 
 /// Execute compaction inside the CP process. This entrypoint is wired only by
 /// the project-controller runtime effect; editor/CLI callers use [`run`].
+#[allow(clippy::too_many_arguments)]
 pub fn run_in_controller(
     file: &Path,
     keep: Option<usize>,
@@ -640,12 +663,23 @@ pub fn run_in_controller(
     tag: Option<&str>,
     commit: bool,
     force_disk: bool,
+    lint: Option<LintCliMode>,
 ) -> Result<agent_doc_controller_io::project_controller::ControllerCompactDocumentOutcome> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
-        run_in_controller_scoped(file, keep, component_name, message, tag, commit, force_disk)
+        run_in_controller_scoped(
+            file,
+            keep,
+            component_name,
+            message,
+            tag,
+            commit,
+            force_disk,
+            lint,
+        )
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_in_controller_scoped(
     file: &Path,
     keep: Option<usize>,
@@ -654,6 +688,7 @@ fn run_in_controller_scoped(
     tag: Option<&str>,
     commit: bool,
     force_disk: bool,
+    lint: Option<LintCliMode>,
 ) -> Result<agent_doc_controller_io::project_controller::ControllerCompactDocumentOutcome> {
     use agent_doc_controller_io::project_controller::ControllerCompactDocumentOutcome;
     let compact_started = std::time::Instant::now();
@@ -753,7 +788,7 @@ fn run_in_controller_scoped(
     agent_doc_lint_io::run_on_content_with_logger(
         file,
         &semantic_base_content,
-        None,
+        lint,
         agent_doc_ops_log_io::log_op,
     )?;
 
@@ -3869,6 +3904,7 @@ mod tests {
             Some("skip"),
             true,
             true,
+            None,
         )
         .unwrap();
 
@@ -5002,6 +5038,7 @@ mod tests {
             Some("skip"),
             true,
             true,
+            None,
         )
         .unwrap();
 
@@ -5418,6 +5455,7 @@ mod tests {
             Some("skip"),
             true,
             false,
+            None,
         )
         .expect("compact --commit must not reject a clean exchange-only historical response");
 
@@ -5514,6 +5552,7 @@ mod tests {
             Some("skip"),
             false,
             false,
+            None,
         )
         .unwrap();
 
@@ -5622,6 +5661,7 @@ mod tests {
             Some("skip"),
             false,
             false,
+            None,
         )
         .unwrap_err();
         assert!(
@@ -5711,6 +5751,7 @@ mod tests {
             Some("skip"),
             false, // no --commit
             true,
+            None,
         )
         .unwrap();
 
@@ -5724,6 +5765,84 @@ mod tests {
             ops_log.contains("compact_left_uncommitted"),
             "uncommitted compact must be recorded, got:\n{ops_log}"
         );
+    }
+
+    /// GH #227: `compact` had no `--lint` override, so a lint finding that
+    /// `write --lint off` could step past left compact with no CLI escape.
+    #[test]
+    fn compact_lint_override_off_steps_past_dialect_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        let file = root.join("session.md");
+        let doc = concat!(
+            "---\nagent_doc_session: test-compact-lint\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n\n",
+            "### Re: topic two\n\nResponse two.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue subagents preset=\"\" priority -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&file, doc).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let blocked = run(
+            &file,
+            None,
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            false,
+            true,
+            None,
+        )
+        .expect_err("the default lint mode blocks on the empty preset");
+        let message = format!("{blocked:#}");
+        assert!(message.contains("agent-doc/empty-attr-value"), "{message}");
+        assert!(message.contains("`--lint off`"), "{message}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), doc);
+
+        run(
+            &file,
+            None,
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            false,
+            true,
+            Some(LintCliMode::Off),
+        )
+        .expect("--lint off must let compact proceed");
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert!(after.contains("Compacted summary."), "{after}");
+    }
+
+    #[test]
+    fn compact_invocation_lint_round_trips_and_rejects_unknown_modes() {
+        assert_eq!(parse_invocation_lint(None).unwrap(), None);
+        for mode in [LintCliMode::Off, LintCliMode::Warn, LintCliMode::Strict] {
+            assert_eq!(
+                parse_invocation_lint(Some(mode.as_str())).unwrap(),
+                Some(mode)
+            );
+        }
+        assert!(parse_invocation_lint(Some("loud")).is_err());
+        // An older controller payload without the field still deserializes.
+        let legacy: agent_doc_controller_io::project_controller::ControllerCompactDocumentInvocation =
+            serde_json::from_str(r#"{"keep":null,"component_name":"exchange","message":null,"tag":null,"commit":true,"force_disk":false}"#)
+                .unwrap();
+        assert_eq!(legacy.lint, None);
     }
 
     fn git(dir: &Path, args: &[&str]) {
@@ -6134,6 +6253,7 @@ mod tests {
             Some("skip"),
             true,
             false,
+            None,
         ) {
             let ops_log =
                 fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
@@ -6413,6 +6533,7 @@ mod tests {
             Some("skip"),
             true,
             false,
+            None,
         )
         .expect("two-target Compact Exchange commit must succeed");
 
@@ -6476,8 +6597,17 @@ mod tests {
         );
         fs::write(&doc, malformed).unwrap();
 
-        let err = run(&doc, Some(1), Some("exchange"), None, None, true, false)
-            .expect_err("compact must reject malformed component authority");
+        let err = run(
+            &doc,
+            Some(1),
+            Some("exchange"),
+            None,
+            None,
+            true,
+            false,
+            None,
+        )
+        .expect_err("compact must reject malformed component authority");
         assert!(err.to_string().contains("[integrity-gate] INTERRUPTED"));
         assert_eq!(fs::read_to_string(&doc).unwrap(), malformed);
         assert!(!dir.path().join(".agent-doc/archives").exists());
@@ -6512,6 +6642,7 @@ mod tests {
             Some("skip"),
             false,
             false,
+            None,
         )
         .expect("compact should normalize the proven replay shell before integrity validation");
 
@@ -6558,6 +6689,7 @@ mod tests {
             Some("skip"),
             false,
             false,
+            None,
         )
         .expect_err("compact must not normalize a unique interrupted heading");
 
@@ -6594,8 +6726,17 @@ mod tests {
         let dirty = initial.replace("complete", "complete but locally annotated");
         fs::write(&doc, &dirty).unwrap();
 
-        run(&doc, Some(1), Some("exchange"), None, None, true, false)
-            .expect("semantic no-op compact should return cleanly");
+        run(
+            &doc,
+            Some(1),
+            Some("exchange"),
+            None,
+            None,
+            true,
+            false,
+            None,
+        )
+        .expect("semantic no-op compact should return cleanly");
 
         let head_after = Command::new("git")
             .current_dir(root)

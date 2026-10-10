@@ -242,8 +242,9 @@ backlog edits continue to reject Review-only targets.
 
 ## compact
 
-`agent-doc compact <FILE> [--component NAME] [--message TEXT] [--tag NAME] [--commit]`
+`agent-doc compact <FILE> [--component NAME] [--message TEXT] [--tag NAME] [--commit] [--lint off|warn|strict]`
 
+- `--lint` overrides only the dialect lint gate mode, matching `write --lint`. A blocking dialect finding's message names every escape that works for the interrupted command: `--lint off` on `write`/`compact`, frontmatter `agent_doc_lint_dialect: off`, or project `[lint] dialect = "off"` (GH #227).
 - Before creating a checkpoint tag, archive, summary, snapshot, or commit, compact must pass the mandatory document-integrity gate: the component tree is balanced and every active id-backed queue reference names open tracked work. Dialect `off` cannot disable this gate.
 - Before that gate, compact and recovery-capable session-check may canonicalize only the proven retained-replay shell: an empty `### Re:` heading whose normalized topic already has an earlier non-empty response. The repair removes only that redundant heading line, preserves every body, prompt, comment, and unrelated response byte, and records the normalization. Session-check applies it through the same CAS/realtime authority repair used for other retained replay artifacts, so finalize cannot be blocked by the exact interrupted shell that its retained capture proves how to recover. A unique empty heading or any other malformed structure still fails closed without tag, archive, document, snapshot, or commit effects.
 - Once operator-facing session-check applies any proven retained-response replay canonicalization, that repair owns a narrow commit boundary: current authority and disk must be exact, normalizing the `HEAD` document must reproduce those exact bytes, and a private-index compare-and-swap commit may select only the session document. Session-check must checkpoint and re-prove authority/disk/`HEAD` convergence before reporting `OK`; after a process restart between repair and commit, the same proof must resume from `HEAD`. Unrelated staged or working-tree content remains untouched.

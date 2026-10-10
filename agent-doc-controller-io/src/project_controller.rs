@@ -176,6 +176,11 @@ pub struct ControllerCompactDocumentInvocation {
     pub tag: Option<String>,
     pub commit: bool,
     pub force_disk: bool,
+    /// `--lint` override (`off` | `warn` | `strict`) for the compact lint gate
+    /// (GH #227). Carried as text so the wire stays forward compatible; absent
+    /// means "resolve from frontmatter / project config", exactly as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lint: Option<String>,
 }
 
 /// Authoritative result of one controller-owned Compact Exchange request.

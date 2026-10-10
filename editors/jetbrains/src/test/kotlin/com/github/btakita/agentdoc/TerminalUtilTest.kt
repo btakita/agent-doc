@@ -873,6 +873,24 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `notification html keeps lint hint angle-bracket placeholders visible`() {
+        val output = listOf(
+            "Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /repo/tasks/doc.md (mode=warn, source=default).",
+            "/repo/tasks/doc.md:14:1 error: attribute `preset=` on `agent:queue` has empty value [agent-doc/empty-attr-value]",
+            "  hint: provide a value: `preset=<value>`",
+        ).joinToString("\n")
+
+        val message = TerminalUtil.buildCommandFailureMessage("compact this document", 1, output)
+        assertTrue(message.contains("`preset=<value>`"))
+
+        val html = TerminalUtil.notificationHtml(message)
+        assertTrue(html, html.contains("`preset=&lt;value&gt;`"))
+        assertFalse(html, html.contains("<value>"))
+        assertTrue(html, html.contains("doc.md, line 14<br>"))
+        assertEquals("a &amp; b<br>&quot;c&quot;", TerminalUtil.notificationHtml("a & b\r\n\"c\""))
+    }
+
+    @Test
     fun `compact lint failure extracts CRLF diagnostic before dogfood trailer`() {
         val output = listOf(
             "Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /repo/tasks/sample.md (mode=warn, source=default).",

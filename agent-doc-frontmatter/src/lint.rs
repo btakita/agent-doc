@@ -28,6 +28,15 @@ impl LintCliMode {
         }
     }
 
+    /// The `--lint` spelling `parse` accepts back (`off` | `warn` | `strict`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Warn => "warn",
+            Self::Strict => "strict",
+        }
+    }
+
     pub const fn to_dialect(self) -> LintDialectMode {
         match self {
             Self::Off => LintDialectMode::Off,

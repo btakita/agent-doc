@@ -568,7 +568,16 @@ The batch's single `make check` passed 9879/9879. All three ship in v0.35.481, w
 - Next: as each agent reports back, I release its claim, integrate serially, run one `make install` for the batch, and close the items.
 
 Exchange is 526 lines / 28 sections (accretion warn); the queue is active, so I am not compacting.
-<!-- agent:boundary:d79eeb00:agent-doc-bugs -->
+> **Chat prompt (#chatprompt):** Is the release out?
+
+### Re: release status — opus-5.5 · 2026-10-09T22:20-04:00
+
+No. **v0.35.481 did not publish.** The latest published version is still **v0.35.480**, on both the GitHub release and PyPI.
+
+- The v0.35.481 tag is pushed, but Release run 38014769297 (2026-10-10T01:51Z) failed. All six binary builds passed. The `plugins` job failed at `:backend:compileKotlin` with `Could not find io.github.lazily:lazily:0.39.0`, so the `release` and `homebrew` jobs were skipped.
+- It is the same lazily resolution failure as the PR 222 CI problem. Commit 548a24874 fixed it only in `ci.yml`: it publishes the pinned lazily-kt to mavenLocal before the JetBrains 262 build. `release.yml` checks out `../lazily-kt` but never publishes it, so the fix is in the tag yet doesn't apply to the Release workflow.
+- Fix: copy that step into `release.yml` and add a guard so the two workflows can't drift again. Then cut **v0.35.482**, because re-running the v0.35.481 tag uses that tag's old `release.yml`. Captured as `relcimavenlocal` in the backlog. I have not cut a release; tell me if you want me to.
+<!-- agent:boundary:79909a6b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -586,6 +595,7 @@ Exchange is 526 lines / 28 sections (accretion warn); the queue is active, so I 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#relcimavenlocalreleasepu] relcimavenlocal: [agent-doc] Release v0.35.481 did NOT publish: Release run 38014769297 (2026-10-10T01:51Z) failed in the plugins job at :backend:compileKotlin, Could not find io.github.lazily:lazily:0.39.0, so release + homebrew were skipped. Latest published is still v0.35.480 (GitHub + PyPI). Cause: 548a24874 (lz262resolve) added the publish-pinned-lazily-kt-to-mavenLocal step to ci.yml only; release.yml checks out ../lazily-kt but never publishes it to mavenLocal for the JetBrains 262 build. Port that step into release.yml (with a parity test/guard so ci.yml and release.yml cannot drift), then re-run the release by cutting v0.35.482 (the existing v0.35.481 tag runs its own old release.yml).
 - [ ] [#ftstrikeclaimedmention] [agent-doc] ftstrike over-strikes claimed free-text queue heads: on 2026-10-09 ~19:27 a status response that only MENTIONED GH 218/221/227/228 (all claimed: two coordinator-held awaiting PR 222, two with live subagents) struck all four as answered this cycle, and the binary itself synthesized a queue-prompt echo for the coordinator-claimed 218 driver line, consuming it. Restored by hand with agent-doc patch FILE queue. A claimed head must strike only via an explicit exact queue-prompt echo authored by the agent (or a claim release), never via a mention or a binary-synthesized echo; add regression coverage.
 - [ ] [#crossrootcolumnflip] [agent-doc] Two project controllers sharing one tmux main window (agent-loop + haiven-dev, cross-root layout) publish competing layouts: after an IDEA restart the haiven-dev route published [agent-doc-bugs, contracts] (gen 21) while the agent-loop controller's editor-surface churn published gens 32-36 ending [agent-doc-bugs, api.md]; whichever publishes last wins and a column can flip between documents. Make cross-root main-window layout single-owner (or merge both controllers' desired columns through one arbiter) so post-restart churn converges to the editor's real visible set. Evidence: src/haiven-dev/.agent-doc/logs/ops.log 22:17:47Z-22:18:23Z on 2026-10-09; see fix/stale-third-main-pane (943c6041e) report.
 - [ ] [#staleharnessturnlive] [agent-doc] supervisor_empty_preflight_reclaim_probe reports outcome=protected_live_turn harness_turn_live=true for an IDLE owner pane (contracts.md pane %161 at its prompt, 2026-10-09 22:11:37Z, cycle-1791583495987 response_captured), which deferred recycle/reclaim and kept automatic recovery from running. Find why the live-turn lease outlives the harness turn and make it expire/clear at the turn's Stop boundary, with regression coverage.

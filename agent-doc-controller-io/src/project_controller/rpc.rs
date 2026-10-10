@@ -5634,6 +5634,56 @@ pub fn supervisor_recycle_settled_for_file(
     request_supervisor_recycle_for_file(file, "supervisor_recycle_settled", Some(reason))
 }
 
+/// `#dispatchreadyselfheal`: ask the controller to settle the `InFlight`
+/// recycle at `recycle_epoch` on the strength of a supervisor ready
+/// registration after its start. The controller re-verifies both; the returned
+/// projection is the authority (still `InFlight` means it declined).
+pub fn supervisor_recycle_settle_ready_after_start_for_file(
+    file: &Path,
+    recycle_epoch: u64,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(Default::default());
+    };
+    let stream = connect(&project_root)?;
+    request_controller_on_stream_with_timeout(
+        &project_root,
+        ControllerRequest {
+            command: "supervisor_recycle_settle_ready_after_start".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(recycle_epoch),
+            state: None,
+            caller: Some("route".to_string()),
+            reason: Some("dispatch_ready_after_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        },
+        CONTROLLER_RPC_TIMEOUT,
+        stream,
+    )
+}
+
+/// `#dispatchreadyselfheal`: the newest supervisor `ready` registration stamp
+/// for `file`'s document, read straight from the durable lease table so the
+/// gate can classify without a controller round trip. `None` when unknown.
+pub fn supervisor_ready_registered_secs_for_file(file: &Path) -> Option<u64> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
+    let conn = open_state_db(&project_root).ok()?;
+    state_store::load_supervisor_ready_registered_secs_from_db(&conn, &document_id)
+        .ok()
+        .flatten()
+}
+
 pub fn supervisor_recycle_status(
     project_root: &Path,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
@@ -17509,6 +17559,13 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "supervisor_recycle_settle_ready_after_start" => {
+            controller_envelope(handle_supervisor_recycle_settle_ready_after_start(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
+        }
         "supervisor_recycle_status" => {
             controller_envelope(runtime.supervisor_recycle_projection_for(
                 supervisor_recycle_request_document_hash(&bootstrap_snapshot, &request).as_deref(),
@@ -21191,6 +21248,78 @@ pub(crate) fn handle_supervisor_recycle_settled(
     settle_supervisor_recycle_from(bootstrap, runtime, event_hash, reason, current)
 }
 
+/// `#dispatchreadyselfheal`: settle a wedged `InFlight` recycle at the epoch
+/// the dispatch-only gate observed, when the document's supervisor registered
+/// `ready` strictly after that recycle started.
+///
+/// The gate's own read is a request, never the authority: this handler
+/// re-verifies against its live projection and the durable registration stamp,
+/// and mints `settled-<expected epoch>` only when the projection is still
+/// `InFlight` at exactly that epoch. It mints once, at that epoch, and never
+/// re-mints forward the way the supervisor's own settle does (`#fixruninfra`):
+/// a newer `Started` racing this request is a real pre-`execve` boundary, and
+/// a settle below its epoch is dropped by the reducer, so it can never be
+/// settled by this path. The expected epoch rides in `generation`.
+pub(crate) fn handle_supervisor_recycle_settle_ready_after_start(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let file = request_file(&request)?;
+    let expected_epoch = request_u64(request.generation, "generation")?;
+    let document_hash = supervisor_recycle_request_document_hash(bootstrap, &request)
+        .context("supervisor_recycle_settle_ready_after_start requires a file")?;
+    let current = runtime.supervisor_recycle_projection_for(Some(&document_hash))?;
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    let ready_registered_secs = open_state_db(&bootstrap.project_root)
+        .and_then(|conn| {
+            state_store::load_supervisor_ready_registered_secs_from_db(&conn, &document_id)
+        })
+        .unwrap_or(None);
+    let in_flight_at_expected = matches!(
+        current.phase,
+        agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+    ) && current.recycle_epoch == expected_epoch;
+    let covered = agent_doc_controller::dispatch::recycle_inflight_ready_after_start(
+        current.marked_secs,
+        ready_registered_secs,
+    );
+    if !in_flight_at_expected || !covered {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "supervisor_recycle_ready_after_start_declined document_hash={document_hash} expected_epoch={expected_epoch} recycle_epoch={} phase={:?} marked_secs={} ready_registered_secs={:?} in_flight_at_expected={in_flight_at_expected} covered={covered} (#dispatchreadyselfheal)",
+                current.recycle_epoch, current.phase, current.marked_secs, ready_registered_secs
+            ),
+        );
+        return Ok(current);
+    }
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!(
+            "{}:{document_hash}",
+            supervisor_recycle_event_id("settled", expected_epoch)
+        ),
+        agent_doc_state_backbone::StateFact::SupervisorRecycleSettled {
+            document_hash: document_hash.clone(),
+            reason: "dispatch_ready_after_start".to_string(),
+            recycle_epoch: expected_epoch,
+            marked_secs: timestamp_secs(),
+        },
+    );
+    let projection = append_and_apply_state_event(bootstrap, runtime, event)?;
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "supervisor_recycle_graph_settled document_hash={document_hash} reason=dispatch_ready_after_start minted_epoch={expected_epoch} recycle_epoch={} phase={:?} marked_secs={} ready_registered_secs={:?} (#dispatchreadyselfheal)",
+            projection.recycle_epoch, projection.phase, current.marked_secs, ready_registered_secs
+        ),
+    );
+    Ok(projection)
+}
+
 /// How many times one settle request may re-mint its `Settled` fact against a
 /// newer outstanding recycle epoch (`#fixruninfra`).
 const SUPERVISOR_RECYCLE_SETTLE_MAX_MINTS: u32 = 3;
@@ -22142,6 +22271,30 @@ pub(crate) fn handle_register_supervisor(
         request.supervisor_socket.as_deref(),
         runtime_state,
     )?;
+    // `#dispatchreadyselfheal`: a ready *registration* (never a heartbeat) is
+    // the evidence the dispatch-only recycle gate uses to prove an `InFlight`
+    // recycle's hot-reload boundary is over. Best effort: the lease above is
+    // the registration's authority, the stamp only adds evidence.
+    if runtime_state == agent_doc_controller::actor::ActorState::Ready.as_str()
+        && let Err(err) = open_state_db(&bootstrap.project_root).and_then(|conn| {
+            state_store::stamp_supervisor_ready_registration_in_db(
+                &conn,
+                &record.document_id,
+                record.generation,
+                timestamp_secs(),
+            )
+        })
+    {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "controller_supervisor_ready_registration_stamp_failed session={} generation={} error={:?} (#dispatchreadyselfheal)",
+                session_id,
+                generation,
+                format!("{err:#}")
+            ),
+        );
+    }
     agent_doc_ops_log_io::log_op(
         &file,
         &format!(

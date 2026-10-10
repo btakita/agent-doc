@@ -3080,6 +3080,11 @@ pub(crate) struct ControllerRuntime {
     /// This mutex preserves exact CAS ordering while allowing the projection
     /// lock to be dropped before durable I/O.
     state_event_ingress: Mutex<()>,
+    /// Bumped by every live apply of a state event (under `memory`). A
+    /// `refresh_memory` whose unlocked durable load straddled a bump reloads
+    /// under `state_event_ingress` instead of swapping in a snapshot that
+    /// predates the applied fact (`#runfrontenddispatch`).
+    state_apply_generation: AtomicU64,
     actor_graph: ControllerActorGraph,
     document_authority_graph: ControllerDocumentAuthorityGraph,
     coordination_graph: ControllerCoordinationGraph,
@@ -7485,6 +7490,7 @@ impl ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
             state_event_ingress: Mutex::new(()),
+            state_apply_generation: AtomicU64::new(0),
             actor_graph,
             document_authority_graph,
             coordination_graph,
@@ -7826,11 +7832,50 @@ impl ControllerRuntime {
     }
 
     fn refresh_memory(&self) -> Result<()> {
+        self.refresh_memory_with(|| {})
+    }
+
+    /// Replace the live projection with a fresh durable load.
+    ///
+    /// `#runfrontenddispatch`: the load runs off every lock (it is a SQLite
+    /// replay), so a controller-owned append can commit and apply *during* it.
+    /// Swapping that snapshot in blindly erased the applied fact from the live
+    /// projection: on 2026-10-10 02:00:14Z `started-4351` for
+    /// `src/haiven-dev/tasks/frontend.md` was applied, a concurrent refresh
+    /// (begun before the append committed) swapped `Requested@4350` back in, the
+    /// supervisor's `watch_loop_started` settle then minted `settled-4350`
+    /// against that regressed read, and the durable ledger kept
+    /// `started-4351, settled-4350` -> `InFlight@4351` for good. Every Run Agent
+    /// Doc on the document was then refused "mid-recycle" (TTL elapsed,
+    /// supervisor alive) until an operator intervened. `#fixruninfra`'s
+    /// re-mint could not see it: the post-append projection it verifies against
+    /// was the regressed one.
+    ///
+    /// Every controller-owned append+apply holds `state_event_ingress` and
+    /// bumps `state_apply_generation`, so the swap is published under that
+    /// lock, and a load that raced an apply is redone under it (where no
+    /// controller-owned apply can interleave). The common no-race refresh still
+    /// loads without blocking ingress. `after_unlocked_load` is the seam the
+    /// regression test uses to land an append inside the race window.
+    fn refresh_memory_with(&self, after_unlocked_load: impl FnOnce()) -> Result<()> {
         let project_root = self.bootstrap_snapshot()?.project_root;
-        let (next, next_actor_store) = ControllerMemoryState::load(&project_root)?;
+        let seen_apply_generation = self.state_apply_generation.load(Ordering::Acquire);
+        let loaded = ControllerMemoryState::load(&project_root)?;
+        after_unlocked_load();
+        let _ingress =
+            self.lock_state_event_ingress(&project_root, "refresh_memory", "durable_reload");
+        let raced = self.state_apply_generation.load(Ordering::Acquire) != seen_apply_generation;
+        let (next, next_actor_store) = if raced {
+            agent_doc_ops_log_io::log_op(
+                &project_root,
+                "controller_refresh_memory_reloaded_after_concurrent_apply (#runfrontenddispatch)",
+            );
+            ControllerMemoryState::load(&project_root)?
+        } else {
+            loaded
+        };
         let recycle = next.state_projection.project_supervisor_recycle();
-        let main_layout_eligibility =
-            main_layout_eligibility_from_state(&next.state_projection);
+        let main_layout_eligibility = main_layout_eligibility_from_state(&next.state_projection);
         let next_documents = next.state_projection.documents.clone();
         let mut memory = self.memory.lock();
         let previous_documents = memory.state_projection.documents.clone();
@@ -7864,6 +7909,7 @@ impl ControllerRuntime {
             // only the current projection and epoch in the process: the durable
             // store, not controller RSS, owns historical replay (GH #141).
             memory.state_projection.apply_durable_unique(event);
+            self.state_apply_generation.fetch_add(1, Ordering::AcqRel);
             memory
                 .state_document_versions
                 .entry(document_hash.clone())
@@ -11932,7 +11978,10 @@ mod tests {
             vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()]
         );
         assert_eq!(projected.invocation.focus.as_deref(), Some("tasks/a.md"));
-        assert_eq!(projected.provenance.publisher, PaneLayoutPublisher::Escalation);
+        assert_eq!(
+            projected.provenance.publisher,
+            PaneLayoutPublisher::Escalation
+        );
     }
 
     /// GH #224 case 2: while a route lease is active, the accepted editor split
@@ -16870,6 +16919,7 @@ agent:queue\n\
                 map_backend: "std_btree_map",
             }),
             state_event_ingress: Mutex::new(()),
+            state_apply_generation: AtomicU64::new(0),
             actor_graph,
             document_authority_graph,
             supervisor_recycle_graph,
@@ -17157,6 +17207,285 @@ agent:queue\n\
         assert!(
             ops.contains("supervisor_recycle_settle_reminted"),
             "the re-mint must be visible in ops.log:\n{ops}"
+        );
+    }
+
+    /// `#runfrontenddispatch`: a `refresh_memory` whose unlocked durable load
+    /// began before a controller-owned `Started` append committed must not swap
+    /// the pre-append snapshot over the applied fact. On 2026-10-10 that lost
+    /// update left `frontend.md`'s live projection at `Requested@4350`, the
+    /// supervisor's `watch_loop_started` settle minted `settled-4350`, and the
+    /// durable ledger replayed `InFlight@4351` forever — every Run Agent Doc was
+    /// refused "mid-recycle" with the supervisor alive.
+    #[test]
+    fn refresh_racing_a_started_append_keeps_the_applied_fact_and_settle_covers_it() {
+        use agent_doc_state_backbone::SupervisorRecyclePhase;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        let runtime = Arc::new(runtime_for_bootstrap(bootstrap.clone()));
+        let frontend = dir.path().join("frontend.md");
+        std::fs::write(&frontend, "# frontend").unwrap();
+        let hash = agent_doc_hash::document_id_for_path(&frontend);
+        let request = |command: &str, reason: &str| -> ControllerRequest {
+            serde_json::from_value(serde_json::json!({
+                "command": command, "file": frontend, "reason": reason
+            }))
+            .unwrap()
+        };
+
+        let requested = rpc::handle_supervisor_recycle_requested(
+            &bootstrap,
+            &runtime,
+            request("supervisor_recycle_requested", "install_fanout"),
+        )
+        .unwrap();
+        assert_eq!(requested.phase, SupervisorRecyclePhase::Requested);
+
+        // The refresh's durable load completes (it sees `Requested`), then the
+        // supervisor's pre-`execve` `Started` lands before the swap.
+        let mut started = None;
+        runtime
+            .refresh_memory_with(|| {
+                started = Some(
+                    rpc::handle_supervisor_recycle_started(
+                        &bootstrap,
+                        &runtime,
+                        request("supervisor_recycle_started", "auto_install_reexec"),
+                    )
+                    .unwrap(),
+                );
+            })
+            .unwrap();
+        let started = started.unwrap();
+        assert_eq!(started.phase, SupervisorRecyclePhase::InFlight);
+        assert!(started.recycle_epoch > requested.recycle_epoch);
+
+        let live = runtime
+            .supervisor_recycle_projection_for(Some(&hash))
+            .unwrap();
+        assert_eq!(
+            (live.phase, live.recycle_epoch),
+            (SupervisorRecyclePhase::InFlight, started.recycle_epoch),
+            "a refresh that straddled the append must not regress the live projection"
+        );
+
+        // The freshly started supervisor's settle now covers the started epoch.
+        let settled = rpc::handle_supervisor_recycle_settled(
+            &bootstrap,
+            &runtime,
+            request("supervisor_recycle_settled", "watch_loop_started"),
+        )
+        .unwrap();
+        assert_eq!(settled.phase, SupervisorRecyclePhase::Settled);
+        assert_eq!(settled.recycle_epoch, started.recycle_epoch);
+
+        // Durable: the ledger replays settled, so a controller restart (or the
+        // dispatch-only gate reading a replayed projection) does not wedge.
+        let replayed = load_state_event_ledger(dir.path())
+            .unwrap()
+            .project()
+            .document(&hash)
+            .map(|document| document.supervisor.recycle.clone())
+            .unwrap();
+        assert_eq!(
+            (replayed.phase, replayed.recycle_epoch),
+            (SupervisorRecyclePhase::Settled, started.recycle_epoch)
+        );
+        assert!(
+            runtime
+                .wait_for_supervisor_recycle_settle_for(Some(&hash), Duration::ZERO)
+                .is_ok()
+        );
+    }
+
+    /// `#dispatchreadyselfheal`: a document already wedged `InFlight` (its
+    /// supervisor's settle was minted at a stale epoch and dropped) is settled
+    /// by the dispatch-only gate's re-mint once the controller re-verifies a
+    /// supervisor `ready` registration strictly after the recycle's start —
+    /// and only at exactly the in-flight epoch.
+    #[test]
+    fn ready_registration_after_start_remints_the_wedged_settle_at_the_inflight_epoch() {
+        use agent_doc_state_backbone::SupervisorRecyclePhase;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/frontend.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-frontend\nagent: claude\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        let runtime = Arc::new(runtime_for_bootstrap(bootstrap.clone()));
+        let hash = agent_doc_hash::document_id_for_path(&doc);
+        let request = |command: &str, reason: &str| -> ControllerRequest {
+            serde_json::from_value(serde_json::json!({
+                "command": command, "file": doc, "reason": reason
+            }))
+            .unwrap()
+        };
+        let heal = |epoch: u64| {
+            rpc::handle_supervisor_recycle_settle_ready_after_start(
+                &bootstrap,
+                &runtime,
+                serde_json::from_value(serde_json::json!({
+                    "command": "supervisor_recycle_settle_ready_after_start",
+                    "file": doc,
+                    "generation": epoch,
+                    "reason": "dispatch_ready_after_start",
+                }))
+                .unwrap(),
+            )
+            .unwrap()
+        };
+
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-frontend",
+            "%166",
+            "@1",
+            1,
+        )
+        .unwrap();
+        let record = agent_doc_session_actor_io::transition_state_direct(
+            &doc,
+            "session-frontend",
+            "%166",
+            Some(1),
+            agent_doc_controller::actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        rpc::handle_supervisor_recycle_requested(
+            &bootstrap,
+            &runtime,
+            request("supervisor_recycle_requested", "install_fanout"),
+        )
+        .unwrap();
+        let started = rpc::handle_supervisor_recycle_started(
+            &bootstrap,
+            &runtime,
+            request("supervisor_recycle_started", "auto_install_reexec"),
+        )
+        .unwrap();
+        assert_eq!(started.phase, SupervisorRecyclePhase::InFlight);
+        let epoch = started.recycle_epoch;
+        let marked = started.marked_secs;
+        assert!(marked > 0 && epoch > 1);
+
+        // A `ready` registration stamps the evidence (a heartbeat never does).
+        rpc::handle_register_supervisor(
+            &bootstrap,
+            None,
+            ControllerRequest {
+                command: "register_supervisor".to_string(),
+                file: Some(doc.clone()),
+                session_id: Some("session-frontend".to_string()),
+                pane_id: Some("%166".to_string()),
+                window_id: None,
+                generation: Some(1),
+                state: Some("ready".to_string()),
+                caller: None,
+                reason: None,
+                supervisor_pid: Some(std::process::id()),
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+                sequence: None,
+            },
+        )
+        .unwrap();
+        let conn = open_state_db(dir.path()).unwrap();
+        let stamped =
+            state_store::load_supervisor_ready_registered_secs_from_db(&conn, &record.document_id)
+                .unwrap()
+                .expect("a ready registration stamps the lease");
+        assert!(stamped >= marked);
+        assert_eq!(
+            rpc::supervisor_ready_registered_secs_for_file(&doc),
+            Some(stamped),
+            "the gate reads the same stamp the controller wrote"
+        );
+
+        // A registration in the start's own second is not evidence.
+        state_store::stamp_supervisor_ready_registration_in_db(
+            &conn,
+            &record.document_id,
+            1,
+            marked,
+        )
+        .unwrap();
+        let declined = heal(epoch);
+        assert_eq!(
+            (declined.phase, declined.recycle_epoch),
+            (SupervisorRecyclePhase::InFlight, epoch)
+        );
+
+        // Ready four seconds after the start, as on `frontend.md`.
+        state_store::stamp_supervisor_ready_registration_in_db(
+            &conn,
+            &record.document_id,
+            1,
+            marked + 4,
+        )
+        .unwrap();
+        // No covering `Settled` fact exists: the recycle is wedged `InFlight`
+        // exactly as on `frontend.md` (its settle-4350 was dropped as stale).
+        assert_eq!(
+            runtime
+                .supervisor_recycle_projection_for(Some(&hash))
+                .unwrap()
+                .phase,
+            SupervisorRecyclePhase::InFlight
+        );
+
+        // A stale expected epoch is declined: the evidence covers the epoch
+        // the gate observed, never a different one.
+        let wrong = heal(epoch - 1);
+        assert_eq!(
+            (wrong.phase, wrong.recycle_epoch),
+            (SupervisorRecyclePhase::InFlight, epoch)
+        );
+
+        let healed = heal(epoch);
+        assert_eq!(
+            (healed.phase, healed.recycle_epoch),
+            (SupervisorRecyclePhase::Settled, epoch),
+            "ready-after-start settles the recycle at the in-flight epoch"
+        );
+        assert!(
+            runtime
+                .wait_for_supervisor_recycle_settle_for(Some(&hash), Duration::ZERO)
+                .is_ok()
+        );
+        let replayed = load_state_event_ledger(dir.path())
+            .unwrap()
+            .project()
+            .document(&hash)
+            .map(|document| document.supervisor.recycle.clone())
+            .unwrap();
+        assert_eq!(
+            (replayed.phase, replayed.recycle_epoch),
+            (SupervisorRecyclePhase::Settled, epoch),
+            "the re-mint is durable: a replay settles too"
+        );
+        // Idempotent: a second heal on a settled recycle is a no-op read.
+        let again = heal(epoch);
+        assert_eq!(again.phase, SupervisorRecyclePhase::Settled);
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("reason=dispatch_ready_after_start"),
+            "the re-mint must be visible in ops.log:\n{ops}"
+        );
+        assert!(
+            ops.contains("supervisor_recycle_ready_after_start_declined"),
+            "declines must be visible in ops.log:\n{ops}"
         );
     }
 

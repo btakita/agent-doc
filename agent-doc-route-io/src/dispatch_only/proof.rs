@@ -11,7 +11,8 @@ use agent_doc_controller::dispatch::{
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_recycle_inflight_message, dispatch_only_sent_console_message,
     dispatch_only_sent_log_message, dispatch_proof_failed_event,
-    recycle_inflight_unsettled_verdict_with_owner, routed_dispatch_start_timeout_for_binary,
+    recycle_inflight_unsettled_verdict_with_owner,
+    recycle_inflight_unsettled_verdict_with_readiness, routed_dispatch_start_timeout_for_binary,
 };
 use agent_doc_harness::HarnessConfig;
 
@@ -64,13 +65,72 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
         // `#netadv5` R9: the TTL alone is a timer; abandonment needs the
         // supervisor to be gone.
         let supervisor_alive =
-            agent_doc_supervisor_io::process::supervisor_pid_for_doc(Path::new(file_path)).is_some();
-        match recycle_inflight_unsettled_verdict_with_owner(
+            agent_doc_supervisor_io::process::supervisor_pid_for_doc(Path::new(file_path))
+                .is_some();
+        // `#dispatchreadyselfheal`: a supervisor `ready` registration stamped
+        // after this recycle started is the settle itself, observed directly.
+        let ready_registered_secs =
+            agent_doc_controller_io::project_controller::supervisor_ready_registered_secs_for_file(
+                Path::new(file_path),
+            );
+        let mut verdict = recycle_inflight_unsettled_verdict_with_readiness(
             marked_secs,
             now_secs(),
             ttl_secs,
             supervisor_alive,
-        ) {
+            ready_registered_secs,
+        );
+        if verdict == RecycleInflightUnsettledVerdict::ProceedReadyAfterStart {
+            match ready_after_start_self_heal(
+                file,
+                file_path,
+                pane,
+                harness_binary,
+                marked_secs,
+                recycle_epoch,
+                ready_registered_secs,
+                started.elapsed().as_millis(),
+                attempt,
+            ) {
+                ReadyAfterStartHeal::Proceed => return Ok(()),
+                ReadyAfterStartHeal::Rekey(projection) => {
+                    // A newer recycle replaced the one the evidence covered:
+                    // re-key and re-classify against it, exactly as a settle
+                    // RPC reporting a new epoch does below.
+                    epoch_changes += 1;
+                    marked_secs = projection.marked_secs;
+                    recycle_epoch = projection.recycle_epoch;
+                    if let Some(next) = projection.reason {
+                        reason = next;
+                    }
+                    if epoch_changes > RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES {
+                        return Err(recycle_inflight_refusal(
+                            file,
+                            pane,
+                            harness_binary,
+                            &reason,
+                            marked_secs,
+                            recycle_epoch,
+                            started.elapsed().as_millis(),
+                            attempt,
+                            "recycle_epoch_churn",
+                        ));
+                    }
+                    continue;
+                }
+                ReadyAfterStartHeal::Declined => {
+                    // The controller disagreed with the evidence: fall back to
+                    // the verdict without it rather than trusting our read.
+                    verdict = recycle_inflight_unsettled_verdict_with_owner(
+                        marked_secs,
+                        now_secs(),
+                        ttl_secs,
+                        supervisor_alive,
+                    );
+                }
+            }
+        }
+        match verdict {
             RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling => {
                 return Err(recycle_inflight_refusal(
                     file,
@@ -115,7 +175,11 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
                     "unstamped_recycle_mark",
                 ));
             }
-            RecycleInflightUnsettledVerdict::KeepWaiting => {}
+            // `ProceedReadyAfterStart` is resolved above (it proceeds, re-keys,
+            // or is re-classified without the evidence), so it cannot reach
+            // here; re-arming the wait is the safe reading if it ever did.
+            RecycleInflightUnsettledVerdict::KeepWaiting
+            | RecycleInflightUnsettledVerdict::ProceedReadyAfterStart => {}
         }
 
         attempt += 1;
@@ -279,6 +343,89 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
             }
         }
     }
+}
+
+/// What the gate does after asking the controller to settle a recycle on the
+/// strength of a ready registration after its start (`#dispatchreadyselfheal`).
+enum ReadyAfterStartHeal {
+    /// Settled (or the RPC was unavailable but the evidence stands): inject.
+    Proceed,
+    /// The controller reports a newer `InFlight` recycle than the one covered.
+    Rekey(agent_doc_state_backbone::SupervisorRecycleProjection),
+    /// The controller re-verified and declined; classify without the evidence.
+    Declined,
+}
+
+/// `#dispatchreadyselfheal`: the supervisor registered `ready` after this
+/// recycle started, so the hot-reload boundary is over. Re-mint the settle at
+/// the in-flight epoch so the durable projection stops refusing every later
+/// dispatch too, then proceed.
+///
+/// An unreachable controller (or one that predates the RPC) does not refuse:
+/// the registration evidence alone proves the boundary passed, and the next
+/// dispatch retries the re-mint.
+#[allow(clippy::too_many_arguments)]
+fn ready_after_start_self_heal(
+    file: &Path,
+    file_path: &str,
+    pane: &str,
+    harness_binary: &str,
+    marked_secs: u64,
+    recycle_epoch: u64,
+    ready_registered_secs: Option<u64>,
+    waited_ms: u128,
+    attempts: u32,
+) -> ReadyAfterStartHeal {
+    let healed =
+        agent_doc_controller_io::project_controller::supervisor_recycle_settle_ready_after_start_for_file(
+            Path::new(file_path),
+            recycle_epoch,
+        );
+    let (outcome, heal) = match healed {
+        Ok(projection)
+            if matches!(
+                projection.phase,
+                agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+            ) && projection.recycle_epoch != recycle_epoch =>
+        {
+            ("rekey".to_string(), ReadyAfterStartHeal::Rekey(projection))
+        }
+        Ok(projection)
+            if matches!(
+                projection.phase,
+                agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+            ) =>
+        {
+            ("declined".to_string(), ReadyAfterStartHeal::Declined)
+        }
+        Ok(projection) => (
+            format!(
+                "settled phase={:?} settled_epoch={}",
+                projection.phase, projection.recycle_epoch
+            ),
+            ReadyAfterStartHeal::Proceed,
+        ),
+        Err(err) => (
+            format!("remint_unavailable error={:?}", format!("{err:#}")),
+            ReadyAfterStartHeal::Proceed,
+        ),
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_recycle_inflight_ready_after_start file={} pane={} harness={} marked_secs={} ready_registered_secs={:?} recycle_epoch={} waited_ms={} attempts={} outcome={} (#dispatchreadyselfheal)",
+            file.display(),
+            pane,
+            harness_binary,
+            marked_secs,
+            ready_registered_secs,
+            recycle_epoch,
+            waited_ms,
+            attempts,
+            outcome
+        ),
+    );
+    heal
 }
 
 /// The one refusal shape for the recycle gate, so both fail-closed paths carry

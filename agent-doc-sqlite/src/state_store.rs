@@ -712,6 +712,7 @@ CREATE TABLE IF NOT EXISTS supervisor_leases (
             supervisor_socket TEXT,
             last_heartbeat INTEGER,
             runtime_state TEXT,
+            ready_registered_at INTEGER,
             PRIMARY KEY (document_id, generation)
 );
 
@@ -2545,6 +2546,11 @@ const CANONICAL_ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "consecutive_rejections",
         "consecutive_rejections INTEGER NOT NULL DEFAULT 0",
     ),
+    (
+        "supervisor_leases",
+        "ready_registered_at",
+        "ready_registered_at INTEGER",
+    ),
 ];
 
 /// Bring an existing database up to [`CANONICAL_ADDED_COLUMNS`].
@@ -2891,10 +2897,10 @@ pub fn rekey_actor_document_path_in_db(
     tx.execute(
         "INSERT OR REPLACE INTO supervisor_leases (
              document_id, generation, supervisor_pid, supervisor_socket,
-             last_heartbeat, runtime_state
+             last_heartbeat, runtime_state, ready_registered_at
          )
          SELECT ?1, generation, supervisor_pid, supervisor_socket,
-                last_heartbeat, runtime_state
+                last_heartbeat, runtime_state, ready_registered_at
          FROM supervisor_leases
          WHERE document_id = ?2",
         params![new_document_id, old_document_id],
@@ -3088,6 +3094,56 @@ pub fn load_supervisor_lease_from_db(
     )
     .optional()
     .context("failed to load supervisor lease from controller state")
+}
+
+/// Record that a supervisor *registered* in the `ready` state at `registered_secs`
+/// (`#dispatchreadyselfheal`).
+///
+/// Distinct from `last_heartbeat`, which every heartbeat refreshes: a heartbeat
+/// can come from a supervisor that is about to `execve`, but a registration is
+/// only ever made by a process that has just started (or re-entered after its
+/// `execve`). A ready registration stamped strictly after an `InFlight`
+/// recycle's start is therefore positive evidence that the hot-reload boundary
+/// the dispatch-only recycle gate protects is already over.
+pub fn stamp_supervisor_ready_registration_in_db(
+    conn: &Connection,
+    document_id: &str,
+    generation: u64,
+    registered_secs: u64,
+) -> Result<()> {
+    conn.execute(
+        r#"
+        INSERT INTO supervisor_leases (document_id, generation, ready_registered_at)
+        VALUES (?1, ?2, ?3)
+        ON CONFLICT(document_id, generation) DO UPDATE SET
+            ready_registered_at = excluded.ready_registered_at
+        "#,
+        params![
+            document_id,
+            sqlite_i64(generation, "generation")?,
+            sqlite_i64(registered_secs, "supervisor ready registration timestamp")?,
+        ],
+    )
+    .context("failed to stamp supervisor ready registration")?;
+    Ok(())
+}
+
+/// The newest `ready` registration recorded for any generation of
+/// `document_id`, if one was ever stamped (`#dispatchreadyselfheal`).
+pub fn load_supervisor_ready_registered_secs_from_db(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<Option<u64>> {
+    let newest: Option<i64> = conn
+        .query_row(
+            "SELECT MAX(ready_registered_at) FROM supervisor_leases WHERE document_id = ?1",
+            params![document_id],
+            |row| row.get(0),
+        )
+        .context("failed to load supervisor ready registration")?;
+    newest
+        .map(|value| sqlite_u64(value, "supervisor ready registration timestamp"))
+        .transpose()
 }
 
 pub fn load_dispatch_attempts_from_db(
@@ -6667,6 +6723,73 @@ mod tests {
                 .pointer("/fact/canonical_path")
                 .and_then(serde_json::Value::as_str),
             Some("/project/tasks/new.md"),
+        );
+        Ok(())
+    }
+
+    /// `#dispatchreadyselfheal`: a ready registration is stamped apart from the
+    /// heartbeat. A heartbeat upsert must neither set nor clear it, the newest
+    /// stamp across generations wins, and a path rekey carries it along.
+    #[test]
+    fn supervisor_ready_registration_stamp_is_independent_of_heartbeats() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let mut conn = open_state_db(dir.path())?;
+        let record = ActorRecord {
+            document_id: "tasks/frontend.md".to_string(),
+            session_id: "session-frontend".to_string(),
+            generation: 51,
+            pane_id: "%166".to_string(),
+            window_id: "@3".to_string(),
+            harness: "claude".to_string(),
+            state: ActorState::Ready,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "ready_registration".to_string(),
+                timestamp: timestamp_secs(),
+                prior_generation: 50,
+                new_generation: 51,
+            },
+        };
+        store_actor_record_tx(&mut conn, None, &record, Some("managed".to_string()), None)?;
+        assert_eq!(
+            load_supervisor_ready_registered_secs_from_db(&conn, "tasks/frontend.md")?,
+            None,
+            "no registration has been stamped yet"
+        );
+
+        upsert_supervisor_lease_in_db(&conn, &record, Some(4242), Some("s.sock"), "ready")?;
+        assert_eq!(
+            load_supervisor_ready_registered_secs_from_db(&conn, "tasks/frontend.md")?,
+            None,
+            "a heartbeat-shaped upsert is not a registration"
+        );
+
+        stamp_supervisor_ready_registration_in_db(&conn, "tasks/frontend.md", 51, 1_000)?;
+        upsert_supervisor_lease_in_db(&conn, &record, Some(4242), Some("s.sock"), "busy")?;
+        assert_eq!(
+            load_supervisor_ready_registered_secs_from_db(&conn, "tasks/frontend.md")?,
+            Some(1_000),
+            "a later heartbeat must not clear the registration stamp"
+        );
+        let lease = load_supervisor_lease_from_db(&conn, "tasks/frontend.md", 51)?.unwrap();
+        assert_eq!(lease.supervisor_pid, Some(4242));
+
+        stamp_supervisor_ready_registration_in_db(&conn, "tasks/frontend.md", 52, 1_004)?;
+        assert_eq!(
+            load_supervisor_ready_registered_secs_from_db(&conn, "tasks/frontend.md")?,
+            Some(1_004)
+        );
+
+        assert!(rekey_actor_document_path_in_db(
+            &conn,
+            "tasks/frontend.md",
+            "tasks/frontend-renamed.md",
+            "/project/tasks/frontend-renamed.md",
+        )?);
+        assert_eq!(
+            load_supervisor_ready_registered_secs_from_db(&conn, "tasks/frontend-renamed.md")?,
+            Some(1_004),
+            "a path rekey carries the registration stamp"
         );
         Ok(())
     }

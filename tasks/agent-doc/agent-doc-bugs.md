@@ -108,7 +108,18 @@ Each press still opens a full no-op cycle, even though zero heads are drainable.
 **Still in flight:** `#runfrontenderror`, `#explicitrunqueue`, queue cruft, `#runfrontendcrashed`, `#freetextqueue`. The supervisor-thrash fix (`fix/supthrash`) merges after the release.
 
 This cycle had no new follow-ups: the claim-transfer defect is covered by `#freetextqueue`.
-<!-- agent:boundary:047c1cfd -->
+> **Chat prompt (#chatprompt):** Instead of rerunning flaky tests, fix the cause of the flakyness
+
+> **Chat prompt (#chatprompt):** cont
+
+### Re: fix flaky causes, don't rerun — opus-5-5 · 2026-10-10T14:58-04:00
+
+I sent this directive to four of the five running subagents: `#runfrontenderror`, `#explicitrunqueue`, queue cruft and `#freetextqueue`. You rejected the send to the `#runfrontendcrashed` subagent, so that one has not received it. For every test that failed in any of its `make check` runs, even one that later passed on a rerun, each subagent has to name the test, show the failure, and find the cause. Then it makes the test deterministic: an injected or simulated clock, waiting for the actual event instead of a timer, and unique per-test paths. A longer timeout doesn't count as a fix. The flake fix goes in its own commit, and the final report lists each flaky test with its cause.
+
+**Likely trigger:** the machine's load average is about 128, from 5 full `make check` suites plus the 0.35.484 release running at once. That load exposes tests that depend on wall-clock timing. The load explains when the tests fail, but the tests still have to be fixed so load can't make them fail.
+
+**Release 0.35.484:** still running, with no failures or retries in its log so far.
+<!-- agent:boundary:a19d933a -->
 <!-- /agent:exchange -->
 
 <!--

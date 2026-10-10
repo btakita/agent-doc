@@ -13,6 +13,18 @@ pub struct PromptComponentAttrs {
     pub subagents: bool,
 }
 
+/// The component's `preset` value, or `None` when there is no preset.
+///
+/// GH #227: `preset=""` is the operator's explicit "no preset" and is preserved
+/// byte for byte in the document. Every resolver must read it as no preset, so
+/// an empty (or whitespace-only) value is `None` exactly like an absent key.
+pub fn component_preset(attrs: &std::collections::HashMap<String, String>) -> Option<&str> {
+    attrs
+        .get("preset")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+}
+
 /// Read prompt defaults from the first structural component named `name`.
 ///
 /// Queue subagent attributes retain their existing optional concurrency value.
@@ -43,11 +55,7 @@ pub fn prompt_component_attrs_for(
         _ => false,
     };
     PromptComponentAttrs {
-        preset: component
-            .attrs
-            .get("preset")
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty()),
+        preset: component_preset(&component.attrs).map(str::to_string),
         subagents,
     }
 }
@@ -71,6 +79,28 @@ mod tests {
                 subagents: true,
             }
         );
+    }
+
+    /// GH #227: `preset=""` resolves to no preset on both prompt components.
+    #[test]
+    fn explicit_empty_preset_resolves_to_no_preset() {
+        let queue =
+            "<!-- agent:queue subagents preset=\"\" priority -->\n- a\n<!-- /agent:queue -->\n";
+        assert_eq!(
+            prompt_component_attrs(queue, "queue"),
+            PromptComponentAttrs {
+                preset: None,
+                subagents: true,
+            }
+        );
+        let exchange = "<!-- agent:exchange preset=\"\" -->\nfix it\n<!-- /agent:exchange -->\n";
+        assert_eq!(prompt_component_attrs(exchange, "exchange").preset, None);
+
+        let mut attrs = std::collections::HashMap::new();
+        attrs.insert("preset".to_string(), "  ".to_string());
+        assert_eq!(component_preset(&attrs), None);
+        attrs.insert("preset".to_string(), "#ship".to_string());
+        assert_eq!(component_preset(&attrs), Some("#ship"));
     }
 
     #[test]

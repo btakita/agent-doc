@@ -328,13 +328,9 @@ They are canonicalized as bare tokens, never `key=true`: preflight repairs
 boolean-serialized forms such as `priority=true` / `go=true` and the malformed
 `preset="#name"=true` suffix back to `priority` / `go` and `preset="#name"` in
 both the visible document and snapshot before continuing queue maintenance.
-Every queue-tag rewriter (preflight normalization, `auto`/control binding, route
-`go`) also drops an empty-valued attribute (`preset=""`, `preset=''`,
-`preset=`) and renders an empty-valued bare flag (`subagents=""`, `go=`) as the
-bare flag, so no agent-doc write ever re-emits `preset=""` (GH #227). The lint
-hint for `agent-doc/empty-attr-value` leads with removing the attribute (a bare
-`subagents` flag already carries subagent dispatch) and uses no angle-bracket
-placeholder.
+Queue-tag rewriters never rewrite an explicit empty preset: `preset=""` means
+"no preset" (GH #227), is preserved byte for byte in the document and snapshot,
+and resolves to no preset everywhere a queue preset is read.
 
 Queue maintenance binds the marker gesture and `queue:` frontmatter
 bidirectionally (`#qactsync`). It compares the current editor-authoritative

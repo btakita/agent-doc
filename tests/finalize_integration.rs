@@ -3604,6 +3604,49 @@ fn finalize_keeps_deferred_leading_free_text_queue_head() {
     );
 }
 
+/// GH #227 (operator decision): `preset=""` on the queue marker means
+/// explicitly no preset. A write closeout must pass the lint gate without
+/// `--lint off` and leave the operator's marker byte-identical.
+#[test]
+fn finalize_preserves_explicit_empty_preset_marker_without_lint_override() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let marker = "<!-- agent:queue subagents preset=\"\" priority go -->\n";
+    let content = format!(
+        "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n\
+         <!-- agent:exchange -->\n### Re: older\nOld response.\n\
+         <!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n\
+         {marker}\
+         - #upgrade\n\
+         <!-- /agent:queue -->\n\n\
+         <!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), &content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: #upgrade — gpt-5\n\n",
+            "> **Queue prompt:** #upgrade\n\n",
+            "**Deferred:** claimed as `subagent:upgrade`. It starts after this response commits.\n",
+            "<!-- /patch:exchange -->\n",
+        ))
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains(marker),
+        "the explicit empty preset must survive the write byte-identical:\n{content}"
+    );
+    assert!(content.contains("### Re: #upgrade — gpt-5"), "{content}");
+}
+
 #[test]
 fn finalize_skips_queue_consumption_when_user_prompt_diff_targets_other_work() {
     let tmp = TempDir::new().unwrap();

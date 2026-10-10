@@ -470,7 +470,6 @@ fn set_auto_in_queue_tag(tag: &str, want_auto: bool) -> String {
     };
     tokens = tokens
         .into_iter()
-        .filter(|token| !is_droppable_empty_valued_token(token))
         .map(|token| normalize_queue_tag_token(&token))
         .collect();
     let has_auto = tokens.iter().any(|token| token == "auto");
@@ -532,12 +531,6 @@ fn normalize_queue_tag_token(token: &str) -> String {
     if is_queue_boolean_attr(key) && value.eq_ignore_ascii_case("true") {
         return key.to_string();
     }
-    // GH #227: an empty value (`key=""`, `key=''`, `key=`) carries no
-    // information. On a bare-flag attribute it is the flag; on any other key the
-    // token is dropped by the caller. Never re-emit `preset=""`.
-    if is_empty_attr_value(value) && (is_queue_boolean_attr(key) || is_queue_flag_attr(key)) {
-        return key.to_string();
-    }
     if key == "preset"
         && let Some(stripped) = strip_malformed_true_suffix(value)
     {
@@ -548,28 +541,6 @@ fn normalize_queue_tag_token(token: &str) -> String {
 
 fn is_queue_boolean_attr(key: &str) -> bool {
     matches!(key, "auto" | "priority" | "go" | "start" | "stop")
-}
-
-/// Queue-marker attributes that are valid bare flags but are not activation
-/// controls (`subagents`, `fan-out`).
-fn is_queue_flag_attr(key: &str) -> bool {
-    matches!(key, "subagents" | "fan-out")
-}
-
-fn is_empty_attr_value(value: &str) -> bool {
-    matches!(value, "" | "\"\"" | "''")
-}
-
-/// GH #227: `true` for a `key=""` token on a queue marker that must be dropped
-/// rather than preserved (any valued attribute such as `preset`). Bare-flag
-/// keys are rewritten to the flag by `normalize_queue_tag_token` instead.
-fn is_droppable_empty_valued_token(token: &str) -> bool {
-    token.split_once('=').is_some_and(|(key, value)| {
-        is_empty_attr_value(value)
-            && !is_queue_boolean_attr(key)
-            && !is_queue_flag_attr(key)
-            && !key.is_empty()
-    })
 }
 
 fn strip_malformed_true_suffix(value: &str) -> Option<&str> {
@@ -3842,18 +3813,21 @@ Fix applied to skip non-agent <!-- sequences.
         );
     }
 
-    /// GH #227: toggling `auto` rewrites the whole queue tag; it must drop an
-    /// empty `preset=""` rather than carry it forward.
+    /// GH #227: toggling `auto` rewrites the queue tag; the operator's explicit
+    /// `preset=""` ("no preset") survives unchanged, and the parser reads it as
+    /// no preset.
     #[test]
-    fn converge_queue_auto_drops_empty_preset_value() {
+    fn converge_queue_auto_preserves_explicit_empty_preset() {
         let doc =
             "<!-- agent:queue subagents preset=\"\" priority -->\n- a\n<!-- /agent:queue -->\n";
         let converged = converge_queue_auto(doc, true).unwrap();
-        assert!(
-            converged.starts_with("<!-- agent:queue auto subagents priority -->\n"),
-            "{converged}"
+        assert_eq!(
+            converged,
+            "<!-- agent:queue auto subagents preset=\"\" priority -->\n- a\n<!-- /agent:queue -->\n"
         );
-        assert!(!converged.contains("preset="), "{converged}");
+        assert_eq!(converge_queue_auto(&converged, false).unwrap(), doc);
+        let components = parse(doc).unwrap();
+        assert_eq!(components[0].attrs.get("preset"), None);
     }
 
     #[test]

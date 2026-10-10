@@ -506,18 +506,43 @@ fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec
         .filter(|finding| {
             !is_registry_known_unknown_component_finding(finding)
                 && !is_agent_doc_queue_bare_flag_finding(finding)
+                && !is_explicit_no_preset_finding(finding)
         })
         .map(rewrite_empty_attr_value_hint)
         .collect()
 }
 
+/// GH #227 (operator decision): `preset=""` on a prompt component
+/// (`agent:queue`, `agent:exchange`) is an explicit "no preset", not a malformed
+/// pair. The element attribute parser already drops an empty value, so every
+/// preset resolver sees no preset; the lint gate must agree instead of blocking
+/// compact/write on operator text agent-doc deliberately preserves.
+///
+/// Only `preset` gets this meaning. Every other empty value stays an error:
+/// `patch=`, `archive=`, and backlog `queue=` need a value to mean anything, and
+/// an empty `subagents=` / `fan-out=` is ambiguous (the bare flag means "all
+/// eligible heads", while the parser drops the empty pair, i.e. "off").
+fn is_explicit_no_preset_finding(finding: &LintFinding) -> bool {
+    if finding.rule != "agent-doc/empty-attr-value" {
+        return false;
+    }
+    let mut quoted = finding.message.split('`');
+    let Some(attribute) = quoted.nth(1) else {
+        return false;
+    };
+    let Some(component) = quoted.nth(1) else {
+        return false;
+    };
+    attribute.trim_end_matches('=') == "preset"
+        && matches!(component, "agent:queue" | "agent:exchange")
+}
+
 /// GH #227: tagpath's `agent-doc/empty-attr-value` hint says
-/// ``provide a value: `preset=<value>` `` — which points the wrong way (an
-/// empty attribute carries no information, so deleting it is the safe fix;
-/// for `preset` a `subagents` flag usually already carries the intent) and
-/// whose `<value>` placeholder is swallowed as an HTML tag by editor
-/// notification renderers. Replace it with an agent-doc hint that leads with
-/// removal and uses no angle-bracket placeholder.
+/// ``provide a value: `key=<value>` `` — whose `<value>` placeholder is
+/// swallowed as an HTML tag by editor notification renderers, and which hides
+/// the usually-correct fix of deleting an attribute that carries nothing.
+/// Replace it with an agent-doc hint that offers both and uses no angle-bracket
+/// placeholder.
 fn rewrite_empty_attr_value_hint(mut finding: LintFinding) -> LintFinding {
     if finding.rule != "agent-doc/empty-attr-value" {
         return finding;
@@ -536,12 +561,6 @@ fn rewrite_empty_attr_value_hint(mut finding: LintFinding) -> LintFinding {
 }
 
 fn empty_attr_value_hint(key: &str) -> String {
-    if key == "preset" {
-        return "remove the empty `preset=` attribute (a bare `subagents` flag already \
-                dispatches every head to a subagent), or name a registered preset: \
-                `preset=\"#name\"`"
-            .to_string();
-    }
     format!("remove the empty `{key}=` attribute, or give it a value: `{key}=VALUE`")
 }
 
@@ -1118,24 +1137,57 @@ operator-owned scratch state\n\
         assert!(message.contains("missing `=value`"), "{message}");
     }
 
-    /// GH #227: `subagents preset="" priority` blocked compact with a hint that
-    /// asked for a `<value>` (swallowed as an HTML tag by the JetBrains
-    /// notification) when the working fix was to delete the attribute.
+    /// GH #227 (operator decision): `preset=""` means explicitly no preset. It
+    /// must not block lint (and therefore compact/write) on queue or exchange.
     #[test]
-    fn empty_preset_hint_suggests_removal_without_angle_brackets() {
+    fn empty_preset_is_explicit_no_preset_and_passes_lint() {
+        let dir = TempDir::new().unwrap();
+        for (name, doc) in [
+            (
+                "queue.md",
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange -->\n\
+                 prompt\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents preset=\"\" priority go -->\n\
+                 - do [#a]\n\
+                 <!-- /agent:queue -->\n",
+            ),
+            (
+                "exchange.md",
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange preset=\"\" -->\n\
+                 prompt\n\
+                 <!-- /agent:exchange -->\n",
+            ),
+        ] {
+            let file = write_doc(&dir, name, doc);
+            run(&file, None).unwrap_or_else(|error| {
+                panic!("`preset=\"\"` in {name} must pass lint: {error:#}")
+            });
+            run(&file, Some(LintCliMode::Strict)).unwrap_or_else(|error| {
+                panic!("`preset=\"\"` in {name} must pass strict lint: {error:#}")
+            });
+        }
+    }
+
+    /// Other empty attribute values stay malformed; their hint leads with
+    /// removal, carries no `<value>` placeholder, and the header names
+    /// `--lint off` on write/compact as an escape.
+    #[test]
+    fn other_empty_attr_values_still_block_with_actionable_hint() {
         let dir = TempDir::new().unwrap();
         let doc = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange -->\n\
             prompt\n\
             <!-- /agent:exchange -->\n\n\
-            <!-- agent:queue subagents preset=\"\" priority -->\n\
-            - do [#a]\n\
-            <!-- /agent:queue -->\n";
-        let file = write_doc(&dir, "empty-preset.md", doc);
-        let message = format!("{:#}", run(&file, None).expect_err("empty preset blocks"));
+            <!-- agent:done archive=\"\" -->\n\
+            <!-- /agent:done -->\n";
+        let file = write_doc(&dir, "empty-archive.md", doc);
+        let message = format!("{:#}", run(&file, None).expect_err("empty archive blocks"));
         assert!(message.contains("agent-doc/empty-attr-value"), "{message}");
         assert!(
-            message.contains("hint: remove the empty `preset=` attribute"),
+            message.contains("hint: remove the empty `archive=` attribute"),
             "{message}"
         );
         assert!(!message.contains("<value>"), "{message}");

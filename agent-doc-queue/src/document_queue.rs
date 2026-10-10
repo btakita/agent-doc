@@ -2272,9 +2272,6 @@ fn rewrite_queue_tag_attrs(tag: &str, keep: impl Fn(&str) -> bool) -> String {
     let tokens = tokens
         .into_iter()
         .filter_map(|token| {
-            if is_droppable_empty_valued_token(&token) {
-                return None;
-            }
             let normalized = normalize_queue_tag_token(&token);
             if !keep(queue_tag_token_key(&normalized)) {
                 return None;
@@ -2332,12 +2329,6 @@ fn normalize_queue_tag_token(token: &str) -> String {
     if is_queue_boolean_attr(key) && value.eq_ignore_ascii_case("true") {
         return key.to_string();
     }
-    // GH #227: an empty value (`key=""`, `key=''`, `key=`) carries no
-    // information. On a bare-flag attribute it is the flag; on any other key the
-    // token is dropped by the caller. Never re-emit `preset=""`.
-    if is_empty_attr_value(value) && (is_queue_boolean_attr(key) || is_queue_flag_attr(key)) {
-        return key.to_string();
-    }
     if key == "preset"
         && let Some(stripped) = strip_malformed_true_suffix(value)
     {
@@ -2352,28 +2343,6 @@ fn queue_tag_token_key(token: &str) -> &str {
 
 fn is_queue_boolean_attr(key: &str) -> bool {
     matches!(key, "auto" | "priority" | "go" | "start" | "stop" | "pause")
-}
-
-/// Queue-marker attributes that are valid bare flags but are not activation
-/// controls (`subagents`, `fan-out`).
-fn is_queue_flag_attr(key: &str) -> bool {
-    matches!(key, "subagents" | "fan-out")
-}
-
-fn is_empty_attr_value(value: &str) -> bool {
-    matches!(value, "" | "\"\"" | "''")
-}
-
-/// GH #227: `true` for a `key=""` token on a queue marker that must be dropped
-/// rather than preserved (any valued attribute such as `preset`). Bare-flag
-/// keys are rewritten to the flag by `normalize_queue_tag_token` instead.
-fn is_droppable_empty_valued_token(token: &str) -> bool {
-    token.split_once('=').is_some_and(|(key, value)| {
-        is_empty_attr_value(value)
-            && !is_queue_boolean_attr(key)
-            && !is_queue_flag_attr(key)
-            && !key.is_empty()
-    })
 }
 
 fn strip_malformed_true_suffix(value: &str) -> Option<&str> {
@@ -6430,47 +6399,27 @@ mod tests {
         assert_eq!(normalize_queue_tag_attrs(tag), tag);
     }
 
-    /// GH #227: a queue-marker rewrite must never re-emit an empty `preset=""`.
-    /// The live marker `subagents preset="" priority` blocked compact; every
-    /// agent-doc tag rewriter (preflight normalization, route `go`, control
-    /// binding) now drops the empty valued attribute instead of preserving it.
+    /// GH #227 (operator decision): `preset=""` is the operator's explicit "no
+    /// preset". Every queue-tag rewriter preserves it byte for byte.
     #[test]
-    fn normalize_queue_tag_attrs_drops_empty_preset_value() {
-        for tag in [
-            "<!-- agent:queue subagents preset=\"\" priority go -->",
-            "<!-- agent:queue subagents preset='' priority go -->",
-            "<!-- agent:queue subagents preset= priority go -->",
-        ] {
-            assert_eq!(
-                normalize_queue_tag_attrs(tag),
-                "<!-- agent:queue subagents priority go -->",
-                "{tag}"
-            );
-        }
+    fn queue_tag_rewriters_preserve_explicit_empty_preset() {
+        let tag = "<!-- agent:queue subagents preset=\"\" priority go -->\n";
+        assert_eq!(normalize_queue_tag_attrs(tag), tag);
+        assert_eq!(set_control_in_tag(tag, Some("go")), tag);
         assert_eq!(
-            normalize_queue_tag_attrs("<!-- agent:queue preset=\"#subagents\" priority -->"),
-            "<!-- agent:queue preset=\"#subagents\" priority -->",
-            "a non-empty preset is preserved"
+            strip_control_from_tag(tag),
+            "<!-- agent:queue subagents preset=\"\" priority -->\n"
         );
-    }
-
-    #[test]
-    fn normalize_queue_tag_attrs_turns_empty_flag_values_into_bare_flags() {
         assert_eq!(
-            normalize_queue_tag_attrs("<!-- agent:queue subagents=\"\" fan-out='' go= -->"),
-            "<!-- agent:queue subagents fan-out go -->"
+            set_control_in_tag(
+                "<!-- agent:queue subagents preset=\"\" priority -->",
+                Some("go")
+            ),
+            "<!-- agent:queue subagents preset=\"\" priority go -->"
         );
-    }
-
-    #[test]
-    fn set_control_in_tag_never_emits_empty_preset() {
-        let tag = "<!-- agent:queue subagents preset=\"\" priority -->\n";
-        let rewritten = set_control_in_tag(tag, Some("go"));
-        assert_eq!(rewritten, "<!-- agent:queue subagents priority go -->\n");
-        assert!(!rewritten.contains("preset=\"\""));
         assert_eq!(
-            strip_control_from_tag("<!-- agent:queue subagents preset=\"\" go -->"),
-            "<!-- agent:queue subagents -->"
+            strip_auto_from_tag("<!-- agent:queue auto preset=\"\" -->"),
+            "<!-- agent:queue preset=\"\" -->"
         );
     }
 

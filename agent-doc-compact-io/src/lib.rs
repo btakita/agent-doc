@@ -5767,10 +5767,7 @@ mod tests {
         );
     }
 
-    /// GH #227: `compact` had no `--lint` override, so a lint finding that
-    /// `write --lint off` could step past left compact with no CLI escape.
-    #[test]
-    fn compact_lint_override_off_steps_past_dialect_finding() {
+    fn compact_lint_fixture(queue_marker: &str) -> (tempfile::TempDir, std::path::PathBuf, String) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
@@ -5778,54 +5775,72 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
 
         let file = root.join("session.md");
-        let doc = concat!(
-            "---\nagent_doc_session: test-compact-lint\nagent_doc_format: template\n---\n\n",
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: topic one\n\nResponse one.\n\n",
-            "### Re: topic two\n\nResponse two.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "## Queue\n\n",
-            "<!-- agent:queue subagents preset=\"\" priority -->\n",
-            "<!-- /agent:queue -->\n",
+        let doc = format!(
+            "---\nagent_doc_session: test-compact-lint\nagent_doc_format: template\n---\n\n\
+             ## Exchange\n\n\
+             <!-- agent:exchange patch=append -->\n\
+             ### Re: topic one\n\nResponse one.\n\n\
+             ### Re: topic two\n\nResponse two.\n\
+             <!-- /agent:exchange -->\n\n\
+             ## Queue\n\n\
+             {queue_marker}\
+             <!-- /agent:queue -->\n"
         );
-        std::fs::write(&file, doc).unwrap();
+        std::fs::write(&file, &doc).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &file,
-            doc,
+            &doc,
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
+        (dir, file, doc)
+    }
 
-        let blocked = run(
-            &file,
+    fn compact_exchange_with_lint(file: &Path, lint: Option<LintCliMode>) -> Result<()> {
+        run(
+            file,
             None,
             Some("exchange"),
             Some("Compacted summary."),
             Some("skip"),
             false,
             true,
-            None,
+            lint,
         )
-        .expect_err("the default lint mode blocks on the empty preset");
+    }
+
+    /// GH #227: `compact` had no `--lint` override, so a lint finding that
+    /// `write --lint off` could step past left compact with no CLI escape.
+    #[test]
+    fn compact_lint_override_off_steps_past_dialect_finding() {
+        let (_dir, file, doc) = compact_lint_fixture("<!-- agent:queue patch=\"\" priority -->\n");
+
+        let blocked = compact_exchange_with_lint(&file, None)
+            .expect_err("the default lint mode blocks on the empty patch value");
         let message = format!("{blocked:#}");
         assert!(message.contains("agent-doc/empty-attr-value"), "{message}");
         assert!(message.contains("`--lint off`"), "{message}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), doc);
 
-        run(
-            &file,
-            None,
-            Some("exchange"),
-            Some("Compacted summary."),
-            Some("skip"),
-            false,
-            true,
-            Some(LintCliMode::Off),
-        )
-        .expect("--lint off must let compact proceed");
+        compact_exchange_with_lint(&file, Some(LintCliMode::Off))
+            .expect("--lint off must let compact proceed");
         let after = std::fs::read_to_string(&file).unwrap();
         assert!(after.contains("Compacted summary."), "{after}");
+    }
+
+    /// GH #227 (operator decision): `preset=""` is an explicit "no preset". The
+    /// live failure was compact blocking on it; it now compacts with no lint
+    /// override and leaves the operator's marker byte-identical.
+    #[test]
+    fn compact_accepts_and_preserves_explicit_empty_preset() {
+        let marker = "<!-- agent:queue subagents preset=\"\" priority -->\n";
+        let (_dir, file, _doc) = compact_lint_fixture(marker);
+
+        compact_exchange_with_lint(&file, None)
+            .expect("an explicit empty preset must not block compact");
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert!(after.contains("Compacted summary."), "{after}");
+        assert!(after.contains(marker), "{after}");
     }
 
     #[test]

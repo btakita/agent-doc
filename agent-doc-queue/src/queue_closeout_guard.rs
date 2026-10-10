@@ -408,6 +408,25 @@ pub fn free_text_queue_head_provenance_decision(
     content: &str,
     current_cycle_response: Option<&str>,
 ) -> Option<FreeTextQueueHeadProvenanceDecision> {
+    free_text_queue_head_provenance_decision_with_claims(
+        active_free_text_queue_heads,
+        content,
+        current_cycle_response,
+        &[],
+    )
+}
+
+/// [`free_text_queue_head_provenance_decision`] judging heads in
+/// `claimed_heads` (live heads an active worker claim holds) as completed
+/// residue only on an exact `> **Queue prompt:**` echo
+/// (`#ftstrikeclaimedmention`), matching the claimed-head strike.
+pub fn free_text_queue_head_provenance_decision_with_claims(
+    active_free_text_queue_heads: &[String],
+    content: &str,
+    current_cycle_response: Option<&str>,
+    claimed_heads: &[String],
+) -> Option<FreeTextQueueHeadProvenanceDecision> {
+    let claimed = crate::queue_claim::ClaimedQueueItems::none().with_heads(claimed_heads);
     if content.contains("<!-- no-free-text-queue-head-guard -->") {
         return Some(FreeTextQueueHeadProvenanceDecision {
             suppressed: true,
@@ -442,10 +461,11 @@ pub fn free_text_queue_head_provenance_decision(
         {
             continue;
         }
-        if queue_heads::free_text_queue_head_is_completed_residue(
+        if queue_heads::free_text_queue_head_is_completed_residue_with_claim(
             content,
             current_cycle_response,
             &head,
+            claimed.claims(&head),
         ) {
             completed_residue.push(head);
             continue;

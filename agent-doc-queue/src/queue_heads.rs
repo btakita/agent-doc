@@ -425,11 +425,31 @@ pub fn free_text_queue_head_is_completed_residue(
     exchange_text: &str,
     head: &str,
 ) -> bool {
+    free_text_queue_head_is_completed_residue_with_claim(content, exchange_text, head, false)
+}
+
+/// [`free_text_queue_head_is_completed_residue`] for a head an active worker
+/// claim may hold (`#ftstrikeclaimedmention`). A claimed head is completed
+/// residue only on an exact `> **Queue prompt:**` echo of it
+/// ([`crate::queue_response::free_text_head_has_explicit_answer_evidence`]),
+/// the same proof the claimed-head strike requires, so the residue set and the
+/// strike set stay equal (`#claimstrike`).
+pub fn free_text_queue_head_is_completed_residue_with_claim(
+    content: &str,
+    exchange_text: &str,
+    head: &str,
+    claimed: bool,
+) -> bool {
     if crate::queue_continuation::is_recurring_imperative_head(head) {
         return false;
     }
+    let answered = if claimed {
+        crate::queue_response::free_text_head_has_explicit_answer_evidence(exchange_text, head)
+    } else {
+        free_text_head_answered_by_response(exchange_text, head)
+    };
     committed_queue_contains_free_text_head(content, head)
-        && free_text_head_answered_by_response(exchange_text, head)
+        && answered
         // `#deferstrike`: an echo followed by a deferral keeps the head queued
         // on purpose; it is not completed residue.
         && !crate::queue_response::latest_free_text_head_echo_is_deferral(exchange_text, head)

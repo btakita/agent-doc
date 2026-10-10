@@ -205,11 +205,16 @@ pub fn check_free_text_queue_head_provenance(
         .and_then(|projection| projection.captured_response.as_ref())
         .filter(|capture| capture.cycle_id == state.cycle_id)
         .map(|capture| capture.response_body.as_str());
+    // `#ftstrikeclaimedmention`: a claimed head is completed residue only on an
+    // exact `> **Queue prompt:**` echo, the same proof its strike requires.
+    let claimed_heads =
+        agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(file, &content);
     let Some(decision) =
-        agent_doc_queue::queue_closeout_guard::free_text_queue_head_provenance_decision(
+        agent_doc_queue::queue_closeout_guard::free_text_queue_head_provenance_decision_with_claims(
             &state.active_free_text_queue_heads,
             &content,
             current_cycle_response,
+            &claimed_heads,
         )
     else {
         return Ok(GuardResult::None);

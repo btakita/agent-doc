@@ -171,6 +171,14 @@ pub fn queue_prompt_preset_expansions(content: &str, text: &str) -> Vec<(String,
 
 /// True when the response contains evidence for every resolved preset expansion
 /// requested by this queue head. A compact preset reference is not itself evidence.
+///
+/// `#ftstrikeclaimedmention` (agent-doc-bugs.md 2026-10-09): a preset body is
+/// shared by every head that uses the preset, so the body alone cannot say WHICH
+/// head was answered. A status response quoting `#gh-fix`'s body ("fix then
+/// close") once answered all four queued `#gh-fix <url>` heads. The head's own
+/// argument — its text with the `#tag` tokens removed, e.g. the issue URL — must
+/// also appear in the response, matched on whole words so `.../issues/22` is not
+/// proven by `.../issues/227`.
 pub fn prompt_preset_head_answered_by_response(
     content: &str,
     response_body: &str,
@@ -181,10 +189,53 @@ pub fn prompt_preset_head_answered_by_response(
         return false;
     }
     let response = normalize_for_answer_match(response_body);
-    expansions.into_iter().all(|(_, body)| {
+    let bodies_present = expansions.into_iter().all(|(_, body)| {
         let body = normalize_for_answer_match(&body);
         !body.is_empty() && response.contains(&body)
-    })
+    });
+    if !bodies_present {
+        return false;
+    }
+    let argument = preset_head_argument(head_text);
+    argument.is_empty() || format!(" {response} ").contains(&format!(" {argument} "))
+}
+
+/// The normalized argument of a preset-bearing queue head: the head text with
+/// lifecycle markers and every `#tag` token (preset references, intent tags)
+/// removed. Empty for a bare preset head such as `[#upgrade]`.
+fn preset_head_argument(head_text: &str) -> String {
+    let clean = strip_priority_markers(head_text);
+    let mut kept = String::with_capacity(clean.len());
+    let mut chars = clean.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '#' {
+            while chars
+                .peek()
+                .is_some_and(|next| next.is_ascii_alphanumeric() || matches!(next, '-' | '_'))
+            {
+                chars.next();
+            }
+            kept.push(' ');
+            continue;
+        }
+        kept.push(ch);
+    }
+    normalize_for_answer_match(&kept)
+}
+
+/// The only completion proof a CLAIMED free-text head accepts
+/// (`#ftstrikeclaimedmention`): an explicit `> **Queue prompt:**` echo whose
+/// quoted line is exactly the head, written by the responding agent, that
+/// is not a bare listing (`#bareechodrop`). A claim says another worker owns
+/// the head, so the weaker proofs every other head accepts — a preset-body
+/// mention, a `### Re:` identifier heading, a blockquote that merely starts
+/// with the head's prose — are not evidence for it. The caller must pass the
+/// agent's own captured response, never document text the binary has already
+/// embedded its consumed-prompt echo into.
+pub fn claimed_free_text_head_answered_by_response(response_body: &str, head_text: &str) -> bool {
+    let head_clean = strip_priority_markers(head_text);
+    !head_echoed_only_in_bare_singular_blocks(response_body, &head_clean)
+        && response_explicit_queue_prompt_echoes_head(response_body, &head_clean)
 }
 
 /// True when the active queue head is exactly the registered prompt preset id.
@@ -1332,7 +1383,8 @@ mod tests {
         let response = concat!(
             "### Re: upgrade\n\n",
             "Upgrade agent-doc and verify the current issues. ",
-            "Fix the referenced GitHub issue and add a regression test."
+            "Fix the referenced GitHub issue and add a regression test. ",
+            "Fixed https://github.com/example/sample/issues/100."
         );
 
         assert!(prompt_preset_head_answered_by_response(
@@ -1354,6 +1406,105 @@ mod tests {
             content,
             "### Re: partial\n\nUpgrade agent-doc and verify the current issues.",
             "#upgrade #gh-fix https://github.com/example/sample/issues/100"
+        ));
+    }
+
+    /// `#ftstrikeclaimedmention` (agent-doc-bugs.md 2026-10-09): a status
+    /// response quoting the `#gh-fix` preset body once must not answer every
+    /// `#gh-fix <url>` head. The head's own argument (its URL) must appear, on
+    /// whole-word boundaries.
+    #[test]
+    fn prompt_preset_body_mention_does_not_answer_every_preset_head() {
+        let content = concat!(
+            "---\nqueue_active: true\n",
+            "prompt_presets:\n",
+            "  '#gh-fix': fix then close\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- #gh-fix https://github.com/btakita/agent-doc/issues/218\n",
+            "- #gh-fix https://github.com/btakita/agent-doc/issues/22\n",
+            "- #gh-fix https://github.com/btakita/agent-doc/issues/227\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let status = concat!(
+            "### Re: GH #227 and #228 dispatched\n\n",
+            "Both new `#gh-fix` heads (\"fix then close\") are claimed and with their own ",
+            "subagents. GH #218 waits on PR #222.\n",
+        );
+        for head in [
+            "#gh-fix https://github.com/btakita/agent-doc/issues/218",
+            "#gh-fix https://github.com/btakita/agent-doc/issues/22",
+            "#gh-fix https://github.com/btakita/agent-doc/issues/227",
+        ] {
+            assert!(
+                !prompt_preset_head_answered_by_response(content, status, head),
+                "a preset-body mention is not an answer to {head}"
+            );
+        }
+        let answered = concat!(
+            "### Re: GH 227\n\n",
+            "fix then close: fixed https://github.com/btakita/agent-doc/issues/227 and closed it.\n",
+        );
+        assert!(prompt_preset_head_answered_by_response(
+            content,
+            answered,
+            "#gh-fix https://github.com/btakita/agent-doc/issues/227"
+        ));
+        assert!(
+            !prompt_preset_head_answered_by_response(
+                content,
+                answered,
+                "#gh-fix https://github.com/btakita/agent-doc/issues/22"
+            ),
+            "`.../issues/227` must not prove `.../issues/22`"
+        );
+        assert_eq!(preset_head_argument("[#upgrade]"), "");
+        assert_eq!(
+            preset_head_argument("🚧 #subagents #gh-fix https://x.dev/issues/9"),
+            "https x dev issues 9"
+        );
+    }
+
+    /// `#ftstrikeclaimedmention`: a claimed head accepts only an exact,
+    /// agent-authored `> **Queue prompt:**` echo — never a mention, a preset
+    /// body, or a blockquote that merely begins with its prose.
+    #[test]
+    fn claimed_head_proof_is_exact_queue_prompt_echo_only() {
+        let head = "#gh-fix https://github.com/btakita/agent-doc/issues/221";
+        let mention = "### Re: status\n\nGH #221 and https://github.com/btakita/agent-doc/issues/221 wait on PR 222.\n";
+        assert!(!claimed_free_text_head_answered_by_response(mention, head));
+        let quoted_prefix = concat!(
+            "### Re: x\n\n",
+            "> #gh-fix https://github.com/btakita/agent-doc/issues/221 and more prose\n\n",
+            "Done.\n",
+        );
+        assert!(!claimed_free_text_head_answered_by_response(
+            quoted_prefix,
+            head
+        ));
+        let other_head_echo = concat!(
+            "### Re: x\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/218\n\n",
+            "Done.\n",
+        );
+        assert!(!claimed_free_text_head_answered_by_response(
+            other_head_echo,
+            head
+        ));
+        let exact = concat!(
+            "### Re: GH 221\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/221\n\n",
+            "Merged PR 222 and closed GH 221.\n",
+        );
+        assert!(claimed_free_text_head_answered_by_response(exact, head));
+        let exact_multiline = concat!(
+            "### Re: GH 221\n\n",
+            "> **Queue prompt:**\n>\n> #gh-fix https://github.com/btakita/agent-doc/issues/221\n\n",
+            "Merged PR 222 and closed GH 221.\n",
+        );
+        assert!(claimed_free_text_head_answered_by_response(
+            exact_multiline,
+            head
         ));
     }
 

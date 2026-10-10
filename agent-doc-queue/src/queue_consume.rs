@@ -679,14 +679,18 @@ pub fn answered_free_text_head_node_keys(
     answered_free_text_head_node_keys_excluding_claimed(content, response_body, baseline, &[])
 }
 
-/// [`answered_free_text_head_node_keys`] that never selects a head an active
-/// worker claim holds (`#deferstrike`).
+/// [`answered_free_text_head_node_keys`] with the claimed-head rule
+/// (`#deferstrike`, `#ftstrikeclaimedmention`).
 ///
 /// A claim is the structural statement that a worker (a subagent, or the
-/// coordinator's own integration step) still owns the head. A response that
-/// quotes the head only to report that dispatch is not its answer, so the
-/// claim outranks the quote. The claim owner releases it
-/// (`agent-doc queue release`) before the closing cycle answers the head.
+/// coordinator's own integration step) still owns the head. Every weak proof
+/// is therefore refused for a claimed head: a mention, a preset-body quote, a
+/// `### Re:` identifier heading, or a blockquote that merely starts with the
+/// head's prose. A claimed head strikes only on an explicit exact
+/// `> **Queue prompt:**` echo in the agent's own response that is not followed
+/// by a deferral (`#ftstrikedefer`, which covers "dispatched to a subagent" /
+/// "waits for" reports), or after the owner releases the claim
+/// (`agent-doc queue release`).
 pub fn answered_free_text_head_node_keys_excluding_claimed(
     content: &str,
     response_body: &str,
@@ -755,20 +759,29 @@ pub fn answered_free_text_head_node_keys_excluding_claimed(
         if struck_texts.contains(&normalize_queue_prompt_text(text)) {
             continue;
         }
+        // `#ftstrikeclaimedmention`: a claimed head strikes ONLY on an exact,
+        // agent-authored `> **Queue prompt:**` echo of it. A status response
+        // that merely mentions claimed heads (or quotes their shared preset
+        // body) is a report about work another worker owns, not an answer.
         if claimed.claims(text) {
-            continue;
-        }
-        // `#bugautostruck`: the in-progress marker proves only which queue head
-        // was selected for this cycle. It is not evidence that the response
-        // addressed that head. Require exact quoted-prompt proof for ordinary
-        // free text, or resolved-expansion proof for a prompt-preset head.
-        if !crate::queue_response::free_text_head_answered_by_response(response_body, text)
+            if !crate::queue_response::claimed_free_text_head_answered_by_response(
+                response_body,
+                text,
+            ) {
+                continue;
+            }
+        } else if !crate::queue_response::free_text_head_answered_by_response(response_body, text)
             && !crate::queue_response::prompt_preset_head_answered_by_response(
                 content,
                 response_body,
                 text,
             )
         {
+            // `#bugautostruck`: the in-progress marker proves only which queue
+            // head was selected for this cycle. It is not evidence that the
+            // response addressed that head. Require exact quoted-prompt proof
+            // for ordinary free text, or resolved-expansion proof for a
+            // prompt-preset head.
             continue;
         }
         // `#ftstrikedefer`: the quoted echo is the responding agent's assertion
@@ -1983,9 +1996,40 @@ mod tests {
         "Released v0.35.453: tagged, the GitHub release and PyPI published, issues closed.\n",
     );
 
+    /// `#ftstrikeclaimedmention`: a claimed head is held back from every weak
+    /// proof, yet still strikes on the agent's exact `> **Queue prompt:**`
+    /// echo of it — unless the response defers it next to that echo.
     #[test]
-    fn deferstrike_claimed_head_is_never_struck_even_when_quoted() {
+    fn claimed_head_strikes_only_on_exact_undeferred_echo() {
         let claimed = vec!["release + publish".to_string()];
+        // Quoted and deferred by the claim owner: stays queued.
+        assert!(
+            answered_free_text_head_node_keys_excluding_claimed(
+                DEFERSTRIKE_DOC,
+                DEFERSTRIKE_DEFERRAL,
+                Some(DEFERSTRIKE_DOC),
+                &claimed,
+            )
+            .unwrap()
+            .is_empty(),
+            "a claimed head quoted only to defer it stays queued"
+        );
+        // Mentioned, not echoed: stays queued.
+        let mention = concat!(
+            "### Re: status — opus\n\n",
+            "`release + publish` is claimed by me and waits on PR 222.\n",
+        );
+        assert!(
+            answered_free_text_head_node_keys_excluding_claimed(
+                DEFERSTRIKE_DOC,
+                mention,
+                Some(DEFERSTRIKE_DOC),
+                &claimed,
+            )
+            .unwrap()
+            .is_empty()
+        );
+        // Exact agent-authored echo with an answer: struck.
         let keys = answered_free_text_head_node_keys_excluding_claimed(
             DEFERSTRIKE_DOC,
             DEFERSTRIKE_ANSWER,
@@ -1993,20 +2037,24 @@ mod tests {
             &claimed,
         )
         .unwrap();
-        assert!(keys.is_empty(), "a claimed head stays queued: {keys:?}");
-        assert!(
-            project_answered_free_text_strike_excluding_claimed(
-                DEFERSTRIKE_DOC,
-                DEFERSTRIKE_ANSWER,
-                Some(DEFERSTRIKE_DOC),
-                &claimed,
-            )
-            .unwrap()
-            .is_none()
+        assert_eq!(
+            keys.len(),
+            1,
+            "an exact echo answers a claimed head: {keys:?}"
         );
-        // The in-progress marker does not change the claim identity.
+        let projected = project_answered_free_text_strike_excluding_claimed(
+            DEFERSTRIKE_DOC,
+            DEFERSTRIKE_ANSWER,
+            Some(DEFERSTRIKE_DOC),
+            &claimed,
+        )
+        .unwrap()
+        .expect("the exact echo projects a strike");
+        assert!(projected.target_content.contains("~~release + publish~~"));
+        // The in-progress marker does not change the claim identity, and the
+        // echo still matches the marked head.
         let marked = DEFERSTRIKE_DOC.replace("- release + publish", "- 🚧 release + publish");
-        assert!(
+        assert_eq!(
             answered_free_text_head_node_keys_excluding_claimed(
                 &marked,
                 DEFERSTRIKE_ANSWER,
@@ -2014,8 +2062,93 @@ mod tests {
                 &claimed,
             )
             .unwrap()
-            .is_empty()
+            .len(),
+            1
         );
+    }
+
+    /// `#ftstrikeclaimedmention` live shape (agent-doc-bugs.md 2026-10-09
+    /// ~19:27): four claimed `#gh-fix <url>` heads (two coordinator-held,
+    /// two with live subagents). A status response that only MENTIONED them
+    /// and quoted the preset body struck all four.
+    const CLAIMED_MENTION_DOC: &str = concat!(
+        "---\nqueue_active: true\nprompt_presets:\n  '#gh-fix': fix then close\n---\n\n",
+        "<!-- agent:queue go -->\n",
+        "- #gh-fix https://github.com/btakita/agent-doc/issues/218\n",
+        "- #gh-fix https://github.com/btakita/agent-doc/issues/221\n",
+        "- #gh-fix https://github.com/btakita/agent-doc/issues/227\n",
+        "- #gh-fix https://github.com/btakita/agent-doc/issues/228\n",
+        "- release + publish\n",
+        "<!-- /agent:queue -->\n",
+    );
+    const CLAIMED_MENTION_STATUS: &str = concat!(
+        "### Re: GH #227 and #228 dispatched — opus-5.5\n\n",
+        "Both new `#gh-fix` heads (\"fix then close\") are claimed and with their own ",
+        "subagents. Each will open a `Fixes #N` PR.\n\n",
+        "- **GH #227 (`subagent:gh227`):** https://github.com/btakita/agent-doc/issues/227\n",
+        "- **GH #228 (`subagent:gh228`):** https://github.com/btakita/agent-doc/issues/228\n\n",
+        "GH #218, GH #221 and `release + publish` are unchanged.\n",
+    );
+
+    #[test]
+    fn ftstrikeclaimedmention_status_mention_never_strikes_claimed_heads() {
+        let claimed: Vec<String> = [218, 221, 227, 228]
+            .iter()
+            .map(|n| format!("#gh-fix https://github.com/btakita/agent-doc/issues/{n}"))
+            .collect();
+        assert!(
+            answered_free_text_head_node_keys_excluding_claimed(
+                CLAIMED_MENTION_DOC,
+                CLAIMED_MENTION_STATUS,
+                Some(CLAIMED_MENTION_DOC),
+                &claimed,
+            )
+            .unwrap()
+            .is_empty(),
+            "a status mention strikes no claimed head"
+        );
+        // Even with no claims, the live status (issue numbers plus the shared
+        // preset body, no URLs) is not an answer to any `#gh-fix` head.
+        let live_status = concat!(
+            "### Re: GH #227 and #228 dispatched — opus-5.5\n\n",
+            "Both new `#gh-fix` heads (\"fix then close\") are claimed and with their own ",
+            "subagents.\n\nGH #218, GH #221 and `release + publish` are unchanged.\n",
+        );
+        assert!(
+            answered_free_text_head_node_keys(
+                CLAIMED_MENTION_DOC,
+                live_status,
+                Some(CLAIMED_MENTION_DOC),
+            )
+            .unwrap()
+            .is_empty(),
+            "a preset-body mention strikes no unclaimed `#gh-fix` head either"
+        );
+        // An exact agent-authored echo of ONE claimed head strikes only it.
+        let closing = concat!(
+            "### Re: GH 221 — opus-5.5\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/221\n\n",
+            "PR 222 merged; GH 221 closed as fixed.\n",
+        );
+        let projected = project_answered_free_text_strike_excluding_claimed(
+            CLAIMED_MENTION_DOC,
+            closing,
+            Some(CLAIMED_MENTION_DOC),
+            &claimed,
+        )
+        .unwrap()
+        .expect("the exact echo strikes its claimed head");
+        assert_eq!(projected.node_keys.len(), 1);
+        let content = &projected.target_content;
+        assert!(content.contains("~~#gh-fix https://github.com/btakita/agent-doc/issues/221~~"));
+        for n in [218, 227, 228] {
+            assert!(
+                content.contains(&format!(
+                    "- #gh-fix https://github.com/btakita/agent-doc/issues/{n}\n"
+                )),
+                "claimed head {n} stays live"
+            );
+        }
     }
 
     #[test]

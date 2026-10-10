@@ -19152,19 +19152,19 @@ revised operator request
         assert!(!state.queue.completed_heads.contains("queue:1:ready-work:0"));
     }
 
-    /// `#deferstrike` live shape (agent-doc-bugs.md 2026-10-04): the controller
-    /// struck `release + publish` while `coordinator:integration` held its
-    /// claim. The observation reads the claim ledger, so the projection has no
-    /// target until the claim is released.
+    /// `#deferstrike` / `#ftstrikeclaimedmention`: the controller struck a head
+    /// while `coordinator:integration` held its claim. The observation reads the
+    /// claim ledger, so a claimed head refuses every weak proof (here an
+    /// unlabeled blockquote of its text) and has no strike target until the
+    /// claim is released; only an exact `> **Queue prompt:**` echo would strike
+    /// it while claimed (covered in `agent-doc-queue`).
     #[test]
     fn claimed_free_text_head_gets_no_answered_strike_projection_until_released() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("claimed-session.md");
         let head = "close the GH 127 128 129 issues after integration lands";
-        let response = format!(
-            "### Re: integration — opus\n\n> **Queue prompt:** {head}\n\nClosed all three.\n"
-        );
+        let response = format!("### Re: integration — opus\n\n> {head}\n\nClosed all three.\n");
         let content = format!(
             concat!(
                 "---\n",

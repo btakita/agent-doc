@@ -1884,6 +1884,55 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
             consumed_texts.truncate(proven);
         }
     }
+    // `#ftstrikeclaimedmention` (agent-doc-bugs.md 2026-10-09): the leading
+    // free-text consume must never take a CLAIMED head on the strength of the
+    // closeout alone. It struck the coordinator-claimed `#gh-fix .../218` head
+    // and then synthesized a `> **Queue prompt:**` echo for it into a status
+    // response that never answered it. A claimed head is consumed only when
+    // the agent's own captured response carries an exact echo of it; the
+    // binary's embedded echo is written AFTER this decision and never counts.
+    if leading_done_consume_count == 0 {
+        let claimed_heads = crate::queue_claim::claimed_live_head_texts_for_content(file, content);
+        if !claimed_heads.is_empty() {
+            let claimed =
+                agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);
+            let response_body = projected_capture_response_body(file);
+            let proven = consumed_texts
+                .iter()
+                .take_while(|text| {
+                    !claimed.claims(text)
+                        || response_body.as_deref().is_some_and(|body| {
+                            agent_doc_queue::queue_response::claimed_free_text_head_answered_by_response(
+                                body, text,
+                            )
+                        })
+                })
+                .count();
+            if proven < consumed_texts.len() {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_consume_refused_claimed_head file={} requested={} proven={} head_hash={} reason=claimed_head_without_exact_agent_echo (#ftstrikeclaimedmention)",
+                        file.display(),
+                        consumed_texts.len(),
+                        proven,
+                        agent_doc_hash::content_hash(
+                            consumed_texts
+                                .get(proven)
+                                .map(String::as_str)
+                                .unwrap_or("")
+                                .trim()
+                        ),
+                    ),
+                );
+                if proven == 0 {
+                    return Ok(None);
+                }
+                consume_count = proven;
+                consumed_texts.truncate(proven);
+            }
+        }
+    }
     let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
     let completed_entries =
         agent_doc_queue::document_queue::mark_first_n_prompts_completed(&entries, consume_count);
@@ -3888,6 +3937,107 @@ mod core_tests {
             plan.new_document.contains("- I can't login.\n"),
             "{}",
             plan.new_document
+        );
+    }
+
+    /// `#ftstrikeclaimedmention` (agent-doc-bugs.md 2026-10-09 ~19:27): the
+    /// leading free-text consume struck the coordinator-claimed
+    /// `#gh-fix .../218` head of a status response that never answered it, and
+    /// synthesized a `> **Queue prompt:**` echo for it. A claimed head is
+    /// consumed — and echoed — only when the agent's own captured response
+    /// carries an exact echo of it.
+    #[test]
+    fn leading_consume_never_takes_or_echoes_a_claimed_head_without_exact_agent_echo() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("bugs.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let head = "#gh-fix https://github.com/btakita/agent-doc/issues/218";
+        let content = concat!(
+            "---\nqueue_active: true\nprompt_presets:\n  '#gh-fix': fix then close\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: GH #227 and #228 dispatched\n\nStatus.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- #gh-fix https://github.com/btakita/agent-doc/issues/218\n",
+            "- #gh-fix https://github.com/btakita/agent-doc/issues/221\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        crate::queue_claim::claim(&doc, head, "coordinator:pr222-integration", 3600).unwrap();
+        let record = |response: &str| {
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+            let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .unwrap();
+            let sha = agent_doc_hash::content_hash(response);
+            agent_doc_cycle_state_io::append_response_captured_body(
+                &doc,
+                agent_doc_cycle_state_io::CapturedResponseFactInput {
+                    cycle_id: &state.cycle_id,
+                    capture_id: &state.cycle_id,
+                    response_sha256: &sha,
+                    response_body: response,
+                    intent_body: None,
+                    mutation_plan_json: None,
+                    file_hash: None,
+                    snapshot_hash: None,
+                    baseline_content: None,
+                },
+            )
+            .unwrap();
+            agent_doc_cycle_state_io::mark_response_captured(
+                &doc,
+                "test_capture",
+                Some(content),
+                Some(content),
+                &sha,
+                Some(&state.cycle_id),
+            )
+            .unwrap();
+        };
+
+        // A status response that only mentions the claimed head (and quotes the
+        // shared preset body) consumes nothing and embeds no echo.
+        record(concat!(
+            "### Re: GH #227 and #228 dispatched\n\n",
+            "Both new `#gh-fix` heads (\"fix then close\") are claimed. ",
+            "GH #218 and GH #221 wait on PR #222.\n",
+        ));
+        let plan =
+            plan_queue_prompt_consumption_with_snapshot_and_count(&doc, content, None, &[], 1)
+                .unwrap();
+        assert!(
+            plan.is_none(),
+            "a claimed head was consumed by a mention: {:?}",
+            plan.as_ref().map(|plan| &plan.consumed_texts)
+        );
+
+        // The agent's own exact echo of the claimed head still consumes it.
+        record(concat!(
+            "### Re: GH #227 and #228 dispatched\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/218\n\n",
+            "PR 222 merged with the Remote Dev proof; GH 218 closed.\n",
+        ));
+        let plan =
+            plan_queue_prompt_consumption_with_snapshot_and_count(&doc, content, None, &[], 1)
+                .unwrap()
+                .expect("an exact agent echo consumes the claimed head");
+        assert_eq!(plan.consumed_texts, vec![head.to_string()]);
+        assert!(
+            plan.new_document
+                .contains("- #gh-fix https://github.com/btakita/agent-doc/issues/221\n"),
+            "{}",
+            plan.new_document
+        );
+
+        // A released claim returns the head to ordinary closeout semantics.
+        crate::queue_claim::release(&doc, head).unwrap();
+        record("### Re: GH #227 and #228 dispatched\n\nStatus.\n");
+        assert!(
+            plan_queue_prompt_consumption_with_snapshot_and_count(&doc, content, None, &[], 1)
+                .unwrap()
+                .is_some(),
+            "an unclaimed head keeps the generic closeout consume"
         );
     }
 

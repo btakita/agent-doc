@@ -187,10 +187,15 @@ quote.
 quote alone reads as "answered" and strikes the head. To keep it queued, either:
 - **Claim it** (preferred, structural): `agent-doc queue claim <FILE> --item "<head>"
   --owner <owner>` (`subagent:<label>`, or `coordinator:integration` for work you
-  integrate yourself). A head with a live claim is never auto-struck, by this
-  cycle's `#ftstrike` or by preflight's residue strike, and the pre-write gate does
-  not demand evidence for it even if this cycle selected it. Release the claim
-  (`agent-doc queue release <FILE> --item "<head>"`) before the cycle that answers it.
+  integrate yourself). A claimed head is never struck by a mention, a shared
+  preset-body quote, a `### Re:` heading, the closeout's leading-head consume, or
+  preflight's residue strike, and the binary never synthesizes a
+  `> **Queue prompt:**` echo for it (`#ftstrikeclaimedmention`). The pre-write
+  gate does not demand evidence for it even if this cycle selected it. It strikes
+  only when your own response carries an exact `> **Queue prompt:**` echo of it
+  with no deferral beside that echo, or after you release the claim
+  (`agent-doc queue release <FILE> --item "<head>"`). So a status response may
+  name claimed heads freely; quote a claimed head only in the cycle that closes it.
 - **Defer it explicitly:** follow the `> **Queue prompt:**` quote with a paragraph
   that opens with the bold lead `**Deferred:**` (any `**Deferred…**` lead, such as
   `**Deferred, not done:**`, counts) and says what it waits for. Plain phrasing such

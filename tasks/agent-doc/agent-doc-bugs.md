@@ -158,6 +158,22 @@ Not yet. The batch is set up for local install only. These queue items carry `#s
 **Should it be released?** I'd recommend it. The supervisor-thrash, bare-shell-restart, and stale-supervisor dispatch fixes are production behavior that every installed user hits, not just this machine. Releasing would be `make release` as v0.35.485 after the merge to `main`: a VERSIONS.md entry, an editor parity row, and the same check/tmux-ci/tag/publish/install-full path as 0.35.484. That release would then replace the separate `make install`.
 
 Add `release + publish` to the queue, or answer here, and I'll run the release in place of the plain install.
+
+### Re: release queued; GH #234 and `#testisolationtests` dispatched — opus-5-5 · 2026-10-10T16:50-04:00
+
+**Release + publish (v0.35.485), coordinator-owned.**
+- **Branch:** `integrate-0485` carries 11 commits, all applied cleanly onto `main` (`b3eb4ddf9`). It contains supthrash, `#runfrontendcrashed`, `#explicitrunqueue`, `#freetextqueue` plus its Codex transcript-scan fix, the multi-line queue cruft fix, `#runfrontenderror`, the Codex Stop-hook root-cause fix (`c378feb2d`: a stale document cache made every recovery run a second full closeout), the single `worker_completion` test hatch, and the realtime half of `653dbeb78`. The two duplicate `unbounded` hatches were dropped.
+- **Suite:** the authoritative `make check` nextest stage passed 9956/9956, with none failing or retried. The rest of the gate is still running.
+- **Next:** fast-forward `main`, write the VERSIONS.md entry and parity row, bump to 0.35.485, then `make release`. That covers tag, publish, and `install-full`, which replaces the separate `make install`. Each integrated item closes after that.
+
+**Dispatched this cycle:**
+
+| Item | Owner | Brief |
+|---|---|---|
+| GH #234 (Remote Dev layout swap) | `subagent:gh234` | Survivors keep their side and relative order through split width changes. Includes a regression test for the issue's 2→3→2 trace and a property test. I read `#gt-fix` as `#gh-fix` (fix then close); the coordinator closes the issue after integration. |
+| `#testisolationtests` | `subagent:testisolation` | Add a project-root ceiling (like `GIT_CEILING_DIRECTORIES`) under test and a harness guard against a TMPDIR with an `.agent-doc` ancestor. It also inventories what test runs wrote into `~/.agent-doc`, as a cleanup plan for your approval. It does not scrub anything. |
+
+Both finished after the 0.35.485 batch boundary, so they go into the next release.
 <!-- agent:boundary:eea96e0d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -166,14 +182,15 @@ Add `release + publish` to the queue, or answer here, and I'll run the release i
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#runfrontendcrashed]
+- do [#testisolationtests]
+- ⏭️ do [#runfrontendcrashed]
 - ⏭️ do [#runfrontenderror]
-- ~~⏭️ do [#runctrlclaude]~~
+- ~~do [#runctrlclaude]~~
 - 🚧 do [#explicitrunqueue]
 - 🚧 do [#freetextqueue]
 - 🚧 Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.
-- #
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 #gt-fix https://github.com/btakita/agent-doc/issues/234
+- ~~release + publish~~
 <!-- /agent:queue -->
 
 ## Backlog

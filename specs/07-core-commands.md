@@ -427,6 +427,10 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   `agent-doc-jetbrains-262-<version>.zip`, and an unprovable or unsupported
   target fails before any installed tree is replaced. `--local --all-installed`
   applies the same policy independently to every existing installation.
+  When a live IDE owns a 262 target, the modular package has no restart-free
+  dynamic upgrade entry point: the installer skips the attach, replaces the
+  files, and reports restart-required naming that reason
+  (`declined_by=modular_package`), not a legacy-package or upgrader failure.
 - Downloaded editor packages are verified before they are extracted or handed to
   the editor CLI (`#editorpkgdigest`, GH #55). The expected digest comes from the
   release's `EDITOR-PACKAGES.sha256` manifest, and from GitHub's per-asset

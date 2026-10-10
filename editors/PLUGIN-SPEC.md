@@ -37,6 +37,12 @@ Rust binary.
   unsupported target fails closed with guidance instead of defaulting to the
   classic package. Update numbers are compared only within one line; a target
   holding the other line is always replaced with its own line's package.
+- Restart-free dynamic upgrade is a per-line capability. The JetBrains classic
+  line ships an attach launcher; the exact-262 modular line does not, so a live
+  262 IDE gets a file replacement plus an explicit restart-required verdict that
+  names the missing entry point, never a misleading "legacy package" or
+  upgrader-failure warning. Live-process plugin-jar probes match every line's
+  versioned plugin jar (`agent-doc-jetbrains-<v>.jar`, `agent.doc-<v>.jar`).
 
 There is no filesystem delivery queue, live-value projection, receipt file,
 plugin-owner file, queue journal, or file-signal compatibility transport.

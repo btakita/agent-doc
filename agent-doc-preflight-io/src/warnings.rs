@@ -607,13 +607,13 @@ fn live_plugin_install_state(status: &LivePluginGenerationStatus) -> PluginInsta
     if !status.kind.eq_ignore_ascii_case("jetbrains") || status.pid == 0 {
         return PluginInstallState::default();
     }
-    let Some(jar_stem) = plugin_jar_stem(&status.kind) else {
+    let Some(jar_stems) = plugin_jar_stems(&status.kind) else {
         return PluginInstallState::default();
     };
     plugin_install_state_for_mapped_jar(
         &status.kind,
         &status.expected,
-        &probe_mapped_plugin_jar(status.pid, jar_stem),
+        &probe_mapped_plugin_jar(status.pid, jar_stems),
         &agent_doc_fs::jetbrains_install::jetbrains_system_roots(),
     )
 }
@@ -654,7 +654,14 @@ fn jetbrains_plugins_dir_from_mapped_jar(mapped: &MappedPluginJar) -> Option<Pat
     };
     let lib_dir = path.parent()?;
     let plugin_dir = lib_dir.parent()?;
-    if lib_dir.file_name()? != "lib" || plugin_dir.file_name()? != "agent-doc-jetbrains" {
+    // `#jb262dynupgrade`: both lines install into the canonical tree; an older
+    // 262 install may still sit in its legacy `agent-doc-jetbrains-262/` tree.
+    if lib_dir.file_name()? != "lib"
+        || !matches!(
+            plugin_dir.file_name()?.to_str()?,
+            "agent-doc-jetbrains" | "agent-doc-jetbrains-262"
+        )
+    {
         return None;
     }
     plugin_dir.parent().map(Path::to_path_buf)
@@ -724,7 +731,7 @@ pub fn plugin_byte_identity_warnings_from(
     plugin_byte_identity_warnings_with_restart_verdicts(probes, &HashMap::new())
 }
 
-pub use agent_doc_fs::plugin_jar::{PLUGIN_RESTART_REQUIRED_MARKER, plugin_jar_stem};
+pub use agent_doc_fs::plugin_jar::{PLUGIN_RESTART_REQUIRED_MARKER, plugin_jar_stems};
 
 /// Like [`plugin_byte_identity_warnings_from`], but a process whose last install
 /// already recorded a refused restart-free upgrade (`restart_verdicts[pid]`) is told
@@ -771,7 +778,7 @@ pub fn plugin_byte_identity_warnings(file: &Path) -> Vec<PreflightWarning> {
     let mut probes = Vec::new();
     let mut probed: HashSet<u32> = HashSet::new();
     for registration in &registrations {
-        let Some(jar_stem) = plugin_jar_stem(&registration.editor_kind) else {
+        let Some(jar_stems) = plugin_jar_stems(&registration.editor_kind) else {
             continue;
         };
         let pid = u32::try_from(registration.pid).unwrap_or_default();
@@ -781,7 +788,7 @@ pub fn plugin_byte_identity_warnings(file: &Path) -> Vec<PreflightWarning> {
         probes.push((
             registration.editor_kind.clone(),
             pid,
-            probe_mapped_plugin_jar(pid, jar_stem),
+            probe_mapped_plugin_jar(pid, jar_stems),
         ));
     }
     let restart_verdicts = probes
@@ -798,7 +805,7 @@ pub fn plugin_byte_identity_warnings(file: &Path) -> Vec<PreflightWarning> {
 mod tests {
     use super::{
         MappedPluginJar, classify_mapped_plugin_jar, plugin_byte_identity_warnings_from,
-        plugin_install_state_for_mapped_jar, plugin_jar_stem, prefer_mapped_plugin_jar,
+        plugin_install_state_for_mapped_jar, plugin_jar_stems, prefer_mapped_plugin_jar,
     };
 
     /// `#pluginbyteidentity`: the kernel's `" (deleted)"` suffix is the only
@@ -1163,13 +1170,13 @@ mod tests {
     fn jar_stem_is_scoped_to_jvm_hosted_editors() {
         for kind in ["jetbrains", "JetBrains", "intellij", "idea"] {
             assert_eq!(
-                plugin_jar_stem(kind),
-                Some("agent-doc-jetbrains-"),
+                plugin_jar_stems(kind),
+                Some(&["agent-doc-jetbrains-", "agent.doc-"][..]),
                 "{kind}"
             );
         }
         for kind in ["vscode", "zed", "neovim", ""] {
-            assert_eq!(plugin_jar_stem(kind), None, "{kind}");
+            assert_eq!(plugin_jar_stems(kind), None, "{kind}");
         }
     }
 
@@ -1408,6 +1415,28 @@ mod tests {
             core[0].message,
             stale_plugin_message("jetbrains", "0.2.205", "0.2.206", None, false)
         );
+    }
+
+    /// `#jb262dynupgrade`: a live exact-262 IDE maps the modular root jar
+    /// `agent.doc-<v>.jar`; its install state resolves from the same plugin
+    /// tree as a classic mapping, canonical or legacy `agent-doc-jetbrains-262`.
+    #[test]
+    fn stale_plugin_install_state_reads_a_modular_262_mapped_jar() {
+        for plugin_dir in ["agent-doc-jetbrains", "agent-doc-jetbrains-262"] {
+            let tmp = TempDir::new().unwrap();
+            let live = tmp.path().join("data/IntelliJIdea2026.2");
+            let lib = live.join(plugin_dir).join("lib");
+            std::fs::create_dir_all(&lib).unwrap();
+            let live_jar = lib.join("agent.doc-0.2.514.jar");
+            std::fs::write(&live_jar, b"live").unwrap();
+            let mapped = MappedPluginJar::Current {
+                path: live_jar.to_string_lossy().into_owned(),
+                inode: 1,
+            };
+            let state = plugin_install_state_for_mapped_jar("jetbrains", "0.2.515", &mapped, &[]);
+            assert_eq!(state.installed.as_deref(), Some("0.2.514"), "{plugin_dir}");
+            assert!(!state.staged_for_restart, "{plugin_dir}");
+        }
     }
 
     /// GH #180: an idle IDE data directory can hold a newer jar or a pending

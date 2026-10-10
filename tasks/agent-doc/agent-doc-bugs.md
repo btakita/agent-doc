@@ -676,6 +676,25 @@ There are no actionable follow-up items to add to the backlog or queue.
 - **After that, I'll verify:** the Release run (this time with the `relcimavenlocal` fix), the release assets, PyPI 0.35.482, and that the install clears the frontend.md recycle wedge. Then I close the batch items, the release item and `releasepublishgate`.
 
 The `runfrontenddispatch` fix (`fix/runfrontenddispatch` `3d9fbad86`) arrived after the release's `make check` started, so it is held for the next release.
+
+### Re: v0.35.482 released — batch closed — opus-5.5 · 2026-10-10T01:10-04:00
+
+> **Queue prompt:** release + publish
+
+**v0.35.482 is released and published.**
+
+- **GitHub:** Release run 38025127512 passed every job: `plugins`, all 6 binary builds, `release` and `homebrew / bump-formula`. The `plugins` job is the one that failed v0.35.481, so the `relcimavenlocal` fix works.
+- **Release page:** v0.35.482 is **Latest** (published 05:08:33Z) with 13 assets: 6 binary archives, `agent-doc-jetbrains-0.2.517.zip`, `agent-doc-jetbrains-262-0.2.518.zip`, both ranged XML feeds, the VS Code `.vsix`, and `SHA256SUMS` + `EDITOR-PACKAGES.sha256`.
+- **PyPI:** 0.35.482 is live. The PyPI and Book workflows also passed.
+- **Local:** `main` and the tag are `0dc81e8ae`. `install-full` installed agent-doc 0.35.482. The `make release` "exit 1" came from my logging wrapper: `install-full`'s cleanup deleted `target/`, including my log file, so my trailing `echo` failed. The release itself completed.
+- **Before tagging:** `make check` and `make tmux-ci` passed on the version-projected tree (9901 of 9901 Rust tests).
+
+**Closed (shipped in 0.35.482):** `ftstrikeclaimedmention`, `crossrootcolumnflip`, `staleharnessturnlive`, `jb262dynupgrade`, `relcimavenlocalreleasepu`, and the `releasepublishgate` review item (superseded by the operator's release authorization and now satisfied).
+
+**Still open: `runfrontenddispatch`.**
+- **Fix ready:** `fix/runfrontenddispatch` `3d9fbad86` fixes the root cause. A reload done without the lock overwrote a newly recorded recycle start, so the supervisor's settle was written at the stale epoch. `make check` exit 0. It is held for the next release because it arrived after this release's `make check` started.
+- **Live wedge remains:** frontend.md in haiven-dev is still `started` 4351 / `settled` 4350. The install's recycle requests skipped it, and `agent-doc admin recycle` (controller handoff) does not rewrite that document's supervisor ledger. Only a restart of pane %166's own supervisor writes a fresh matching pair, and that ends the live session there. That restart is yours to do, or wait for the dispatch-gate self-heal follow-up below.
+- **Follow-up added: `dispatchreadyselfheal`.** The dispatch-only gate should treat a supervisor that registered ready after the recycle start as settled, so ledger damage like this heals without a restart.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -686,11 +705,11 @@ The `runfrontenddispatch` fix (`fix/runfrontenddispatch` `3d9fbad86`) arrived af
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#runfrontenddispatch]
 - ~~do [#jb262dynlauncherrecommen]~~
-- 🚧 do [#relcimavenlocalreleasepu]
-- ⏭️ do [#ftstrikeclaimedmention]
-- 🚧 do [#crossrootcolumnflip]
-- 🚧 do [#staleharnessturnlive]
-- 🚧 do [#jb262dynupgrade]
+- ~~do [#relcimavenlocalreleasepu]~~
+- ~~⏭️ do [#ftstrikeclaimedmention]~~
+- ~~do [#crossrootcolumnflip]~~
+- ~~do [#staleharnessturnlive]~~
+- ~~do [#jb262dynupgrade]~~
 - ~~do [#previewrepin]~~
 - ~~#actionable-review~~
 - 🚧 release + publish
@@ -699,12 +718,8 @@ The `runfrontenddispatch` fix (`fix/runfrontenddispatch` `3d9fbad86`) arrived af
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#dispatchreadyselfhealdis] dispatchreadyselfheal [agent-doc] Dispatch-only recycle gate self-heal: agent-doc-route-io/src/dispatch_only/proof.rs refuses with recycle_ttl_elapsed_supervisor_alive whenever an InFlight recycle is past TTL and the supervisor is alive, even when that supervisor registered state=ready AFTER the recycle start (frontend.md in haiven-dev: started 4351 at 02:00:14Z, ready 02:00:18Z, settled written at stale 4350, refused for hours). Treat ready-after-start as settled (and re-mint the settle at the in-flight epoch), with regression coverage; then confirm Run Agent Doc on frontend.md dispatches. Ship together with fix/runfrontenddispatch 3d9fbad86.
 - [ ] 🚧 [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
-- [ ] 🚧 [#relcimavenlocalreleasepu] relcimavenlocal: [agent-doc] Release v0.35.481 did NOT publish: Release run 38014769297 (2026-10-10T01:51Z) failed in the plugins job at :backend:compileKotlin, Could not find io.github.lazily:lazily:0.39.0, so release + homebrew were skipped. Latest published is still v0.35.480 (GitHub + PyPI). Cause: 548a24874 (lz262resolve) added the publish-pinned-lazily-kt-to-mavenLocal step to ci.yml only; release.yml checks out ../lazily-kt but never publishes it to mavenLocal for the JetBrains 262 build. Port that step into release.yml (with a parity test/guard so ci.yml and release.yml cannot drift), then re-run the release by cutting v0.35.482 (the existing v0.35.481 tag runs its own old release.yml).
-- [ ] 🚧 [#ftstrikeclaimedmention] [agent-doc] ftstrike over-strikes claimed free-text queue heads: on 2026-10-09 ~19:27 a status response that only MENTIONED GH 218/221/227/228 (all claimed: two coordinator-held awaiting PR 222, two with live subagents) struck all four as answered this cycle, and the binary itself synthesized a queue-prompt echo for the coordinator-claimed 218 driver line, consuming it. Restored by hand with agent-doc patch FILE queue. A claimed head must strike only via an explicit exact queue-prompt echo authored by the agent (or a claim release), never via a mention or a binary-synthesized echo; add regression coverage.
-- [ ] 🚧 [#crossrootcolumnflip] [agent-doc] Two project controllers sharing one tmux main window (agent-loop + haiven-dev, cross-root layout) publish competing layouts: after an IDEA restart the haiven-dev route published [agent-doc-bugs, contracts] (gen 21) while the agent-loop controller's editor-surface churn published gens 32-36 ending [agent-doc-bugs, api.md]; whichever publishes last wins and a column can flip between documents. Make cross-root main-window layout single-owner (or merge both controllers' desired columns through one arbiter) so post-restart churn converges to the editor's real visible set. Evidence: src/haiven-dev/.agent-doc/logs/ops.log 22:17:47Z-22:18:23Z on 2026-10-09; see fix/stale-third-main-pane (943c6041e) report.
-- [ ] 🚧 [#staleharnessturnlive] [agent-doc] supervisor_empty_preflight_reclaim_probe reports outcome=protected_live_turn harness_turn_live=true for an IDLE owner pane (contracts.md pane %161 at its prompt, 2026-10-09 22:11:37Z, cycle-1791583495987 response_captured), which deferred recycle/reclaim and kept automatic recovery from running. Find why the live-turn lease outlives the harness turn and make it expire/clear at the turn's Stop boundary, with regression coverage.
-- [ ] 🚧 [#jb262dynupgrade] [agent-doc] Restart-free upgrade for the exact-262 modular JetBrains plugin: the 262 ZIP has no dynamic-upgrade launcher entry point, so updating a running 262 IDE falls back to file replacement + restart with a misleading 'predates restart-free dynamic upgrade support' warning; and the running-IDE jar probes (src/plugin.rs ~1366, plugin_activation.rs) only match agent-doc-jetbrains-*.jar, missing the 262 agent.doc-<v>.jar. Add a 262 entry point (or an accurate warning) and teach the probes the 262 jar name, with tests. Found by jetbrains262installselect (d82196a3f).
 <!-- /agent:backlog -->
 
 ## Review
@@ -712,7 +727,6 @@ The `runfrontenddispatch` fix (`fix/runfrontenddispatch` `3d9fbad86`) arrived af
 <!-- agent:review -->
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
-- [/] [#releasepublishgate] [operator-verify] Authorize release + publish only after: (1) CI is green for the final PR 222 head after ci25gradle (run 37974793628 on c39de1b04 failed); (2) gh218remoteproof is resolved; (3) PR 222 is marked ready and merged and GH 221 is closed, resolving gh221mergeclose; and (4) repository secret HOMEBREW_TAP_TOKEN is provisioned (gh secret list on btakita/agent-doc showed nothing on 2026-10-09, possibly because the token lacks secret visibility). Only then perform the authorized release + publish and verify delivery.
 - [/] [#gh218remoteproof] [operator-verify] GH 218: PR 222 is MERGED (01:25Z 2026-10-10, merge cc6e458c6) at head 34842a23a, CI run 38002449411 green. Run the real IDEA 2026.2.3 (262) Remote Dev acceptance matrix against prerelease jetbrains-262-preview-34842a2 (asset agent-doc-jetbrains-262-0.2.511.zip, id 626772959, 2556136 bytes, sha256 2ef328588d1491446f1a45a83775ee220c13507f5cdd9bca4f5c2111f9e864a7), or against the 0.2.514 ZIP of the next published release. Verify both downloaded copies with make verify-jetbrains-262-preview BACKEND_ZIP=... CLIENT_GATEWAY_ZIP=... first, and install the same ZIP on backend and Client/Gateway. Check: detached-only isolated terminal; same-document main-wins read-only placeholder with byte-identical main; focus/sync/resize causes no main mutation; close/rejoin; backend restart/client reconnect before the first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Post results on 218 citing that tag and commit, then close 218. jetbrains-262-preview-c39de1b is superseded.
 - [/] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-06: 8.363 GiB of 10.0 GiB, 1.637 GiB headroom, 198 releases through 0.35.465, post-cutover mean 35.3 KiB, approximately 48,621 further releases fit; VERDICT headroom fine. The support issue remains open with only the github-actions bot comment and has not changed since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.

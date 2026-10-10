@@ -6769,9 +6769,16 @@ mod tests {
     }
     #[test]
     fn preflight_abandons_stale_empty_preflight_started_prompt_drift_without_capture() {
-        for per_component in [false, true] {
-            assert_failed_launch_prompt_survives_retries(per_component);
-        }
+        // `#preflightsettleflake`: one convergence mode per test. The two modes
+        // used to run in one test (six sequential preflights), which overran
+        // nextest's terminate deadline on a loaded machine.
+        assert_failed_launch_prompt_survives_retries(false);
+    }
+
+    #[test]
+    fn preflight_abandons_stale_empty_preflight_started_prompt_drift_without_capture_per_component()
+    {
+        assert_failed_launch_prompt_survives_retries(true);
     }
 
     fn assert_failed_launch_prompt_survives_retries(per_component: bool) {
@@ -6783,8 +6790,13 @@ mod tests {
         )
         .unwrap();
         let doc = root.join("session.md");
+        // `#preflightsettleflake`: `agent_doc_debounce: 0` turns off the 2000ms
+        // operator-quiescence window (and its 3s settle ceiling). This test runs
+        // six full preflights; with the default window each one slept on real
+        // timers, and at load average ~100 the test overran nextest's
+        // terminate deadline. Quiescence is not what this test asserts.
         let snapshot = concat!(
-            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "---\nagent_doc_format: template\nagent_doc_session: test\nagent_doc_debounce: 0\n---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "### Re: older — gpt-5\n",
             "old body\n",

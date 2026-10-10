@@ -204,6 +204,19 @@ pub const STOP_HOOK_BUDGET_SECS: u64 = 45;
 /// and a fail-closed response when SQLite is contended by a concurrent closeout.
 const STOP_HOOK_STATE_DB_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const STOP_HOOK_BUDGET_ENV: &str = "AGENT_DOC_CODEX_STOP_HOOK_BUDGET_SECS";
+/// Deadline source for one Stop hook invocation (`#stophookdeadlineflake`).
+///
+/// Unset (production): the [`STOP_HOOK_BUDGET_SECS`] wall-clock budget, so the
+/// hook answers before the harness's outer timeout. `worker_completion`: no
+/// wall-clock deadline; the hook waits for the worker's actual completion
+/// event. Integration tests that assert what the hook DOES (replay, resume,
+/// commit) select it, because racing real closeout work against a fixed timer
+/// made their outcome depend on machine load: at load average ~100 the same
+/// fixture took 37-42s in one phase and failed closed on the 45s budget. The
+/// budget's own behaviour is covered deterministically by the unit tests below
+/// with an injected task.
+const STOP_HOOK_DEADLINE_ENV: &str = "AGENT_DOC_CODEX_STOP_HOOK_DEADLINE";
+const STOP_HOOK_DEADLINE_WORKER_COMPLETION: &str = "worker_completion";
 #[cfg(test)]
 const STOP_HOOK_TEST_DELAY_MS_ENV: &str = "AGENT_DOC_CODEX_STOP_HOOK_TEST_DELAY_MS";
 
@@ -285,8 +298,24 @@ fn stop_phase(phase: &str) {
     });
 }
 
-fn stop_hook_budget() -> std::time::Duration {
-    resolve_stop_hook_budget(std::env::var(STOP_HOOK_BUDGET_ENV).ok().as_deref())
+fn stop_hook_deadline() -> Option<std::time::Duration> {
+    resolve_stop_hook_deadline(
+        std::env::var(STOP_HOOK_DEADLINE_ENV).ok().as_deref(),
+        std::env::var(STOP_HOOK_BUDGET_ENV).ok().as_deref(),
+    )
+}
+
+/// `None` means "wait for the worker's completion event" (no wall-clock
+/// deadline); otherwise the wall-clock budget.
+fn resolve_stop_hook_deadline(
+    mode: Option<&str>,
+    budget_raw: Option<&str>,
+) -> Option<std::time::Duration> {
+    if mode.map(str::trim) == Some(STOP_HOOK_DEADLINE_WORKER_COMPLETION) {
+        None
+    } else {
+        Some(resolve_stop_hook_budget(budget_raw))
+    }
 }
 
 fn resolve_stop_hook_budget(raw: Option<&str>) -> std::time::Duration {
@@ -300,7 +329,7 @@ fn resolve_stop_hook_budget(raw: Option<&str>) -> std::time::Duration {
 pub fn handle_stop() -> Result<()> {
     let run = match read_stdin_payload()
         .and_then(|payload| serde_json::from_str::<StopInput>(&payload).context("parse stop JSON"))
-        .and_then(|input| apply_stop_within_budget(input, stop_hook_budget()))
+        .and_then(|input| apply_stop_within_budget(input, stop_hook_deadline()))
     {
         Ok(run) => run,
         Err(err) => StopHookRun {
@@ -958,7 +987,10 @@ fn continuation_head_preview(prompt: &str) -> String {
 
 const CONTINUATION_HEAD_PREVIEW_CHARS: usize = 120;
 
-fn apply_stop_within_budget(input: StopInput, budget: std::time::Duration) -> Result<StopHookRun> {
+fn apply_stop_within_budget(
+    input: StopInput,
+    budget: Option<std::time::Duration>,
+) -> Result<StopHookRun> {
     #[cfg(test)]
     if let Some(delay_ms) = std::env::var(STOP_HOOK_TEST_DELAY_MS_ENV)
         .ok()
@@ -972,7 +1004,10 @@ fn apply_stop_within_budget(input: StopInput, budget: std::time::Duration) -> Re
     run_stop_hook_task_within_budget(budget, move || apply_stop(&input))
 }
 
-fn run_stop_hook_task_within_budget<F>(budget: std::time::Duration, task: F) -> Result<StopHookRun>
+fn run_stop_hook_task_within_budget<F>(
+    budget: Option<std::time::Duration>,
+    task: F,
+) -> Result<StopHookRun>
 where
     F: FnOnce() -> Result<StopResponse> + Send + 'static,
 {
@@ -992,6 +1027,16 @@ where
             }
         })
         .context("spawn Codex Stop hook worker")?;
+    let Some(budget) = budget else {
+        // `#stophookdeadlineflake`: wait for the worker's completion event.
+        return match receiver.recv() {
+            Ok(response) => response.map(|response| StopHookRun {
+                response,
+                timed_out: false,
+            }),
+            Err(_) => anyhow::bail!("Codex Stop hook worker exited without a response"),
+        };
+    };
     match receiver.recv_timeout(budget) {
         Ok(response) => response.map(|response| StopHookRun {
             response,
@@ -3287,12 +3332,52 @@ mod tests {
     }
 
     #[test]
-    fn stop_hook_budget_returns_a_fail_closed_response_before_outer_timeout() {
-        let run = run_stop_hook_task_within_budget(std::time::Duration::from_millis(1), || {
-            std::thread::sleep(std::time::Duration::from_millis(20));
+    fn stop_hook_deadline_defaults_to_the_wall_clock_budget_and_opts_into_worker_completion() {
+        assert_eq!(
+            resolve_stop_hook_deadline(None, None),
+            Some(std::time::Duration::from_secs(STOP_HOOK_BUDGET_SECS))
+        );
+        assert_eq!(
+            resolve_stop_hook_deadline(Some("anything-else"), Some("3")),
+            Some(std::time::Duration::from_secs(3))
+        );
+        assert_eq!(
+            resolve_stop_hook_deadline(Some(STOP_HOOK_DEADLINE_WORKER_COMPLETION), Some("3")),
+            None
+        );
+    }
+
+    /// `#stophookdeadlineflake`: with no wall-clock deadline the hook returns
+    /// the worker's real response however long the worker takes. The worker
+    /// is gated on a channel event from another thread, and no timer exists
+    /// anywhere in the path, so the outcome cannot depend on scheduling.
+    #[test]
+    fn stop_hook_worker_completion_deadline_waits_for_the_actual_response() {
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let releaser = std::thread::spawn(move || {
+            release.send(()).unwrap();
+        });
+        let run = run_stop_hook_task_within_budget(None, move || {
+            gate.recv().unwrap();
             Ok(StopResponse::Continue { continue_: true })
         })
         .unwrap();
+        releaser.join().unwrap();
+        assert!(!run.timed_out);
+        assert!(matches!(
+            run.response,
+            StopResponse::Continue { continue_: true }
+        ));
+    }
+
+    #[test]
+    fn stop_hook_budget_returns_a_fail_closed_response_before_outer_timeout() {
+        let run =
+            run_stop_hook_task_within_budget(Some(std::time::Duration::from_millis(1)), || {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                Ok(StopResponse::Continue { continue_: true })
+            })
+            .unwrap();
 
         assert!(run.timed_out);
         assert!(matches!(

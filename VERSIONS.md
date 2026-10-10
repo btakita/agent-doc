@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.484
+
+- **Interrupted + cleared empty preflight no longer wedges Run Agent Doc (`#runctrlclaude`).** A Ctrl-C that landed
+  during the preflight hook left an empty, replay-safe closeout that `/clear` could not prove ended, so the next route
+  refused until `agent-doc session cancel-turn`. The harness now records a durable per-pane turn-end receipt
+  (session start after clear/startup/resume, or a settled interrupt); the route and idle supervisor abandon the empty
+  preflight immediately when the pane is idle and the receipt is strictly newer than the cycle, and stay fail-closed
+  otherwise.
+
 ## 0.35.483
 
 - **Durable reload never regresses an applied recycle fact (`#runfrontenddispatch`).** A controller reload that ran

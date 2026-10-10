@@ -26,8 +26,8 @@ use agent_doc_turn_executor_tmux::context_clear::{
     context_clear_submit_blocked_line, context_clear_submit_blocked_message,
     context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
     context_clear_submit_retry_action, interrupt_clear_timeout_message,
-    operator_interrupt_key_plan, operator_interrupt_step_delay, protected_clear_refusal_message,
-    terminal_editor_command,
+    live_turn_clear_refusal_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
+    protected_clear_refusal_message, terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
@@ -1107,11 +1107,18 @@ fn reconcile_idle_projection_before_clear(
     } else {
         None
     };
+    // GH #232: consult the supervisor's live-turn
+    // evidence BEFORE any input is sent. A composer that renders between tool
+    // calls read as `idle_prompt`, the guard then projected the actor `ready`
+    // (releasing the dispatch in-flight marker) and typed `/clear` into the
+    // busy harness, where it queued behind the turn.
+    let harness_turn_live = harness_turn_live_evidence(ctx, &evidence);
     let clear_state = operator_clear_input_state_for_evidence(
         &evidence,
         protected_reason.is_some(),
         clean_exit_prompt,
         busy_reason.is_some(),
+        harness_turn_live.is_some(),
     );
     agent_doc_flow_io::log_flow_event(
         &ctx.canonical_file,
@@ -1153,8 +1160,14 @@ fn reconcile_idle_projection_before_clear(
                 );
             }
         }
-        OperatorClearInputState::Busy => {
-            let busy_reason = busy_reason.unwrap_or_else(|| "busy cue".to_string());
+        OperatorClearInputState::Busy | OperatorClearInputState::LiveTurn => {
+            let live_turn_evidence = (clear_state == OperatorClearInputState::LiveTurn)
+                .then_some(harness_turn_live)
+                .flatten();
+            let busy_reason = match live_turn_evidence {
+                Some(evidence) => format!("harness_turn_live evidence={evidence}"),
+                None => busy_reason.unwrap_or_else(|| "busy cue".to_string()),
+            };
             // `#autoloop-command-preemption` Phase 2: a non-interrupting clear on
             // a doc whose pane is busy *because an `agent:queue auto` loop keeps
             // dispatching* never finds a quiet window, so the old hard block made
@@ -1257,6 +1270,17 @@ fn reconcile_idle_projection_before_clear(
                             evidence.tail.as_deref().unwrap_or("unknown")
                         ),
                     );
+                    if let Some(live_evidence) = live_turn_evidence {
+                        anyhow::bail!(
+                            "{}",
+                            live_turn_clear_refusal_message(
+                                &ctx.canonical_file,
+                                evidence.pane_id.as_deref(),
+                                evidence.source,
+                                live_evidence,
+                            )
+                        );
+                    }
                     anyhow::bail!(
                         "{}",
                         busy_clear_refusal_message(
@@ -1275,13 +1299,52 @@ fn reconcile_idle_projection_before_clear(
     Ok(ClearPreflightOutcome::Proceed)
 }
 
+/// GH #232: the live-turn evidence the supervisor uses
+/// (`harness_turn_live`), read for the operator-clear guard. Returns the kind of
+/// evidence that proved the turn live, or `None`.
+///
+/// - `turn_active_lease`: the harness-authored `UserPromptSubmit` turn-active
+///   lease for the evidence pane — the exact read the supervisor's
+///   `turn_active_for_owned_pane_with_idle_evidence` makes (including its
+///   `#staleharnessturnlive` interrupted-transcript retirement and TTL expiry).
+/// - `dispatch_turn_running`: an observed, unsettled dispatch receipt for this
+///   document (`#idledispatchstack`), which covers the window between a
+///   dispatched trigger going busy and the harness hook writing its lease.
+///
+/// Read-only with respect to actor state: nothing here projects `ready` or
+/// releases the dispatch in-flight marker.
+fn harness_turn_live_evidence(
+    ctx: &SessionContext,
+    evidence: &LivePaneEvidence,
+) -> Option<&'static str> {
+    if !matches!(
+        evidence.state,
+        LivePaneState::AliveIdle | LivePaneState::AliveBusy
+    ) {
+        return None;
+    }
+    if let Some(pane) = evidence.pane_id.as_deref()
+        && agent_doc_turn_status_io::turn_active_for_pane(&ctx.base_dir, pane)
+    {
+        return Some("turn_active_lease");
+    }
+    agent_doc_controller_io::project_controller::dispatch_turn_running_for_file(&ctx.canonical_file)
+        .unwrap_or(false)
+        .then_some("dispatch_turn_running")
+}
+
 fn operator_clear_input_state_for_evidence(
     evidence: &LivePaneEvidence,
     protected_input: bool,
     clean_exit_prompt: bool,
     busy_cue: bool,
+    harness_turn_live: bool,
 ) -> OperatorClearInputState {
     match evidence.state {
+        // GH #232: harness-authored live-turn evidence
+        // outranks a rendered prompt. Claude Code redraws its composer between
+        // tool calls while the turn runs.
+        LivePaneState::AliveIdle if harness_turn_live => OperatorClearInputState::LiveTurn,
         LivePaneState::AliveIdle => OperatorClearInputState::IdlePrompt,
         LivePaneState::ClosedClean | LivePaneState::ProjectionStale | LivePaneState::Unknown => {
             OperatorClearInputState::NoLivePane
@@ -1289,6 +1352,7 @@ fn operator_clear_input_state_for_evidence(
         LivePaneState::AliveUnobservable => OperatorClearInputState::ProtectedInput,
         LivePaneState::AliveBusy if protected_input => OperatorClearInputState::ProtectedInput,
         LivePaneState::AliveBusy if clean_exit_prompt => OperatorClearInputState::CleanExit,
+        LivePaneState::AliveBusy if harness_turn_live => OperatorClearInputState::LiveTurn,
         LivePaneState::AliveBusy if busy_cue => OperatorClearInputState::Busy,
         // Some harnesses leave a wrapper process (`agent-doc`, `codex`, etc.)
         // as the pane command even when the visible TUI is only idle/status
@@ -2999,6 +3063,23 @@ fn reconcile_idle_projection_from_evidence(
     let Some(record) = ctx.actor_record.as_ref() else {
         return Ok(false);
     };
+    // GH #232: an idle-looking composer is not proof the
+    // turn ended. While the supervisor's live-turn evidence holds, projecting
+    // `ready` would release the dispatch in-flight marker under a running turn.
+    if let Some(live_evidence) = harness_turn_live_evidence(ctx, evidence) {
+        agent_doc_ops_log_io::log_op(
+            &ctx.canonical_file,
+            &format!(
+                "session_operator_idle_projection_reconcile_skipped file={} pane={} source={} reason=harness_turn_live evidence={} prior_actor_state={}",
+                ctx.canonical_file.display(),
+                record.pane_id,
+                evidence.source,
+                live_evidence,
+                record.state.as_str(),
+            ),
+        );
+        return Ok(false);
+    }
     agent_doc_controller_io::project_controller::mark_lifecycle(
         &ctx.base_dir,
         agent_doc_controller_io::project_controller::LifecycleRequest {
@@ -5220,7 +5301,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             tail: Some("gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 41% used".to_string()),
         };
 
-        let state = operator_clear_input_state_for_evidence(&evidence, false, false, false);
+        let state = operator_clear_input_state_for_evidence(&evidence, false, false, false, false);
 
         assert_eq!(state, OperatorClearInputState::IdlePrompt);
         assert_eq!(
@@ -5240,12 +5321,176 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             tail: Some("Working...".to_string()),
         };
 
-        let state = operator_clear_input_state_for_evidence(&evidence, false, false, true);
+        let state = operator_clear_input_state_for_evidence(&evidence, false, false, true, false);
 
         assert_eq!(state, OperatorClearInputState::Busy);
         assert_eq!(
             agent_doc_controller::operator_clear::clear_guard_outcome(state),
             OperatorClearGuardOutcome::Blocked
+        );
+    }
+
+    /// GH #232: the supervisor's live-turn evidence
+    /// outranks an idle-looking composer and the unclassified-busy fallback, so
+    /// the guard never completes as `idle_prompt` while a turn runs.
+    #[test]
+    fn operator_clear_live_turn_outranks_idle_prompt_and_busy_fallback() {
+        let idle = LivePaneEvidence {
+            pane_id: Some("%6".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveIdle,
+            current_command: Some("claude".to_string()),
+            prompt_ready: Some(true),
+            tail: Some("\u{276f}".to_string()),
+        };
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&idle, false, false, false, true),
+            OperatorClearInputState::LiveTurn
+        );
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&idle, false, false, false, false),
+            OperatorClearInputState::IdlePrompt
+        );
+
+        let busy_no_cue = LivePaneEvidence {
+            state: LivePaneState::AliveBusy,
+            prompt_ready: Some(false),
+            ..idle.clone()
+        };
+        let state =
+            operator_clear_input_state_for_evidence(&busy_no_cue, false, false, false, true);
+        assert_eq!(state, OperatorClearInputState::LiveTurn);
+        assert_eq!(
+            agent_doc_controller::operator_clear::clear_guard_outcome(state),
+            OperatorClearGuardOutcome::Blocked
+        );
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&busy_no_cue, false, false, true, true),
+            OperatorClearInputState::LiveTurn,
+            "live-turn evidence is reported in preference to a scraped busy cue"
+        );
+
+        // Distinct refusals keep their own reasons: protected input stays
+        // fail-closed, and a clean-exit prompt means the harness is gone.
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&busy_no_cue, true, false, false, true),
+            OperatorClearInputState::ProtectedInput
+        );
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&busy_no_cue, false, true, false, true),
+            OperatorClearInputState::CleanExit
+        );
+        // No live pane: live-turn evidence has nothing to protect.
+        let closed = LivePaneEvidence {
+            state: LivePaneState::ClosedClean,
+            ..idle
+        };
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&closed, false, false, false, true),
+            OperatorClearInputState::NoLivePane
+        );
+    }
+
+    /// GH #232 timeline against a real project `state.db`: the actor projects
+    /// `busy`, the pane renders an idle composer, and the supervisor's live-turn
+    /// evidence is present. The guard reads the same evidence the supervisor's
+    /// `harness_turn_live` probe reads, and the idle-projection reconcile refuses
+    /// to project `ready` (which would release the dispatch in-flight marker).
+    #[test]
+    fn clear_guard_reads_supervisor_live_turn_evidence_and_never_projects_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks/doc-a.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-1\n---\n\nBody.\n").unwrap();
+
+        let mut ctx = test_session_context(
+            test_actor_record(ActorState::Busy),
+            test_supervisor_runtime(Some(ActorState::Busy)),
+            Some("busy"),
+        );
+        ctx.canonical_file = doc.clone();
+        ctx.base_dir = root.clone();
+        let idle = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveIdle,
+            current_command: Some("claude".to_string()),
+            prompt_ready: Some(true),
+            tail: Some(">".to_string()),
+        };
+        assert!(
+            idle_projection_needs_reconciliation(&ctx, &idle),
+            "precondition: without live-turn evidence this is the stale-busy repair shape"
+        );
+        assert_eq!(harness_turn_live_evidence(&ctx, &idle), None);
+
+        // 1. The harness `UserPromptSubmit` hook wrote the pane's turn-active lease.
+        agent_doc_turn_status_io::write_turn_active_marker(&root, "%7").unwrap();
+        assert!(
+            agent_doc_turn_status_io::turn_active_for_pane_for_file(&doc, "%7"),
+            "the supervisor's harness_turn_live read sees the lease"
+        );
+        assert_eq!(
+            harness_turn_live_evidence(&ctx, &idle),
+            Some("turn_active_lease")
+        );
+        let state = operator_clear_input_state_for_evidence(&idle, false, false, false, true);
+        let event = clear_guard_event(state);
+        assert_eq!(event.outcome, agent_doc_flow::types::FlowOutcome::Blocked);
+        assert_eq!(event.reason.as_deref(), Some("harness_turn_live"));
+        // No controller is running here: had the reconcile tried to project
+        // `ready` it would have issued the lifecycle RPC. It returns before that.
+        assert!(!reconcile_idle_projection_from_evidence(&ctx, &idle).unwrap());
+        let ops = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("session_operator_idle_projection_reconcile_skipped")
+                && ops.contains("reason=harness_turn_live evidence=turn_active_lease"),
+            "ops.log must record the skipped ready projection: {ops}"
+        );
+        agent_doc_turn_status_io::clear_turn_active_marker(&root, "%7").unwrap();
+        assert_eq!(harness_turn_live_evidence(&ctx, &idle), None);
+
+        // 2. Between a dispatched trigger going busy and the hook writing its
+        // lease, the observed running receipt is the live-turn evidence.
+        let document_id =
+            agent_doc_session_actor_io::canonical_document_id_in(&root, &doc.to_string_lossy());
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        agent_doc_sqlite::state_store::insert_dispatch_attempt_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DispatchAttemptInsert {
+                document_id: &document_id,
+                generation: 7,
+                command_kind: "auto_trigger",
+                accepted_stage: Some("operator_busy"),
+                failed_stage: None,
+                diagnostic_payload: "{}",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            harness_turn_live_evidence(&ctx, &idle),
+            None,
+            "a pre-turn receipt alone is not a live turn"
+        );
+        assert_eq!(
+            agent_doc_sqlite::state_store::mark_open_dispatches_turn_started(&conn, &document_id)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            harness_turn_live_evidence(&ctx, &idle),
+            Some("dispatch_turn_running")
+        );
+        assert!(!reconcile_idle_projection_from_evidence(&ctx, &idle).unwrap());
+        assert!(
+            agent_doc_sqlite::state_store::has_open_in_flight_dispatch(&conn, &document_id, 7)
+                .unwrap(),
+            "the dispatch in-flight marker stays held while the turn runs"
         );
     }
 
@@ -5260,7 +5505,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             tail: None,
         };
 
-        let state = operator_clear_input_state_for_evidence(&evidence, false, false, false);
+        let state = operator_clear_input_state_for_evidence(&evidence, false, false, false, false);
 
         assert_eq!(state, OperatorClearInputState::ProtectedInput);
         assert_eq!(
@@ -5394,7 +5639,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             tail: Some("Press Enter to restart...".to_string()),
         };
 
-        let state = operator_clear_input_state_for_evidence(&evidence, false, true, false);
+        let state = operator_clear_input_state_for_evidence(&evidence, false, true, false, false);
 
         assert_eq!(state, OperatorClearInputState::CleanExit);
         assert_eq!(

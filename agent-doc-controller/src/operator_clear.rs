@@ -9,6 +9,12 @@ pub enum OperatorClearInputState {
     NoLivePane,
     ProtectedInput,
     Busy,
+    /// GH #232: the supervisor's live-turn evidence
+    /// (`harness_turn_live`: the harness-authored turn-active lease for the
+    /// owned pane, or an observed running dispatch receipt) says a turn is
+    /// executing. A rendered composer between tool calls is NOT idleness, so
+    /// this outranks an idle-looking prompt and the busy-cue fallback.
+    LiveTurn,
 }
 
 impl OperatorClearInputState {
@@ -19,6 +25,7 @@ impl OperatorClearInputState {
             Self::NoLivePane => "no_live_pane",
             Self::ProtectedInput => "protected_input",
             Self::Busy => "busy",
+            Self::LiveTurn => "harness_turn_live",
         }
     }
 }
@@ -46,7 +53,9 @@ pub const fn clear_guard_outcome(state: OperatorClearInputState) -> OperatorClea
         | OperatorClearInputState::CleanExit
         | OperatorClearInputState::NoLivePane => OperatorClearGuardOutcome::Completed,
         OperatorClearInputState::ProtectedInput => OperatorClearGuardOutcome::FailedClosed,
-        OperatorClearInputState::Busy => OperatorClearGuardOutcome::Blocked,
+        OperatorClearInputState::Busy | OperatorClearInputState::LiveTurn => {
+            OperatorClearGuardOutcome::Blocked
+        }
     }
 }
 
@@ -81,6 +90,10 @@ mod tests {
             "protected_input"
         );
         assert_eq!(OperatorClearInputState::Busy.as_str(), "busy");
+        assert_eq!(
+            OperatorClearInputState::LiveTurn.as_str(),
+            "harness_turn_live"
+        );
     }
 
     #[test]
@@ -115,6 +128,19 @@ mod tests {
             clear_guard_outcome(OperatorClearInputState::Busy),
             OperatorClearGuardOutcome::Blocked
         );
+        assert_eq!(
+            clear_guard_outcome(OperatorClearInputState::LiveTurn),
+            OperatorClearGuardOutcome::Blocked
+        );
+    }
+
+    /// GH #232: a live turn must never complete the guard as `idle_prompt`.
+    #[test]
+    fn operator_clear_guard_event_blocks_a_live_turn() {
+        let event = clear_guard_event(OperatorClearInputState::LiveTurn);
+
+        assert_eq!(event.outcome, FlowOutcome::Blocked);
+        assert_eq!(event.reason.as_deref(), Some("harness_turn_live"));
     }
 
     #[test]

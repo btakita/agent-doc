@@ -9455,6 +9455,21 @@ pub fn mark_dispatch_turn_started_for_file(file: &Path) -> Result<usize> {
     state_store::mark_open_dispatches_turn_started(&conn, &document_id)
 }
 
+/// GH #232: is this document's dispatched turn observed
+/// running (a `running`, unsettled receipt inside the in-flight horizon)? Read-only;
+/// missing project root or state DB reads as `false`.
+pub fn dispatch_turn_running_for_file(file: &Path) -> Result<bool> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(false);
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
+    let conn = open_state_db(&project_root)?;
+    state_store::has_running_dispatch_turn_as_of(&conn, &document_id, timestamp_secs() as i64)
+}
+
 pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);

@@ -744,6 +744,29 @@ pub fn busy_clear_refusal_message(
     )
 }
 
+/// GH #232: refusal when the operator-clear guard sees
+/// the supervisor's live-turn evidence (`harness_turn_live`). It is emitted
+/// BEFORE any input reaches the pane, so — unlike the post-delivery
+/// `harness_queued_input` verdict — no `/clear` is left in the harness input
+/// queue. It carries the same typed unblocker the post-delivery verdict uses.
+pub fn live_turn_clear_refusal_message(
+    file: &Path,
+    pane_id: Option<&str>,
+    source: &str,
+    evidence: &str,
+) -> String {
+    let pane = pane_id.unwrap_or("unknown");
+    format!(
+        "session_clear refused for {} because a turn is live in pane {} (harness_turn_live=true evidence={}, source={}); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker={}. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the turn and clear context.",
+        file.display(),
+        pane,
+        evidence,
+        source,
+        ContextClearSubmitStatus::HarnessQueuedInput.unblocker(),
+        file.display()
+    )
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct InterruptClearTimeoutFacts<'a> {
     pub file: &'a Path,
@@ -2003,5 +2026,23 @@ Welcome to Claude Code
         assert!(message.contains("prompt_ready=false"));
         assert!(message.contains("tail=\"⏵⏵ bypass permissions on\""));
         assert!(message.contains("agent-doc session status /tmp/doc.md"));
+    }
+
+    /// GH #232: the pre-delivery live-turn refusal carries the typed unblocker
+    /// and says nothing was sent.
+    #[test]
+    fn live_turn_clear_refusal_message_names_unblocker_and_no_send() {
+        let message = live_turn_clear_refusal_message(
+            Path::new("/tmp/doc.md"),
+            Some("%6"),
+            "authoritative_actor",
+            "turn_active_lease",
+        );
+        assert!(message.contains("harness_turn_live=true evidence=turn_active_lease"));
+        assert!(message.contains("no `/clear` was sent"));
+        assert!(message.contains("ui_outcome=blocked_with_exact_unblocker"));
+        assert!(message.contains("next_action=wait_for_turn_or_interrupt_then_retry"));
+        assert!(message.contains("unblocker=clear_queued_behind_busy_turn"));
+        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
     }
 }

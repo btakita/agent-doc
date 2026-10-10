@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -857,6 +856,33 @@ The exchange is now 794 lines / 45 sections (block level). I'm not compacting wh
 **Shipped in 0.35.483:** `runfrontenddispatch`, `dispatchreadyselfheal`, GH #232 (closed), GH #233 (closed). The live frontend.md check is still the `frontendlivedispatch` review item. It needs pane %166's supervisor to restart.
 
 **Batch 0.35.484** (Grok `20bf36eb8` + IDEA/Rider `9796d8c8a` + plugin bumps): the nextest suite passed 9913 of 9913, and the rest of `make check` is finishing. Next: `make install`, push, migrate agent-loop's `.grok/config.toml`, then close `grokbuildaccount`, `idearidereditors` and `#grokmcpverify`.
+
+### Re: 0.35.484 batch integrated — Grok MCP fixed, IDEA/Rider scoping — opus-5.5 · 2026-10-10T04:10-04:00
+
+> **Queue prompt:** do [#idearidereditors]
+
+> **Queue prompt:** do [#grokbuildaccount]
+
+**The batch is on agent-doc `main` (`ca98f7926`) and installed.**
+- **Contents:**
+  - Grok MCP fix `20bf36eb8`
+  - IDEA/Rider editor-surface installation scoping `9796d8c8a`
+  - plugin version bumps for both JetBrains packages
+- **Verification:** `make check` exited 0 (nextest 9913 of 9913, 141 skipped, no `result: FAILED`). `make install` exited 0.
+- **Not released yet:** this is local-install only. It goes out with the next release.
+
+**`grokbuildaccount` is done.** Answer: yes, agent-doc supports Grok Build. The broken MCP server entry is fixed and installed.
+- **This project is migrated:** I ran `agent-doc skill install --harness grok` in agent-loop, which rewrote `.grok/config.toml` from `args = ["mcp"]` to `["mcp","serve"]`. That is committed as `03f501a513` on the superproject branch and not pushed. I committed only `config.toml`. The `.grok/skills` files had uncommitted edits before this session started, so I didn't stage them.
+- **What you need to do:** restart any open Grok session, since headless Grok doesn't reload its MCP config. Grok also only loads a project's MCP server once the folder is trusted.
+- **`#grokmcpverify` is resolved.** The subagent's live run on a scratch project, with your signed-in account, proved the full admit → finalize → same-turn queue-continuation cycle. That was three cycles in one `grok -p` turn, ending with `session-check ok`.
+
+**`idearidereditors` is done.**
+- **The answer:** partly. Both IDEs can open the same project and stay consistent on document text and turns. They can't navigate independently, because both drive one shared tmux `agent-doc` window.
+- **The fix now installed:** one IDE closing or switching roots no longer drops the other IDE's tmux sync.
+- **Before testing:** restart both IDEs onto the new plugin builds.
+- **Follow-ups:** `ideriderstopgap` and `ideriderindependentnav` are in the icebox as recommendations.
+
+**What's left:** the `frontendlivedispatch` review item, which needs you to restart frontend.md's pane-%166 session. The queue has nothing else to drain.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -864,22 +890,12 @@ The exchange is now 794 lines / 45 sections (block level). I'm not compacting wh
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#idearidereditors]
-- ⏭️ do [#grokbuildaccount]
-- ~~do [#runfrontenddispatch]~~
-- ~~do [#dispatchreadyselfhealdis]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/231~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/232~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/233~~
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#idearidereditors] If I were to use both Idea & Rider, can I have both editors open the same project and independently navigate through agent docs?
-- [ ] 🚧 [#grokbuildaccount] I have my grok build account attached. Does agent-doc current support grok build?
 <!-- /agent:backlog -->
 
 ## Review
@@ -892,7 +908,6 @@ The exchange is now 794 lines / 45 sections (block level). I'm not compacting wh
 - [/] [#gh218remoteproof] [operator-verify] GH 218: PR 222 is MERGED (01:25Z 2026-10-10, merge cc6e458c6) at head 34842a23a, CI run 38002449411 green. Run the real IDEA 2026.2.3 (262) Remote Dev acceptance matrix against prerelease jetbrains-262-preview-34842a2 (asset agent-doc-jetbrains-262-0.2.511.zip, id 626772959, 2556136 bytes, sha256 2ef328588d1491446f1a45a83775ee220c13507f5cdd9bca4f5c2111f9e864a7), or against the 0.2.514 ZIP of the next published release. Verify both downloaded copies with make verify-jetbrains-262-preview BACKEND_ZIP=... CLIENT_GATEWAY_ZIP=... first, and install the same ZIP on backend and Client/Gateway. Check: detached-only isolated terminal; same-document main-wins read-only placeholder with byte-identical main; focus/sync/resize causes no main mutation; close/rejoin; backend restart/client reconnect before the first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Post results on 218 citing that tag and commit, then close 218. jetbrains-262-preview-c39de1b is superseded.
 - [/] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-06: 8.363 GiB of 10.0 GiB, 1.637 GiB headroom, 198 releases through 0.35.465, post-cutover mean 35.3 KiB, approximately 48,621 further releases fit; VERDICT headroom fine. The support issue remains open with only the github-actions bot comment and has not changed since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
-- [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation. NEW BLOCKER 2026-09-30: grok 1.0.41 is now SIGNED OUT ('grok -p' -> 'Error: Not signed in'); operator runs 'grok login --device-code' (or sets XAI_API_KEY), and the free usage quota or the planned subscription must be active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed earlier; the last live MCP probe stopped at the usage limit before committed closeout. Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

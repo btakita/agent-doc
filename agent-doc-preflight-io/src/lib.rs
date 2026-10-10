@@ -4903,7 +4903,18 @@ pub fn run_queue_maintenance_with_coin_gate(
                     // with no action taken.
                             if !agent_doc_queue::queue_continuation::is_recurring_imperative_head(&p.text)
                                 && queue_prompt_text_is_free_text(&current_content, &p.text)
-                                && free_text_head_answered_by_response(&exchange_text, &p.text)
+                                // `#ftstrikeclaimedmention`: a claimed head is
+                                // residue only on an exact `> **Queue prompt:**`
+                                // echo, the same proof session-check and the
+                                // finalize strike require of it.
+                                && (if claimed.claims(&p.text) {
+                                    agent_doc_queue::queue_response::free_text_head_has_explicit_answer_evidence(
+                                        &exchange_text,
+                                        &p.text,
+                                    )
+                                } else {
+                                    free_text_head_answered_by_response(&exchange_text, &p.text)
+                                })
                                 && !agent_doc_queue::queue_response::latest_free_text_head_echo_is_deferral(
                                     &exchange_text,
                                     &p.text,

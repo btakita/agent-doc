@@ -225,6 +225,16 @@ not quote it): the claim stays, and the pre-write gate does not demand evidence 
 claimed head this cycle selected. `do [#id]` heads complete by `--done <id>` whether
 or not they are claimed.
 
+That exact echo is the **only** evidence a claimed head accepts
+(`#ftstrikeclaimedmention`). A status response may name claimed heads freely:
+mentioning a claimed head, quoting its prompt-preset body, putting it in a
+`### Re:` heading, or quoting it without the `**Queue prompt:**` label strikes
+nothing. The closeout's leading-head consume never takes a claimed head on the
+closeout alone, and the binary never inserts its own `> **Queue prompt:**` echo for
+one. Separately, a preset head such as `#gh-fix <url>` is answered by its expanded
+preset body only when the response also contains the head's own argument (the URL),
+so one quote of a shared preset body never answers every head that uses the preset.
+
 **Annotated `#id` heads are operator steering — answer the annotation (`#qheadannotation`).**
 The canonical backlog-mirror head is `do [#id]`. When the operator appends their own
 text to it — `do [#id]: can the *.h files be generated too?`, `[#id] and keep the old

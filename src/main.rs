@@ -439,10 +439,11 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                         if let Ok(Some(snapshot)) =
                             agent_doc_snapshot_io::load_document_baseline(&file)
                             && let Ok(Some(snapshot_target)) =
-                                agent_doc_queue::queue_consume::project_answered_free_text_strike(
+                                agent_doc_queue::queue_consume::project_answered_free_text_strike_with_claims(
                                     &snapshot,
                                     &invocation.response_body,
                                     invocation.baseline_content.as_deref(),
+                                    &invocation.claimed_heads,
                                 )
                             && let Err(error) =
                                 agent_doc_snapshot_io::checkpoint_document_baseline(

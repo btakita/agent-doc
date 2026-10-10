@@ -13270,7 +13270,7 @@ mod tests {
     fn fresh_relay_recipient_overrides_lagging_registration_index() {
         let baseline = "# Session\n\nvesting question\n";
         let target = "# Session\n\nvesting question\n\nagent response\n";
-        let (_dir, file, _canonical) = temp_doc(baseline);
+        let (dir, file, _canonical) = temp_doc(baseline);
         let identity = "test-fresh-relay-lagging-registration";
         seed_reliable_sync_open_without_registration(&file, identity);
         test_support_register_replica_for_file(&file, identity)
@@ -13278,13 +13278,22 @@ mod tests {
             .expect("editor replica should attach");
 
         let ack = project_next_crdt_delivery(file.clone(), identity);
-        let started = std::time::Instant::now();
         atomic_write_through_authority(&file, target)
             .expect("the fresh relay recipient must win over lagging registration metadata");
         ack.join().unwrap();
+        // Assert the PATH, not a wall-clock bound: a `< 3s` elapsed check
+        // flaked under a load-128 parallel `make check` (8.4s) while the
+        // write still took the fresh-recipient path. The two slow paths this
+        // guards against each leave their own ops-log event.
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(3),
-            "a fresh relay recipient must not burn the stale-worker recovery deadline",
+            !log.contains("_editor_delivery_worker_stale "),
+            "a fresh relay recipient must not take the stale-worker recovery branch:\n{log}",
+        );
+        assert!(
+            !log.contains("_crdt_convergence_timeout "),
+            "a fresh relay recipient must not burn the convergence deadline:\n{log}",
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
         assert!(pending_document_write(&file).is_none());

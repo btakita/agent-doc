@@ -1,0 +1,52 @@
+#!/bin/sh
+# `#testisolationtests`: refuse a test TMPDIR that sits inside an agent-doc
+# project, and print the ceiling list tests must run under.
+#
+# A test whose TMPDIR is under a directory holding `.agent-doc/` (typically
+# `$HOME`, whose `~/.agent-doc` is the operator's real user-level state) walks
+# up from its tempdir, adopts that directory as its project root, and writes
+# the operator's state.db / ops.log / snapshots / proof ledger and spawns
+# controllers there. Discovery is bounded by AGENT_DOC_ROOT_CEILING_DIRECTORIES
+# (GIT_CEILING_DIRECTORIES semantics); this guard refuses the unsafe TMPDIR
+# outright so the bound is never the only line of defence.
+#
+# Usage:
+#   scripts/check-test-tmpdir [TMPDIR]        print the ceiling list or exit 1
+#   scripts/check-test-tmpdir --nextest-env   nextest setup script: also write the
+#                                             ceiling into "$NEXTEST_ENV"
+set -eu
+
+nextest_env=0
+if [ "${1:-}" = "--nextest-env" ]; then
+    nextest_env=1
+    shift
+fi
+
+dir=${1:-${TMPDIR:-/tmp}}
+case "$dir" in
+    /*) ;;
+    *) dir="$PWD/$dir" ;;
+esac
+mkdir -p "$dir"
+canonical=$(cd "$dir" && pwd -P)
+
+probe=$canonical
+while :; do
+    if [ -d "$probe/.agent-doc" ]; then
+        echo "error: test TMPDIR $canonical is inside the agent-doc project $probe ($probe/.agent-doc)." >&2
+        echo "error: tests would walk up and write that project's real state; use a TMPDIR outside any .agent-doc tree, e.g. TMPDIR=/tmp/agent-doc-test (#testisolationtests)" >&2
+        exit 1
+    fi
+    [ "$probe" = "/" ] && break
+    probe=$(dirname "$probe")
+done
+
+# An explicit ceiling (Makefile export, operator override) wins; otherwise
+# bound discovery at the test temp root and the workspace the tests run from.
+ceiling=${AGENT_DOC_ROOT_CEILING_DIRECTORIES-$canonical:$(pwd -P)}
+
+if [ "$nextest_env" = 1 ]; then
+    : "${NEXTEST_ENV:?--nextest-env must run as a nextest setup script}"
+    printf 'AGENT_DOC_ROOT_CEILING_DIRECTORIES=%s\n' "$ceiling" >>"$NEXTEST_ENV"
+fi
+printf '%s\n' "$ceiling"

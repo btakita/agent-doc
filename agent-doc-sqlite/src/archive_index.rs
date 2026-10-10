@@ -1035,12 +1035,13 @@ fn find_project_root(file: &Path) -> Result<PathBuf> {
     let canonical = file
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let mut dir = canonical.parent();
-    while let Some(candidate) = dir {
-        if candidate.join(".agent-doc").is_dir() {
-            return Ok(candidate.to_path_buf());
-        }
-        dir = candidate.parent();
+    // `#testisolationtests`: bounded by `AGENT_DOC_ROOT_CEILING_DIRECTORIES`.
+    if let Some(root) = canonical.parent().and_then(|parent| {
+        agent_doc_fs::ancestors_within_root_ceiling(parent)
+            .into_iter()
+            .find(|dir| dir.join(".agent-doc").is_dir())
+    }) {
+        return Ok(root);
     }
     anyhow::bail!("failed to find project root for {}", file.display());
 }

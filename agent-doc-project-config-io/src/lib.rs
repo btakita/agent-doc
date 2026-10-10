@@ -238,15 +238,9 @@ pub fn clear_project_tmux_session() -> Result<()> {
 /// Resolve the path to `.agent-doc/config.toml`, walking up from CWD.
 fn project_config_path() -> PathBuf {
     if let Ok(cwd) = std::env::current_dir() {
-        let mut current: &Path = &cwd;
-        loop {
-            if current.join(".agent-doc").is_dir() {
-                return current.join(".agent-doc").join("config.toml");
-            }
-            match current.parent() {
-                Some(p) => current = p,
-                None => break,
-            }
+        // `#testisolationtests`: bounded by `AGENT_DOC_ROOT_CEILING_DIRECTORIES`.
+        if let Some(root) = agent_doc_fs::find_project_root(&cwd) {
+            return root.join(".agent-doc").join("config.toml");
         }
         cwd.join(".agent-doc").join("config.toml")
     } else {

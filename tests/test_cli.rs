@@ -12,7 +12,14 @@ use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 fn agent_doc_cmd() -> Command {
-    cargo_bin_cmd!("agent-doc")
+    let mut command = cargo_bin_cmd!("agent-doc");
+    // `#testisolationtests`: a raw `cargo test` (no Makefile / nextest setup
+    // script export) must still keep the spawned binary's project-root walk
+    // inside the test temp tree instead of adopting `$HOME/.agent-doc`.
+    if std::env::var_os("AGENT_DOC_ROOT_CEILING_DIRECTORIES").is_none() {
+        command.env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", std::env::temp_dir());
+    }
+    command
 }
 
 static ISOLATED_TMUX_SERVER_SEQUENCE: AtomicU64 = AtomicU64::new(0);

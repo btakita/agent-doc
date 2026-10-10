@@ -131,15 +131,11 @@ fn resolve_logs_dir() -> Option<PathBuf> {
 /// Walk up from `start` to the nearest `.agent-doc/`. Pure apart from the
 /// `is_dir` probes, so it needs no ambient cwd.
 fn resolve_logs_dir_from(start: PathBuf) -> Option<PathBuf> {
-    let mut dir = start;
-    loop {
-        if dir.join(".agent-doc").is_dir() {
-            return Some(dir.join(".agent-doc").join("logs"));
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+    // `#testisolationtests`: bounded by `AGENT_DOC_ROOT_CEILING_DIRECTORIES`.
+    agent_doc_fs::ancestors_within_root_ceiling(&start)
+        .into_iter()
+        .find(|dir| dir.join(".agent-doc").is_dir())
+        .map(|dir| dir.join(".agent-doc").join("logs"))
 }
 
 #[cfg(test)]

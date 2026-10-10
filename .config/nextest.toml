@@ -10,6 +10,10 @@
 # nextest kills it and reports a timeout failure (so the suite still terminates
 # and names the hung test). 60s × 3 = 180s ceiling — comfortably above the
 # slowest ordinary IPC-replay integration test (~20s) yet far below a hang.
+# `#testisolationtests`: setup scripts export the discovery ceiling (see the
+# `test-isolation` script at the end of this file).
+experimental = ["setup-scripts"]
+
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 3 }
 
@@ -36,3 +40,19 @@ slow-timeout = { period = "120s", terminate-after = 2 }
 [profile.dev-fast]
 inherits = "default"
 fail-fast = true
+
+# `#testisolationtests`: refuse a TMPDIR inside an agent-doc project (e.g. under
+# `$HOME`, whose `~/.agent-doc` is the operator's real state) and export the
+# project-root discovery ceiling to every test process, so a raw
+# `cargo nextest run` is isolated the same way `make test` is. An explicit
+# AGENT_DOC_ROOT_CEILING_DIRECTORIES (the Makefile export) is preserved.
+[scripts.setup.test-isolation]
+command = "scripts/check-test-tmpdir --nextest-env"
+
+[[profile.default.scripts]]
+filter = "all()"
+setup = "test-isolation"
+
+[[profile.ci.scripts]]
+filter = "all()"
+setup = "test-isolation"

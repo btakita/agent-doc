@@ -4,8 +4,13 @@ use std::path::{Component, Path, PathBuf};
 pub mod install_freshness;
 pub mod jetbrains_install;
 pub mod plugin_jar;
+pub mod root_ceiling;
 pub mod rotating_log;
 
+pub use root_ceiling::{
+    ROOT_CEILING_ENV, agent_doc_ancestor, ancestors_within_root_ceiling,
+    ensure_test_tmpdir_isolated, root_ceiling_directories,
+};
 pub use rotating_log::{SharedAppendLog, read_rotated_log, rotate_log_if_oversized};
 
 /// Current process descriptor count where the platform exposes a stable procfs
@@ -37,17 +42,17 @@ pub fn find_project_root(path: &Path) -> Option<PathBuf> {
     } else {
         std::env::current_dir().ok()?.join(path)
     };
-    let mut current = if anchored.is_file() {
+    let start = if anchored.is_file() {
         anchored.parent()?
     } else {
         anchored.as_path()
     };
-    loop {
-        if current.join(".agent-doc").is_dir() {
-            return Some(current.to_path_buf());
-        }
-        current = current.parent()?;
-    }
+    // `#testisolationtests`: never climb above an `AGENT_DOC_ROOT_CEILING_DIRECTORIES`
+    // entry (or a test binary's temp root), so a test tempdir cannot adopt
+    // `$HOME/.agent-doc` as its project root.
+    ancestors_within_root_ceiling(start)
+        .into_iter()
+        .find(|dir| dir.join(".agent-doc").is_dir())
 }
 
 /// Canonicalize `path` first, then delegate to [`find_project_root`].
@@ -231,8 +236,7 @@ fn linux_exe_is_unlinked(target: Option<&Path>, link_count: u64) -> bool {
     // procfs normally annotates an unlinked executable with ` (deleted)`, but
     // that presentation is not guaranteed across every backing filesystem.
     // The mapped inode's zero link count is the kernel-level identity proof.
-    link_count == 0
-        || target.is_some_and(|target| target.to_string_lossy().ends_with(" (deleted)"))
+    link_count == 0 || target.is_some_and(|target| target.to_string_lossy().ends_with(" (deleted)"))
 }
 
 /// Build identity of the executable at `path`.
@@ -584,7 +588,7 @@ fn hashed_state_path_with_suffix(doc: &Path, dir: &str, suffix: &str) -> Result<
 }
 
 fn project_roots_for(path: &Path) -> Vec<PathBuf> {
-    let mut current = if path.is_dir() {
+    let start = if path.is_dir() {
         path.to_path_buf()
     } else {
         match path.parent() {
@@ -592,15 +596,11 @@ fn project_roots_for(path: &Path) -> Vec<PathBuf> {
             None => return Vec::new(),
         }
     };
-    let mut roots = Vec::new();
-    loop {
-        if current.join(".agent-doc").is_dir() {
-            roots.push(normalize_path(&current));
-        }
-        if !current.pop() {
-            return roots;
-        }
-    }
+    ancestors_within_root_ceiling(&start)
+        .into_iter()
+        .filter(|dir| dir.join(".agent-doc").is_dir())
+        .map(|dir| normalize_path(&dir))
+        .collect()
 }
 
 #[cfg(test)]

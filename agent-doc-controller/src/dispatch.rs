@@ -2379,6 +2379,15 @@ pub enum RecycleInflightUnsettledVerdict {
     /// host the `auto_install_reexec` phase spans a whole `make install`. Do not
     /// inject into a pane that may be mid-`execve`; refuse retryably.
     RefuseOwnerStillRecycling,
+    /// `#dispatchreadyselfheal`: the document's supervisor *registered* in the
+    /// `ready` state strictly after this recycle's start. A registration is only
+    /// made by a process that has just started or re-entered after its `execve`,
+    /// so the hot-reload boundary is over and the recycle is settled in fact even
+    /// though no covering `Settled` fact landed (observed 2026-10-10 on
+    /// `frontend.md`: `started-4351` at 02:00:14, ready at 02:00:18, the settle
+    /// minted at the stale epoch 4350 and dropped, refused for hours). Proceed,
+    /// and have the controller re-mint the settle at the in-flight epoch.
+    ProceedReadyAfterStart,
 }
 
 /// How many times the gated recycle may be replaced by a NEW epoch before the
@@ -2449,6 +2458,43 @@ pub fn recycle_inflight_unsettled_verdict_with_owner(
         }
         verdict => verdict,
     }
+}
+
+/// `#dispatchreadyselfheal`: true when a supervisor `ready` registration
+/// stamped at `ready_registered_secs` happened strictly after the `InFlight`
+/// recycle marked at `marked_secs` started.
+///
+/// Strict: `Started` is published immediately before the `execve`, so a
+/// registration in the same second could be the pre-`execve` process's own
+/// startup registration. An unstamped mark (`0`) is never covered, matching
+/// [`recycle_inflight_unsettled_verdict`]'s fail-closed rule.
+pub fn recycle_inflight_ready_after_start(
+    marked_secs: u64,
+    ready_registered_secs: Option<u64>,
+) -> bool {
+    marked_secs != 0 && ready_registered_secs.is_some_and(|ready| ready > marked_secs)
+}
+
+/// [`recycle_inflight_unsettled_verdict_with_owner`] plus registration
+/// evidence (`#dispatchreadyselfheal`).
+///
+/// A ready registration after the start settles the recycle in fact, whatever
+/// the TTL or supervisor liveness say: it is the event the gate was waiting for,
+/// observed directly rather than through a `Settled` fact that may have been
+/// minted at a stale epoch and dropped. Without that evidence the verdict is
+/// unchanged, so a live supervisor that has not re-registered past the TTL still
+/// refuses retryably (`#netadv5` R9).
+pub fn recycle_inflight_unsettled_verdict_with_readiness(
+    marked_secs: u64,
+    now_secs: u64,
+    ttl_secs: u64,
+    supervisor_alive: bool,
+    ready_registered_secs: Option<u64>,
+) -> RecycleInflightUnsettledVerdict {
+    if recycle_inflight_ready_after_start(marked_secs, ready_registered_secs) {
+        return RecycleInflightUnsettledVerdict::ProceedReadyAfterStart;
+    }
+    recycle_inflight_unsettled_verdict_with_owner(marked_secs, now_secs, ttl_secs, supervisor_alive)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3098,7 +3144,9 @@ pub fn pass_through_stranded_draft_settle_from_env_value(value: Option<&str>) ->
 
 pub fn pass_through_stranded_draft_settle() -> Duration {
     pass_through_stranded_draft_settle_from_env_value(
-        std::env::var(PASS_THROUGH_STRANDED_DRAFT_SETTLE_ENV).ok().as_deref(),
+        std::env::var(PASS_THROUGH_STRANDED_DRAFT_SETTLE_ENV)
+            .ok()
+            .as_deref(),
     )
 }
 pub const PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS_DEFAULT: usize = 3;
@@ -4439,6 +4487,84 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         );
     }
 
+    /// `#dispatchreadyselfheal`: the live `frontend.md` wedge. `started-4351`
+    /// marked 02:00:14, the supervisor registered ready at 02:00:18, and its
+    /// settle was minted at the stale epoch and dropped. Hours later the
+    /// supervisor is alive and past the TTL — the R9 refusal — but the ready
+    /// registration after the start proves the boundary is over.
+    #[test]
+    fn ready_registration_after_recycle_start_settles_the_gate() {
+        let ttl = RECYCLE_INFLIGHT_SETTLE_TTL_SECS;
+        let marked = 1_791_597_614; // 2026-10-10T02:00:14Z
+        let ready = marked + 4; // 02:00:18Z
+        let hours_later = marked + 3 * 3600;
+
+        // The production refusal, reproduced without the readiness evidence.
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_readiness(marked, hours_later, ttl, true, None),
+            RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling
+        );
+        // With it, the gate self-heals: past the TTL, and inside it too.
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_readiness(
+                marked,
+                hours_later,
+                ttl,
+                true,
+                Some(ready)
+            ),
+            RecycleInflightUnsettledVerdict::ProceedReadyAfterStart
+        );
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_readiness(
+                marked,
+                ready + 1,
+                ttl,
+                true,
+                Some(ready)
+            ),
+            RecycleInflightUnsettledVerdict::ProceedReadyAfterStart
+        );
+
+        // A registration at or before the start is the pre-`execve` process:
+        // no evidence, the R9 / TTL verdicts stand.
+        for stale in [marked, marked - 1] {
+            assert!(!recycle_inflight_ready_after_start(marked, Some(stale)));
+            assert_eq!(
+                recycle_inflight_unsettled_verdict_with_readiness(
+                    marked,
+                    hours_later,
+                    ttl,
+                    true,
+                    Some(stale)
+                ),
+                RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling
+            );
+            assert_eq!(
+                recycle_inflight_unsettled_verdict_with_readiness(
+                    marked,
+                    marked + 5,
+                    ttl,
+                    true,
+                    Some(stale)
+                ),
+                RecycleInflightUnsettledVerdict::KeepWaiting
+            );
+        }
+        // An unstamped mark stays fail-closed even with a registration.
+        assert!(!recycle_inflight_ready_after_start(0, Some(ready)));
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_readiness(
+                0,
+                hours_later,
+                ttl,
+                true,
+                Some(ready)
+            ),
+            RecycleInflightUnsettledVerdict::FailClosed
+        );
+    }
+
     #[test]
     fn pass_through_settle_is_configurable_for_slow_hosts() {
         assert_eq!(
@@ -4477,13 +4603,19 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert_eq!(payload, "harness=codex dispatch_request_key=dr-1");
         assert_eq!(dispatch_request_key(&payload), Some("dr-1"));
         assert_eq!(with_dispatch_request_key(&payload, "dr-2"), payload);
-        assert_eq!(with_dispatch_request_key("", "dr-3"), "dispatch_request_key=dr-3");
+        assert_eq!(
+            with_dispatch_request_key("", "dr-3"),
+            "dispatch_request_key=dr-3"
+        );
         assert_eq!(dispatch_request_key("harness=codex"), None);
         assert_eq!(
             dispatch_request_admission(true),
             DispatchRequestAdmission::DuplicateOfApplied
         );
-        assert_eq!(dispatch_request_admission(false), DispatchRequestAdmission::Fresh);
+        assert_eq!(
+            dispatch_request_admission(false),
+            DispatchRequestAdmission::Fresh
+        );
     }
 
     #[test]
@@ -5809,12 +5941,30 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn recycle_settle_unreachable_backoff_doubles_and_caps() {
         use std::time::Duration;
-        assert_eq!(recycle_settle_unreachable_backoff(0), Duration::from_millis(250));
-        assert_eq!(recycle_settle_unreachable_backoff(1), Duration::from_millis(250));
-        assert_eq!(recycle_settle_unreachable_backoff(2), Duration::from_millis(500));
-        assert_eq!(recycle_settle_unreachable_backoff(3), Duration::from_millis(1_000));
-        assert_eq!(recycle_settle_unreachable_backoff(6), Duration::from_millis(5_000));
-        assert_eq!(recycle_settle_unreachable_backoff(u32::MAX), Duration::from_millis(5_000));
+        assert_eq!(
+            recycle_settle_unreachable_backoff(0),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            recycle_settle_unreachable_backoff(1),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            recycle_settle_unreachable_backoff(2),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            recycle_settle_unreachable_backoff(3),
+            Duration::from_millis(1_000)
+        );
+        assert_eq!(
+            recycle_settle_unreachable_backoff(6),
+            Duration::from_millis(5_000)
+        );
+        assert_eq!(
+            recycle_settle_unreachable_backoff(u32::MAX),
+            Duration::from_millis(5_000)
+        );
     }
 
     #[test]

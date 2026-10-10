@@ -97,6 +97,33 @@ ingress lock and bumps an apply generation; the reload publishes its swap under
 that lock and, when the generation moved during its unlocked load, reloads
 again under the lock before swapping (`#runfrontenddispatch`).
 
+Both repairs above prevent a new wedge; neither un-wedges a document whose
+ledger already ends `InFlight` with no covering settle, and the dispatch-only
+recycle gate kept refusing those as `recycle_ttl_elapsed_supervisor_alive`
+(`#netadv5` R9) for as long as the supervisor lived. The gate therefore accepts
+direct evidence that the recycle is over (`#dispatchreadyselfheal`):
+
+- A supervisor `register_supervisor` with `state=ready` stamps
+  `supervisor_leases.ready_registered_at`. Heartbeats never touch it: a
+  heartbeat can come from a process about to `execve`, but a registration is
+  only made by a process that has just started or re-entered after its
+  `execve`.
+- `recycle_inflight_unsettled_verdict_with_readiness` returns
+  `ProceedReadyAfterStart` when that stamp is *strictly* greater than the
+  `InFlight` mark's `marked_secs` (same-second is not evidence; an unstamped
+  mark stays `FailClosed`). It takes precedence over the TTL and liveness
+  verdicts; without the stamp the R9 refusal is unchanged.
+- On that verdict the gate calls `supervisor_recycle_settle_ready_after_start`
+  with the epoch it observed. The controller re-verifies against its live
+  projection and the durable stamp and mints `settled-<that epoch>` (reason
+  `dispatch_ready_after_start`) only when the projection is still `InFlight` at
+  exactly that epoch. It never re-mints forward: a newer `Started` racing the
+  request is a real pre-`execve` boundary, and a settle below its epoch is
+  dropped by the reducer. A decline returns the projection unchanged and the
+  gate re-classifies without the evidence; a newer epoch re-keys the wait. An
+  unreachable controller does not refuse, because the stamp alone proves the
+  boundary passed and the next dispatch retries the re-mint.
+
 Events must carry stable ids where available: document hash, session id, cycle
 id, actor generation, patch id, queue node key, backlog id, and causation id.
 The event log is append-only on the write path. Corrections are new events that

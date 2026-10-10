@@ -719,6 +719,19 @@ The exchange is 664 lines / 39 sections (warn). I'm not compacting while the que
 - **Comment:** https://github.com/btakita/agent-doc/issues/231#issuecomment-6094240326. The issue is closed.
 
 **`release + publish`:** I claimed it as `coordinator:next-release` and didn't hand it to a subagent, because the coordinator rules bar subagents from releasing. The next release (0.35.483) will contain `runfrontenddispatch`, `dispatchreadyselfheal` and the GH #232 clear-guard fix. I'll cut it after both remaining subagents report and their branches are integrated into `main` with one `make check` and one `make install`.
+
+### Re: GH #233 dispatched — batch still in flight — opus-5.5 · 2026-10-10T01:47-04:00
+
+> **Queue prompt:** do [#runfrontenddispatch]
+
+**Deferred:** `runfrontenddispatch` still waits for `dispatchreadyselfheal`, so the two land together.
+
+**Newly sent to a background subagent (claimed):**
+- **GH #233** (`subagent:gh233`, `fix/gh233-unsupported-jb-build` from `origin/main`): on a 263 JetBrains IDE, `agent-doc upgrade` exits 1 with "NOT fully installed" and retry advice, even though leaving 0.2.508 installed is the correct outcome. The fix leaves the plugin in place, prints one warning that names the build, the supported ranges and the kept plugin version, drops the retry/manual-install advice and exits 0. It also fixes the `stale_plugin` warning, which tells a 263 IDE to install the classic package even though that package is capped at 261.
+
+**Still running:** `dispatchreadyselfheal` and GH #232. Both are running `make check` in their own worktrees. `release + publish` stays claimed by the coordinator.
+
+**Next:** when the subagents report, I'll merge every ready branch into agent-doc `main` (`runfrontenddispatch` + `dispatchreadyselfheal`, #232, #233), run one `make check` and one `make install`, push, check that frontend.md dispatches, close the items and GH issues, and cut 0.35.483.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -728,16 +741,17 @@ The exchange is 664 lines / 39 sections (warn). I'm not compacting while the que
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ⏭️ do [#runfrontenddispatch]
-- do [#dispatchreadyselfhealdis]
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/231~~ — auto-struck: answered this cycle (#ftstrike)
-- #gh-fix https://github.com/btakita/agent-doc/issues/232
-- release + publish
+- ⏭️ do [#dispatchreadyselfhealdis]
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/231~~
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/232
+- #gh-fix https://github.com/btakita/agent-doc/issues/233
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dispatchreadyselfhealdis] dispatchreadyselfheal [agent-doc] Dispatch-only recycle gate self-heal: agent-doc-route-io/src/dispatch_only/proof.rs refuses with recycle_ttl_elapsed_supervisor_alive whenever an InFlight recycle is past TTL and the supervisor is alive, even when that supervisor registered state=ready AFTER the recycle start (frontend.md in haiven-dev: started 4351 at 02:00:14Z, ready 02:00:18Z, settled written at stale 4350, refused for hours). Treat ready-after-start as settled (and re-mint the settle at the in-flight epoch), with regression coverage; then confirm Run Agent Doc on frontend.md dispatches. Ship together with fix/runfrontenddispatch 3d9fbad86.
+- [ ] 🚧 [#dispatchreadyselfhealdis] dispatchreadyselfheal [agent-doc] Dispatch-only recycle gate self-heal: agent-doc-route-io/src/dispatch_only/proof.rs refuses with recycle_ttl_elapsed_supervisor_alive whenever an InFlight recycle is past TTL and the supervisor is alive, even when that supervisor registered state=ready AFTER the recycle start (frontend.md in haiven-dev: started 4351 at 02:00:14Z, ready 02:00:18Z, settled written at stale 4350, refused for hours). Treat ready-after-start as settled (and re-mint the settle at the in-flight epoch), with regression coverage; then confirm Run Agent Doc on frontend.md dispatches. Ship together with fix/runfrontenddispatch 3d9fbad86.
 - [ ] 🚧 [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
 <!-- /agent:backlog -->
 

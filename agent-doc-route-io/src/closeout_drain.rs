@@ -42,25 +42,50 @@ pub struct RouteCloseoutDrainEffects {
 
 enum CloseoutRecoveryAttempt {
     Recovered(String),
-    Blocked(String),
+    Blocked(CloseoutRecoveryBlock),
+}
+
+/// Why a recovery attempt left the closeout open.
+struct CloseoutRecoveryBlock {
+    reason: String,
+    /// GH #228: session-check's own `#sessioncheckliveturn` verdict (IN
+    /// PROGRESS). Carried typed so the route never re-derives the blocker from
+    /// the cycle shape and recommends interrupting a healthy turn.
+    live_owner_turn: bool,
 }
 
 fn project_closeout_recovery_effects(
     file: &Path,
     effects: RouteCloseoutDrainEffects,
 ) -> Result<CloseoutRecoveryAttempt> {
-    let block_reason = match (effects.repair_closeout)(file) {
-        Ok(label) => match (effects.inspect_session)(file)? {
-            // `#steerinterruptexit`: the closeout recovered; pending steering is
-            // the routed dispatch's own input, not a block.
-            SessionCheckStatus::Ok(_) | SessionCheckStatus::SteeringPending(_) => {
-                return Ok(CloseoutRecoveryAttempt::Recovered(label));
+    let block = match (effects.repair_closeout)(file) {
+        Ok(label) => {
+            let status = (effects.inspect_session)(file)?;
+            let live_owner_turn = status.is_live_owner_turn_in_progress();
+            match status {
+                // `#steerinterruptexit`: the closeout recovered; pending steering is
+                // the routed dispatch's own input, not a block.
+                SessionCheckStatus::Ok(_) | SessionCheckStatus::SteeringPending(_) => {
+                    return Ok(CloseoutRecoveryAttempt::Recovered(label));
+                }
+                SessionCheckStatus::Interrupted(reason) => CloseoutRecoveryBlock {
+                    reason,
+                    live_owner_turn,
+                },
             }
-            SessionCheckStatus::Interrupted(reason) => reason,
-        },
-        Err(error) => error.to_string(),
+        }
+        // The repair itself runs the same session-check and refuses with its
+        // verdict, so the live-turn classification is read from that verdict
+        // on this branch too.
+        Err(error) => {
+            let reason = error.to_string();
+            CloseoutRecoveryBlock {
+                live_owner_turn: agent_doc_session_check_io::is_live_owner_turn_verdict(&reason),
+                reason,
+            }
+        }
     };
-    Ok(CloseoutRecoveryAttempt::Blocked(block_reason))
+    Ok(CloseoutRecoveryAttempt::Blocked(block))
 }
 
 pub fn drain_open_closeout_before_routed_dispatch(
@@ -138,7 +163,7 @@ pub fn drain_open_closeout_before_routed_dispatch(
         return Ok(RouteCloseoutDrainOutcome::Unlandable(report));
     }
 
-    let first_reason = match project_closeout_recovery_effects(file, effects)? {
+    let first_block = match project_closeout_recovery_effects(file, effects)? {
         CloseoutRecoveryAttempt::Recovered(label) => {
             agent_doc_ops_log_io::log_op(
                 file,
@@ -151,7 +176,7 @@ pub fn drain_open_closeout_before_routed_dispatch(
             );
             return Ok(RouteCloseoutDrainOutcome::Recovered(label));
         }
-        CloseoutRecoveryAttempt::Blocked(reason) => reason,
+        CloseoutRecoveryAttempt::Blocked(block) => block,
     };
 
     let change = match (effects.await_closeout_projection)(
@@ -164,7 +189,7 @@ pub fn drain_open_closeout_before_routed_dispatch(
         CloseoutCycleWaitOutcome::OwnerReleased => CloseoutProjectionChange::OwnerReleased,
         CloseoutCycleWaitOutcome::TimedOut => CloseoutProjectionChange::TimedOut,
     };
-    let last_reason = match project_closeout_drain(change) {
+    let last_block = match project_closeout_drain(change) {
         CloseoutDrainProjection::DispatchReady => {
             agent_doc_ops_log_io::log_op(
                 file,
@@ -189,7 +214,7 @@ pub fn drain_open_closeout_before_routed_dispatch(
                 // cancel-turn` by hand. The projection has now proven the owner
                 // RELEASED the cycle, which is the same fact run cancellation
                 // proves, so the reclaim is authorized and bounded.
-                CloseoutRecoveryAttempt::Blocked(reason) => {
+                CloseoutRecoveryAttempt::Blocked(block) => {
                     if cycle.is_empty_preflight()
                         && state.tracked_work_maintenance_required_at_preflight != Some(true)
                         && (effects.cancel_empty_preflight_after_owner_release)(file)?
@@ -206,30 +231,49 @@ pub fn drain_open_closeout_before_routed_dispatch(
                             "empty_preflight_cancelled_after_owner_release".to_string(),
                         ));
                     }
-                    reason
+                    block
                 }
             }
         }
-        CloseoutDrainProjection::AwaitingTerminal => first_reason,
+        CloseoutDrainProjection::AwaitingTerminal => first_block,
+    };
+    let last_reason = last_block.reason;
+    // GH #228: reuse session-check's verdict. An open `preflight_started`
+    // cycle whose owner holds a fresh active-turn lease is a busy owner, even
+    // though its shape is also an empty preflight: the cancel/repair live-turn
+    // guards have just refused to touch it for the same reason.
+    let context = if last_block.live_owner_turn
+        && matches!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted)
+    {
+        RouteCloseoutBlockContext::LiveOwnerTurn
+    } else if cycle.is_empty_preflight() {
+        RouteCloseoutBlockContext::OpenEmptyPreflight
+    } else {
+        RouteCloseoutBlockContext::Other
     };
 
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "route_dispatch_drain_closeout_blocked file={} cycle_id={} blocker={}",
+            "route_dispatch_drain_closeout_blocked file={} cycle_id={} context={} blocker={}",
             file.display(),
             state.cycle_id,
+            route_closeout_block_context_label(context),
             agent_doc_secret_redact::redact(&last_reason)
         ),
     );
     Ok(RouteCloseoutDrainOutcome::Blocked {
         reason: last_reason,
-        context: if cycle.is_empty_preflight() {
-            RouteCloseoutBlockContext::OpenEmptyPreflight
-        } else {
-            RouteCloseoutBlockContext::Other
-        },
+        context,
     })
+}
+
+pub fn route_closeout_block_context_label(context: RouteCloseoutBlockContext) -> &'static str {
+    match context {
+        RouteCloseoutBlockContext::OpenEmptyPreflight => "open_empty_preflight",
+        RouteCloseoutBlockContext::LiveOwnerTurn => "live_owner_turn",
+        RouteCloseoutBlockContext::Other => "other",
+    }
 }
 
 pub fn apply_routed_dispatch_closeout_policy(

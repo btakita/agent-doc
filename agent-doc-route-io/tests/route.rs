@@ -2501,6 +2501,98 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 
+    /// GH #228: the 2026-10-09 timeline. A live turn opened an empty
+    /// `preflight_started` cycle on the queue head; its owner pane held a fresh
+    /// active-turn lease. A route arrived ~66s later; the closeout projection
+    /// reported the owner released, the owner-release cancel guard refused
+    /// (`owner_released_cycle_not_stalled`), and session-check said IN
+    /// PROGRESS. The drain then labelled the block `OpenEmptyPreflight`, which
+    /// route surfaced as `session cancel-turn` against the healthy turn. The
+    /// block must carry session-check's live-turn verdict instead, and the
+    /// cycle and document must be untouched.
+    #[test]
+    fn drain_keeps_session_checks_live_owner_turn_verdict() {
+        use agent_doc_controller::dispatch::RouteCloseoutBlockContext;
+        use agent_doc_controller::dispatch::RouteCloseoutDrainOutcome as DrainOutcome;
+        use agent_doc_controller_io::project_controller::CloseoutCycleWaitOutcome;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("doc-a.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- Read the linked message and implement its directive\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        // The owning pane is the document's durable registry owner and holds a
+        // fresh active-turn lease (the turn is generating its response).
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            doc.display().to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%3".to_string(),
+                pid: 1,
+                cwd: dir.path().display().to_string(),
+                started: "2026-10-09T21:41:21Z".to_string(),
+                session_id: "session-live".to_string(),
+                file: doc.display().to_string(),
+                window: "@2".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%3").unwrap();
+
+        let mut effects = super::route_closeout_drain_effects(super::route_repair_closeout);
+        // 21:42:32 in the trace: the projection wait reported OwnerReleased.
+        effects.await_closeout_projection = |_, _, _| Ok(CloseoutCycleWaitOutcome::OwnerReleased);
+        let outcome = super::drain_open_closeout_before_routed_dispatch(&doc, effects).unwrap();
+
+        let DrainOutcome::Blocked { reason, context } = outcome else {
+            panic!("a live turn's open cycle must block the route: {outcome:?}");
+        };
+        assert_eq!(
+            context,
+            RouteCloseoutBlockContext::LiveOwnerTurn,
+            "{reason}"
+        );
+        assert!(
+            reason.starts_with("[session-check] IN PROGRESS:"),
+            "{reason}"
+        );
+        assert!(reason.contains(&cycle.cycle_id), "{reason}");
+        assert!(!reason.contains("cancel-turn"), "{reason}");
+
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(state.is_open(), "the live turn's cycle must stay open");
+        assert_eq!(state.cycle_id, cycle.cycle_id);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("route_dispatch_drain_closeout_blocked")
+                && ops.contains("context=live_owner_turn"),
+            "{ops}"
+        );
+        assert!(!ops.contains("cancel_preflight_cycle_abandoned"), "{ops}");
+    }
+
     #[test]
     fn drain_fails_closed_on_an_unlandable_capture_without_waiting() {
         // GH 91: an open cycle whose durable capture can never land (GH 90's

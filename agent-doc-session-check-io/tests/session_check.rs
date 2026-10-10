@@ -2292,7 +2292,9 @@ Body\n\
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
         agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        match inspect(&doc).unwrap() {
+        let status = inspect(&doc).unwrap();
+        assert!(!status.is_live_owner_turn_in_progress(), "{status:?}");
+        match status {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("cycle started but no write/commit followed"));
             }
@@ -2323,7 +2325,14 @@ Body\n\
         agent_doc_session_registry_io::save_in(tmp.path(), &registry).unwrap();
         agent_doc_turn_status_io::write_turn_active_marker(tmp.path(), "%152").unwrap();
 
-        match inspect(&doc).unwrap() {
+        let status = inspect(&doc).unwrap();
+        // GH #228: route reuses this exact verdict instead of re-deriving an
+        // `open_empty_preflight` recovery from the cycle shape.
+        assert!(status.is_live_owner_turn_in_progress(), "{status:?}");
+        assert!(agent_doc_session_check_io::is_live_owner_turn_verdict(
+            status.message()
+        ));
+        match status {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.starts_with("[session-check] IN PROGRESS:"));
                 assert!(message.contains(&state.cycle_id));

@@ -825,6 +825,23 @@ Both issues are closed. `runfrontenddispatch` and `dispatchreadyselfheal` are cl
   - `ideriderindependentnav`: one tmux window per installation. Several days.
 
 **Batch 0.35.484:** in progress in `agent-doc-wt/batch-0484` on top of `v0.35.483`. Grok `20bf36eb8` and IDEA/Rider `9796d8c8a` merged cleanly. Next come the plugin version bumps (the IDEA/Rider change alters the JetBrains plugin source), then one `make check`, then `make install` and the push.
+
+### Re: waiting on v0.35.483 publish and the 0.35.484 batch check — opus-5.5 · 2026-10-10T03:50-04:00
+
+> **Queue prompt:** do [#idearidereditors]
+
+**Deferred:** `idearidereditors` and `grokbuildaccount` are claimed by the coordinator for batch 0.35.484. Their answers are in my previous response. They close after that batch's `make check`, `make install` and push.
+- **Plugin bumps:** done, `bump_exit=0`.
+- **`make check`:** still running.
+
+**`release + publish` (v0.35.483):** claimed by the coordinator. Release run 38034996746 is still in progress:
+- `plugins` and the x86_64 Linux build passed;
+- the other five builds are still running;
+- PyPI is still on 0.35.482.
+
+It closes once the GitHub release assets and PyPI 0.35.483 are verified.
+
+The exchange is now 794 lines / 45 sections (block level). I'm not compacting while the queue is active.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -833,20 +850,20 @@ Both issues are closed. `runfrontenddispatch` and `dispatchreadyselfheal` are cl
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#idearidereditors]
-- 🚧 do [#grokbuildaccount]
-- ~~⏭️ do [#runfrontenddispatch]~~
-- ~~⏭️ do [#dispatchreadyselfhealdis]~~
+- 🚧 do [#idearidereditors]
+- ⏭️ do [#grokbuildaccount]
+- ~~do [#runfrontenddispatch]~~
+- ~~do [#dispatchreadyselfhealdis]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/231~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/232~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/233~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 release + publish
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/232~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/233~~
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#idearidereditors] If I were to use both Idea & Rider, can I have both editors open the same project and independently navigate through agent docs?
+- [ ] 🚧 [#idearidereditors] If I were to use both Idea & Rider, can I have both editors open the same project and independently navigate through agent docs?
 - [ ] 🚧 [#grokbuildaccount] I have my grok build account attached. Does agent-doc current support grok build?
 <!-- /agent:backlog -->
 

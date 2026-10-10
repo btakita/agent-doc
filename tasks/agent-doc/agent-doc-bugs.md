@@ -664,7 +664,19 @@ There were no actionable follow-up items, so nothing new was added to the backlo
 
 This cycle only commits leftovers from my previous write: the `#actionable-review` strike and the `(HEAD)` marker had reached the editor but not git. The `#actionable-review` sweep was answered last cycle: `gh221mergeclose` and `qsubattr5` were resolved and 7 review items remain. The remaining queue heads are all claimed (the batch merge, the release, and the `runfrontenddispatch` subagent), so there is nothing for the loop to drain. Exchange is 628 lines / 36 sections (warn); not compacting while the queue is active.
 There are no actionable follow-up items to add to the backlog or queue.
-<!-- agent:boundary:85b8d79b -->
+> **Chat prompt (#chatprompt):** Is the release still pending?
+
+### Re: release status — opus-5.5 · 2026-10-10T00:44-04:00
+
+**Deferred:** Yes, it's still pending. v0.35.482 is not tagged or published yet. The latest published version is still v0.35.480.
+
+- **Done:** the batch is on agent-doc `main` (`2e873e965`). The release commit `0dc81e8ae` (`chore: release v0.35.482`) is committed locally and hasn't been pushed; `make release` pushes it together with the tag. `make release` is running in the batch worktree, and its `make check` on the release tree passed (9901 of 9901 Rust tests).
+- **Running now:** `make tmux-ci`. Its proof couldn't be reused because the repository changed, so it's rebuilding and running.
+- **Then:** the release driver tags `v0.35.482`, pushes `main` with the tag, and runs `install-full`. The tag push starts the GitHub Release workflow, which publishes the GitHub release, PyPI and Homebrew.
+- **After that, I'll verify:** the Release run (this time with the `relcimavenlocal` fix), the release assets, PyPI 0.35.482, and that the install clears the frontend.md recycle wedge. Then I close the batch items, the release item and `releasepublishgate`.
+
+The `runfrontenddispatch` fix (`fix/runfrontenddispatch` `3d9fbad86`) arrived after the release's `make check` started, so it is held for the next release.
+<!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
 <!--

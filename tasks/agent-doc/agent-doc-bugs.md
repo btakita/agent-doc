@@ -595,6 +595,20 @@ No. **v0.35.481 did not publish.** The latest published version is still **v0.35
 Done. I cherry-picked `87d6a60a7` onto agent-doc `origin/main` in a separate worktree and pushed it as **`4b374bea0`** (fast-forward from `dbb7e763e`). `main` now pins `jetbrains-262-preview-34842a2` instead of `c39de1b`. Verification: `verify_jetbrains_preview.py --self-test` ok, and `make check-fast` exit 0 with no affected Rust packages. The only remaining `c39de1b` mention is a history comment in `.github/workflows/pypi.yml`.
 
 The ftstrike, cross-root column, stale live-turn and jb262 upgrade agents are still running.
+
+### Re: batch integration status + new dispatch — opus-5.5 · 2026-10-09T23:51-04:00
+
+**Deferred:** none of the open queue items is closed this cycle. The batch is being merged, and the release waits for that merge.
+
+- **New item `runfrontenddispatch`:** claimed and sent to a background subagent. It first checks the haiven-dev ops.log to see whether the `auto_install_reexec` recycle settled and whether the refused frontend.md trigger was retried. If not, it fixes the bug on a branch from `origin/main`. Otherwise it reports the evidence with no code change.
+- **Merge branch `integrate/batch-20261009`** (worktree `~/work/btakita/worktrees/batch-integrate`, built on `origin/main` `4b374bea0`):
+  - jb262 upgrade (`153c72916`)
+  - cross-root column (`a9adf62ad`), ported to `origin/main`; `make check` exit 0 there
+  - stale live-turn (`002181bfd`): Claude Code skips the Stop hook when a turn is interrupted, so the lease is now retired from an interrupt record in the turn's own transcript
+  - `relcimavenlocal` (`1abda46ed`): the release workflow now publishes the pinned lazily-kt to mavenLocal through one script shared with CI, plus a guard against drift. This is why v0.35.481 never published.
+- **ftstrike:** being rebuilt on `origin/main` and reconciled with `#claimstrike`.
+- **Mistake:** I based the first subagents on a stale local commit (`e8990627c`, 337 commits behind `origin/main`). That cost one rebase round. The base for every later subagent is `origin/main`.
+- **Release + publish:** claimed as `coordinator:release-after-batch`, because its subagent rules forbid tagging. Next: run one `make check` across the merged batch, fast-forward `main`, `make install`, cut v0.35.482, verify the GitHub release and PyPI, and close the items.
 <!-- agent:boundary:79909a6b -->
 <!-- /agent:exchange -->
 
@@ -603,16 +617,20 @@ The ftstrike, cross-root column, stale live-turn and jb262 upgrade agents are st
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#ftstrikeclaimedmention]
+- do [#runfrontenddispatch]
+- ⏭️ do [#ftstrikeclaimedmention]
 - do [#crossrootcolumnflip]
 - do [#staleharnessturnlive]
 - do [#jb262dynupgrade]
 - ~~do [#previewrepin]~~
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#jb262dynlauncherrecommen] jb262dynlauncher: [recommended] [agent-doc] jb262dynupgrade (153c72916) chose the accurate-warning option: a 262 package now reports declined_by=modular_package and falls back to file replacement + restart. A real restart-free upgrade for the exact-262 split-mode plugin needs a launcher that swaps backend + frontend (the frontend may run in a separate JetBrains Client process); design and prove it against a live 262 IDE, or keep the warning as the supported policy.
+- [ ] [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
 - [ ] [#relcimavenlocalreleasepu] relcimavenlocal: [agent-doc] Release v0.35.481 did NOT publish: Release run 38014769297 (2026-10-10T01:51Z) failed in the plugins job at :backend:compileKotlin, Could not find io.github.lazily:lazily:0.39.0, so release + homebrew were skipped. Latest published is still v0.35.480 (GitHub + PyPI). Cause: 548a24874 (lz262resolve) added the publish-pinned-lazily-kt-to-mavenLocal step to ci.yml only; release.yml checks out ../lazily-kt but never publishes it to mavenLocal for the JetBrains 262 build. Port that step into release.yml (with a parity test/guard so ci.yml and release.yml cannot drift), then re-run the release by cutting v0.35.482 (the existing v0.35.481 tag runs its own old release.yml).
 - [ ] [#ftstrikeclaimedmention] [agent-doc] ftstrike over-strikes claimed free-text queue heads: on 2026-10-09 ~19:27 a status response that only MENTIONED GH 218/221/227/228 (all claimed: two coordinator-held awaiting PR 222, two with live subagents) struck all four as answered this cycle, and the binary itself synthesized a queue-prompt echo for the coordinator-claimed 218 driver line, consuming it. Restored by hand with agent-doc patch FILE queue. A claimed head must strike only via an explicit exact queue-prompt echo authored by the agent (or a claim release), never via a mention or a binary-synthesized echo; add regression coverage.
 - [ ] [#crossrootcolumnflip] [agent-doc] Two project controllers sharing one tmux main window (agent-loop + haiven-dev, cross-root layout) publish competing layouts: after an IDEA restart the haiven-dev route published [agent-doc-bugs, contracts] (gen 21) while the agent-loop controller's editor-surface churn published gens 32-36 ending [agent-doc-bugs, api.md]; whichever publishes last wins and a column can flip between documents. Make cross-root main-window layout single-owner (or merge both controllers' desired columns through one arbiter) so post-restart churn converges to the editor's real visible set. Evidence: src/haiven-dev/.agent-doc/logs/ops.log 22:17:47Z-22:18:23Z on 2026-10-09; see fix/stale-third-main-pane (943c6041e) report.

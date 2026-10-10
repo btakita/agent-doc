@@ -2,20 +2,20 @@
   "schema_version": 1,
   "repository": "btakita/agent-doc",
   "pull_request": 222,
-  "source_commit": "c39de1b045b8b5238f8e5b7fa6870062798d4114",
+  "source_commit": "34842a23a57739c9ad97e0de7c80b036770a7dc9",
   "release": {
-    "id": 408229042,
-    "tag": "jetbrains-262-preview-c39de1b",
+    "id": 408534966,
+    "tag": "jetbrains-262-preview-34842a2",
     "prerelease": true,
-    "published_at": "2026-10-09T18:42:30Z"
+    "published_at": "2026-10-10T02:21:21Z"
   },
   "asset": {
-    "id": 625841715,
+    "id": 626772959,
     "name": "agent-doc-jetbrains-262-0.2.511.zip",
-    "size": 2569299,
-    "sha256": "44474f85ab7f3d8ababb0f99feba244986e24c1b663f6d699895aa9e0819b0d9",
-    "created_at": "2026-10-09T18:42:29Z",
-    "updated_at": "2026-10-09T18:42:29Z"
+    "size": 2556136,
+    "sha256": "2ef328588d1491446f1a45a83775ee220c13507f5cdd9bca4f5c2111f9e864a7",
+    "created_at": "2026-10-10T02:21:20Z",
+    "updated_at": "2026-10-10T02:21:20Z"
   },
   "plugin": {
     "archive_root": "agent-doc-jetbrains-262",

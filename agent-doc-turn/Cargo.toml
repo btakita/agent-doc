@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-turn"
-version = "0.35.484"
+version = "0.35.485"
 edition = "2024"
 description = "Pure turn lifecycle and operation-scope models for agent-doc"
 license = "MIT"
@@ -11,17 +11,17 @@ publish = false
 name = "agent_doc_turn"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.484" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.484" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.484" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.484" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.484" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.484" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.484" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.484" }
-agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.484" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.484" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.484" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.485" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.485" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.485" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.485" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.485" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.485" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.485" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.485" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.485" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.485" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.485" }
 lazily = { version = "0.57.1", features = ["thread-safe"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
@@ -32,5 +32,5 @@ similar = "3"
 # `#timestampresponseheader`: the cross-parser heading test drives the compact
 # digest's topic summarizer alongside the three closeout parsers, so a format
 # change cannot satisfy some readers and silently break others.
-agent-doc-topic = { path = "../agent-doc-topic", version = "0.35.484" }
+agent-doc-topic = { path = "../agent-doc-topic", version = "0.35.485" }
 proptest = "1"

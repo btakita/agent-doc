@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.485
+
+- **Controller lifecycle is bounded (`#supthrash`).** Failed self-handoffs back off (5s doubling, 10m cap) and give up
+  after 6 attempts or at once on a permanent failure; the handoff socket falls back to a short name when the canonical
+  one would exceed the unix path limit; lazy controllers on an idle root (no editor, supervisor, client, or live actor)
+  retire after 30 minutes. Invariants L1-L5 are in `specs/08b` and model-checked in `formal/tla/ControllerLifecycle.tla`.
+- **A supervisor restart never strands the operator at a bare shell (`#runfrontendcrashed`).** A restart in flight is
+  no longer misread as a crash by the watchdog, a bare shell prompt is never treated as a live harness, and a killed
+  supervisor restores the terminal mode.
+- **A claimed-only queue head opens no cycle (`#explicitrunqueue`).** Run Agent Doc reports the owning claim instead.
+- **Free-text strike and claim follow exact promotion lineage (`#freetextqueue`).** Containment inside unrelated
+  backlog prose no longer strikes a queue head, and a claim follows its head into the promoted `do [#id]`.
+- **A multi-line free-text queue item is one item (`#queuecruft`).** Promotion, strike, remove, and reorder keep
+  continuation lines with their item.
+- **Dispatch-only recycle gate is bounded on a superseded owner (`#runfrontenderror`).** A stale-binary supervisor with
+  no ready stamp gets one turn-safe recycle request and a 45s bound instead of an indefinite refusal.
+- **Codex Stop recovery no longer re-runs a full closeout (`#codexstopflake`).** The replay receipt reads the document
+  fresh after repair; the Codex transcript lookup reads only the first 20 lines of each rollout.
+
 ## 0.35.484
 
 - **Interrupted + cleared empty preflight no longer wedges Run Agent Doc (`#runctrlclaude`).** A Ctrl-C that landed

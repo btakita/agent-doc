@@ -255,6 +255,186 @@ mod pane_layout_stashed_column_model {
     }
 }
 
+/// `#crossrootcolumnflip` reference model: two project controllers (a
+/// superproject and a nested root with its own `.agent-doc/`) sharing ONE tmux
+/// main window.
+///
+/// Each controller is an arbiter with its own latest-wins projection worker: a
+/// newer publication on the same arbiter cancels the older one
+/// (`pane_layout_projection_cancelled reason=superseded`), but nothing orders
+/// projections across arbiters. Publications are routed by the production
+/// policy `agent_doc_controller::layout_owner::main_window_layout_owner`; the
+/// `legacy` flag routes each publication to the controller that produced it,
+/// which is the observed bug (haiven-dev route gen 21 vs agent-loop
+/// editor-surface gens 32-36). The invariant: once every projection settles,
+/// the window shows the newest publication — the editor's real visible set.
+mod cross_root_main_window_layout_model {
+    use agent_doc_controller::layout_owner::{LayoutOwner, main_window_layout_owner};
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    const OUTER: &str = "/w/agent-loop";
+    const INNER: &str = "/w/agent-loop/src/haiven-dev";
+    const BUGS: &str = "/w/agent-loop/tasks/agent-doc/agent-doc-bugs.md";
+    const CONTRACTS: &str = "/w/agent-loop/src/haiven-dev/tasks/contracts.md";
+    const ROSESHIELD: &str = "/w/agent-loop/src/haiven-dev/tasks/roseshield.md";
+    const API: &str = "/w/agent-loop/src/haiven-dev/tasks/api.md";
+
+    #[derive(Clone)]
+    struct Publication {
+        publisher: &'static str,
+        columns: [&'static str; 2],
+    }
+
+    /// The evidence window, in arrival order: the haiven-dev editor route
+    /// (gen 21) then the agent-loop editor-surface churn (gens 32-36).
+    fn evidence() -> Vec<Publication> {
+        let mut publications = vec![Publication {
+            publisher: INNER,
+            columns: [BUGS, CONTRACTS],
+        }];
+        for focus in [ROSESHIELD, CONTRACTS, ROSESHIELD, CONTRACTS, API] {
+            publications.push(Publication {
+                publisher: OUTER,
+                columns: [BUGS, focus],
+            });
+        }
+        publications
+    }
+
+    fn document_root(document: &str) -> &'static Path {
+        if document.starts_with(INNER) {
+            Path::new(INNER)
+        } else {
+            Path::new(OUTER)
+        }
+    }
+
+    #[derive(Default)]
+    struct World {
+        legacy: bool,
+        /// Per arbiter: (latest generation, its columns, projected?).
+        arbiters: BTreeMap<PathBuf, (u64, [&'static str; 2], bool)>,
+        window: Option<[&'static str; 2]>,
+        window_writers: Vec<PathBuf>,
+    }
+
+    impl World {
+        fn arbiter_for(&self, publication: &Publication) -> PathBuf {
+            let publisher = Path::new(publication.publisher);
+            if self.legacy {
+                return publisher.to_path_buf();
+            }
+            match main_window_layout_owner(
+                publisher,
+                publication
+                    .columns
+                    .iter()
+                    .map(|column| Some(document_root(column))),
+            ) {
+                LayoutOwner::Local => publisher.to_path_buf(),
+                LayoutOwner::Delegate(owner) => owner.to_path_buf(),
+            }
+        }
+
+        fn publish(&mut self, publication: &Publication) {
+            let arbiter = self.arbiter_for(publication);
+            let entry = self.arbiters.entry(arbiter).or_insert((0, [""; 2], true));
+            *entry = (entry.0 + 1, publication.columns, false);
+        }
+
+        /// One arbiter's worker finishes: only its latest generation projects.
+        fn project(&mut self, arbiter: &Path) {
+            if let Some(entry) = self.arbiters.get_mut(arbiter)
+                && !entry.2
+            {
+                entry.2 = true;
+                self.window = Some(entry.1);
+                self.window_writers.push(arbiter.to_path_buf());
+            }
+        }
+
+        fn pending(&self) -> Vec<PathBuf> {
+            self.arbiters
+                .iter()
+                .filter(|(_, entry)| !entry.2)
+                .map(|(arbiter, _)| arbiter.clone())
+                .collect()
+        }
+    }
+
+    /// Deliver the evidence in order, interleaving projection completions by
+    /// a seeded schedule, then drain every pending projection in seeded order.
+    fn run(seed: u64, legacy: bool) -> World {
+        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        let mut next = move |bound: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % bound as u64) as usize
+        };
+        let mut world = World {
+            legacy,
+            ..World::default()
+        };
+        for publication in evidence() {
+            world.publish(&publication);
+            while next(3) == 0 {
+                let pending = world.pending();
+                if pending.is_empty() {
+                    break;
+                }
+                let arbiter = pending[next(pending.len())].clone();
+                world.project(&arbiter);
+            }
+        }
+        loop {
+            let pending = world.pending();
+            if pending.is_empty() {
+                break;
+            }
+            let arbiter = pending[next(pending.len())].clone();
+            world.project(&arbiter);
+        }
+        world
+    }
+
+    #[test]
+    fn single_owner_converges_to_the_editor_visible_set_for_every_schedule() {
+        for seed in 0..512 {
+            let world = run(seed, false);
+            assert_eq!(
+                world.window,
+                Some([BUGS, API]),
+                "seed {seed}: the window must settle on the newest editor publication"
+            );
+            assert!(
+                world
+                    .window_writers
+                    .iter()
+                    .all(|writer| writer == Path::new(OUTER)),
+                "seed {seed}: only the main-window owner projects into it"
+            );
+        }
+    }
+
+    /// The pre-fix routing reproduces the flip: some schedule lets the nested
+    /// controller's stale route projection land after the owner's last one.
+    /// Without this, the passing test above would not prove the policy is
+    /// what does the work.
+    #[test]
+    fn per_controller_arbiters_let_a_stale_route_column_win() {
+        let flipped = (0..512)
+            .map(|seed| run(seed, true))
+            .filter(|world| world.window == Some([BUGS, CONTRACTS]))
+            .count();
+        assert!(
+            flipped > 0,
+            "two arbiters projecting into one window must be able to flip a column"
+        );
+    }
+}
+
 /// Adversarial model for `#percellconverge` phase 3. The retained agent
 /// transition owns only `exchange`; the editor changes `queue` on every tick.
 /// The survival assertion is paired with an ownership-overclaim mutation proof

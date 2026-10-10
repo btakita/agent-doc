@@ -609,7 +609,26 @@ The ftstrike, cross-root column, stale live-turn and jb262 upgrade agents are st
 - **ftstrike:** being rebuilt on `origin/main` and reconciled with `#claimstrike`.
 - **Mistake:** I based the first subagents on a stale local commit (`e8990627c`, 337 commits behind `origin/main`). That cost one rebase round. The base for every later subagent is `origin/main`.
 - **Release + publish:** claimed as `coordinator:release-after-batch`, because its subagent rules forbid tagging. Next: run one `make check` across the merged batch, fast-forward `main`, `make install`, cut v0.35.482, verify the GitHub release and PyPI, and close the items.
-<!-- agent:boundary:79909a6b -->
+> **Chat prompt (#chatprompt):** Did you finish the rest of the queue items?
+
+### Re: queue status — opus-5.5 · 2026-10-10T00:06-04:00
+
+**Deferred:** No, not yet. Only `previewrepin` is closed. The code for the rest is written and merged into one branch, but none is on `main`, installed, or released yet.
+
+- **Merged and tested, not yet on `main`:** `ftstrikeclaimedmention`, `crossrootcolumnflip`, `staleharnessturnlive`, `jb262dynupgrade`, plus the `relcimavenlocal` release-workflow fix. All five commits are on `integrate/batch-20261009` on top of `origin/main`. Its `make check` is running: all 9901 Rust tests passed, and the later stages (sims, TLA, editor checks) are still running.
+- **Still with a subagent:** `runfrontenddispatch`, the frontend.md "mid-recycle" refusal. No report yet.
+- **Release:** claimed by me, and it comes after the batch.
+- **Waiting on you:** `jb262dynlauncherrecommen`. Either keep the restart-required warning as the policy, or authorize a real 262 restart-free launcher.
+
+When `make check` is green, I will:
+1. Fast-forward agent-doc `main` and push.
+2. Add the `VERSIONS.md` entry and run `make release-version VERSION=0.35.482`.
+3. Run `make release` (tag, push, `install-full`).
+4. Check that v0.35.482 is on the GitHub release and PyPI.
+5. Close the four items, `relcimavenlocal` and the release item.
+
+If `runfrontenddispatch` produces a fix before the tag, it goes into this release; otherwise it goes into the next one.
+<!-- agent:boundary:5d6c8aa7 -->
 <!-- /agent:exchange -->
 
 <!--

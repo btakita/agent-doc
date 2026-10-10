@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.486
+
+- **Remote Dev survivors keep their side across split width changes (GH #234).** `RemoteLayoutMemory::ordered_columns`
+  folds a membership change slot-wise: survivors keep their relative order and edge, and new documents fill vacated
+  slots, so a 2->3->2 width change can no longer leave the tmux panes left/right swapped.
+- **Test project-root discovery is bounded (`#testisolationtests`).** `AGENT_DOC_ROOT_CEILING_DIRECTORIES` (like
+  `GIT_CEILING_DIRECTORIES`) bounds every `.agent-doc` root walker; the test harness refuses a TMPDIR with an
+  `.agent-doc` ancestor and exports the ceiling, so tests can no longer adopt and write the operator's `~/.agent-doc`.
+  Production discovery is unchanged when the variable is unset.
+
 ## 0.35.485
 
 - **Controller lifecycle is bounded (`#supthrash`).** Failed self-handoffs back off (5s doubling, 10m cap) and give up

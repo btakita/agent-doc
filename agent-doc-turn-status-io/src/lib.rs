@@ -16,16 +16,19 @@
 //! the turn: outside tmux, or on any tmux error, it succeeds quietly.
 
 use agent_doc_sqlite::state_store::{
-    Connection, CoordinationLeaseRecord, clear_coordination_lease_if_holder_in_db,
-    clear_coordination_lease_in_db, clear_coordination_leases_heartbeat_at_or_before_in_db,
-    load_coordination_lease_from_db, load_coordination_leases_for_scope_kind_from_db,
-    open_state_db, upsert_coordination_lease_in_db,
+    Connection, CoordinationLeaseRecord, clear_coordination_lease_if_heartbeat_at_or_before_in_db,
+    clear_coordination_lease_if_holder_in_db, clear_coordination_lease_in_db,
+    clear_coordination_leases_heartbeat_at_or_before_in_db, load_coordination_lease_from_db,
+    load_coordination_leases_for_scope_kind_from_db, open_state_db,
+    upsert_coordination_lease_in_db,
 };
 use agent_doc_turn::turn_status::{
-    TurnActiveMarker, pane_title_for_status, turn_active_expiry_cutoff,
-    turn_active_marker_is_fresh, turn_active_marker_matches_pane,
+    TRANSCRIPT_TAIL_PROBE_BYTES, TranscriptTailEvidence, TurnActiveMarker,
+    classify_transcript_tail, pane_title_for_status, turn_active_expiry_cutoff,
+    turn_active_marker_is_fresh, turn_active_marker_matches_pane, turn_lease_ended_by_interrupt,
 };
 use anyhow::Result;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -37,6 +40,11 @@ fn now_secs() -> u64 {
 }
 
 const TURN_ACTIVE_SCOPE: &str = "turn_active";
+/// `#staleharnessturnlive`: the harness transcript named by the hook that wrote
+/// a pane's turn-active lease. One row per pane, keyed like the lease; its
+/// heartbeat equals the lease heartbeat it belongs to, so a binding left by an
+/// older turn never vouches for a newer lease.
+const TURN_ACTIVE_TRANSCRIPT_SCOPE: &str = "turn_active_transcript";
 const SUPERVISOR_STALE_SCOPE: &str = "supervisor_stale";
 // Compatibility key written by agent-doc versions before turn-active leases
 // became pane-scoped.
@@ -44,10 +52,29 @@ const PROJECT_SCOPE_ID: &str = "project";
 
 /// Record the current turn owner in the project state database.
 pub fn write_turn_active_marker(base: &Path, pane: &str) -> Result<()> {
-    write_turn_active_marker_at(base, pane, now_secs())
+    write_turn_active_marker_with_transcript_at(base, pane, now_secs(), None)
 }
 
-fn write_turn_active_marker_at(base: &Path, pane: &str, written_at: u64) -> Result<()> {
+/// Record the current turn owner together with the harness transcript the
+/// `UserPromptSubmit` hook named (`#staleharnessturnlive`). The transcript lets
+/// a later read prove the turn was interrupted, which Claude Code never reports
+/// through the `Stop` hook.
+pub fn write_turn_active_marker_with_transcript(
+    base: &Path,
+    pane: &str,
+    transcript: Option<&Path>,
+) -> Result<()> {
+    write_turn_active_marker_with_transcript_at(base, pane, now_secs(), transcript)
+}
+
+/// Clock-explicit form of [`write_turn_active_marker_with_transcript`], for
+/// simulations that drive turn lifecycles on a virtual clock.
+pub fn write_turn_active_marker_with_transcript_at(
+    base: &Path,
+    pane: &str,
+    written_at: u64,
+    transcript: Option<&Path>,
+) -> Result<()> {
     let conn = open_state_db(base)?;
     upsert_coordination_lease_in_db(
         &conn,
@@ -58,13 +85,34 @@ fn write_turn_active_marker_at(base: &Path, pane: &str, written_at: u64) -> Resu
             holder_pid: Some(std::process::id()),
             heartbeat_secs: written_at,
         },
-    )
+    )?;
+    match transcript {
+        Some(transcript) => upsert_coordination_lease_in_db(
+            &conn,
+            &CoordinationLeaseRecord {
+                scope_kind: TURN_ACTIVE_TRANSCRIPT_SCOPE.to_string(),
+                scope_id: pane.to_string(),
+                holder: transcript.to_string_lossy().into_owned(),
+                holder_pid: Some(std::process::id()),
+                heartbeat_secs: written_at,
+            },
+        ),
+        None => {
+            clear_coordination_lease_in_db(&conn, TURN_ACTIVE_TRANSCRIPT_SCOPE, pane).map(|_| ())
+        }
+    }
+}
+
+#[cfg(test)]
+fn write_turn_active_marker_at(base: &Path, pane: &str, written_at: u64) -> Result<()> {
+    write_turn_active_marker_with_transcript_at(base, pane, written_at, None)
 }
 
 /// Clear one pane's turn owner (turn idle / superseded). Absent is OK.
 pub fn clear_turn_active_marker(base: &Path, pane: &str) -> Result<()> {
     let conn = open_state_db(base)?;
     clear_coordination_lease_in_db(&conn, TURN_ACTIVE_SCOPE, pane)?;
+    clear_coordination_lease_in_db(&conn, TURN_ACTIVE_TRANSCRIPT_SCOPE, pane)?;
     // Retire only a matching legacy singleton. A Stop hook from another pane
     // must not erase the active owner written by an older installed binary.
     clear_coordination_lease_if_holder_in_db(&conn, TURN_ACTIVE_SCOPE, PROJECT_SCOPE_ID, pane)?;
@@ -83,7 +131,125 @@ fn sweep_expired_turn_active_leases_in_db(conn: &Connection, now: u64) -> Result
     let Some(cutoff) = turn_active_expiry_cutoff(now) else {
         return Ok(0);
     };
+    clear_coordination_leases_heartbeat_at_or_before_in_db(
+        conn,
+        TURN_ACTIVE_TRANSCRIPT_SCOPE,
+        cutoff,
+    )?;
     clear_coordination_leases_heartbeat_at_or_before_in_db(conn, TURN_ACTIVE_SCOPE, cutoff)
+}
+
+/// A turn-active lease the harness transcript proves was interrupted
+/// (`#staleharnessturnlive`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterruptedTurnLease {
+    pub pane: String,
+    /// Unix seconds the lease was written (the turn's `UserPromptSubmit`).
+    pub written_at: u64,
+    /// Unix seconds of the harness interrupt record.
+    pub interrupted_at: u64,
+    pub transcript: PathBuf,
+}
+
+/// Read at most [`TRANSCRIPT_TAIL_PROBE_BYTES`] from the end of `path`.
+/// Returns the tail and whether it starts mid-file.
+fn read_transcript_tail(path: &Path) -> Option<(String, bool)> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(TRANSCRIPT_TAIL_PROBE_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::with_capacity((len - start) as usize);
+    file.take(TRANSCRIPT_TAIL_PROBE_BYTES)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    Some((String::from_utf8_lossy(&bytes).into_owned(), start > 0))
+}
+
+/// The transcript bound to exactly this lease, if its hook named one.
+fn transcript_for_marker(conn: &Connection, marker: &TurnActiveMarker) -> Option<PathBuf> {
+    let binding = load_coordination_lease_from_db(conn, TURN_ACTIVE_TRANSCRIPT_SCOPE, &marker.pane)
+        .ok()??;
+    (binding.heartbeat_secs == marker.written_at && !binding.holder.is_empty())
+        .then(|| PathBuf::from(binding.holder))
+}
+
+fn interrupted_turn_lease(
+    conn: &Connection,
+    marker: &TurnActiveMarker,
+    now: u64,
+) -> Option<InterruptedTurnLease> {
+    let transcript = transcript_for_marker(conn, marker)?;
+    let (tail, starts_mid_file) = read_transcript_tail(&transcript)?;
+    let evidence = classify_transcript_tail(&tail, starts_mid_file);
+    if !turn_lease_ended_by_interrupt(marker, evidence, now) {
+        return None;
+    }
+    let TranscriptTailEvidence::Interrupted { at_secs } = evidence else {
+        return None;
+    };
+    Some(InterruptedTurnLease {
+        pane: marker.pane.clone(),
+        written_at: marker.written_at,
+        interrupted_at: at_secs,
+        transcript,
+    })
+}
+
+/// Retire a fresh lease whose turn the harness transcript proves was
+/// interrupted. The delete is conditioned on the observed heartbeat, so a
+/// lease rewritten by a newer prompt in the meantime survives. Returns the
+/// evidence when this call (or a concurrent one) retired it.
+fn retire_interrupted_turn_lease(
+    conn: &Connection,
+    marker: &TurnActiveMarker,
+    now: u64,
+) -> Option<InterruptedTurnLease> {
+    let interrupted = interrupted_turn_lease(conn, marker, now)?;
+    let _ = clear_coordination_lease_if_heartbeat_at_or_before_in_db(
+        conn,
+        TURN_ACTIVE_SCOPE,
+        &marker.pane,
+        marker.written_at,
+    );
+    let _ = clear_coordination_lease_if_heartbeat_at_or_before_in_db(
+        conn,
+        TURN_ACTIVE_TRANSCRIPT_SCOPE,
+        &marker.pane,
+        marker.written_at,
+    );
+    let _ = clear_coordination_lease_if_holder_in_db(
+        conn,
+        TURN_ACTIVE_SCOPE,
+        PROJECT_SCOPE_ID,
+        &marker.pane,
+    );
+    Some(interrupted)
+}
+
+/// `#staleharnessturnlive`: retire `pane`'s turn-active lease when the harness
+/// transcript proves the turn was interrupted (Claude Code runs no `Stop` hook
+/// on an interrupt). `None` when there is no fresh lease, no bound transcript,
+/// or no settled interrupt newer than the lease.
+pub fn reclaim_interrupted_turn_for_pane_at(
+    base: &Path,
+    pane: &str,
+    now: u64,
+) -> Option<InterruptedTurnLease> {
+    let conn = open_state_db(base).ok()?;
+    let lease = load_coordination_lease_from_db(&conn, TURN_ACTIVE_SCOPE, pane)
+        .ok()
+        .flatten()?;
+    let marker = marker_from_lease(lease, now)?;
+    retire_interrupted_turn_lease(&conn, &marker, now)
+}
+
+/// [`reclaim_interrupted_turn_for_pane_at`] for the project containing `file`.
+pub fn reclaim_interrupted_turn_for_pane_for_file(
+    file: &Path,
+    pane: &str,
+) -> Option<InterruptedTurnLease> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    reclaim_interrupted_turn_for_pane_at(&root, pane, now_secs())
 }
 
 /// Delete every turn-active lease past `TURN_ACTIVE_TTL_SECS` (GH #135).
@@ -134,7 +300,10 @@ pub fn read_turn_active_marker_at(base: &Path, now: u64) -> Option<TurnActiveMar
     if fresh.len() < lease_count {
         reclaim_expired_turn_active_leases_on_read(&conn, now);
     }
-    fresh.into_iter().max_by_key(|marker| marker.written_at)
+    fresh
+        .into_iter()
+        .filter(|marker| retire_interrupted_turn_lease(&conn, marker, now).is_none())
+        .max_by_key(|marker| marker.written_at)
 }
 
 fn read_turn_active_marker_for_pane_at(
@@ -159,7 +328,9 @@ fn read_turn_active_marker_for_pane_at(
     if marker.is_none() {
         reclaim_expired_turn_active_leases_on_read(&conn, now);
     }
-    marker
+    // `#staleharnessturnlive`: an interrupted turn ran no `Stop` hook; its
+    // transcript is the turn-boundary evidence that retires the lease.
+    marker.filter(|marker| retire_interrupted_turn_lease(&conn, marker, now).is_none())
 }
 
 /// Read the non-expired turn-active marker under `base`, if present.
@@ -352,7 +523,8 @@ pub fn run(active: bool) -> anyhow::Result<()> {
     // never fail the turn.
     if let Some(base) = base {
         let result = if active {
-            write_turn_active_marker(&base, &pane)
+            let transcript = hook_transcript_path_from_stdin();
+            write_turn_active_marker_with_transcript(&base, &pane, transcript.as_deref())
         } else {
             clear_turn_active_marker(&base, &pane)
         };
@@ -361,6 +533,49 @@ pub fn run(active: bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// How long `turn-status active` waits for the hook payload on stdin. The
+/// harness writes the JSON and closes the pipe immediately; a caller that
+/// leaves stdin open must not stall the turn.
+const HOOK_STDIN_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+/// Upper bound on the hook payload read from stdin.
+const HOOK_STDIN_MAX_BYTES: u64 = 1024 * 1024;
+
+/// `transcript_path` from a harness hook payload (`UserPromptSubmit` JSON).
+/// `~/` expands against `$HOME`. Absent, empty, or non-JSON payloads yield
+/// `None`; the lease is then written without transcript evidence and retires
+/// through `Stop` or the TTL exactly as before.
+fn hook_transcript_path_from_payload(payload: &str) -> Option<PathBuf> {
+    let value: serde_json::Value = serde_json::from_str(payload.trim()).ok()?;
+    let raw = value.get("transcript_path")?.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    match raw.strip_prefix("~/") {
+        Some(rest) => std::env::var_os("HOME").map(|home| PathBuf::from(home).join(rest)),
+        None => Some(PathBuf::from(raw)),
+    }
+}
+
+/// Best-effort read of the hook payload from stdin. Never blocks the turn:
+/// an interactive stdin is skipped and a pipe that stays open is abandoned
+/// after [`HOOK_STDIN_WAIT`].
+fn hook_transcript_path_from_stdin() -> Option<PathBuf> {
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() {
+        return None;
+    }
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut payload = String::new();
+        let _ = std::io::stdin()
+            .take(HOOK_STDIN_MAX_BYTES)
+            .read_to_string(&mut payload);
+        let _ = sender.send(payload);
+    });
+    let payload = receiver.recv_timeout(HOOK_STDIN_WAIT).ok()?;
+    hook_transcript_path_from_payload(&payload)
 }
 
 /// Resolve the project root for the turn-active marker from the current working
@@ -645,5 +860,209 @@ mod tests {
         let marker = read_turn_active_marker(base).expect("fresh marker survives");
         assert_eq!(marker.pane, "%66");
         assert_eq!(turn_active_rows(base), vec!["%66".to_string()]);
+    }
+
+    /// `#staleharnessturnlive` SimWorld: one project, one owner pane, one
+    /// Claude-shaped transcript, and a virtual clock. Hook events drive the
+    /// same IO entry points the `UserPromptSubmit` / `Stop` hooks use; the
+    /// harness appends transcript records the way Claude Code does.
+    struct TurnSimWorld {
+        _dir: tempfile::TempDir,
+        base: PathBuf,
+        transcript: PathBuf,
+        pane: &'static str,
+        now: u64,
+    }
+
+    impl TurnSimWorld {
+        fn new(pane: &'static str) -> Self {
+            let dir = agent_doc_base();
+            let base = dir.path().to_path_buf();
+            let transcript = base.join("transcript.jsonl");
+            std::fs::write(&transcript, "").unwrap();
+            Self {
+                _dir: dir,
+                base,
+                transcript,
+                pane,
+                now: 1_791_583_800,
+            }
+        }
+
+        fn tick(&mut self, secs: u64) {
+            self.now += secs;
+        }
+
+        fn append(&self, record: serde_json::Value) {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&self.transcript)
+                .unwrap();
+            writeln!(file, "{record}").unwrap();
+        }
+
+        fn stamp(&self) -> String {
+            agent_doc_turn::turn_status::format_rfc3339_utc_secs(self.now)
+        }
+
+        /// `UserPromptSubmit`: the hook writes the lease, then the harness
+        /// records the prompt.
+        fn submit_prompt(&self, text: &str) {
+            write_turn_active_marker_with_transcript_at(
+                &self.base,
+                self.pane,
+                self.now,
+                Some(&self.transcript),
+            )
+            .unwrap();
+            self.append(serde_json::json!({
+                "type": "user", "isSidechain": false, "timestamp": self.stamp(),
+                "message": {"role": "user", "content": text},
+            }));
+        }
+
+        fn tool_round_trip(&self) {
+            self.append(serde_json::json!({
+                "type": "assistant", "timestamp": self.stamp(),
+                "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "Bash", "input": {}}]},
+            }));
+            self.append(serde_json::json!({
+                "type": "user", "isSidechain": false, "timestamp": self.stamp(),
+                "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]},
+            }));
+        }
+
+        /// Operator Esc: Claude Code records the interrupt and runs NO Stop hook.
+        fn interrupt(&self) {
+            self.append(serde_json::json!({
+                "type": "user", "isSidechain": false, "timestamp": self.stamp(),
+                "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user for tool use]"}]},
+            }));
+            self.append(serde_json::json!({"type": "pr-link", "timestamp": self.stamp()}));
+        }
+
+        fn stop_hook(&self) {
+            clear_turn_active_marker(&self.base, self.pane).unwrap();
+        }
+
+        fn live(&self) -> bool {
+            read_turn_active_marker_for_pane_at(&self.base, self.pane, self.now).is_some()
+        }
+    }
+
+    #[test]
+    fn sim_interrupted_turn_lease_retires_without_a_stop_hook() {
+        let mut world = TurnSimWorld::new("%161");
+        world.submit_prompt("unwedge agent-doc");
+        world.tick(5);
+        world.tool_round_trip();
+        assert!(world.live(), "a turn mid tool call is live");
+        world.tick(6);
+        world.interrupt();
+        assert!(
+            world.live(),
+            "an unsettled interrupt keeps the lease (a same-second prompt may be landing)"
+        );
+        world.tick(agent_doc_turn::turn_status::TURN_INTERRUPT_SETTLE_SECS);
+        let interrupted = reclaim_interrupted_turn_for_pane_at(&world.base, world.pane, world.now)
+            .expect("settled interrupt retires the lease");
+        assert_eq!(interrupted.pane, "%161");
+        assert_eq!(interrupted.interrupted_at, interrupted.written_at + 11);
+        assert!(
+            !world.live(),
+            "the idle owner pane no longer reads as mid-turn"
+        );
+        assert!(turn_active_rows(&world.base).is_empty());
+
+        // The next prompt opens a new lease that the old interrupt cannot retire.
+        world.tick(30);
+        world.submit_prompt("unwedge agent-doc for contracts.md");
+        world.tick(10);
+        assert!(world.live());
+        assert_eq!(
+            reclaim_interrupted_turn_for_pane_at(&world.base, world.pane, world.now),
+            None
+        );
+        world.stop_hook();
+        assert!(!world.live());
+    }
+
+    #[test]
+    fn sim_interrupt_never_retires_a_newer_or_unbound_lease() {
+        // A prompt submitted in the same second as the interrupt: its lease is
+        // written before its transcript record, and must survive the settle.
+        let mut world = TurnSimWorld::new("%7");
+        world.submit_prompt("first");
+        world.tick(4);
+        world.interrupt();
+        write_turn_active_marker_with_transcript_at(
+            &world.base,
+            world.pane,
+            world.now,
+            Some(&world.transcript),
+        )
+        .unwrap();
+        world.append(serde_json::json!({
+            "type": "user", "isSidechain": false, "timestamp": world.stamp(),
+            "message": {"role": "user", "content": "second"},
+        }));
+        world.tick(60);
+        assert!(world.live(), "the newer prompt's turn stays live");
+
+        // A lease written without a transcript (older hook, Codex, manual
+        // `turn-status active`) keeps the Stop/TTL contract unchanged.
+        let mut world = TurnSimWorld::new("%8");
+        write_turn_active_marker_at(&world.base, world.pane, world.now).unwrap();
+        world.tick(2);
+        world.interrupt();
+        world.tick(60);
+        assert!(world.live());
+
+        // A binding left by an earlier turn never vouches for a newer lease.
+        let mut world = TurnSimWorld::new("%9");
+        world.submit_prompt("bound");
+        world.tick(2);
+        write_turn_active_marker_at(&world.base, world.pane, world.now).unwrap();
+        world.tick(1);
+        world.interrupt();
+        world.tick(60);
+        assert!(world.live());
+    }
+
+    #[test]
+    fn sim_project_wide_read_skips_an_interrupted_pane() {
+        let mut world = TurnSimWorld::new("%161");
+        write_turn_active_marker_at(&world.base, "%200", world.now).unwrap();
+        world.tick(1);
+        world.submit_prompt("newest lease, then interrupted");
+        world.tick(2);
+        world.interrupt();
+        world.tick(10);
+        let marker = read_turn_active_marker_at(&world.base, world.now).expect("sibling lease");
+        assert_eq!(marker.pane, "%200");
+        assert_eq!(turn_active_rows(&world.base), vec!["%200".to_string()]);
+    }
+
+    #[test]
+    fn hook_payload_names_the_transcript() {
+        assert_eq!(
+            hook_transcript_path_from_payload(
+                r#"{"session_id":"s","transcript_path":"/tmp/x/s.jsonl","hook_event_name":"UserPromptSubmit","prompt":"p"}"#
+            ),
+            Some(PathBuf::from("/tmp/x/s.jsonl"))
+        );
+        for payload in [
+            "",
+            "not json",
+            r#"{"transcript_path":""}"#,
+            r#"{"prompt":"p"}"#,
+        ] {
+            assert_eq!(
+                hook_transcript_path_from_payload(payload),
+                None,
+                "{payload}"
+            );
+        }
     }
 }

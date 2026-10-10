@@ -2839,6 +2839,7 @@ dependencies = [
  "agent-doc-tmux-io",
  "agent-doc-turn",
  "anyhow",
+ "serde_json",
  "tempfile",
  "tmux-router",
 ]

@@ -1979,6 +1979,23 @@ pub fn clear_coordination_leases_heartbeat_at_or_before_in_db(
     .context("delete expired coordination leases")
 }
 
+/// Delete one lease only while its heartbeat is still at or before
+/// `cutoff_secs`. One bounded statement: a holder that refreshed the lease after
+/// the caller observed it keeps its newer row (`#staleharnessturnlive`).
+pub fn clear_coordination_lease_if_heartbeat_at_or_before_in_db(
+    conn: &Connection,
+    scope_kind: &str,
+    scope_id: &str,
+    cutoff_secs: u64,
+) -> Result<bool> {
+    let cutoff = i64::try_from(cutoff_secs).unwrap_or(i64::MAX);
+    Ok(conn.execute(
+        "DELETE FROM coordination_leases \
+         WHERE scope_kind = ?1 AND scope_id = ?2 AND heartbeat_secs <= ?3",
+        params![scope_kind, scope_id, cutoff],
+    )? > 0)
+}
+
 pub fn clear_coordination_lease_if_holder_in_db(
     conn: &Connection,
     scope_kind: &str,

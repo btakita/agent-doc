@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a10ac7-0854-7370-9995-144908122424
+  codex: 01a126ff-58d4-78e3-a863-b702751fd428
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -16,6 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
+queue: go
 ---
 
 ## Status
@@ -709,18 +710,48 @@ The exchange remains above the session-accretion warning threshold; the active q
 Changed paths: `Cargo.toml`, `Cargo.lock`, `macros/Cargo.toml`, and `docs/dependency-license-inventory.json` in `lazily-rs`.
 
 Confidence: high. Escalation: none. No additional backlog follow-up is needed because publication and registry verification are complete; CI is already running independently.
+
+### Re: #lzmacosrunner, hosted macOS GitHub CI — gpt-5 · 2026-10-10T15:34:39-04:00
+
+> **Queue prompt:**
+>
+> [#lzmacosrunner]: setup OSX build on gh CI
+
+> **Operator note:** setup OSX build on gh CI
+
+Complete. The release workflow already built both Darwin targets, and release run 38034996746 proved that the hosted ARM64 and x86_64 jobs both build, package, upload, and feed the release checksum stage successfully.
+
+I hardened that setup against the current GitHub runner transition:
+
+- `aarch64-apple-darwin` now uses the explicit native ARM64 label `macos-15`.
+- `x86_64-apple-darwin` now uses the explicit Intel label `macos-15-intel`, replacing `macos-14` before its scheduled retirement.
+- Each Darwin matrix row declares its expected native architecture, and the job fails early if `uname -m` does not match. This prevents a floating-label change from silently producing the wrong artifact.
+- The release workflow contract test now pins both target/runner/architecture mappings and rejects the deprecated/floating labels.
+
+Verification:
+
+- Both focused release-workflow tests passed.
+- `git diff --check` passed, and the public-repository private-name denylist found no matches.
+- The latest upstream `main` CI run, 38074562077, is green.
+- The one-time `make install` completed successfully for v0.35.484. VS Code package sync was skipped because `vsce` is absent; that pre-existing optional tooling gap is unrelated to this workflow-only change.
+- Two full `make check` attempts were interrupted by unrelated load-sensitive timing tests while other host builds were active. Each failing test passed when rerun alone; the macOS-focused tests remained green.
+
+The sibling code patch is committed transactionally with this closeout and will be fast-forwarded to `origin/main` immediately afterward. No additional follow-up was created: the Beta-readiness question is already the next queued prompt.
+
+Session accretion is in warning range; I continued draining the queue without compaction.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~[#lzmacosrunner]: setup OSX build on gh CI~~
+- I want to promote Lazily to Beta. Do you think our featureset + api is stable enough?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 
 ## Review

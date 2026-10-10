@@ -23,11 +23,13 @@ jobs:
             os: ubuntu-latest
             use_cross: true
           - target: x86_64-apple-darwin
-            os: macos-14
+            os: macos-15-intel
             use_cross: false
+            expected_arch: x86_64
           - target: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-15
             use_cross: false
+            expected_arch: arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             use_cross: false
@@ -49,6 +51,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Verify native Darwin runner architecture
+        if: matrix.expected_arch != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_arch="$(uname -m)"
+          if [ "$actual_arch" != "${{ matrix.expected_arch }}" ]; then
+            echo "::error::runner architecture $actual_arch does not match expected ${{ matrix.expected_arch }} for ${{ matrix.target }}"
+            exit 1
+          fi
 
       - name: Install cross
         if: matrix.use_cross

@@ -14721,18 +14721,43 @@ fn test_release_builds_both_macos_targets_on_every_tag() {
         6,
         "each on-demand tag must build all six Linux, Windows, and Darwin targets"
     );
-    for required in [
-        "target: x86_64-apple-darwin",
-        "os: macos-14",
-        "target: aarch64-apple-darwin",
-        "os: macos-latest",
-        "libagent_doc.dylib",
+    for expected_row in [
+        r#"          - target: x86_64-apple-darwin
+            os: macos-15-intel
+            use_cross: false
+            expected_arch: x86_64"#,
+        r#"          - target: aarch64-apple-darwin
+            os: macos-15
+            use_cross: false
+            expected_arch: arm64"#,
     ] {
         assert!(
-            release.contains(required),
-            "hosted release builds must preserve both Darwin targets and their cdylib: {required}"
+            release.contains(expected_row),
+            "hosted release builds must preserve the exact native Darwin matrix row:\n{expected_row}"
         );
     }
+    assert!(
+        !release.contains("os: macos-14") && !release.contains("os: macos-latest"),
+        "Darwin release jobs must use explicit supported runner labels"
+    );
+    let native_arch_check = r#"      - name: Verify native Darwin runner architecture
+        if: matrix.expected_arch != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_arch="$(uname -m)"
+          if [ "$actual_arch" != "${{ matrix.expected_arch }}" ]; then
+            echo "::error::runner architecture $actual_arch does not match expected ${{ matrix.expected_arch }} for ${{ matrix.target }}"
+            exit 1
+          fi"#;
+    assert!(
+        release.contains(native_arch_check),
+        "Darwin release jobs must fail closed when the hosted runner architecture does not match the matrix"
+    );
+    assert!(
+        release.contains("*-apple-darwin) lib=\"libagent_doc.dylib\" ;;"),
+        "hosted Darwin archives must continue packaging the cdylib beside the binary"
+    );
 
     let spec = fs::read_to_string(manifest_dir.join("specs/07-core-commands.md")).unwrap();
     let spec_words = spec.split_whitespace().collect::<Vec<_>>().join(" ");

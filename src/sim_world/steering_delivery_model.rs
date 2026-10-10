@@ -75,6 +75,20 @@ fn backdate(file: &Path) {
         .unwrap();
 }
 
+/// Pin "the operator is still typing" without racing the
+/// wall clock. The quiet window is `now - mtime` (saturating), so a write a few
+/// seconds old on a loaded host already read as settled past the 2.5s
+/// debounce and the "typing is held" assertion woke the pane. An mtime ahead
+/// of now reads as zero quiet time however long the scheduler stalls.
+fn freshen(file: &Path) {
+    std::fs::File::options()
+        .write(true)
+        .open(file)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(3600))
+        .unwrap();
+}
+
 fn verbatims(report: Option<SteeringReport>) -> Vec<String> {
     report
         .map(|report| report.items.into_iter().map(|item| item.verbatim).collect())
@@ -216,6 +230,7 @@ fn run_harness(harness: &str) {
     //    being typed (inside the debounce): no wake.
     session.operator_appends("#subagent: https://github.com/btakita/agent-doc/issues/117");
     session.operator_appends("#subagent: https://github.com/btakita/agent-doc/issues/118");
+    freshen(&session.file);
     assert!(
         !supervisor_tick(&session, &wake, harness, idle_pane(harness)),
         "{harness}: typing is held"

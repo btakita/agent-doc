@@ -510,6 +510,22 @@ Thanks, that settles the part of GH #227 the subagent couldn't trace: no agent-d
 - **Kept:** `compact --lint off|warn|strict` (so Compact has the same escape as write), and the JetBrains notification escaping (`notificationHtml()`), which fixes the dropped placeholder in hints.
 
 The subagent is amending `fix/gh227-empty-preset-attr` (PR #230). I cancelled the main-batch `make check` I had started on the old #227 head. Once the amended branch reports, I'll redo the batch: #228 (PR #229, ready, `make check` green) plus the new #227, JetBrains plugin 0.2.513, then one `make check`, push to main, `make install`, and close both issues.
+
+### Re: GH #221: merging PR #222 without the live proof — opus-5.5 · 2026-10-09T21:00-04:00
+
+**Deferred:** GH #221 closes when PR #222 lands on main. That happens in the batch below, not in this cycle.
+
+You struck the #218 head and chose to **merge PR #222 without the live Remote Dev proof**. PR #222's CI is now green on `34842a23a`.
+
+**Integration (`integrate/mainbatch3-20261009`):** origin/main `eafa5cb2e`, then #228 (PR #229), then PR #222 (`cc6e458c6`). The only conflict was `editors/jetbrains/gradle.properties`: I kept main's classic 0.2.512 and added the PR's `pluginReleaseVersion`. The 262 backend compiles the classic plugin's sources, so it picks up the editor change-lineage fix from main too.
+
+Both plugin lines need a version bump. I'll do a single bump after the reworked #227 (PR #230, `preset=""` means no preset) merges, so the version only moves once. The 262 line gets a number distinct from classic, because both share one plugin ID. After that:
+1. one `make check`;
+2. mark PR #222 ready and push main, which merges #222, #229 and #230;
+3. `make install`;
+4. close #221, #227 and #228.
+
+**#218** stays open: its live IDEA 2026.2.3 Remote Dev proof is still undone, and `#gh218remoteproof` stays in review. **`release + publish`** is re-claimed as `coordinator:release-after-batch` and comes after this batch.
 <!-- agent:boundary:d79eeb00:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -518,11 +534,11 @@ The subagent is amending `fix/gh227-empty-preset-attr` (PR #230). I cancelled th
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/218
-- #gh-fix https://github.com/btakita/agent-doc/issues/221
-- #gh-fix https://github.com/btakita/agent-doc/issues/227
-- #gh-fix https://github.com/btakita/agent-doc/issues/228
-- 🚧 release + publish
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/218~~
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/221
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/227
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/228
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

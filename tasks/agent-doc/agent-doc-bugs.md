@@ -776,6 +776,55 @@ If the answer shows independent per-editor navigation is missing, it will propos
 - **Issues:** GH #232 closed itself (`Fixes #232`), and I closed GH #233 with a comment.
 - **0.35.483:** the release commit `d2d82c041` adds the VERSIONS.md entry and the editor-parity row (classic plugin 0.2.519, exact-262 plugin 0.2.520). The first `make release` refused because the parity row was missing; I added it. The rerun is now on the release-tree test suite (9910 tests), then `make tmux-ci`, the tag, the push and `install-full`.
 - **`grokbuildaccount`:** its subagent is running `make check` on something it found. Any fix ships after 0.35.483.
+
+### Re: v0.35.483 tagged — 0.35.484 batch (Grok + IDEA/Rider) under check — opus-5.5 · 2026-10-10T03:48-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/232
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/233
+
+**v0.35.483 is tagged and installed (`d2d82c041`).** It contains:
+- `runfrontenddispatch`
+- `dispatchreadyselfheal`
+- GH #232: Clear Session Context checks for a live turn
+- GH #233: an unsupported JetBrains build is no longer reported as a failed install
+
+Both issues are closed. `runfrontenddispatch` and `dispatchreadyselfheal` are closed now; the live frontend.md check moved to review as `frontendlivedispatch` (see below).
+
+**How the release went:**
+- **First rerun:** `make release` stopped in `make check`. 2 of 9910 tests failed: `agent-doc-write-runtime-io` visible-write tests timed out after 2.0s waiting for the project controller. Load average was 53, because a subagent suite was running at the same time. Tests in the same file failed in GH #232's run too.
+- **Second rerun:** I waited until no other suite was running and reran it. `make check` passed 9910 of 9910. `tmux-ci`, the tag push and `install-full` all completed (`agent-doc 0.35.483`).
+- **Follow-up:** I added the timeout pattern to the icebox as `visiblewriteloadtimeout`.
+- **Still to verify:** GitHub Release run 38034996746 is in progress, and PyPI is still on 0.35.482. `release + publish` closes once the release assets and PyPI 0.35.483 are verified.
+
+**frontend.md live check: it needs your action.** Pane %166's supervisor (pid 1989646) has been running for 15h on the pre-0.35.483 binary. It hasn't re-registered, so it has no `ready_registered_at` stamp. The install's recycle requests are ignored while the old recycle is still in flight, which keeps the existing `4351/4350` wedge in place. The fixes prevent new wedges and heal any wedge whose supervisor re-registers. Restarting the frontend.md session in %166 clears this one. I tracked that as the `frontendlivedispatch` review item (operator-verify), with the log lines to look for afterwards.
+
+> **Queue prompt:** do [#grokbuildaccount]
+
+**Deferred:** this one closes after the next install. **Answer: yes, agent-doc supports Grok Build, but every installed Grok project was broken.**
+- **The bug:** `skill install --harness grok` wrote `args = ["mcp"]`. That command only prints help and exits 2, so Grok's MCP handshake failed and admission was refused.
+- **The fix:** `20bf36eb8` writes `["mcp","serve"]`, migrates the old entry, and makes the skill audit and `skill check` flag it. It also adds tests and updates the spec.
+- **Live proof** on a throwaway project, with your signed-in account (Grok 1.0.41):
+  - one admit and finalize answered a prompt plus a queue head in a single cycle;
+  - a single `grok -p` turn worked through three cycles: `realtime_admit`, then `commit_success`, then `mcp_finalize_queue_continuation`, then the next admit. It ended with an empty queue and `session-check ok`. The probes cost about /usr/bin/zsh.85. Only headless `--always-approve` mode was tested; the interactive TUI uses the same MCP server.
+- **After install:** I'll run `agent-doc skill install --harness grok` in agent-loop, which migrates its `.grok/config.toml`, and close `#grokmcpverify`. Any open Grok session must be restarted.
+- **Trust:** Grok only loads a project's skill and MCP server once the folder is trusted.
+
+> **Queue prompt:** do [#idearidereditors]
+
+**Deferred:** this one closes after the next install. **Answer: partly.**
+- **What works:** IDEA and Rider can both have the same project open with the plugin. Each registers its own editor copy of the document, so text and turns stay consistent in both.
+- **What conflicts:** they can't navigate independently. Both drive the project's single shared tmux `agent-doc` window, so navigating in one moves the other, and tmux focus is mirrored into both editors. When they show different documents, the layout can flip back and forth.
+- **Bug fixed:** every JetBrains process identified itself as `jetbrains-pid:<pid>`. So when one IDE switched roots or closed, the controller also dropped the other IDE's tmux sync for that root, until a restart. `9796d8c8a` scopes the identity to the IDE installation (product code plus a hash of the config directory). A restart of the same IDE still replaces its old entry, and a second IDE keeps its own.
+- **Rider caveats:**
+  - The plugin verifier runs only against IntelliJ Ultimate, so Rider has never been verified or tested live.
+  - Rider 2026.2 with the 262 package is unconfirmed.
+  - Each IDE has its own plugin directory, so install the plugin in both.
+- **Follow-ups, in the icebox:**
+  - `ideriderstopgap`: only the most recently focused IDE drives tmux. About 1 day.
+  - `ideriderindependentnav`: one tmux window per installation. Several days.
+
+**Batch 0.35.484:** in progress in `agent-doc-wt/batch-0484` on top of `v0.35.483`. Grok `20bf36eb8` and IDEA/Rider `9796d8c8a` merged cleanly. Next come the plugin version bumps (the IDEA/Rider change alters the JetBrains plugin source), then one `make check`, then `make install` and the push.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -786,8 +835,8 @@ If the answer shows independent per-editor navigation is missing, it will propos
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - do [#idearidereditors]
 - 🚧 do [#grokbuildaccount]
-- ⏭️ do [#runfrontenddispatch]
-- ⏭️ do [#dispatchreadyselfhealdis]
+- ~~⏭️ do [#runfrontenddispatch]~~
+- ~~⏭️ do [#dispatchreadyselfhealdis]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/231~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/232
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/233
@@ -799,13 +848,12 @@ If the answer shows independent per-editor navigation is missing, it will propos
 <!-- agent:backlog priority queue -->
 - [ ] [#idearidereditors] If I were to use both Idea & Rider, can I have both editors open the same project and independently navigate through agent docs?
 - [ ] 🚧 [#grokbuildaccount] I have my grok build account attached. Does agent-doc current support grok build?
-- [ ] 🚧 [#dispatchreadyselfhealdis] dispatchreadyselfheal [agent-doc] Dispatch-only recycle gate self-heal: agent-doc-route-io/src/dispatch_only/proof.rs refuses with recycle_ttl_elapsed_supervisor_alive whenever an InFlight recycle is past TTL and the supervisor is alive, even when that supervisor registered state=ready AFTER the recycle start (frontend.md in haiven-dev: started 4351 at 02:00:14Z, ready 02:00:18Z, settled written at stale 4350, refused for hours). Treat ready-after-start as settled (and re-mint the settle at the in-flight epoch), with regression coverage; then confirm Run Agent Doc on frontend.md dispatches. Ship together with fix/runfrontenddispatch 3d9fbad86.
-- [ ] 🚧 [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#frontendlivedispatch] [operator-verify] [agent-doc] Live confirmation that Run Agent Doc on haiven-dev frontend.md dispatches again. The fixes shipped in 0.35.483: runfrontenddispatch 3d9fbad86 and dispatchreadyselfheal 81b9e1910. The existing wedge (started 4351 / settled 4350) is still in place because pane %166's supervisor (pid 1989646, started about 15h ago on the pre-0.35.483 binary, last heartbeat 03:49Z) has not re-registered, so its lease has no ready_registered_at stamp, and install_fanout recycle requests are ignored while the old recycle is in flight. Unblocker: restart the frontend.md session in pane %166, or let that supervisor re-register. Then click Run Agent Doc and look for route_dispatch_only_recycle_inflight_ready_after_start outcome=settled, or supervisor_recycle_graph_settled reason=dispatch_ready_after_start, in haiven-dev ops.log, with no refusal=recycle_ttl_elapsed_supervisor_alive.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#jetbrains262distribution] [agent-doc] Provide and verify a two-sided production distribution channel for the exact-262 modular plugin before calling v0.35.480 generally installable: publish classic and 262 as non-overlapping updates of the same Marketplace plugin ID, or ship an equivalent tested custom-repository feed, while preserving fail-closed behavior for one-sided installation. Verify clean 262 Remote Dev installation reaches backend and Client/Gateway, 242–261 receive only classic, mismatch remains fail closed, and the release workflow asserts both ranged updates.
 - [/] [#gh218remoteproof] [operator-verify] GH 218: PR 222 is MERGED (01:25Z 2026-10-10, merge cc6e458c6) at head 34842a23a, CI run 38002449411 green. Run the real IDEA 2026.2.3 (262) Remote Dev acceptance matrix against prerelease jetbrains-262-preview-34842a2 (asset agent-doc-jetbrains-262-0.2.511.zip, id 626772959, 2556136 bytes, sha256 2ef328588d1491446f1a45a83775ee220c13507f5cdd9bca4f5c2111f9e864a7), or against the 0.2.514 ZIP of the next published release. Verify both downloaded copies with make verify-jetbrains-262-preview BACKEND_ZIP=... CLIENT_GATEWAY_ZIP=... first, and install the same ZIP on backend and Client/Gateway. Check: detached-only isolated terminal; same-document main-wins read-only placeholder with byte-identical main; focus/sync/resize causes no main mutation; close/rejoin; backend restart/client reconnect before the first main publication; two simultaneous thin clients; capability loss/one-sided install fails closed. Post results on 218 citing that tag and commit, then close 218. jetbrains-262-preview-c39de1b is superseded.
@@ -815,6 +863,9 @@ If the answer shows independent per-editor navigation is missing, it will propos
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
+- [ ] [#ideriderstopgap] [recommended] [agent-doc] Two JetBrains IDEs on one project: only the most recently focused IDE drives the shared tmux agent-doc window, which stops the layout from flipping between IDEA and Rider. About 1 day. Builds on idearidereditors 9796d8c8a (installation-scoped editor-surface client families).
+- [ ] [#ideriderindependentnav] [recommended] [agent-doc] Fully independent navigation per JetBrains installation: one tmux window or session per IDE installation. The installation identity becomes part of the layout-ownership key, tmux-to-editor focus mirroring goes only to the IDE that owns the window, tmux_focus_state and pane ownership are split per window, and specs plus a two-IDE SimWorld are added. Several days.
+- [ ] [#visiblewriteloadtimeout] [recommended] [agent-doc] agent-doc-write-runtime-io visible_write_content_snapshot_tests (test_lazily_visible_write_event_read, test_poll_lazily_event_*) fail under host load (load average around 50) with 'timed out after 2.0s waiting for project controller response' at ipc.rs:170 (record_lazily_visible_write_candidate). Seen in 2 of about 6 full runs on 2026-10-10. Make the fixture warm the controller before the timed RPC, or charge cold-start launch separately from CONTROLLER_RPC_TIMEOUT, so a busy runner cannot decide the outcome.
 - [ ] [#ghrecvpolicy] [agent-doc] Recipient-side [receive] auto_create_components policy for multi-user workspaces (GH #40, https://github.com/btakita/agent-doc/issues/40). Parked until multi-user workspace support exists.
 <!-- /agent:icebox -->
 

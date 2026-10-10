@@ -3,7 +3,10 @@
 //! Pure functions for parsing and mutating the `agent:queue` component body.
 //!
 //! Hybrid syntax:
-//! - `- text` / `1. text` → single-line prompt
+//! - `- text` / `1. text` → list-item prompt; a free-text item also owns its
+//!   lazy / indented continuation lines up to the next blank line, list
+//!   marker, or queue-native line (`#queuecruft`,
+//!   `agent_doc_markdown_ast::overlay::queue_continuation_line`)
 //! - `~~~prompt` / `---` → multi-line prompt fence
 //! - unwrapped prose + a closed Markdown code fence + a trailing explicit
 //!   request → recovered multi-line prompt (`#queue-unwrapped-fenced-task`)
@@ -400,6 +403,46 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 // verbatim as `Freeform` so it is never run, synced, or reaped.
                 QueueEntry::Freeform(line.to_string())
             } else {
+                // `#queuecruft`: a free-text item owns the lazy / indented
+                // continuation lines beneath it (Markdown paragraph
+                // continuation). They are part of the item's text, so admission,
+                // consume, removal and every entry-level reorder move or drop the
+                // whole item; none can strand a continuation line as orphaned
+                // `Freeform` residue. The raw lines are kept verbatim after a
+                // `\n` so `render` stays byte-preserving.
+                let mut end_i = i + 1;
+                if agent_doc_markdown_ast::overlay::queue_item_accepts_continuation(rest) {
+                    while end_i < lines.len()
+                        && agent_doc_markdown_ast::overlay::queue_continuation_line(lines[end_i])
+                    {
+                        end_i += 1;
+                    }
+                }
+                if end_i > i + 1 {
+                    let mut text = rest.to_string();
+                    for continuation in &lines[i + 1..end_i] {
+                        text.push('\n');
+                        text.push_str(continuation);
+                    }
+                    // `- ~~first` + `rest~~`: the strike wraps the whole item.
+                    let entry = match parse_completed_inline(&text) {
+                        Some(completed) => QueueEntry::Completed(QueuePrompt {
+                            text: completed.to_string(),
+                            multiline: false,
+                            indent,
+                            ordered_marker,
+                        }),
+                        None => QueueEntry::Prompt(QueuePrompt {
+                            text,
+                            multiline: false,
+                            indent,
+                            ordered_marker,
+                        }),
+                    };
+                    entries.push((entry, span(start_i, end_i)));
+                    i = end_i;
+                    continue;
+                }
                 QueueEntry::Prompt(QueuePrompt {
                     text: rest.to_string(),
                     multiline: false,
@@ -5030,7 +5073,8 @@ mod tests {
     #[test]
     fn progressive_free_text_heads_collapse_long_raced_pair_in_either_order() {
         let current = "In sample-app, describe setup and add installation usage docs with Python 3.14 and other dependencies.";
-        let stale = "In sample-app, describe setup and add installation usage docs with Python 3.14.";
+        let stale =
+            "In sample-app, describe setup and add installation usage docs with Python 3.14.";
         for body in [
             format!("- {current}\n- {stale}\n"),
             format!("- {stale}\n- {current}\n"),
@@ -7566,6 +7610,160 @@ mod tests {
                     first.text
                 );
             }
+        }
+    }
+
+    // ── #queuecruft: multi-line queue item boundaries ─────────────────────
+
+    /// A free-text item's lazy (unindented) continuation line is part of the
+    /// item, not separate `Freeform` residue, and round-trips byte for byte.
+    #[test]
+    fn lazy_continuation_line_belongs_to_its_free_text_item() {
+        let body = concat!(
+            "- do [#runctrlclaude]\n",
+            "- Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n",
+            "the route-owned host supervisor (pid 1989646) is mapping a STALE binary.\n",
+            "- do [#explicitrunqueue]\n",
+        );
+        let spans = parse_spans(body).unwrap();
+        assert_eq!(spans.len(), 3, "{spans:?}");
+        let QueueEntry::Prompt(prompt) = &spans[1].0 else {
+            panic!("expected the wrapped item as one prompt: {spans:?}");
+        };
+        assert_eq!(
+            prompt.text,
+            "Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n\
+             the route-owned host supervisor (pid 1989646) is mapping a STALE binary."
+        );
+        assert!(!prompt.multiline);
+        assert_eq!(
+            &body[spans[1].1.clone()],
+            "- Run Agent Doc on frontend.md error: dispatch-only claude reopen refused\n\
+             the route-owned host supervisor (pid 1989646) is mapping a STALE binary.\n"
+        );
+        assert!(
+            !spans
+                .iter()
+                .any(|(entry, _)| matches!(entry, QueueEntry::Freeform(_)))
+        );
+        assert_eq!(render(&parse(body).unwrap()), body);
+    }
+
+    /// Indented continuation (one or more lines, up to the next list marker or
+    /// blank line) is also part of the item.
+    #[test]
+    fn indented_continuation_lines_belong_to_their_item_until_blank_or_marker() {
+        let body = concat!(
+            "- Investigate the flaky route test\n",
+            "  it fails only under nextest\n",
+            "    and only on the second run\n",
+            "\n",
+            "stray note after a blank line\n",
+            "- next item\n",
+        );
+        let entries = parse(body).unwrap();
+        assert_eq!(entries.len(), 3, "{entries:?}");
+        assert_eq!(
+            entries[0],
+            QueueEntry::Prompt(QueuePrompt::new(
+                "Investigate the flaky route test\n  it fails only under nextest\n    and only on the second run"
+            ))
+        );
+        assert_eq!(
+            entries[1],
+            QueueEntry::Freeform("stray note after a blank line".to_string())
+        );
+        assert_eq!(
+            entries[2],
+            QueueEntry::Prompt(QueuePrompt::new("next item"))
+        );
+    }
+
+    /// Id-backed directives never absorb continuation (the `#qfoldedhead` fold
+    /// heal relies on that), and a line struck on its own keeps the residue below
+    /// it separate so a completed item is never revived as live text. A strike
+    /// that wraps the whole multi-line item reads back as one completed item.
+    #[test]
+    fn continuation_is_free_text_only_and_strike_wraps_the_whole_item() {
+        let directive = parse("- do [#aaa]\n  explain the tradeoffs\n").unwrap();
+        assert_eq!(directive.len(), 2);
+        assert!(matches!(directive[1], QueueEntry::Freeform(_)));
+
+        let struck_first_line = parse("- ~~done item~~\nresidue\n").unwrap();
+        assert_eq!(
+            struck_first_line,
+            vec![
+                QueueEntry::Completed(QueuePrompt::new("done item")),
+                QueueEntry::Freeform("residue".to_string()),
+            ]
+        );
+
+        let body = "- ~~wrapped item\nsecond line~~\n";
+        let wrapped = parse(body).unwrap();
+        assert_eq!(
+            wrapped,
+            vec![QueueEntry::Completed(QueuePrompt::new(
+                "wrapped item\nsecond line"
+            ))]
+        );
+        assert_eq!(render(&wrapped), body);
+    }
+
+    /// Reordering after promotion: the backlog mirror (`sync`/`prepend`) moves
+    /// whole entries, so a multi-line item can never be separated from its
+    /// continuation line by a later insertion.
+    #[test]
+    fn backlog_mirror_reorder_never_separates_an_item_from_its_continuation() {
+        let body = concat!(
+            "- do [#bbb]\n",
+            "- Wrapped free-text item\n",
+            "second line of the same item\n",
+            "- do [#ccc]\n",
+        );
+        let entries = parse(body).unwrap();
+        for mode in [
+            BacklogQueueSyncMode::Prepend,
+            BacklogQueueSyncMode::Append,
+            BacklogQueueSyncMode::Sync,
+        ] {
+            let synced = sync_backlog_into_queue(
+                &entries,
+                &["aaa".to_string(), "bbb".to_string(), "ccc".to_string()],
+                mode,
+            )
+            .unwrap_or_else(|| entries.clone());
+            let rendered = render(&synced);
+            assert!(
+                rendered.contains("- Wrapped free-text item\nsecond line of the same item\n"),
+                "{mode:?} separated the continuation: {rendered}"
+            );
+            assert_eq!(
+                rendered.matches("second line of the same item").count(),
+                1,
+                "{mode:?}: {rendered}"
+            );
+        }
+    }
+
+    /// The overlay node enumerator and `parse_spans` must agree on the
+    /// boundaries of a multi-line item (single segmentation truth).
+    #[test]
+    fn continuation_item_spans_match_markdown_ast_item_nodes() {
+        let body = concat!(
+            "- first free text\n",
+            "lazy continuation\n",
+            "- second item\n",
+            "  indented continuation\n",
+            "- do [#aaa]\n",
+        );
+        let doc = format!("<!-- agent:queue -->\n{body}<!-- /agent:queue -->\n");
+        let body_start = doc.find('\n').unwrap() + 1;
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
+        let spans = parse_spans(body).unwrap();
+        assert_eq!(nodes.len(), spans.len());
+        for (node, (_, range)) in nodes.iter().zip(spans.iter()) {
+            assert_eq!(node.item.start_byte - body_start, range.start);
+            assert_eq!(node.item.end_byte - body_start, range.end);
         }
     }
 }

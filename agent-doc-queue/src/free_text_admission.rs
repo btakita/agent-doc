@@ -45,6 +45,28 @@ pub fn normalize_admitted_free_text(text: &str) -> String {
     text.trim().trim_start_matches('❯').trim().to_string()
 }
 
+/// The backlog text a queue prompt is admitted as.
+///
+/// `#queuecruft`: a bulleted queue item that wraps onto lazy or indented
+/// continuation lines is ONE item (see `document_queue::parse_spans`). Its lines
+/// are joined with single spaces into the one-line backlog item text, so every
+/// continuation line's words survive the promotion. A fenced multiline prompt
+/// (`~~~prompt` / `---`) keeps its line structure: the backlog renders those as
+/// item continuation, and literal fenced examples must stay literal.
+pub fn admitted_prompt_text(prompt: &crate::document_queue::QueuePrompt) -> String {
+    if prompt.multiline || !prompt.text.contains('\n') {
+        return normalize_admitted_free_text(&prompt.text);
+    }
+    let joined = prompt
+        .text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    normalize_admitted_free_text(&joined)
+}
+
 /// True when free text is suitable to materialize as tracked backlog work.
 ///
 /// `#halftypedcoin`: text the shared typing gate calls plainly unfinished
@@ -234,7 +256,7 @@ fn adjacent_snapshot_extension_claims(
         let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
             continue;
         };
-        let new_text = normalize_admitted_free_text(&prompt.text);
+        let new_text = admitted_prompt_text(prompt);
         let new_key = crate::queue_response::normalize_for_answer_match(&new_text);
         if new_key.is_empty() || !actionable_keys.contains(&new_key) {
             continue;
@@ -379,9 +401,8 @@ pub fn reconcile_materialized_free_text_projection(
                 };
                 (!claimed_sources.contains(&index)
                     && free_text_prompt_is_backlog_task(&prompt.text)
-                    && normalize_admitted_free_text(&prompt.text)
-                        == normalize_admitted_free_text(backlog_text))
-                    .then_some(index)
+                    && admitted_prompt_text(prompt) == normalize_admitted_free_text(backlog_text))
+                .then_some(index)
             })
             .collect::<Vec<_>>();
         let [source_index] = candidates.as_slice() else {
@@ -463,7 +484,7 @@ pub fn reconcile_materialized_free_text_projection(
         replay_rows.insert(observed_index);
         backlog_edits.push(MaterializedFreeTextRevision {
             id: id.clone(),
-            text: normalize_admitted_free_text(&prompt.text),
+            text: admitted_prompt_text(prompt),
         });
     }
     backlog_edits.sort_by(|left, right| left.id.cmp(&right.id));
@@ -615,7 +636,7 @@ pub fn collect_actionable_free_text_prompts(
             && queue_scope.allows_prompt(&prompt.text)
         {
             prompts.push(FreeTextWorkPrompt {
-                text: normalize_admitted_free_text(&prompt.text),
+                text: admitted_prompt_text(prompt),
             });
         }
     }
@@ -700,8 +721,7 @@ pub fn prepare_free_text_admission(
     }
     let mut warnings = Vec::new();
     if !texts_to_add.is_empty() {
-        let reserved =
-            agent_doc_element_backlog::backlog::document_reserved_identity_ids(&current);
+        let reserved = agent_doc_element_backlog::backlog::document_reserved_identity_ids(&current);
         let outcome = agent_doc_element_backlog::backlog::op_prepend_many_with_outcomes_reserved(
             &backlog_body,
             &texts_to_add,
@@ -1089,12 +1109,9 @@ mod tests {
     #[test]
     fn materialized_projection_identity_fails_closed_on_ambiguous_equal_text_sources() {
         let old = "Can this be run remotely via uvx?";
-        let baseline =
-            crate::document_queue::parse(&format!("- {old}\n- {old}\n")).unwrap();
-        let projected = crate::document_queue::parse(&format!(
-            "- do [#crossplatformmise]\n- {old}\n"
-        ))
-        .unwrap();
+        let baseline = crate::document_queue::parse(&format!("- {old}\n- {old}\n")).unwrap();
+        let projected =
+            crate::document_queue::parse(&format!("- do [#crossplatformmise]\n- {old}\n")).unwrap();
         let observed = crate::document_queue::parse(concat!(
             "- do [#crossplatformmise]\n",
             "- Can this be run remotely via uvx on every platform?\n",
@@ -1115,13 +1132,10 @@ mod tests {
     #[test]
     fn materialized_projection_identity_fails_closed_on_unrelated_same_shape_edit() {
         let old = "Can this be run remotely via uvx?";
-        let baseline = crate::document_queue::parse(&format!(
-            "- {old}\n- do [#neighbor]\n"
-        ))
-        .unwrap();
+        let baseline =
+            crate::document_queue::parse(&format!("- {old}\n- do [#neighbor]\n")).unwrap();
         let projected =
-            crate::document_queue::parse("- do [#crossplatformmise]\n- do [#neighbor]\n")
-                .unwrap();
+            crate::document_queue::parse("- do [#crossplatformmise]\n- do [#neighbor]\n").unwrap();
         let observed = crate::document_queue::parse(concat!(
             "- do [#crossplatformmise]\n",
             "- Can this be run remotely via uvx on every platform?\n",
@@ -1267,18 +1281,15 @@ mod tests {
             .iter()
             .find(|component| component.name == "backlog")
             .unwrap();
-        let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(
-            backlog.content(&prepared.content),
-        );
+        let (_, items, _) =
+            agent_doc_element_backlog::backlog::parse_items(backlog.content(&prepared.content));
 
         assert_eq!(prepared.admitted_count, 1);
         assert_eq!(items.len(), 1, "fenced examples became backlog siblings");
         assert_eq!(items[0].id, prepared.unique_ids[0]);
         assert!(items[0].continuation.contains("[#crossplatformmise-txpw]"));
 
-        let admission = prepared
-            .finish(FreeTextAdmissionExecution::Queue)
-            .unwrap();
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
         let queue_entries = queue_entries_from_content(&admission.content);
         let queue_prompts = crate::document_queue::prompts(&queue_entries);
         assert_eq!(queue_prompts.len(), 1);
@@ -1703,5 +1714,85 @@ mod tests {
             admission.content
         );
         assert!(!admission.content.contains(&format!("- {continued}\n")));
+    }
+
+    /// `#queuecruft`: the live `agent-doc-bugs.md` shape. A free-text queue item
+    /// pasted across two lines (the second a lazy, unindented continuation) is
+    /// ONE item: the promoted backlog text carries both lines joined, and the
+    /// queue replacement removes every line of it. Before the fix the second
+    /// line stayed behind as orphaned `Freeform` residue, and the prepended
+    /// `do [#id]` mirror then detached it from its parent.
+    #[test]
+    fn promotion_of_a_multiline_free_text_item_leaves_no_orphaned_continuation() {
+        let first =
+            "Run Agent Doc on frontend.md error: dispatch-only claude reopen refused to inject";
+        let second = "the route-owned host supervisor (pid 1989646) serving this document is mapping a STALE agent-doc binary.";
+        let content = format!(
+            "<!-- agent:queue -->\n- do [#runctrlclaude]\n- {first}\n{second}\n- do [#explicitrunqueue]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#runctrlclaude] Ctrl-C wedge\n- [ ] [#explicitrunqueue] Explicit run on claimed head\n<!-- /agent:backlog -->\n"
+        );
+        let entries = queue_entries_from_content(&content);
+
+        let prepared = prepare_free_text_admission(
+            &content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "bugs-doc",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(prepared.admitted_count, 1);
+        let new_id = prepared.unique_ids[0].clone();
+        let components = agent_doc_element::element::parse(&prepared.content).unwrap();
+        let backlog = components
+            .iter()
+            .find(|component| component.name == "backlog")
+            .unwrap();
+        let (_, items, _) =
+            agent_doc_element_backlog::backlog::parse_items(backlog.content(&prepared.content));
+        let promoted = items.iter().find(|item| item.id == new_id).unwrap();
+        assert_eq!(promoted.text, format!("{first} {second}"));
+
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let queue = agent_doc_element::element::parse(&admission.content)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue_body = queue.content(&admission.content);
+        assert!(
+            !queue_body.contains("route-owned host supervisor"),
+            "continuation line orphaned in the queue: {queue_body}"
+        );
+        assert!(!queue_body.contains(first));
+        let queue_entries = queue_entries_from_content(&admission.content);
+        assert!(
+            !queue_entries
+                .iter()
+                .any(|entry| matches!(entry, crate::document_queue::QueueEntry::Freeform(_))),
+            "{queue_entries:?}"
+        );
+        assert!(queue_body.contains(&format!("do [#{new_id}]")));
+    }
+
+    /// Indented continuation is promoted the same way.
+    #[test]
+    fn promotion_joins_indented_continuation_lines() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- Investigate the flaky route test\n",
+            "  it fails only under nextest\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+        let actionable =
+            collect_actionable_free_text_prompts(None, &entries, &FreeTextAdmissionScope::All);
+        assert_eq!(
+            actionable.prompts,
+            vec![FreeTextWorkPrompt {
+                text: "Investigate the flaky route test it fails only under nextest".to_string()
+            }]
+        );
     }
 }

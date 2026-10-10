@@ -675,6 +675,49 @@ mod tests {
         }
     }
 
+    /// `#queuecruft`: node-keyed remove / strike / reorder treat a free-text item
+    /// and its lazy continuation line as one node.
+    const CONTINUATION_DOC: &str = "\
+<!-- agent:queue -->
+- do [#alpha]
+- Wrapped free-text item
+second line of the same item
+- do [#beta]
+<!-- /agent:queue -->
+";
+
+    #[test]
+    fn remove_strike_and_reorder_keep_continuation_with_its_item() {
+        let nodes = item_nodes(CONTINUATION_DOC, "queue").unwrap();
+        assert_eq!(nodes.len(), 3);
+        let wrapped = &nodes[1];
+
+        let removed = remove_nodes(CONTINUATION_DOC, "queue", &[&wrapped.node_key]).unwrap();
+        assert_eq!(
+            removed,
+            "<!-- agent:queue -->\n- do [#alpha]\n- do [#beta]\n<!-- /agent:queue -->\n"
+        );
+
+        let struck = consume_node(CONTINUATION_DOC, "queue", &wrapped.node_key).unwrap();
+        assert!(
+            struck.contains("- ~~Wrapped free-text item\nsecond line of the same item~~\n"),
+            "{struck}"
+        );
+        let struck_nodes = item_nodes(&struck, "queue").unwrap();
+        assert_eq!(struck_nodes.len(), 3);
+        assert!(struck_nodes[1].item.struck);
+
+        let order = [&nodes[1].node_key, &nodes[2].node_key, &nodes[0].node_key];
+        let order = order.iter().map(|k| k.as_str()).collect::<Vec<_>>();
+        let reordered = reorder_nodes(CONTINUATION_DOC, "queue", &order).unwrap();
+        assert!(
+            reordered.contains(
+                "- Wrapped free-text item\nsecond line of the same item\n- do [#beta]\n- do [#alpha]\n"
+            ),
+            "{reordered}"
+        );
+    }
+
     #[test]
     fn consume_strikes_exact_node_key_without_matching_text() {
         let nodes = item_nodes(DOC, "queue").unwrap();

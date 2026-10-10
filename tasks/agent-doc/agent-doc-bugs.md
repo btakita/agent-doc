@@ -258,7 +258,25 @@ Yes. **v0.35.485 is fully published.**
 **Still on disk:** the subagent scratch dirs a hook blocked them from deleting: `~/work/qct`, `~/.t-rfe`, `~/.cache/freetextqueue-agent`, and `~/work/btakita/agent-doc-wt/.scratch-runfrontenderror`.
 
 These two fixes are not released. Queue `release + publish` to ship them as 0.35.486.
-<!-- agent:boundary:971f0665 -->
+> **Chat prompt (#chatprompt):** have you published the release?
+
+### Re: have you published the release? — opus-5-5 · 2026-10-10T18:35-04:00
+
+**v0.35.485 is fully published:** GitHub Release with 13 assets, PyPI 0.35.485, Homebrew, and the local install. **GH #234 and `#testisolationtests` were not released yet.** Your second `release + publish` was queued after GH #234, but my 0.35.485 closeout struck it. That was my error.
+
+**v0.35.486 is in progress now.**
+- `release: v0.35.486` (`3c0680a6e`) is on `main`, with the VERSIONS.md entry and editor parity row.
+- It covers GH #234 (`f33493ea2`) and `#testisolationtests` (`c87aaf081`, `fb38011ab`).
+- `make release` is running: check, tmux-ci, tag, publish, `install-full`. I'll confirm the GitHub Release and PyPI once they land. If PyPI hits the 30-minute race again, I'll re-run its publish job.
+
+**New queue items, dispatched:**
+
+| Item | Owner | Brief |
+|---|---|---|
+| `#pypireleaseworkflow` | `subagent:pypirelease` | Trigger PyPI from the Release workflow after assets upload, or via `workflow_run`, instead of a 30-minute poll. A GITHUB_TOKEN-created release does not fire `release:published`. |
+| GH #235 | `subagent:gh235` | session-check prints the manual recycle remedy next to the line saying not to run it. Route every stale-supervisor warning through the recycle-status-aware formatter. The coordinator closes the issue after integration. |
+| `release + publish` (new) | `coordinator:release-0487` | Ships those two fixes as v0.35.487 once they're integrated. |
+<!-- agent:boundary:d2344b01 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -266,15 +284,10 @@ These two fixes are not released. Queue `release + publish` to ship them as 0.35
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#testisolationtests]~~
-- ~~⏭️ do [#runfrontendcrashed]~~
-- ~~⏭️ do [#runfrontenderror]~~
-- ~~do [#runctrlclaude]~~
-- ~~⏭️ do [#explicitrunqueue]~~
-- ~~do [#freetextqueue]~~
-- ~~Multiline cruft was left from the `Run Agent Doc on frontend.md error` free-text queue item that transitioned into the backlog.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gt-fix https://github.com/btakita/agent-doc/issues/234~~
-- ~~release + publish~~
+- do [#respondfinalizehard]
+- do [#pypireleaseworkflow]
+- #gh-fix https://github.com/btakita/agent-doc/issues/235
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

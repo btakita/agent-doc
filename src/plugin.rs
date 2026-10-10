@@ -1331,7 +1331,7 @@ fn same_filesystem_path(left: &Path, right: &Path) -> bool {
 /// `#jbdynamicfalsereport`: whether a live process's mapped plugin jar proves it
 /// is executing `expected_version` from `target_dir`. Only a still-linked jar at
 /// `<target_dir>/agent-doc-jetbrains/lib/agent-doc-jetbrains-<expected>.jar`
-/// counts; a deleted mapping, a different version or a different plugin root is
+/// (or the exact-262 `agent.doc-<expected>.jar`) counts; a deleted mapping, a different version or a different plugin root is
 /// not a load of this install.
 fn jetbrains_mapped_jar_proves_load(
     mapped: &agent_doc_fs::plugin_jar::MappedPluginJar,
@@ -1363,7 +1363,10 @@ fn await_jetbrains_live_load(
 ) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        let mapped = agent_doc_fs::plugin_jar::probe_mapped_plugin_jar(pid, "agent-doc-jetbrains-");
+        let mapped = agent_doc_fs::plugin_jar::probe_mapped_plugin_jar(
+            pid,
+            agent_doc_fs::plugin_jar::JETBRAINS_PLUGIN_JAR_STEMS,
+        );
         if jetbrains_mapped_jar_proves_load(&mapped, target_dir, expected_version) {
             return true;
         }
@@ -1582,6 +1585,65 @@ fn extract_jetbrains_upgrade_launcher(zip_path: &Path) -> Result<tempfile::Named
     bail!("JetBrains package has no agent-doc plugin jar to use as the upgrade launcher")
 }
 
+/// `#jb262dynupgrade`: stable prefix of the reason an exact-262 modular package
+/// gives for not attempting a restart-free upgrade. The classic launcher
+/// (`JetBrainsPluginUpgradeBootstrap`) unloads one classic plugin tree and
+/// installs a ZIP rooted at `agent-doc-jetbrains/`; the 262 package is a Plugin
+/// Model v2 split-mode distribution (root `agent-doc-jetbrains-262/`, a
+/// descriptor-only `agent.doc-<v>.jar` plus `lib/modules/agent.doc.*.jar`, with a
+/// frontend half that may live in a separate JetBrains Client process), and it
+/// ships no upgrade launcher at all. That is a property of the package line, not
+/// a legacy build, so it must never read as "predates restart-free support".
+const JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE: &str =
+    "the exact-262 modular JetBrains package has no restart-free dynamic upgrade entry point";
+
+/// Which compatibility line a package ZIP holds, read from its versioned plugin
+/// jar: classic `agent-doc-jetbrains-<v>.jar` or modular `agent.doc-<v>.jar`.
+fn jetbrains_zip_package_range(zip_path: &Path) -> Result<JetbrainsPackageRange> {
+    let file = fs::File::open(zip_path).context("Failed to open JetBrains package")?;
+    let mut archive = zip::ZipArchive::new(file).context("Failed to read JetBrains package")?;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
+        let Some(name) = entry.enclosed_name() else {
+            continue;
+        };
+        let file_name = name
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if agent_doc_fs::plugin_jar::plugin_jar_version(file_name, &["agent.doc-"]).is_some() {
+            return Ok(JetbrainsPackageRange::Modular262);
+        }
+        if agent_doc_fs::plugin_jar::plugin_jar_version(file_name, &["agent-doc-jetbrains-"])
+            .is_some()
+        {
+            return Ok(JetbrainsPackageRange::Classic242To261);
+        }
+    }
+    bail!("JetBrains package has no versioned agent-doc plugin jar")
+}
+
+/// `#jb262dynupgrade`: why a live IDE cannot be upgraded restart-free from a
+/// package of `package_range`, or `None` when the package carries a usable
+/// upgrade launcher. `launcher_has_main` is consulted only for the classic line;
+/// the modular 262 package has no launcher to inspect.
+fn jetbrains_dynamic_upgrade_entry_point_refusal(
+    package_range: JetbrainsPackageRange,
+    expected_version: &str,
+    launcher_has_main: impl FnOnce() -> Result<bool>,
+) -> Result<Option<String>> {
+    match package_range {
+        JetbrainsPackageRange::Modular262 => Ok(Some(format!(
+            "{JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE} (v{expected_version} is a Plugin Model v2 split-mode package whose agent.doc-{expected_version}.jar carries no upgrade launcher), so a running 262 IDE keeps its current plugin generation until it restarts"
+        ))),
+        JetbrainsPackageRange::Classic242To261 => Ok((!launcher_has_main()?).then(|| {
+            format!(
+                "JetBrains package v{expected_version} predates restart-free dynamic upgrade support (its plugin JAR has no Main-Class); refusing to replace a package owned by a live IDE. Restart the IDE before installing this legacy package, or install a current local build with `agent-doc plugin install jetbrains --local`."
+            )
+        })),
+    }
+}
+
 fn jetbrains_upgrade_launcher_has_main_manifest(jar_path: &Path) -> Result<bool> {
     let file = fs::File::open(jar_path).context("Failed to open JetBrains upgrade launcher")?;
     let mut archive =
@@ -1707,12 +1769,19 @@ fn try_hot_upgrade_jetbrains(
     if pids.is_empty() {
         return Ok(None);
     }
-    let launcher = extract_jetbrains_upgrade_launcher(zip_path)?;
-    if !jetbrains_upgrade_launcher_has_main_manifest(launcher.path())? {
-        bail!(
-            "JetBrains package v{expected_version} predates restart-free dynamic upgrade support (its plugin JAR has no Main-Class); refusing to replace a package owned by a live IDE. Restart the IDE before installing this legacy package, or install a current local build with `agent-doc plugin install jetbrains --local`."
-        );
+    let package_range = jetbrains_zip_package_range(zip_path)?;
+    let mut launcher = None;
+    if let Some(refusal) =
+        jetbrains_dynamic_upgrade_entry_point_refusal(package_range, expected_version, || {
+            let extracted = extract_jetbrains_upgrade_launcher(zip_path)?;
+            let has_main = jetbrains_upgrade_launcher_has_main_manifest(extracted.path())?;
+            launcher = Some(extracted);
+            Ok(has_main)
+        })?
+    {
+        bail!("{refusal}");
     }
+    let launcher = launcher.context("JetBrains upgrade launcher was not extracted")?;
     let archive = tempfile::Builder::new()
         .prefix("agent-doc-jb-package-")
         .suffix(".zip")
@@ -2430,6 +2499,8 @@ fn agent_doc_declined_dynamic_upgrade(reason: &str) -> bool {
 fn dynamic_upgrade_decliner(reason: &str) -> &'static str {
     if agent_doc_declined_dynamic_upgrade(reason) {
         "agent-doc"
+    } else if reason.contains(JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE) {
+        "modular_package"
     } else if reason.contains(JETBRAINS_DYNAMIC_UNLOAD_REFUSED) {
         "ide"
     } else {
@@ -2445,6 +2516,10 @@ fn dynamic_upgrade_decliner(reason: &str) -> &'static str {
 fn dynamic_upgrade_fallback_warning(reason: &str, fallback: &str) -> String {
     let cause = if agent_doc_declined_dynamic_upgrade(reason) {
         "agent-doc declined the restart-free upgrade: this JetBrains build retires plugin classloaders asynchronously, so there is no safe synchronous swap point"
+    } else if reason.contains(JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE) {
+        // `#jb262dynupgrade`: an expected property of the 262 package line, not
+        // a failure and not a legacy build.
+        "the exact-262 modular plugin package has no restart-free upgrade entry point, so the running IDE keeps its current plugin generation until restart"
     } else if reason.contains(JETBRAINS_DYNAMIC_UNLOAD_REFUSED) {
         "the IDE refused the restart-free upgrade"
     } else {
@@ -5308,6 +5383,168 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             &target,
             "0.2.448"
         ));
+    }
+
+    /// `#jb262dynupgrade`: a live 262 IDE maps the modular root jar
+    /// `agent.doc-<v>.jar`, which proves a load of that generation exactly as the
+    /// classic jar does.
+    #[test]
+    fn mapped_jar_proves_load_for_the_modular_262_jar() {
+        use agent_doc_fs::plugin_jar::MappedPluginJar as M;
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(lib.join("modules")).unwrap();
+        let jar = lib.join("agent.doc-0.2.514.jar");
+        fs::write(&jar, b"x").unwrap();
+        let module = lib.join("modules/agent.doc.backend.jar");
+        fs::write(&module, b"x").unwrap();
+        let current = |path: &Path| M::Current {
+            path: path.to_string_lossy().into_owned(),
+            inode: 1,
+        };
+        assert!(super::jetbrains_mapped_jar_proves_load(
+            &current(&jar),
+            &target,
+            "0.2.514"
+        ));
+        assert!(!super::jetbrains_mapped_jar_proves_load(
+            &current(&jar),
+            &target,
+            "0.2.515"
+        ));
+        assert!(!super::jetbrains_mapped_jar_proves_load(
+            &current(&module),
+            &target,
+            "0.2.514"
+        ));
+    }
+
+    /// `#jb262dynupgrade`: the package line is read from the ZIP's versioned
+    /// plugin jar, so the hot-upgrade path knows a 262 package before it looks
+    /// for a launcher.
+    #[test]
+    fn jetbrains_zip_package_range_reads_the_plugin_jar_line() {
+        let tmp = TempDir::new().unwrap();
+        let classic = tmp.path().join("classic.zip");
+        let modular = tmp.path().join("modular.zip");
+        write_test_jetbrains_zip(&classic, "0.2.513", b"classic");
+        write_test_modular_jetbrains_zip(&modular, "0.2.514", b"modular");
+        assert_eq!(
+            super::jetbrains_zip_package_range(&classic).unwrap(),
+            JetbrainsPackageRange::Classic242To261
+        );
+        assert_eq!(
+            super::jetbrains_zip_package_range(&modular).unwrap(),
+            JetbrainsPackageRange::Modular262
+        );
+    }
+
+    /// `#jb262dynupgrade`: a 262 package is refused for an accurate reason --
+    /// the modular line has no upgrade launcher -- without inspecting a launcher
+    /// and never with the "predates restart-free support" legacy wording. The
+    /// classic line keeps its Main-Class check.
+    #[test]
+    fn dynamic_upgrade_entry_point_refusal_names_the_modular_262_package() {
+        let modular = super::jetbrains_dynamic_upgrade_entry_point_refusal(
+            JetbrainsPackageRange::Modular262,
+            "0.2.514",
+            || panic!("the modular package has no launcher to inspect"),
+        )
+        .unwrap()
+        .expect("a 262 package has no restart-free entry point");
+        assert!(
+            modular.contains(super::JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE),
+            "{modular}"
+        );
+        assert!(modular.contains("agent.doc-0.2.514.jar"), "{modular}");
+        assert!(!modular.contains("predates"), "{modular}");
+        assert!(!modular.contains("legacy"), "{modular}");
+
+        let legacy = super::jetbrains_dynamic_upgrade_entry_point_refusal(
+            JetbrainsPackageRange::Classic242To261,
+            "0.2.300",
+            || Ok(false),
+        )
+        .unwrap()
+        .expect("a classic jar without Main-Class predates the launcher");
+        assert!(legacy.contains("predates restart-free"), "{legacy}");
+
+        assert_eq!(
+            super::jetbrains_dynamic_upgrade_entry_point_refusal(
+                JetbrainsPackageRange::Classic242To261,
+                "0.2.513",
+                || Ok(true),
+            )
+            .unwrap(),
+            None
+        );
+        assert!(
+            super::jetbrains_dynamic_upgrade_entry_point_refusal(
+                JetbrainsPackageRange::Classic242To261,
+                "0.2.513",
+                || anyhow::bail!("unreadable launcher"),
+            )
+            .is_err()
+        );
+    }
+
+    /// `#jb262dynupgrade`: a live 262 IDE still gets its package replaced on
+    /// disk and a restart-required verdict, but the warning, decliner and
+    /// recorded reason say why -- the modular line has no entry point -- instead
+    /// of claiming an upgrader failure or a legacy package.
+    #[test]
+    fn modular_262_package_falls_back_to_restart_with_an_accurate_reason() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("agent.doc-0.2.513.jar"), b"old").unwrap();
+        let zip = tmp.path().join("agent-doc-jetbrains-262-0.2.514.zip");
+        write_test_modular_jetbrains_zip(&zip, "0.2.514", b"new");
+        let refusal = super::jetbrains_dynamic_upgrade_entry_point_refusal(
+            JetbrainsPackageRange::Modular262,
+            "0.2.514",
+            || unreachable!(),
+        )
+        .unwrap()
+        .unwrap();
+
+        super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow_mut().clear());
+        let outcome = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            "0.2.514",
+            true,
+            || anyhow::bail!("{refusal}"),
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+        match &outcome {
+            JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
+                assert!(
+                    reason.contains(super::JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE),
+                    "{reason}"
+                );
+            }
+            other => panic!("expected RestartRequired, got {other:?}"),
+        }
+        assert_eq!(fs::read(lib.join("agent.doc-0.2.514.jar")).unwrap(), b"new");
+        assert_eq!(super::dynamic_upgrade_decliner(&refusal), "modular_package");
+        let warning =
+            super::dynamic_upgrade_fallback_warning(&refusal, "replacing the plugin files instead");
+        assert!(warning.contains("exact-262 modular"), "{warning}");
+        assert!(!warning.contains("failed"), "{warning}");
+        assert!(!warning.contains("refused"), "{warning}");
+        let logged = super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow().clone());
+        assert!(
+            logged
+                .iter()
+                .any(|line| line.contains("declined_by=modular_package")),
+            "{logged:?}"
+        );
+        // Not an agent-doc platform decline: no permanent-loss classification.
+        assert!(!super::agent_doc_declined_dynamic_upgrade(&refusal));
     }
 
     /// A staged `--local` install leaves the live generation's jar in place, so

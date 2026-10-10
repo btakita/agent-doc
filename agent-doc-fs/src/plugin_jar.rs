@@ -103,9 +103,31 @@ pub fn prefer_mapped_plugin_jar(
     }
 }
 
+/// `#jb262dynupgrade`: versioned plugin-jar filename prefixes a live JetBrains
+/// process can map. The classic 242-261 package ships
+/// `agent-doc-jetbrains-<v>.jar`; the exact-262 modular package ships its root
+/// descriptor jar as `agent.doc-<v>.jar` (its `lib/modules/agent.doc.*.jar`
+/// module jars are unversioned and never match). A probe that knew only the
+/// classic prefix read every 262 IDE as "no plugin mapped".
+pub const JETBRAINS_PLUGIN_JAR_STEMS: &[&str] = &["agent-doc-jetbrains-", "agent.doc-"];
+
+/// The version a plugin jar filename carries under one of `jar_stems`:
+/// `<stem><digits>(.<digits>)*.jar`. Anything else (another plugin, an
+/// unversioned module jar, a non-numeric suffix) is not an agent-doc plugin jar.
+pub fn plugin_jar_version<'a>(file_name: &'a str, jar_stems: &[&str]) -> Option<&'a str> {
+    jar_stems.iter().find_map(|stem| {
+        let version = file_name.strip_prefix(stem)?.strip_suffix(".jar")?;
+        (!version.is_empty()
+            && version
+                .split('.')
+                .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit())))
+        .then_some(version)
+    })
+}
+
 /// Probe one process's mapped plugin jar. Linux-only; every other platform and
 /// every IO error yields [`MappedPluginJar::Unknown`].
-pub fn probe_mapped_plugin_jar(pid: u32, jar_stem: &str) -> MappedPluginJar {
+pub fn probe_mapped_plugin_jar(pid: u32, jar_stems: &[&str]) -> MappedPluginJar {
     let map_files = std::path::PathBuf::from(format!("/proc/{pid}/map_files"));
     let Ok(entries) = std::fs::read_dir(&map_files) else {
         return MappedPluginJar::Unknown;
@@ -120,7 +142,7 @@ pub fn probe_mapped_plugin_jar(pid: u32, jar_stem: &str) -> MappedPluginJar {
         if !std::path::Path::new(stem)
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with(jar_stem) && name.ends_with(".jar"))
+            .is_some_and(|name| plugin_jar_version(name, jar_stems).is_some())
         {
             continue;
         }
@@ -157,11 +179,11 @@ fn inode_of(_path: &std::path::Path) -> Option<u64> {
 /// never counts it as package content.
 pub const PLUGIN_RESTART_REQUIRED_MARKER: &str = ".agent-doc-jetbrains-restart-required";
 
-/// Jar filename prefix for an editor kind. Only editors that load agent-doc as a
-/// jar inside their own process can be probed this way.
-pub fn plugin_jar_stem(editor_kind: &str) -> Option<&'static str> {
+/// Jar filename prefixes for an editor kind. Only editors that load agent-doc as
+/// a jar inside their own process can be probed this way.
+pub fn plugin_jar_stems(editor_kind: &str) -> Option<&'static [&'static str]> {
     match editor_kind.to_ascii_lowercase().as_str() {
-        "jetbrains" | "intellij" | "idea" => Some("agent-doc-jetbrains-"),
+        "jetbrains" | "intellij" | "idea" => Some(JETBRAINS_PLUGIN_JAR_STEMS),
         _ => None,
     }
 }
@@ -253,13 +275,13 @@ pub fn probe_superseded_editors(
     let mut probed = std::collections::HashSet::new();
     let mut superseded = Vec::new();
     for (editor_kind, pid) in editors {
-        let Some(jar_stem) = plugin_jar_stem(&editor_kind) else {
+        let Some(jar_stems) = plugin_jar_stems(&editor_kind) else {
             continue;
         };
         if pid == 0 || !probed.insert(pid) {
             continue;
         }
-        let mapped = probe_mapped_plugin_jar(pid, jar_stem);
+        let mapped = probe_mapped_plugin_jar(pid, jar_stems);
         let Some(detail) = superseded_mapping_detail(&mapped) else {
             continue;
         };
@@ -276,6 +298,33 @@ pub fn probe_superseded_editors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#jb262dynupgrade`: the live-jar probes match both the classic and the
+    /// exact-262 modular plugin jar, and nothing else.
+    #[test]
+    fn plugin_jar_version_matches_classic_and_modular_262_jars() {
+        let stems = plugin_jar_stems("jetbrains").unwrap();
+        assert_eq!(
+            plugin_jar_version("agent-doc-jetbrains-0.2.513.jar", stems),
+            Some("0.2.513")
+        );
+        assert_eq!(
+            plugin_jar_version("agent.doc-0.2.514.jar", stems),
+            Some("0.2.514")
+        );
+        for name in [
+            "agent.doc.backend.jar",
+            "agent.doc.shared.jar",
+            "agent.doc-.jar",
+            "agent.doc-0.2.514.zip",
+            "agent-doc-jetbrains-262-0.2.514.jar",
+            "agent-doc-jetbrains-0.2.x.jar",
+            "lazily-0.39.0.jar",
+            "agent-doc-jetbrains-0..1.jar",
+        ] {
+            assert_eq!(plugin_jar_version(name, stems), None, "{name}");
+        }
+    }
 
     /// GH #84: without a recorded refusal the ladder starts restart-free; with
     /// one, it advises the restart and names the recorded reason.

@@ -67,6 +67,12 @@ whose `since-build`/`until-build` contains its build. Marketplace hosting of the
 same two ranged updates is the equivalent alternative but is not automated. See
 [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md).
 
+This package has no restart-free dynamic upgrade entry point: unlike the
+classic plugin jar, `agent.doc-<pluginVersion>.jar` carries no
+`JetBrainsPluginUpgradeBootstrap` launcher. `agent-doc plugin install` against a
+running 262 IDE replaces the files and reports that a restart is required
+(`declined_by=modular_package`).
+
 Remote Dev plugin synchronization currently resolves the other side only for
 Marketplace-hosted plugins. A custom repository must be configured and the
 same update installed on both sides; installing the 262 ZIP locally on only the

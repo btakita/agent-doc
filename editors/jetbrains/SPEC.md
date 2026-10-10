@@ -119,6 +119,26 @@ tree, and a stale `agent-doc-jetbrains-262/` tree is removed so one plugin ID
 never has two on-disk roots. `make install-editor-plugins` builds both packages
 before the all-installed convergence.
 
+Restart-free dynamic upgrade is a classic-line capability
+(`#jb262dynupgrade`). Only the classic plugin jar carries the
+`JetBrainsPluginUpgradeBootstrap` `Main-Class`/`Agent-Class` launcher, and that
+launcher replaces one classic `agent-doc-jetbrains/` tree. The exact-262
+package is a Plugin Model v2 split-mode distribution (descriptor-only
+`agent.doc-<version>.jar` plus unversioned `lib/modules/agent.doc.*.jar`, with a
+frontend half that may run in a separate JetBrains Client) and ships no
+launcher. When a live IDE owns a 262 target, the installer therefore recognizes
+the package line from its `agent.doc-<version>.jar`, does not attempt an attach,
+replaces the plugin files on disk, and reports restart-required with the reason
+"the exact-262 modular JetBrains package has no restart-free dynamic upgrade
+entry point" (`ops.log`: `declined_by=modular_package`). It never reports the
+262 package as one that "predates restart-free dynamic upgrade support"; that
+wording is reserved for a classic jar without a `Main-Class`. The live-jar
+probes (`#pluginbyteidentity` superseded-bytes detection, the controller's
+`editor_route` admission, the install's `#jbdynamicfalsereport` load proof and
+the `#pluginactivationprobe` loaded-generation reading) match both versioned
+plugin jars, `agent-doc-jetbrains-<version>.jar` and `agent.doc-<version>.jar`,
+and never the unversioned module jars.
+
 Local package convergence compares every ZIP payload byte and relative path
 with the installed plugin tree before replacing it. A byte-identical package is
 a true no-op: the installer leaves the existing files and inodes in place so a

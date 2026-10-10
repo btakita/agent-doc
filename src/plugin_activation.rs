@@ -17,8 +17,8 @@
 //! > **Which plugin generation does each live IDE process actually have mapped?**
 //!
 //! The first answer is direct: a process that maps
-//! `agent-doc-jetbrains-<version>.jar` with the inode still linked is executing
-//! that generation. Only when that mapping cannot be read does the probe fall
+//! `agent-doc-jetbrains-<version>.jar` (classic 242-261) or `agent.doc-<version>.jar`
+//! (exact-262 modular) with the inode still linked is executing that generation. Only when that mapping cannot be read does the probe fall
 //! back on timestamps — if the newest installed jar has an mtime later than an
 //! IDE process's start time, that process probably has not loaded it. That
 //! fallback is a heuristic, not a proof, because agent-doc ships a dynamic
@@ -215,17 +215,27 @@ pub fn live_ide_processes() -> Vec<IdeProcess> {
 /// of the same evidence.
 #[cfg(target_os = "linux")]
 fn mapped_plugin_version(pid: u32) -> Option<String> {
-    let agent_doc_preflight_io::warnings::MappedPluginJar::Current { path, .. } =
-        agent_doc_preflight_io::warnings::probe_mapped_plugin_jar(pid, "agent-doc-jetbrains-")
-    else {
+    mapped_jar_plugin_version(&agent_doc_preflight_io::warnings::probe_mapped_plugin_jar(
+        pid,
+        agent_doc_fs::plugin_jar::JETBRAINS_PLUGIN_JAR_STEMS,
+    ))
+}
+
+/// The generation a still-linked mapping names: the classic
+/// `agent-doc-jetbrains-<v>.jar` or the exact-262 modular `agent.doc-<v>.jar`
+/// (`#jb262dynupgrade`). Anything not `Current` proves no live generation.
+fn mapped_jar_plugin_version(
+    mapped: &agent_doc_preflight_io::warnings::MappedPluginJar,
+) -> Option<String> {
+    let agent_doc_preflight_io::warnings::MappedPluginJar::Current { path, .. } = mapped else {
         return None;
     };
-    Path::new(&path)
-        .file_name()
-        .and_then(|name| name.to_str())?
-        .strip_prefix("agent-doc-jetbrains-")?
-        .strip_suffix(".jar")
-        .map(str::to_string)
+    let name = Path::new(path).file_name().and_then(|name| name.to_str())?;
+    agent_doc_fs::plugin_jar::plugin_jar_version(
+        name,
+        agent_doc_fs::plugin_jar::JETBRAINS_PLUGIN_JAR_STEMS,
+    )
+    .map(str::to_string)
 }
 
 /// Corroborating evidence that `pid` really is a JetBrains IDE host: its address
@@ -419,6 +429,42 @@ mod tests {
                 .doctor_issue()
                 .is_some_and(|issue| issue.contains("no JetBrains IDE process is running")),
             "doctor must say the premise is dead: {probe:?}"
+        );
+    }
+
+    /// `#jb262dynupgrade`: a live 262 IDE maps the modular root jar
+    /// `agent.doc-<v>.jar`; reading only the classic name reported no loaded
+    /// generation and fell back to the mtime heuristic.
+    #[test]
+    fn mapped_jar_plugin_version_reads_classic_and_modular_262_jars() {
+        use agent_doc_preflight_io::warnings::MappedPluginJar;
+        let current = |path: &str| MappedPluginJar::Current {
+            path: path.to_string(),
+            inode: 1,
+        };
+        assert_eq!(
+            mapped_jar_plugin_version(&current(
+                "/p/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.513.jar"
+            ))
+            .as_deref(),
+            Some("0.2.513")
+        );
+        assert_eq!(
+            mapped_jar_plugin_version(&current("/p/agent-doc-jetbrains/lib/agent.doc-0.2.514.jar"))
+                .as_deref(),
+            Some("0.2.514")
+        );
+        assert_eq!(
+            mapped_jar_plugin_version(&current(
+                "/p/agent-doc-jetbrains/lib/modules/agent.doc.backend.jar"
+            )),
+            None
+        );
+        assert_eq!(
+            mapped_jar_plugin_version(&MappedPluginJar::Deleted {
+                path: "/p/agent-doc-jetbrains/lib/agent.doc-0.2.514.jar".to_string(),
+            }),
+            None
         );
     }
 

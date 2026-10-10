@@ -11342,8 +11342,6 @@ fn handle_editor_command_submit_async_rpc_with_settle(
     Ok(accepted_response)
 }
 
-const JETBRAINS_PLUGIN_JAR_STEM: &str = "agent-doc-jetbrains-";
-
 /// GH #76 pure core: the first live JetBrains editor proven to be executing
 /// superseded plugin bytes, rendered as a refusal reason. `None` when every
 /// probe is current or inconclusive (fails open — `Unknown` never refuses).
@@ -11393,8 +11391,10 @@ fn refuse_editor_route_to_superseded_editor(
             // A pid that does not fit `/proc`'s u32 cannot be probed: skip it
             // (fail open) rather than refuse on a truncated id.
             let pid = u32::try_from(registration.pid).ok()?;
-            let mapped =
-                agent_doc_fs::plugin_jar::probe_mapped_plugin_jar(pid, JETBRAINS_PLUGIN_JAR_STEM);
+            let mapped = agent_doc_fs::plugin_jar::probe_mapped_plugin_jar(
+                pid,
+                agent_doc_fs::plugin_jar::JETBRAINS_PLUGIN_JAR_STEMS,
+            );
             Some((registration.editor_kind, pid, mapped))
         })
         .collect::<Vec<_>>();

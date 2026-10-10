@@ -757,6 +757,25 @@ Each branch passed `make check` in its own worktree. #232's run had 2 load-timin
 **Next:** if the batch is green, `make install` and push `main`. Then check that Run Agent Doc on frontend.md dispatches. The frontend supervisor must re-register first: its registration predates the new column, so it has no `ready_registered_at` stamp yet. Then close the four items and #232 / #233 (#232 closes itself via `Fixes #232`), and cut 0.35.483.
 
 I refreshed the coordinator claims; the `runfrontenddispatch` claim had passed its 2-hour TTL.
+
+### Re: idearidereditors dispatched — 0.35.483 release running — opus-5.5 · 2026-10-10T02:53-04:00
+
+> **Queue prompt:** do [#runfrontenddispatch]
+
+**Deferred:** `runfrontenddispatch` and `dispatchreadyselfheal` are on agent-doc `main` (`ba6f11af8`) and installed. They close once the 0.35.483 release is verified. A live dispatch check on frontend.md has to wait for pane %166's supervisor to re-register: pid 1989646 has been running for 14h on the old binary, and its lease has no `ready_registered_at` stamp yet. I didn't inject a trigger into your live frontend session.
+
+**Sent to a background subagent (claimed `subagent:idearider`): `idearidereditors`.** Your question is whether IntelliJ IDEA and Rider can have the same project open and each navigate agent docs independently. The subagent is tracing the actual mechanisms:
+- per-IDE editor registration and CRDT replicas (two live editors on one document)
+- whether one tmux main-window layout owner means navigating in one IDE moves the other
+- Rider's platform build numbers against the 242-261 / 262 package ranges
+
+If the answer shows independent per-editor navigation is missing, it will propose that as a follow-up, not build it.
+
+**Progress since the last update:**
+- **Batch integrated:** `make check` on the merged batch passed (exit 0, 9910 of 9910 tests). It's pushed to `main` as `ba6f11af8`, and `make install` succeeded.
+- **Issues:** GH #232 closed itself (`Fixes #232`), and I closed GH #233 with a comment.
+- **0.35.483:** the release commit `d2d82c041` adds the VERSIONS.md entry and the editor-parity row (classic plugin 0.2.519, exact-262 plugin 0.2.520). The first `make release` refused because the parity row was missing; I added it. The rerun is now on the release-tree test suite (9910 tests), then `make tmux-ci`, the tag, the push and `install-full`.
+- **`grokbuildaccount`:** its subagent is running `make check` on something it found. Any fix ships after 0.35.483.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -765,7 +784,8 @@ I refreshed the coordinator claims; the `runfrontenddispatch` claim had passed i
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#grokbuildaccount]
+- do [#idearidereditors]
+- 🚧 do [#grokbuildaccount]
 - ⏭️ do [#runfrontenddispatch]
 - ⏭️ do [#dispatchreadyselfhealdis]
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/231~~
@@ -777,9 +797,10 @@ I refreshed the coordinator claims; the `runfrontenddispatch` claim had passed i
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#grokbuildaccount] I have my grok build account attached. Does agent-doc current support grok build?
+- [ ] [#idearidereditors] If I were to use both Idea & Rider, can I have both editors open the same project and independently navigate through agent docs?
+- [ ] 🚧 [#grokbuildaccount] I have my grok build account attached. Does agent-doc current support grok build?
 - [ ] 🚧 [#dispatchreadyselfhealdis] dispatchreadyselfheal [agent-doc] Dispatch-only recycle gate self-heal: agent-doc-route-io/src/dispatch_only/proof.rs refuses with recycle_ttl_elapsed_supervisor_alive whenever an InFlight recycle is past TTL and the supervisor is alive, even when that supervisor registered state=ready AFTER the recycle start (frontend.md in haiven-dev: started 4351 at 02:00:14Z, ready 02:00:18Z, settled written at stale 4350, refused for hours). Treat ready-after-start as settled (and re-mint the settle at the in-flight epoch), with regression coverage; then confirm Run Agent Doc on frontend.md dispatches. Ship together with fix/runfrontenddispatch 3d9fbad86.
-- [ ] [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
+- [ ] 🚧 [#runfrontenddispatch] Run Agent Doc on frontend.md: dispatch-only claude reopen refused to inject into pane %166 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle
 <!-- /agent:backlog -->
 
 ## Review

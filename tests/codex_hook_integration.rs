@@ -8,7 +8,16 @@ use std::process::Command as ProcessCommand;
 use tempfile::TempDir;
 
 fn agent_doc() -> Command {
-    cargo_bin_cmd!("agent-doc")
+    let mut cmd = cargo_bin_cmd!("agent-doc");
+    // `#stophookdeadlineflake`: these tests assert what the Stop hook does, not
+    // its wall-clock budget. Under a loaded machine (load average ~100) the
+    // real closeout work exceeded the 45s budget and the hook failed closed
+    // (`continue:false`), flaking `codex_hook_cli_replays_plain_final_answer_
+    // after_repeated_auto_queue_stop` and `codex_hook_cli_resumes_original_
+    // capture_over_editor_convergence_block`. Wait for the worker's completion
+    // event instead; the budget itself is unit-tested in agent-doc-codex-stop-io.
+    cmd.env("AGENT_DOC_CODEX_STOP_HOOK_DEADLINE", "worker_completion");
+    cmd
 }
 
 fn template_doc_content() -> String {

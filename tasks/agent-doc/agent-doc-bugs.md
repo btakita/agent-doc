@@ -628,7 +628,16 @@ When `make check` is green, I will:
 5. Close the four items, `relcimavenlocal` and the release item.
 
 If `runfrontenddispatch` produces a fix before the tag, it goes into this release; otherwise it goes into the next one.
-<!-- agent:boundary:5d6c8aa7 -->
+> **Chat prompt (#chatprompt):** They are not struck
+
+### Re: why the queue heads are not struck — opus-5.5 · 2026-10-10T00:07-04:00
+
+That's deliberate. Those heads are not done, so striking them now would claim work that hasn't shipped. A head is struck only when its item is closed with `--done`. I'll close these after the batch fix is on agent-doc `main` and installed. That covers `ftstrikeclaimedmention`, `crossrootcolumnflip`, `staleharnessturnlive` and `jb262dynupgrade`, and the release head once v0.35.482 is verified on the GitHub release and PyPI. `runfrontenddispatch` stays open until its subagent reports.
+
+Leaving them unstruck while they are claimed is also exactly the `#ftstrikeclaimedmention` fix in this batch: a status message that only mentions a claimed head must not strike it.
+
+Progress: the batch `make check` has passed all 9901 Rust tests, and its later stages are still running.
+<!-- agent:boundary:85b8d79b -->
 <!-- /agent:exchange -->
 
 <!--

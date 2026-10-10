@@ -695,6 +695,19 @@ The `runfrontenddispatch` fix (`fix/runfrontenddispatch` `3d9fbad86`) arrived af
 - **Fix ready:** `fix/runfrontenddispatch` `3d9fbad86` fixes the root cause. A reload done without the lock overwrote a newly recorded recycle start, so the supervisor's settle was written at the stale epoch. `make check` exit 0. It is held for the next release because it arrived after this release's `make check` started.
 - **Live wedge remains:** frontend.md in haiven-dev is still `started` 4351 / `settled` 4350. The install's recycle requests skipped it, and `agent-doc admin recycle` (controller handoff) does not rewrite that document's supervisor ledger. Only a restart of pane %166's own supervisor writes a fresh matching pair, and that ends the live session there. That restart is yours to do, or wait for the dispatch-gate self-heal follow-up below.
 - **Follow-up added: `dispatchreadyselfheal`.** The dispatch-only gate should treat a supervisor that registered ready after the recycle start as settled, so ledger damage like this heals without a restart.
+
+### Re: queue dispatch — runfrontenddispatch held for the self-heal — opus-5.5 · 2026-10-10T01:32-04:00
+
+> **Queue prompt:** do [#runfrontenddispatch]
+
+**Deferred:** `runfrontenddispatch` stays open and claimed by the coordinator. Its fix (`fix/runfrontenddispatch` `3d9fbad86`, not yet on `main`) has to ship together with `dispatchreadyselfheal`. That subagent is building on top of `3d9fbad86`. Once it reports, I'll merge both into agent-doc `main`, run one `make check`, `make install`, push, and then check that Run Agent Doc on frontend.md dispatches. Both items close after that.
+
+**Sent to background subagents (claimed):**
+- **`dispatchreadyselfhealdis`** (`subagent:selfheal`): working on `fix/dispatchreadyselfheal`, branched from `origin/fix/runfrontenddispatch`. The dispatch-only gate will treat a supervisor that registered ready after the recycle start as settled, and re-mint the settle at the in-flight epoch. It also gets a spec update and a regression test.
+- **GH #231** (`subagent:gh231`): the release.yml mavenLocal step. I think 0.35.482 already fixed this: `1abda46ed` (`#relcimavenlocal`) shipped in the tag, and Release run 38025127512 passed `plugins`. The subagent checks that, comments, and closes the issue. It only writes code if the fix turns out to be missing.
+- **GH #232** (`subagent:gh232`): Clear Session Context reports `idle_prompt` during a live turn, sets the actor to ready, and types `/clear` into the busy harness. The fix goes on `fix/gh232-clear-guard-live-turn` from `origin/main`. Before sending anything, the guard will check the same `harness_turn_live` evidence the supervisor uses. While a turn is live it will refuse with `clear_queued_behind_busy_turn` and leave the actor state and the in-flight marker alone. The issue closes once the fix is on `main`.
+
+The exchange is 664 lines / 39 sections (warn). I'm not compacting while the queue is active.
 <!-- agent:boundary:047c1cfd -->
 <!-- /agent:exchange -->
 
@@ -703,16 +716,11 @@ The `runfrontenddispatch` fix (`fix/runfrontenddispatch` `3d9fbad86`) arrived af
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#runfrontenddispatch]
-- ~~do [#jb262dynlauncherrecommen]~~
-- ~~do [#relcimavenlocalreleasepu]~~
-- ~~⏭️ do [#ftstrikeclaimedmention]~~
-- ~~do [#crossrootcolumnflip]~~
-- ~~do [#staleharnessturnlive]~~
-- ~~do [#jb262dynupgrade]~~
-- ~~do [#previewrepin]~~
-- ~~#actionable-review~~
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- ⏭️ do [#runfrontenddispatch]
+- do [#dispatchreadyselfhealdis]
+- #gh-fix https://github.com/btakita/agent-doc/issues/231
+- #gh-fix https://github.com/btakita/agent-doc/issues/232
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

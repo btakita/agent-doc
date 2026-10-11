@@ -992,12 +992,7 @@ pub fn auto_start_in_session_with_lock_mode(
                     harness.binary
                 ),
             );
-            if let Err(e) = tmux.select_pane(&dispatch_pane) {
-                eprintln!(
-                    "[route] warning: failed to focus handoff pane {}: {}",
-                    dispatch_pane, e
-                );
-            }
+            crate::route_focus::focus_route_pane(tmux, file, &dispatch_pane, "fresh_start_handoff");
         }
         let dispatch_start = if ready {
             eprintln!("[route] {} is ready, sending command", harness.binary);

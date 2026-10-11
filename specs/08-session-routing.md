@@ -347,6 +347,20 @@ publisher requested, no `pane_layout_projection` records, and no projection
 ever reconciles (observed 2026-10-09: a converged two-pane window grew a
 silent third column). Standalone CLI routes keep the legacy stash rescue.
 
+**Controller-owned focus boundary (`#focussynccurrent`):** The same boundary
+covers focus. Every route focus effect goes through
+`route_focus::focus_route_pane`. Under a controller-owned layout the route
+never selects a pane (no `select-window`, no `select-pane`): the layout
+projection applied the route's focus at convergence, and any later focus belongs
+to the newest editor selection, which only the generation-sequenced layout plane
+knows. The route logs `route_focus_skipped ... reason=controller_layout_owns_focus`
+instead. A route that preserves the caller's surface (background recovery,
+cross-document child route) is focus-neutral too; only standalone CLI routes
+focus their pane. Observed 2026-10-11: an rpg.md route converged, the editor
+switched to sdk.md (newer generation parked the rpg pane in stash), and the rpg
+route's direct-pane submit then ran `select_pane` on the stashed pane, switching
+the tmux client into `stash` while the editor showed sdk.md.
+
 Claude artifact and IDE-context UI must be distinguished by stable shape rather than session-owned text. A bare `⧉ <label>` attachment line and a leading `[⧉ ...]` chip inside Claude Code's `❯` composer are chrome; labels and paths are arbitrary. Composer projection removes the inline chip before deciding whether the remaining body is empty, a faint placeholder, or real operator text. It accepts both ASCII whitespace and Claude's U+00A0 after `❯`, while preserving any text after the chip as a protected draft. The active artifact picker is blocked only when `Enter to open` and a `claude.ai/code/artifact/...` URL are both visible.
 
 **Owned ready/busy conflict:** When a managed owned pane reaches an internally ready state (`actor=ready`, supervisor runtime actor ready, controller lease ready) but the pane probe still reports `alive-busy` / `prompt_ready=false` from a recoverable stale queued-draft cue, route-owned completion and supervisor idle-queue dispatch must treat that as a bounded ready/busy conflict rather than an unbounded keep-alive. After the same four-poll debounce used by stale-busy idle repair, they emit `owned_pane_ready_busy_conflict` and continue route-owned reap/liveness or queue dispatch as appropriate. Active turn cues, permission prompts, hook-review prompts, shell-search prompts, help screens, and clean-exit prompts remain hard blockers. `agent-doc session status` prints this conflict with a bounded reconcile/clear hint so the operator does not have to infer it from raw ready/busy fields.

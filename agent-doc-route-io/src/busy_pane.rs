@@ -556,11 +556,7 @@ pub fn ensure_existing_pane_ready_for_dispatch(
                 provenance
             ),
         );
-        if !crate::invocation::preserve_route_layout()
-            && let Err(e) = tmux.select_pane(pane)
-        {
-            eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
-        }
+        crate::route_focus::focus_route_pane(tmux, file, pane, "busy_already_running");
         eprintln!(
             "[route] registered pane {} for {} is busy but has no pending prompt-bearing drift — focusing the live {} session instead of injecting a duplicate reopen",
             pane,

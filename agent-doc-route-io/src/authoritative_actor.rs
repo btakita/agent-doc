@@ -472,7 +472,7 @@ pub fn promote_starting_authoritative_actor_if_dispatch_ready(
         return (record, runtime);
     }
 
-    let _ = tmux.select_pane(&record.pane_id);
+    crate::route_focus::focus_route_pane(tmux, file, &record.pane_id, "starting_actor_probe");
     let pane_ready = agent_doc_tmux_io::capture_pane(tmux, &record.pane_id)
         .ok()
         .map(|content| {

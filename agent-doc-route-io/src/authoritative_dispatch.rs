@@ -107,14 +107,7 @@ fn accept_pending_harness_switch(
     pending: &PendingHarnessSwitch,
 ) -> Result<String> {
     let dispatch_pane = actor.record.pane_id.clone();
-    if !crate::invocation::preserve_route_layout()
-        && let Err(err) = tmux.select_pane(&dispatch_pane)
-    {
-        eprintln!(
-            "[route] warning: failed to focus pending harness handoff pane {}: {}",
-            dispatch_pane, err
-        );
-    }
+    crate::route_focus::focus_route_pane(tmux, file, &dispatch_pane, "pending_harness_handoff");
     let action = if pending.queue_paused {
         "accepted_pending_queue_resume"
     } else if pending.restart_in_flight {
@@ -772,14 +765,12 @@ pub fn route_via_authoritative_actor(
             dispatch_pane = actor.record.pane_id.clone();
             actor_state = actor.actor_state();
         } else {
-            if !crate::invocation::preserve_route_layout()
-                && let Err(e) = tmux.select_pane(&dispatch_pane)
-            {
-                eprintln!(
-                    "[route] warning: failed to focus pane {}: {}",
-                    dispatch_pane, e
-                );
-            }
+            crate::route_focus::focus_route_pane(
+                tmux,
+                file,
+                &dispatch_pane,
+                "starting_timeout_blocked",
+            );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -1057,14 +1048,8 @@ pub fn route_via_authoritative_actor(
             intent: dispatch_intent,
         });
 
-    if !crate::invocation::preserve_route_layout()
-        && actor_dispatch_blocker_reason(actor_dispatch_state).is_some()
-        && let Err(e) = tmux.select_pane(&dispatch_pane)
-    {
-        eprintln!(
-            "[route] warning: failed to focus pane {}: {}",
-            dispatch_pane, e
-        );
+    if actor_dispatch_blocker_reason(actor_dispatch_state).is_some() {
+        crate::route_focus::focus_route_pane(tmux, file, &dispatch_pane, "dispatch_blocked");
     }
 
     match action {

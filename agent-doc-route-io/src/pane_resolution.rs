@@ -1218,14 +1218,12 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                             ),
                         );
                         if restart_via_supervisor(file, session_id) {
-                            if !crate::invocation::preserve_route_layout()
-                                && let Err(e) = tmux.select_pane(registered_pane)
-                            {
-                                eprintln!(
-                                    "[route] warning: failed to focus restarted pane {}: {}",
-                                    registered_pane, e
-                                );
-                            }
+                            crate::route_focus::focus_route_pane(
+                                tmux,
+                                file,
+                                registered_pane,
+                                "supervisor_restart",
+                            );
                             require_routed_admission_projection(
                                 tmux,
                                 file,

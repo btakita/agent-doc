@@ -215,9 +215,7 @@ pub fn dispatch_via_supervisor_ipc_with_mode(
         );
     }
 
-    if let Err(e) = tmux.select_pane(pane) {
-        eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
-    }
+    crate::route_focus::focus_route_pane(tmux, file, pane, "supervisor_ipc_submit");
     eprintln!(
         "[route] Dispatched {} via supervisor IPC → pane {}",
         trigger, pane

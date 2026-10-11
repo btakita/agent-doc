@@ -1144,6 +1144,32 @@ merge-consumer receipt `editor_ops_for_base accepted=true` is producer-agnostic.
 When neither producer marker is present the diagnostic must name both, so a
 dormant capture ledger is not misread as the wrong-marker defect.
 
+A handed-over burst is never silently lost (`#editoropscheckpointfail`). The
+batch FFI's first append keeps the editor's short (250ms) controller response
+budget, but that budget is routinely exceeded while the controller's project
+state-ingress lock is held by a durable reload (`state_event_ingress_slow
+site=refresh_memory fact=durable_reload hold_ms=1000-4000`); the stalled append
+is then applied late, after the editor has already logged it as failed. Both
+batch and one-op FFIs therefore record through `record_editor_ops_retaining`:
+
+- A transient failure (controller timeout, connect/protocol failure on a live
+  socket, busy cold store) retains the burst in a per-document FIFO and returns
+  `1`, logging `editor_ops_retained count=<n> pending=<k> cause=<full error
+  chain> #editoropscheckpointfail`. A background drainer in the binary re-sends
+  the identical burst (same `event_nonce` and `updated_ms`) with a 3s budget and
+  capped backoff until the controller acknowledges it, then writes `editor_ops_recorded
+  ... retained_retry=true attempts=<n> retained_ms=<ms> #qbasehashmemo`.
+- While a document has a retained or in-flight burst, every later burst queues
+  behind it, so the epoch keeps typing order.
+- The controller remembers applied append nonces per document (bounded) under
+  its editor-op write lock and acknowledges a re-sent nonce without appending,
+  so a late-applied original plus its re-send land exactly once, even across
+  an epoch boundary. Within one epoch the durable event id
+  (`editor-op-capture-checkpoint:<doc>:<epoch>:<nonce>`) already deduplicates.
+- Only a definitive controller rejection, or exhausting the per-document
+  retention bound (4096 bursts), is reported as `editor_ops_record_failed ...
+  error=<full chain>` and returns `0`.
+
 A refused capture is a receipt, not silence (`#opcapturedormant`). Neither
 producer marker nor a failure marker is written when a burst never reaches the
 record FFI at all, so a dormant ledger is otherwise indistinguishable from an

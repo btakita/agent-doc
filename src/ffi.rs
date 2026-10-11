@@ -1589,8 +1589,20 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
         }
     };
 
-    match agent_doc_op_capture_io::record_editor_op(&file_path_buf, base, op) {
-        Ok(()) => {
+    match agent_doc_op_capture_io::record_editor_ops_retaining(&file_path_buf, base, vec![op]) {
+        Ok(agent_doc_op_capture_io::EditorOpsRecordOutcome::Retained {
+            pending_batches,
+            cause,
+        }) => {
+            agent_doc_ops_log_io::log_op(
+                &file_path_buf,
+                &format!(
+                    "editor_ops_retained count=1 kind={kind} pending={pending_batches} cause={cause} #editoropscheckpointfail"
+                ),
+            );
+            1
+        }
+        Ok(agent_doc_op_capture_io::EditorOpsRecordOutcome::Recorded) => {
             agent_doc_ops_log_io::log_op(
                 &file_path_buf,
                 &format!(
@@ -1605,7 +1617,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
             agent_doc_ops_log_io::log_op(
                 &file_path_buf,
                 &format!(
-                    "{} kind={kind} error={e} #qnodemerge4wire",
+                    "{} kind={kind} error={e:#} #qnodemerge4wire",
                     OpsLogEvent::EditorOpRecordFailed
                 ),
             );
@@ -1618,8 +1630,10 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
 ///
 /// `ops_json` is a JSON array of [`agent_doc_merge::crdt::EditorOp`] values,
 /// e.g. `[{"kind":"insert","offset":3,"text":"x"}]`. Returns `1` when the
-/// complete batch was durably recorded and `0` on malformed input or I/O
-/// failure. The caller can safely fall back to the diff-guess path on failure.
+/// complete batch was durably recorded, or was retained for in-order retry by
+/// the binary after a transient controller/store failure
+/// (`#editoropscheckpointfail`), and `0` on malformed input or a definitive
+/// rejection. The caller can safely fall back to the diff-guess path on `0`.
 ///
 /// # Safety
 ///
@@ -1659,8 +1673,24 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
     // tests — could be satisfied ONLY by the one-op FFI the JetBrains TypingTracker
     // never calls. Same false-negative shape as `#opcaptureverifybatchproducer`.
     let op_log_summary = agent_doc_merge::crdt::summarize_editor_ops_for_log(&ops);
-    match agent_doc_op_capture_io::record_editor_ops(&file_path_buf, base, ops) {
-        Ok(()) => {
+    match agent_doc_op_capture_io::record_editor_ops_retaining(&file_path_buf, base, ops) {
+        Ok(agent_doc_op_capture_io::EditorOpsRecordOutcome::Retained {
+            pending_batches,
+            cause,
+        }) => {
+            // `#editoropscheckpointfail`: not yet recorded, but owned by the
+            // binary's in-order retry drainer, which writes the matching
+            // `editor_ops_recorded ... retained_retry=true` receipt.
+            agent_doc_ops_log_io::log_op(
+                &file_path_buf,
+                &format!(
+                    "editor_ops_retained count={op_count} base={} pending={pending_batches} transaction=batch cause={cause} #qbasehashmemo #editoropscheckpointfail",
+                    base.get(..12).unwrap_or(base),
+                ),
+            );
+            1
+        }
+        Ok(agent_doc_op_capture_io::EditorOpsRecordOutcome::Recorded) => {
             agent_doc_ops_log_io::log_op(
                 &file_path_buf,
                 &format!(

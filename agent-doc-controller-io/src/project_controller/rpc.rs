@@ -20291,7 +20291,19 @@ fn handle_editor_op_capture_update(
     let payload = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let update: EditorOpCaptureUpdate =
         serde_json::from_str(&payload).context("decode editor-op capture update")?;
-    let _write_guard = runtime.editor_op_capture_writes.lock();
+    let mut applied_nonces = runtime.editor_op_capture_writes.lock();
+    // `#editoropscheckpointfail`: a client whose first append attempt timed out
+    // while it waited here re-sends the identical batch. Acknowledge it without
+    // a second append so retry never duplicates typed operations.
+    let append_nonce = match &update {
+        EditorOpCaptureUpdate::Append { event_nonce, .. } => {
+            if applied_nonces.contains(&document_hash, event_nonce) {
+                return Ok(false);
+            }
+            Some((document_hash.clone(), event_nonce.clone()))
+        }
+        _ => None,
+    };
     let current = runtime.document_state_projection(&document_hash)?;
     let generation = current
         .as_ref()
@@ -20377,11 +20389,18 @@ fn handle_editor_op_capture_update(
             )
         }
     };
-    append_apply_state_event(
+    let inserted = append_apply_state_event(
         bootstrap,
         runtime,
         agent_doc_state_backbone::StateEvent::new(event_id, fact),
-    )
+    )?;
+    if let Some((document_hash, nonce)) = append_nonce {
+        // Recorded whether or not this call inserted: an ignored insert means the
+        // durable ledger already holds this exact event id, i.e. the batch is
+        // applied.
+        applied_nonces.record(&document_hash, &nonce);
+    }
+    Ok(inserted)
 }
 
 /// Read-only live-projection query (`#lazily-hot-path`): return the controller's
@@ -41814,6 +41833,117 @@ mod tests {
             .unwrap();
         assert!(projected.document.editor_op_capture.is_none());
         assert_eq!(projected.document.editor_op_capture_generation, 2);
+    }
+
+    /// `#editoropscheckpointfail`: during a typing burst the state-ingress lock
+    /// can be held by a durable reload far past the editor's 250ms response
+    /// budget. Every editor append queued behind it times out client-side and
+    /// is re-sent with its original nonce — while the stalled original is still
+    /// applied late. Each burst must land exactly once regardless.
+    #[test]
+    fn editor_op_capture_append_resend_after_ingress_stall_applies_each_burst_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/op-capture.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let append = |nonce: String| -> ControllerRequest {
+            serde_json::from_value(serde_json::json!({
+                "command": "editor_op_capture_update",
+                "file": doc,
+                "diagnostic_payload": serde_json::to_string(&serde_json::json!({
+                    "action": "append",
+                    "base_hash": "base-a",
+                    "ops_json": serde_json::json!([{ "insert": nonce }]).to_string(),
+                    "updated_ms": 10,
+                    "event_nonce": nonce,
+                }))
+                .unwrap(),
+            }))
+            .unwrap()
+        };
+
+        const BURSTS: usize = 8;
+        let stalled = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let stall = {
+            let runtime = runtime.clone();
+            let root = bootstrap.project_root.clone();
+            let stalled = stalled.clone();
+            std::thread::spawn(move || {
+                let _ingress =
+                    runtime.lock_state_event_ingress(&root, "refresh_memory", "durable_reload");
+                stalled.wait();
+                std::thread::sleep(Duration::from_millis(300));
+            })
+        };
+        stalled.wait();
+        // Originals and their re-sends race each other into the stalled
+        // controller, exactly as a timed-out editor and its drainer do.
+        let senders: Vec<_> = (0..BURSTS)
+            .flat_map(|index| [index, index])
+            .map(|index| {
+                let (bootstrap, runtime) = (bootstrap.clone(), runtime.clone());
+                let request = append(format!("burst-{index}"));
+                std::thread::spawn(move || {
+                    handle_editor_op_capture_update(&bootstrap, &runtime, request).unwrap()
+                })
+            })
+            .collect();
+        let inserted = senders
+            .into_iter()
+            .map(|sender| sender.join().unwrap())
+            .filter(|inserted| *inserted)
+            .count();
+        stall.join().unwrap();
+        assert_eq!(
+            inserted, BURSTS,
+            "exactly one of each original/re-send pair appends"
+        );
+
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let capture = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap()
+            .document
+            .editor_op_capture
+            .expect("active capture");
+        let mut ops: Vec<String> =
+            serde_json::from_str::<Vec<serde_json::Value>>(&capture.ops_json)
+                .unwrap()
+                .into_iter()
+                .map(|op| op["insert"].as_str().unwrap().to_string())
+                .collect();
+        ops.sort();
+        let mut expected: Vec<String> = (0..BURSTS).map(|index| format!("burst-{index}")).collect();
+        expected.sort();
+        assert_eq!(ops, expected, "no burst lost and none duplicated");
+
+        // A late re-send after the epoch closed must not resurrect the burst.
+        // Within one epoch the durable event id already deduplicates; across an
+        // epoch boundary only the applied-nonce ledger does, so this is the
+        // discriminating case.
+        let request: ControllerRequest = serde_json::from_value(serde_json::json!({
+            "command": "editor_op_capture_update",
+            "file": doc,
+            "diagnostic_payload": serde_json::to_string(&serde_json::json!({
+                "action": "clear",
+                "event_nonce": "clear",
+            })).unwrap(),
+        }))
+        .unwrap();
+        assert!(handle_editor_op_capture_update(&bootstrap, &runtime, request).unwrap());
+        assert!(
+            !handle_editor_op_capture_update(&bootstrap, &runtime, append("burst-0".into()))
+                .unwrap(),
+            "a re-send of an applied burst is acknowledged without appending"
+        );
+        let projected = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        assert!(projected.document.editor_op_capture.is_none());
     }
 
     #[test]

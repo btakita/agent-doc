@@ -454,6 +454,12 @@ Each item below is claimed and running in its own worktree on main `a186f61e46`.
 **New follow-up (filed this cycle):** command-line writes on a document open in the editor exit with an error, plus a dogfood "fix this" prompt, even though the write lands a few seconds later. That happened 6+ times today. A write that is retained and then converges should wait for convergence and exit 0, or return a distinct "deferred" status.
 
 **In flight (6 subagents):** `#statesubscriberecords`, `#remainingwallclock`, `#replace120shang`, `#tlafailedonce`, `#continuationheadskip`, `#regressionawaitingoperat`. `#drivecapturedsplice` is still waiting for your `go`.
+
+### Re: #binaryownedcli dispatched — opus-5-5 · 2026-10-11T07:39-04:00
+
+**Dispatched (claimed `subagent:binaryownedcli`):** command-line writes (`backlog add|remove`, `queue sync`, `queue consume --id`) on a document open in the editor will get the same deferred-write handling `respond` already has. Each one waits for the editor to catch up and then exits 0. If the wait times out while the write is still safely held, the command exits with a separate, documented "deferred" status, which is not an error and prints no dogfood fix prompt. Real failures still fail. The no-disk-write guarantee is unchanged.
+
+Every queue head except `#drivecapturedsplice` (⏳, waiting for your `go`) is now with a subagent, so the loop stops here until they report back.
 <!-- agent:boundary:f6f2f5ef -->
 <!-- /agent:exchange -->
 
@@ -462,6 +468,7 @@ Each item below is claimed and running in its own worktree on main `a186f61e46`.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#binaryownedcli]
 - ~~#gh-fix: https://github.com/btakita/agent-doc/issues/239~~
 - ⏳ do [#drivecapturedsplice]
 - ~~do [#respondcloseoutbacklog]~~

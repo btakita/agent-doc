@@ -47,6 +47,19 @@ Compacted content:
 **Deferred:** this went to a background subagent (claim `subagent:gh240`, worktree `agent-doc-wt/gh240`, based on `23a5d7c0a4`). Issue #240 describes this sequence: a free-text closeout approves consumption against the head as it stood before the write. After the answered head is struck, the consume re-reads the document and also takes the next, unanswered head (`[#<id-a>]: go`) and clears `queue: go`. Session-check then blames the response for the loss. A second closeout driver (the controller's captured-finalize resume beside `respond`) may have committed between the steps. The subagent will first reproduce it with a deterministic test. Then it will bind the consume to the exact head identity approved at proof time, and check the double-driver commit and the session-check misattribution. It adds tests and updates the specs. Following `#gh-fix` ("fix then close"), I'll close the issue after the fix is integrated on main, using the closing comment the subagent drafts.
 
 `#splicectlcommit` and `#clearqueuedliveturn` are still with their subagents.
+
+### Re: Clear Session Context on sdk.md lost both presses — opus-5.5 · 2026-10-11T16:49-04:00
+
+> **Queue prompt:** Clear Session Context on sdk.md did not take effect despite me running it twice. Run Agent Doc was sandwiched in between the 2 Clear Session Context calls.
+
+**Deferred:** I've confirmed it from the haiven-dev ops.log (`doc=sdk`, pane %180), on the queued-clear build I installed at `23a5d7c0a4`:
+1. **20:45:19, Clear #1:** deferred as `queued` because `evidence=dispatch_turn_running`. But the actor was `ready`, the pane showed an idle prompt (`⏵⏵ bypass permissions on · ← 4 agents`), and at 20:47:29 the binary itself logged `turn_live=false turn_ended_at=18:19:55`. A dispatch receipt seems to have been stuck at `running` since then. That stale receipt "proved" a live turn, so the clear was deferred when it should have gone through immediately. The deferred clear then waits for that same receipt to settle, which never happens.
+2. **20:45:52–58, Run Agent Doc:** dispatched and submitted.
+3. **20:45:55, Clear #2:** arrived before the submit and was absorbed as `already_deferred`. The new prompt then superseded the deferred clear, so both presses were lost. No `/clear` was ever sent, and nothing told you so.
+
+This is the same code and the same open question (the turn proven live only by its dispatch receipt) as `#clearqueuedliveturn`. So I forwarded the evidence to that item's subagent (claim `subagent:clearlive`) rather than start a second, conflicting branch. It is to reproduce this exact sequence with tests. Then fix it so a stale `running` receipt can never prove a live turn (the receipt is fenced to its turn and settles when the turn ends), and so a press that arrives after a newer prompt applies to the new turn rather than being silently lost. If a clear is dropped anyway, you'll get a notice. It will also draft a GitHub issue summary.
+
+**Workaround until it lands:** run `agent-doc session interrupt-clear tasks/sdk.md` from `src/haiven-dev`. It interrupts whatever is running in pane %180 (here the pane is idle apart from its 4 background agents) and clears. Or wait for the fix and press Clear once.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -57,7 +70,8 @@ Compacted content:
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#clearqueuedliveturn]
 - 🚧 do [#splicectlcommit]
-- #gh-fix https://github.com/btakita/agent-doc/issues/240
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/240
+- Clear Session Context on sdk.md did not take effect despite me running it twice. Run Agent Doc was sandwiched in between the 2 Clear Session Context calls.
 <!-- /agent:queue -->
 
 ## Backlog

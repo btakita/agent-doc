@@ -41,9 +41,22 @@ while :; do
     probe=$(dirname "$probe")
 done
 
-# An explicit ceiling (Makefile export, operator override) wins; otherwise
-# bound discovery at the test temp root and the workspace the tests run from.
-ceiling=${AGENT_DOC_ROOT_CEILING_DIRECTORIES-$canonical:$(pwd -P)}
+# Bound discovery at the test temp root and the workspace the tests run from.
+# An explicit ceiling (Makefile export, operator override) is kept, but it can
+# never drop THIS checkout's bounds (`#checktmpdirleak`): an inherited list may
+# have been exported by a different checkout's `make` (an agent shell, a tmux
+# server, or a nested run started there), and honoring it verbatim left this
+# workspace unbounded -- discovery could climb out of it to `$HOME/.agent-doc`
+# -- while the setup step printed the other checkout's path. Missing entries
+# are appended; extra entries only narrow discovery further.
+workspace=$(pwd -P)
+ceiling=${AGENT_DOC_ROOT_CEILING_DIRECTORIES-}
+for required in "$canonical" "$workspace"; do
+    case ":$ceiling:" in
+        *":$required:"*) ;;
+        *) ceiling=${ceiling:+$ceiling:}$required ;;
+    esac
+done
 
 if [ "$nextest_env" = 1 ]; then
     : "${NEXTEST_ENV:?--nextest-env must run as a nextest setup script}"

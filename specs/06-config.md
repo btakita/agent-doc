@@ -50,7 +50,9 @@ directories (relative and empty entries are ignored). Discovery examines the
 starting directory and then each parent, but never climbs into a ceiling
 directory or anything above it. Unset, discovery walks to the filesystem root
 as before. The test harness (`make test`/`check`, the nextest
-`test-isolation` setup script) sets it to `<TMPDIR>:<workspace>` and refuses a
+`test-isolation` setup script) sets it to `<TMPDIR>:<workspace>` (appending
+this checkout's own entries to an inherited list that lacks them, so a ceiling
+exported by another checkout never replaces this one's; `#checktmpdirleak`) and refuses a
 `TMPDIR` with an `.agent-doc` ancestor (`#testisolationtests`); a cargo test
 binary without it bounds in-process discovery at its temp root.
 

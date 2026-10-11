@@ -339,6 +339,10 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
          authorization above where the two conflict):\n\
          - Work only in your own git worktree outside the IDE-watched project, never in the \
          coordinator's checkout or a checkout another subagent uses.\n\
+         - Write command output, logs, and scratch files inside your own worktree, never to a fixed \
+         name (such as `check.log` or `msg.txt`) in a shared scratchpad or temp directory: sibling \
+         subagents share it, and two runs truncating one file interleave each other's output, so \
+         you would read another checkout's results as your own.\n\
          - Never run `make install`, a release build, a version bump, a tag, or a release. Where the \
          authorization says build + install, build and test in your worktree; the coordinator runs \
          the single `make install` after integrating.\n\
@@ -393,6 +397,11 @@ mod tests {
         assert!(p.contains("> do [#abc]"));
         assert!(p.contains("> Add a way to post authorization"));
         assert!(p.contains("Never run `make install`"));
+        // Sibling subagents share the coordinator's scratchpad: one `make check`
+        // read another worktree's nextest output from a shared `check.log`.
+        assert!(
+            p.contains("Write command output, logs, and scratch files inside your own worktree")
+        );
         assert!(p.contains("covers only the queue item above"));
         assert!(!p.contains(UNRESOLVED_AUTHORIZATION_MARKER));
     }

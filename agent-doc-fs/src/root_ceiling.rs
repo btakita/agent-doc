@@ -322,4 +322,116 @@ mod tests {
             assert!(ensure_test_tmpdir_isolated(&clean_root).is_ok());
         }
     }
+
+    fn run_guard_script(cwd: &Path, args: &[&OsString], ceiling: Option<&OsString>) -> String {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../scripts/check-test-tmpdir")
+            .canonicalize()
+            .unwrap();
+        let mut command = std::process::Command::new(script);
+        command.current_dir(cwd).args(args);
+        match ceiling {
+            Some(value) => command.env(ROOT_CEILING_ENV, value),
+            None => command.env_remove(ROOT_CEILING_ENV),
+        };
+        let output = command.output().expect("run scripts/check-test-tmpdir");
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .trim_end()
+            .to_string()
+    }
+
+    /// `#checktmpdirleak`: every checkout's test ceiling names that checkout's
+    /// own workspace -- whether the guard runs concurrently from sibling
+    /// checkouts, or inherits a ceiling another checkout's `make` exported.
+    /// Before the fix, the nextest setup script honored an inherited list
+    /// verbatim: it printed the other checkout's path and left this workspace
+    /// unbounded, so discovery from inside it adopted a project above it.
+    #[test]
+    fn the_test_tmpdir_guard_bounds_each_checkout_by_its_own_workspace() {
+        let outer = tempfile::tempdir().unwrap();
+        let outer_root = outer.path().canonicalize().unwrap();
+        let test_tmp = tempfile::tempdir().unwrap();
+        let test_tmp_root = test_tmp.path().canonicalize().unwrap();
+        if agent_doc_ancestor(&outer_root).is_some() || agent_doc_ancestor(&test_tmp_root).is_some()
+        {
+            return; // the guard would (rightly) refuse; covered by the test above.
+        }
+        // A real project ABOVE both checkouts (as `$HOME/.agent-doc` is).
+        std::fs::create_dir_all(outer_root.join(".agent-doc")).unwrap();
+        let checkout_a = outer_root.join("checkout-a");
+        let checkout_b = outer_root.join("checkout-b");
+        let nested = checkout_b.join("crate/src");
+        std::fs::create_dir_all(&checkout_a).unwrap();
+        std::fs::create_dir_all(&nested).unwrap();
+        let tmp_arg = test_tmp_root.clone().into_os_string();
+
+        // Sibling checkouts running the guard concurrently each get their own.
+        let runs: Vec<_> = (0..8)
+            .map(|i| {
+                let cwd = if i % 2 == 0 {
+                    checkout_a.clone()
+                } else {
+                    checkout_b.clone()
+                };
+                let tmp_arg = tmp_arg.clone();
+                std::thread::spawn(move || (run_guard_script(&cwd, &[&tmp_arg], None), cwd))
+            })
+            .collect();
+        for run in runs {
+            let (ceiling, cwd) = run.join().unwrap();
+            assert_eq!(
+                ceiling,
+                format!("{}:{}", test_tmp_root.display(), cwd.display())
+            );
+        }
+
+        // Checkout B inherits the ceiling checkout A's `make` exported.
+        let foreign: OsString =
+            format!("{}:{}", test_tmp_root.display(), checkout_a.display()).into();
+        let nextest_env = test_tmp_root.join("nextest-env");
+        std::fs::write(&nextest_env, "").unwrap();
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../scripts/check-test-tmpdir")
+            .canonicalize()
+            .unwrap();
+        let output = std::process::Command::new(script)
+            .current_dir(&checkout_b)
+            .arg("--nextest-env")
+            .env("TMPDIR", &test_tmp_root)
+            .env("NEXTEST_ENV", &nextest_env)
+            .env(ROOT_CEILING_ENV, &foreign)
+            .output()
+            .expect("run scripts/check-test-tmpdir --nextest-env");
+        assert!(output.status.success());
+        let printed = String::from_utf8(output.stdout).unwrap();
+        let exported = std::fs::read_to_string(&nextest_env).unwrap();
+        let exported = exported
+            .trim_end()
+            .strip_prefix(&format!("{ROOT_CEILING_ENV}="))
+            .unwrap_or_else(|| panic!("NEXTEST_ENV: {exported:?}"))
+            .to_string();
+        assert_eq!(printed.trim_end(), exported);
+        let entries: Vec<&str> = exported.split(':').collect();
+        assert!(
+            entries.contains(&checkout_b.to_str().unwrap()),
+            "checkout B's own workspace must bound its tests: {exported}"
+        );
+        assert!(
+            entries.contains(&test_tmp_root.to_str().unwrap()),
+            "{exported}"
+        );
+
+        // The bound is what keeps discovery from inside B off the project above it.
+        assert_eq!(
+            probe_root(&nested, &foreign),
+            outer_root.display().to_string()
+        );
+        assert_eq!(probe_root(&nested, &exported.into()), "<none>");
+    }
 }

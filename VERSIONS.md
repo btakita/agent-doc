@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **Each checkout's test ceiling always bounds that checkout (`#checktmpdirleak`).** The report that one
+  worktree's `make check` "printed another worktree's path" in its nextest `test-isolation` setup line was a
+  shared log, not a shared TMPDIR: concurrent subagents redirected `make check` to the same fixed
+  `check.log` in the coordinator's shared scratchpad, so the runs truncated and interleaved one file (the NUL
+  holes in it are the signature) and one subagent read another worktree's results as its own. The guard
+  itself derives `<TMPDIR>:<workspace>` per checkout, and the Makefile recomputes it with the variable
+  unset. One real gap remained: the nextest setup script (`scripts/check-test-tmpdir --nextest-env`) kept an
+  inherited `AGENT_DOC_ROOT_CEILING_DIRECTORIES` verbatim, so a raw `cargo nextest run` from a shell that
+  had inherited another checkout's ceiling bounded discovery at that other checkout and left its own
+  workspace unbounded, letting discovery climb to a project above it (such as `$HOME/.agent-doc`). The
+  guard now appends this checkout's `<TMPDIR>` and workspace to an inherited list that lacks them. Tests
+  never wrote into the other checkout (a ceiling only stops discovery), but the workspace bound was lost.
+  The subagent dispatch preamble now tells subagents to keep command output, logs and scratch files inside
+  their own worktree, never at a fixed name in a shared scratchpad.
+
 ## 0.35.489
 
 - **A controller memory refresh no longer stalls editor-op appends behind a full ledger reload (`#refreshmemlockstall`).**

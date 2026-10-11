@@ -39,6 +39,14 @@ Released agent-doc v0.35.475. v0.35.476 is not yet tagged or published; the acti
 Compacted content:
 - Archived 9 response topic(s): what #drivecapturedsplice still needs; release status; v0.35.490 released; 6 more
 - Prior summary/context: prior compacted content: Archived 29 response topic(s): actionable-review dispatched; v0.35.487 batch status; actiona...
+
+### Re: dispatched GH #240 to a subagent — opus-5.5 · 2026-10-11T16:36-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/240
+
+**Deferred:** this went to a background subagent (claim `subagent:gh240`, worktree `agent-doc-wt/gh240`, based on `23a5d7c0a4`). Issue #240 describes this sequence: a free-text closeout approves consumption against the head as it stood before the write. After the answered head is struck, the consume re-reads the document and also takes the next, unanswered head (`[#<id-a>]: go`) and clears `queue: go`. Session-check then blames the response for the loss. A second closeout driver (the controller's captured-finalize resume beside `respond`) may have committed between the steps. The subagent will first reproduce it with a deterministic test. Then it will bind the consume to the exact head identity approved at proof time, and check the double-driver commit and the session-check misattribution. It adds tests and updates the specs. Following `#gh-fix` ("fix then close"), I'll close the issue after the fix is integrated on main, using the closing comment the subagent drafts.
+
+`#splicectlcommit` and `#clearqueuedliveturn` are still with their subagents.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -49,6 +57,7 @@ Compacted content:
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#clearqueuedliveturn]
 - 🚧 do [#splicectlcommit]
+- #gh-fix https://github.com/btakita/agent-doc/issues/240
 <!-- /agent:queue -->
 
 ## Backlog

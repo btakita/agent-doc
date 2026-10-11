@@ -30,6 +30,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   - The ipc-io `await_endpoint` helper waits for liveness with a hang ceiling, not a 5s budget.
     `a_bound_but_unaccepting_listener_is_evicted_not_protected` first spends up to the 3s connect timeout probing the
     wedged socket before it rebinds, and failed the 5s budget in a full `make check` at load average ~100.
+  - `captured_response_and_authority_reactively_project_answered_free_text_strike` proves that publishing
+    `ResponseCaptured` does not wait for the strike adapter by ordering. The `blocking-session.md` adapter fixture
+    blocks on a gate that the test holds closed, where it used to sleep 750ms against a 250ms bound. The test requires
+    that the adapter has not passed the gate when the publish returns. If the publish waited on the adapter, the gate
+    opens at its 30s ceiling, the adapter passes it first, and the assertion fails.
+  - The controller-io `wait_for_test_controller` helper waits for startup with a hang ceiling, not a 5s budget. That
+    budget failed `controller_client_connection_is_one_request` under load, even though startup takes 0.42s alone.
+  - `scripts/dev-check.py` probes each toolchain version once per process. A probe can hit its 10s timeout under load
+    and answer `version-unavailable` while the next one answers a version. That made two fingerprints taken in the
+    same run differ, which failed `dev-check-self-test` ("index metadata is not repository content") in a loaded
+    `make check`.
 
 ## 0.35.489
 

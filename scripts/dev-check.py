@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import os
@@ -233,22 +234,32 @@ def repository_fingerprint() -> str:
     # `tmux-ci`.  The proof is shared only when both repository bytes and these
     # toolchain identities still match.
     for tool in ("rustc", "cargo", sys.executable, "node", "npm", "java", "lake", "tmux"):
-        executable = shutil.which(tool) if tool != sys.executable else sys.executable
         digest.update(tool.encode() + b"\0")
-        if executable:
-            try:
-                version = subprocess.check_output(
-                    tool_version_command(tool, executable),
-                    stderr=subprocess.STDOUT,
-                    timeout=10,
-                )
-            except (subprocess.SubprocessError, OSError):
-                version = b"version-unavailable"
-            digest.update(version)
-        else:
-            digest.update(b"absent")
+        digest.update(tool_identity(tool))
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+@functools.lru_cache(maxsize=None)
+def tool_identity(tool: str) -> bytes:
+    """One toolchain identity per process (`#loadbudgettests`).
+
+    The version probe is bounded by a 10s timeout, so on a loaded host one
+    probe can answer `version-unavailable` and the next a real version. Two
+    fingerprints taken in one run must not differ because of that, so each
+    tool is probed once per process.
+    """
+    executable = shutil.which(tool) if tool != sys.executable else sys.executable
+    if not executable:
+        return b"absent"
+    try:
+        return subprocess.check_output(
+            tool_version_command(tool, executable),
+            stderr=subprocess.STDOUT,
+            timeout=10,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return b"version-unavailable"
 
 
 def receipt_path(proof: str = "full-check") -> Path:

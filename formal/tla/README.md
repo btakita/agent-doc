@@ -434,3 +434,14 @@ Cross-cutting gaps that netadv2/netadv3 must close:
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.
+
+Each run is isolated from every other TLC process on the host. TLC extracts the
+standard modules (`Naturals`, `TLC`, ...) from the jar to fixed paths under
+`java.io.tmpdir` (`/tmp` on Linux regardless of `TMPDIR`) and deletes them when
+the JVM exits, so two concurrent runs used to delete or truncate each other's
+copies and fail with `File does not exist: /tmp/Naturals.tla`. The runner pins
+`java.io.tmpdir` to its own `mktemp` work dir and runs from a checksum-verified
+snapshot of the jar in that dir; a stale cache is replaced by atomic rename. A
+standard-module load failure is reported as an environment failure, not a model
+result. `make tla-runner-self-test` (part of `make check`) proves both
+properties deterministically under a hostile `JAVA_TOOL_OPTIONS`.

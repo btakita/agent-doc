@@ -216,6 +216,19 @@ has moved to another i3 window, editor-origin focus is suppressed. Automatic
 layout reconciliation may still repair pane placement, but its focus target is
 stripped at the effect boundary so it cannot surface `stash` after the editor
 loses desktop focus.
+- When several editor installations publish surfaces into one project (IntelliJ IDEA and
+  Rider; `#idefocusowner`), only the installation that most recently gained focus drives the
+  shared tmux `agent-doc` window. Installations are parsed from installation-scoped client ids
+  (`<lane>@<installation>-pid:<pid>`); an accepted `focus_only` focus-lane fact is the focus-gain
+  claim. Each controller root keeps a `Source` of the pure `InstallationFocus` fold and derives
+  the owner and a per-surface `SurfaceAuthority` as `Computed`s in the controller `ProcessScope`; no
+  caller recomputes or polls it. A deferred surface's observation is accepted, folds to `Idle`, and
+  its receipt names `deferred_to`; it derives no tmux consequence from an editor fact, a tmux
+  refold, or a retained retry until its installation claims again. Every ownership move starts a
+  new epoch, and the first observation a surface folds under a new epoch re-projects its layout
+  unless tmux is observed to match it. Retiring the owner's last surface on the root falls back to
+  the most recently focused live installation under a fresh epoch. Unscoped clients never claim
+  or defer.
 - A `focus_only` refusal the selection lane cannot repair (`actor_pane_not_visible`,
 `outside_agent_doc_window`) escalates to the structural layout owner. With no
 editor columns it republishes the retained desired layout **unchanged** when

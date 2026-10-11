@@ -27,7 +27,7 @@ use lazily::{
 
 use crate::{
     CurrentDocumentAuthority, DocumentAuthority, EditorSurface, SurfaceIntent, SurfaceTracking,
-    TmuxLayout, layout_matches,
+    TmuxLayout, installation_focus::SurfaceAuthority, layout_matches,
 };
 
 /// One observation of the whole mirror: what the editor shows, and whether tmux
@@ -40,6 +40,10 @@ use crate::{
 pub struct SurfaceObservation {
     pub surface: EditorSurface,
     pub layout_matches: Option<bool>,
+    /// Whether this surface may drive the shared tmux surface right now
+    /// (`#idefocusowner`). Derived from the project's focus owner, never
+    /// reported by the editor.
+    pub authority: SurfaceAuthority,
 }
 
 /// The folded state: what tmux was last reconciled against, plus the intent the
@@ -62,6 +66,20 @@ pub struct SurfaceFold {
     /// consequence that must still fire. An idle observation does not bump it,
     /// so repeated no-ops stay silent.
     pub epoch: u64,
+    /// The ownership epoch `tracking` was reconciled under (`#idefocusowner`),
+    /// or `None` once a deferred observation proved another installation was
+    /// driving tmux.
+    ///
+    /// `tracking` claims "tmux already shows what I reconciled". That stops
+    /// being true the moment another installation drives the shared window, so
+    /// the first observation under a different epoch folds from empty tracking
+    /// (unless tmux is observed to match this layout) and re-projects this
+    /// surface's whole layout instead of trusting a reconciliation the other
+    /// installation has since overwritten.
+    pub authority_epoch: Option<u64>,
+    /// The installation this surface is deferring to, when it is not the focus
+    /// owner.
+    pub deferred_to: Option<String>,
 }
 
 impl Default for SurfaceFold {
@@ -70,6 +88,8 @@ impl Default for SurfaceFold {
             tracking: SurfaceTracking::default(),
             intent: SurfaceIntent::Idle,
             epoch: 0,
+            authority_epoch: Some(0),
+            deferred_to: None,
         }
     }
 }
@@ -80,9 +100,34 @@ impl Default for SurfaceFold {
 /// that implies nothing leaves the tracking value and the epoch alone while
 /// clearing the intent back to [`SurfaceIntent::Idle`].
 pub fn advance(current: &SurfaceFold, observation: &SurfaceObservation) -> Option<SurfaceFold> {
-    let (tracking, intent) = current
-        .tracking
-        .advance(&observation.surface, observation.layout_matches);
+    let authority_epoch = match &observation.authority {
+        // Another installation owns the shared tmux surface: the observation
+        // implies nothing, and the reconciliation this surface remembers can
+        // no longer be trusted once it drives again.
+        SurfaceAuthority::Deferred { owner } => {
+            return Some(SurfaceFold {
+                tracking: current.tracking.clone(),
+                intent: SurfaceIntent::Idle,
+                epoch: current.epoch,
+                authority_epoch: None,
+                deferred_to: Some(owner.clone()),
+            });
+        }
+        SurfaceAuthority::Drives { epoch } => *epoch,
+    };
+    // A different epoch means another installation may have driven tmux since
+    // this surface last reconciled. Only a tmux observation that matches this
+    // surface's layout proves the remembered reconciliation still holds;
+    // otherwise fold from empty tracking so the layout is re-projected even
+    // when tmux has not been observed yet.
+    let base = if current.authority_epoch == Some(authority_epoch)
+        || observation.layout_matches == Some(true)
+    {
+        current.tracking.clone()
+    } else {
+        SurfaceTracking::default()
+    };
+    let (tracking, intent) = base.advance(&observation.surface, observation.layout_matches);
     let epoch = if intent.is_idle() {
         current.epoch
     } else {
@@ -92,6 +137,8 @@ pub fn advance(current: &SurfaceFold, observation: &SurfaceObservation) -> Optio
         tracking,
         intent,
         epoch,
+        authority_epoch: Some(authority_epoch),
+        deferred_to: None,
     })
 }
 
@@ -111,6 +158,10 @@ pub struct EditorSurfaceState {
     document_authorities: ThreadSafeDependencyMap<String, DocumentAuthority>,
     /// Selected document × its controller-owned authority.
     current_document_authority: Computed<CurrentDocumentAuthority>,
+    /// Whether this surface may drive tmux (`#idefocusowner`). A projection of
+    /// the project's focus owner supplied by the controller, or a constant
+    /// `Drives` for a standalone graph.
+    authority: Computed<SurfaceAuthority>,
     machine: ThreadSafeStateMachine<SurfaceFold, SurfaceObservation>,
     intent: Computed<SurfaceIntent>,
     _scope: Option<ProcessScope>,
@@ -139,6 +190,20 @@ impl EditorSurfaceState {
     /// sits in the same graph as the rest of the process's facts and can be
     /// derived across, instead of being an island with the right shape.
     pub fn new_in(scope: &ProcessScope) -> Self {
+        let authority = scope.ctx().computed(|_| SurfaceAuthority::default());
+        Self::new_in_with_authority(scope, authority)
+    }
+
+    /// Build the graph inside a caller-owned process scope whose tmux authority
+    /// is the given projection (`#idefocusowner`).
+    ///
+    /// The controller passes `InstallationFocusOwner::authority_for(client)`,
+    /// so every fold reads the project's current focus owner from the same
+    /// graph instead of being told by a caller.
+    pub fn new_in_with_authority(
+        scope: &ProcessScope,
+        authority: Computed<SurfaceAuthority>,
+    ) -> Self {
         let ctx = scope.ctx().clone();
         let editor = ctx.source(EditorSurface::default());
         let tmux = ctx.source(None::<TmuxLayout>);
@@ -174,6 +239,7 @@ impl EditorSurfaceState {
             layout_matches,
             document_authorities,
             current_document_authority,
+            authority,
             machine,
             intent,
             _scope: None,
@@ -189,6 +255,7 @@ impl EditorSurfaceState {
         let observation = SurfaceObservation {
             surface: self.ctx.get(&self.editor),
             layout_matches: self.ctx.get(&self.layout_matches),
+            authority: self.ctx.get(&self.authority),
         };
         self.machine.send(&self.ctx, observation);
     }
@@ -603,5 +670,88 @@ mod tests {
             2,
             "a stopped consequence must not keep firing"
         );
+    }
+
+    #[test]
+    fn a_deferred_surface_drives_nothing_and_reprojects_its_layout_when_it_drives_again() {
+        // `#idefocusowner`: while another installation owns the shared tmux
+        // surface this surface derives nothing; when ownership returns under a
+        // new epoch it re-projects its layout even though its own fold already
+        // recorded that layout and tmux has not been observed.
+        let scope = ProcessScope::new();
+        let ctx = scope.ctx().clone();
+        let authority_input = ctx.source(SurfaceAuthority::default());
+        let authority = ctx.computed(move |c| c.get(&authority_input));
+        let state = EditorSurfaceState::new_in_with_authority(&scope, authority);
+        let fired = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&fired);
+        let _effect = state.on_intent(move |intent| sink.lock().unwrap().push(intent.clone()));
+        let mut layout = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        layout.preserve_focus = true;
+
+        state.observe(layout.clone());
+        assert!(matches!(state.intent(), SurfaceIntent::Sync { .. }));
+        state.observe(layout.clone());
+        assert!(state.intent().is_idle());
+        assert_eq!(fired.lock().unwrap().len(), 1);
+
+        ctx.set(
+            &authority_input,
+            SurfaceAuthority::Deferred {
+                owner: "RD.9f8e7d6c".to_string(),
+            },
+        );
+        let mut reshaped = layout.clone();
+        reshaped.columns.push(SurfaceColumn::new(["/c.md"]));
+        reshaped.visible.push("/c.md".to_string());
+        state.observe(reshaped);
+        state.observe_tmux(Some(TmuxLayout {
+            columns: vec![SurfaceColumn::new(["/z.md"])],
+        }));
+        state.observe_tmux(None);
+        assert!(state.intent().is_idle());
+        assert_eq!(state.fold().deferred_to.as_deref(), Some("RD.9f8e7d6c"));
+        assert_eq!(
+            fired.lock().unwrap().len(),
+            1,
+            "a deferred surface must not drive tmux"
+        );
+
+        ctx.set(&authority_input, SurfaceAuthority::Drives { epoch: 2 });
+        state.observe(layout.clone());
+        assert!(
+            matches!(state.intent(), SurfaceIntent::Sync { .. }),
+            "regaining ownership re-projects the layout: {:?}",
+            state.intent()
+        );
+        assert_eq!(state.fold().deferred_to, None);
+        state.observe(layout);
+        assert!(state.intent().is_idle(), "and then settles");
+        assert_eq!(fired.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_new_epoch_trusts_a_tmux_observation_that_already_matches() {
+        let scope = ProcessScope::new();
+        let ctx = scope.ctx().clone();
+        let authority_input = ctx.source(SurfaceAuthority::default());
+        let authority = ctx.computed(move |c| c.get(&authority_input));
+        let state = EditorSurfaceState::new_in_with_authority(&scope, authority);
+        let mut layout = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        layout.preserve_focus = true;
+        let tmux = TmuxLayout {
+            columns: vec![SurfaceColumn::new(["/a.md"]), SurfaceColumn::new(["/b.md"])],
+        };
+        state.observe_with_tmux(layout.clone(), Some(tmux.clone()));
+        state.observe(layout.clone());
+        assert!(state.intent().is_idle());
+
+        ctx.set(&authority_input, SurfaceAuthority::Drives { epoch: 7 });
+        state.observe(layout);
+        assert!(
+            state.intent().is_idle(),
+            "tmux already shows this layout, so the handoff needs no re-projection"
+        );
+        assert_eq!(state.fold().authority_epoch, Some(7));
     }
 }

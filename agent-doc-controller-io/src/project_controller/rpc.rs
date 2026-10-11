@@ -153,6 +153,11 @@ mod main_layout_eligibility_tests {
 pub(super) struct ControllerEditorSurfaceGraph {
     roots: Mutex<BTreeMap<(PathBuf, String, String), ControllerEditorSurfaceRoot>>,
     terminal_ownership: Mutex<BTreeMap<PathBuf, SurfaceTerminalOwnership>>,
+    /// Per project root: which editor installation most recently gained focus
+    /// and therefore drives the shared tmux surface (`#idefocusowner`). Lives in
+    /// the same ProcessScope as the surface graphs, whose authority it projects.
+    /// Lock order: `roots` before `focus_owners`.
+    focus_owners: Mutex<BTreeMap<PathBuf, agent_doc_editor_surface::InstallationFocusOwner>>,
     run_intent: ControllerEditorSurfaceIntentRunner,
 }
 
@@ -536,8 +541,37 @@ impl ControllerEditorSurfaceGraph {
         Self {
             roots: Mutex::new(BTreeMap::new()),
             terminal_ownership: Mutex::new(BTreeMap::new()),
+            focus_owners: Mutex::new(BTreeMap::new()),
             run_intent,
         }
+    }
+
+    /// Publish which installations still have a live surface on `project_root`,
+    /// so a retired focus owner hands the shared tmux surface back to the most
+    /// recently focused live installation (`#idefocusowner`).
+    fn retain_live_installations(&self, project_root: &Path) {
+        let live = self
+            .roots
+            .lock()
+            .iter()
+            .filter(|((root, _, _), entry)| root == project_root && !entry.retired)
+            .filter_map(|((_, client_id, _), _)| {
+                agent_doc_editor_surface::editor_installation(client_id).map(str::to_string)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        if let Some(owner) = self.focus_owners.lock().get(project_root) {
+            owner.retain_live(&live);
+        }
+    }
+
+    /// The installation currently driving `project_root`'s tmux surface.
+    #[cfg(test)]
+    fn focus_owner(&self, project_root: &Path) -> Option<String> {
+        self.focus_owners
+            .lock()
+            .get(project_root)
+            .and_then(|owner| owner.owner())
+            .map(|owner| owner.installation)
     }
 
     fn observe(
@@ -568,9 +602,21 @@ impl ControllerEditorSurfaceGraph {
                     outcome: None,
                     error: None,
                     terminal_decision: SurfaceTerminalDecision::Stale,
+                    deferred_to: None,
                 },
             );
         }
+
+        // `#idefocusowner`: an accepted focus-lane fact moves ownership of the
+        // shared tmux surface to its installation BEFORE the fact is folded, so
+        // the observation that gained focus is the first one allowed to drive.
+        let focus_owner = self
+            .focus_owners
+            .lock()
+            .entry(project_root.to_path_buf())
+            .or_insert_with(|| agent_doc_editor_surface::InstallationFocusOwner::new_in(scope))
+            .clone();
+        focus_owner.observe(&observation.client_id, &observation.surface);
 
         let replace_generation = roots
             .get(&key)
@@ -590,8 +636,9 @@ impl ControllerEditorSurfaceGraph {
         };
         let root = project_root.to_path_buf();
         let run_intent = Arc::clone(&self.run_intent);
+        let authority = focus_owner.authority_for(&observation.client_id);
         let entry = roots.entry(key).or_insert_with(|| {
-            let state = EditorSurfaceState::new_in(scope);
+            let state = EditorSurfaceState::new_in_with_authority(scope, authority);
             let outcome = Arc::new(Mutex::new(None));
             let consequence = {
                 let outcome = Arc::clone(&outcome);
@@ -621,6 +668,7 @@ impl ControllerEditorSurfaceGraph {
             None => entry.state.observe(observation.surface),
         }
         let intent = entry.state.intent();
+        let deferred_to = entry.state.fold().deferred_to;
         let consequence = entry.outcome.lock().clone();
         let (outcome, error) = match consequence {
             Some(Ok(output)) => (Some(output), None),
@@ -641,6 +689,7 @@ impl ControllerEditorSurfaceGraph {
                 outcome,
                 error,
                 terminal_decision,
+                deferred_to,
             },
         )
     }
@@ -690,6 +739,8 @@ impl ControllerEditorSurfaceGraph {
                     ownership.retire(source_id, surface_id, *surface_generation);
                 }
             }
+            drop(ownerships);
+            self.retain_live_installations(project_root);
         }
         !retired_surfaces.is_empty()
     }
@@ -722,6 +773,7 @@ impl ControllerEditorSurfaceGraph {
             .entry(project_root.to_path_buf())
             .or_default()
             .retire(client_id, surface_id, generation);
+        self.retain_live_installations(project_root);
         (true, decision)
     }
 
@@ -759,6 +811,8 @@ impl ControllerEditorSurfaceGraph {
                     ownership.retire(&source_id, &surface_id, surface_generation);
                 }
             }
+            drop(ownerships);
+            self.retain_live_installations(project_root);
         }
         forgotten
     }
@@ -24835,7 +24889,13 @@ fn handle_editor_surface_observe(
         observation,
         None,
     );
-    if accepted && let Some(intent) = retry_intent {
+    // `#idefocusowner`: a deferred observation's installation does not own the
+    // shared tmux surface, so a retained retry of its earlier failed effect must
+    // not drive tmux either.
+    if accepted
+        && receipt.deferred_to.is_none()
+        && let Some(intent) = retry_intent
+    {
         receipt.intent = intent;
     }
     // `#surfaceobservesilent`: an observation the graph REJECTS produced no ops.log
@@ -24870,18 +24930,19 @@ fn handle_editor_surface_observe(
         },
     );
     let surface_observation_key = format!(
-        "{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}",
         projection_identity.0,
         projection_identity.2,
         accepted,
         surface_intent_label(&receipt.intent),
         surface_layout_authority,
+        receipt.deferred_to.as_deref().unwrap_or(""),
     );
     if let Some(repeats) = fold_repeated_surface_observation(&surface_observation_key) {
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "controller_editor_surface_observed client={} generation={} sequence={} accepted={} layout={} pane_action={}{}",
+                "controller_editor_surface_observed client={} generation={} sequence={} accepted={} layout={} pane_action={}{}{}",
                 projection_identity.0,
                 projection_identity.2,
                 projection_identity.3,
@@ -24892,6 +24953,11 @@ fn handle_editor_surface_observe(
                     SurfaceIntent::Focus { .. } => "focus_only",
                     SurfaceIntent::Sync { .. } => "structural_sync",
                 },
+                receipt
+                    .deferred_to
+                    .as_deref()
+                    .map(|owner| format!(" deferred_to_focus_owner={owner}"))
+                    .unwrap_or_default(),
                 if repeats > 0 {
                     format!(" repeats={repeats}")
                 } else {
@@ -33207,6 +33273,7 @@ mod tests {
             outcome: None,
             error: None,
             terminal_decision: Default::default(),
+            deferred_to: None,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -33243,6 +33310,7 @@ mod tests {
             outcome: Some("stale-eager-effect".to_string()),
             error: None,
             terminal_decision: Default::default(),
+            deferred_to: None,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -33303,6 +33371,7 @@ mod tests {
             outcome: None,
             error: None,
             terminal_decision: Default::default(),
+            deferred_to: None,
         };
 
         record_editor_surface_focus_outcome(
@@ -35288,6 +35357,230 @@ mod tests {
             "jetbrains",
             "jetbrains@IU.0a1b2c3d"
         ));
+    }
+
+    #[test]
+    fn only_the_most_recently_focused_installation_drives_the_shared_tmux_surface() {
+        // `#idefocusowner`: IntelliJ IDEA and Rider open on one project share
+        // one tmux agent-doc window. Each IDE's layout heartbeats used to
+        // re-project tmux onto its own split shape, so the window flipped
+        // between the two layouts. Only the installation that most recently
+        // gained focus (its focus lane) may drive; the other's facts are
+        // accepted but derive nothing until it is focused again.
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let effects = Arc::new(Mutex::new(Vec::<SurfaceIntent>::new()));
+        let recorded = Arc::clone(&effects);
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(move |_, intent| {
+            recorded.lock().push(intent.clone());
+            Ok("recorded".to_string())
+        }));
+        let root = Path::new("/project");
+        let idea = "jetbrains@IU.0a1b2c3d-pid:41";
+        let idea_focus = "jetbrains-focus@IU.0a1b2c3d-pid:41";
+        let rider = "jetbrains@RD.9f8e7d6c-pid:42";
+        let rider_focus = "jetbrains-focus@RD.9f8e7d6c-pid:42";
+        let vscode = "vscode-pid:9";
+        let sequence = std::cell::Cell::new(0_u64);
+        let layout = |columns: &[&[&str]]| {
+            let columns = columns
+                .iter()
+                .map(|files| SurfaceColumn {
+                    files: files.iter().map(|file| (*file).to_string()).collect(),
+                })
+                .collect::<Vec<_>>();
+            let visible = columns
+                .iter()
+                .flat_map(|column| column.files.clone())
+                .collect::<Vec<_>>();
+            agent_doc_editor_surface::EditorSurface {
+                focused: visible[0].clone(),
+                open: visible.clone(),
+                visible,
+                columns,
+                // A heartbeat: nothing forces the reconcile, so only a real
+                // change (or an ownership handoff) can derive a consequence.
+                force_reconcile: false,
+                focus_only: false,
+                preserve_focus: true,
+            }
+        };
+        let focus = |document: &str| agent_doc_editor_surface::EditorSurface {
+            focused: document.to_string(),
+            visible: vec![document.to_string()],
+            open: vec![document.to_string()],
+            columns: Vec::new(),
+            force_reconcile: true,
+            focus_only: true,
+            preserve_focus: false,
+        };
+        let observe = |client_id: &str, surface| {
+            sequence.set(sequence.get() + 1);
+            let (accepted, receipt) = graph.observe(
+                &scope,
+                root,
+                EditorSurfaceObservation {
+                    client_id: client_id.to_string(),
+                    surface_id: "project".to_string(),
+                    generation: 100,
+                    sequence: sequence.get(),
+                    surface,
+                },
+                None,
+            );
+            assert!(accepted, "every installation's facts stay admissible");
+            receipt
+        };
+        let idea_layout: &[&[&str]] = &[&["/project/a.md"], &["/project/b.md"]];
+        let rider_layout: &[&[&str]] = &[&["/project/c.md", "/project/a.md"]];
+        let drained = || std::mem::take(&mut *effects.lock());
+
+        // Before any focus claim both installations drive, exactly as before.
+        assert!(matches!(
+            observe(idea, layout(idea_layout)).intent,
+            SurfaceIntent::Sync { .. }
+        ));
+        assert!(matches!(
+            observe(rider, layout(rider_layout)).intent,
+            SurfaceIntent::Sync { .. }
+        ));
+        assert_eq!(drained().len(), 2);
+        assert_eq!(graph.focus_owner(root), None);
+
+        // IDEA gains focus.
+        let receipt = observe(idea_focus, focus("/project/a.md"));
+        assert!(matches!(receipt.intent, SurfaceIntent::Focus { .. }));
+        assert_eq!(receipt.deferred_to, None);
+        assert_eq!(graph.focus_owner(root).as_deref(), Some("IU.0a1b2c3d"));
+        drained();
+
+        // Rider keeps publishing a different layout; tmux drifts from it.
+        for _ in 0..3 {
+            let receipt = observe(rider, layout(rider_layout));
+            assert_eq!(receipt.intent, SurfaceIntent::Idle);
+            assert!(receipt.idle);
+            assert_eq!(receipt.deferred_to.as_deref(), Some("IU.0a1b2c3d"));
+        }
+        let mut rider_change = layout(rider_layout);
+        rider_change.columns.push(SurfaceColumn {
+            files: vec!["/project/d.md".to_string()],
+        });
+        rider_change.visible.push("/project/d.md".to_string());
+        assert_eq!(observe(rider, rider_change).intent, SurfaceIntent::Idle);
+        graph.observe_tmux_for_project(
+            root,
+            Some(TmuxLayout {
+                columns: vec![
+                    SurfaceColumn {
+                        files: vec!["/project/a.md".to_string()],
+                    },
+                    SurfaceColumn {
+                        files: vec!["/project/b.md".to_string()],
+                    },
+                ],
+            }),
+        );
+        // The tmux refold may re-run IDEA's own retained focus-lane selection;
+        // nothing may project Rider's layout.
+        let after_refold = drained();
+        assert!(
+            after_refold
+                .iter()
+                .all(|intent| matches!(intent, SurfaceIntent::Focus { document } if document == "/project/a.md")),
+            "the unfocused installation must not reshape tmux, from an editor fact or a tmux refold: {after_refold:?}",
+        );
+
+        // The owner's own heartbeat against a matching tmux stays quiet.
+        assert_eq!(
+            observe(idea, layout(idea_layout)).intent,
+            SurfaceIntent::Idle
+        );
+        assert!(drained().is_empty());
+
+        // Rider gains focus: its focus lane drives, and its very next layout
+        // heartbeat re-projects Rider's layout even though Rider's own fold
+        // already recorded that layout and nothing forces the reconcile.
+        let receipt = observe(rider_focus, focus("/project/c.md"));
+        assert!(matches!(receipt.intent, SurfaceIntent::Focus { .. }));
+        assert_eq!(graph.focus_owner(root).as_deref(), Some("RD.9f8e7d6c"));
+        let receipt = observe(rider, layout(rider_layout));
+        assert!(
+            matches!(&receipt.intent, SurfaceIntent::Sync { columns, .. }
+                if columns.len() == 1 && columns[0].files[0] == "/project/c.md"),
+            "a regained owner re-projects its layout: {:?}",
+            receipt.intent,
+        );
+        assert_eq!(receipt.deferred_to, None);
+        // The pane-layout worker converges and republishes tmux.
+        graph.observe_tmux_for_project(
+            root,
+            Some(TmuxLayout {
+                columns: vec![SurfaceColumn {
+                    files: vec!["/project/c.md".to_string(), "/project/a.md".to_string()],
+                }],
+            }),
+        );
+        // A repeated focus from the owner is not a handoff.
+        observe(rider_focus, focus("/project/a.md"));
+        assert_eq!(
+            observe(rider, layout(rider_layout)).intent,
+            SurfaceIntent::Idle
+        );
+        drained();
+
+        // Now IDEA is the deferred one.
+        assert_eq!(
+            observe(idea, layout(idea_layout)).deferred_to.as_deref(),
+            Some("RD.9f8e7d6c")
+        );
+        assert!(drained().is_empty());
+
+        // An unscoped editor never claims and is never deferred.
+        assert!(matches!(
+            observe(vscode, layout(idea_layout)).intent,
+            SurfaceIntent::Sync { .. }
+        ));
+        assert_eq!(observe(vscode, focus("/project/b.md")).deferred_to, None);
+        assert_eq!(graph.focus_owner(root).as_deref(), Some("RD.9f8e7d6c"));
+        drained();
+
+        // Back to IDEA, then IDEA shuts down: ownership falls back to Rider,
+        // which re-projects its layout on its next heartbeat.
+        observe(idea_focus, focus("/project/b.md"));
+        assert!(matches!(
+            observe(idea, layout(idea_layout)).intent,
+            SurfaceIntent::Sync { .. }
+        ));
+        graph.observe_tmux_for_project(
+            root,
+            Some(TmuxLayout {
+                columns: vec![
+                    SurfaceColumn {
+                        files: vec!["/project/a.md".to_string()],
+                    },
+                    SurfaceColumn {
+                        files: vec!["/project/b.md".to_string()],
+                    },
+                ],
+            }),
+        );
+        assert_eq!(
+            observe(rider, layout(rider_layout)).deferred_to.as_deref(),
+            Some("IU.0a1b2c3d")
+        );
+        assert_eq!(graph.forget_client_family(root, idea, 100), 1);
+        assert_eq!(
+            graph.focus_owner(root).as_deref(),
+            Some("IU.0a1b2c3d"),
+            "IDEA's focus lane is still live on this root",
+        );
+        assert_eq!(graph.forget_client_family(root, idea_focus, 100), 1);
+        assert_eq!(graph.focus_owner(root).as_deref(), Some("RD.9f8e7d6c"));
+        drained();
+        assert!(matches!(
+            observe(rider, layout(rider_layout)).intent,
+            SurfaceIntent::Sync { .. }
+        ));
+        assert_eq!(drained().len(), 1);
     }
 
     #[test]

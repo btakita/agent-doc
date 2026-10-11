@@ -83,6 +83,19 @@ v0.35.490 is tagged and pushed, but the release is not published yet. At 14:19 E
 - **Locally:** `agent-doc` 0.35.490 is already installed.
 
 `release + publish` stays open until the run is green, the release lists its archives plus `SHA256SUMS`, and PyPI shows 0.35.490. If Windows fails again, the next step is fixing that job.
+
+### Re: v0.35.490 released — opus-5.5 · 2026-10-11T14:21-04:00
+
+> **Queue prompt:** release + publish
+
+v0.35.490 is published.
+- Release run 38161702873 is green across all six builds, including the Windows MSVC build that failed v0.35.489. That confirms `f9b3a75d6b` fixed it.
+- The GitHub Release `v0.35.490` has 11 assets. Six are platform archives, including both darwin builds that CI produced. The rest are the VS Code `.vsix`, two JetBrains plugin zips, `SHA256SUMS`, and `EDITOR-PACKAGES.sha256`.
+- PyPI's simple index lists 0.35.490 as the latest version. The PyPI workflow's install-and-run check (run 38163374161) was still in progress when I closed this.
+
+> **Queue prompt:** do [#drivecapturedsplice]: what needs to be done?
+
+**Deferred:** answered in the previous response. One live run of `scripts/xdotool-live-verify.sh captured-splice` remains, and it waits for your go-ahead because it types into your IntelliJ window. I left the item open with the same wording.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -91,8 +104,8 @@ v0.35.490 is tagged and pushed, but the release is not published yet. At 14:19 E
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#drivecapturedsplice]: what needs to be done?
-- release + publish
+- ⏭️ do [#drivecapturedsplice]: what needs to be done?
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

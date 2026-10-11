@@ -1827,11 +1827,73 @@ fn run_with_options_to_writer_in_pass(
         eprintln!("[preflight] warning: {}", warning.message);
         warnings.push(warning);
     }
-    let backlog_capture_required = agent_doc_prompt_contract::prompt_requests_backlog_work(
-        &prompt_targets,
-        &added_diff_lines,
-        &frontmatter_prompt_presets,
-    );
+    // `#closeout-steering`: new subagent-intent queue lines the cycle must
+    // dispatch (claimed ones excluded). Computed before the steering seed below
+    // so it is judged against the previous cycle's steering seed.
+    let pending_queue_subagent_dispatch =
+        agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(
+            file,
+            queue_authoritative_content,
+        );
+    // `#capturegatedispatched`: the backlog-capture requirement covers only the
+    // queue heads this cycle drains. A struck head (closed by the cycle that
+    // answered it), a head a worker claim or subagents hold owns, and a head this
+    // cycle dispatches to a subagent all carry their text in this diff, but
+    // their capture belongs to the cycle that closes them. Scoping is
+    // fail-closed: see `agent_doc_queue::capture_scope`.
+    let backlog_capture_required = {
+        let not_drained = agent_doc_queue_io::queue_claim::claimed_items_for_content(
+            file,
+            queue_authoritative_content,
+        )
+        .with_heads(&pending_queue_subagent_dispatch);
+        // The admitted diff cut and the post-maintenance projection: maintenance
+        // may reap a struck line the diff still carries.
+        let mut undrained_queue_lines = agent_doc_queue::capture_scope::undrained_queue_line_keys(
+            &[
+                diff_result_with_current.current.as_str(),
+                queue_authoritative_content,
+            ],
+            &not_drained,
+        );
+        // A line the operator typed in the harness prompt is a live request,
+        // whatever queue entry shares its text.
+        if let Some(harness_only_diff) = harness_diff.as_ref() {
+            for line in agent_doc_prompt_contract::collect_added_diff_lines(harness_only_diff) {
+                undrained_queue_lines.remove(
+                    &agent_doc_queue::document_queue::normalized_queue_line_for_match(&line),
+                );
+            }
+        }
+        let unscoped = agent_doc_prompt_contract::prompt_requests_backlog_work(
+            &prompt_targets,
+            &added_diff_lines,
+            &frontmatter_prompt_presets,
+        );
+        let scoped = unscoped
+            && agent_doc_prompt_contract::prompt_requests_backlog_work(
+                &agent_doc_queue::capture_scope::without_undrained_queue_lines(
+                    &prompt_targets,
+                    &undrained_queue_lines,
+                ),
+                &agent_doc_queue::capture_scope::without_undrained_queue_lines(
+                    &added_diff_lines,
+                    &undrained_queue_lines,
+                ),
+                &frontmatter_prompt_presets,
+            );
+        if unscoped && !scoped {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_backlog_capture_scoped_out file={} undrained_queue_lines={} reason=undrained_queue_heads_only (#capturegatedispatched)",
+                    file.display(),
+                    undrained_queue_lines.len()
+                ),
+            );
+        }
+        scoped
+    };
     let explicit_backlog_targets = agent_doc_prompt_contract::explicit_backlog_targets(
         file,
         &prompt_targets,
@@ -2282,16 +2344,10 @@ fn run_with_options_to_writer_in_pass(
             exchange_prompt_preempts_queue,
         )?;
     }
-    // `#closeout-steering`: new subagent-intent queue lines the cycle must
-    // dispatch (claimed ones excluded). Computed before the seed below so it
-    // is judged against the previous cycle's steering seed.
     let queue_subagent_dispatch = agent_doc_preflight_io::queue_subagent_dispatch_entries(
         file,
         queue_authoritative_content,
-        &agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(
-            file,
-            queue_authoritative_content,
-        ),
+        &pending_queue_subagent_dispatch,
     );
     let exchange_subagent_dispatch = if exchange_prompt_attrs.subagents {
         agent_doc_preflight_io::exchange_subagent_dispatch_entries(&active_exchange_prompt_targets)
@@ -3511,6 +3567,143 @@ mod tests {
             "{parsed:#}"
         );
         assert!(!diff.contains("+do [#runctrlclaude]"), "{parsed:#}");
+    }
+
+    /// `#capturegatedispatched`: the 2026-10-09/10 `agent-doc-bugs.md` shape.
+    /// `#actionable-review` expands to "Add actionable review items into
+    /// backlog + queue", so ANY cycle whose diff carried that queue line used to
+    /// record `requires_backlog_capture`, and the finalize pre-write gate then
+    /// refused a coordinator cycle that only dispatched, or only observed, the
+    /// head. The capture belongs to the cycle that closes the head.
+    fn capture_scope_doc(queue_attrs: &str, queue_body: &str, exchange_tail: &str) -> String {
+        format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "presets:\n",
+                "  '#actionable-review': Add actionable review items into backlog + queue\n",
+                "queue: go\n",
+                "---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: earlier — test\n\n",
+                "Answered.\n",
+                "{exchange_tail}",
+                "<!-- /agent:exchange -->\n\n",
+                "## Queue\n\n",
+                "<!-- agent:queue{queue_attrs} -->\n",
+                "{queue_body}",
+                "<!-- /agent:queue -->\n",
+            ),
+            queue_attrs = queue_attrs,
+            queue_body = queue_body,
+            exchange_tail = exchange_tail,
+        )
+    }
+
+    fn capture_scope_preflight(
+        dir: &tempfile::TempDir,
+        baseline: &str,
+        claim: Option<&str>,
+        current: &str,
+    ) -> (serde_json::Value, bool) {
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        if let Some(item) = claim {
+            agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:review", 3600).unwrap();
+        }
+        std::fs::write(&doc, current).unwrap();
+        let mut output = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions::default(), &mut output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(parsed["no_changes"], false, "{parsed:#}");
+        let state = agent_doc_cycle_state_io::load(&doc)
+            .unwrap()
+            .expect("the cycle must open");
+        (parsed, state.requires_backlog_capture)
+    }
+
+    #[test]
+    fn dispatch_only_coordinator_cycle_does_not_require_backlog_capture() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc(" subagents", "", "");
+        let current = capture_scope_doc(" subagents", "- #actionable-review\n", "");
+        let (parsed, requires) = capture_scope_preflight(&dir, &baseline, None, &current);
+        assert_eq!(
+            parsed["queue_subagent_dispatch"][0]["item"], "#actionable-review",
+            "the head must reach this cycle as subagent dispatch work: {parsed:#}"
+        );
+        assert!(
+            !requires,
+            "a head this cycle dispatches carries its capture to the cycle that closes it: {parsed:#}"
+        );
+    }
+
+    #[test]
+    fn a_claimed_head_in_the_diff_does_not_require_backlog_capture() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", "- #actionable-review\n", "");
+        let current = capture_scope_doc(
+            "",
+            "- 🚧 #actionable-review\n",
+            "\nWhat is the status of the batch?\n",
+        );
+        let (parsed, requires) =
+            capture_scope_preflight(&dir, &baseline, Some("#actionable-review"), &current);
+        assert!(
+            !requires,
+            "a head a worker claim owns is not drained by this cycle: {parsed:#}"
+        );
+    }
+
+    #[test]
+    fn a_struck_head_in_the_diff_does_not_require_backlog_capture() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", "- #actionable-review\n", "");
+        let current = capture_scope_doc(
+            "",
+            "- ~~#actionable-review~~\n",
+            "\nWhat is the status of the batch?\n",
+        );
+        let (parsed, requires) = capture_scope_preflight(&dir, &baseline, None, &current);
+        assert!(
+            !requires,
+            "a head an earlier cycle closed is not drained by this cycle: {parsed:#}"
+        );
+    }
+
+    /// Fail-closed control: an unclaimed head this cycle drains keeps the
+    /// requirement, so the scoping above is caused by claim / dispatch / strike
+    /// state and not by the fixture.
+    #[test]
+    fn a_drained_capture_head_still_requires_backlog_capture() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", "", "");
+        let current = capture_scope_doc("", "- #actionable-review\n", "");
+        let (parsed, requires) = capture_scope_preflight(&dir, &baseline, None, &current);
+        assert!(
+            requires,
+            "the head this cycle drains owns its capture: {parsed:#}"
+        );
+    }
+
+    /// Fail-closed control: the same preset typed as an exchange prompt is a
+    /// live request even while the queue head that shares its text is claimed.
+    #[test]
+    fn an_exchange_request_sharing_a_claimed_head_text_still_requires_backlog_capture() {
+        let dir = setup_project();
+        let baseline = capture_scope_doc("", "- #actionable-review\n", "");
+        let current = capture_scope_doc("", "- 🚧 #actionable-review\n", "\n#actionable-review\n");
+        let (parsed, requires) =
+            capture_scope_preflight(&dir, &baseline, Some("#actionable-review"), &current);
+        assert!(requires, "{parsed:#}");
     }
 
     #[test]

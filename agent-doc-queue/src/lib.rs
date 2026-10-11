@@ -5,6 +5,7 @@
 //! read documents, submit commands, or mutate files.
 
 pub mod backlog_sync;
+pub mod capture_scope;
 pub mod component_attrs;
 pub mod control_binding;
 pub mod dispatch_item;

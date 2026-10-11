@@ -207,6 +207,20 @@ Affected component: editor IPC / writeback\n\n\
 pub fn is_dogfood_terminal_issue(diagnostic: &str) -> bool {
     !agent_doc_turn::response_text::is_session_check_steering_pending(diagnostic)
         && !diagnostic.contains(crate::session_check::SESSION_CHECK_IN_PROGRESS_PREFIX)
+        && !is_evidence_backed_operator_clear_refusal(diagnostic)
+}
+
+/// `#clearqueuedliveturn`: an operator clear the guard refused on harness
+/// evidence — a turn proven live (`harness_turn_live=true`) or protected
+/// prompt input — is the guard doing its job, with an exact operator unblocker
+/// in the message. It is not a turn at all, so "Agent Doc did not complete this
+/// turn" is false, and filing it as an actionable fix prompt queued the refusal
+/// itself as work. An unclassified alive-busy refusal still qualifies: its busy
+/// verdict may be a misread pane.
+fn is_evidence_backed_operator_clear_refusal(diagnostic: &str) -> bool {
+    diagnostic.contains("session_clear refused for ")
+        && (diagnostic.contains("harness_turn_live=true")
+            || diagnostic.contains("contains protected prompt input"))
 }
 
 pub fn dogfood_terminal_issue_class(diagnostic: &str) -> &'static str {
@@ -531,6 +545,22 @@ mod tests {
             "[session-check] INTERRUPTED: cycle `cycle-1` is still `write_applied`"
         ));
         assert!(is_dogfood_terminal_issue("[lint-gate] INTERRUPTED: 1 blocking lint finding"));
+    }
+
+    /// `#clearqueuedliveturn`: the guard refusing a clear into a proven-live
+    /// turn (observed on agent-doc-bugs.md, pane %149) was filed as an
+    /// ACTIONABLE terminal_failure and pasted into the session queue.
+    #[test]
+    fn evidence_backed_operator_clear_refusal_is_not_a_dogfood_terminal_issue() {
+        let live_turn = "session_clear refused for /repo/tasks/agent-doc/agent-doc-bugs.md because a turn is live in pane %149 (harness_turn_live=true evidence=dispatch_turn_running, source=authoritative_actor) and no supervisor owns the pane to deliver a queued clear when it ends; no `/clear` was sent or queued. ui_outcome=blocked_with_exact_unblocker";
+        assert!(!is_dogfood_terminal_issue(live_turn));
+        assert!(!is_dogfood_terminal_issue(&format!("Error: {live_turn}")));
+        let protected = "session_clear refused for /repo/plan.md because pane %3 contains protected prompt input (reason=draft, source=registry)";
+        assert!(!is_dogfood_terminal_issue(protected));
+        // An unclassified busy verdict may itself be the defect.
+        assert!(is_dogfood_terminal_issue(
+            "session_clear refused for /repo/plan.md because pane %3 is alive-busy (reason=busy cue, source=registry)"
+        ));
     }
 
     #[test]

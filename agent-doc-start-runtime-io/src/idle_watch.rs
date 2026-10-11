@@ -44,6 +44,8 @@ use agent_doc_turn::op_log::OpsLogEvent;
 const CLEAN_SESSION_CONTEXT_RESET_REASON: &str = "active queue head is a [clean-session] item - clearing to give it a fresh agent context (#cleandrainsup)";
 const FOCUSED_CYCLE_CONTEXT_RESET_REASON: &str = "active queue head is a [focused-cycle] item - clearing to continue in a fresh agent context (#qfocsup)";
 const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str = "operator_deferred_clear";
+const CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED: &str =
+    agent_doc_state_backbone::QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED;
 const CONTEXT_CLEAR_SOURCE_QUEUE_SLASH: &str = "queue_slash_command";
 const CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET: &str = "supervisor_background_context_reset";
 const ZERO_REPLICA_IDLE_WATCH_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
@@ -540,7 +542,11 @@ fn context_clear_projection_source_allows_supervisor_action(
 ) -> bool {
     matches!(
         projection.source.as_deref(),
-        Some(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED | CONTEXT_CLEAR_SOURCE_QUEUE_SLASH)
+        Some(
+            CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED
+                | CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED
+                | CONTEXT_CLEAR_SOURCE_QUEUE_SLASH
+        )
     )
 }
 
@@ -1604,6 +1610,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // the manual cooldown projection.
             let mut awaiting_clear_settle = false;
             let mut clear_settle_idle_ticks: u32 = 0;
+            // `#clearqueuedliveturn`: the turn a deferred operator clear waits
+            // behind, so a newer prompt retires it instead of being wiped by it.
+            let mut deferred_clear_turn_baseline =
+                agent_doc_queue::queue_preemption::DeferredClearTurnBaseline::default();
+            // `#clearqueuedliveturn`: once a deferred clear is observed, every
+            // tick reaches the delivery decision until it is delivered or
+            // retired, so the clear lands at the turn's idle boundary rather
+            // than at the next quiescent-maintenance probe.
+            let mut deferred_clear_armed = false;
             // `#fbwire` Phase 2: the instant the convergence gate FIRST deferred the
             // current pending inter-item dispatch. `None` ⇒ not currently deferring;
             // set on the first `Defer`, cleared on `Dispatch`.
@@ -2177,6 +2192,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 empty_preflight_reclaim_ticks = empty_preflight_reclaim_ticks.wrapping_add(1);
                 let exclusive_supervisor_maintenance = context_reset_in_flight
                     || awaiting_clear_settle
+                    || deferred_clear_armed
                     || shared.restart_reexec.load(Ordering::Relaxed);
                 let urgent_maintenance = stale_recycle_reconcile_due
                     || empty_preflight_reclaim_probe_due
@@ -4479,9 +4495,72 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     other => other,
                 };
+                // `#clearqueuedliveturn`: a deferred clear belongs to the turn it
+                // was queued behind. A newer prompt on the pane (operator typed
+                // or routed one, or the harness ran a composer-queued message)
+                // means the operator continued the conversation; delivering the
+                // clear after that turn would wipe the context it depends on.
+                let deferred_clear = match deferred_clear {
+                    Some(projection) => {
+                        let current_turn_started_at =
+                            agent_doc_turn_status_io::turn_active_marker_for_pane_for_file(
+                                &path,
+                                &projection.target,
+                            )
+                            .map(|marker| marker.written_at);
+                        if deferred_clear_turn_baseline
+                            .observe(projection.clear_epoch, current_turn_started_at)
+                        {
+                            let settled = agent_doc_controller_io::project_controller::clear_queue_context_clear_deferred_for_file(&path);
+                            let event = format!(
+                                "idle_queue_watch_deferred_clear_superseded file={} target={} clear_epoch={} deferred_at={} source={} reason=newer_prompt turn_started_at={} settled={} (#clearqueuedliveturn)",
+                                path.display(),
+                                projection.target,
+                                projection.clear_epoch,
+                                projection.marked_secs,
+                                projection.source.as_deref().unwrap_or("none"),
+                                current_turn_started_at.map_or_else(|| "none".to_string(), |at| at.to_string()),
+                                settled.as_ref().map_or_else(|err| format!("error:{err:#}"), |ok| ok.to_string()),
+                            );
+                            log_event(&mut session_log, &event);
+                            agent_doc_ops_log_io::log_op(&path, &event);
+                            deferred_clear_turn_baseline.reset();
+                            None
+                        } else {
+                            Some(projection)
+                        }
+                    }
+                    None => {
+                        deferred_clear_turn_baseline.reset();
+                        None
+                    }
+                };
+                deferred_clear_armed = deferred_clear.is_some();
+                let live_turn_deferral = deferred_clear
+                    .as_ref()
+                    .is_some_and(|projection| projection.is_live_turn_deferred_operator_clear());
+                // A clear queued behind a live turn may have been proven live by
+                // its `running` dispatch receipt alone; wait that receipt out too.
+                // An unreadable receipt store fails closed (keep waiting).
+                let dispatch_turn_running = live_turn_deferral
+                    && agent_doc_controller_io::project_controller::dispatch_turn_running_for_file(&path)
+                        .unwrap_or_else(|err| {
+                            let event = format!(
+                                "idle_queue_watch_deferred_clear_dispatch_probe_failed file={} action=keep_waiting error={:?} (#clearqueuedliveturn)",
+                                path.display(),
+                                format!("{err:#}"),
+                            );
+                            log_event(&mut session_log, &event);
+                            true
+                        });
                 match agent_doc_queue::queue_preemption::plan_deferred_clear_step(
                     deferred_clear.is_some(),
-                    prompt_visible && !turn_active,
+                    agent_doc_queue::queue_preemption::deferred_clear_delivery_ready(
+                        prompt_visible,
+                        turn_active,
+                        live_turn_deferral,
+                        dispatch_turn_running,
+                    ),
                 ) {
                     agent_doc_queue::queue_preemption::DeferredClearStep::None => {}
                     agent_doc_queue::queue_preemption::DeferredClearStep::WaitForIdle => {

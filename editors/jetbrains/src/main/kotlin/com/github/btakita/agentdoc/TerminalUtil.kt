@@ -32,6 +32,16 @@ object TerminalUtil {
         """session_clear refused for (.+?) because pane (\S+) is (?:alive-busy|active_agent_doc|busy)""",
         RegexOption.DOT_MATCHES_ALL,
     )
+    // #clearqueuedliveturn: the guard refused because a harness turn is proven
+    // live and no supervisor owns the pane to queue the clear behind it.
+    private val LIVE_TURN_CLEAR_REFUSAL_HEADER_REGEX = Regex(
+        """session_clear refused for (.+?) because a turn is live in pane (\S+) \(harness_turn_live=true evidence=([^,\s)]+)""",
+        RegexOption.DOT_MATCHES_ALL,
+    )
+    private val LIVE_TURN_CLEAR_QUEUED_REGEX = Regex(
+        """session_clear queued for (.+?) — a turn is live in pane (\S+)""",
+        RegexOption.DOT_MATCHES_ALL,
+    )
     private val PROTECTED_CLEAR_REFUSAL_HEADER_REGEX = Regex(
         """session_clear refused for (.+?) because pane (\S+) contains protected prompt input""",
         RegexOption.DOT_MATCHES_ALL,
@@ -186,6 +196,12 @@ object TerminalUtil {
         val currentCommand: String,
         val tail: String,
         val protectedReason: String = "",
+        val liveTurnEvidence: String = "",
+    )
+
+    internal data class LiveTurnQueuedClear(
+        val file: String,
+        val pane: String,
     )
 
     internal data class BusySessionRestartRefusal(
@@ -1293,8 +1309,11 @@ object TerminalUtil {
                 // hard-blocking. Surface that as a distinct "deferred" notice so
                 // the operator knows it will run shortly, not that it ran now.
                 val deferredClear = isDeferredQueuePreemptClear(output)
-                clearFinishedNow = !deferredClear
-                if (deferredClear) {
+                val liveTurnQueued = parseLiveTurnQueuedClear(output)
+                clearFinishedNow = !deferredClear && liveTurnQueued == null
+                if (liveTurnQueued != null) {
+                    notifyInfo(project, buildLiveTurnQueuedClearMessage(clearRelativePath, liveTurnQueued))
+                } else if (deferredClear) {
                     notifyInfo(
                         project,
                         "Clear Session Context deferred for $clearRelativePath.\n" +
@@ -1615,7 +1634,35 @@ object TerminalUtil {
     internal fun isDeferredQueuePreemptClear(output: String): Boolean =
         output.contains("session_clear deferred for")
 
+    /**
+     * #clearqueuedliveturn: Clear Session Context during a live turn succeeds by
+     * queueing one clear that the supervisor delivers when the turn ends.
+     */
+    internal fun parseLiveTurnQueuedClear(output: String): LiveTurnQueuedClear? {
+        val match = LIVE_TURN_CLEAR_QUEUED_REGEX.find(output) ?: return null
+        return LiveTurnQueuedClear(file = match.groupValues[1], pane = match.groupValues[2])
+    }
+
+    internal fun buildLiveTurnQueuedClearMessage(relativePath: String, queued: LiveTurnQueuedClear): String =
+        "Clear Session Context queued for $relativePath.\n" +
+            "A turn is running in pane ${queued.pane}, so nothing was typed into it. " +
+            "The clear runs automatically when that turn ends; it is dropped if a new prompt starts first. " +
+            "Use Interrupt and clear to clear immediately instead."
+
     internal fun parseBusySessionClearRefusal(output: String): BusySessionClearRefusal? {
+        val liveTurnMatch = LIVE_TURN_CLEAR_REFUSAL_HEADER_REGEX.find(output)
+        if (liveTurnMatch != null) {
+            val detail = output.substring(liveTurnMatch.range.last + 1)
+            val source = BUSY_CLEAR_SOURCE_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
+            return BusySessionClearRefusal(
+                file = liveTurnMatch.groupValues[1],
+                pane = liveTurnMatch.groupValues[2],
+                source = source.ifBlank { "unknown" },
+                currentCommand = "unknown",
+                tail = "unknown",
+                liveTurnEvidence = liveTurnMatch.groupValues[3],
+            )
+        }
         val protectedMatch = PROTECTED_CLEAR_REFUSAL_HEADER_REGEX.find(output)
         if (protectedMatch != null) {
             val detail = output.substring(protectedMatch.range.last + 1)
@@ -2132,6 +2179,17 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 append("\nLatest pane output: ")
                 append(refusal.tail)
             }
+            return@buildString
+        }
+        if (refusal.liveTurnEvidence.isNotBlank()) {
+            append("Clear Session Context was not queued for ")
+            append(relativePath)
+            append(".\nA turn is running in pane ")
+            append(refusal.pane)
+            append(" (")
+            append(refusal.liveTurnEvidence)
+            append("), and no agent-doc supervisor owns that pane to run the clear when the turn ends.")
+            append(" Nothing was sent. Retry Clear Session Context after the turn finishes, or use Interrupt and clear to discard the running turn.")
             return@buildString
         }
         append("Session is still running for ")

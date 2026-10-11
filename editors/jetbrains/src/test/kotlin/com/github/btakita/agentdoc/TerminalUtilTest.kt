@@ -782,6 +782,46 @@ class TerminalUtilTest {
         assertEquals("gpt-5.5 high - ~/work/btakita/agent-loop - Context 15% used", refusal.tail)
     }
 
+    // #clearqueuedliveturn: the live-turn refusal (observed on agent-doc-bugs.md
+    // pane %149) fell through to a generic "agent-doc command failed" error.
+    @Test
+    fun `live turn clear refusal parses into a busy refusal not a command failure`() {
+        val output = """
+            agent-doc command failed (exit 1): Error: session_clear refused for /repo/tasks/agent-doc/agent-doc-bugs.md because a turn is live in pane %149 (harness_turn_live=true evidence=dispatch_turn_running, source=authoritative_actor) and no supervisor owns the pane to deliver a queued clear when it ends; no `/clear` was sent or queued. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=wait_for_turn_end_no_supervisor_to_queue_clear. Wait for the turn to finish and run Clear Session Context again.
+        """.trimIndent()
+
+        val refusal = TerminalUtil.parseBusySessionClearRefusal(output)
+
+        assertNotNull(refusal)
+        assertEquals("/repo/tasks/agent-doc/agent-doc-bugs.md", refusal!!.file)
+        assertEquals("%149", refusal.pane)
+        assertEquals("authoritative_actor", refusal.source)
+        assertEquals("dispatch_turn_running", refusal.liveTurnEvidence)
+        val message = TerminalUtil.buildBusySessionClearBlockedMessage("tasks/agent-doc/agent-doc-bugs.md", refusal)
+        assertTrue(message.contains("A turn is running in pane %149 (dispatch_turn_running)"))
+        assertTrue(message.contains("Nothing was sent"))
+        assertFalse(message.contains("agent-doc command failed"))
+    }
+
+    @Test
+    fun `live turn queued clear is a queued notice not a failure`() {
+        val output = """
+            session_clear queued for /repo/tasks/agent-doc/agent-doc-bugs.md — a turn is live in pane %149 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none.
+        """.trimIndent()
+
+        val queued = TerminalUtil.parseLiveTurnQueuedClear(output)
+
+        assertNotNull(queued)
+        assertEquals("/repo/tasks/agent-doc/agent-doc-bugs.md", queued!!.file)
+        assertEquals("%149", queued.pane)
+        assertFalse(TerminalUtil.isDeferredQueuePreemptClear(output))
+        assertNull(TerminalUtil.parseBusySessionClearRefusal(output))
+        val message = TerminalUtil.buildLiveTurnQueuedClearMessage("tasks/agent-doc/agent-doc-bugs.md", queued)
+        assertTrue(message.startsWith("Clear Session Context queued for tasks/agent-doc/agent-doc-bugs.md."))
+        assertTrue(message.contains("runs automatically when that turn ends"))
+        assertNull(TerminalUtil.parseLiveTurnQueuedClear("Cleared session context for /repo/plan.md"))
+    }
+
     @Test
     fun `busy clear refusal parses generic command wrapper output`() {
         val output = """

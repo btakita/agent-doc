@@ -89,6 +89,23 @@ and unbounded `cargo test` runs from poisoning `session-check` regressions
 while `make check` remains the supported full-suite entrypoint with
 `TEST_THREADS=2`.
 
+Relay-hub tests isolate their keys, not the registry
+(`#relayhubtestisolation`). The `agent-doc-crdt-relay-io` hub registry,
+replica identity registry and retained projections are process-global because
+one controller serves every document, and the editor-pid operations
+intentionally cross documents: `reap_exited_editor_replicas(pid)` retires every
+membership of an exited editor process, and a registration retires the same
+pid's older editor ids on other documents (`#staleeditorregprune`). Tests must
+not serialize the suite or swap in a test-only registry to dodge that. Each
+test owns a unique document (a `temp_doc` path) and, whenever its replica
+identity names an editor pid, a unique live pid from a per-test
+`TestEditorProcess` child that is killed and reaped on drop; its
+reliable-sync `Open` fact is seeded for that same pid. Sharing
+`std::process::id()` as the editor pid let parallel tests prune and reap each
+other's memberships, failing plain `cargo test` while `--test-threads=1` and
+nextest passed. Plain parallel `cargo test -p agent-doc-crdt-relay-io`,
+`--test-threads=1`, and nextest must all pass.
+
 Current deterministic budgets:
 
 - Fast corpus: seeds `0..512`, `24` commands per seed, budget `3s`, always run

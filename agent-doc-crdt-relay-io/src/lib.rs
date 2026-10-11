@@ -7368,6 +7368,46 @@ mod tests {
         );
     }
 
+    /// A live editor process whose pid no other test shares (`#relayhubtestisolation`).
+    ///
+    /// The relay hub registry, identity registry and retained projections are
+    /// process-global by design: one controller serves every document, and the
+    /// editor-pid operations deliberately cross documents —
+    /// [`reap_exited_editor_replicas`] retires every membership of an exited pid,
+    /// and registration retires the same pid's older editor ids on other
+    /// documents (`#staleeditorregprune`). Tests that all claimed
+    /// `std::process::id()` as their editor pid therefore pruned and reaped each
+    /// other's memberships under parallel `cargo test`, while passing under
+    /// `--test-threads=1` and nextest. A per-test child process gives each test
+    /// a distinct pid that is genuinely live for `process_pid_is_live`, without
+    /// changing the production semantics or serializing the suite. The child is
+    /// killed and reaped on drop.
+    struct TestEditorProcess(std::process::Child);
+
+    impl TestEditorProcess {
+        fn spawn() -> Self {
+            let child = std::process::Command::new("sleep")
+                .arg("3600")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn a per-test editor process");
+            Self(child)
+        }
+
+        fn pid(&self) -> u32 {
+            self.0.id()
+        }
+    }
+
+    impl Drop for TestEditorProcess {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
     /// A throwaway tracked document under a temp project root so `doc_hash` and the
     /// per-document keying resolve against a real path.
     fn temp_doc(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
@@ -7539,7 +7579,13 @@ mod tests {
     }
 
     fn seed_live_reliable_sync_open(file: &str) {
-        let pid = std::process::id();
+        seed_live_reliable_sync_open_for_pid(file, std::process::id());
+    }
+
+    /// Seed the reliable-sync `Open` fact for `pid`, so a test whose editor is a
+    /// [`TestEditorProcess`] keeps its liveness fact and its replica identity on
+    /// the same pid, as a real editor does.
+    fn seed_live_reliable_sync_open_for_pid(file: &str, pid: u32) {
         let document_hash = agent_doc_hash::document_id_for_path(Path::new(file));
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
@@ -8460,9 +8506,10 @@ mod tests {
         // whose identity names no editor process at all.
         let (_dir, doc) = temp_doc("ghost-relay-member-sibling.md");
         let file_str = doc.display().to_string();
-        seed_live_reliable_sync_open(&file_str);
+        let live_editor = TestEditorProcess::spawn();
+        seed_live_reliable_sync_open_for_pid(&file_str, live_editor.pid());
         let dead_pid = 5151u32;
-        let live_pid = std::process::id();
+        let live_pid = live_editor.pid();
         let dead_identity = format!("jetbrains-{dead_pid}-dead:{file_str}");
         let live_identity = format!("jetbrains-{live_pid}-live:{file_str}");
         let dead_id = register_replica_for_file_with_liveness(&doc, &dead_identity, |_| true)
@@ -8503,7 +8550,9 @@ mod tests {
     fn replacement_registration_prunes_dead_member_and_preserves_delivery_barrier() {
         let (_dir, doc) = temp_doc("dead-editor-member.md");
         let file_str = doc.display().to_string();
-        seed_live_reliable_sync_open(&file_str);
+
+        let editor = TestEditorProcess::spawn();
+        seed_live_reliable_sync_open_for_pid(&file_str, editor.pid());
         let stale_identity = "jetbrains-1111-stale:/tmp/dead-editor-member.md";
         let stale_id = register_replica_for_file_with_liveness(&doc, stale_identity, |_| true)
             .unwrap()
@@ -8523,10 +8572,9 @@ mod tests {
             assert!(!hub.pending_updates(stale_id).unwrap().is_empty());
         })
         .unwrap();
-
         let replacement_identity = format!(
             "jetbrains-{}-replacement:/tmp/dead-editor-member.md",
-            std::process::id()
+            editor.pid()
         );
         let replacement_id =
             register_replica_for_file_with_liveness(&doc, &replacement_identity, |pid| pid != 1111)
@@ -8566,10 +8614,11 @@ mod tests {
     fn refresh_replaces_one_logical_replica_and_fences_both_late_frame_paths() {
         let (_dir, doc) = temp_doc("logical-refresh-fence.md");
         let file_str = doc.display().to_string();
-        seed_live_reliable_sync_open(&file_str);
+        let editor = TestEditorProcess::spawn();
+        seed_live_reliable_sync_open_for_pid(&file_str, editor.pid());
         let base_identity = format!(
             "jetbrains-{}-logical-refresh:/tmp/logical-refresh-fence.md",
-            std::process::id(),
+            editor.pid(),
         );
         let (old_id, old_bootstrap) =
             register_replica_for_file_with_liveness(&doc, &base_identity, |_| true)
@@ -8675,10 +8724,11 @@ mod tests {
         );
         std::fs::write(&doc, base).unwrap();
         let file_str = doc.display().to_string();
-        seed_live_reliable_sync_open(&file_str);
+        let editor = TestEditorProcess::spawn();
+        seed_live_reliable_sync_open_for_pid(&file_str, editor.pid());
         let identity = format!(
             "jetbrains-{}-{case}-partial-queue:/tmp/{file_name}",
-            std::process::id(),
+            editor.pid(),
         );
         let (client_id, bootstrap) =
             register_replica_for_file_with_liveness(&doc, &identity, |_| true)
@@ -8776,8 +8826,9 @@ mod tests {
 
         let (_dir, doc) = temp_doc("logical-refresh-pid-attachment.md");
         let file_str = doc.display().to_string();
-        let pid = std::process::id();
-        seed_live_reliable_sync_open(&file_str);
+        let editor = TestEditorProcess::spawn();
+        let pid = editor.pid();
+        seed_live_reliable_sync_open_for_pid(&file_str, pid);
         let attach = agent_doc_document_realtime::editor_attach::editor_attach();
         attach.install_watcher(std::sync::Arc::new(NoopWatcher));
         attach.attach(&file_str, pid);
@@ -8830,8 +8881,9 @@ mod tests {
 
         let (_dir, doc) = temp_doc("same-pid-classloader-replacement.md");
         let file_str = doc.display().to_string();
-        let pid = std::process::id();
-        seed_live_reliable_sync_open(&file_str);
+        let editor = TestEditorProcess::spawn();
+        let pid = editor.pid();
+        seed_live_reliable_sync_open_for_pid(&file_str, pid);
         agent_doc_document_realtime::editor_attach::editor_attach()
             .install_watcher(std::sync::Arc::new(NoopWatcher));
         let retired_identity = format!("jetbrains-{pid}-retired-classloader:{}", doc.display());
@@ -8883,12 +8935,12 @@ mod tests {
 
         let (_dir_a, doc_a) = temp_doc("stale-endpoint-registered.md");
         let (_dir_b, doc_b) = temp_doc("stale-endpoint-never-reopened.md");
-        // The parent pid is live and used by no other test: the prune is
-        // process-wide, so sharing `std::process::id()` with the other
-        // classloader tests would prune their memberships under `cargo test`.
-        let pid = std::os::unix::process::parent_id();
-        seed_live_reliable_sync_open(&doc_a.display().to_string());
-        seed_live_reliable_sync_open(&doc_b.display().to_string());
+        // The prune is process-wide, so this test's editor pid must be live and
+        // owned by no other test (see [`TestEditorProcess`]).
+        let editor = TestEditorProcess::spawn();
+        let pid = editor.pid();
+        seed_live_reliable_sync_open_for_pid(&doc_a.display().to_string(), pid);
+        seed_live_reliable_sync_open_for_pid(&doc_b.display().to_string(), pid);
         agent_doc_document_realtime::editor_attach::editor_attach()
             .install_watcher(std::sync::Arc::new(NoopWatcher));
         let old_a = format!("jetbrains-{pid}-old-classloader:{}", doc_a.display());
@@ -8995,8 +9047,9 @@ mod tests {
     #[test]
     fn provisional_classloader_replacement_retires_same_pid_member_on_promotion() {
         let (_dir, doc) = temp_doc("provisional-classloader-replacement.md");
-        seed_live_reliable_sync_open(&doc.display().to_string());
-        let pid = std::process::id();
+        let editor = TestEditorProcess::spawn();
+        seed_live_reliable_sync_open_for_pid(&doc.display().to_string(), editor.pid());
+        let pid = editor.pid();
         let retired_identity = format!("jetbrains-{pid}-retired-provisional:{}", doc.display());
         let current_identity = format!("jetbrains-{pid}-current-provisional:{}", doc.display());
         let retired =
@@ -9039,8 +9092,9 @@ mod tests {
         agent_doc_document_realtime::editor_attach::editor_attach()
             .install_watcher(std::sync::Arc::new(NoopWatcher));
         let (_dir, doc) = temp_doc("registration-captured-base.md");
-        seed_live_reliable_sync_open(&doc.display().to_string());
-        let pid = std::process::id();
+        let editor = TestEditorProcess::spawn();
+        seed_live_reliable_sync_open_for_pid(&doc.display().to_string(), editor.pid());
+        let pid = editor.pid();
         let identity = format!("jetbrains-{pid}-base:{}", doc.display());
         let original = register_editor_replica_for_file_incremental(&doc, &identity, None, pid)
             .unwrap()
@@ -9107,8 +9161,9 @@ mod tests {
     fn provisional_replacement_preserves_predecessor_until_promoted() {
         let (_dir, doc) = temp_doc("provisional-replacement.md");
         let file_str = doc.display().to_string();
-        seed_live_reliable_sync_open(&file_str);
-        let pid = std::process::id();
+        let editor = TestEditorProcess::spawn();
+        seed_live_reliable_sync_open_for_pid(&file_str, editor.pid());
+        let pid = editor.pid();
         let base_identity = format!("jetbrains-{pid}-provisional:/tmp/provisional-replacement.md");
         let original =
             register_editor_replica_for_file_incremental(&doc, &base_identity, None, pid)
@@ -9198,10 +9253,11 @@ mod tests {
     fn concurrent_refresh_registrations_elect_one_logical_successor() {
         let (_dir, doc) = temp_doc("concurrent-logical-refresh.md");
         let file_str = doc.display().to_string();
-        seed_live_reliable_sync_open(&file_str);
+        let editor = TestEditorProcess::spawn();
+        seed_live_reliable_sync_open_for_pid(&file_str, editor.pid());
         let base_identity = format!(
             "jetbrains-{}-concurrent-refresh:/tmp/concurrent-logical-refresh.md",
-            std::process::id(),
+            editor.pid(),
         );
         register_replica_for_file_with_liveness(&doc, &base_identity, |_| true)
             .unwrap()

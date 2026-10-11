@@ -56,8 +56,6 @@ use anyhow::Result;
 use std::io::Write;
 use std::path::Path;
 
-#[cfg(test)]
-use tmux_router::IsolatedTmux;
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock};
 
 // ---------------------------------------------------------------------------
@@ -962,14 +960,14 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_isolated_server_not_running_initially() {
-        let t = IsolatedTmux::new("agent-doc-test-not-running");
+        let t = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-not-running");
         assert!(!t.running());
     }
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_create_session_and_verify() {
-        let t = IsolatedTmux::new("agent-doc-test-create-session");
+        let t = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-create-session");
         let tmp = TempDir::new().unwrap();
 
         let pane_id = t.new_session("test-session", tmp.path()).unwrap();
@@ -984,7 +982,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_session_exists_returns_false_for_missing() {
-        let t = IsolatedTmux::new("agent-doc-test-session-missing");
+        let t = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-session-missing");
         let tmp = TempDir::new().unwrap();
 
         t.new_session("existing", tmp.path()).unwrap();
@@ -996,7 +994,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_new_window_creates_second_pane() {
-        let t = IsolatedTmux::new("agent-doc-test-new-window");
+        let t = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-new-window");
         let tmp = TempDir::new().unwrap();
 
         let pane1 = t.new_session("test", tmp.path()).unwrap();
@@ -1010,7 +1008,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_send_keys_to_pane() {
-        let t = IsolatedTmux::new("agent-doc-test-send-keys");
+        let t = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-send-keys");
         let tmp = TempDir::new().unwrap();
 
         let pane_id = t.new_session("test", tmp.path()).unwrap();
@@ -1020,7 +1018,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn opencode_submit_uses_named_enter_key() {
-        let t = IsolatedTmux::new("agent-doc-test-opencode-enter-key");
+        let t = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-opencode-enter-key");
         let tmp = TempDir::new().unwrap();
         let pane_id = t.new_session("test", tmp.path()).unwrap();
         let output_path = tmp.path().join("input.bin");
@@ -1079,7 +1077,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_pane_alive_returns_false_after_kill() {
-        let t = IsolatedTmux::new("agent-doc-test-pane-kill");
+        let t = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-pane-kill");
         let tmp = TempDir::new().unwrap();
 
         let pane_id = t.new_session("test", tmp.path()).unwrap();
@@ -1096,7 +1094,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_auto_start_cascade_no_server() {
-        let t = IsolatedTmux::new("agent-doc-test-autostart-no-server");
+        let t = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-autostart-no-server");
         let tmp = TempDir::new().unwrap();
 
         assert!(!t.running());
@@ -1110,7 +1108,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_auto_start_cascade_no_session() {
-        let t = IsolatedTmux::new("agent-doc-test-autostart-no-session");
+        let t = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-autostart-no-session");
         let tmp = TempDir::new().unwrap();
 
         t.new_session("other", tmp.path()).unwrap();
@@ -1125,7 +1123,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_auto_start_cascade_session_exists() {
-        let t = IsolatedTmux::new("agent-doc-test-autostart-exists");
+        let t = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-autostart-exists");
         let tmp = TempDir::new().unwrap();
 
         let pane1 = t.new_session("claude", tmp.path()).unwrap();

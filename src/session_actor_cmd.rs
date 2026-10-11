@@ -2636,7 +2636,11 @@ fn upgrade_unrendered_clear_from_pane_history(
 fn codex_viewport_shows_fresh_chat(viewport: &str) -> bool {
     let lines: Vec<String> = viewport
         .lines()
-        .map(|line| agent_doc_turn_executor_tmux::prompt::strip_ansi(line).trim().to_string())
+        .map(|line| {
+            agent_doc_turn_executor_tmux::prompt::strip_ansi(line)
+                .trim()
+                .to_string()
+        })
         .collect();
     let zero_context = lines
         .iter()
@@ -4479,7 +4483,9 @@ fn live_pane_blocker_status_line(reason: &str) -> String {
         agent_doc_harness::CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER => {
             "operator_action=\"close the conversation in the other app, then press r in the pane\""
         }
-        "active permission prompt" => "operator_action=\"answer the permission prompt in the pane\"",
+        "active permission prompt" => {
+            "operator_action=\"answer the permission prompt in the pane\""
+        }
         _ => "operator_action=\"restore an idle prompt\"",
     };
     format!("live_pane_blocker: reason=\"{reason}\" {action}")
@@ -5230,7 +5236,10 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
     #[test]
     fn live_pane_blocker_status_names_codex_update_dialog_without_clear_hint() {
         let line = live_pane_blocker_status_line(agent_doc_harness::CODEX_UPDATE_AVAILABLE_BLOCKER);
-        assert!(line.contains("reason=\"codex update-available dialog\""), "{line}");
+        assert!(
+            line.contains("reason=\"codex update-available dialog\""),
+            "{line}"
+        );
         assert!(line.contains("Update now or Skip"), "{line}");
         assert!(line.contains("never answers"), "{line}");
         assert!(blocker_supersedes_ready_busy_recovery_hint(
@@ -6247,7 +6256,9 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let busy = "• Working (4m 57s • esc to interrupt)\n› Ask Codex to do anything\n  GPT-5.6-Sol high · ~/work · Context 34% used\n  ? for shortcuts\n";
         assert!(!codex_viewport_shows_fresh_chat(busy));
         // Operator prose that merely mentions the phrase is not the footer.
-        assert!(!codex_viewport_shows_fresh_chat("Why does it say Context 0% used?\n"));
+        assert!(!codex_viewport_shows_fresh_chat(
+            "Why does it say Context 0% used?\n"
+        ));
     }
 
     #[test]
@@ -6598,8 +6609,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn send_clear_to_pane_submits_clear_command() {
         let dir = tempfile::tempdir().unwrap();
-        let socket = format!("session-clear-direct-pane-{}", uuid::Uuid::new_v4());
-        let iso = tmux_router::IsolatedTmux::new(&socket);
+        let iso = agent_doc_tmux_io::isolated_test_tmux("session-clear-direct-pane");
         let pane = iso.new_session("test", dir.path()).unwrap();
         let output_path = dir.path().join("clear.txt");
         let ready_path = dir.path().join("clear.ready");
@@ -6663,7 +6673,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 .expect("tempdir should have a basename")
                 .to_string_lossy()
         );
-        let iso = tmux_router::IsolatedTmux::new("session-clear-direct-pane");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("session-clear-direct-pane");
         let default_tmux = agent_doc_tmux_io::configured_tmux();
         let mut pane = iso.new_session("test", dir.path()).unwrap();
         for _ in 0..64 {
@@ -6729,7 +6739,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_direct_submit_pane_prefers_authoritative_actor() {
         let dir = tempfile::tempdir().unwrap();
-        let iso = tmux_router::IsolatedTmux::new("session-clear-pane-select-actor");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("session-clear-pane-select-actor");
         let actor_pane = iso.new_session("test", dir.path()).unwrap();
         let registry_pane = iso.new_window("test", dir.path()).unwrap();
         let actor_record = agent_doc_controller::actor::ActorRecord {
@@ -6797,7 +6807,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_direct_submit_pane_falls_back_to_registry() {
         let dir = tempfile::tempdir().unwrap();
-        let iso = tmux_router::IsolatedTmux::new("session-clear-pane-select-registry");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("session-clear-pane-select-registry");
         let registry_pane = iso.new_session("test", dir.path()).unwrap();
         let actor_record = agent_doc_controller::actor::ActorRecord {
             document_id: "doc".to_string(),

@@ -4,6 +4,18 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+- **Concurrent test suites no longer share live tmux servers.** Each test's `IsolatedTmux` was named by a
+  fixed string (`gh218-controller-lifecycle`, ...), and `tmux -L <name>` puts that socket in the user-wide
+  `/tmp/tmux-<uid>/`, so two suites running at once (separate worktrees or parallel runs) attached to one
+  server: the controller-io detached-view tests failed with `tmux new-session failed: duplicate session:
+  main` and, once the other run dropped its handle, `server exited unexpectedly`. Run in two concurrent
+  processes, the two controller-io tests failed 10 of 10 runs before the fix and 0 of 20 after. Tests now
+  build servers through `agent_doc_tmux_io::isolated_test_tmux(label)`, which appends the pid, a
+  per-process sequence and a nonce to the label and removes the socket file on drop (tmux leaves it behind
+  after `kill-server`). All 272 direct constructions moved to it; a workspace source test rejects any new
+  `IsolatedTmux::new` call, and a live `make tmux-ci` test reproduces the shared-name collision as its
+  control before proving two same-label servers are independent.
+
 - **A head waiting on the operator (`⏳`) is no longer reported as a fresh operator prompt every preflight
   (`#regressionawaitingoperat`).** On a `subagents` queue whose first head `do [#id]` tracked an
   `[operator-verify]` item, every preflight reported `+do [#id]` as the cycle diff (`[user+]`, a

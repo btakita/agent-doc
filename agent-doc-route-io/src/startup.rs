@@ -1344,7 +1344,7 @@ mod tests {
     #[ignore = "isolated tmux integration test; run make tmux-ci"]
     fn layout_startup_completion_cannot_append_a_third_visible_pane() {
         let dir = tempfile::tempdir().unwrap();
-        let tmux = tmux_router::IsolatedTmux::new("layout-startup-staging");
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("layout-startup-staging");
         let left = tmux.new_session("test", dir.path()).unwrap();
         let right = tmux.split_window(&left, dir.path(), "-dh").unwrap();
         let window = tmux.pane_window(&left).unwrap();

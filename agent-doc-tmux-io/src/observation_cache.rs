@@ -323,8 +323,8 @@ mod tests {
     #[test]
     #[ignore = "requires tmux"]
     fn remote_pane_creation_receipt_replaces_cached_missing_pane() {
-        let socket = format!("agent-doc-remote-receipt-{}", std::process::id());
-        let iso = tmux_router::IsolatedTmux::new(&socket);
+        let iso = crate::isolated_test_tmux("agent-doc-remote-receipt");
+        let socket = iso.server_socket.clone().expect("isolated socket");
         let root = std::path::Path::new("/tmp");
         let original = iso.new_session("test", root).unwrap();
         let _observations = begin_observation_scope();

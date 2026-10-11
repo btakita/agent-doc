@@ -34757,7 +34757,7 @@ mod tests {
             .set(lifecycle_sender)
             .expect("install isolated multi-view lifecycle sink");
 
-        let tmux = tmux_router::IsolatedTmux::new("gh218-controller-multi-lifecycle");
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("gh218-controller-multi-lifecycle");
         let main_pane = tmux.new_session("main", dir.path()).unwrap();
         tmux.raw_cmd(&["rename-window", "-t", &main_pane, "agent-doc"])
             .unwrap();
@@ -34961,7 +34961,7 @@ mod tests {
             .set(lifecycle_sender)
             .expect("install isolated lifecycle sink");
 
-        let tmux = tmux_router::IsolatedTmux::new("gh218-controller-lifecycle");
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("gh218-controller-lifecycle");
         let main_pane = tmux.new_session("main", dir.path()).unwrap();
         tmux.raw_cmd(&["rename-window", "-t", &main_pane, "agent-doc"])
             .unwrap();
@@ -37434,15 +37434,7 @@ mod tests {
     #[test]
     fn gh153_fresh_controller_uses_registered_supervisors_for_real_tmux_merge_basis() {
         let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
-        let socket = format!(
-            "agent-doc-gh153-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        );
-        let tmux = tmux_router::IsolatedTmux::new(&socket);
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("agent-doc-gh153");
         let first = tmux.new_session("gh153", fixture.dir.path()).unwrap();
         tmux.raw_cmd(&["rename-window", "-t", "gh153:0", "agent-doc"])
             .unwrap();

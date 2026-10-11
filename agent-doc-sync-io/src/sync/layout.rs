@@ -201,7 +201,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-associated-session-log-owner");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-associated-session-log-owner");
         let owner_pane = iso.new_session("test", tmp.path()).unwrap();
         std::fs::write(
             tmp.path().join(".agent-doc/logs/associated-session-log.log"),
@@ -248,7 +248,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: associated-supervisor\n---\n").unwrap();
 
-        let iso = IsolatedTmux::new("sync-associated-supervisor");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-associated-supervisor");
         let pane = iso.new_session("test", tmp.path()).unwrap();
         let pane_pid = agent_doc_tmux_io::pane_pid(&iso, &pane).unwrap();
         let supervisor_instance_id = "instance-1".to_string();
@@ -305,7 +305,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: preserved-supervisor\n---\n").unwrap();
 
-        let iso = IsolatedTmux::new("sync-preserve-supervisor-entry");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-preserve-supervisor-entry");
         let pane = iso.new_session("test", tmp.path()).unwrap();
         let pane_pid = pane_pid_from_tmux(&iso, &pane).unwrap();
         let window = iso.pane_window(&pane).unwrap();
@@ -429,7 +429,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-explicit-non-agent-window");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-explicit-non-agent-window");
         let root_pane = iso.new_session("test", root).unwrap();
         iso.raw_cmd(&["rename-window", "-t", "test:0", "notes"])
             .unwrap();
@@ -534,7 +534,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-visible-registry-rescue");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-visible-registry-rescue");
         let root_pane = iso.new_session("4", root).unwrap();
         iso.raw_cmd(&["rename-window", "-t", "4:0", "agent-doc"])
             .unwrap();
@@ -741,7 +741,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-register-authoritative-actor");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-register-authoritative-actor");
         let actor_pane = iso.new_session("test", root).unwrap();
         let other_pane = iso.split_window(&actor_pane, root, "-dh").unwrap();
         let actor_window = iso.pane_window(&actor_pane).unwrap();

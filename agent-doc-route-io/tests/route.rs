@@ -432,8 +432,6 @@ pub(crate) fn write_codex_writable_proof_status_fixture(
 // --- Prompt detection tests (via HarnessConfig) ---
 // --- Routing logic tests ---
 // --- Integration tests (IsolatedTmux) ---
-#[cfg(test)]
-use tmux_router::IsolatedTmux;
 // #jb-run-agent-doc-busy-wait-deadlock: a dispatch-only route on a busy active
 // turn must NOT honor the slow-start `--wait-for-ready` override when a queue
 // fallback exists — it should skip the wait and queue immediately, so JB `Run
@@ -3039,7 +3037,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-fresh-start-blocked-handoff");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-fresh-start-blocked-handoff");
 
         let doc = dir.path().join("fresh-start-blocked-handoff.md");
         std::fs::write(&doc, "# Session\n").unwrap();
@@ -3086,7 +3084,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
-        let iso = IsolatedTmux::new("route-test-preserve-failed-owner");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-preserve-failed-owner");
         let session = format!("test-{}", std::process::id());
         let pane = iso.new_session(&session, dir.path()).unwrap();
         let file = dir.path().join("tasks/software/corky.md");
@@ -3115,7 +3113,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
-        let iso = IsolatedTmux::new("route-test-cleanup-unregistered");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-cleanup-unregistered");
         let pane = iso.new_session("test", dir.path()).unwrap();
         let file = dir.path().join("tasks/software/corky.md");
         if let Some(parent) = file.parent() {
@@ -3134,7 +3132,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
-        let iso = IsolatedTmux::new("route-test-cleanup-startup-miss");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-cleanup-startup-miss");
         let pane = iso.new_session("test", dir.path()).unwrap();
         let file = dir.path().join("tasks/software/corky.md");
         if let Some(parent) = file.parent() {
@@ -3173,7 +3171,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
-        let iso = IsolatedTmux::new("route-test-cleanup-concurrent-sibling");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-cleanup-concurrent-sibling");
         let pane_owned = iso.new_session("test", dir.path()).unwrap();
         let pane_sibling = iso.split_window(&pane_owned, dir.path(), "-dh").unwrap();
 
@@ -3567,7 +3565,7 @@ mod tests {
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
-        let iso = IsolatedTmux::new("route-test-startup-miss-diagnostic");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-startup-miss-diagnostic");
         let pane = iso.new_session("test", dir.path()).unwrap();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();

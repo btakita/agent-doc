@@ -298,7 +298,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn lazy_claim_requires_explicit_pane_provenance() {
-        let iso = IsolatedTmux::new("route-test-lazy-claim-explicit-only");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-lazy-claim-explicit-only");
         let cwd = std::env::current_dir().unwrap();
         let pane = iso.auto_start("claim", &cwd).unwrap();
         let claimed_panes = std::collections::HashSet::new();
@@ -319,7 +319,7 @@ mod tests {
     fn find_registered_pane_filters_by_session() {
         // find_registered_pane_in_session should only return panes
         // that are alive and in the target tmux session.
-        let iso = IsolatedTmux::new("route-test-find-reg");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-find-reg");
         let cwd = std::env::current_dir().unwrap();
 
         // Create two sessions
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn has_named_window_detects_agent_doc_window() {
-        let iso = IsolatedTmux::new("route-test-named-win");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-named-win");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn has_named_window_false_for_nonexistent_session() {
-        let iso = IsolatedTmux::new("route-test-named-win-no-sess");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-named-win-no-sess");
         assert!(
             !agent_doc_tmux_io::has_window_named(&iso, "nonexistent", "agent-doc"),
             "should return false for nonexistent session"
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_target_session_ignores_blank_context_session() {
-        let iso = IsolatedTmux::new("route-test-blank-context");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-blank-context");
         let cwd = std::env::current_dir().unwrap();
         let pane = iso.auto_start("claude", &cwd).unwrap();
         let current_session = iso.pane_session(&pane).unwrap();
@@ -398,7 +398,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("route-test-project-session-pin");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-project-session-pin");
         let _configured = iso.new_session("0", dir.path()).unwrap();
         let _current = iso.new_session("1", dir.path()).unwrap();
         let _ = iso
@@ -426,7 +426,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("route-test-project-session-pin-fallback");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-project-session-pin-fallback");
         let _configured = iso.new_session("0", dir.path()).unwrap();
         let _current = iso.new_session("1", dir.path()).unwrap();
 
@@ -466,7 +466,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("route-test-nested-file-root-pin");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-nested-file-root-pin");
         let _child = iso.new_session("1", root).unwrap();
         let _workspace = iso.new_session("4", root).unwrap();
 
@@ -513,7 +513,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("route-test-mixed-root-workspace-pin");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-mixed-root-workspace-pin");
         let _child = iso.new_session("1", root).unwrap();
         let _workspace = iso.new_session("4", root).unwrap();
 
@@ -568,7 +568,7 @@ mod tests {
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
         let (research, plan, stray) = multi_session_project(tmp.path());
 
-        let iso = IsolatedTmux::new("route-test-ghmultitmux-two-sessions");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-ghmultitmux-two-sessions");
         let _main = iso.new_session("main", tmp.path()).unwrap();
         let _research = iso.new_session("research", tmp.path()).unwrap();
         let _scratch = iso.new_session("scratch", tmp.path()).unwrap();
@@ -614,7 +614,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("route-test-ghmultitmux-single-default");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-ghmultitmux-single-default");
         let _main = iso.new_session("main", tmp.path()).unwrap();
         let _research = iso.new_session("research", tmp.path()).unwrap();
 
@@ -629,7 +629,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn blank_context_session_does_not_bypass_target_validation() {
-        let iso = IsolatedTmux::new("route-test-blank-context-validate");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-blank-context-validate");
         let result =
             ensure_auto_start_target_session(&iso, Some("   "), "claude", &HarnessConfig::claude());
         assert!(
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn implicit_fallback_session_is_not_auto_start_target() {
-        let iso = IsolatedTmux::new("route-test-no-implicit-fallback");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-no-implicit-fallback");
         let result =
             ensure_auto_start_target_session(&iso, None, "claude", &HarnessConfig::claude());
         assert!(
@@ -656,7 +656,7 @@ mod tests {
         // the first (leftmost) pane in the agent-doc window — not the last.
         // Before the fix, the code always used find_registered_pane_in_session
         // which could pick any registered pane regardless of position.
-        let iso = IsolatedTmux::new("route-test-split-before-left");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-split-before-left");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 

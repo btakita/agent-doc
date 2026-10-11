@@ -6956,7 +6956,7 @@ mod th {
             .unwrap();
         }
 
-        let iso = IsolatedTmux::new(test_name);
+        let iso = agent_doc_tmux_io::isolated_test_tmux(test_name);
         let protected_pane = iso.new_session(&tmux_session, root).unwrap();
         let _ = iso.raw_cmd(&[
             "rename-window",
@@ -7289,7 +7289,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-ownership-binding-first");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-ownership-binding-first");
         let anchor_pane = iso.new_session("test", &root).unwrap();
         let target_window = iso.pane_window(&anchor_pane).unwrap();
         iso.raw_cmd(&["rename-window", "-t", &target_window, "agent-doc"])
@@ -7393,7 +7393,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-cross-root-pane-only");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-cross-root-pane-only");
         let decoy_pane = iso.new_session("test", &root).unwrap();
         iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
             .unwrap();
@@ -7498,7 +7498,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-cross-root-full");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-cross-root-full");
         let root_pane = iso.new_session("test", &root).unwrap();
         iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
             .unwrap();
@@ -7718,7 +7718,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: session-log-owner\n---\n").unwrap();
 
-        let iso = IsolatedTmux::new("sync-session-log-owner");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-session-log-owner");
         let owner_pane = iso.new_session("test", tmp.path()).unwrap();
         std::fs::write(
             tmp.path().join(".agent-doc/logs/session-log-owner.log"),
@@ -7747,7 +7747,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-session-log-beats-process-tree");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-session-log-beats-process-tree");
         let stale_pane = iso.new_session("test", tmp.path()).unwrap();
         let owner_pane = iso.split_window(&stale_pane, tmp.path(), "-dh").unwrap();
 
@@ -7825,7 +7825,7 @@ mod tests {
             }
         }
 
-        let iso = IsolatedTmux::new("sync-pane-occupant-classes");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-pane-occupant-classes");
         let shell_pane = iso.new_session("test", tmp.path()).unwrap();
         let bare_pane = iso.split_window(&shell_pane, tmp.path(), "-dh").unwrap();
         let owner_pane = iso.split_window(&shell_pane, tmp.path(), "-dv").unwrap();
@@ -7901,7 +7901,7 @@ mod tests {
             std::fs::set_permissions(&fake, perms).unwrap();
         }
 
-        let iso = IsolatedTmux::new("sync-column-foreign-document");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-column-foreign-document");
         let shell_pane = iso.new_session("test", tmp.path()).unwrap();
         let owner_a = iso.split_window(&shell_pane, tmp.path(), "-dh").unwrap();
         assert!(wait_for_shell(&iso, &shell_pane, Duration::from_secs(15)));
@@ -7974,7 +7974,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: live-rebind-owner\n---\n").unwrap();
 
-        let iso = IsolatedTmux::new("sync-live-rebind-owner");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-live-rebind-owner");
         let successor_pane = iso.new_session("test", tmp.path()).unwrap();
         std::fs::write(
             tmp.path().join(".agent-doc/logs/live-rebind-owner.log"),
@@ -8005,7 +8005,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-authoritative-actor-owner");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-authoritative-actor-owner");
         let stale_pane = iso.new_session("test", root).unwrap();
         let actor_pane = iso.split_window(&stale_pane, root, "-dh").unwrap();
         let stale_window = iso.pane_window(&stale_pane).unwrap();
@@ -8047,7 +8047,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: associated-rebind\n---\n").unwrap();
 
-        let iso = IsolatedTmux::new("sync-associated-registry-rebind");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-associated-registry-rebind");
         let successor_pane = iso.new_session("test", tmp.path()).unwrap();
         std::fs::write(
             tmp.path().join(".agent-doc/logs/associated-rebind.log"),
@@ -8092,7 +8092,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: open-log-pane\n---\n").unwrap();
 
-        let iso = IsolatedTmux::new("sync-open-log-owner-fail-closed");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-open-log-owner-fail-closed");
         let owner_pane = iso.new_session("test", tmp.path()).unwrap();
         std::fs::write(
             tmp.path().join(".agent-doc/logs/open-log-pane.log"),
@@ -8262,7 +8262,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn passive_autostart_allows_cleanly_closed_latest_session() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let iso = IsolatedTmux::new("sync-passive-closed");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-passive-closed");
         std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         let doc = tmp.path().join("tasks").join("closed.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
@@ -8287,7 +8287,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn passive_autostart_blocks_open_latest_session() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let iso = IsolatedTmux::new("sync-passive-open");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-passive-open");
         std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         let doc = tmp.path().join("tasks").join("open.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
@@ -8315,7 +8315,7 @@ mod tests {
         let doc = tmp.path().join("tasks").join("rebind.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: passive-rebind\n---\n").unwrap();
-        let iso = IsolatedTmux::new("sync-passive-rebind-live");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-passive-rebind-live");
         let successor = iso.new_session("test", tmp.path()).unwrap();
         std::fs::write(
             tmp.path().join(".agent-doc/logs/passive-rebind.log"),
@@ -8339,7 +8339,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn passive_autostart_allows_stale_registry_rebind_successor() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let iso = IsolatedTmux::new("sync-passive-rebind-stale");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-passive-rebind-stale");
         std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         let doc = tmp.path().join("tasks").join("rebind.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
@@ -8364,7 +8364,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn passive_autostart_blocks_unresolved_startup_miss() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let iso = IsolatedTmux::new("sync-passive-miss");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-passive-miss");
         let doc = tmp.path().join("tasks").join("miss.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: passive-miss\n---\n").unwrap();
@@ -8497,7 +8497,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_skips_correct_state() {
-        let iso = IsolatedTmux::new("sync-repair-skip-correct");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-skip-correct");
         let tmp = tempfile::TempDir::new().unwrap();
 
         // Create session with agent-doc window at index 0 + one stash window
@@ -8528,7 +8528,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_pins_managed_names_without_promoting_stash() {
-        let iso = IsolatedTmux::new("sync-repair-stable-role-names");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-stable-role-names");
         let tmp = tempfile::TempDir::new().unwrap();
         let first = iso.new_session("test", tmp.path()).unwrap();
         iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
@@ -8617,7 +8617,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_reports_repair_only_when_it_moves_windows() {
-        let iso = IsolatedTmux::new("sync-repair-outcome-honest");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-outcome-honest");
         let tmp = tempfile::TempDir::new().unwrap();
 
         let _pane = iso.new_session("test", tmp.path()).unwrap();
@@ -8657,7 +8657,7 @@ mod tests {
         // dimensions but left `window-size=manual`, while still older code could
         // leave the full 1000-row staging geometry behind. A normal repair must
         // heal both without touching unrelated windows.
-        let iso = IsolatedTmux::new("sync-repair-unpin-staging-height");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-unpin-staging-height");
         let tmp = tempfile::TempDir::new().unwrap();
 
         let _pane = iso.new_session("test", tmp.path()).unwrap();
@@ -8712,7 +8712,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_zero_stash_target_is_noop_tmuxsynccrash() {
-        let iso = IsolatedTmux::new("sync-repair-zero-stash-target-noop");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-zero-stash-target-noop");
         let tmp = tempfile::TempDir::new().unwrap();
 
         let _pane = iso.new_session("test", tmp.path()).unwrap();
@@ -8731,7 +8731,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_moves_window_to_index_0() {
-        let iso = IsolatedTmux::new("sync-repair-move-idx0");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-move-idx0");
         let tmp = tempfile::TempDir::new().unwrap();
 
         // Create session: initial window at 0 (placeholder), then create
@@ -8770,7 +8770,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_consolidates_duplicate_target_windows() {
-        let iso = IsolatedTmux::new("sync-repair-duplicate-agent-doc");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-duplicate-agent-doc");
         let tmp = tempfile::TempDir::new().unwrap();
 
         let pane0 = iso.new_session("test", tmp.path()).unwrap();
@@ -8830,7 +8830,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_moves_stash_directly_after_agent_doc() {
-        let iso = IsolatedTmux::new("sync-repair-stash-index");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-stash-index");
         let tmp = tempfile::TempDir::new().unwrap();
 
         let _pane0 = iso.new_session("test", tmp.path()).unwrap();
@@ -8873,7 +8873,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_normalizes_stash_alias_to_index_1() {
-        let iso = IsolatedTmux::new("sync-repair-stash-alias-index");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-stash-alias-index");
         let tmp = tempfile::TempDir::new().unwrap();
 
         let _pane0 = iso.new_session("test", tmp.path()).unwrap();
@@ -8919,7 +8919,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn full_sync_repairs_window_order_before_reconcile() {
-        let iso = IsolatedTmux::new("sync-full-repairs-window-order");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-full-repairs-window-order");
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -8995,7 +8995,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn full_sync_calls_doctor_repair_for_explicit_stash_window() {
-        let iso = IsolatedTmux::new("sync-full-doctor-repairs-stash-window");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-full-doctor-repairs-stash-window");
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -9064,7 +9064,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_rescues_pane_from_stash() {
-        let iso = IsolatedTmux::new("sync-repair-rescue-stash");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-rescue-stash");
         let tmp = tempfile::TempDir::new().unwrap();
 
         // Create session with a non-agent-doc window + stash with a pane
@@ -9098,7 +9098,7 @@ mod tests {
     fn promote_pane_to_agent_doc_window_reparents_stash_pane() {
         // #stash-pane-promote-on-focus: a live-owner pane parked in the stash
         // window must be reparented into the agent-doc window on focus.
-        let iso = IsolatedTmux::new("sync-promote-stash");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-promote-stash");
         let tmp = tempfile::TempDir::new().unwrap();
 
         let pane0 = iso.new_session("test", tmp.path()).unwrap();
@@ -9135,7 +9135,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn promote_pane_to_agent_doc_window_noop_for_non_stash_pane() {
         // A pane already outside the stash must not be reparented.
-        let iso = IsolatedTmux::new("sync-promote-noop");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-promote-noop");
         let tmp = tempfile::TempDir::new().unwrap();
         let pane0 = iso.new_session("test", tmp.path()).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
@@ -9153,7 +9153,7 @@ mod tests {
         // selecting a stashed pane in place (which would surface focus inside the
         // stash). A pane in the agent-doc window is not stashed; a pane parked in
         // the stash window is.
-        let iso = IsolatedTmux::new("sync-pane-in-stash");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-pane-in-stash");
         let tmp = tempfile::TempDir::new().unwrap();
 
         let pane0 = iso.new_session("test", tmp.path()).unwrap();
@@ -9173,7 +9173,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_consolidates_multiple_stash_windows() {
-        let iso = IsolatedTmux::new("sync-repair-consolidate");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-consolidate");
         let tmp = tempfile::TempDir::new().unwrap();
 
         // Create session with agent-doc window
@@ -9276,7 +9276,7 @@ mod tests {
         // Bug: when agent-doc is at index 2 and index 0 is occupied by another window
         // (e.g., stash), move-window fails because index 0 is taken.
         // Fix: use swap-window when index 0 is occupied.
-        let iso = IsolatedTmux::new("sync-repair-swap-idx0");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-swap-idx0");
         let tmp = tempfile::TempDir::new().unwrap();
 
         // Create session — window 0 is a "corky" window (simulating user's corky watch)
@@ -9681,7 +9681,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_logs_move_window_action() {
-        let iso = IsolatedTmux::new("sync-log-move-window");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-log-move-window");
         let tmp = tempfile::TempDir::new().unwrap();
 
         // Create session: placeholder at 0, then agent-doc at 1+ after killing placeholder
@@ -9871,7 +9871,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-postlock-actor-focus");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-postlock-actor-focus");
         let stale_pane = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let active_pane = iso.split_window(&stale_pane, root, "-dh").unwrap();
@@ -10074,7 +10074,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn stash_rescue_discovers_agent_doc_window_when_window_arg_is_none() {
-        let iso = IsolatedTmux::new("sync-stash-discover-window");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-stash-discover-window");
         let tmp = tempfile::TempDir::new().unwrap();
 
         // Create session with agent-doc window
@@ -10139,7 +10139,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_defers_stash_rescue_to_reconciler_swap() {
-        let iso = IsolatedTmux::new("sync-deferred-stash-rescue");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-deferred-stash-rescue");
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd = ScopedCurrentDir::set(tmp.path());
 
@@ -10234,7 +10234,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn windowless_sync_targets_current_session_agent_doc_window() {
-        let iso = IsolatedTmux::new("sync-windowless-target-agent-doc");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-windowless-target-agent-doc");
         let tmp = tempfile::TempDir::new().unwrap();
 
         let pane0 = iso.new_session("test", tmp.path()).unwrap();
@@ -10267,7 +10267,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-windowless-project-pin");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-windowless-project-pin");
         let _pane0 = iso.new_session("0", tmp.path()).unwrap();
         iso.raw_cmd(&["rename-window", "-t", "0:0", "agent-doc"])
             .unwrap();
@@ -10302,7 +10302,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-windowless-current-agent-doc");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-windowless-current-agent-doc");
         let _pane0 = iso.new_session("0", tmp.path()).unwrap();
         let _pane1 = iso.new_session("1", tmp.path()).unwrap();
         iso.raw_cmd(&["rename-window", "-t", "1:0", "agent-doc"])
@@ -10430,7 +10430,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let focus = tmp.path().join("focused.md");
         let focus = focus.to_string_lossy().to_string();
-        let iso = IsolatedTmux::new("sync-windowless-focused-actor-session");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-windowless-focused-actor-session");
         let _controller_pane = iso
             .new_session("replacement-controller", tmp.path())
             .unwrap();
@@ -10485,7 +10485,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-windowless-dead-project-pin");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-windowless-dead-project-pin");
         let _pane1 = iso.new_session("1", tmp.path()).unwrap();
 
         assert_eq!(
@@ -10537,7 +10537,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-windowless-mixed-root-pin");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-windowless-mixed-root-pin");
         let _pane1 = iso.new_session("1", root).unwrap();
         let _pane4 = iso.new_session("4", root).unwrap();
 
@@ -10583,7 +10583,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-cross-root-register");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-cross-root-register");
         let root_pane = iso.new_session("test", root).unwrap();
         let child_pane = iso.split_window(&root_pane, &subroot, "-dh").unwrap();
 
@@ -10678,7 +10678,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-cross-root-duplicate-register");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-cross-root-duplicate-register");
         let root_pane = iso.new_session("test", root).unwrap();
         let window = iso.pane_window(&root_pane).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
@@ -10794,7 +10794,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-fail-closed-geometry-binding");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-fail-closed-geometry-binding");
         let child_pane = iso.new_session("test", &subroot).unwrap();
 
         let child_key = tmux_router::registry::canonical_registry_key_in(
@@ -10895,7 +10895,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_stashes_open_cycle_pane_during_reconcile_detach() {
-        let iso = IsolatedTmux::new("sync-open-cycle-protect");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-open-cycle-protect");
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -11045,7 +11045,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-safe-passive-no-alias");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-safe-passive-no-alias");
         let bugs_pane = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let dev_pane = iso.split_window(&bugs_pane, &subroot, "-dh").unwrap();
@@ -11148,7 +11148,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-safe-passive-registered-fast-path");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-safe-passive-registered-fast-path");
         let pane = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let window_id = iso.pane_window(&pane).unwrap();
@@ -11212,7 +11212,7 @@ mod tests {
             .unwrap();
         }
 
-        let iso = IsolatedTmux::new("sync-safe-passive-protected-grow");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-safe-passive-protected-grow");
         let pane_a = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let pane_b = iso.split_window(&pane_a, root, "-dh").unwrap();
@@ -11326,7 +11326,7 @@ mod tests {
             .unwrap();
         }
 
-        let iso = IsolatedTmux::new("sync-manual-protected-grow");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-manual-protected-grow");
         let pane_a = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let pane_b = iso.split_window(&pane_a, root, "-dh").unwrap();
@@ -11460,7 +11460,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-safe-passive-blocked-focus");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-safe-passive-blocked-focus");
         let bugs_pane = iso.new_session("test", root.path()).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let dev_pane = iso.split_window(&bugs_pane, subroot.path(), "-dh").unwrap();
@@ -11578,7 +11578,7 @@ mod tests {
         agent_doc_controller_io::project_controller::store_layout_state(root, &layout_state)
             .unwrap();
 
-        let iso = IsolatedTmux::new("sync-focus-only-editor-switch");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-focus-only-editor-switch");
         let left_pane = iso.new_session("test", root).unwrap();
         iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
             .unwrap();
@@ -11673,7 +11673,7 @@ mod tests {
         agent_doc_controller_io::project_controller::store_layout_state(root, &layout_state)
             .unwrap();
 
-        let iso = IsolatedTmux::new("sync-focus-only-visible-sibling");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-focus-only-visible-sibling");
         let bugs_pane = iso.new_session("test", root).unwrap();
         iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
             .unwrap();
@@ -11750,7 +11750,7 @@ mod tests {
             .unwrap();
         }
 
-        let iso = IsolatedTmux::new("sync-focus-only-no-saved-layout");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-focus-only-no-saved-layout");
         let left_pane = iso.new_session("test", root).unwrap();
         iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
             .unwrap();
@@ -11837,7 +11837,7 @@ mod tests {
         .unwrap();
         let _cwd = ScopedCurrentDir::set(root);
 
-        let iso = IsolatedTmux::new("pane-window-binding-rebind");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("pane-window-binding-rebind");
         let pane = iso.new_session("test", root).unwrap();
         let live_window = iso.pane_window(&pane).unwrap();
         let file_key = doc.to_string_lossy().to_string();
@@ -11919,7 +11919,7 @@ mod tests {
         .unwrap();
         let _cwd = ScopedCurrentDir::set(root);
 
-        let iso = IsolatedTmux::new("pane-window-binding-unlocatable");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("pane-window-binding-unlocatable");
         let file_key = doc.to_string_lossy().to_string();
         agent_doc_session_actor_io::project_binding_in(
             root,
@@ -11977,7 +11977,7 @@ mod tests {
             .unwrap();
         }
 
-        let iso = IsolatedTmux::new("sync-safe-passive-protected-focus");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-safe-passive-protected-focus");
         let pane_a = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let pane_b = iso.split_window(&pane_a, root, "-dh").unwrap();

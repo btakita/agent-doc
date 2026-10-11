@@ -2892,8 +2892,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("session.md");
         std::fs::write(&file, "---\nagent_doc_session: tmux-ensure\n---\n").unwrap();
-        let socket = format!("agent-doc-ensure-{}", uuid::Uuid::new_v4());
-        let tmux = tmux_router::tmux::IsolatedTmux::new(&socket);
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("agent-doc-ensure");
 
         let first = ensure_tmux_session_with(&tmux, &file, Some("headless")).unwrap();
         let second = ensure_tmux_session_with(&tmux, &file, Some("headless")).unwrap();
@@ -2924,8 +2923,7 @@ attach_command = "custom-attach --session {session} --command {tmux_command}"
         .unwrap();
         let file = dir.path().join("session.md");
         std::fs::write(&file, "---\nagent_doc_session: ide-policy\n---\n").unwrap();
-        let socket = format!("agent-doc-ensure-{}", uuid::Uuid::new_v4());
-        let tmux = tmux_router::tmux::IsolatedTmux::new(&socket);
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("agent-doc-ensure");
 
         let outcome = ensure_tmux_session_with_ide(&tmux, &file, Some("ide-policy"), true)
             .expect("IDE ensure must use the binary-owned policy");
@@ -2958,8 +2956,7 @@ auto_start_tmux = false
         .unwrap();
         let file = dir.path().join("session.md");
         std::fs::write(&file, "---\nagent_doc_session: manual-tmux\n---\n").unwrap();
-        let socket = format!("agent-doc-ensure-{}", uuid::Uuid::new_v4());
-        let tmux = tmux_router::tmux::IsolatedTmux::new(&socket);
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("agent-doc-ensure");
 
         let error = ensure_tmux_session_with_ide(&tmux, &file, Some("manual-tmux"), true)
             .expect_err("missing session must not be created");

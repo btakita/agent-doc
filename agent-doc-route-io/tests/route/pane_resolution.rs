@@ -110,7 +110,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-child-extended-projection");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-live-child-extended-projection");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -201,7 +202,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-child-skip-projection");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-child-skip-projection");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -291,7 +292,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-codex-fresh-retry");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-codex-fresh-retry");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -437,7 +438,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/codex-hooks/sessions")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-codex-clear-pre-dispatch-restart");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-codex-clear-pre-dispatch-restart");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -593,7 +595,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-pane-busy");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-pane-busy");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -663,7 +665,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-dispatch-only-busy-pane");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-dispatch-only-busy-pane");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -736,7 +738,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-dispatch-only-starting-pane");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-dispatch-only-starting-pane");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -841,7 +843,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-dispatch-only-reverse-i-search");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-dispatch-only-reverse-i-search");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -917,7 +920,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-pane-busy-interrupt-retry");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-live-pane-busy-interrupt-retry");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1026,7 +1030,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-pane-busy-ctrl-g-retry");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-pane-busy-ctrl-g-retry");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1134,7 +1138,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-opencode-busy-escape-retry");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-opencode-busy-escape-retry");
         let session = "opencode";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1246,7 +1250,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-pane-busy-interrupt-blocked");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-live-pane-busy-interrupt-blocked");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1353,7 +1358,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-pane-busy-auto-fix");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-pane-busy-auto-fix");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1460,7 +1465,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-pane-busy-no-drift");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-pane-busy-no-drift");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1525,7 +1530,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-projection-same-cycle");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-projection-same-cycle");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1622,7 +1627,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-projection-ok");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-projection-ok");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1724,7 +1729,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-visible-write-edit");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-visible-write-edit");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1825,7 +1830,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-owner-missing");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-owner-missing");
         let session = "claude";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
@@ -1919,7 +1924,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-authoritative-actor-dispatch-only-fallback");
+        let iso = agent_doc_tmux_io::isolated_test_tmux(
+            "route-test-authoritative-actor-dispatch-only-fallback",
+        );
         let session = "claude";
         let cwd = test_cwd();
         let actor_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2015,7 +2022,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-dispatch-only-waiting-input-restart");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-dispatch-only-waiting-input-restart");
         let session = "codex";
         let cwd = test_cwd();
         let actor_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2126,7 +2134,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-starting-actor-ready-prompt");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-starting-actor-ready-prompt");
         let session = "codex";
         let actor_pane = iso.new_session(session, dir.path()).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "codex:0", "agent-doc"]);
@@ -2291,7 +2299,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-dispatch-only-stranded-trigger");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-dispatch-only-stranded-trigger");
         let session = "codex";
         let pane = iso.auto_start(session, dir.path()).unwrap();
 
@@ -2423,7 +2432,7 @@ done
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-cross-file-split-anchor");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-cross-file-split-anchor");
         let requested_session = "claude";
         let cwd = test_cwd();
 
@@ -2548,7 +2557,8 @@ done
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-fresh-start-extended-projection");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-fresh-start-extended-projection");
         let session = "claude";
         let cwd = test_cwd();
         let _anchor_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2618,7 +2628,9 @@ done
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-fresh-start-reregister-before-dispatch");
+        let iso = agent_doc_tmux_io::isolated_test_tmux(
+            "route-test-fresh-start-reregister-before-dispatch",
+        );
         let session = "claude";
         let cwd = test_cwd();
         let _anchor_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2713,7 +2725,7 @@ done
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-fresh-start-handoff");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-fresh-start-handoff");
         let session = "claude";
         let cwd = test_cwd();
         let existing_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2826,7 +2838,9 @@ done
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-fresh-start-ignore-startup-miss-handoff");
+        let iso = agent_doc_tmux_io::isolated_test_tmux(
+            "route-test-fresh-start-ignore-startup-miss-handoff",
+        );
         let session = "claude";
         let cwd = test_cwd();
         let existing_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2956,7 +2970,7 @@ done
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-supervisor-restart");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-supervisor-restart");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -3047,7 +3061,7 @@ done
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-recent-session-loss");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-recent-session-loss");
         let session = "codex";
         let cwd = test_cwd();
         let anchor = iso.auto_start(session, &cwd).unwrap();

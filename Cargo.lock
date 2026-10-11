@@ -2772,6 +2772,7 @@ dependencies = [
  "agent-doc-tmux-commands",
  "anyhow",
  "lazily 0.57.1",
+ "libc",
  "serde",
  "serde_json",
  "tmux-router",

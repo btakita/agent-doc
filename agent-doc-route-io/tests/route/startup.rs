@@ -90,7 +90,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let iso = IsolatedTmux::new("route-test-cross-file-rebind-guard");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-cross-file-rebind-guard");
         let session = "test";
 
         let tasks = dir.path().join("tasks");
@@ -166,7 +166,7 @@ mod tests {
         // This test verifies the tmux infrastructure that makes the fix work:
         // pane_alive must return true for an alive pane regardless of the
         // session it belongs to. The %N pane ID is the routing key.
-        let iso = IsolatedTmux::new("route-test-wrong-sess-send");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-wrong-sess-send");
         let cwd = std::env::current_dir().unwrap();
 
         // Pane lives in session "real" (simulating the user's tmux session).
@@ -193,7 +193,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_detects_prompt() {
         let _tmux_guard = tmux_start_lock();
-        let iso = IsolatedTmux::new("route-test-ready");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-ready");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -227,7 +227,7 @@ mod tests {
         // must be blocked; once a harness dispatch-ready prompt appears the
         // block lifts.
         let _tmux_guard = tmux_start_lock();
-        let iso = IsolatedTmux::new("route-test-dead-shell");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-dead-shell");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -277,7 +277,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_detects_claude_composer_hint_prompt() {
         let _tmux_guard = tmux_start_lock();
-        let iso = IsolatedTmux::new("route-test-claude-composer-hint");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-claude-composer-hint");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -309,7 +309,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_times_out_without_prompt() {
-        let iso = IsolatedTmux::new("route-test-timeout");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-timeout");
         let session = "test";
         let cwd = test_cwd();
 
@@ -340,7 +340,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_codex_prompt() {
         let _tmux_guard = tmux_start_lock();
-        let iso = IsolatedTmux::new("route-test-codex-ready");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-codex-ready");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -374,7 +374,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_rejects_codex_queue_message_footer() {
         let _tmux_guard = tmux_start_lock();
-        let iso = IsolatedTmux::new("route-test-codex-queue-message");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-codex-queue-message");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -407,7 +407,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_rejects_codex_reverse_history_search() {
         let _tmux_guard = tmux_start_lock();
-        let iso = IsolatedTmux::new("route-test-codex-reverse-search");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-codex-reverse-search");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -579,7 +579,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_rejects_codex_prompt_with_real_drafted_text() {
         let _tmux_guard = tmux_start_lock();
-        let iso = IsolatedTmux::new("route-test-codex-drafted-prompt");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-codex-drafted-prompt");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -611,7 +611,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn send_keys_delivers_claude_command_with_enter() {
-        let iso = IsolatedTmux::new("route-test-send");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-send");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -643,7 +643,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn send_keys_delivers_codex_command_with_enter() {
-        let iso = IsolatedTmux::new("route-test-send-codex");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-send-codex");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -677,7 +677,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::write(dir.path().join("test.md"), "# test\n").unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-send-checked");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-send-checked");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -711,7 +711,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::write(dir.path().join("test.md"), "# test\n").unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-send-once-checked");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-send-once-checked");
         let pane = iso.auto_start("test", &test_cwd()).unwrap();
         let window = iso.pane_window(&pane).unwrap();
         sessions::register_full_with_cwd_in(
@@ -746,7 +746,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::write(dir.path().join("test.md"), "# test\n").unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-send-checked-no-extra-lines");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-send-checked-no-extra-lines");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -803,7 +803,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-codex-fresh-retry-handoff");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-live-codex-fresh-retry-handoff");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -974,7 +975,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-dispatch-only-startup-miss");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-dispatch-only-startup-miss");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1057,7 +1058,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-pane-busy-fresh-reroute");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-pane-busy-fresh-reroute");
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1240,7 +1241,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-pane-fresh-reroute-relative-doc");
+        let iso = agent_doc_tmux_io::isolated_test_tmux(
+            "route-test-live-pane-fresh-reroute-relative-doc",
+        );
         let session = "codex";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -1393,7 +1396,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-busy-restart-handoff");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-busy-restart-handoff");
         let session = "claude";
         let cwd = test_cwd();
         let busy_pane = iso.auto_start(session, &cwd).unwrap();
@@ -1558,7 +1561,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-owner-reregister");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-owner-reregister");
         let session = "claude";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
@@ -1672,7 +1675,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-dead-legacy-pane-reclaim");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-dead-legacy-pane-reclaim");
         let session = "claude";
         let cwd = test_cwd();
 
@@ -1745,7 +1748,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-authoritative-actor-dispatch");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-authoritative-actor-dispatch");
         let session = "codex";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
@@ -1881,7 +1884,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-authoritative-actor-dispatch-only");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-authoritative-actor-dispatch-only");
         let session = "codex";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2012,7 +2016,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/codex-hooks/sessions")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-dispatch-only-clear-no-restart");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-dispatch-only-clear-no-restart");
         let session = "codex";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2160,7 +2165,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
         std::fs::write(dir.path().join(".codex/hooks.json"), "{}\n").unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-authoritative-actor-dispatch-only-unproven");
+        let iso = agent_doc_tmux_io::isolated_test_tmux(
+            "route-test-authoritative-actor-dispatch-only-unproven",
+        );
         let session = "codex";
         let cwd = test_cwd();
         let actor_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2281,7 +2288,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             let dir = tempfile::tempdir().unwrap();
             std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
             let _cwd_guard = ScopedCurrentDir::set(dir.path());
-            let iso = IsolatedTmux::new(&format!(
+            let iso = agent_doc_tmux_io::isolated_test_tmux(&format!(
                 "route-test-authoritative-actor-{}-fail-closed",
                 actor_state
             ));
@@ -2405,7 +2412,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-authoritative-actor-busy");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-authoritative-actor-busy");
         let session = "claude";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2524,7 +2531,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-authoritative-actor-starting");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-authoritative-actor-starting");
         let session = "codex";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2674,7 +2681,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-authoritative-actor-starting-closed");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-authoritative-actor-starting-closed");
         let session = "codex";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2785,7 +2793,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-dispatch-only-authoritative-starting-direct");
+        let iso = agent_doc_tmux_io::isolated_test_tmux(
+            "route-test-dispatch-only-authoritative-starting-direct",
+        );
         let session = "codex";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
@@ -2905,7 +2915,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/codex-hooks/sessions")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-dispatch-only-authoritative-starting-clear");
+        let iso = agent_doc_tmux_io::isolated_test_tmux(
+            "route-test-dispatch-only-authoritative-starting-clear",
+        );
         let session = "codex";
         let cwd = test_cwd();
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
@@ -3044,7 +3056,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-owner-supervisor-pid");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-live-owner-supervisor-pid");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -3116,7 +3128,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn pane_has_prompt_detects_unicode() {
         let _tmux_guard = tmux_start_lock();
-        let iso = IsolatedTmux::new("route-test-has-prompt");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-has-prompt");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -3149,7 +3161,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn full_auto_start_flow() {
         let _tmux_guard = tmux_start_lock();
-        let iso = IsolatedTmux::new("route-test-e2e");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-e2e");
         let session = "test";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -3191,7 +3203,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn select_pane_switches_window() {
-        let iso = IsolatedTmux::new("route-test-select");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-select");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -3223,7 +3235,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn command_text_cleared_after_acceptance() {
         // Verifies that send_command's acceptance check works:
         // The command text should NOT be in the last 5 lines after acceptance.
-        let iso = IsolatedTmux::new("route-test-cmd-clear");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-cmd-clear");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -3253,7 +3265,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn pane_session_detection() {
         // Verify we can detect which session a pane is in
-        let iso = IsolatedTmux::new("route-test-session");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-session");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
         let pane = iso.auto_start(session, &cwd).unwrap();
@@ -3270,7 +3282,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn pane_in_wrong_session_detected() {
         // Create panes in two different sessions, verify we can distinguish them
-        let iso = IsolatedTmux::new("route-test-wrong-sess");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-wrong-sess");
         let cwd = std::env::current_dir().unwrap();
 
         // Create session "correct" with a pane
@@ -3296,7 +3308,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         // When a registered agent-doc pane exists in the target session,
         // auto_start_in_session should split-window in that pane's window
         // (not create a new window).
-        let iso = IsolatedTmux::new("route-test-split-existing");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-split-existing");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -3326,7 +3338,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn auto_start_creates_new_window_when_no_registered_panes() {
         // When no registered agent-doc panes exist, auto_start_in_session
         // should create a new window via auto_start().
-        let iso = IsolatedTmux::new("route-test-new-window");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-new-window");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -3348,7 +3360,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn split_window_respects_working_directory() {
-        let iso = IsolatedTmux::new("route-test-split-cwd");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-split-cwd");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -3376,7 +3388,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn stash_pane_on_split_failure() {
         // When split_window fails, the fallback should auto_start then stash
         // the pane so it doesn't create a visible new window.
-        let iso = IsolatedTmux::new("route-test-stash-fallback");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-stash-fallback");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -3410,7 +3422,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn preserves_replaced_stash_pane_without_provenance() {
-        let iso = IsolatedTmux::new("route-test-evict-stash");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-evict-stash");
         let session = "route-evict";
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -3457,7 +3469,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn eviction_skipped_when_agent_process_active() {
-        let iso = IsolatedTmux::new("route-test-evict-busy");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-evict-busy");
         let session = "route-evict-busy";
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -3537,7 +3549,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn route_warns_on_nonexistent_tmux_session() {
         // When frontmatter specifies a tmux_session that doesn't exist,
         // run_with_tmux should log a warning and NOT create that session.
-        let iso = IsolatedTmux::new("route-test-warn-nonexist");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-warn-nonexist");
         let cwd = std::env::current_dir().unwrap();
 
         // Create a fallback session so there's somewhere to land
@@ -3586,7 +3598,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn route_falls_back_to_existing_session() {
         // When frontmatter requests a nonexistent session, route should
         // fall back to an existing session and create panes there.
-        let iso = IsolatedTmux::new("route-test-fallback-sess");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-fallback-sess");
         let cwd = std::env::current_dir().unwrap();
 
         // Create the fallback session "claude"
@@ -3638,7 +3650,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         // When a registered pane ends up in a stash window, route should
         // rescue it back to the agent-doc window without ejecting the
         // currently visible pane into stash.
-        let iso = IsolatedTmux::new("route-test-stash-rescue");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-stash-rescue");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -3700,7 +3712,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         use agent_doc_route_io::invocation::CrossDocumentExistingPaneOnlyGuard;
         use agent_doc_route_io::pane_resolution::rescue_from_stash;
 
-        let iso = IsolatedTmux::new("route-test-cross-document-layout-preserved");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-cross-document-layout-preserved");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -3767,7 +3780,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         use agent_doc_route_io::invocation::LayoutOwnedByControllerGuard;
         use agent_doc_route_io::pane_resolution::rescue_from_stash;
 
-        let iso = IsolatedTmux::new("route-test-controller-layout-late-rescue");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-controller-layout-late-rescue");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -3854,7 +3867,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         use agent_doc_route_io::invocation::LayoutOwnedByControllerGuard;
         use agent_doc_route_io::route_focus::{RouteFocusDecision, focus_route_pane};
 
-        let iso = IsolatedTmux::new("route-test-controller-layout-late-focus");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-controller-layout-late-focus");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -3932,7 +3945,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn join_pane_rescue_places_left_of_target_when_requested() {
-        let iso = IsolatedTmux::new("route-test-join-left");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-join-left");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -3976,7 +3989,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         // pass those to agent_doc_sync_io::sync::run instead of auto-discovering from registry.
         // The actual pane stashing is handled by tmux-router's reconcile —
         // this test verifies the col_args flow.
-        let iso = IsolatedTmux::new("route-test-col-args");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-col-args");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -4043,7 +4056,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-post-provision-two-pane-reconcile");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-post-provision-two-pane-reconcile");
         let outgoing_pane = iso.auto_start("test", dir.path()).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let neighbor_pane = iso.split_window(&outgoing_pane, dir.path(), "-dh").unwrap();
@@ -4152,7 +4165,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("route-test-sync-after-claim-injected");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-sync-after-claim-injected");
         let session = "test";
         let pane_a = iso.new_session(session, dir.path()).unwrap();
         let window = iso.pane_window(&pane_a).unwrap();
@@ -4211,7 +4224,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         // Regression test for 3-pane layout bug (Fix 1):
         // When split_before=false (right-column file), the split target should be
         // the last (rightmost) pane in the agent-doc window.
-        let iso = IsolatedTmux::new("route-test-split-before-right");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-split-before-right");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -4266,7 +4279,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&file_a, "# A\n").unwrap();
         std::fs::write(&file_b, "# B\n").unwrap();
 
-        let iso = IsolatedTmux::new("route-test-auto-start-col-left");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-auto-start-col-left");
         let session = "test";
         let cwd = dir.path().to_path_buf();
 
@@ -4337,7 +4350,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             },
         )
         .unwrap();
-        let iso = IsolatedTmux::new("route-paused-layout-provision");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-paused-layout-provision");
         let operator = iso.auto_start("test", dir.path()).unwrap();
         let window = iso.pane_window(&operator).unwrap();
         iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"])
@@ -4377,7 +4390,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let file = tasks.join("focus-neutral.md");
         std::fs::write(&file, "# Focus neutral\n").unwrap();
 
-        let iso = IsolatedTmux::new("route-layout-focus-neutral");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-layout-focus-neutral");
         let session = "test";
         let operator_pane = iso.auto_start(session, dir.path()).unwrap();
         let window = iso.pane_window(&operator_pane).unwrap();
@@ -4421,7 +4434,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&file_a, "# A\n").unwrap();
         std::fs::write(&file_b, "# B\n").unwrap();
 
-        let iso = IsolatedTmux::new("route-test-auto-start-col-right");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-auto-start-col-right");
         let session = "test";
         let cwd = dir.path().to_path_buf();
 
@@ -4471,7 +4484,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn sync_after_claim_handles_malformed_registry() {
         // When the durable registry is malformed, sync_after_claim should not panic.
         // It should return early (silently) rather than propagating the error.
-        let iso = IsolatedTmux::new("route-test-malformed-registry");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-malformed-registry");
         let tmp = tempfile::TempDir::new().unwrap();
         let session = "test";
         let pane = iso.new_session(session, tmp.path()).unwrap();
@@ -4490,7 +4503,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn sync_after_claim_with_empty_col_args_and_no_registry() {
         // When there's no registry file and no col_args, sync_after_claim
         // should return early without creating any panes.
-        let iso = IsolatedTmux::new("route-test-no-registry");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-no-registry");
         let tmp = tempfile::TempDir::new().unwrap();
         let session = "test";
         let pane = iso.new_session(session, tmp.path()).unwrap();
@@ -4511,7 +4524,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn list_panes_ordered_returns_screen_position_after_rearrange() {
         // When panes are broken out and re-joined, creation order can diverge from
         // screen position. list_panes_ordered must return screen order (by pane_left).
-        let iso = IsolatedTmux::new("route-test-pane-order-rearrange");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-pane-order-rearrange");
         let session = "test";
         let cwd = std::env::current_dir().unwrap();
 
@@ -4552,7 +4565,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&file_a, "# A\n").unwrap();
         std::fs::write(&file_b, "# B\n").unwrap();
 
-        let iso = IsolatedTmux::new("route-test-provision-rearranged");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-provision-rearranged");
         let session = "test";
         let cwd = dir.path().to_path_buf();
 
@@ -4604,7 +4617,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let session = "test";
-        let iso = Arc::new(IsolatedTmux::new("route-test-concurrent-provision"));
+        let iso = Arc::new(agent_doc_tmux_io::isolated_test_tmux(
+            "route-test-concurrent-provision",
+        ));
         let left = iso.new_session(session, dir.path()).unwrap();
         let right = iso.split_window(&left, dir.path(), "-dh").unwrap();
         let visible_window = iso.pane_window(&left).unwrap();

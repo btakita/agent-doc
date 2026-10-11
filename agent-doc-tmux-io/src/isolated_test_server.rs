@@ -1,0 +1,267 @@
+//! Process-unique isolated tmux servers for tests.
+//!
+//! `tmux_router::IsolatedTmux::new(name)` runs `tmux -L <name>`, and tmux
+//! resolves `-L <name>` to `$TMUX_TMPDIR/tmux-<uid>/<name>` (default
+//! `/tmp/tmux-<uid>/<name>`). That directory is shared by every process of the
+//! same user, so a fixed name is one server for every concurrent test run:
+//! two suites (separate worktrees, or two `cargo test` invocations) that both
+//! construct `IsolatedTmux::new("gh218-controller-lifecycle")` attach to the
+//! same server, collide on `new-session -s main` ("duplicate session: main"),
+//! and the first one to finish kills the server out from under the other
+//! ("server exited unexpectedly").
+//!
+//! Tests construct their server through [`isolated_test_tmux`] instead. The
+//! label stays human-readable for diagnostics; the suffix (pid, per-process
+//! sequence, and a start-time nonce) makes the socket unique per construction,
+//! so concurrent runs can never share a server and a stale server left by a
+//! killed run whose pid is later reused is never re-adopted. Session names
+//! inside the server (`main`, ...) need no uniqueness because the server
+//! itself is private to the test.
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static ISOLATED_TEST_TMUX_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Longest label kept in the socket name. A Unix socket path is limited to
+/// ~108 bytes and the socket lives under `/tmp/tmux-<uid>/`, so long labels are
+/// truncated rather than letting `tmux` fail to bind.
+const MAX_LABEL_BYTES: usize = 48;
+
+/// Return a socket name for `tmux -L` that no other test construction, in this
+/// process or any concurrent one, can produce.
+pub fn unique_isolated_tmux_socket(label: &str) -> String {
+    let sequence = ISOLATED_TEST_TMUX_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos() as u64)
+        .unwrap_or_default();
+    let label: String = label
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .take(MAX_LABEL_BYTES)
+        .collect();
+    format!(
+        "{label}-{}-{sequence}-{:x}",
+        std::process::id(),
+        nonce & 0xffff_ffff
+    )
+}
+
+/// Where tmux puts the socket for `tmux -L <socket>`:
+/// `$TMUX_TMPDIR/tmux-<uid>/<socket>`, with `/tmp` when `TMUX_TMPDIR` is unset.
+pub fn isolated_tmux_socket_path(socket: &str) -> PathBuf {
+    let base = std::env::var_os("TMUX_TMPDIR")
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    base.join(format!("tmux-{uid}")).join(socket)
+}
+
+/// A test-private tmux server. Dereferences to [`tmux_router::IsolatedTmux`]
+/// (and through it to [`tmux_router::Tmux`]).
+///
+/// Dropping it kills the server and removes the socket file. tmux leaves the
+/// socket file behind after `kill-server`; with a fresh name per construction
+/// that would otherwise grow `/tmp/tmux-<uid>/` by one file per test per run.
+pub struct IsolatedTestTmux {
+    tmux: Option<tmux_router::IsolatedTmux>,
+    socket_path: PathBuf,
+}
+
+impl IsolatedTestTmux {
+    /// The socket file this server binds, removed on drop.
+    pub fn socket_path(&self) -> &Path {
+        &self.socket_path
+    }
+}
+
+impl std::ops::Deref for IsolatedTestTmux {
+    type Target = tmux_router::IsolatedTmux;
+
+    fn deref(&self) -> &Self::Target {
+        self.tmux
+            .as_ref()
+            .expect("isolated test tmux is only taken on drop")
+    }
+}
+
+impl Drop for IsolatedTestTmux {
+    fn drop(&mut self) {
+        // `IsolatedTmux::drop` runs `kill-server`; only then is the socket
+        // file unused.
+        drop(self.tmux.take());
+        let _ = std::fs::remove_file(&self.socket_path);
+    }
+}
+
+/// Start a test-private tmux server handle. Dropping it kills the server and
+/// removes its socket file.
+///
+/// Use this instead of `tmux_router::IsolatedTmux::new` with a fixed name; see
+/// the module docs for the collision this prevents.
+pub fn isolated_test_tmux(label: &str) -> IsolatedTestTmux {
+    let socket = unique_isolated_tmux_socket(label);
+    IsolatedTestTmux {
+        socket_path: isolated_tmux_socket_path(&socket),
+        tmux: Some(tmux_router::IsolatedTmux::new(&socket)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn socket_names_are_unique_per_construction_and_keep_the_label() {
+        let first = unique_isolated_tmux_socket("gh218-controller-lifecycle");
+        let second = unique_isolated_tmux_socket("gh218-controller-lifecycle");
+        assert_ne!(first, second);
+        let pid = std::process::id().to_string();
+        for socket in [&first, &second] {
+            assert!(
+                socket.starts_with("gh218-controller-lifecycle-"),
+                "{socket}"
+            );
+            assert!(socket.contains(&format!("-{pid}-")), "{socket}");
+        }
+    }
+
+    #[test]
+    fn socket_names_are_bounded_and_path_safe() {
+        let socket = unique_isolated_tmux_socket(&format!("a/b c{}", "x".repeat(200)));
+        assert!(!socket.contains('/'), "{socket}");
+        assert!(!socket.contains(' '), "{socket}");
+        assert!(socket.len() <= MAX_LABEL_BYTES + 40, "{socket}");
+    }
+
+    /// A fixed name passed to `IsolatedTmux::new` is one shared server for
+    /// every concurrent run, and a hand-rolled unique name leaks its socket
+    /// file; tests construct servers only through `isolated_test_tmux`.
+    #[test]
+    fn workspace_builds_isolated_tmux_servers_only_through_the_helper() {
+        fn visit(dir: &std::path::Path, offenders: &mut Vec<String>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if path.is_dir() {
+                    if !name.starts_with('.')
+                        && name != "target"
+                        && name != "tmp"
+                        && name != "node_modules"
+                    {
+                        visit(&path, offenders);
+                    }
+                    continue;
+                }
+                if !name.ends_with(".rs") || path.ends_with(file!()) {
+                    continue;
+                }
+                let Ok(source) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                for (line_number, line) in source.lines().enumerate() {
+                    let code = line.trim_start();
+                    if code.starts_with("//") {
+                        continue;
+                    }
+                    if code.contains(concat!("IsolatedTmux::new", "(")) {
+                        offenders.push(format!("{}:{}", path.display(), line_number + 1));
+                    }
+                }
+            }
+        }
+        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root");
+        let mut offenders = Vec::new();
+        visit(workspace, &mut offenders);
+        assert!(
+            offenders.is_empty(),
+            "build isolated tmux servers with agent_doc_tmux_io::isolated_test_tmux \
+             (fixed names collide across concurrent test runs): {offenders:#?}"
+        );
+    }
+
+    fn tmux_available() -> bool {
+        std::process::Command::new("tmux")
+            .arg("-V")
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
+    /// Two concurrent runs of one test (same label, same session name) must get
+    /// separate servers: both create `main`, and tearing one down leaves the
+    /// other alive. The raw fixed-name constructor is exercised first as the
+    /// control: it reproduces `duplicate session: main` and the shared-server
+    /// teardown, proving this test can see the collision it guards against.
+    /// Every server here is `-L`-isolated; the default server is never touched.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn concurrent_runs_of_one_test_get_separate_tmux_servers() {
+        if !tmux_available() {
+            eprintln!("tmux unavailable; skipping");
+            return;
+        }
+        let dir = std::env::temp_dir();
+
+        // Control: the pre-fix shape — two runs sharing one fixed `-L` name.
+        let shared = unique_isolated_tmux_socket("concurrent-control");
+        {
+            let run_a = tmux_router::IsolatedTmux::new(&shared);
+            let run_b = tmux_router::IsolatedTmux::new(&shared);
+            run_a
+                .new_session("main", &dir)
+                .expect("first run creates main");
+            let collision = run_b
+                .new_session("main", &dir)
+                .expect_err("a shared fixed-name server must collide on `main`");
+            assert!(
+                format!("{collision:#}").contains("duplicate session"),
+                "unexpected collision error: {collision:#}"
+            );
+            drop(run_a);
+            assert!(
+                !run_b.session_exists("main"),
+                "dropping one run kills the server the other run shares"
+            );
+        }
+        // The raw handles kill the server but leave its socket file.
+        let _ = std::fs::remove_file(isolated_tmux_socket_path(&shared));
+
+        // Fix: same label, separate servers.
+        let run_a = isolated_test_tmux("concurrent-runs");
+        let run_b = isolated_test_tmux("concurrent-runs");
+        assert_ne!(run_a.server_socket, run_b.server_socket);
+        run_a.new_session("main", &dir).expect("run a creates main");
+        run_b.new_session("main", &dir).expect("run b creates main");
+        let reported = run_a
+            .raw_cmd(&["display-message", "-p", "#{socket_path}"])
+            .expect("query socket path");
+        assert_eq!(Path::new(reported.trim()), run_a.socket_path());
+        let socket_a = run_a.socket_path().to_path_buf();
+        assert!(socket_a.exists());
+        drop(run_a);
+        assert!(
+            !socket_a.exists(),
+            "dropping a test server removes its socket file"
+        );
+        assert!(
+            run_b.session_exists("main"),
+            "tearing down one run must not kill the other run's server"
+        );
+    }
+}

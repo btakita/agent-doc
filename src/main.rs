@@ -4829,6 +4829,8 @@ fn try_main() -> anyhow::Result<()> {
             )
     {
         eprintln!("[agent-doc] {message}");
+        // GH #235: session-check's report must not print this supervisor again.
+        agent_doc_controller_io::project_controller::note_stale_supervisor_warning_shown(&message);
     }
 
     // `lib-path` is a machine-only bootstrap query. Neither stream may carry

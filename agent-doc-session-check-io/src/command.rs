@@ -1490,6 +1490,7 @@ fn run_with_options_inner(
             )
     {
         eprintln!("[session-check] WARNING: {message}");
+        agent_doc_controller_io::project_controller::note_stale_supervisor_warning_shown(&message);
     }
     // A retained response replay can duplicate only semantic response cells or
     // protocol boundary markers. Collapse that narrow, lossless transient
@@ -2665,8 +2666,11 @@ fn inspect_with_warnings_sweep(
     // #fccsupwarn: surface a stale hosting controller/supervisor at closeout too, so a
     // drifted post-commit cycle points the operator at a recycle instead of re-filing a
     // File-Cache-Conflict dialog. Fail-open — any status/stat error yields no warning.
+    // GH #235: the report form reads the outstanding recycle request (an already
+    // `requested` recycle drops the manual remedy) and stays silent when this
+    // process already printed the same supervisor's warning.
     if let Some(message) =
-        agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
+        agent_doc_controller_io::project_controller::stale_supervisor_warning_for_report(file)
     {
         report
             .warnings
@@ -2924,6 +2928,7 @@ fn enforce_clean_closeout_inner(file: &Path, effects: &impl SessionCheckEffects)
         )
     {
         eprintln!("[session-check] WARNING: {message}");
+        agent_doc_controller_io::project_controller::note_stale_supervisor_warning_shown(&message);
     }
     self_heal_late_ipc_overapplication(file, effects)?;
     if effects.recover_retained_document_write(file)? {

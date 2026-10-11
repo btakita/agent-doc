@@ -360,6 +360,24 @@ The one item this pane dispatched, "Run Agent Doc on tools.md was slow to go." (
 - If the old controller completes a route after the editor's status poll has moved to the successor, the successor doesn't know that route and a replay can still happen.
 
 **Advisory:** preflight reports the live JetBrains plugin at 0.2.525 while this binary ships 0.2.527. Reinstall the plugin (`agent-doc plugin install jetbrains`) and restart the IDE to reach parity.
+
+### Re: icebox cleanup — opus-5.5 · 2026-10-10T22:00-04:00
+
+> **Queue prompt:** do [#removeobsoleteicebox]
+
+The icebox had 7 items. Three were exact duplicates of others, left from older `recommended…` ids.
+
+| Icebox item | Action | Why |
+|---|---|---|
+| `#recommendedtwojetbrains` | Removed (done) | Duplicate of `#ideriderstopgap` |
+| `#recommendedfullyindepend` | Removed (done) | Duplicate of `#ideriderindependentnav` |
+| `#recommendedwriteruntime` | Removed (done) | Duplicate of `#visiblewriteloadtimeout` |
+| `#visiblewriteloadtimeout` | **Promoted** to `#visiblewriteloadflake` (backlog + queue) | A load-sensitive flaky test you have seen. Under the fix-the-cause-not-rerun directive it is real, actionable work. |
+| `#ideriderstopgap` | **Promoted** to `#idefocusowner` (backlog + queue) | IDEA and Rider are both installed here, so layout flipping between them is a live risk. About 1 day of work. |
+| `#ideriderindependentnav` | Kept in icebox | Several days of work that builds on `#idefocusowner`. Revisit once the stopgap lands. |
+| `#ghrecvpolicy` | Kept in icebox | Parked until multi-user workspace support exists (GH #40). |
+
+Both promotions went to the end of the queue, so they don't preempt in-flight work. I did this coordinator-owned rather than with a subagent, because subagents may not edit the session document.
 <!-- agent:boundary:66940815 -->
 <!-- /agent:exchange -->
 
@@ -368,21 +386,24 @@ The one item this pane dispatched, "Run Agent Doc on tools.md was slow to go." (
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#respondfinalizehard]
-- ⏭️ do [#pypireleaseworkflow]
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/235
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/236
-- 🚧 fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
+- ~~do [#removeobsoleteicebox]~~
+- do [#respondfinalizehard]
+- do [#pypireleaseworkflow]
+- #gh-fix https://github.com/btakita/agent-doc/issues/235
+- #gh-fix https://github.com/btakita/agent-doc/issues/236
+- fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
 Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md because a turn is live in pane %127 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md` to intentionally interrupt the turn and clear context.
-- 🚧 Run Agent Doc on tools.md was slow to go.
+- ~~Run Agent Doc on tools.md was slow to go.~~
 - 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#respondfinalizehard] respond/finalize hard-fails with 'queue consume: no prompt to consume' (then write --commit fails 'failed to compose completed tracked-work target') when the cycle's quoted Queue prompt / --done target was already struck/consumed earlier (all queue heads struck, item already in agent:done). The response write landed and the cycle wedged at write_applied until a bare 'agent-doc write --commit' recovered it as AlreadyApplied. Consuming an already-consumed head must be idempotent. Repro 2026-10-10 cycle-1791675315432.
-- [ ] 🚧 [#pypireleaseworkflow] PyPI release workflow races the GitHub Release: the PyPI job polls at most 30 minutes for the Release's SHA256SUMS, but v0.35.485's cross-platform builds took about 33 minutes, so publish failed at 21:45:30Z and the Release went up at 21:47:24Z (run 38086853278; a rerun of the failed job published it). Trigger PyPI from the release:published event, or from the Release workflow after its assets upload, instead of a fixed wall-clock poll.
+- [ ] [#visiblewriteloadflake] [agent-doc] Fix flaky agent-doc-write-runtime-io visible_write_content_snapshot_tests (test_lazily_visible_write_event_read, test_poll_lazily_event_*): under host load (load average around 50) they time out with 'timed out after 2.0s waiting for project controller response' at ipc.rs:170 (record_lazily_visible_write_candidate); seen in 2 of about 6 full runs on 2026-10-10. Fix the nondeterminism instead of rerunning: warm the controller before the timed RPC, or charge cold-start launch separately from CONTROLLER_RPC_TIMEOUT, so a busy runner cannot decide the outcome. Prove it under load stress. (Promoted from icebox visiblewriteloadtimeout.)
+- [ ] [#idefocusowner] [agent-doc] Two JetBrains IDEs on one project: only the most recently focused IDE drives the shared tmux agent-doc window, which stops the layout from flipping between IDEA and Rider (both installed on this machine). About 1 day. Builds on idearidereditors 9796d8c8a (installation-scoped editor-surface client families). Fully independent per-IDE navigation stays in the icebox as ideriderindependentnav. (Promoted from icebox ideriderstopgap.)
+- [ ] [#respondfinalizehard] respond/finalize hard-fails with 'queue consume: no prompt to consume' (then write --commit fails 'failed to compose completed tracked-work target') when the cycle's quoted Queue prompt / --done target was already struck/consumed earlier (all queue heads struck, item already in agent:done). The response write landed and the cycle wedged at write_applied until a bare 'agent-doc write --commit' recovered it as AlreadyApplied. Consuming an already-consumed head must be idempotent. Repro 2026-10-10 cycle-1791675315432.
+- [ ] [#pypireleaseworkflow] PyPI release workflow races the GitHub Release: the PyPI job polls at most 30 minutes for the Release's SHA256SUMS, but v0.35.485's cross-platform builds took about 33 minutes, so publish failed at 21:45:30Z and the Release went up at 21:47:24Z (run 38086853278; a rerun of the failed job published it). Trigger PyPI from the release:published event, or from the Release workflow after its assets upload, instead of a fixed wall-clock poll.
 <!-- /agent:backlog -->
 
 ## Review
@@ -396,12 +417,7 @@ Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
-- [ ] [#recommendedtwojetbrains] #ideriderstopgap [recommended] [agent-doc] Two JetBrains IDEs on one project: only the most recently focused IDE drives the shared tmux agent-doc window, which stops the layout from flipping between IDEA and Rider. About 1 day. Builds on idearidereditors 9796d8c8a (installation-scoped editor-surface client families).
-- [ ] [#recommendedfullyindepend] #ideriderindependentnav [recommended] [agent-doc] Fully independent navigation per JetBrains installation: one tmux window or session per IDE installation. The installation identity becomes part of the layout-ownership key, tmux-to-editor focus mirroring goes only to the IDE that owns the window, tmux_focus_state and pane ownership are split per window, and specs plus a two-IDE SimWorld are added. Several days.
-- [ ] [#recommendedwriteruntime] #visiblewriteloadtimeout [recommended] [agent-doc] agent-doc-write-runtime-io visible_write_content_snapshot_tests (test_lazily_visible_write_event_read, test_poll_lazily_event_*) fail under host load (load average around 50) with 'timed out after 2.0s waiting for project controller response' at ipc.rs:170 (record_lazily_visible_write_candidate). Seen in 2 of about 6 full runs on 2026-10-10. Make the fixture warm the controller before the timed RPC, or charge cold-start launch separately from CONTROLLER_RPC_TIMEOUT, so a busy runner cannot decide the outcome.
-- [ ] [#ideriderstopgap] [recommended] [agent-doc] Two JetBrains IDEs on one project: only the most recently focused IDE drives the shared tmux agent-doc window, which stops the layout from flipping between IDEA and Rider. About 1 day. Builds on idearidereditors 9796d8c8a (installation-scoped editor-surface client families).
 - [ ] [#ideriderindependentnav] [recommended] [agent-doc] Fully independent navigation per JetBrains installation: one tmux window or session per IDE installation. The installation identity becomes part of the layout-ownership key, tmux-to-editor focus mirroring goes only to the IDE that owns the window, tmux_focus_state and pane ownership are split per window, and specs plus a two-IDE SimWorld are added. Several days.
-- [ ] [#visiblewriteloadtimeout] [recommended] [agent-doc] agent-doc-write-runtime-io visible_write_content_snapshot_tests (test_lazily_visible_write_event_read, test_poll_lazily_event_*) fail under host load (load average around 50) with 'timed out after 2.0s waiting for project controller response' at ipc.rs:170 (record_lazily_visible_write_candidate). Seen in 2 of about 6 full runs on 2026-10-10. Make the fixture warm the controller before the timed RPC, or charge cold-start launch separately from CONTROLLER_RPC_TIMEOUT, so a busy runner cannot decide the outcome.
 - [ ] [#ghrecvpolicy] [agent-doc] Recipient-side [receive] auto_create_components policy for multi-user workspaces (GH #40, https://github.com/btakita/agent-doc/issues/40). Parked until multi-user workspace support exists.
 <!-- /agent:icebox -->
 

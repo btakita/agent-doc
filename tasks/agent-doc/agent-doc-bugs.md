@@ -378,7 +378,28 @@ The icebox had 7 items. Three were exact duplicates of others, left from older `
 | `#ghrecvpolicy` | Kept in icebox | Parked until multi-user workspace support exists (GH #40). |
 
 Both promotions went to the end of the queue, so they don't preempt in-flight work. I did this coordinator-owned rather than with a subagent, because subagents may not edit the session document.
-<!-- agent:boundary:66940815 -->
+> **Chat prompt (#chatprompt):** Why didn't the backlog promote thi items into the queue?
+
+### Re: why the promoted items missed the queue — opus-5.5 · 2026-10-10T23:05-04:00
+
+**Root cause: an agent-doc defect on the deferred (retained) write path.** Adding a backlog item makes it queueable through one cycle-state fact, `pending_actionable_ids`. The closeout's queue mirror (`sync_same_cycle_actionable_backlog_into_go_queue`) reads only that fact.
+- **Immediate path:** when tracked-work mutations publish right away, the write records the added and ungated ids as actionable, and the mirror inserts them.
+- **This cycle:** the icebox cycle's mutations were **retained**, deferred while the editor projection converged. That branch (`if transaction.is_err()`) recorded the planned adds only as `pending_added_ids`, which protects them from same-cycle reaping. It never recorded them as actionable.
+- **Result:** the mutations landed later, and the captured-finalize resume replayed them (`backlog_add_already_satisfied`). The mirror then ran over an empty set and added nothing. Your backlog marker (`<!-- agent:backlog priority queue -->`) was correct.
+
+**Fixed, committed, not yet released.** Commit `bb5ab38aa` in the `ab6cf0fe7` integration worktree:
+- The retained branch now records the same planned adds plus ungates as actionable, through `record_planned_actionable_mutations`, so the immediate and deferred paths cannot drift.
+- Tests: a unit test covers adds and ungates while excluding review adds, and a source guard fails if the retained branch stops recording.
+- `AGENTS.md` `#backlogqueuepopulation` now states the rule.
+- It ships in the next batch.
+
+**Your two items are queued now.** I ran `agent-doc backlog requeue visiblewriteloadflake idefocusowner`, so `do [#visiblewriteloadflake]` and `do [#idefocusowner]` are in the queue.
+
+**Queue takeover:** the session that coordinated this document today is gone. Its worktrees had been idle for about 2 hours and its claims had expired. I re-claimed its heads.
+- **Committed branches:** `#respondfinalizehard`, `#pypireleaseworkflow` and GH #235 have commits and await integration (`coordinator:batch0487`).
+- **Unfinished work:** GH #236 (`subagent:gh236b`) and the dev.md Codex clear fix (`subagent:devclearb`) were uncommitted, so new subagents are finishing them in their existing worktrees.
+- **Next:** once both report, everything integrates in one batch with this fix and ships as the queued release + publish (v0.35.487).
+<!-- agent:boundary:2c9385e2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -395,6 +416,8 @@ Both promotions went to the end of the queue, so they don't preempt in-flight wo
 Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md because a turn is live in pane %127 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md` to intentionally interrupt the turn and clear context.
 - ~~Run Agent Doc on tools.md was slow to go.~~
 - 🚧 release + publish
+- do [#visiblewriteloadflake]
+- do [#idefocusowner]
 <!-- /agent:queue -->
 
 ## Backlog

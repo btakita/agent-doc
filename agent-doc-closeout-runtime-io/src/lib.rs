@@ -1207,6 +1207,23 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         if committed()? {
             return Ok(Outcome::Committed);
         }
+        // `#splicectlcommit`: the commit closed this exact cycle by refusing an
+        // ignored untracked path. That is terminal (no HEAD blob can ever
+        // appear), so waiting for a controller-projected `committed` phase here
+        // stranded the capture at `captured_finalize_resume_waiting_for_state`.
+        let closed_ignored_path = || -> Result<bool> {
+            Ok(
+                agent_doc_cycle_state_io::load_with_closeout_projection(file)?.is_some_and(
+                    |current| {
+                        current.cycle_id == state.cycle_id
+                            && current.closed_by_ignored_path_refusal()
+                    },
+                ),
+            )
+        };
+        if closed_ignored_path()? {
+            return Ok(Outcome::ClosedIgnoredPath);
+        }
 
         if !controller_owned_commit {
             return Ok(Outcome::Retained {
@@ -1232,6 +1249,9 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         };
         if committed()? {
             return Ok(Outcome::Committed);
+        }
+        if closed_ignored_path()? {
+            return Ok(Outcome::ClosedIgnoredPath);
         }
         if progress == CloseoutCycleWaitOutcome::Superseded {
             return Ok(Outcome::Superseded);
@@ -1913,6 +1933,88 @@ mod tests {
             after.phase,
             CyclePhase::WriteApplied | CyclePhase::Committed
         ));
+    }
+
+    #[test]
+    fn write_applied_capture_on_ignored_scratch_closes_terminal_without_waiting() {
+        // `#splicectlcommit`: the live captured-splice evidence stranded at
+        // `captured_finalize_resume_waiting_for_state` because recovery's commit
+        // closed the cycle as `commit_refused_ignored_path` and recovery then
+        // waited for a `committed` projection that can never exist. The exact
+        // same-cycle ignored-path terminal must end recovery.
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .current_dir(dir.path())
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        std::fs::write(dir.path().join(".gitignore"), "scratch/\n.agent-doc/\n").unwrap();
+        git(&["add", ".gitignore"]);
+        git(&["commit", "-q", "-m", "ignore scratch", "--no-verify"]);
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join("scratch")).unwrap();
+        let file = dir.path().join("scratch/session.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_scratch: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Advance the canonical text.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: advanced — test\n\n",
+            "Advanced.\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- no-pending-capture -->\n",
+        );
+        let target = concat!(
+            "---\nagent_doc_format: template\nagent_doc_scratch: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Advance the canonical text.\n",
+            "### Re: advanced — test\n\n",
+            "Advanced.\n",
+            "<!-- agent:boundary:response -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, base).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_capture_io::capture_response(&file, response).unwrap();
+        std::fs::write(&file, target).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            target,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_capture_io::mark_write_applied(&file).unwrap();
+
+        let outcome = RuntimeSessionCheckEffects
+            .resume_captured_finalize(&file)
+            .unwrap();
+        assert_eq!(outcome, CapturedFinalizeResumeOutcome::ClosedIgnoredPath);
+        let after = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert!(
+            after.closed_by_ignored_path_refusal(),
+            "{}",
+            after.last_event
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("commit_skipped_ignored_scratch"), "{ops}");
+        assert!(!ops.contains("commit_error"), "{ops}");
     }
 }
 

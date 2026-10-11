@@ -2889,6 +2889,9 @@ where
 
     let t_commit = std::time::Instant::now();
     let mut commit_attempts = 0u32;
+    // `#splicectlcommit`: set when the refused ignored path is a declared
+    // scratch document, so the refusal is reported as a clean skip.
+    let mut ignored_scratch_skip: Option<String> = None;
     let commit_output = {
         loop {
             let t_staging = std::time::Instant::now();
@@ -2980,6 +2983,22 @@ where
                             "[commit] WARNING: could not close the cycle for ignored path {path}: {abandon_error:#}"
                         );
                     }
+                    // `#splicectlcommit`: a document that declares itself a
+                    // scratch/proof document (`agent_doc_scratch: true`) is
+                    // ignored on purpose, so the same refusal is its expected
+                    // terminal, not an error. The declaration is read from the
+                    // exact candidate this commit would have staged, so every
+                    // committing process — the CLI, session-check recovery, or
+                    // the project controller handling a live-editor commit —
+                    // reaches the same verdict from the document itself rather
+                    // than from its own environment. Nothing is staged either way.
+                    let candidate = snapshot_content.as_deref().unwrap_or(file_content.as_str());
+                    if agent_doc_frontmatter::declares_scratch_document(candidate) {
+                        ignored_scratch_skip = Some(path.clone());
+                        break Err(anyhow::anyhow!(
+                            "declared scratch document {path} is ignored by .gitignore; not staged"
+                        ));
+                    }
                     break Err(
                         agent_doc_git_io::commit_result_reporting::ignored_untracked_path_error(
                             ports.commit_result_reporting,
@@ -2998,11 +3017,18 @@ where
     }
 
     let post_commit_finalize_started = std::time::Instant::now();
-    let commit_outcome = agent_doc_git_io::commit_result_reporting::report_commit_output(
-        ports.commit_result_reporting,
-        file,
-        commit_output.as_ref(),
-    );
+    let commit_outcome = match ignored_scratch_skip.as_deref() {
+        Some(path) => agent_doc_git_io::commit_result_reporting::report_ignored_scratch_skip(
+            ports.commit_result_reporting,
+            file,
+            path,
+        ),
+        None => agent_doc_git_io::commit_result_reporting::report_commit_output(
+            ports.commit_result_reporting,
+            file,
+            commit_output.as_ref(),
+        ),
+    };
 
     let mut did_commit = false;
     match commit_outcome {
@@ -3021,7 +3047,9 @@ where
             );
         }
         agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Failed
-        | agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Error => {}
+        | agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Error
+        | agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::SkippedIgnoredScratch => {
+        }
     }
     let elapsed_post_commit_finalize = post_commit_finalize_started.elapsed().as_millis();
 

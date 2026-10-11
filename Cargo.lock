@@ -411,6 +411,7 @@ dependencies = [
  "agent-doc-element-boundary",
  "agent-doc-flow",
  "agent-doc-flow-io",
+ "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
  "agent-doc-git",

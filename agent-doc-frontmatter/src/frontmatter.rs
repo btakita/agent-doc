@@ -621,6 +621,19 @@ pub struct Frontmatter {
         rename = "agent_doc_queue_context_reset"
     )]
     pub queue_context_reset: Option<bool>,
+    /// `#splicectlcommit`: declares this document a deliberate scratch/proof
+    /// document whose path is expected to be git-ignored. When — and only
+    /// when — the commit candidate is an untracked path `.gitignore` matches,
+    /// commit closes the cycle as a clean skip (`commit_skipped_ignored_scratch`)
+    /// instead of logging `commit_error`. It never stages the ignored file, never
+    /// changes the commit target, and has no effect on a tracked or non-ignored
+    /// path: those commit normally.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_scratch"
+    )]
+    pub scratch: Option<bool>,
     /// Explicit opt-in for terminal convergence scoped to the components owned
     /// by retained agent write transitions. Off by default while the
     /// adversarial live-edit survival suite accumulates production evidence.
@@ -1430,6 +1443,14 @@ pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
     let mut fm = deserialize_frontmatter_yaml(yaml)?;
     normalize_queue_control(&mut fm);
     Ok((fm, body))
+}
+
+/// `#splicectlcommit`: whether `content` declares itself a scratch/proof
+/// document (`agent_doc_scratch: true`). Malformed or absent frontmatter is not
+/// a declaration, so an unparsable document keeps the strict ignored-path
+/// refusal receipts.
+pub fn declares_scratch_document(content: &str) -> bool {
+    parse(content).is_ok_and(|(fm, _)| fm.scratch == Some(true))
 }
 
 /// Canonical frontmatter key for prompt presets.
@@ -3937,6 +3958,7 @@ mod tests {
             links: vec![],
             auto_compact: None,
             queue_context_reset: None,
+            scratch: None,
             per_component_convergence: None,
             gate_autoverify: None,
             clear_threshold: None,
@@ -5385,5 +5407,24 @@ mod tests {
             changed.contains("prompt_presets:\n  '#new': n\n"),
             "{changed}"
         );
+    }
+
+    #[test]
+    fn scratch_declaration_requires_explicit_true() {
+        // `#splicectlcommit`: only an explicit `agent_doc_scratch: true` turns an
+        // ignored-path commit refusal into a clean skip.
+        assert!(declares_scratch_document(
+            "---\nagent_doc_session: s\nagent_doc_scratch: true\n---\nbody\n"
+        ));
+        assert!(!declares_scratch_document(
+            "---\nagent_doc_session: s\nagent_doc_scratch: false\n---\nbody\n"
+        ));
+        assert!(!declares_scratch_document(
+            "---\nagent_doc_session: s\n---\nbody\n"
+        ));
+        assert!(!declares_scratch_document("no frontmatter\n"));
+        assert!(!declares_scratch_document(
+            "---\nagent_doc_scratch: [\n---\nbody\n"
+        ));
     }
 }

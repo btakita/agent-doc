@@ -127,6 +127,22 @@ When absent, legacy agent-doc source/task path inference remains for backward
 compatibility. `dogfood_mode` is accepted as a read-only alias; serialization
 uses `agent_doc_dogfood`.
 
+## agent_doc_scratch
+
+`agent_doc_scratch: true` in document frontmatter declares a deliberate
+scratch/proof document that lives under a git-ignored path, such as the live
+captured-splice proof scratch in `tmp/captured-splice-live/`
+(`#splicectlcommit`). It changes only how the commit's ignored-path refusal is
+reported: an untracked path `.gitignore` matches is still never staged and its
+cycle still closes as `abandoned` / `commit_refused_ignored_path`, but the commit
+logs `commit_skipped_ignored_scratch outcome=clean_skip` instead of
+`commit_skipped_ignored_path` + `commit_error`, so proof tooling and the dogfood
+watch do not read the expected skip as a failure. It has no effect on a tracked
+or non-ignored path (those commit normally), never redirects the commit to
+another repository, and is read from the document itself, so every committing
+process (CLI, recovery, or the project controller under a live editor) agrees.
+`false`, absent, or unparsable frontmatter keep the strict refusal receipts.
+
 ## Project Config
 
 Location: `.agent-doc/config.toml` (relative to project root).

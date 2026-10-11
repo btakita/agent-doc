@@ -4637,6 +4637,13 @@ fn report_resume_capture_outcome(
             );
             Ok(())
         }
+        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::ClosedIgnoredPath => {
+            eprintln!(
+                "[repair] captured finalize for {} closed without a git commit: the document is ignored by .gitignore (cycle closed as `commit_refused_ignored_path`)",
+                file.display()
+            );
+            Ok(())
+        }
         agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
             eprintln!(
                 "[repair] captured finalize for {} was superseded by a newer capture; nothing to resume",

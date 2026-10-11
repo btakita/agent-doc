@@ -34064,7 +34064,10 @@ fn every_wedge_recording_site_classifies_rejections_too() {
 /// `#drivecapturedsplice` is intentionally a stale-replica live proof. It must
 /// not silently collapse back to the healthy sequence where the response is
 /// delivered before edit two, and its ignored scratch must not make the strict
-/// response cycle terminally `commit_refused`.
+/// response cycle terminally `commit_refused`. `#splicectlcommit`: the commit
+/// boundary is the scratch's own `agent_doc_scratch: true` declaration, which
+/// every committing process (CLI, controller, recovery) reads — never an env
+/// prefix that only the advance pane carries.
 #[test]
 fn captured_splice_live_recipe_holds_delivery_and_uses_disposable_commit_boundary() {
     let script = std::fs::read_to_string("scripts/xdotool-live-verify.sh")
@@ -34095,10 +34098,15 @@ fn captured_splice_live_recipe_holds_delivery_and_uses_disposable_commit_boundar
         "the live proof must observe a retained independent advance, type edit two against the stale replica, then await closeout",
     );
     assert!(
-        recipe.contains("ensure_captured_splice_commit_repo \"$doc\"")
-            && script.contains("git init -q --bare \"$ADVANCE_GIT_DIR\"")
-            && script.contains("GIT_DIR=\"$ADVANCE_GIT_DIR\" GIT_WORK_TREE=\"$REPO\" git add -f"),
-        "the ignored scratch must get an isolated Git commit boundary",
+        recipe.contains("assert_captured_splice_scratch_declared \"$doc\"")
+            && script.contains("agent_doc_scratch: true\n---")
+            && script.contains("grep -qx 'agent_doc_scratch: true' \"$doc\"")
+            && script.contains("git check-ignore -q --no-index -- \"$rel\""),
+        "the ignored scratch must declare itself a scratch document and stay ignored by the product repo",
+    );
+    assert!(
+        !script.contains("ADVANCE_GIT_DIR") && !script.contains("GIT_WORK_TREE=\"$REPO\""),
+        "an env-only GIT_DIR boundary never reaches the controller-delegated commit; it must not come back",
     );
     assert!(
         recipe.contains("agent-doc verify-captured-splice-recovery \"$rel\""),
@@ -34109,9 +34117,9 @@ fn captured_splice_live_recipe_holds_delivery_and_uses_disposable_commit_boundar
 /// `#splicevrfyforward`: the live recipe must not assert one recovery
 /// MECHANISM. The 2026-10-11 run recovered edit two through the CRDT forward
 /// path and never wrote the fallback splice-recovery receipt, so a hard wait on
-/// that receipt alone failed a run that proved the property. And the isolated
-/// GIT_DIR cannot reach the controller-delegated commit, so a controller-side
-/// ignored-path refusal must be named rather than left as a bare commit_error.
+/// that receipt alone failed a run that proved the property. And a strict
+/// ignored-path refusal of the declared scratch (`#splicectlcommit` regression)
+/// must be named rather than left as a bare commit_error.
 #[test]
 fn captured_splice_live_recipe_accepts_either_recovery_shape_and_names_the_commit_boundary() {
     let script = std::fs::read_to_string("scripts/xdotool-live-verify.sh")
@@ -34158,7 +34166,8 @@ fn captured_splice_live_recipe_accepts_either_recovery_shape_and_names_the_commi
     );
     assert!(
         script.contains("controller_commit_document")
-            && script.contains("commit_skipped_ignored_path"),
-        "the controller-side ignored-path refusal must be recognised by name",
+            && script.contains("commit_skipped_ignored_path")
+            && script.contains("commit_skipped_ignored_scratch"),
+        "the declared-scratch clean skip and a strict refusal regression must both be recognised by name",
     );
 }

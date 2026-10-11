@@ -251,20 +251,43 @@ pub fn complete_required_closeout_with_options(
         Err(e) => eprintln!("[commit] closeout pending-reap maintenance failed (non-fatal): {e}"),
     }
 
-    retry_snapshot_head_content_hash_drift(
-        file,
-        effects,
-        &rc,
-        &mut did_commit,
-        &mut timer,
-        RetrySnapshotHeadDriftOptions {
-            force_disk: options.force_disk,
-            commit_mark: "git_commit_retry_snapshot",
-            cycle_mark: "cycle_state_retry_snapshot",
-        },
-    )?;
+    // `#splicectlcommit`: a cycle the commit closed as
+    // `commit_refused_ignored_path` committed nothing and never will — the
+    // document is an untracked path `.gitignore` matches. The HEAD-convergence
+    // gates below (snapshot-vs-HEAD retry, parent submodule pointer) prove a
+    // commit that this cycle cannot have, so running them only re-enters the
+    // same refusal and then fails closed on unrelated repository state (a stale
+    // parent gitlink the scratch never touched). Skip exactly those gates; the
+    // session check, actor closeout and terminal proof still run, and the
+    // terminal proof already ends an ignored-path cycle successfully (GH #119).
+    let ignored_path_terminal = cycle_closed_by_ignored_path_refusal(file)?;
+    if ignored_path_terminal {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "closeout_ignored_path_terminal file={} skipped_gates=snapshot_head_drift,parent_pointer did_commit={}",
+                file.display(),
+                did_commit,
+            ),
+        );
+    } else {
+        retry_snapshot_head_content_hash_drift(
+            file,
+            effects,
+            &rc,
+            &mut did_commit,
+            &mut timer,
+            RetrySnapshotHeadDriftOptions {
+                force_disk: options.force_disk,
+                commit_mark: "git_commit_retry_snapshot",
+                cycle_mark: "cycle_state_retry_snapshot",
+            },
+        )?;
+    }
 
-    if agent_doc_git_io::submodule::submodule_pointer_drift(file)?.is_some() {
+    if !ignored_path_terminal
+        && agent_doc_git_io::submodule::submodule_pointer_drift(file)?.is_some()
+    {
         eprintln!("[commit] parent submodule pointer still stale after commit - retrying");
         did_commit |= effects.commit_for_authority(file, options.force_disk)?;
         rc.invalidate_head_content();
@@ -273,7 +296,9 @@ pub fn complete_required_closeout_with_options(
         proven_committed_cycle = Some(ensure_cycle_committed(file)?);
         timer.mark("cycle_state_retry_parent_pointer");
     }
-    if let Some(drift) = agent_doc_git_io::submodule::submodule_pointer_drift(file)? {
+    if !ignored_path_terminal
+        && let Some(drift) = agent_doc_git_io::submodule::submodule_pointer_drift(file)?
+    {
         timer.mark("parent_pointer_verify_failed");
         let parent_head = drift.parent_head.as_deref().unwrap_or("<missing>");
         timer.finish();
@@ -304,18 +329,20 @@ pub fn complete_required_closeout_with_options(
     timer.mark("session_check");
     agent_doc_controller_io::project_controller::persist_session_actor_closeout(file)?;
     timer.mark("session_actor_closeout");
-    retry_snapshot_head_content_hash_drift(
-        file,
-        effects,
-        &rc,
-        &mut did_commit,
-        &mut timer,
-        RetrySnapshotHeadDriftOptions {
-            force_disk: options.force_disk,
-            commit_mark: "git_commit_retry_terminal_snapshot",
-            cycle_mark: "cycle_state_retry_terminal_snapshot",
-        },
-    )?;
+    if !ignored_path_terminal {
+        retry_snapshot_head_content_hash_drift(
+            file,
+            effects,
+            &rc,
+            &mut did_commit,
+            &mut timer,
+            RetrySnapshotHeadDriftOptions {
+                force_disk: options.force_disk,
+                commit_mark: "git_commit_retry_terminal_snapshot",
+                cycle_mark: "cycle_state_retry_terminal_snapshot",
+            },
+        )?;
+    }
     record_terminal_closeout_proof(
         file,
         did_commit,
@@ -581,6 +608,17 @@ fn capture_state_label(state: agent_doc_workflow::capture::CaptureState) -> &'st
 
 /// Returns the cycle id proven closed, so the terminal proof can tell a lagging
 /// re-read apart from a genuinely open cycle (`#terminalproofphaseregress`).
+/// `#splicectlcommit`: whether the document's current cycle was closed by the
+/// commit's ignored-path refusal (`abandoned` + `commit_refused_ignored_path`).
+/// That is the one terminal whose commit is unreachable by design, so the
+/// closeout must not wait for or retry a HEAD convergence that cannot happen.
+pub fn cycle_closed_by_ignored_path_refusal(file: &Path) -> Result<bool> {
+    Ok(
+        agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+            .is_some_and(|state| state.closed_by_ignored_path_refusal()),
+    )
+}
+
 fn ensure_cycle_committed(file: &Path) -> Result<String> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         log_closeout_guard_event(

@@ -453,6 +453,14 @@ impl CycleState {
         !matches!(self.phase, CyclePhase::Committed | CyclePhase::Abandoned)
     }
 
+    /// `#splicectlcommit`: whether the commit closed this cycle by refusing an
+    /// untracked path `.gitignore` matches ([`COMMIT_REFUSED_IGNORED_PATH_EVENT`]).
+    /// That terminal has no HEAD blob and never will, so closeout and capture
+    /// recovery must treat it as final instead of waiting for a commit.
+    pub fn closed_by_ignored_path_refusal(&self) -> bool {
+        self.phase == CyclePhase::Abandoned && self.last_event == COMMIT_REFUSED_IGNORED_PATH_EVENT
+    }
+
     /// Whether this open cycle has a typed, durable replay checkpoint for its
     /// complete response. A capture id without its response hash is not enough
     /// to cross a process-generation boundary, and terminal captures are no

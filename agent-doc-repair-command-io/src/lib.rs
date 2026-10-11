@@ -19,6 +19,11 @@ pub enum CapturedFinalizeResumeOutcome {
         repair_outcome: String,
     },
     Superseded,
+    /// `#splicectlcommit`: the closeout's commit refused an ignored untracked
+    /// path and closed the cycle as `commit_refused_ignored_path`. Terminal: the
+    /// response is on disk, nothing was (or ever will be) committed, and every
+    /// retry surface must stop instead of awaiting a commit edge.
+    ClosedIgnoredPath,
     /// The effect completed successfully enough to observe that a newer
     /// document-state edge is required. Do not put this on a timer.
     WaitingForSignal {
@@ -399,10 +404,18 @@ pub fn resume_captured_finalize(
                     state.cycle_id == expected.cycle_id
                         && matches!(state.phase, agent_doc_turn::CyclePhase::Committed)
                 });
+            let closed_ignored_path = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+                .ok()
+                .flatten()
+                .is_some_and(|state| {
+                    state.cycle_id == expected.cycle_id && state.closed_by_ignored_path_refusal()
+                });
             if committed {
                 CapturedFinalizeResumeOutcome::Committed {
                     repair_outcome: format!("{outcome:?}"),
                 }
+            } else if closed_ignored_path {
+                CapturedFinalizeResumeOutcome::ClosedIgnoredPath
             } else if captured_finalize_resume_key(file).ok().flatten().as_ref() != Some(expected) {
                 CapturedFinalizeResumeOutcome::Superseded
             } else {
@@ -762,6 +775,9 @@ fn resume_materialized_captured_finalize(
         }
         Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Superseded) => {
             CapturedFinalizeResumeOutcome::Superseded
+        }
+        Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::ClosedIgnoredPath) => {
+            CapturedFinalizeResumeOutcome::ClosedIgnoredPath
         }
         Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Retained { reason }) => {
             CapturedFinalizeResumeOutcome::WaitingForSignal { reason }

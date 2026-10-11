@@ -1581,6 +1581,167 @@ Duplicate replay should stay live.
             "ignored untracked document must not be staged/tracked"
         );
     }
+    /// `#splicectlcommit` fixture: an ignored scratch directory with one session
+    /// document and an open cycle, so the commit's ignored-path refusal has a
+    /// cycle to close.
+    fn ignored_session_doc_with_open_cycle(
+        root: &Path,
+        frontmatter_extra: &str,
+    ) -> (PathBuf, String) {
+        init_repo(root);
+        commit_file(
+            root,
+            ".gitignore",
+            "scratch/\n.agent-doc/\n",
+            "ignore scratch",
+        );
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("scratch/session.md");
+        let content = format!(
+            "---\nagent_doc_session: test\n{frontmatter_extra}---\n\n<!-- agent:exchange -->\n### Re: ignored\nbody\n<!-- /agent:exchange -->\n"
+        );
+        fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        (doc, content)
+    }
+
+    fn ops_log_text(root: &Path) -> String {
+        fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default()
+    }
+
+    fn assert_not_staged_or_committed(root: &Path) {
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:scratch/session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            !show.status.success(),
+            "ignored document must not reach HEAD"
+        );
+        let listed = Command::new("git")
+            .current_dir(root)
+            .args(["ls-files", "--", "scratch/session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            listed.stdout.is_empty(),
+            "ignored document must not be staged"
+        );
+    }
+
+    #[test]
+    fn controller_commit_of_declared_scratch_ignored_doc_is_a_clean_skip() {
+        // `#splicectlcommit`: with a live editor attached, `write --commit`
+        // hands the commit to the project controller, which runs
+        // `commit_document_in_controller` with ITS environment against the
+        // product repo. A declared scratch document that the product repo
+        // ignores must close there as a clean skip: no staging, no
+        // `commit_error`, and a terminal cycle — never a stranded wait.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let (doc, _) = ignored_session_doc_with_open_cycle(root, "agent_doc_scratch: true\n");
+
+        let outcome = agent_doc_commit_io::commit_document_in_controller(&doc, false)
+            .expect("a declared scratch skip is not an error");
+        assert!(!outcome.did_commit);
+        assert_not_staged_or_committed(root);
+
+        let log = ops_log_text(root);
+        assert!(
+            log.contains("commit_skipped_ignored_scratch") && log.contains("outcome=clean_skip"),
+            "the skip must leave its own clean receipt:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_error"),
+            "a declared scratch skip must not log commit_error:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_skipped_ignored_path"),
+            "the strict refusal receipt belongs to undeclared documents only:\n{log}"
+        );
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            state.closed_by_ignored_path_refusal(),
+            "the cycle must close as commit_refused_ignored_path, not stay open: {} / {}",
+            state.phase.as_str(),
+            state.last_event
+        );
+    }
+
+    #[test]
+    fn controller_commit_of_undeclared_ignored_doc_is_still_refused() {
+        // `#splicectlcommit` guard: only the explicit declaration changes the
+        // receipt. A normal session document that happens to be ignored keeps
+        // the strict refusal (`commit_skipped_ignored_path` + `commit_error`)
+        // and is never staged.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let (doc, _) = ignored_session_doc_with_open_cycle(root, "");
+
+        let outcome = agent_doc_commit_io::commit_document_in_controller(&doc, false).unwrap();
+        assert!(!outcome.did_commit);
+        assert_not_staged_or_committed(root);
+
+        let log = ops_log_text(root);
+        assert!(
+            log.contains("commit_skipped_ignored_path"),
+            "the strict refusal receipt must remain:\n{log}"
+        );
+        assert!(
+            log.contains("commit_error")
+                && log.contains("refusing to commit ignored untracked path"),
+            "an undeclared ignored document must still report the refusal as commit_error:\n{log}"
+        );
+        assert!(!log.contains("commit_skipped_ignored_scratch"), "{log}");
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(state.closed_by_ignored_path_refusal());
+    }
+
+    #[test]
+    fn declared_scratch_doc_that_is_not_ignored_commits_normally() {
+        // The declaration never skips a commit by itself: only an untracked
+        // path `.gitignore` matches is skipped.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        commit_file(root, ".gitignore", ".agent-doc/\n", "ignore state");
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("notes/session.md");
+        let content = "---\nagent_doc_session: test\nagent_doc_scratch: true\n---\n\n<!-- agent:exchange -->\n### Re: tracked\nbody\n<!-- /agent:exchange -->\n";
+        fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        assert!(
+            commit(&doc).unwrap(),
+            "a non-ignored scratch document must commit"
+        );
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:notes/session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success());
+        assert!(!ops_log_text(root).contains("commit_skipped_ignored_scratch"));
+    }
+
     #[test]
     fn commit_staged_blob_restores_answered_prompt_prefixes() {
         use std::fs;

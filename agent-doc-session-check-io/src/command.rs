@@ -148,8 +148,18 @@ pub enum CapturedFinalizeResumeOutcome {
     NotApplicable,
     Committed,
     Superseded,
-    Retained { reason: String },
-    RetryAt { reason: String, retry_at_secs: u64 },
+    /// `#splicectlcommit`: the same-capture commit closed the cycle by refusing
+    /// an ignored untracked path (`commit_refused_ignored_path`). Terminal and
+    /// final — nothing was committed and no state edge can change that — so
+    /// recovery stops instead of waiting for a commit that cannot exist.
+    ClosedIgnoredPath,
+    Retained {
+        reason: String,
+    },
+    RetryAt {
+        reason: String,
+        retry_at_secs: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1788,7 +1798,8 @@ fn run_with_options_inner(
                 effects.resume_retained_closeout_after_native_save(file)
             })? {
                 CapturedFinalizeResumeOutcome::Committed
-                | CapturedFinalizeResumeOutcome::Superseded => {
+                | CapturedFinalizeResumeOutcome::Superseded
+                | CapturedFinalizeResumeOutcome::ClosedIgnoredPath => {
                     crate::invalidate_current_document_pass(file);
                     authority_content = crate::resolve_current_document_content(
                         file,
@@ -2334,7 +2345,9 @@ fn resume_captured_finalize_for_recovery(
         return Ok(false);
     }
     match effects.resume_captured_finalize(file)? {
-        CapturedFinalizeResumeOutcome::Committed | CapturedFinalizeResumeOutcome::Superseded => {
+        CapturedFinalizeResumeOutcome::Committed
+        | CapturedFinalizeResumeOutcome::Superseded
+        | CapturedFinalizeResumeOutcome::ClosedIgnoredPath => {
             agent_doc_ops_log_io::log_op(file, recovered_log_event);
             Ok(true)
         }
@@ -3407,7 +3420,8 @@ fn inspect_core_profiled(
         }
         match effects.resume_captured_finalize(file)? {
             CapturedFinalizeResumeOutcome::Committed
-            | CapturedFinalizeResumeOutcome::Superseded => {
+            | CapturedFinalizeResumeOutcome::Superseded
+            | CapturedFinalizeResumeOutcome::ClosedIgnoredPath => {
                 return inspect_core_with_captured_resume(file, effects, false);
             }
             CapturedFinalizeResumeOutcome::NotApplicable => {}

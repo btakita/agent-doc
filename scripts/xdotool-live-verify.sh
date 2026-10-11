@@ -284,6 +284,7 @@ ensure_scratch_doc() {
 agent_doc_session: xdotool-${case_name}
 agent_doc_format: template
 agent_doc_write: crdt
+agent_doc_scratch: true
 ---
 
 ## Exchange
@@ -447,7 +448,7 @@ case_captured_splice() {
   OPS_LOG_DOC="$doc"
   log "receipts for this doc are read from $(ops_log)"
   rel="${doc#"$REPO"/}"
-  ensure_captured_splice_commit_repo "$doc"
+  assert_captured_splice_scratch_declared "$doc"
   assert_scratch_authority "$rel"
   wid="$(require_window "$base" "$doc")"
   # Opening the doc can bind it to a pane for the first time; re-read before typing.
@@ -501,7 +502,7 @@ case_captured_splice() {
 
   if [[ "$DRY_RUN" == 1 ]]; then
     log "[dry-run] would wait for a fresh captured-local-splice-recovery read OR an applied crdt_document_op_delta_ingested for ${base%.md}"
-    log "[dry-run] would name a controller-side commit_skipped_ignored_path for ${base%.md} as the controller-env commit-boundary limit (see ensure_captured_splice_commit_repo)"
+    log "[dry-run] would expect a clean commit_skipped_ignored_scratch closeout for ${base%.md} (see assert_captured_splice_scratch_declared)"
     log "[dry-run] would assert: agent-doc verify-captured-splice-recovery $rel"
     return 0
   fi
@@ -514,46 +515,40 @@ case_captured_splice() {
 }
 
 # The live-repro directory is ignored by the product repository, deliberately:
-# no proof scratch may leak into a product commit. Strict response cycles still
-# require a reachable commit boundary, so captured-splice owns an isolated bare
-# Git directory and points only the advance process at it through GIT_DIR and
-# GIT_WORK_TREE. It MUST NOT create a nested `.git` beside the document: that
-# would also create a nested `.agent-doc`, split the controller/ops-log authority,
-# and make the proof meaningless.
+# no proof scratch may leak into a product commit. The scratch document declares
+# itself a scratch/proof document in its own frontmatter (`agent_doc_scratch:
+# true`, written by ensure_scratch_doc), and that declaration is the commit
+# boundary (`#splicectlcommit`): when a strict response cycle commits an ignored,
+# declared scratch, the commit closes the cycle as a clean skip
+# (`commit_skipped_ignored_scratch outcome=clean_skip`) — nothing is staged,
+# nothing is committed, and closeout ends without `commit_error`.
 #
-# Reach of that boundary (`#splicevrfyforward`): the env prefix DOES reach the
-# `agent-doc write --commit` process in the owner pane. It does NOT reach the
-# commit, because the proof requires a live editor, and with a live editor
-# attached `write --commit` delegates the git commit to the already-running
-# project controller (`commit_document_via_controller` -> `controller_commit_document`).
-# The controller commits in ITS process with ITS environment, resolves the
-# product repository, and refuses the ignored scratch (`commit_skipped_ignored_path`
-# + `commit_error ... refusing to commit ignored untracked path`). No env export
-# from any pane can change a daemon's environment, so the isolated GIT_DIR covers
-# only the local-commit fallback (`controller_commit_document_unavailable
-# recovery=local_commit`). The recipe names the controller-side refusal instead
-# of reporting it as an unexplained commit_error; the splice verdict never
-# depends on the scratch commit.
-ADVANCE_GIT_DIR=""
-ensure_captured_splice_commit_repo() {
+# Why the declaration lives in the DOCUMENT and not in this script's
+# environment: the proof requires a live editor, and with a live editor attached
+# `write --commit` delegates the git commit to the already-running project
+# controller (`commit_document_via_controller` -> `controller_commit_document`),
+# and capture recovery commits from session-check/supervisor processes. None of
+# those carry an env prefix from this pane — the earlier isolated
+# GIT_DIR/GIT_WORK_TREE boundary (`#splicevrfyforward`) reached only the advance
+# process and the controller refused the scratch (`commit_skipped_ignored_path`
+# + `commit_error`). Every committing process reads the same frontmatter, so it
+# reaches the same verdict. The splice verdict never depends on the scratch
+# commit. It MUST NOT create a nested `.git` beside the document: that would
+# also create a nested `.agent-doc`, split the controller/ops-log authority, and
+# make the proof meaningless.
+assert_captured_splice_scratch_declared() {
   local doc="$1" root rel
   root="$(dirname "$doc")"; rel="${doc#"$REPO"/}"
-  ADVANCE_GIT_DIR="$root/.captured-splice-git-dir"
   if [[ "$DRY_RUN" == 1 ]]; then
-    log "[dry-run] would baseline $rel through isolated GIT_DIR=$ADVANCE_GIT_DIR"
+    log "[dry-run] would assert $rel declares agent_doc_scratch: true and is ignored by the product repo"
     return 0
   fi
   [[ ! -e "$root/.git" && ! -e "$root/.agent-doc" ]] \
     || die "live-repro contains nested .git/.agent-doc authority; move it aside before running the proof"
-  git init -q --bare "$ADVANCE_GIT_DIR"
-  GIT_DIR="$ADVANCE_GIT_DIR" GIT_WORK_TREE="$REPO" git add -f -- "$rel"
-  if ! GIT_DIR="$ADVANCE_GIT_DIR" GIT_WORK_TREE="$REPO" git diff --cached --quiet -- "$rel"; then
-    GIT_DIR="$ADVANCE_GIT_DIR" GIT_WORK_TREE="$REPO" git -c user.name=agent-doc-live-verify \
-      -c user.email=agent-doc-live-verify@invalid \
-      commit -q -m "captured-splice live proof baseline" -- "$rel"
-  fi
-  GIT_DIR="$ADVANCE_GIT_DIR" GIT_WORK_TREE="$REPO" git ls-files --error-unmatch "$rel" >/dev/null \
-    || die "captured-splice scratch is not tracked in its isolated Git directory"
+  grep -qx 'agent_doc_scratch: true' "$doc" \
+    || die "captured-splice scratch $rel does not declare agent_doc_scratch: true; its strict closeout would report commit_error"
+  (cd "$REPO" && git check-ignore -q --no-index -- "$rel") \
+    || die "captured-splice scratch $rel is not ignored by the product repo; refusing to let a proof scratch reach a product commit"
 }
 
 case_lvbatch_markers() {
@@ -674,7 +669,7 @@ start_advance_in_owner_pane() {
     "$(date -u +%FT%TZ)" > "$ADVANCE_BODY"
   ADVANCE_SENTINEL="$(mktemp -u "${TMPDIR:-/tmp}/xdotool-advance.XXXXXX")"
   if [[ -z "$SCRATCH_OWNER_PANE" ]]; then
-    (cd "$REPO"; GIT_DIR="$ADVANCE_GIT_DIR" GIT_WORK_TREE="$REPO" agent-doc write --commit "$rel" < "$ADVANCE_BODY"; printf '%s\n' "$?" > "$ADVANCE_SENTINEL") &
+    (cd "$REPO"; agent-doc write --commit "$rel" < "$ADVANCE_BODY"; printf '%s\n' "$?" > "$ADVANCE_SENTINEL") &
     return 0
   fi
   if [[ "$SCRATCH_OWNER_BANG" == 1 ]]; then
@@ -683,7 +678,7 @@ start_advance_in_owner_pane() {
     sleep 0.5
   fi
   tmux send-keys -t "$SCRATCH_OWNER_PANE" -l -- \
-    "cd $(printf '%q' "$REPO") && GIT_DIR=$(printf '%q' "$ADVANCE_GIT_DIR") GIT_WORK_TREE=$(printf '%q' "$REPO") agent-doc write --commit $(printf '%q' "$rel") < $(printf '%q' "$ADVANCE_BODY"); echo \$? > $(printf '%q' "$ADVANCE_SENTINEL")"
+    "cd $(printf '%q' "$REPO") && agent-doc write --commit $(printf '%q' "$rel") < $(printf '%q' "$ADVANCE_BODY"); echo \$? > $(printf '%q' "$ADVANCE_SENTINEL")"
   tmux send-keys -t "$SCRATCH_OWNER_PANE" Enter
 }
 
@@ -720,19 +715,25 @@ mark_advance_closeout() {
   ADVANCE_CLOSEOUT_OFFSET="$( [[ -f "$olog" ]] && stat -c %s "$olog" || echo 0 )"
 }
 
-# Name a controller-side ignored-path refusal as what it is (see
-# ensure_captured_splice_commit_repo): the controller, not the advance process,
-# ran the commit, so the isolated GIT_DIR never applied to it.
+# Confirm the advance's strict closeout took the declared-scratch commit
+# boundary (see assert_captured_splice_scratch_declared). A strict
+# `commit_skipped_ignored_path` / `commit_error` for this document means the
+# committing process — CLI, controller, or recovery — did not honour the
+# `agent_doc_scratch` declaration: a regression of `#splicectlcommit`, named here
+# so it is not mistaken for a splice-proof failure.
 explain_advance_commit_boundary() {
   local stem="$1" olog fresh
   olog="$(ops_log)"
   [[ -f "$olog" ]] || return 0
   fresh="$(tail -c +"$(( ADVANCE_CLOSEOUT_OFFSET + 1 ))" "$olog" 2>/dev/null | grep -F -- "doc=$stem " || true)"
-  grep -qF -- "commit_skipped_ignored_path" <<<"$fresh" || return 0
-  if grep -qF -- "controller_commit_document " <<<"$fresh"; then
-    warn "the advance's commit ran in the project controller (controller_commit_document), whose environment never carries the advance's GIT_DIR/GIT_WORK_TREE; it refused the ignored scratch (commit_skipped_ignored_path). This is the controller-delegated commit-boundary limit, not a splice-proof failure."
-  else
-    warn "the advance's commit refused the ignored scratch (commit_skipped_ignored_path) without a controller_commit_document receipt — the isolated GIT_DIR did not reach the committing process; inspect the advance's closeout receipts"
+  if grep -qF -- "commit_skipped_ignored_path" <<<"$fresh" || grep -qF -- "commit_error" <<<"$fresh"; then
+    local where="the advance process"
+    grep -qF -- "controller_commit_document " <<<"$fresh" && where="the project controller (controller_commit_document)"
+    warn "the advance's commit in $where refused the declared scratch strictly (commit_skipped_ignored_path/commit_error) instead of a clean commit_skipped_ignored_scratch — the agent_doc_scratch declaration did not reach the committing process (#splicectlcommit regression); not a splice-proof failure"
+    return 0
+  fi
+  if grep -qF -- "commit_skipped_ignored_scratch" <<<"$fresh"; then
+    log "the advance's strict closeout skipped the ignored scratch cleanly (commit_skipped_ignored_scratch)"
   fi
 }
 

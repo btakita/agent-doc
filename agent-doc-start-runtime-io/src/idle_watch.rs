@@ -1980,6 +1980,21 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             log_event(&mut session_log, &event);
                             agent_doc_ops_log_io::log_op(&path, &event);
                         }
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::ClosedIgnoredPath => {
+                    // `#splicectlcommit`: terminal without a commit — stop
+                    // retrying this capture, exactly like a commit receipt.
+                    resume_retry = None;
+                    resume_triggers.observe_operation(None);
+                    let event = format!(
+                        "captured_finalize_resume_closed_ignored_path file={} cycle_id={} capture_id={} response_sha256={} outcome=terminal_without_commit",
+                        path.display(),
+                        key.cycle_id,
+                        key.capture_id,
+                        key.response_sha256,
+                    );
+                    log_event(&mut session_log, &event);
+                    agent_doc_ops_log_io::log_op(&path, &event);
+                }
                 agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::WaitingForSignal {
                     reason,
                 } => {

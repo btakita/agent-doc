@@ -1484,6 +1484,16 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                 );
                 return true;
             }
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::ClosedIgnoredPath => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_captured_finalize_resume_closed_ignored_path cycle_id={} capture_id={} response_sha256={} attempt={} outcome=terminal_without_commit",
+                        key.cycle_id, key.capture_id, key.response_sha256, attempt,
+                    ),
+                );
+                return true;
+            }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
                 return agent_doc_session_check_io::inspect(
                     file,

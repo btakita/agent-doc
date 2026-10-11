@@ -1484,6 +1484,122 @@ mod tests {
     }
 
     #[test]
+    fn ignored_scratch_closeout_in_submodule_with_stale_parent_pointer_is_terminal() {
+        // `#splicectlcommit`: the live captured-splice scratch lives in an
+        // ignored directory of a submodule whose parent gitlink was already
+        // stale for unrelated reasons. The commit refused the ignored path and
+        // closed the cycle as `commit_refused_ignored_path`, but closeout then
+        // re-ran the snapshot-vs-HEAD retry and the parent-pointer gate — which
+        // prove a commit this cycle can never have — and failed closed with
+        // `parent_pointer_stale`. The ignored-path terminal must skip exactly
+        // those gates and end the closeout successfully without committing.
+        let root = tempfile::TempDir::new().unwrap();
+        let sub_origin = root.path().join("sub_origin");
+        let sup = root.path().join("super");
+        let init_repo = |p: &Path| {
+            std::fs::create_dir_all(p).unwrap();
+            run_git(p, &["init"]);
+            run_git(p, &["config", "user.email", "test@example.com"]);
+            run_git(p, &["config", "user.name", "Test User"]);
+        };
+        init_repo(&sub_origin);
+        std::fs::write(sub_origin.join(".gitignore"), "tmp/\n.agent-doc/\n").unwrap();
+        run_git(&sub_origin, &["add", "."]);
+        run_git(&sub_origin, &["commit", "-m", "s1", "--no-verify"]);
+        init_repo(&sup);
+        run_git(
+            &sup,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                sub_origin.to_str().unwrap(),
+                "sub",
+            ],
+        );
+        run_git(&sup, &["commit", "-m", "add sub", "--no-verify"]);
+        // Advance the submodule HEAD without bumping the parent gitlink: the
+        // unrelated stale pointer the live run hit.
+        let subwt = sup.join("sub");
+        std::fs::write(subwt.join("README.md"), "advanced\n").unwrap();
+        run_git(&subwt, &["add", "README.md"]);
+        run_git(
+            &subwt,
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test User",
+                "commit",
+                "-m",
+                "s2",
+                "--no-verify",
+            ],
+        );
+        assert!(
+            agent_doc_git_io::submodule::submodule_pointer_drift(&subwt.join("README.md"))
+                .unwrap()
+                .is_some(),
+            "fixture must start with a stale parent pointer"
+        );
+
+        std::fs::create_dir_all(subwt.join(".agent-doc")).unwrap();
+        let doc = subwt.join("tmp/captured-splice-live/scratch.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = concat!(
+            "---\nagent_doc_session: scratch\nagent_doc_format: template\nagent_doc_scratch: true\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: advance - gpt-5\n\nAdvanced.\n",
+            "<!-- agent:boundary:scratch -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let did_commit = complete_required_closeout(&doc)
+            .expect("an ignored scratch closeout must end successfully");
+        assert!(
+            !did_commit,
+            "nothing may be committed for an ignored scratch"
+        );
+
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            state.closed_by_ignored_path_refusal(),
+            "{}",
+            state.last_event
+        );
+        let ops = std::fs::read_to_string(subwt.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("closeout_ignored_path_terminal"), "{ops}");
+        assert!(ops.contains("commit_skipped_ignored_scratch"), "{ops}");
+        assert!(!ops.contains("parent_pointer_stale"), "{ops}");
+        assert!(
+            !ops.contains("reason=snapshot_differs_from_head"),
+            "the snapshot-vs-HEAD retry cannot converge for an ignored path and must not run: {ops}"
+        );
+        assert!(!ops.contains("commit_error"), "{ops}");
+        let listed = Command::new("git")
+            .current_dir(&subwt)
+            .args(["ls-files", "--", "tmp"])
+            .output()
+            .unwrap();
+        assert!(
+            listed.stdout.is_empty(),
+            "the ignored scratch must never be staged"
+        );
+    }
+
+    #[test]
     fn apply_recovery_clean_is_nothing_to_do() {
         let (_dir, doc) = setup_git_project_with_doc("---\nsession: test\n---\n\nHi\n");
         assert_eq!(

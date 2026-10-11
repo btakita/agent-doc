@@ -20,6 +20,13 @@ pub fn is_submodule_pointer_stale(file: &Path) -> bool {
 /// submodule is intentionally ignored; closeout only owns the parent pointer
 /// needed to make an already-created submodule commit reachable from the
 /// parent repository.
+///
+/// `#splicectlcommit`: an untracked document that `.gitignore` matches never
+/// crosses the submodule commit boundary — commit refuses it before the parent
+/// pointer step — so a stale gitlink is never that document's to own, and
+/// reporting it would fail its closeout with a recovery (`agent-doc commit`)
+/// that can never succeed. Such a document reports no drift. The ignore check
+/// runs only after a drift is observed, so the common no-drift path is unchanged.
 pub fn submodule_pointer_drift(file: &Path) -> Result<Option<SubmodulePointerDrift>> {
     let Ok((super_root, resolved)) = resolve_to_git_root(file) else {
         return Ok(None);
@@ -37,7 +44,15 @@ pub fn submodule_pointer_drift(file: &Path) -> Result<Option<SubmodulePointerDri
     };
     let parent_spec = format!("HEAD:{rel}");
     let parent_head = revision::rev_parse(&super_root, &parent_spec)?;
-    if parent_head.as_deref() == Some(submodule_head.as_str()) {
+    let gitlink_current = parent_head.as_deref() == Some(submodule_head.as_str());
+    if gitlink_current
+        || resolved
+            .strip_prefix(&git_root)
+            .ok()
+            .map(|doc_rel| crate::status::is_untracked_repo_path_ignored(&git_root, doc_rel))
+            .transpose()?
+            .unwrap_or(false)
+    {
         Ok(None)
     } else {
         Ok(Some(SubmodulePointerDrift {
@@ -172,6 +187,24 @@ mod tests {
         assert_ne!(drift.parent_head.as_deref(), Some(submodule_head.as_str()));
         assert_eq!(drift.submodule_head, submodule_head);
         assert!(is_submodule_pointer_stale(&doc));
+    }
+
+    #[test]
+    fn submodule_pointer_drift_is_none_for_ignored_untracked_document() {
+        // `#splicectlcommit`: a stale gitlink is not an ignored scratch
+        // document's to own — it can never cross the submodule commit boundary.
+        let (outer_dir, submodule, _doc) = project_with_submodule();
+        let _cwd = ScopedCurrentDir::set(outer_dir.path());
+        commit_file(&submodule, ".gitignore", "tmp/\n", "ignore tmp");
+        let scratch = submodule.join("tmp/scratch.md");
+        fs::create_dir_all(scratch.parent().unwrap()).unwrap();
+        fs::write(&scratch, "scratch\n").unwrap();
+        let tracked = submodule.join(".gitignore");
+        assert!(
+            submodule_pointer_drift(&tracked).unwrap().is_some(),
+            "fixture: the parent gitlink lags the submodule HEAD"
+        );
+        assert!(submodule_pointer_drift(&scratch).unwrap().is_none());
     }
 
     #[test]

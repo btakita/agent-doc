@@ -26,7 +26,7 @@ use agent_doc_turn::turn_status::{
     TRANSCRIPT_TAIL_PROBE_BYTES, TranscriptTailEvidence, TurnActiveMarker,
     classify_transcript_tail, pane_title_for_status, transcript_turn_end_reason,
     turn_active_expiry_cutoff, turn_active_marker_is_fresh, turn_active_marker_matches_pane,
-    turn_lease_ended_by_interrupt,
+    turn_lease_ended_by_interrupt, turn_lease_ended_by_withdrawn_prompt,
 };
 use anyhow::Result;
 use std::io::{Read, Seek, SeekFrom};
@@ -256,10 +256,21 @@ fn interrupted_turn_lease(
     marker: &TurnActiveMarker,
     now: u64,
 ) -> Option<InterruptedTurnLease> {
+    harness_ended_turn_lease(conn, marker, |evidence| {
+        turn_lease_ended_by_interrupt(marker, evidence, now)
+    })
+}
+
+/// The lease's bound transcript proves its turn ended under `ended`.
+fn harness_ended_turn_lease(
+    conn: &Connection,
+    marker: &TurnActiveMarker,
+    ended: impl Fn(TranscriptTailEvidence) -> bool,
+) -> Option<InterruptedTurnLease> {
     let transcript = transcript_for_marker(conn, marker)?;
     let (tail, starts_mid_file) = read_transcript_tail(&transcript)?;
     let evidence = classify_transcript_tail(&tail, starts_mid_file);
-    if !turn_lease_ended_by_interrupt(marker, evidence, now) {
+    if !ended(evidence) {
         return None;
     }
     let (TranscriptTailEvidence::Interrupted { at_secs }
@@ -286,6 +297,14 @@ fn retire_interrupted_turn_lease(
     now: u64,
 ) -> Option<InterruptedTurnLease> {
     let interrupted = interrupted_turn_lease(conn, marker, now)?;
+    retire_harness_ended_turn_lease(conn, marker, interrupted)
+}
+
+fn retire_harness_ended_turn_lease(
+    conn: &Connection,
+    marker: &TurnActiveMarker,
+    interrupted: InterruptedTurnLease,
+) -> Option<InterruptedTurnLease> {
     // `#runctrlclaude`: the interrupt (or abandoned prompt) is a
     // harness-authored turn boundary; keep it after the lease row is gone.
     let _ = record_harness_turn_end_in_db(
@@ -330,6 +349,42 @@ pub fn reclaim_interrupted_turn_for_pane_at(
         .flatten()?;
     let marker = marker_from_lease(lease, now)?;
     retire_interrupted_turn_lease(&conn, &marker, now)
+}
+
+/// `#cancelturnprompt`: retire `pane`'s turn-active lease when its prompt was
+/// abandoned (`file-history-snapshot` with no prompt record, see
+/// [`TranscriptTailEvidence::AbandonedPrompt`]) AND the caller has already
+/// observed that prompt back in the harness composer and withdrawn it. The
+/// withdrawal removes the one ambiguity the settle window waits out, so no
+/// settle applies; the snapshot must still be no older than the lease. `None`
+/// when there is no fresh lease, no bound transcript, or no such snapshot yet.
+///
+/// Callers must not use this without the composer observation: on transcript
+/// evidence alone, [`reclaim_interrupted_turn_for_pane_at`] is the only rule.
+pub fn reclaim_withdrawn_prompt_turn_for_pane_at(
+    base: &Path,
+    pane: &str,
+    now: u64,
+) -> Option<InterruptedTurnLease> {
+    let conn = open_state_db(base).ok()?;
+    let lease = load_coordination_lease_from_db(&conn, TURN_ACTIVE_SCOPE, pane)
+        .ok()
+        .flatten()?;
+    let marker = marker_from_lease(lease, now)?;
+    let withdrawn = harness_ended_turn_lease(&conn, &marker, |evidence| {
+        turn_lease_ended_by_withdrawn_prompt(&marker, evidence)
+    })?;
+    retire_harness_ended_turn_lease(&conn, &marker, withdrawn)
+}
+
+/// [`reclaim_withdrawn_prompt_turn_for_pane_at`] for the project containing
+/// `file`.
+pub fn reclaim_withdrawn_prompt_turn_for_pane_for_file(
+    file: &Path,
+    pane: &str,
+) -> Option<InterruptedTurnLease> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    reclaim_withdrawn_prompt_turn_for_pane_at(&root, pane, now_secs())
 }
 
 /// [`reclaim_interrupted_turn_for_pane_at`] for the project containing `file`.
@@ -1383,6 +1438,73 @@ mod tests {
             world.live(),
             "a dequeued input after the snapshot may have started a turn"
         );
+    }
+
+    /// `#cancelturnprompt` incident replay (agent-loop agent-doc-bugs.md, pane
+    /// %149, 2026-10-11): Run Agent Doc's lease at 05:59:23, Cancel Turn's
+    /// `C-c` at 05:59:30 while the preflight hook ran, snapshot 0.7s later, no
+    /// prompt record; Claude Code put `/agent-doc …` back in the composer. Once
+    /// Cancel Turn has withdrawn that restored trigger, the lease retires at
+    /// once instead of holding Clear Session Context for the settle window. A
+    /// withdrawal reported before the snapshot lands (or for a prompt whose
+    /// record persisted) retires nothing.
+    #[test]
+    fn sim_withdrawn_cancelled_prompt_retires_lease_without_settle() {
+        let mut world = TurnSimWorld::new("%149");
+        world.submit_prompt_with_snapshot("prev", 1, true);
+        world.tick(13);
+        world.finish_turn_without_stop();
+        world.stop_hook();
+        world.tick(600);
+
+        // Lease written; the snapshot has not landed yet.
+        write_turn_active_marker_with_transcript_at(
+            &world.base,
+            world.pane,
+            world.now,
+            Some(&world.transcript),
+        )
+        .unwrap();
+        let lease_at = world.now;
+        world.tick(7);
+        assert_eq!(
+            reclaim_withdrawn_prompt_turn_for_pane_at(&world.base, world.pane, world.now),
+            None,
+            "no snapshot yet: the previous turn's records prove nothing about this lease"
+        );
+        assert!(world.live());
+        world.append(serde_json::json!({
+            "type": "file-history-snapshot", "messageId": "8f4af13e",
+            "snapshot": {"messageId": "8f4af13e", "trackedFileBackups": {}, "timestamp": world.stamp()},
+            "isSnapshotUpdate": false,
+        }));
+        let snapshot_at = world.now;
+        assert!(
+            reclaim_interrupted_turn_for_pane_at(&world.base, world.pane, world.now).is_none(),
+            "transcript evidence alone still waits out the settle window"
+        );
+        let retired =
+            reclaim_withdrawn_prompt_turn_for_pane_at(&world.base, world.pane, world.now)
+                .expect("a withdrawn abandoned prompt retires its lease at once");
+        assert_eq!(retired.reason, "abandoned_prompt");
+        assert_eq!(retired.written_at, lease_at);
+        assert_eq!(retired.interrupted_at, snapshot_at);
+        assert!(!world.live());
+        assert_eq!(
+            last_harness_turn_end_for_pane(&world.base, world.pane)
+                .expect("boundary receipt")
+                .reason,
+            "abandoned_prompt"
+        );
+
+        // A persisted prompt is a live turn, withdrawal claim or not.
+        world.tick(30);
+        world.submit_prompt_with_snapshot("live", 2, true);
+        assert_eq!(
+            reclaim_withdrawn_prompt_turn_for_pane_at(&world.base, world.pane, world.now),
+            None
+        );
+        assert!(world.live());
     }
 
     #[test]

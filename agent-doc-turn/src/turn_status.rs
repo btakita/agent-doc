@@ -606,6 +606,28 @@ pub fn turn_lease_ended_by_interrupt(
     }
 }
 
+/// `#cancelturnprompt`: true when an abandoned prompt snapshot ends `marker`'s
+/// turn *without* the [`ABANDONED_PROMPT_SETTLE_SECS`] settle window, because
+/// agent-doc itself observed and withdrew the prompt.
+///
+/// The settle window exists for one ambiguity: a live prompt's record may
+/// still land after its snapshot. That ambiguity is gone once the cancelled
+/// prompt has been seen back in the composer (Claude Code restores a prompt
+/// there only when it abandons it) and agent-doc has removed it. Callers must
+/// prove both facts before asking; this rule then only checks that the
+/// snapshot belongs to this lease. Interrupt records, activity and unknown
+/// tails never qualify here; they keep the ordinary
+/// [`turn_lease_ended_by_interrupt`] rules.
+pub fn turn_lease_ended_by_withdrawn_prompt(
+    marker: &TurnActiveMarker,
+    evidence: TranscriptTailEvidence,
+) -> bool {
+    matches!(
+        evidence,
+        TranscriptTailEvidence::AbandonedPrompt { at_secs } if at_secs >= marker.written_at
+    )
+}
+
 /// The turn-end receipt reason a lease-retiring transcript boundary proves.
 pub fn transcript_turn_end_reason(evidence: TranscriptTailEvidence) -> Option<&'static str> {
     match evidence {
@@ -1267,6 +1289,99 @@ mod tests {
             transcript_turn_end_reason(TranscriptTailEvidence::Activity),
             None
         );
+    }
+
+    /// `#cancelturnprompt` incident replay: agent-loop
+    /// `tasks/agent-doc/agent-doc-bugs.md`, pane %149, 2026-10-11. The previous
+    /// turn ended at 05:49:07. Run Agent Doc typed the trigger at 05:59:23 and
+    /// Cancel Turn sent `C-c` at 05:59:30 while the `UserPromptSubmit`
+    /// preflight hook was still running (snapshot 05:59:30.674, no prompt
+    /// record). The operator ran again at 06:00:09 and cancelled again at
+    /// 06:00:16 (snapshot 06:00:16.961, no prompt record). Trimmed copies of
+    /// transcript `ba846c4c-…` lines 2836-2846.
+    fn cancelturnprompt_incident_tail() -> String {
+        [
+            r#"{"type":"assistant","isSidechain":false,"uuid":"7dfb2cb3","timestamp":"2026-10-11T05:49:06.100Z","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}"#.to_string(),
+            r#"{"type":"attachment","isSidechain":false,"attachment":{"type":"hook_success","hookName":"Stop"},"timestamp":"2026-10-11T05:49:07.424Z"}"#.to_string(),
+            r#"{"type":"system","subtype":"stop_hook_summary","isSidechain":false,"timestamp":"2026-10-11T05:49:07.430Z"}"#.to_string(),
+            r#"{"type":"system","subtype":"turn_duration","isSidechain":false,"durationMs":13593,"timestamp":"2026-10-11T05:49:07.433Z"}"#.to_string(),
+            r#"{"type":"last-prompt","lastPrompt":"/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"}"#.to_string(),
+            r#"{"type":"mode","mode":"normal"}"#.to_string(),
+            r#"{"type":"permission-mode","permissionMode":"bypassPermissions"}"#.to_string(),
+            r#"{"type":"atis-latch","atis":""}"#.to_string(),
+            r#"{"type":"pr-link","prNumber":226,"timestamp":"2026-10-11T05:49:07.556Z"}"#.to_string(),
+            prompt_snapshot_line("8f4af13e-f86f-454d-ac6c-06a2a0440680", "2026-10-11T05:59:30.674Z", false),
+            prompt_snapshot_line("8b8cf978-ffc2-4e80-99ad-809591c714a0", "2026-10-11T06:00:16.961Z", false),
+            String::new(),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn cancelturnprompt_back_to_back_cancelled_prompts_are_abandoned_at_the_newest_snapshot() {
+        let first = parse_rfc3339_utc_secs("2026-10-11T05:59:30.674Z").unwrap();
+        let second = parse_rfc3339_utc_secs("2026-10-11T06:00:16.961Z").unwrap();
+        let tail = cancelturnprompt_incident_tail();
+        assert_eq!(
+            classify_transcript_tail(&tail, false),
+            TranscriptTailEvidence::AbandonedPrompt { at_secs: second }
+        );
+        // After only the first cancel the same tail names the first snapshot.
+        let first_only = tail
+            .lines()
+            .filter(|line| !line.contains("8b8cf978"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            classify_transcript_tail(&first_only, false),
+            TranscriptTailEvidence::AbandonedPrompt { at_secs: first }
+        );
+        // The queued trigger Claude Code enqueued at 06:00:46 may start a
+        // turn: a queue operation after the snapshot fails closed.
+        let queued = format!(
+            "{tail}{}\n",
+            r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-11T06:00:46.799Z","content":"/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md"}"#
+        );
+        assert_eq!(
+            classify_transcript_tail(&queued, false),
+            TranscriptTailEvidence::Unknown
+        );
+    }
+
+    /// `#cancelturnprompt`: once agent-doc saw the cancelled trigger back in
+    /// the composer and withdrew it, the abandoned snapshot retires its own
+    /// lease immediately; it still never retires a newer lease, and nothing
+    /// but an abandoned snapshot qualifies.
+    #[test]
+    fn cancelturnprompt_withdrawn_prompt_retires_its_own_lease_without_settling() {
+        let lease_at = parse_rfc3339_utc_secs("2026-10-11T05:59:23Z").unwrap();
+        let snapshot_at = parse_rfc3339_utc_secs("2026-10-11T05:59:30.674Z").unwrap();
+        let lease = TurnActiveMarker {
+            pane: "%149".to_string(),
+            written_at: lease_at,
+        };
+        let abandoned = TranscriptTailEvidence::AbandonedPrompt {
+            at_secs: snapshot_at,
+        };
+        assert!(turn_lease_ended_by_withdrawn_prompt(&lease, abandoned));
+        assert!(
+            !turn_lease_ended_by_interrupt(&lease, abandoned, snapshot_at + 1),
+            "without the withdrawal the 20s settle window still applies"
+        );
+        let newer = TurnActiveMarker {
+            pane: "%149".to_string(),
+            written_at: snapshot_at + 1,
+        };
+        assert!(!turn_lease_ended_by_withdrawn_prompt(&newer, abandoned));
+        for evidence in [
+            TranscriptTailEvidence::Interrupted {
+                at_secs: snapshot_at,
+            },
+            TranscriptTailEvidence::Activity,
+            TranscriptTailEvidence::Unknown,
+        ] {
+            assert!(!turn_lease_ended_by_withdrawn_prompt(&lease, evidence));
+        }
     }
 
     /// `#sdkclearwedge`: the operator's deferred clear (04:30:30) was later

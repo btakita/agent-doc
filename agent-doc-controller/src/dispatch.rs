@@ -2205,6 +2205,71 @@ impl StartingPaneBlocker {
     }
 }
 
+/// `#cancelturnprompt`: what to do with the composer of a Claude pane whose
+/// turn agent-doc just cancelled, or which an operator clear is about to
+/// target.
+///
+/// Claude Code puts a submitted prompt back in the composer when the cancel
+/// lands before the prompt is persisted (while its `UserPromptSubmit` hooks
+/// still run). For a routed turn that prompt is agent-doc's own trigger. Left
+/// there, it reads as an operator draft: Clear Session Context would type
+/// `/clear` onto it, and the next Enter re-runs the cancelled turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelledTriggerComposerAction {
+    /// Nothing restored (yet). Keep watching until the restore window closes.
+    WaitForRestore,
+    /// The composer holds exactly this document's trigger and the harness is
+    /// idle: agent-doc owns that text and withdraws it.
+    WithdrawRestoredTrigger,
+    /// The composer holds anything else. It is operator input; never touch it.
+    KeepOperatorDraft,
+    /// A route submit is in flight, or the harness still shows a busy cue:
+    /// the trigger may be a fresh injection or the turn may still be running.
+    /// Touch nothing now.
+    Hold,
+}
+
+impl CancelledTriggerComposerAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WaitForRestore => "wait_for_restore",
+            Self::WithdrawRestoredTrigger => "withdraw_restored_trigger",
+            Self::KeepOperatorDraft => "keep_operator_draft",
+            Self::Hold => "hold",
+        }
+    }
+}
+
+/// Decide [`CancelledTriggerComposerAction`] from one composer observation.
+///
+/// `draft` is the operator-draft preview the composer projection reported
+/// (`None` for an empty, busy or absent composer). `triggers` are the trigger
+/// spellings agent-doc injects for this document. Only an EXACT trigger draft
+/// is agent-owned (`#dispatchonlystrandedtrigger`); text around it keeps the
+/// draft operator-owned. Fails closed: a route submit in flight or a busy cue
+/// holds even an exact trigger, because a concurrent route may be typing it or
+/// the turn may still be running.
+pub fn cancelled_trigger_composer_action(
+    draft: Option<&str>,
+    triggers: &[&str],
+    busy_cue: bool,
+    route_submit_in_flight: bool,
+) -> CancelledTriggerComposerAction {
+    let Some(draft) = draft else {
+        return CancelledTriggerComposerAction::WaitForRestore;
+    };
+    let exact_trigger = triggers
+        .iter()
+        .any(|trigger| draft_is_exactly_the_trigger(draft, trigger));
+    if !exact_trigger {
+        return CancelledTriggerComposerAction::KeepOperatorDraft;
+    }
+    if route_submit_in_flight || busy_cue {
+        return CancelledTriggerComposerAction::Hold;
+    }
+    CancelledTriggerComposerAction::WithdrawRestoredTrigger
+}
+
 /// Is this composer draft nothing but the trigger agent-doc would inject?
 ///
 /// The captured line carries the harness prompt sigil and its padding, so the
@@ -8147,6 +8212,51 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                     .and_then(|suffix| suffix.chars().next())
                     .is_some_and(char::is_whitespace)
         }) || (trimmed.starts_with("\u{23f5}\u{23f5} ") && trimmed.contains("(shift+tab to cycle)"))
+    }
+
+    /// `#cancelturnprompt` (agent-doc-bugs.md, pane %149, 2026-10-11): Cancel
+    /// Turn's `C-c` landed while the routed prompt's preflight hook ran, and
+    /// Claude Code restored `/agent-doc …/agent-doc-bugs.md` into the composer.
+    #[test]
+    fn cancelled_trigger_composer_action_withdraws_only_an_idle_exact_trigger() {
+        let abs = "/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md";
+        let rel = "/agent-doc tasks/agent-doc/agent-doc-bugs.md";
+        let triggers = [abs, rel];
+        assert_eq!(
+            cancelled_trigger_composer_action(Some(abs), &triggers, false, false),
+            CancelledTriggerComposerAction::WithdrawRestoredTrigger
+        );
+        assert_eq!(
+            cancelled_trigger_composer_action(Some(&format!("❯\u{a0}{rel}")), &triggers, false, false),
+            CancelledTriggerComposerAction::WithdrawRestoredTrigger,
+            "the prompt sigil and padding are not draft text"
+        );
+        // Fail closed while a route may be typing it or the turn may run.
+        assert_eq!(
+            cancelled_trigger_composer_action(Some(abs), &triggers, true, false),
+            CancelledTriggerComposerAction::Hold
+        );
+        assert_eq!(
+            cancelled_trigger_composer_action(Some(abs), &triggers, false, true),
+            CancelledTriggerComposerAction::Hold
+        );
+        // Anything else is operator input.
+        for draft in [
+            "please also check sdk.md",
+            &format!("{abs} and then stop"),
+            "/agent-doc tasks/agent-doc/agent-doc-bugs2.md",
+            "/clear",
+        ] {
+            assert_eq!(
+                cancelled_trigger_composer_action(Some(draft), &triggers, false, false),
+                CancelledTriggerComposerAction::KeepOperatorDraft,
+                "{draft:?} is not agent-doc's trigger"
+            );
+        }
+        assert_eq!(
+            cancelled_trigger_composer_action(None, &triggers, false, false),
+            CancelledTriggerComposerAction::WaitForRestore
+        );
     }
 
     #[test]

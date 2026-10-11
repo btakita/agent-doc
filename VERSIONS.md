@@ -4,6 +4,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+- **A controller memory refresh no longer stalls editor-op appends behind a full ledger reload (`#refreshmemlockstall`).**
+  When an apply raced `refresh_memory`'s unlocked ledger load, it re-ran the whole `state.db` replay under the project
+  state-ingress lock, holding it 1-4s on a large ledger, so editor-op appends during a typing burst missed their budget.
+  The locked step now folds only the `state_events` rows written after the unlocked load's high-water id (logged as
+  `controller_refresh_memory_caught_up_after_concurrent_apply rows=<n>`), equivalent to a full reload at that instant.
+- **`agent-doc upgrade` no longer demands a restart for an IDE that is not running from the install target (GH #238).**
+  Live-IDE ownership is now decided from process evidence (an agent-doc jar mapped under the target, `-Didea.plugins.path`,
+  then the data directory from `-Didea.paths.selector` or `product-info.json` `dataDirectoryName`) before the
+  exact-262 package's dynamic-upgrade refusal. A live IDE proven to load from another data directory leaves the write a
+  plain install with no restart verdict, and a stale `.agent-doc-jetbrains-restart-required` marker is cleared; a pid
+  without conclusive evidence still counts as a possible owner.
 - **External tools can hand work to a session with `agent-doc queue add` (`#queueinbound`, GH #237).**
   `agent-doc queue add <FILE> --source <NAME> [--key <KEY>] [--attach <PATH>]... [--json] [TEXT]...` appends one
   attributed head, `[from:<source>] <text>`, to the document's selected `agent:queue`. It writes through the

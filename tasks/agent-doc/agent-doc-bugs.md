@@ -60,6 +60,22 @@ Compacted content:
 This is the same code and the same open question (the turn proven live only by its dispatch receipt) as `#clearqueuedliveturn`. So I forwarded the evidence to that item's subagent (claim `subagent:clearlive`) rather than start a second, conflicting branch. It is to reproduce this exact sequence with tests. Then fix it so a stale `running` receipt can never prove a live turn (the receipt is fenced to its turn and settles when the turn ends), and so a press that arrives after a newer prompt applies to the new turn rather than being silently lost. If a clear is dropped anyway, you'll get a notice. It will also draft a GitHub issue summary.
 
 **Workaround until it lands:** run `agent-doc session interrupt-clear tasks/sdk.md` from `src/haiven-dev`. It interrupts whatever is running in pane %180 (here the pane is idle apart from its 4 background agents) and clears. Or wait for the fix and press Clear once.
+
+### Re: Clear Session Context on api.md wedged — same stale dispatch receipt — opus-5.5 · 2026-10-11T17:07-04:00
+
+> **Queue prompt:** Clear Session Context on api.md is wedged.
+
+**Deferred:** this is the same bug as `sdk.md`. From the haiven-dev ops.log (`doc=api`, pane %165):
+- **The stale record:** the Run Agent Doc turn dispatched at 20:37 was promoted to `running` at 20:37:25 and closed out at 20:38:33, but its dispatch record was never settled.
+- **Your presses:** all four Clear presses (21:04:32–57) were deferred or absorbed on that stale `dispatch_turn_running`, with no feedback, so it looked wedged.
+- **The pane:** it is at an idle `❯` prompt, with one background subagent still running ("Checking DecisionFeed.jsx…").
+- **When it fires:** the deferred clear should go through on its own once the record ages past 30 minutes, at about 17:07 local (21:07Z), which is about now. That `/clear` may cut off the background subagent.
+
+I gave this to the same subagent as the sdk.md item (claim `subagent:clearlive`). Two more requirements are added to its fix:
+- Repeat presses while a clear is waiting show visible feedback: what it's waiting on, and how old that evidence is.
+- An explicit, tested rule for a Clear when the prompt is idle but background agents or shells are still running.
+
+**Now:** if it hasn't cleared by 17:08, run `agent-doc session interrupt-clear tasks/api.md` from `src/haiven-dev`. It interrupts whatever is running in that pane, which here likely means that background subagent too.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -71,7 +87,8 @@ This is the same code and the same open question (the turn proven live only by i
 - 🚧 do [#clearqueuedliveturn]
 - 🚧 do [#splicectlcommit]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/240
-- Clear Session Context on sdk.md did not take effect despite me running it twice. Run Agent Doc was sandwiched in between the 2 Clear Session Context calls.
+- 🚧 Clear Session Context on sdk.md did not take effect despite me running it twice. Run Agent Doc was sandwiched in between the 2 Clear Session Context calls.
+- Clear Session Context on api.md is wedged.
 <!-- /agent:queue -->
 
 ## Backlog

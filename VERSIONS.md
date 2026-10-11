@@ -2,7 +2,7 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
-## Unreleased
+## 0.35.490
 
 - **The state-plane subscriber lock-order test now detects an inversion
   (`#stateplanesubscriber`).** `state_plane_subscriber_never_inverts_channel_and_process_scope_locks`

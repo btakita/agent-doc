@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element"
-version = "0.35.489"
+version = "0.35.490"
 edition = "2024"
 description = "Pure element descriptors for agent-doc document components"
 license = "MIT"

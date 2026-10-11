@@ -2290,16 +2290,23 @@ struct ControllerStatePlaneGraph {
 
 struct ControllerStatePlaneChannelDependency {
     changed: Condvar,
-    change_lock: Mutex<()>,
+    change_lock: state_plane_lock_order::ChannelChangeLock,
     revision: AtomicU64,
+    /// Subscribers that reached the condvar sleep, counted under
+    /// `change_lock` so a test can prove a subscriber is parked instead of
+    /// sleeping and hoping it got there.
+    #[cfg(test)]
+    parked_subscribers: AtomicUsize,
 }
 
 impl ControllerStatePlaneChannelDependency {
     fn new() -> Self {
         Self {
             changed: Condvar::new(),
-            change_lock: Mutex::new(()),
+            change_lock: state_plane_lock_order::ChannelChangeLock::new(),
             revision: AtomicU64::new(0),
+            #[cfg(test)]
+            parked_subscribers: AtomicUsize::new(0),
         }
     }
 
@@ -2310,7 +2317,85 @@ impl ControllerStatePlaneChannelDependency {
     }
 }
 
+/// State-plane lock order: the shared reactive context (the process scope's
+/// `ThreadSafeContext`) is the OUTER lock and a channel's `change_lock` is the
+/// INNER one. Publication Effects run inside the context and take
+/// `change_lock` to make notify + sleep atomic, so no state-plane path may
+/// enter the context while it holds a `change_lock`.
+///
+/// The checker is a per-thread count of held channel locks: every
+/// `change_lock` acquisition goes through [`ChannelChangeLock::lock`], and every
+/// context entry in [`ControllerStatePlaneGraph`] goes through
+/// `reactive_ctx`, which panics in debug builds when the count is non-zero.
+/// It catches an inversion on the first acquisition in the wrong order,
+/// whether or not the other side happens to be contending at that moment:
+/// lazily runs Effects outside its state lock, so an inverted subscriber
+/// usually stalls publication briefly rather than deadlocking, and a
+/// race-shaped test cannot see it.
+mod state_plane_lock_order {
+    use std::cell::Cell;
+
+    thread_local! {
+        static CHANNEL_LOCKS_HELD: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// The only way to take a channel's `change_lock`, so the order checker
+    /// sees every acquisition.
+    pub(super) struct ChannelChangeLock(parking_lot::Mutex<()>);
+
+    impl ChannelChangeLock {
+        pub(super) fn new() -> Self {
+            Self(parking_lot::Mutex::new(()))
+        }
+
+        pub(super) fn lock(&self) -> ChannelChangeGuard<'_> {
+            let guard = self.0.lock();
+            CHANNEL_LOCKS_HELD.with(|held| held.set(held.get() + 1));
+            ChannelChangeGuard { guard }
+        }
+    }
+
+    pub(super) struct ChannelChangeGuard<'a> {
+        guard: parking_lot::MutexGuard<'a, ()>,
+    }
+
+    impl<'a> ChannelChangeGuard<'a> {
+        /// The raw guard for a condvar wait. The wait releases and reacquires
+        /// the mutex itself; the held count stays put because the thread
+        /// cannot enter the context while it sleeps.
+        pub(super) fn condvar_guard(&mut self) -> &mut parking_lot::MutexGuard<'a, ()> {
+            &mut self.guard
+        }
+    }
+
+    impl Drop for ChannelChangeGuard<'_> {
+        fn drop(&mut self) {
+            CHANNEL_LOCKS_HELD.with(|held| held.set(held.get() - 1));
+        }
+    }
+
+    #[track_caller]
+    pub(super) fn assert_may_enter_reactive_context() {
+        if cfg!(debug_assertions) {
+            let held = CHANNEL_LOCKS_HELD.with(Cell::get);
+            assert!(
+                held == 0,
+                "state-plane lock-order inversion: entered the shared reactive context while \
+                 holding {held} channel change lock(s); the context is the outer lock"
+            );
+        }
+    }
+}
+
 impl ControllerStatePlaneGraph {
+    /// Every entry into the shared reactive context goes through here so the
+    /// lock-order checker sees it (see `state_plane_lock_order`).
+    #[track_caller]
+    fn reactive_ctx(&self) -> &ThreadSafeContext {
+        state_plane_lock_order::assert_may_enter_reactive_context();
+        &self.ctx
+    }
+
     #[cfg(test)]
     fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
         Self::new_in_with_first_version(scope, 1)
@@ -2342,7 +2427,7 @@ impl ControllerStatePlaneGraph {
             drop(effects);
             if let Some(frame) = self
                 .histories
-                .observe(&self.ctx, &channel)
+                .observe(self.reactive_ctx(), &channel)
                 .and_then(|frames| frames.last().cloned())
                 && let Some(sink) = self.sinks.lock().get(&channel).cloned()
             {
@@ -2350,13 +2435,13 @@ impl ControllerStatePlaneGraph {
             }
             return;
         }
-        let history = self
-            .histories
-            .get_or_insert_handle(&self.ctx, channel.clone(), |_, _| Vec::new());
+        let history =
+            self.histories
+                .get_or_insert_handle(self.reactive_ctx(), channel.clone(), |_, _| Vec::new());
         let dependency = self.channel_dependency(&channel);
         let sinks = Arc::clone(&self.sinks);
         let effect_channel = channel.clone();
-        let effect = self.ctx.effect(move |ctx| {
+        let effect = self.reactive_ctx().effect(move |ctx| {
             let frame = ctx.get(&history).last().cloned();
             dependency.project_change();
             let Some(frame) = frame else {
@@ -2376,7 +2461,7 @@ impl ControllerStatePlaneGraph {
             return None;
         }
         self.histories
-            .observe(&self.ctx, &channel.to_string())
+            .observe(self.reactive_ctx(), &channel.to_string())
             .and_then(|frames| frames.last().map(|frame| frame.plane_version))
     }
 
@@ -2394,13 +2479,13 @@ impl ControllerStatePlaneGraph {
         if effects.contains_key(&channel) {
             return;
         }
-        let history = self
-            .histories
-            .get_or_insert_handle(&self.ctx, channel.clone(), |_, _| Vec::new());
+        let history =
+            self.histories
+                .get_or_insert_handle(self.reactive_ctx(), channel.clone(), |_, _| Vec::new());
         let dependency = self.channel_dependency(&channel);
         let sinks = Arc::clone(&self.sinks);
         let effect_channel = channel.clone();
-        let effect = self.ctx.effect(move |ctx| {
+        let effect = self.reactive_ctx().effect(move |ctx| {
             let frame = ctx.get(&history).last().cloned();
             dependency.project_change();
             let Some(frame) = frame else {
@@ -2415,11 +2500,11 @@ impl ControllerStatePlaneGraph {
 
     fn retire_channel(&self, channel: &str) {
         if let Some(effect) = self.channel_effects.lock().remove(channel) {
-            self.ctx.dispose_effect(&effect);
+            self.reactive_ctx().dispose_effect(&effect);
         }
         self.sinks.lock().remove(channel);
         let channel_key = channel.to_string();
-        self.histories.remove(&self.ctx, &channel_key);
+        self.histories.remove(self.reactive_ctx(), &channel_key);
         if let Some(dependency) = self.channel_dependencies.lock().remove(channel) {
             dependency.project_change();
         }
@@ -2472,7 +2557,7 @@ impl ControllerStatePlaneGraph {
         }
         let mut history = self
             .histories
-            .observe(&self.ctx, &channel)
+            .observe(self.reactive_ctx(), &channel)
             .unwrap_or_default();
         anyhow::ensure!(
             base_epoch.is_none() || history.len() < STATE_PLANE_MAX_RETAINED_FRAMES_PER_CHANNEL,
@@ -2535,7 +2620,7 @@ impl ControllerStatePlaneGraph {
             message_json,
         };
         history.push(frame.clone());
-        self.histories.set(&self.ctx, channel, history);
+        self.histories.set(self.reactive_ctx(), channel, history);
         Ok((frame, false))
     }
 
@@ -2558,7 +2643,7 @@ impl ControllerStatePlaneGraph {
             let observed_revision = dependency.revision.load(Ordering::SeqCst);
             let history = self
                 .histories
-                .observe(&self.ctx, &channel.to_string())
+                .observe(self.reactive_ctx(), &channel.to_string())
                 .unwrap_or_default();
             let latest_version = history.last().map(|frame| frame.plane_version).unwrap_or(0);
             // A legacy subscriber cannot name the controller generation. If
@@ -2597,8 +2682,10 @@ impl ControllerStatePlaneGraph {
             if dependency.revision.load(Ordering::SeqCst) != observed_revision {
                 continue;
             }
+            #[cfg(test)]
+            dependency.parked_subscribers.fetch_add(1, Ordering::SeqCst);
             dependency.changed.wait_for(
-                &mut guard,
+                guard.condvar_guard(),
                 deadline.saturating_duration_since(Instant::now()),
             );
         }
@@ -13042,65 +13129,126 @@ mod tests {
         assert!(warm.timed_out, "an unchanged pull must not publish a wake");
     }
 
+    /// A sink that holds the publication Effect inside the reactive context
+    /// until the test opens its gate, after `project_change` has already
+    /// taken (context -> channel lock) and notified.
+    struct GatedStatePlaneSink {
+        entered: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl ControllerStatePlaneSink for GatedStatePlaneSink {
+        fn project(&self, _frame: ControllerStatePlaneFrame) {
+            let _ = self.entered.send(());
+            let _ = self.release.lock().recv();
+        }
+    }
+
     #[test]
     fn state_plane_subscriber_never_inverts_channel_and_process_scope_locks() {
+        // Every bounded wait below is a hang ceiling only: the interleaving is
+        // forced by gates, and an inverted lock order fails through the
+        // lock-order checker (a panic on the subscriber thread), not through
+        // elapsed time.
+        const HANG_CEILING: Duration = Duration::from_secs(30);
         let scope = agent_doc_state_scope::ProcessScope::new();
         let plane = Arc::new(ControllerStatePlaneGraph::new_in(&scope));
         let channel = "test/nonblocking-subscriber";
-        plane.ensure_channel_effect(channel);
+        let (sink_entered_tx, sink_entered_rx) = std::sync::mpsc::channel();
+        let (sink_release_tx, sink_release_rx) = std::sync::mpsc::channel();
+        plane.install_sink(
+            channel,
+            Arc::new(GatedStatePlaneSink {
+                entered: sink_entered_tx,
+                release: Mutex::new(sink_release_rx),
+            }),
+        );
         let dependency = plane.channel_dependency(channel);
 
-        // Hold the process scope inside an Effect. A subscriber must wait for
-        // that scope without owning the channel condition mutex, otherwise the
-        // publisher's notification path takes the inverse lock order and both
-        // sides deadlock.
-        let blocker = scope.ctx().source(false);
-        let entered = Arc::new(std::sync::Barrier::new(2));
-        let release = Arc::new(std::sync::Barrier::new(2));
-        let entered_effect = Arc::clone(&entered);
-        let release_effect = Arc::clone(&release);
-        let blocker_effect = blocker;
-        let blocking_effect = scope.ctx().effect(move |ctx| {
-            if ctx.get(&blocker_effect) {
-                entered_effect.wait();
-                release_effect.wait();
-            }
-        });
-        let blocking_ctx = scope.ctx().clone();
-        let blocker_thread = std::thread::spawn(move || {
-            blocking_ctx.set(&blocker, true);
-        });
-        entered.wait();
-
+        // Gate 1: a subscriber on an empty channel enters the context (observe),
+        // takes the channel lock and parks on the condvar. The parked count is
+        // written under the channel lock, so seeing it proves the subscriber
+        // got past its first context entry and into the sleep.
         let subscriber_plane = Arc::clone(&plane);
-        let subscriber_started = Arc::new(std::sync::Barrier::new(2));
-        let subscriber_started_thread = Arc::clone(&subscriber_started);
+        let (subscribed_tx, subscribed_rx) = std::sync::mpsc::channel();
         let subscriber = std::thread::spawn(move || {
-            subscriber_started_thread.wait();
-            subscriber_plane.subscribe(channel, 0, false, Duration::ZERO)
+            let subscription = subscriber_plane.subscribe(channel, 0, false, HANG_CEILING);
+            let _ = subscribed_tx.send(subscription);
         });
-        subscriber_started.wait();
-        std::thread::sleep(Duration::from_millis(50));
+        let parked_by = Instant::now() + HANG_CEILING;
+        while dependency.parked_subscribers.load(Ordering::SeqCst) == 0 {
+            assert!(
+                !subscriber.is_finished(),
+                "the subscriber left before parking: it panicked (lock-order inversion) \
+                 or returned without waiting"
+            );
+            assert!(Instant::now() < parked_by, "the subscriber never parked");
+            std::thread::yield_now();
+        }
 
-        let (notified_tx, notified_rx) = std::sync::mpsc::channel();
-        let notifier = std::thread::spawn(move || {
-            dependency.project_change();
-            let _ = notified_tx.send(());
+        // Gate 2: publish. The publication Effect runs inside the reactive
+        // context and takes the channel lock to notify (context -> channel),
+        // then blocks in the gated sink, so the publisher is still inside the
+        // context while the woken subscriber takes its own path back in
+        // (channel lock released -> context). A subscriber that re-entered the
+        // context while still holding the channel lock is the inverse order.
+        let publisher_plane = Arc::clone(&plane);
+        let publisher = std::thread::spawn(move || {
+            publisher_plane
+                .publish(
+                    channel.to_string(),
+                    "producer".to_string(),
+                    r#"{"Snapshot":{"epoch":1}}"#.to_string(),
+                    1,
+                    None,
+                )
+                .unwrap()
         });
-        // `#remainingwallclock`: the notifier either returns while the
-        // effect is still blocked (no lock inversion) or deadlocks until the
-        // release below; the bound is only a hang ceiling for that deadlock.
-        let notification_was_responsive = notified_rx.recv_timeout(Duration::from_secs(30)).is_ok();
+        let sink_by = Instant::now() + HANG_CEILING;
+        loop {
+            match sink_entered_rx.recv_timeout(Duration::from_millis(10)) {
+                Ok(()) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    assert!(
+                        !publisher.is_finished(),
+                        "the publisher left before its Effect reached the sink: it panicked \
+                         (lock-order inversion) or skipped the projection"
+                    );
+                    assert!(
+                        Instant::now() < sink_by,
+                        "the publication Effect never reached the sink"
+                    );
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    unreachable!("the sink owns the sender")
+                }
+            }
+        }
 
-        release.wait();
-        blocker_thread.join().unwrap();
-        subscriber.join().unwrap();
-        notifier.join().unwrap();
-        scope.ctx().dispose_effect(&blocking_effect);
+        let subscription = subscribed_rx.recv_timeout(HANG_CEILING);
+        let subscriber_panicked = subscriber.join().is_err();
+        sink_release_tx.send(()).unwrap();
+        let (frame, replayed) = publisher.join().unwrap();
         assert!(
-            notification_was_responsive,
-            "a state-plane subscriber held its channel mutex while waiting for the process scope"
+            !subscriber_panicked,
+            "a state-plane subscriber entered the reactive context while holding its channel lock"
         );
+        let subscription =
+            subscription.expect("the subscriber stayed blocked behind the in-flight publication");
+        assert!(!replayed);
+        assert!(!subscription.timed_out);
+        assert_eq!(subscription.frames, vec![frame]);
+    }
+
+    #[test]
+    #[should_panic(expected = "state-plane lock-order inversion")]
+    fn state_plane_lock_order_checker_rejects_context_entry_under_a_channel_lock() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let plane = ControllerStatePlaneGraph::new_in(&scope);
+        plane.ensure_channel_effect("test/inverted");
+        let dependency = plane.channel_dependency("test/inverted");
+        let _held = dependency.change_lock.lock();
+        plane.latest_plane_version("test/inverted");
     }
 
     #[test]

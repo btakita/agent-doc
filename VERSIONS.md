@@ -4,6 +4,22 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+- **The state-plane subscriber lock-order test now detects an inversion
+  (`#stateplanesubscriber`).** `state_plane_subscriber_never_inverts_channel_and_process_scope_locks`
+  passed with the pre-fix inversion restored (channel lock taken before the loop
+  and held across every history read). It blocked an unrelated Effect and called
+  `subscribe` with a zero timeout. Lazily runs Effects outside its state lock, so
+  the blocked Effect held nothing the subscriber waited on. The zero timeout also
+  returned before the subscriber reached its wait loop. The state plane now
+  carries a debug-build lock-order checker: the reactive context is the outer
+  lock, a channel's `change_lock` the inner one, and entering the context while
+  holding a channel lock panics. The test parks a subscriber on the condvar
+  (proven by a counter written under the channel lock), then publishes through an
+  Effect held inside the context by a gated sink. A `should_panic` test keeps the
+  checker armed. Three inversions fail the new test: the pre-fix form, a
+  frontier peek under the lock after waking, and `publish` holding the channel
+  lock across its history write. No runtime behavior changes in release builds.
+
 - **A head waiting on the operator (`⏳`) is no longer reported as a fresh operator prompt every preflight
   (`#regressionawaitingoperat`).** On a `subagents` queue whose first head `do [#id]` tracked an
   `[operator-verify]` item, every preflight reported `+do [#id]` as the cycle diff (`[user+]`, a

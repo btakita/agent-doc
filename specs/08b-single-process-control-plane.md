@@ -119,6 +119,18 @@ fail-closed; socket-only adoption applies only while status is not yet ready.
   pinned by Rust/Kotlin conformance tests. Protobuf is an optional future node
   payload codec when generated bindings across enough independent runtimes
   justify it; the state plane and Lazily graph are not coupled to protobuf.
+- Lock order (`#stateplanesubscriber`): the shared reactive context (the
+  process scope's `ThreadSafeContext`) is the outer lock and a channel's
+  `change_lock` is the inner one. Publication Effects run inside the context
+  and take `change_lock` to make notify + sleep atomic, so a subscriber reads
+  the channel history before taking `change_lock`, and nothing on the state
+  plane enters the context while holding it. Debug builds enforce the order:
+  every `change_lock` acquisition goes through `ChannelChangeLock`, every
+  context entry goes through `ControllerStatePlaneGraph::reactive_ctx`, and an
+  entry while the thread holds a channel lock panics. The checker exists
+  because Lazily runs Effects outside its state lock: an inverted subscriber
+  usually stalls publication briefly instead of deadlocking, so a race-shaped
+  test cannot see it.
 
 ## State authority
 

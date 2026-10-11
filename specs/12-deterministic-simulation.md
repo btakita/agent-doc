@@ -140,6 +140,17 @@ so the regression fails instead of hanging the suite. "Admitted without waiting"
 is proven by counting observations, and "refused before the backstop" by the
 refusal's type (the backstop's overrun is untyped).
 
+A lock-order property is proven by an order checker, not by a race
+(`#stateplanesubscriber`). When the two locks do not form a cycle under the
+current runtime (Lazily runs Effects outside its state lock, so a state-plane
+subscriber that inverts the order only stalls a publisher), no interleaving
+deadlocks and a deadlock-shaped test passes with the inversion in place. The
+test instead forces the path that takes each order with gates: a subscriber
+parked on the condvar (a counter written under the channel lock proves it got
+there) and a publication Effect held inside the context by a gated sink after
+it notified. The debug-build checker panics at the first acquisition in the
+wrong order, and a `should_panic` test keeps the checker armed.
+
 Where a wall-clock bound remains, it is a hang ceiling, never a latency budget:
 either a generous ceiling (30-60s, well under nextest's 180s per-test guard)
 over an operation that otherwise hangs, run on a helper thread or child process

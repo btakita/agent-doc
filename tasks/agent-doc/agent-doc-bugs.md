@@ -281,11 +281,12 @@ The `#refreshmemlockstall` subagent is still running `make check-fast`.
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.
 - 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/237
-- #gh-fix: https://github.com/btakita/agent-doc/issues/238
+- 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/238
 - 🚧 do [#refreshmemlockstall]
-- #actionable-review
-- I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.
+- ~~#actionable-review~~
+- 🚧 I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.
 - ~~release + publish~~
+- do [#drivecapturedsplice]
 <!-- /agent:queue -->
 
 ## Backlog

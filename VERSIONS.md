@@ -14,6 +14,18 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   drainability, while its gate (`queue_supervisor_drainable`) was true because of a drainable head below it;
   the head is now the one that gate found. Queue subagent dispatch never offers a head awaiting the operator,
   through either the item tag or the queue-level attribute, until the operator answers it inline.
+- **`make tla` no longer fails when another TLC runs at the same time.** A `make check` failed once with
+  `File does not exist: /tmp/Naturals.tla while looking in these directories: jar:...tla2tools-1.7.4.jar!/...`
+  while `make tla` alone passed. The jar was fine: TLC copies each standard module out of the jar to the fixed
+  path `${java.io.tmpdir}/<Module>.tla` and marks it `deleteOnExit`, and `java.io.tmpdir` is `/tmp` on Linux
+  even when `TMPDIR` is set, so every TLC on the host shared those files and one JVM exiting deleted (or a
+  concurrent write truncated) the copy another was about to parse. Reproduced with concurrent TLC runs sharing
+  a temp dir (exact error text, plus `Could not parse module TLC` from a truncated copy); zero failures with a
+  private temp dir. `scripts/run_tla.sh` now pins `-Djava.io.tmpdir` to its own work dir, runs from a
+  checksum-verified snapshot of the jar there, refreshes a stale cache by atomic rename instead of delete +
+  download, and reports a standard-module load failure as an environment failure instead of a non-vacuity
+  failure. `make tla-runner-self-test` (in `make check`) checks this deterministically under a hostile
+  `JAVA_TOOL_OPTIONS`, including that an unisolated TLC does fail there.
 
 - **Each checkout's test ceiling always bounds that checkout (`#checktmpdirleak`).** The report that one
   worktree's `make check` "printed another worktree's path" in its nextest `test-isolation` setup line was a

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Usage: scripts/run_tla.sh             model-check every module under formal/tla
+#        scripts/run_tla.sh --self-test check the runner's own isolation (below)
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # v1.8.0 is the upstream rolling prerelease: its tag and release asset are
 # replaced by CI, so a pinned checksum eventually rejects a different binary at
@@ -10,30 +13,185 @@ tools_sha256="936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
 tools_url="https://github.com/tlaplus/tlaplus/releases/download/v${tools_version}/tla2tools.jar"
 tools_jar="${TLA_TOOLS_JAR:-${repo_root}/target/tla/tla2tools-${tools_version}.jar}"
 
-if [[ -f "${tools_jar}" ]] && ! printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status; then
-  echo "[tla] cached tools checksum changed; refreshing ${tools_jar}" >&2
-  rm -f "${tools_jar}"
-fi
+# --- Run isolation -----------------------------------------------------------
+#
+# TLC does not read the standard modules (Naturals, Sequences, FiniteSets, TLC,
+# ...) out of the jar. `util.SimpleFilenameToStream` copies each one to the
+# FIXED path `${java.io.tmpdir}/<Module>.tla`, marks it `deleteOnExit`, and only
+# then checks that the file exists and parses it. `java.io.tmpdir` is `/tmp` on
+# Linux whatever `TMPDIR` says, so every TLC process on the host shares those
+# files: one process exiting deletes the `Naturals.tla` another has just written,
+# and a concurrent rewrite hands a reader a truncated `TLC.tla`. That is how a
+# `make tla` running beside another checkout's `make tla` failed with
+#
+#   File does not exist: /tmp/Naturals.tla while looking in these directories:
+#   jar:file:.../tla2tools-1.7.4.jar!/tla2sany/StandardModules/
+#
+# while the jar itself was intact. Every java process below therefore gets a
+# `java.io.tmpdir` private to this run, and runs from a checksum-verified
+# snapshot of the jar inside the run's own work dir, so a concurrent refresh or
+# clean of `target/tla` cannot change the classpath under an in-flight run.
 
-if [[ ! -f "${tools_jar}" ]]; then
-    command -v curl >/dev/null 2>&1 || {
-        echo "[tla] curl is required to download the pinned TLA+ tools" >&2
-        exit 1
-    }
-    mkdir -p "$(dirname "${tools_jar}")"
-    partial="${tools_jar}.partial"
-    curl --fail --location --silent --show-error "${tools_url}" --output "${partial}"
-    printf '%s  %s\n' "${tools_sha256}" "${partial}" | sha256sum --check --status
-    mv "${partial}" "${tools_jar}"
-fi
-
-printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status || {
-    echo "[tla] checksum mismatch for ${tools_jar}" >&2
+die() {
+    echo "$*" >&2
     exit 1
 }
 
+jar_ok() {
+    printf '%s  %s\n' "${tools_sha256}" "$1" | sha256sum --check --status
+}
+
+# Make `tools_jar` a verified copy of the pinned release. A stale or corrupt
+# cache is replaced by an atomic rename over it - never deleted first - so a
+# concurrent run that is snapshotting it sees either the old file or the new
+# one, never a missing or half-written jar.
+ensure_tools_jar() {
+    if [[ -f "${tools_jar}" ]] && jar_ok "${tools_jar}"; then
+        return 0
+    fi
+    if [[ -f "${tools_jar}" ]]; then
+        echo "[tla] cached tools checksum changed; refreshing ${tools_jar}" >&2
+    fi
+    command -v curl >/dev/null 2>&1 ||
+        die "[tla] curl is required to download the pinned TLA+ tools"
+    mkdir -p "$(dirname "${tools_jar}")"
+    local partial
+    partial="$(mktemp "${tools_jar}.partial.XXXXXX")"
+    if ! curl --fail --location --silent --show-error "${tools_url}" --output "${partial}" ||
+        ! jar_ok "${partial}"; then
+        rm -f "${partial}"
+        die "[tla] download of ${tools_url} failed or did not match the pinned SHA-256"
+    fi
+    mv -f "${partial}" "${tools_jar}"
+}
+
+# Point this run at `$1`: snapshot the verified jar into it and give java a
+# private temp dir there. Sets `tools_snapshot` and `java_tmp`.
+isolate_run() {
+    tools_snapshot="$1/tla2tools.jar"
+    java_tmp="$1/java-tmp"
+    mkdir -p "${java_tmp}"
+    cp "${tools_jar}" "${tools_snapshot}"
+    jar_ok "${tools_snapshot}" ||
+        die "[tla] ${tools_jar} changed while it was being snapshotted (checksum mismatch on the copy); rerun"
+}
+
+tla_java() {
+    java -XX:+UseParallelGC "-Djava.io.tmpdir=${java_tmp}" -cp "${tools_snapshot}" "$@"
+}
+
+# True when a TLC log failed because the standard modules could not be loaded -
+# an environment fault, never a verdict about the model.
+standard_module_failure() {
+    grep -Eq 'File does not exist: .* while looking in these directories: jar:.*StandardModules|Could not parse module (Naturals|Integers|Reals|Sequences|FiniteSets|Bags|TLC|TLCExt|RealTime|Json|Randomization|Toolbox) from file' "$1"
+}
+
+standard_module_diagnostic() {
+    echo "[tla] ENVIRONMENT FAILURE, not a model result: TLC could not load a standard" >&2
+    echo "[tla] module (Naturals, TLC, ...). TLC extracts them from the tools jar into" >&2
+    echo "[tla] java.io.tmpdir, which this run pins to ${java_tmp}. Check that the" >&2
+    echo "[tla] directory is writable and was not removed mid-run, and that" >&2
+    echo "[tla] JAVA_TOOL_OPTIONS / _JAVA_OPTIONS do not override java.io.tmpdir." >&2
+}
+
+# Run one model check that must pass. Output still streams to the console; the
+# copy in `$1` lets a failure be classified.
+check_passes() {
+    local log="$1"
+    shift
+    if ! tla_java tlc2.TLC "$@" 2>&1 | tee "${log}"; then
+        if standard_module_failure "${log}"; then
+            standard_module_diagnostic
+        fi
+        die "[tla] model check failed: tlc2.TLC $*"
+    fi
+}
+
+# --- Self-test ---------------------------------------------------------------
+#
+# Deterministic, not a race: a hostile `JAVA_TOOL_OPTIONS` points the JVM's
+# default temp dir at a directory that does not exist, which fails the standard
+# module lookup with exactly the production error text. The isolated runner must
+# pass under it; an unisolated java must fail under it (so the check has teeth);
+# and a run must survive its source jar being truncated after the snapshot.
+self_test() {
+    ensure_tools_jar
+    selftest_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla-selftest.XXXXXX")"
+    trap 'rm -rf "${selftest_dir}"' EXIT
+    local dir="${selftest_dir}"
+    cat >"${dir}/Tiny.tla" <<'TLA'
+---- MODULE Tiny ----
+EXTENDS Naturals, Sequences, FiniteSets, TLC
+VARIABLE x
+Init == x = 0
+Next == x < 2 /\ x' = x + 1
+Spec == Init /\ [][Next]_x
+====
+TLA
+    printf 'SPECIFICATION Spec\n' >"${dir}/Tiny.cfg"
+    local hostile="-Djava.io.tmpdir=${dir}/no-such-dir"
+
+    # 1. Non-vacuity: without a private tmpdir the hostile default breaks TLC
+    #    with the production error, and the classifier recognises it.
+    if (cd "${dir}" && JAVA_TOOL_OPTIONS="${hostile}" java -cp "${tools_jar}" tlc2.TLC \
+        -deadlock -workers 1 -metadir "${dir}/states-bare" Tiny.tla >"${dir}/bare.log" 2>&1); then
+        cat "${dir}/bare.log" >&2
+        die "[tla] self-test: an unisolated TLC passed with java.io.tmpdir unusable - the check below would be vacuous"
+    fi
+    standard_module_failure "${dir}/bare.log" || {
+        cat "${dir}/bare.log" >&2
+        die "[tla] self-test: unisolated failure was not classified as a standard-module failure"
+    }
+
+    # 2. The isolated runner passes under the same hostile default.
+    mkdir -p "${dir}/run"
+    isolate_run "${dir}/run"
+    (cd "${dir}" && JAVA_TOOL_OPTIONS="${hostile}" tla_java tlc2.TLC \
+        -deadlock -workers 1 -metadir "${dir}/states-isolated" Tiny.tla >"${dir}/isolated.log" 2>&1) || {
+        cat "${dir}/isolated.log" >&2
+        die "[tla] self-test: TLC failed although java.io.tmpdir was pinned to the run's work dir"
+    }
+
+    # 3. A run keeps working after its source jar is truncated (a concurrent
+    #    refresh or clean of target/tla in the same checkout).
+    cp "${tools_jar}" "${dir}/source.jar"
+    local saved_jar="${tools_jar}"
+    tools_jar="${dir}/source.jar"
+    mkdir -p "${dir}/run2"
+    isolate_run "${dir}/run2"
+    : >"${dir}/source.jar"
+    (cd "${dir}" && tla_java tlc2.TLC -deadlock -workers 1 \
+        -metadir "${dir}/states-snapshot" Tiny.tla >"${dir}/snapshot.log" 2>&1) || {
+        cat "${dir}/snapshot.log" >&2
+        die "[tla] self-test: TLC failed after the source jar was truncated - the run is not using its snapshot"
+    }
+    tools_jar="${saved_jar}"
+
+    # 4. A model verdict is not misread as an environment failure.
+    if (cd "${dir}" && tla_java tlc2.TLC -workers 1 \
+        -metadir "${dir}/states-deadlock" Tiny.tla >"${dir}/deadlock.log" 2>&1); then
+        die "[tla] self-test: the deadlocking Tiny model passed"
+    fi
+    grep -q 'Error: Deadlock reached' "${dir}/deadlock.log" ||
+        die "[tla] self-test: expected a deadlock verdict from Tiny"
+    if standard_module_failure "${dir}/deadlock.log"; then
+        die "[tla] self-test: a deadlock verdict was classified as a standard-module failure"
+    fi
+
+    echo "[tla] runner self-test: ok"
+}
+
+if [[ "${1:-}" == "--self-test" ]]; then
+    self_test
+    exit 0
+fi
+[[ $# -eq 0 ]] || die "usage: $0 [--self-test]"
+
+ensure_tools_jar
+
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
+isolate_run "${work_dir}"
 
 modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet LifecycleSequence LayoutWidthBound EditorTransportHealth ControllerLifecycle)
 
@@ -269,20 +427,20 @@ done
     cd "${work_dir}"
 for module in "${modules[@]}"; do
     if grep -Eq '\(\* --(fair )?algorithm' "${module}.tla"; then
-      java -XX:+UseParallelGC -cp "${tools_jar}" pcal.trans "${module}.tla"
+      tla_java pcal.trans "${module}.tla"
     fi
 # `-metadir` is explicit because TLC otherwise derives it from the current time
 # to the SECOND, and two checks that start inside the same second collide with
 # "that directory already exists". With the same module now checked under several
 # configs that is not a rare race, it is the common case.
-java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto \
+check_passes "${module}.log" -workers auto \
     -metadir "${work_dir}/states-${module}" "${module}.tla"
 done
 
 for entry in "${must_pass[@]}"; do
     module="${entry%%:*}"
     config="${entry#*:}"
-    java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto \
+    check_passes "${module}-${config}.log" -workers auto \
         -metadir "${work_dir}/states-${module}-${config}" \
         -config "${config}.cfg" "${module}.tla"
 done
@@ -292,7 +450,7 @@ for entry in "${must_violate[@]}"; do
     config="${entry#*:}"
     log="${module}-${config}.log"
     # `set -e` is active, so guard the intentionally-failing run.
-    if java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto \
+    if tla_java tlc2.TLC -workers auto \
         -metadir "${work_dir}/states-${module}-${config}" \
         -config "${config}.cfg" "${module}.tla" >"${log}" 2>&1; then
         echo "[tla] NON-VACUITY FAILURE: ${module} with ${config}.cfg was expected to" >&2
@@ -301,6 +459,11 @@ for entry in "${must_violate[@]}"; do
         echo "[tla] longer constrains it - the positive run is now vacuous." >&2
         tail -40 "${log}" >&2
         exit 1
+    fi
+    if standard_module_failure "${log}"; then
+        tail -40 "${log}" >&2
+        standard_module_diagnostic
+        die "[tla] ${module} with ${config}.cfg did not run; its non-vacuity obligation is unchecked"
     fi
     if ! grep -Eq 'Error: (Deadlock reached|Temporal properties were violated|Invariant .* is violated)' "${log}"; then
         echo "[tla] NON-VACUITY FAILURE: ${module} with ${config}.cfg failed, but not" >&2

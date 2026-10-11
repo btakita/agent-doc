@@ -142,6 +142,16 @@ Closing `#drivecapturedsplice` as done on the live evidence. Scratch docs are un
 **Deferred:** this went to a background subagent (claim `subagent:clearqueued`, worktree `agent-doc-wt/clearqueued`, branch `clearqueued`). Some context: the refusal itself was correct. Pane %149 is this session, and my turn was genuinely running the live captured-splice verification when you pressed Clear. The suspected defect is the contract around the refusal. The outcome names `unblocker=clear_queued_behind_busy_turn`, but no clear is queued: it exits 1, tells you to retry, and the editor files it as a `terminal_failure` fix prompt. The subagent will check that against the code, then either queue the clear for the turn's idle boundary (with a non-error `queued` outcome, and dropped if it's superseded) or fix the reporting and classification. Either way it adds tests and updates the specs.
 
 Your edit to that queue line only joined its lines; the text is otherwise unchanged, so there was nothing new to forward. When both subagents report back, I'll integrate both branches serially, run one `make check` and one `make install`, release the claims, and close both items. In the meantime, you can clear this session's context once this turn ends.
+
+### Re: is the release published — opus-5.5 · 2026-10-11T15:50-04:00
+
+> **Chat prompt (#chatprompt):** Is the release published?
+
+Yes. v0.35.490 is fully published:
+- The GitHub Release was published at 18:20:03Z and is not a draft. It has every platform archive plus `SHA256SUMS`.
+- PyPI's latest version is 0.35.490, and the PyPI workflow's install-and-run check (run 38163374161) passed.
+
+No newer tag exists; v0.35.490 is the latest. The two fixes from this session's subagents are not released yet: `splicevrfy` (the verifier accepting the CRDT-forward recovery) and `clearqueued` (a Clear Session Context pressed during a live turn is now queued). Both are merged in the `integrate-0493` worktree, where the full `make check` is still running. Once it passes, I'll push to main and run `make install`. They then ship in the next tagged release.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 

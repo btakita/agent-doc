@@ -2257,9 +2257,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 .is_some_and(|retry| retry.unlandable);
                 let facts = CapturedFinalizeResumeFacts {
                     captured_operation_present: true,
-                    // Diagnostic only: a captured finalize owns its closeout
-                    // lease and must recover even while the Stop hook keeps the
-                    // harness actor active.
+                    // Diagnostic only: a captured finalize must recover even
+                    // while the Stop hook keeps the harness actor active. The
+                    // worker acquires the closeout lease itself before any
+                    // mutation (`#closeoutleaseresume`).
                     actor_ready: actor_ready_fast,
                                 current_transition_pending: current_transition_pending_for_idle_queue(&path),
                                 ipc_inflight: agent_doc_ipc_io::inflight_connection_handlers(),

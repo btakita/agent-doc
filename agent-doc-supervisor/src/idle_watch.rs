@@ -11,11 +11,21 @@ use agent_doc_state_scope::LocalProcessScope;
 use lazily::{Computed, Source};
 
 /// Scalar gate for a supervisor-owned captured-finalize resume. The effectful
-/// idle watch supplies these facts. A durable captured operation already owns
-/// the closeout lease, so recovery must remain live even while the harness turn
-/// is blocked by its Stop hook. A pending Lazily current transition, IPC,
-/// controller pressure, maintenance, and another resume worker remain the actual
-/// concurrency gates.
+/// idle watch supplies these facts. Recovery must remain live even while the
+/// harness turn is blocked by its Stop hook, so the harness actor is diagnostic
+/// only. A pending Lazily current transition, IPC, controller pressure,
+/// maintenance, and another resume worker are the admission gates.
+///
+/// This gate admits an attempt; it does NOT grant the closeout lease
+/// (`#closeoutleaseresume`). A durable capture does not own the lease — a live
+/// `respond` closeout of the same cycle may hold it. The worker acquires the
+/// lease through the controller actor's closeout-owner CAS before any document,
+/// queue, snapshot or commit mutation, on every closeout path including the
+/// legacy repair fallback. A pre-read of the owner here would be a stale copy of
+/// that CAS, so the gate does not try. A refused claim comes back as a
+/// `RetryAt` lease deadline (`retry_cooldown_elapsed` stays false until then),
+/// and the foreground owner's release publishes a captured-finalize wake that
+/// preempts the deadline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapturedFinalizeResumeFacts {
     pub captured_operation_present: bool,

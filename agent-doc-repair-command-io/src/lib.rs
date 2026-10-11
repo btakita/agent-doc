@@ -879,12 +879,86 @@ fn resume_captured_finalize_intent(
 
     // Backward-compatible recovery for captures written before the typed
     // mutation plan became part of the Lazily intent.
-    agent_doc_repair_io::repair_preserving_live_authority(
-        agent_doc_repair_runtime_io::repair_coordinator_effects(
-            &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
-        ),
-        file,
-    )
+    run_legacy_resume_repair_under_closeout_lease(&RuntimeLegacyResumeRepair, file, expected)
+}
+
+/// Effects of the legacy captured-finalize repair fallback, split so the lease
+/// ordering is testable without a controller (`#closeoutleaseresume`).
+trait LegacyResumeRepairEffects {
+    type Lease;
+    /// Claim the closeout lease for `cycle_id`. `Ok(None)` means the cycle was
+    /// superseded; a lease held by another closeout is an `Err` carrying the
+    /// retry deadline.
+    fn claim_closeout_lease(&self, file: &Path, cycle_id: &str) -> Result<Option<Self::Lease>>;
+    fn ensure_lease_still_held(&self, lease: &Self::Lease) -> Result<()>;
+    fn repair(&self, file: &Path) -> Result<RepairOutcome>;
+}
+
+struct RuntimeLegacyResumeRepair;
+
+impl LegacyResumeRepairEffects for RuntimeLegacyResumeRepair {
+    type Lease = agent_doc_write_runtime_io::CapturedFinalizeResumeCloseoutLease;
+
+    fn claim_closeout_lease(&self, file: &Path, cycle_id: &str) -> Result<Option<Self::Lease>> {
+        Ok(
+            match agent_doc_write_runtime_io::claim_captured_finalize_resume_closeout_lease(
+                file, cycle_id,
+            )? {
+                agent_doc_write_runtime_io::CapturedFinalizeResumeLeaseClaim::Acquired(lease) => {
+                    Some(lease)
+                }
+                agent_doc_write_runtime_io::CapturedFinalizeResumeLeaseClaim::CycleSuperseded => {
+                    None
+                }
+            },
+        )
+    }
+
+    fn ensure_lease_still_held(&self, lease: &Self::Lease) -> Result<()> {
+        lease.ensure_still_held()
+    }
+
+    fn repair(&self, file: &Path) -> Result<RepairOutcome> {
+        agent_doc_repair_io::repair_preserving_live_authority(
+            agent_doc_repair_runtime_io::repair_coordinator_effects(
+                &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
+            ),
+            file,
+        )
+    }
+}
+
+/// `#closeoutleaseresume` (GH #240 follow-up): the legacy repair coordinator
+/// strikes answered queue heads, advances the snapshot and commits. It runs
+/// only while this resume holds the cycle's closeout lease, acquired through
+/// the same controller actor CAS a live `respond` closeout holds — so the two
+/// can never drive one closeout at once.
+///
+/// A lease held by another closeout propagates as an error with the lease
+/// deadline (`CLOSEOUT_OWNER_RETRY_AT_MARKER`), which the resume classifies
+/// as `RetryAt`: one bounded timer edge that any earlier document edge
+/// preempts, never a poll loop. A superseded cycle mutates nothing.
+fn run_legacy_resume_repair_under_closeout_lease<E: LegacyResumeRepairEffects>(
+    effects: &E,
+    file: &Path,
+    expected: &CapturedFinalizeResumeKey,
+) -> Result<RepairOutcome> {
+    let Some(lease) = effects.claim_closeout_lease(file, &expected.cycle_id)? else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "captured_finalize_resume_legacy_repair_skipped file={} cycle_id={} capture_id={} reason=cycle_superseded",
+                file.display(),
+                expected.cycle_id,
+                expected.capture_id,
+            ),
+        );
+        return Ok(RepairOutcome::Noop);
+    };
+    effects.ensure_lease_still_held(&lease)?;
+    let outcome = effects.repair(file);
+    drop(lease);
+    outcome
 }
 
 /// The `refusing structurally invalid canonical target for <file> (<reason>)`
@@ -1099,6 +1173,118 @@ fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResu
 #[cfg(test)]
 mod captured_finalize_resume_tests {
     use super::*;
+
+    /// `#closeoutleaseresume`: a scripted legacy-repair seam recording the
+    /// order of lease and repair effects.
+    struct ScriptedLegacyRepair {
+        claim: std::cell::RefCell<Option<Result<Option<&'static str>>>>,
+        lease_lost: bool,
+        events: std::cell::RefCell<Vec<&'static str>>,
+    }
+
+    impl ScriptedLegacyRepair {
+        fn new(claim: Result<Option<&'static str>>) -> Self {
+            Self {
+                claim: std::cell::RefCell::new(Some(claim)),
+                lease_lost: false,
+                events: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl LegacyResumeRepairEffects for ScriptedLegacyRepair {
+        type Lease = &'static str;
+
+        fn claim_closeout_lease(
+            &self,
+            _file: &Path,
+            _cycle_id: &str,
+        ) -> Result<Option<Self::Lease>> {
+            self.events.borrow_mut().push("claim");
+            self.claim
+                .borrow_mut()
+                .take()
+                .expect("one claim per resume")
+        }
+
+        fn ensure_lease_still_held(&self, _lease: &Self::Lease) -> Result<()> {
+            if self.lease_lost {
+                anyhow::bail!("closeout owner lease was taken over");
+            }
+            Ok(())
+        }
+
+        fn repair(&self, _file: &Path) -> Result<RepairOutcome> {
+            self.events.borrow_mut().push("repair");
+            Ok(RepairOutcome::AlreadyApplied)
+        }
+    }
+
+    fn legacy_key() -> CapturedFinalizeResumeKey {
+        CapturedFinalizeResumeKey {
+            cycle_id: "cycle-1".to_string(),
+            capture_id: "capture-1".to_string(),
+            response_sha256: "sha".to_string(),
+        }
+    }
+
+    #[test]
+    fn legacy_resume_repair_runs_only_after_acquiring_the_closeout_lease() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let effects = ScriptedLegacyRepair::new(Ok(Some("lease")));
+        let outcome =
+            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key()).unwrap();
+        assert_eq!(outcome, RepairOutcome::AlreadyApplied);
+        assert_eq!(*effects.events.borrow(), vec!["claim", "repair"]);
+    }
+
+    #[test]
+    fn legacy_resume_repair_defers_without_mutating_when_the_lease_is_held() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let held = format!(
+            "closeout operation is already in progress for cycle cycle-1 by foreground-finalize-1 pid=1 role=foreground_finalize until=1900000000 [{}1900000000]",
+            agent_doc_write_runtime_io::CLOSEOUT_OWNER_RETRY_AT_MARKER,
+        );
+        let effects = ScriptedLegacyRepair::new(Err(anyhow::anyhow!(held)));
+        let err = run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key())
+            .expect_err("a held lease must refuse the repair");
+        assert_eq!(
+            *effects.events.borrow(),
+            vec!["claim"],
+            "no repair effect may run"
+        );
+        assert!(matches!(
+            classify_captured_finalize_resume_error(&format!("{err:#}")),
+            CapturedFinalizeResumeOutcome::RetryAt {
+                retry_at_secs: 1_900_000_000,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn legacy_resume_repair_is_a_no_op_for_a_superseded_cycle() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let effects = ScriptedLegacyRepair::new(Ok(None));
+        let outcome =
+            run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key()).unwrap();
+        assert_eq!(outcome, RepairOutcome::Noop);
+        assert_eq!(*effects.events.borrow(), vec!["claim"]);
+    }
+
+    #[test]
+    fn legacy_resume_repair_refuses_once_the_lease_was_taken_over() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut effects = ScriptedLegacyRepair::new(Ok(Some("lease")));
+        effects.lease_lost = true;
+        run_legacy_resume_repair_under_closeout_lease(&effects, &file, &legacy_key())
+            .expect_err("a lost lease must refuse the repair");
+        assert_eq!(*effects.events.borrow(), vec!["claim"]);
+    }
 
     /// `#closeoutstrandedmsg`: a settled closeout reports only its terminal
     /// outcome, never the superseded error's STRANDED / `agent-doc commit` remedy.

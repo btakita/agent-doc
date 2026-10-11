@@ -162,6 +162,19 @@ Fixed in the same `clearlive` change, and installed. The background-agent row no
 **Recovery once it's corrupted:** force a full redraw. Resize the pane, or press Ctrl+L, or run `tmux refresh-client`. The subagent will confirm which of these works for Claude Code.
 
 **The fix:** remove the source (the unconditional `[perf]` print) and close the stderr channel to the pane. The subagent is also checking for other bare-newline writers on paths that inherit the pane, and adding a regression test that fails on today's leak by detecting the staircase on an isolated tmux server. It will also report whether agent-doc should trigger a redraw itself after it detects foreign output.
+
+### Re: #clearnoticeverify — testing it myself — opus-5.5 · 2026-10-11T18:51-04:00
+
+> **Queue prompt:** do [#clearnoticeverify]: Test yourself
+
+> **Operator note:** Test yourself
+
+**Deferred:** this went to a background subagent (claim `subagent:clearnotice`). It will drive your running IntelliJ and real tmux server, but only against things it creates: a git-ignored scratch session doc (`agent_doc_scratch: true`) and that doc's own pane. It won't touch your existing panes or documents, and it won't run `make install`.
+1. **Plugin check:** first it confirms the running IDE has the queued-clear plugin build (0.2.537 / 0.2.538). If it doesn't, it reports that rather than restarting the IDE.
+2. **Notice checks:** it presses Clear during a running turn, expecting the "queued … runs automatically when that turn ends" notice and exactly one `/clear` at idle. Then it presses twice, expecting the re-armed wording with `evidence_age_secs`.
+3. **Background agents:** in a real Claude Code pane with a background agent running (`← N agents`) at an idle prompt, it presses Clear and records what happens to that agent: killed, orphaned, or still running into the cleared context.
+
+It will quote each notice verbatim with screenshots, fix any defect it finds on its own branch with tests, and clean up its scratch pane and tab afterwards.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -170,7 +183,7 @@ Fixed in the same `clearlive` change, and installed. The background-agent row no
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏳ do [#clearnoticeverify]
+- do [#clearnoticeverify]: Test yourself
 - 🚧 frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
 - 🚧 release + publish
 - 🚧 do [#closeoutleaseresume]

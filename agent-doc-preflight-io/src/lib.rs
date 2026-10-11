@@ -3749,6 +3749,94 @@ fn queue_entries_in_content(content: &str) -> Vec<agent_doc_queue::document_queu
         .unwrap_or_default()
 }
 
+fn exchange_component_text(content: &str) -> String {
+    agent_doc_element::element::parse(content)
+        .ok()
+        .and_then(|comps| {
+            comps
+                .iter()
+                .find(|c| c.name == "exchange")
+                .map(|c| c.content(content).to_string())
+        })
+        .unwrap_or_default()
+}
+
+/// How many committed versions of a document the `#qheadresiduescope` walk
+/// reads before it stops looking for a free-text head's queue entry.
+const FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT: usize = 128;
+
+/// `#qheadresiduescope`: the exchange as it stood just before a live free-text
+/// queue head last (re-)entered the queue, or `None` when every echo counts.
+///
+/// The catch-up residue strike matches a head against the committed exchange,
+/// which keeps every earlier answer. An operator who types the same report
+/// again (a repeated bug report), or un-strikes an answered head, has asked
+/// for it again, so an echo written before that re-entry does not answer it.
+///
+/// The entry point comes from git history, the one record of when a line
+/// appeared that survives closed editor epochs, restarts and snapshot
+/// rewrites. The walk reads the document's commits newest first while the head
+/// is live in the queue (`gate_norm` identity, any `Prompt` row) and stops at
+/// the first commit in which it is not: struck, deleted, or not yet typed. That
+/// commit's exchange is the anchor, and only text written after it can answer
+/// the head. Operator op captures are not used: they hold only the active
+/// epoch, which a non-operator projection closes long before a later cycle's
+/// catch-up runs.
+///
+/// `None` (whole exchange, the prior behavior) when the document has no commit
+/// history or the head was live in every commit back to the document's first:
+/// every echo then postdates the head. When the walk hits its limit with the
+/// head still live, the oldest version read is the anchor. That can only hide
+/// an echo written more than the limit's worth of commits ago, which an earlier
+/// pass would already have struck.
+fn free_text_head_entry_anchor_exchange(
+    file: &Path,
+    queue_id: &str,
+    head_norm: &str,
+    gate_norm: &dyn Fn(&str) -> String,
+) -> Option<String> {
+    let head_live_in = |content: &str| -> bool {
+        let mut entries = queue_entries_for_id(content, queue_id);
+        if entries.is_empty() {
+            entries = queue_entries_in_content(content);
+        }
+        entries.iter().any(|entry| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(p) => {
+                gate_norm(&p.text) == head_norm
+            }
+            _ => false,
+        })
+    };
+    let mut anchor: Option<String> = None;
+    let mut oldest_live: Option<String> = None;
+    let visited = agent_doc_git_io::revision::walk_file_revisions(
+        file,
+        FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT,
+        |content| match content {
+            Some(content) if head_live_in(content) => {
+                oldest_live = Some(exchange_component_text(content));
+                true
+            }
+            Some(content) => {
+                anchor = Some(exchange_component_text(content));
+                false
+            }
+            None => {
+                anchor = Some(String::new());
+                false
+            }
+        },
+    )
+    .unwrap_or(0);
+    if anchor.is_some() {
+        return anchor;
+    }
+    if visited >= FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT {
+        return oldest_live;
+    }
+    None
+}
+
 fn queue_entries_for_id(
     content: &str,
     queue_id: &str,
@@ -5024,15 +5112,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     // the strike to heads already present in the committed queue (mirroring
     // session-check's `committed_queue_contains_active_free_text_head`), so an
     // in-flight operator edit the convergence just added is never struck.
-    let exchange_text = agent_doc_element::element::parse(&current_content)
-        .ok()
-        .and_then(|comps| {
-            comps
-                .iter()
-                .find(|c| c.name == "exchange")
-                .map(|c| c.content(&current_content).to_string())
-        })
-        .unwrap_or_default();
+    let exchange_text = exchange_component_text(&current_content);
     if !exchange_text.trim().is_empty() {
         // Normalized prose of every free-text head committed in the snapshot — the
         // in-flight-edit gate. `snapshot_queue_entries` was parsed above.
@@ -5063,6 +5143,22 @@ pub fn run_queue_maintenance_with_coin_gate(
         );
         let claimed =
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);
+        // `#ftstrikeclaimedmention`: a claimed head is residue only on an exact
+        // `> **Queue prompt:**` echo, the same proof session-check and the
+        // finalize strike require of it. `#deferstrike`: an echo followed by a
+        // deferral keeps the head queued.
+        let answered_residue_in = |exchange: &str, head: &str| -> bool {
+            (if claimed.claims(head) {
+                agent_doc_queue::queue_response::free_text_head_has_explicit_answer_evidence(
+                    exchange, head,
+                )
+            } else {
+                free_text_head_answered_by_response(exchange, head)
+            }) && !agent_doc_queue::queue_response::latest_free_text_head_echo_is_deferral(
+                exchange, head,
+            )
+        };
+        let mut predating_echo_heads = 0usize;
         let mut struck_claimed_heads: Vec<String> = Vec::new();
         let mut struck_count = 0usize;
         let new_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = activation
@@ -5081,23 +5177,32 @@ pub fn run_queue_maintenance_with_coin_gate(
                     // with no action taken.
                             if !agent_doc_queue::queue_continuation::is_recurring_imperative_head(&p.text)
                                 && queue_prompt_text_is_free_text(&current_content, &p.text)
-                                // `#ftstrikeclaimedmention`: a claimed head is
-                                // residue only on an exact `> **Queue prompt:**`
-                                // echo, the same proof session-check and the
-                                // finalize strike require of it.
-                                && (if claimed.claims(&p.text) {
-                                    agent_doc_queue::queue_response::free_text_head_has_explicit_answer_evidence(
-                                        &exchange_text,
-                                        &p.text,
-                                    )
-                                } else {
-                                    free_text_head_answered_by_response(&exchange_text, &p.text)
-                                })
-                                && !agent_doc_queue::queue_response::latest_free_text_head_echo_is_deferral(
-                                    &exchange_text,
-                                    &p.text,
-                                )
-                                && committed_free_text.contains(&gate_norm(&p.text)) =>
+                                && committed_free_text.contains(&gate_norm(&p.text))
+                                && answered_residue_in(&exchange_text, &p.text)
+                                // `#qheadresiduescope`: only an echo written
+                                // after the head (re-)entered the queue
+                                // answers it. An echo of an earlier, already
+                                // answered copy of the same text is history.
+                                && match free_text_head_entry_anchor_exchange(
+                                    file,
+                                    &selected_queue_id,
+                                    &gate_norm(&p.text),
+                                    &gate_norm,
+                                ) {
+                                    None => true,
+                                    Some(anchor) => {
+                                        let newer = agent_doc_queue::queue_response::exchange_text_newer_than(
+                                            &exchange_text,
+                                            &anchor,
+                                        );
+                                        let answered_after_entry =
+                                            answered_residue_in(&newer, &p.text);
+                                        if !answered_after_entry {
+                                            predating_echo_heads += 1;
+                                        }
+                                        answered_after_entry
+                                    }
+                                } =>
                 {
                     struck_count += 1;
                     if claimed.claims(&p.text) {
@@ -5124,6 +5229,15 @@ pub fn run_queue_maintenance_with_coin_gate(
                 other => other.clone(),
             })
             .collect();
+        if predating_echo_heads > 0 {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_freetext_residue_strike_skipped_echo_predates_head_entry file={} heads={predating_echo_heads} (#qheadresiduescope)",
+                    file.display(),
+                ),
+            );
+        }
         if struck_count > 0 {
             let new_body = agent_doc_queue::document_queue::render(&new_entries);
             current_content = {
@@ -15610,6 +15724,187 @@ mod tests {
         assert!(
             active.iter().any(|t| t.contains("do [#beta]")),
             "unanswered id-backed head must remain an active Prompt:\nactive={active:?}"
+        );
+    }
+
+    /// `#qheadresiduescope` fixture: a session document whose exchange holds
+    /// `exchange` and whose queue body is `queue`.
+    fn residue_scope_doc(exchange: &str, queue: &str) -> String {
+        format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue: start\n---\n\n<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:queue priority go -->\n{queue}- :pushpin: do [#beta]\n<!-- /agent:queue -->\n\n<!-- agent:backlog priority queue -->\n- [ ] [#beta] second item still open\n<!-- /agent:backlog -->\n"
+        )
+    }
+
+    /// Commit `content` as `session.md` in the fixture's git repository and make
+    /// it the committed snapshot, as a closeout does.
+    fn residue_scope_commit(dir: &Path, doc: &Path, content: &str, message: &str) {
+        std::fs::write(doc, content).unwrap();
+        for args in [
+            vec!["add", "session.md"],
+            vec!["-c", "commit.gpgsign=false", "commit", "-q", "-m", message],
+        ] {
+            let out = Command::new("git")
+                .current_dir(dir)
+                .args(&args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+    }
+
+    fn residue_scope_queue_rows(doc: &Path) -> (Vec<String>, Vec<String>) {
+        let updated = std::fs::read_to_string(doc).unwrap();
+        let mut active = Vec::new();
+        let mut completed = Vec::new();
+        for entry in queue_entries_in_content(&updated) {
+            match entry {
+                agent_doc_queue::document_queue::QueueEntry::Prompt(p) => active.push(p.text),
+                agent_doc_queue::document_queue::QueueEntry::Completed(p) => completed.push(p.text),
+                _ => {}
+            }
+        }
+        (active, completed)
+    }
+
+    const RESIDUE_SCOPE_REPORT: &str =
+        "the session list flickers when a second pane opens the same document";
+
+    /// The cycle that answered the report the first time: its echo, then the
+    /// head struck in the committed queue.
+    fn residue_scope_first_answer() -> String {
+        format!(
+            "### Re: session list flicker\n\n> **Queue prompt:** {RESIDUE_SCOPE_REPORT}\n\nFixed the double registration.\n\n"
+        )
+    }
+
+    /// `#qheadresiduescope` (backlog: the catch-up residue strike can still
+    /// strike a re-typed free-text head). The operator reported a bug, a cycle
+    /// answered it (echo + strike), the bug came back, and the operator typed
+    /// the same report again. A later cycle answered something else and the
+    /// closeout did not quote the report. The catch-up strike matched the head
+    /// against EVERY earlier `Queue prompt` echo, so the old answer struck the
+    /// new report without anyone looking at it. Only echoes written after the
+    /// head re-entered the queue may answer it. Both re-entry shapes are
+    /// covered: the old struck row deleted, and the old struck row kept with
+    /// the new line typed below it.
+    #[test]
+    fn run_queue_maintenance_keeps_retyped_repeated_report_live() {
+        for keep_struck_row in [false, true] {
+            let dir = setup_project();
+            let doc = dir.path().join("session.md");
+            let report_row = format!("- {RESIDUE_SCOPE_REPORT}\n");
+            let struck_row = format!("- ~~{RESIDUE_SCOPE_REPORT}~~\n");
+            residue_scope_commit(
+                dir.path(),
+                &doc,
+                &residue_scope_doc("", &report_row),
+                "operator reports the bug",
+            );
+            let answered = residue_scope_first_answer();
+            residue_scope_commit(
+                dir.path(),
+                &doc,
+                &residue_scope_doc(&answered, &struck_row),
+                "cycle answers and strikes it",
+            );
+            let retyped_queue = if keep_struck_row {
+                format!("{struck_row}{report_row}")
+            } else {
+                report_row.clone()
+            };
+            // The re-typed head lands in a commit together with an unrelated
+            // answer: this closeout did not quote the report.
+            let later = format!(
+                "{answered}### Re: other\n\n> **Queue prompt:** rename the export button to download\n\nRenamed.\n\n"
+            );
+            residue_scope_commit(
+                dir.path(),
+                &doc,
+                &residue_scope_doc(&later, &retyped_queue),
+                "operator re-types the report; unrelated closeout",
+            );
+
+            for pass in 0..2 {
+                let _ = run_queue_maintenance(&doc, None).unwrap();
+                let (active, _) = residue_scope_queue_rows(&doc);
+                assert!(
+                    active.iter().any(|t| t.contains(RESIDUE_SCOPE_REPORT)),
+                    "keep_struck_row={keep_struck_row} pass={pass}: a re-typed report \
+                     answered only BEFORE it re-entered the queue must stay live:\n{}",
+                    std::fs::read_to_string(&doc).unwrap()
+                );
+            }
+            let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+                .unwrap_or_default();
+            assert!(
+                ops.contains("preflight_freetext_residue_strike_skipped_echo_predates_head_entry"),
+                "the skipped strike must be logged:\n{ops}"
+            );
+        }
+    }
+
+    /// `#qheadresiduescope` counterpart: the re-typed report IS answered by a
+    /// newer echo (written after its re-entry) that the cycle's own strike
+    /// missed. The catch-up still strikes it.
+    #[test]
+    fn run_queue_maintenance_strikes_retyped_report_answered_after_reentry() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let report_row = format!("- {RESIDUE_SCOPE_REPORT}\n");
+        let struck_row = format!("- ~~{RESIDUE_SCOPE_REPORT}~~\n");
+        residue_scope_commit(
+            dir.path(),
+            &doc,
+            &residue_scope_doc("", &report_row),
+            "operator reports the bug",
+        );
+        let answered = residue_scope_first_answer();
+        residue_scope_commit(
+            dir.path(),
+            &doc,
+            &residue_scope_doc(&answered, &struck_row),
+            "cycle answers and strikes it",
+        );
+        residue_scope_commit(
+            dir.path(),
+            &doc,
+            &residue_scope_doc(&answered, &report_row),
+            "operator re-types the report",
+        );
+        let answered_again = format!(
+            "{answered}### Re: session list flicker, again\n\n> **Queue prompt:** {RESIDUE_SCOPE_REPORT}\n\nThe second registration path is fixed too.\n\n"
+        );
+        residue_scope_commit(
+            dir.path(),
+            &doc,
+            &residue_scope_doc(&answered_again, &report_row),
+            "cycle answers the re-typed report; its strike was missed",
+        );
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        let (active, completed) = residue_scope_queue_rows(&doc);
+        assert!(
+            !active.iter().any(|t| t.contains(RESIDUE_SCOPE_REPORT)),
+            "a head answered after its re-entry is completed residue:\n{}",
+            std::fs::read_to_string(&doc).unwrap()
+        );
+        assert!(
+            completed.iter().any(|t| t.contains(RESIDUE_SCOPE_REPORT)),
+            "the answered head must be struck, not dropped: {completed:?}"
+        );
+        assert!(
+            active.iter().any(|t| t.contains("do [#beta]")),
+            "the unanswered id-backed head stays live: {active:?}"
         );
     }
 

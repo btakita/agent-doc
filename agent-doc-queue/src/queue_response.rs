@@ -1075,6 +1075,36 @@ pub fn latest_free_text_head_echo_is_deferral(text: &str, head_text: &str) -> bo
     deferral_scope_has_marker(&blocks, index)
 }
 
+/// The part of `current_exchange` written after `anchor_exchange`
+/// (`#qheadresiduescope`).
+///
+/// `anchor_exchange` is the exchange as it stood when a queue head (re-)entered
+/// the queue. Responses land at one end of the exchange (`patch=append`, or
+/// `prepend`), so the newer text is what lies between the longest common
+/// leading run of lines and the longest common trailing run. The two runs never
+/// overlap the anchor, so when the anchor is a whole prefix (append) the result
+/// is exactly the appended tail. A compaction or edit of older history shrinks
+/// the common runs, which only widens the result back toward the whole
+/// exchange: the scoping can hide an old echo, never a new one.
+pub fn exchange_text_newer_than(current_exchange: &str, anchor_exchange: &str) -> String {
+    let current: Vec<&str> = current_exchange.lines().collect();
+    let anchor: Vec<&str> = anchor_exchange.lines().collect();
+    let max_common = current.len().min(anchor.len());
+    let prefix = current
+        .iter()
+        .zip(anchor.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let suffix = current
+        .iter()
+        .rev()
+        .zip(anchor.iter().rev())
+        .take(max_common - prefix)
+        .take_while(|(a, b)| a == b)
+        .count();
+    current[prefix..current.len() - suffix].join("\n")
+}
+
 /// Whether the block at `index` plus the block after it states a deferral.
 ///
 /// Blockquote lines are the head's own echo, not the response's statement
@@ -1774,6 +1804,35 @@ mod tests {
     fn free_text_head_answered_by_response_rejects_short_unlabeled_heads() {
         let resp = "### Re: x\n\n> - fix it now\n";
         assert!(!free_text_head_answered_by_response(resp, "fix it now"));
+    }
+
+    /// `#qheadresiduescope`: only text written after the anchor is newer, for an
+    /// appended and a prepended exchange; a rewrite of older history widens the
+    /// result instead of hiding a newer response.
+    #[test]
+    fn exchange_text_newer_than_returns_only_text_after_the_anchor() {
+        let old =
+            "### Re: a\n\n> **Queue prompt:** the widget crashes on save every time\n\nFixed.\n";
+        let newer = "### Re: b\n\nUnrelated answer.\n";
+        let appended = format!("{old}\n{newer}");
+        let scoped = exchange_text_newer_than(&appended, old);
+        assert!(scoped.contains("Unrelated answer."), "{scoped}");
+        assert!(!scoped.contains("widget crashes"), "{scoped}");
+        assert!(!free_text_head_answered_by_response(
+            &scoped,
+            "the widget crashes on save every time"
+        ));
+
+        let prepended = format!("{newer}\n{old}");
+        let scoped = exchange_text_newer_than(&prepended, old);
+        assert!(scoped.contains("Unrelated answer."), "{scoped}");
+        assert!(!scoped.contains("widget crashes"), "{scoped}");
+
+        assert_eq!(exchange_text_newer_than(old, old), "");
+        let compacted = format!("Summary of earlier turns.\n\n{newer}");
+        let scoped = exchange_text_newer_than(&compacted, old);
+        assert!(scoped.contains("Summary of earlier turns."), "{scoped}");
+        assert!(scoped.contains("Unrelated answer."), "{scoped}");
     }
 
     #[test]

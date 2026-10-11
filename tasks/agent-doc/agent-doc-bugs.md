@@ -124,7 +124,23 @@ It runs under the queue preset's authorization (commit and push its own branch; 
 Understood. The "have" vs "provide" divergence was your speculation and is now withdrawn. The `fix/typingforkdup` subagent already has that correction: it determines the duplication mechanism from evidence only (haiven-dev commit `bb26315c`, git history, `ops.log`/`state.db`) and does not assume the fork.
 
 The repeated chat lines, "Can I delete the duplicated queue item now?" and "Do the fix in a subagent", were answered in the previous response. Yes, delete the duplicate; the evidence is preserved in `bb26315c`. The fix is already running in that subagent. Nothing else changes.
-<!-- agent:boundary:1b97294e -->
+> **Chat prompt (#chatprompt):** release 0.35.487 without waiting for visiblewriteloadflake
+
+### Re: release 0.35.487 — opus-5.5 · 2026-10-11T00:25-04:00
+
+**There's nothing left to wait on.** `visiblewriteloadflake` finished, `4925690b0`, and it is already merged into the release tree.
+
+- **Release commit:** `release: v0.35.487` (`e6d36e647`) on `integrate/toolsslow-20261010`. Version projected, VERSIONS.md entry and editor parity row written.
+- **Contents:** 13 changes:
+  - the retained actionable-mirror fix
+  - `respondfinalizehard`, `pypireleaseworkflow`, GH #235, GH #236
+  - the dev.md Codex clear fix, `idefocusowner`
+  - `visiblewriteloadflake`, `hookstalemsgfile`, `relayhubtestisolation`, `typingforkdup`
+  - the tools.md drain fix and its lint fix, already on main
+- **Now running:** the one authoritative `make check` on that exact tree; nextest has just started 10013 tests.
+- **Next, if it passes:** fast-forward main, `make release` (tmux-ci, tag, GitHub Release + PyPI, `install-full`), verify the published assets and PyPI version, then close every shipped item.
+- **Next batch:** `capturegatedispatched` (`436cb0652`) arrived after this boundary and goes there.
+<!-- agent:boundary:8c45a2ce -->
 <!-- /agent:exchange -->
 
 <!--

@@ -1392,22 +1392,54 @@ editor session.
 Whether a captured operator edit actually **recovered across an independently
 advanced canonical response** is decided from receipts, by
 `agent-doc verify-captured-splice-recovery <FILE>` (`#activateinstalledjetbrai`).
-A pass requires three receipts for one document, in order: a
-`controller_crdt_current_text source=captured-local-splice-recovery
-status=current` read; then an `editor_op_capture_proof` with `operator_ops >= 1`
-and `shadow_replay=agreed`; then a later splice-recovery `status=current` read
-whose `text_hash` **differs** from the first. Ordering is part of the property —
-an operator capture entirely before or after every advance establishes nothing —
-and a disagreeing shadow replay discards the burst, so those ops never reached
-the merge.
+The verifier asserts the property, not one mechanism (`#splicevrfyforward`): two
+receipt shapes deliver it, and either one passes. The 2026-10-11 live run on
+0.35.490 recovered edit two through the CRDT forward path without ever running
+the splice fallback; a verifier that accepted only the fallback failed a run that
+proved the property.
 
-Each failure names its missing link, because these are different diagnoses: no
-splice recovery ran; splice recoveries ran but never resolved `status=current`
-(the editor replica, not op capture, is the blocker); the canonical text never
-advanced between two recoveries; no capture proof classified an operator op; or
-proofs exist but their shadow replay disagreed. An absence of capture proofs
-entirely is an unobserved reporter chain, which is not the same as a proof that
-classified every op as non-operator.
+- **Fallback triple** (`shape=fallback`): three receipts for one document, in
+  order: a `controller_crdt_current_text source=captured-local-splice-recovery
+  status=current` read; then an `editor_op_capture_proof` with `operator_ops >= 1`
+  and `shadow_replay=agreed`; then a later splice-recovery `status=current` read
+  whose `text_hash` **differs** from the first.
+- **CRDT forward** (`shape=crdt_forward`): four receipts for one document, in
+  order: a `crdt_response_cell_add applied=true delivery_converged=false` — the
+  canonical response advanced while editor delivery was **retained**, so the
+  editor replica is stale; then an `editor_op_capture_proof` with
+  `operator_ops >= 1`, `shadow_replay=agreed`, and a known `merge_base` that is
+  **not** the prefix of that advance's post-advance `content_hash` — the edit was
+  stamped on a base that does not contain the advance; then a
+  `crdt_document_op_delta_ingested outcome=Applied { changed: true }` — the
+  editor delta merged into canonical; then a
+  `crdt_commit_barrier ready=true visible_delivery_projected=true` — delivery
+  converged after the merge. An advance that converged immediately is the
+  healthy path and never satisfies this shape, nor does a capture whose
+  `merge_base` is `unavailable` or already the post-advance canonical, a capture
+  that was refused, an `Applied { changed: false }` duplicate, or a merge whose
+  delivery never converged. These receipt names are `OpsLogEvent` variants, so a
+  producer rename is a compile error rather than a silent verifier false negative.
+
+Ordering is part of the property in both shapes — an operator capture entirely
+before or after every advance establishes nothing — and a disagreeing shadow
+replay discards the burst, so those ops never reached the merge.
+
+Each failure names its missing link, because these are different diagnoses. For
+the fallback: no splice recovery ran; splice recoveries ran but never resolved
+`status=current` (the editor replica, not op capture, is the blocker); the
+canonical text never advanced between two recoveries; no capture proof
+classified an operator op; or proofs exist but their shadow replay disagreed. For
+CRDT forward: no applied advance; the advance never retained delivery; no capture
+after the advance (naming any `editor_op_capture_refused` reasons, or an
+unobserved reporter chain when there are none); no operator or no agreed capture
+after it; a capture on an unknown or post-advance base; no applied delta; or no
+converged delivery. When neither shape holds the failure reports both shapes'
+missing links. An absence of capture proofs entirely is an unobserved reporter
+chain, which is not the same as a proof that classified every op as
+non-operator. The 2026-10-11 receipts are kept verbatim as a fixture
+(`src/fixtures/captured_splice_crdt_forward_2026_10_11.ops.log`), and each
+CRDT-forward acceptance clause has a mutation test that breaks exactly that
+clause in the fixture and must fail.
 
 `editor_op_epoch_closed cause=` must never be read as evidence for or against
 this property. `agent_doc_clear_editor_op_epoch` is its only producer and writes
@@ -1452,12 +1484,22 @@ violated and each of which silently produced a recipe that could not pass:
   still retained. The harness then types edit two against that stale replica
   before awaiting the advance,
   so a healthy-path delivery cannot satisfy the stale-replica proof.
+  After edit two the harness waits for a fresh receipt of **either** recovery
+  shape (a splice-recovery read or an applied CRDT delta), never for one
+  mechanism, and defers the verdict to the binary.
   `tmp/live-repro/` remains ignored by the product repository; captured-splice
   baselines its one scratch document through an isolated bare `GIT_DIR` plus the
-  product tree as `GIT_WORK_TREE`. Only the advance inherits those variables,
-  so the real strict response cycle has a commit boundary without creating a
-  nested `.agent-doc`, terminating in `commit_refused_ignored_path`, or modifying
-  the product repository's `HEAD`.
+  product tree as `GIT_WORK_TREE`, without creating a nested `.agent-doc` or
+  modifying the product repository's `HEAD`. Only the advance process inherits
+  those variables, and that covers only a **local** commit. The proof requires a
+  live editor, and with one attached `write --commit` delegates the commit to the
+  already-running project controller (`controller_commit_document`), which
+  commits with its own environment against the product repository and refuses
+  the ignored scratch (`commit_skipped_ignored_path`, `commit_error ... refusing
+  to commit ignored untracked path`). No environment export can reach a running
+  daemon, so the harness names that controller-side refusal explicitly; the
+  splice verdict never depends on the scratch commit. Giving the scratch a real
+  commit boundary needs a controller-side override, not a harness change.
   `--dry-run` types nothing, so no fresh receipt can arrive: it names each wait
   instead of performing it and prints the whole recipe offline.
 

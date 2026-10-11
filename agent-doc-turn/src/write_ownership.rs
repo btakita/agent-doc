@@ -451,6 +451,19 @@ pub const AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN: &str =
 /// exactly that.
 pub const RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN: &str = "retained=delivery_projection_pending";
 
+/// The marker a binary-owned CLI write's bounded convergence wait stamps on its
+/// deferral (`#binaryownedcli`): the write is durable in the editor authority,
+/// the command already waited on the delivery-convergence edge, and the change
+/// becomes visible on its own. The CLI exits with the distinct deferred status
+/// (75) and no dogfood fix prompt. A caller that sees it must neither retry the
+/// write nor start a second convergence wait of its own.
+pub const RETAINED_CLI_WRITE_DEFERRED_TOKEN: &str = "status=retained_write_deferred";
+
+/// Whether a rendered error is a binary-owned CLI write deferral.
+pub fn is_retained_cli_write_deferred(message: &str) -> bool {
+    message.contains(RETAINED_CLI_WRITE_DEFERRED_TOKEN)
+}
+
 /// Whether a rendered error is a retained-write refusal.
 ///
 /// True means the write **reached the editor authority and was retained** — the

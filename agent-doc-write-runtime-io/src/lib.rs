@@ -4378,6 +4378,11 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 #[cfg(test)]
 mod gh131_pending_only_tests;
 
+// `#binaryownedcli`: standalone CLI writes against a real, late-converging
+// editor replica.
+#[cfg(test)]
+mod binary_owned_cli_write_tests;
+
 #[cfg(test)]
 mod closeout_owner_network_tests {
     //! `#netadv3` F4/F5, replaying `formal/tla/AgentDocCloseoutNet.tla` traces

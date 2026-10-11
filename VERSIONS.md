@@ -43,6 +43,22 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   behaviour is unchanged when no one waits; cross-process clients still find a detached controller by
   connecting.
 - **The continuation offer no longer skips a re-typed report answered only before it re-entered the queue (`#qheadresiduescope`).** The `#syntheticstrike` continuation-head skip in `agent-doc-queue/src/queue_continuation.rs` matched a live free-text head against every `> **Queue prompt:**` echo in the exchange, so an operator who typed an already-answered report again (or un-struck it) had the new copy left out of `queue_continuation_required` / the next head. It now uses the same entry-point scope as the preflight catch-up residue strike, through one shared implementation: `queue_head_entry::FreeTextHeadEntryWalk` (pure, `agent-doc-queue`) and `agent_doc_git_io::revision::free_text_head_entry_anchor_exchange` (git reads), called by both preflight and the queue-io continuation adapter via the new `required_continuation_excluding_claimed_scoped`. A head answered after its re-entry is still skipped; claimed and recurring-imperative handling is unchanged. Tests: `continuation_offers_a_retyped_report_answered_only_before_reentry` (both re-entry shapes; fails with the scoping disabled), `continuation_skips_a_retyped_report_answered_after_reentry`, `required_continuation_offers_a_retyped_head_answered_only_before_reentry`, `queue_head_entry::tests::*`.
+- **A retained-then-converging CLI write is no longer reported as a failure (`#binaryownedcli`).** On
+  2026-10-11 `agent-doc backlog <FILE> add`, `backlog remove --contains`, `queue sync`, and `queue consume
+  --id` on a live-editor document each exited 1 with `visible document write ... is retained by the lazy
+  delivery projection [retained=delivery_projection_pending]` plus a dogfood `projection_failure` fix
+  prompt, although ops.log shows the next delivery edge converging within seconds (e.g. `queue_sync`
+  deferred at `delivery_version=30`, converged at 31) and `agent-doc read` showed the change. The standalone
+  `backlog`/`icebox`/`review`/`queue` commands now install a binary-owned CLI write policy
+  (`agent_doc_write_converge_io::retained_cli_write`): at the shared write-convergence boundary, a refusal
+  carrying the narrow pending token blocks on the delivery-convergence edge (embedded-relay or controller
+  subscription, no polling sleeps; default 30s, `AGENT_DOC_RETAINED_CLI_WRITE_WAIT_MS`) and the command
+  continues with exit 0 once the authority carries the written components. If the bound expires while
+  still retained, the command exits **75** with `[agent-doc] deferred (exit 75):
+  [status=retained_write_deferred] ...` — not an error, no dogfood prompt, do not re-run. Every other
+  refusal (no registered replica, sync pending, rejecting endpoint) still exits 1. No disk write or force is
+  ever attempted; the response/closeout path is unchanged. Regression tests drive each command against a
+  real embedded relay with an editor replica that acknowledges only after the command entered its await.
 
 - **Each checkout's test ceiling always bounds that checkout (`#checktmpdirleak`).** The report that one
   worktree's `make check` "printed another worktree's path" in its nextest `test-isolation` setup line was a

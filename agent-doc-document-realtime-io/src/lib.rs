@@ -864,6 +864,15 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConve
         crate::guard_visible_delivery_convergence(file, source)
     }
 
+    fn await_retained_delivery_projection(
+        &self,
+        file: &Path,
+        source: &str,
+        wait: std::time::Duration,
+    ) -> Result<agent_doc_write_converge_io::retained_cli_write::RetainedDeliveryAwait> {
+        crate::await_retained_delivery_projection(file, source, wait)
+    }
+
     fn guard_visible_write_expected_current(
         &self,
         file: &Path,
@@ -6687,6 +6696,135 @@ pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<(
             }
         }
     }
+}
+
+/// `#binaryownedcli`: block until a retained write's delivery projection
+/// converges, or `wait` expires.
+///
+/// Event-driven: each iteration parks on the delivery-convergence cell
+/// (`await_delivery_change` — the embedded relay's subscription in-process, the
+/// controller's `delivery_convergence_await` otherwise) keyed by the version it
+/// just observed, so it wakes on the next delivery edge, never on a timer. No
+/// disk write, delivery request, or recovery is attempted: waiting is the only
+/// effect. An unobservable edge ends the wait as `StillRetained` (deferred),
+/// never as converged.
+pub fn await_retained_delivery_projection(
+    file: &Path,
+    source: &str,
+    wait: std::time::Duration,
+) -> Result<agent_doc_write_converge_io::retained_cli_write::RetainedDeliveryAwait> {
+    use agent_doc_write_converge_io::retained_cli_write::RetainedDeliveryAwait;
+    let deadline = std::time::Instant::now() + wait;
+    note_retained_cli_write_await_entered(file);
+    // A subscription that returns without the version moving twice in a row
+    // has stopped being an edge source; stop instead of spinning on it.
+    let mut stalled_wakeups = 0usize;
+    let mut last_version: Option<u64> = None;
+    loop {
+        let version = match query_live_editor_authority(file, source)? {
+            agent_doc_crdt_relay_io::CurrentText::Detached => {
+                return Ok(RetainedDeliveryAwait::Converged {
+                    observed_text: None,
+                });
+            }
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                delivery_converged: true,
+                text,
+                ..
+            } => {
+                return Ok(RetainedDeliveryAwait::Converged {
+                    observed_text: Some(text),
+                });
+            }
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                delivery_version, ..
+            } => delivery_version,
+            // The replica stopped being reachable while we waited. The write is
+            // still durable in the authority; report it as deferred.
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+                return Ok(RetainedDeliveryAwait::StillRetained);
+            }
+        };
+        if last_version == Some(version) {
+            stalled_wakeups += 1;
+            if stalled_wakeups >= 2 {
+                return Ok(RetainedDeliveryAwait::StillRetained);
+            }
+        } else {
+            stalled_wakeups = 0;
+        }
+        last_version = Some(version);
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(RetainedDeliveryAwait::StillRetained);
+        }
+        match await_delivery_change(file, version, remaining) {
+            Ok(Some(_)) => {}
+            // No hub and no controller observes this document: there is no
+            // edge to wait on.
+            Ok(None) | Err(_) => return Ok(RetainedDeliveryAwait::StillRetained),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+static RETAINED_CLI_WRITE_AWAITS_ENTERED: LazyLock<(
+    Mutex<std::collections::HashMap<std::path::PathBuf, usize>>,
+    parking_lot::Condvar,
+)> = LazyLock::new(|| {
+    (
+        Mutex::new(std::collections::HashMap::new()),
+        parking_lot::Condvar::new(),
+    )
+});
+
+#[inline]
+fn note_retained_cli_write_await_entered(file: &Path) {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let key = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let (entered, changed) = &*RETAINED_CLI_WRITE_AWAITS_ENTERED;
+        *entered.lock().entry(key).or_default() += 1;
+        changed.notify_all();
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    let _ = file;
+}
+
+/// Test edge: block until more than `after` retained CLI write awaits have
+/// entered for `file`, returning the new count — or `None` once `done` is set
+/// and [`test_support_wake_retained_cli_write_waiters`] ran. Lets a simulated
+/// editor acknowledge strictly after the barrier refused, without a
+/// wall-clock sleep.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_support_await_retained_cli_write_await_entered(
+    file: &Path,
+    after: usize,
+    done: &std::sync::atomic::AtomicBool,
+) -> Option<usize> {
+    let key = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let (entered, changed) = &*RETAINED_CLI_WRITE_AWAITS_ENTERED;
+    let mut guard = entered.lock();
+    loop {
+        let count = guard.get(&key).copied().unwrap_or(0);
+        if count > after {
+            return Some(count);
+        }
+        if done.load(std::sync::atomic::Ordering::SeqCst) {
+            return None;
+        }
+        changed.wait(&mut guard);
+    }
+}
+
+/// Wake every [`test_support_await_retained_cli_write_await_entered`] waiter so
+/// it re-checks its `done` flag.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_support_wake_retained_cli_write_waiters() {
+    let (entered, changed) = &*RETAINED_CLI_WRITE_AWAITS_ENTERED;
+    let _guard = entered.lock();
+    changed.notify_all();
 }
 
 /// Whether the editor that holds `file` is observed not serving its replica

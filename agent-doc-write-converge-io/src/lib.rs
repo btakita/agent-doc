@@ -78,6 +78,8 @@ pub struct EditorAuthorityGap {
 use std::collections::HashSet;
 use std::path::Path;
 
+pub mod retained_cli_write;
+
 #[cfg(any(test, feature = "test-support"))]
 const VISIBLE_WRITE_RECEIPT_TIMEOUT_MS: u64 = 100;
 #[cfg(not(any(test, feature = "test-support")))]
@@ -2018,6 +2020,23 @@ pub trait EditorConvergenceEffects {
     fn guard_visible_delivery_convergence(&self, file: &Path, source: &str) -> Result<()> {
         let _ = (file, source);
         Ok(())
+    }
+
+    /// `#binaryownedcli`: block on the delivery-convergence edge for a write the
+    /// post-write barrier retained, up to `wait`.
+    ///
+    /// The default is inert (`StillRetained`) so detached/test effects can never
+    /// manufacture a convergence. Runtime effects subscribe to the controller's
+    /// delivery-convergence cell; they must not poll with sleeps and must never
+    /// write disk.
+    fn await_retained_delivery_projection(
+        &self,
+        file: &Path,
+        source: &str,
+        wait: std::time::Duration,
+    ) -> Result<retained_cli_write::RetainedDeliveryAwait> {
+        let _ = (file, source, wait);
+        Ok(retained_cli_write::RetainedDeliveryAwait::StillRetained)
     }
 
     fn guard_visible_write_expected_current(
@@ -4445,6 +4464,24 @@ fn queue_consume_node_patches(
         .collect()
 }
 
+/// The post-write barrier every write-convergence entry point runs, with a
+/// retained converging projection settled under the binary-owned CLI write
+/// policy when the calling command installed it (`#binaryownedcli`).
+fn guard_visible_delivery_convergence_settling_cli_writes(
+    effects: &dyn EditorConvergenceEffects,
+    file: &Path,
+    current: &str,
+    target: &str,
+    source: &str,
+) -> Result<()> {
+    match effects.guard_visible_delivery_convergence(file, source) {
+        Ok(()) => Ok(()),
+        Err(refusal) => retained_cli_write::settle_retained_cli_write(
+            effects, file, current, target, source, refusal,
+        ),
+    }
+}
+
 pub fn converge_document_or_disk(
     effects: &dyn EditorConvergenceEffects,
     file: &Path,
@@ -4453,8 +4490,9 @@ pub fn converge_document_or_disk(
     source: &str,
 ) -> Result<()> {
     if try_editor_converge(effects, file, target, current, source)? {
-        effects.guard_visible_delivery_convergence(file, source)?;
-        return Ok(());
+        return guard_visible_delivery_convergence_settling_cli_writes(
+            effects, file, current, target, source,
+        );
     }
     anyhow::bail!(
         "{source}: refused direct disk write for {} because editor convergence did not complete",
@@ -4470,8 +4508,9 @@ pub fn converge_or_disk_write(
     source: &str,
 ) -> Result<()> {
     if try_editor_converge(effects, file, target, current, source)? {
-        effects.guard_visible_delivery_convergence(file, source)?;
-        return Ok(());
+        return guard_visible_delivery_convergence_settling_cli_writes(
+            effects, file, current, target, source,
+        );
     }
     anyhow::bail!(
         "{source}: refused direct disk write for {} because editor convergence did not complete",

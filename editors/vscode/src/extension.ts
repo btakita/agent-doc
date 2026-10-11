@@ -39,6 +39,8 @@ import {
     buildSessionSuccessHint,
     buildStartingSessionRestartBlockedMessage,
     buildTurnStatePresentation,
+    buildDeferredClearSupersededMessage,
+    DeferredClearSupersededNotices,
     parseBusySessionRestartRefusal,
     parseBusySessionClearRefusal,
     parseStartingSessionRestartRefusal,
@@ -560,6 +562,29 @@ function configureTurnStatusWatcher(): void {
     connectTurnAuthorityStream(turnAuthorityStream);
 }
 
+const deferredClearSupersededNotices = new DeferredClearSupersededNotices();
+
+/**
+ * `#clearsupersedenotice`: the supervisor dropped the operator's queued clear (a newer prompt
+ * started before the turn ended) long after `session clear` exited; the authority stream is the
+ * only path that reports it.
+ */
+function announceDeferredClearSuperseded(
+    projectRoot: string,
+    filePath: string,
+    dropped: import('./sessionUi.js').DeferredClearSuperseded | undefined,
+): void {
+    if (!deferredClearSupersededNotices.observe(filePath, dropped ?? null) || !dropped) return;
+    const rel = path.relative(projectRoot, filePath) || path.basename(filePath);
+    void vscode.window
+        .showInformationMessage(buildDeferredClearSupersededMessage(rel, dropped), 'Clear Session Context')
+        .then(async (choice) => {
+            if (choice !== 'Clear Session Context') return;
+            await vscode.window.showTextDocument(vscode.Uri.file(filePath));
+            await vscode.commands.executeCommand('agentDoc.clearSessionContext');
+        });
+}
+
 function connectTurnAuthorityStream(stream: NonNullable<typeof turnAuthorityStream>): void {
     if (stream.disposed || turnAuthorityStream !== stream) return;
     const socket = net.createConnection(controllerSocketPath(stream.projectRoot));
@@ -602,6 +627,11 @@ function connectTurnAuthorityStream(stream: NonNullable<typeof turnAuthorityStre
                 stream.controllerGeneration = frame.controller_generation;
                 stream.planeVersion = frame.plane_version;
                 if (!frame.projection) continue;
+                announceDeferredClearSuperseded(
+                    stream.projectRoot,
+                    stream.filePath,
+                    frame.projection.deferred_clear_superseded,
+                );
                 turnAuthorityCache = {
                     key: stream.key,
                     readiness: 'ready',

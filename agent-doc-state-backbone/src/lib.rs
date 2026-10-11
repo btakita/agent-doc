@@ -48,6 +48,9 @@ pub const QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str = "operator_deferre
 /// proven live by that receipt alone, before its hook wrote a lease).
 pub const QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED: &str =
     "operator_live_turn_deferred_clear";
+/// (`#clearsupersedenotice`) Retirement reason: a newer prompt started on the
+/// pane before the turn a deferred clear was queued behind ended.
+pub const QUEUE_CONTEXT_CLEAR_RETIRED_NEWER_PROMPT: &str = "newer_prompt";
 pub const QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_MANUAL_COOLDOWN: &str =
     "operator_manual_clear_cooldown";
 
@@ -612,6 +615,14 @@ pub enum StateFact {
         source: Option<String>,
         clear_epoch: u64,
         marked_secs: u64,
+        /// (`#clearsupersedenotice`) Why a still-DEFERRED clear was retired
+        /// without being delivered (`newer_prompt`: the operator continued the
+        /// conversation before the turn ended). `None` for a delivered or
+        /// otherwise settled clear. Folded into
+        /// [`QueueContextClearProjection::superseded`] so editors can tell the
+        /// operator their queued clear was dropped.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retired_reason: Option<String>,
     },
     /// An explicit operator clear was deferred while a queue-owned pane was busy;
     /// the supervisor idle watch should submit it at the next dispatch-ready gap.
@@ -2201,10 +2212,10 @@ impl DocumentStateProjection {
                 source,
                 clear_epoch,
                 marked_secs,
+                retired_reason,
                 ..
             } => {
-                self.queue.apply_context_clear_event(
-                    QueueContextClearEvent::Settled,
+                self.queue.apply_context_clear_settled(
                     QueueContextClearFields {
                         file,
                         target,
@@ -2216,6 +2227,7 @@ impl DocumentStateProjection {
                     },
                     *clear_epoch,
                     *marked_secs,
+                    retired_reason.as_deref(),
                 );
             }
             StateFact::QueueContextClearDeferred {
@@ -3699,6 +3711,43 @@ impl QueueProjection {
             .apply_event(event, fields, clear_epoch, marked_secs);
     }
 
+    /// (`#clearsupersedenotice`) Settle the context-clear window. A still-
+    /// deferred clear retired with a reason was DROPPED, not delivered: record
+    /// that as the projection's `superseded` notice so the editor can tell the
+    /// operator, who otherwise sees nothing happen after pressing Clear.
+    fn apply_context_clear_settled(
+        &mut self,
+        fields: QueueContextClearFields<'_>,
+        clear_epoch: u64,
+        marked_secs: u64,
+        retired_reason: Option<&str>,
+    ) {
+        let retired_deferral = (clear_epoch >= self.context_clear.clear_epoch
+            && matches!(self.context_clear.phase, QueueContextClearPhase::Deferred))
+        .then(|| {
+            (
+                self.context_clear.source.clone(),
+                self.context_clear.marked_secs,
+            )
+        });
+        self.context_clear.apply_event(
+            QueueContextClearEvent::Settled,
+            fields,
+            clear_epoch,
+            marked_secs,
+        );
+        if let (Some((source, deferred_at)), Some(reason)) = (retired_deferral, retired_reason) {
+            self.context_clear.superseded = Some(QueueContextClearSupersession {
+                clear_epoch,
+                target: fields.target.to_string(),
+                source,
+                reason: reason.to_string(),
+                deferred_at,
+                superseded_at: marked_secs,
+            });
+        }
+    }
+
     fn apply_drain_stall_event(
         &mut self,
         event: QueueDrainStallEvent,
@@ -3961,6 +4010,30 @@ pub struct QueueContextClearProjection {
     pub head_bytes: Option<usize>,
     pub clear_epoch: u64,
     pub marked_secs: u64,
+    /// (`#clearsupersedenotice`) The most recent deferred clear that was
+    /// retired WITHOUT being delivered. Replaced by the next supersession and
+    /// cleared when a newer clear is deferred or started, so it always
+    /// describes the operator's latest queued clear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded: Option<QueueContextClearSupersession>,
+}
+
+/// (`#clearsupersedenotice`) A deferred operator clear dropped because the
+/// operator continued the conversation before its turn ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueContextClearSupersession {
+    /// Epoch of the dropped clear; editors notify once per epoch.
+    pub clear_epoch: u64,
+    /// Pane the clear was queued for.
+    pub target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Why it was dropped (`newer_prompt`).
+    pub reason: String,
+    /// When the clear was (last) queued, Unix seconds.
+    pub deferred_at: u64,
+    /// When the supervisor dropped it, Unix seconds.
+    pub superseded_at: u64,
 }
 
 impl QueueContextClearProjection {
@@ -3990,6 +4063,14 @@ impl QueueContextClearProjection {
             }
             self.clear_epoch = clear_epoch;
             self.marked_secs = marked_secs;
+            // A newer queued or started clear supersedes any earlier
+            // "your queued clear was dropped" notice.
+            if matches!(
+                event,
+                QueueContextClearEvent::Deferred | QueueContextClearEvent::Started
+            ) {
+                self.superseded = None;
+            }
         }
     }
 
@@ -9862,6 +9943,7 @@ mod tests {
                 source: Some("stale".into()),
                 clear_epoch: 1,
                 marked_secs: 2_001,
+                retired_reason: None,
             },
         ));
         let projection = ledger.project();
@@ -9881,6 +9963,7 @@ mod tests {
                 source: Some("settled".into()),
                 clear_epoch: 2,
                 marked_secs: 2_002,
+                retired_reason: None,
             },
         ));
         let projection = ledger.project();
@@ -9980,6 +10063,100 @@ mod tests {
         assert!(!context_clear.is_pending_at(1_000));
     }
 
+    /// `#clearsupersedenotice`: a deferred clear retired with a reason (a newer
+    /// prompt started before its turn ended) is projected as a `superseded`
+    /// notice naming the dropped epoch; a plain settle (delivery) is not, and
+    /// the next queued clear retires the notice.
+    #[test]
+    fn queue_context_clear_projection_records_superseded_deferred_clear_notice() {
+        let deferred = |id: &str, epoch: u64, at: u64| {
+            state_event(
+                id,
+                StateFact::QueueContextClearDeferred {
+                    document_hash: "doc-a".into(),
+                    file: "/tmp/plan.md".into(),
+                    target: "%149".into(),
+                    harness: "claude".into(),
+                    command: "/clear".into(),
+                    source: Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED.into()),
+                    head_sha256: None,
+                    head_bytes: None,
+                    clear_epoch: epoch,
+                    marked_secs: at,
+                },
+            )
+        };
+        let settled = |id: &str, epoch: u64, at: u64, reason: Option<&str>| {
+            state_event(
+                id,
+                StateFact::QueueContextClearSettled {
+                    document_hash: "doc-a".into(),
+                    file: "/tmp/plan.md".into(),
+                    target: "%149".into(),
+                    harness: "claude".into(),
+                    command: "/clear".into(),
+                    source: Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED.into()),
+                    clear_epoch: epoch,
+                    marked_secs: at,
+                    retired_reason: reason.map(str::to_string),
+                },
+            )
+        };
+        let mut ledger = EventLedger::new();
+        ledger.append(deferred("deferred-1", 1, 1_000));
+        ledger.append(settled("settled-1", 1, 1_040, Some("newer_prompt")));
+        let projection = ledger.project();
+        let context_clear = &projection.document("doc-a").unwrap().queue.context_clear;
+        assert_eq!(context_clear.phase, QueueContextClearPhase::Idle);
+        assert_eq!(
+            context_clear.superseded,
+            Some(QueueContextClearSupersession {
+                clear_epoch: 1,
+                target: "%149".into(),
+                source: Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED.into()),
+                reason: "newer_prompt".into(),
+                deferred_at: 1_000,
+                superseded_at: 1_040,
+            })
+        );
+        let json = serde_json::to_string(context_clear).unwrap();
+        assert!(json.contains("\"superseded\""), "{json}");
+
+        // A newer queued clear retires the notice.
+        ledger.append(deferred("deferred-2", 2, 1_100));
+        let projection = ledger.project();
+        assert_eq!(projection.document("doc-a").unwrap().queue.context_clear.superseded, None);
+
+        // A delivered clear (settled with no retirement reason) is not a drop.
+        ledger.append(settled("settled-2", 2, 1_200, None));
+        let projection = ledger.project();
+        let context_clear = &projection.document("doc-a").unwrap().queue.context_clear;
+        assert_eq!(context_clear.phase, QueueContextClearPhase::Idle);
+        assert_eq!(context_clear.superseded, None);
+        assert!(!serde_json::to_string(context_clear).unwrap().contains("superseded"));
+
+        // A reason on a clear that was not deferred (in-flight) is not a drop.
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "started-1",
+            StateFact::QueueContextClearStarted {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                target: "%149".into(),
+                harness: "claude".into(),
+                command: "/clear".into(),
+                source: Some("operator_deferred_clear".into()),
+                head_sha256: None,
+                head_bytes: None,
+                clear_epoch: 1,
+                marked_secs: 1_000,
+            },
+        ));
+        ledger.append(settled("settled-started-1", 1, 1_010, Some("newer_prompt")));
+        let projection = ledger.project();
+        assert_eq!(projection.document("doc-a").unwrap().queue.context_clear.superseded, None);
+    }
+
     #[test]
     fn queue_context_clear_projection_tracks_manual_operator_cooldown_as_named_state() {
         let mut ledger = EventLedger::new();
@@ -10021,6 +10198,7 @@ mod tests {
                 source: Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_MANUAL_COOLDOWN.into()),
                 clear_epoch: 1,
                 marked_secs: 1_100,
+                retired_reason: None,
             },
         ));
         let projection = ledger.project();

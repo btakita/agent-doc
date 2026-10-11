@@ -1593,6 +1593,14 @@ into a document source; they are operator steering signals that the editor must
 surface on the active turn banner/status label so a deleted or changed prompt is
 visible before the old response is persisted blindly.
 
+`TurnProjection` also carries optional `deferred_clear_superseded` (`clear_epoch`,
+`pane`, `reason`, `superseded_at`) when the supervisor dropped the operator's latest
+queued Clear Session Context because a newer prompt started before its turn ended
+(`#clearsupersedenotice`). It is derived from the document's
+`QueueContextClearProjection.superseded`, is independent of the turn phase, and
+editors announce it once per `clear_epoch` (`editors/SPEC.md` § Clear Session
+Context; `specs/07-session-tmux-commands.md`).
+
 ### Editor Parity Requirement
 
 All editor-facing behavior in this section — `ReplicaPull` application, the

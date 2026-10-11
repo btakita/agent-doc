@@ -1649,6 +1649,26 @@ object TerminalUtil {
             "The clear runs automatically when that turn ends; it is dropped if a new prompt starts first. " +
             "Use Interrupt and clear to clear immediately instead."
 
+    /**
+     * #clearsupersedenotice: the supervisor dropped a queued clear (reported later, over the
+     * document-turn authority stream, not by the `session clear` command that queued it).
+     */
+    internal fun buildDeferredClearSupersededMessage(
+        relativePath: String,
+        dropped: DeferredClearSuperseded,
+    ): String {
+        val why =
+            if (dropped.reason == "newer_prompt") {
+                "A newer prompt started in pane ${dropped.pane} before the turn it was queued behind " +
+                    "ended, so the clear was dropped to keep the context that prompt is using."
+            } else {
+                "The supervisor dropped it in pane ${dropped.pane} (reason=${dropped.reason})."
+            }
+        return "Queued Clear Session Context was not sent for $relativePath.\n" +
+            "$why Press Clear Session Context again if you still want a fresh context, " +
+            "or use Interrupt and clear to clear immediately."
+    }
+
     internal fun parseBusySessionClearRefusal(output: String): BusySessionClearRefusal? {
         val liveTurnMatch = LIVE_TURN_CLEAR_REFUSAL_HEADER_REGEX.find(output)
         if (liveTurnMatch != null) {

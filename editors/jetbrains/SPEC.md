@@ -382,6 +382,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   controller-stream `input_required` state. JetBrains shows an important notification and editor
   banner with a `Focus Agent Terminal` action on the false-to-true transition; it does not poll or
   become a second answer authority.
+- A queued Clear Session Context the supervisor later drops (a newer prompt started before the
+  turn ended) arrives as controller-stream `deferred_clear_superseded`. `TurnStateBannerRefresher`
+  shows one information notification per dropped `clear_epoch` ("Queued clear not sent") with a
+  `Clear Session Context` action; `DeferredClearSupersededNotices` seeds its baseline from the first
+  ready frame per document so reopen/reconnect never re-announces an old drop
+  (`#clearsupersedenotice`).
 
 ### Run Feedback
 

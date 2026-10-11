@@ -10,6 +10,8 @@ import {
     buildSessionSuccessHint,
     buildStartingSessionRestartBlockedMessage,
     buildTurnStatePresentation,
+    buildDeferredClearSupersededMessage,
+    DeferredClearSupersededNotices,
     TurnProjection,
     parseBusySessionRestartRefusal,
     parseBusySessionClearRefusal,
@@ -334,5 +336,54 @@ describe('buildTurnStatePresentation (Project Controller turn-state coordination
         assert.strictEqual(presentation.label, 'agent-doc: ⚠ merge conflict');
         assert.strictEqual(presentation.tooltip, 'exchange:node-1 — operator value won');
         assert.strictEqual(presentation.guardPromptForwarding, false);
+    });
+});
+
+describe('DeferredClearSupersededNotices (#clearsupersedenotice)', () => {
+    const doc = '/repo/tasks/root.md';
+    const dropped = (epoch: number) => ({ clear_epoch: epoch, pane: '%149', reason: 'newer_prompt' });
+
+    it('seeds the baseline from the first projection without announcing an old drop', () => {
+        const notices = new DeferredClearSupersededNotices();
+        assert.strictEqual(notices.observe(doc, dropped(3)), false);
+        assert.strictEqual(notices.observe(doc, dropped(3)), false);
+        assert.strictEqual(notices.observe(doc, undefined), false);
+        assert.strictEqual(notices.observe(doc, dropped(4)), true);
+        assert.strictEqual(notices.observe(doc, dropped(4)), false);
+    });
+
+    it('announces a drop after an empty baseline exactly once per epoch and per document', () => {
+        const notices = new DeferredClearSupersededNotices();
+        assert.strictEqual(notices.observe(doc, null), false);
+        assert.strictEqual(notices.observe(doc, dropped(1)), true);
+        assert.strictEqual(notices.observe(doc, dropped(1)), false);
+        assert.strictEqual(notices.observe(doc, null), false);
+        assert.strictEqual(notices.observe(doc, dropped(2)), true);
+        assert.strictEqual(notices.observe('/repo/tasks/other.md', dropped(2)), false);
+        notices.forget(doc);
+        assert.strictEqual(notices.observe(doc, dropped(5)), false);
+    });
+
+    it('reads the field from the turn projection and names document, pane and the retry', () => {
+        const projection: TurnProjection = {
+            state: 'awaiting_response',
+            turn_in_flight: true,
+            transition_authority: 'project_controller',
+            deferred_clear_superseded: { ...dropped(7), superseded_at: 1040 },
+        };
+        const message = buildDeferredClearSupersededMessage(
+            'tasks/root.md',
+            projection.deferred_clear_superseded!,
+        );
+        assert.ok(message.startsWith('Queued Clear Session Context was not sent for tasks/root.md.\n'));
+        assert.ok(message.includes('A newer prompt started in pane %149'));
+        assert.ok(message.includes('Press Clear Session Context again'));
+        assert.ok(
+            buildDeferredClearSupersededMessage('tasks/root.md', {
+                clear_epoch: 8,
+                pane: '%2',
+                reason: 'session_restarted',
+            }).includes('reason=session_restarted'),
+        );
     });
 });

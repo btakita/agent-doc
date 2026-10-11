@@ -80,6 +80,39 @@ object TurnStateBridge {
         }
     }
 
+    /**
+     * `#clearsupersedenotice`: the dropped-queued-clear field of a READY authority frame, or `null`
+     * when the frame carries no controller projection (pending/unavailable/unparseable), which
+     * must neither seed nor reset the once-per-epoch baseline.
+     */
+    internal fun deferredClearSupersededObservation(
+        authorityJson: String?,
+    ): DeferredClearSupersededObservation? {
+        if (authorityJson.isNullOrBlank() || authorityJson == "null") return null
+        return try {
+            val authority = JsonParser.parseString(authorityJson).asJsonObject
+            if (authority.get("readiness")?.asString != "ready") return null
+            val turn = authority.getAsJsonObject("turn") ?: return null
+            DeferredClearSupersededObservation(deferredClearSuperseded(turn.toString()))
+        } catch (e: Throwable) {
+            LOG.debug("[turn-projection] dropped-clear parse failed: ${e.message}")
+            null
+        }
+    }
+
+    /** Parses `deferred_clear_superseded` from a `TurnProjection` JSON object. */
+    internal fun deferredClearSuperseded(turnJson: String): DeferredClearSuperseded? {
+        val turn = JsonParser.parseString(turnJson).asJsonObject
+        val field = turn.get("deferred_clear_superseded")?.takeIf { it.isJsonObject }?.asJsonObject
+            ?: return null
+        val epoch = field.get("clear_epoch")?.takeIf { it.isJsonPrimitive }?.asLong ?: return null
+        return DeferredClearSuperseded(
+            clearEpoch = epoch,
+            pane = field.get("pane")?.takeIf { it.isJsonPrimitive }?.asString ?: "unknown",
+            reason = field.get("reason")?.takeIf { it.isJsonPrimitive }?.asString ?: "unknown",
+        )
+    }
+
     /** Pure projection→presentation mapping (mirrors VS Code buildTurnStatePresentation). */
     fun presentation(json: String): TurnStatePresentation =
         try {

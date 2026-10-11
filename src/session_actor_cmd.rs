@@ -26,7 +26,7 @@ use agent_doc_turn_executor_tmux::context_clear::{
     context_clear_submit_blocked_line, context_clear_submit_blocked_message,
     context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
     context_clear_submit_retry_action, interrupt_clear_timeout_message,
-    live_turn_clear_refusal_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
+    live_turn_clear_queued_message, live_turn_clear_refusal_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
     protected_clear_refusal_message, terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
@@ -44,6 +44,8 @@ const CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_ENV: &str =
     "AGENT_DOC_CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS";
 const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str =
     agent_doc_state_backbone::QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED;
+const CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED: &str =
+    agent_doc_state_backbone::QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED;
 
 /// A tmux pane that has passed the `#stale-actor-pane-collision` provenance check and
 /// is therefore a safe target for **injected input** (clear / interrupt / resubmit /
@@ -738,9 +740,9 @@ pub fn clear(file: &Path) -> Result<()> {
         == ClearPreflightOutcome::DeferredPreempt
     {
         // A non-interrupting clear hit a busy pane driven by an active auto-queue
-        // loop. The loop is paused (clear cooldown) and the clear is deferred to
-        // the next idle gap; do NOT deliver it into the in-flight turn.
-        // (`#autoloop-command-preemption` Phase 2.)
+        // loop (`#autoloop-command-preemption` Phase 2) or a proven-live turn the
+        // supervisor will see end (`#clearqueuedliveturn`). The clear is queued
+        // for the next idle boundary; do NOT deliver it into the in-flight turn.
         return Ok(());
     }
     let mut restarted_fresh_from_supervisor_prompt = false;
@@ -1077,9 +1079,11 @@ fn send_clear_to_resolved_pane(
 
 /// Outcome of the pre-delivery clear projection reconcile. `Proceed` means the
 /// caller should deliver the clear normally; `DeferredPreempt` means a
-/// non-interrupting clear hit a busy pane driven by an active auto-queue loop,
-/// the loop has been paused, and the clear must NOT be delivered into the
-/// in-flight turn (`#autoloop-command-preemption` Phase 2).
+/// non-interrupting clear hit a busy pane — driven by an active auto-queue loop
+/// (`#autoloop-command-preemption` Phase 2), or running a proven-live harness
+/// turn its supervisor can observe end (`#clearqueuedliveturn`) — and one clear
+/// is queued for the supervisor to deliver at the idle boundary. It must NOT be
+/// delivered into the in-flight turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClearPreflightOutcome {
     Proceed,
@@ -1216,10 +1220,54 @@ fn reconcile_idle_projection_before_clear(
                     &ctx.canonical_file,
                 )?
                 .is_some();
+            // `#clearqueuedliveturn`: a proven-live harness turn ends, and the
+            // document's supervisor is the actor that observes that end. When it
+            // owns the evidence pane, queue the clear behind the turn instead of
+            // refusing; without it nothing would ever deliver a queued clear, so
+            // the refusal stays.
+            let live_turn_deliverable = live_turn_evidence.is_some()
+                && live_turn_clear_deliverable_by_supervisor(
+                    supervisor_clear_inject_available(ctx),
+                    ctx.supervisor_runtime.actor_pane_id.as_deref(),
+                    evidence.pane_id.as_deref(),
+                );
             match agent_doc_queue::queue_preemption::plan_busy_clear(
                 queue_active,
                 deferred_clear_pending,
+                live_turn_deliverable,
             ) {
+                agent_doc_queue::queue_preemption::BusyClearOutcome::DeferBehindLiveTurn => {
+                    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
+                    let live_evidence = live_turn_evidence.unwrap_or("unknown");
+                    agent_doc_controller_io::project_controller::queue_context_clear_deferred_for_file(
+                        &ctx.canonical_file,
+                        pane,
+                        &ctx.harness,
+                        harness_clear_command(&ctx.harness),
+                        CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED,
+                        None,
+                    )?;
+                    agent_doc_ops_log_io::log_op(
+                        &ctx.canonical_file,
+                        &format!(
+                            "session_clear_live_turn_deferred file={} pane={} source={} evidence={} ui_outcome=queued (#clearqueuedliveturn)",
+                            ctx.canonical_file.display(),
+                            pane,
+                            evidence.source,
+                            live_evidence,
+                        ),
+                    );
+                    eprintln!(
+                        "{}",
+                        live_turn_clear_queued_message(
+                            &ctx.canonical_file,
+                            evidence.pane_id.as_deref(),
+                            evidence.source,
+                            live_evidence,
+                        )
+                    );
+                    return Ok(ClearPreflightOutcome::DeferredPreempt);
+                }
                 agent_doc_queue::queue_preemption::BusyClearOutcome::PauseAndDefer => {
                     // Record the deferred clear so the supervisor pauses the loop,
                     // delivers it at the next idle gap, and resumes
@@ -1318,6 +1366,20 @@ fn reconcile_idle_projection_before_clear(
         }
     }
     Ok(ClearPreflightOutcome::Proceed)
+}
+
+/// `#clearqueuedliveturn`: can the document's supervisor deliver a clear
+/// queued behind the live turn? It must be healthy and reachable, and it must
+/// own the very pane the live-turn evidence names — the supervisor watch only
+/// ever delivers into its own pane, so a clear queued for any other pane would
+/// never run.
+fn live_turn_clear_deliverable_by_supervisor(
+    supervisor_inject_available: bool,
+    supervisor_pane: Option<&str>,
+    evidence_pane: Option<&str>,
+) -> bool {
+    supervisor_inject_available
+        && matches!((supervisor_pane, evidence_pane), (Some(owned), Some(live)) if owned == live)
 }
 
 /// GH #232: the live-turn evidence the supervisor uses
@@ -6945,5 +7007,26 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         assert!(!agent_doc_restart_prompt_visible(captured));
         assert!(!live_pane_prompt_ready(&harness, captured));
+    }
+
+    /// `#clearqueuedliveturn`: a clear is queued behind a live turn only when
+    /// the supervisor that will observe the turn end owns that exact pane.
+    #[test]
+    fn live_turn_clear_is_deliverable_only_by_the_supervisor_owning_the_live_pane() {
+        assert!(live_turn_clear_deliverable_by_supervisor(
+            true,
+            Some("%149"),
+            Some("%149")
+        ));
+        assert!(
+            !live_turn_clear_deliverable_by_supervisor(false, Some("%149"), Some("%149")),
+            "no reachable supervisor: nothing would deliver the queued clear"
+        );
+        assert!(
+            !live_turn_clear_deliverable_by_supervisor(true, Some("%7"), Some("%149")),
+            "the supervisor only delivers into its own pane"
+        );
+        assert!(!live_turn_clear_deliverable_by_supervisor(true, None, Some("%149")));
+        assert!(!live_turn_clear_deliverable_by_supervisor(true, Some("%149"), None));
     }
 }

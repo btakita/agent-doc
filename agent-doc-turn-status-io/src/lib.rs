@@ -545,6 +545,16 @@ pub fn turn_active_for_pane(base: &Path, pane: &str) -> bool {
         .is_some_and(|marker| turn_active_marker_matches_pane(&marker, pane))
 }
 
+/// (`#clearqueuedliveturn`) The fresh turn-active lease for `pane` in the
+/// project containing `file`. Its `written_at` is the `UserPromptSubmit` second
+/// of the turn, so it identifies one prompt: a deferred operator clear compares
+/// it to tell its own turn from a newer prompt.
+pub fn turn_active_marker_for_pane_for_file(file: &Path, pane: &str) -> Option<TurnActiveMarker> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    read_turn_active_marker_for_pane_at(&root, pane, now_secs())
+        .filter(|marker| turn_active_marker_matches_pane(marker, pane))
+}
+
 /// True when the project containing `file` has a fresh marker for `pane`.
 pub fn turn_active_for_pane_for_file(file: &Path, pane: &str) -> bool {
     agent_doc_project_root_io::project_root_containing(file)

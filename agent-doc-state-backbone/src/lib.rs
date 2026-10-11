@@ -40,6 +40,14 @@ pub const ROUTE_DISPATCH_SUBMIT_REASON: &str = "dispatch_submit";
 pub const ROUTE_DISPATCH_ONLY_READY_PROBE_REASON: &str = "dispatch_only_ready_probe";
 pub const QUEUE_CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS: u64 = 60;
 pub const QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str = "operator_deferred_clear";
+/// (`#clearqueuedliveturn`) An operator clear requested while a harness turn
+/// was live on a document with no auto-queue loop. It is queued behind that
+/// turn and delivered by the supervisor at the turn's idle boundary. Distinct
+/// from [`QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED`] because its delivery
+/// gate also waits out a `running` dispatch receipt (the turn may have been
+/// proven live by that receipt alone, before its hook wrote a lease).
+pub const QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED: &str =
+    "operator_live_turn_deferred_clear";
 pub const QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_MANUAL_COOLDOWN: &str =
     "operator_manual_clear_cooldown";
 
@@ -3999,7 +4007,20 @@ impl QueueContextClearProjection {
 
     pub fn is_deferred_operator_clear(&self) -> bool {
         matches!(self.phase, QueueContextClearPhase::Deferred)
-            && self.source.as_deref() == Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED)
+            && matches!(
+                self.source.as_deref(),
+                Some(
+                    QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED
+                        | QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED
+                )
+            )
+    }
+
+    /// (`#clearqueuedliveturn`) A deferred operator clear queued behind a live
+    /// harness turn (no auto-queue loop involved).
+    pub fn is_live_turn_deferred_operator_clear(&self) -> bool {
+        matches!(self.phase, QueueContextClearPhase::Deferred)
+            && self.source.as_deref() == Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED)
     }
 
     pub fn is_manual_operator_clear_cooldown(&self) -> bool {
@@ -9897,6 +9918,7 @@ mod tests {
         let context_clear = &projection.document("doc-a").unwrap().queue.context_clear;
         assert_eq!(context_clear.phase, QueueContextClearPhase::Deferred);
         assert!(context_clear.is_deferred_operator_clear());
+        assert!(!context_clear.is_live_turn_deferred_operator_clear());
         assert!(!context_clear.is_pending_at(1_000));
         assert!(!context_clear.is_pending_at(10_000));
 
@@ -9925,6 +9947,37 @@ mod tests {
                 .phase,
             QueueContextClearPhase::InFlight
         );
+    }
+
+    /// `#clearqueuedliveturn`: a clear queued behind a live turn is a deferred
+    /// operator clear (the supervisor watch delivers it) and is told apart from
+    /// the auto-loop deferral so its delivery gate can also wait out a
+    /// `running` dispatch receipt.
+    #[test]
+    fn queue_context_clear_projection_tracks_live_turn_deferred_operator_clear() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "context-clear-live-turn-deferred",
+            StateFact::QueueContextClearDeferred {
+                document_hash: "doc-a".into(),
+                file: "/tmp/plan.md".into(),
+                target: "%149".into(),
+                harness: "claude".into(),
+                command: "/clear".into(),
+                source: Some(QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED.into()),
+                head_sha256: None,
+                head_bytes: None,
+                clear_epoch: 1,
+                marked_secs: 1_000,
+            },
+        ));
+        let projection = ledger.project();
+        let context_clear = &projection.document("doc-a").unwrap().queue.context_clear;
+        assert_eq!(context_clear.phase, QueueContextClearPhase::Deferred);
+        assert!(context_clear.is_deferred_operator_clear());
+        assert!(context_clear.is_live_turn_deferred_operator_clear());
+        assert!(!context_clear.is_manual_operator_clear_cooldown());
+        assert!(!context_clear.is_pending_at(1_000));
     }
 
     #[test]

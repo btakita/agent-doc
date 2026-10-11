@@ -744,11 +744,19 @@ pub fn busy_clear_refusal_message(
     )
 }
 
+/// (`#clearqueuedliveturn`) Unblocker of the live-turn refusal. It is NOT
+/// `clear_queued_behind_busy_turn` ([`ContextClearSubmitStatus::HarnessQueuedInput`]):
+/// that names a `/clear` the harness itself queued in its composer, while this
+/// refusal is emitted before anything reaches the pane and queues nothing. It
+/// is only reached when no supervisor owns the pane to deliver a queued clear
+/// at the turn's end; with one, the clear is queued instead
+/// ([`live_turn_clear_queued_message`]).
+pub const LIVE_TURN_CLEAR_REFUSAL_UNBLOCKER: &str = "wait_for_turn_end_no_supervisor_to_queue_clear";
+
 /// GH #232: refusal when the operator-clear guard sees
-/// the supervisor's live-turn evidence (`harness_turn_live`). It is emitted
-/// BEFORE any input reaches the pane, so — unlike the post-delivery
-/// `harness_queued_input` verdict — no `/clear` is left in the harness input
-/// queue. It carries the same typed unblocker the post-delivery verdict uses.
+/// the supervisor's live-turn evidence (`harness_turn_live`) and no supervisor
+/// owns the pane to deliver a queued clear. It is emitted BEFORE any input
+/// reaches the pane, so no `/clear` is left anywhere.
 pub fn live_turn_clear_refusal_message(
     file: &Path,
     pane_id: Option<&str>,
@@ -757,12 +765,38 @@ pub fn live_turn_clear_refusal_message(
 ) -> String {
     let pane = pane_id.unwrap_or("unknown");
     format!(
-        "session_clear refused for {} because a turn is live in pane {} (harness_turn_live=true evidence={}, source={}); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker={}. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the turn and clear context.",
+        "session_clear refused for {} because a turn is live in pane {} (harness_turn_live=true evidence={}, source={}) and no supervisor owns the pane to deliver a queued clear when it ends; no `/clear` was sent or queued. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker={}. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the turn and clear context.",
         file.display(),
         pane,
         evidence,
         source,
-        ContextClearSubmitStatus::HarnessQueuedInput.unblocker(),
+        LIVE_TURN_CLEAR_REFUSAL_UNBLOCKER,
+        file.display()
+    )
+}
+
+/// (`#clearqueuedliveturn`) Prefix the editors match to show a "queued" notice
+/// instead of a failure.
+pub const LIVE_TURN_CLEAR_QUEUED_PREFIX: &str = "session_clear queued for";
+
+/// (`#clearqueuedliveturn`) A non-interrupting clear requested while a harness
+/// turn is live: nothing was typed into the running turn, and one clear is
+/// queued for the document's supervisor to deliver at the turn's idle
+/// boundary. This is a success outcome (exit 0), not a refusal.
+pub fn live_turn_clear_queued_message(
+    file: &Path,
+    pane_id: Option<&str>,
+    source: &str,
+    evidence: &str,
+) -> String {
+    let pane = pane_id.unwrap_or("unknown");
+    format!(
+        "{} {} — a turn is live in pane {} (harness_turn_live=true evidence={}, source={}), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends; it is dropped instead if a newer prompt starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none. Run `agent-doc session interrupt-clear {}` to interrupt the turn and clear now.",
+        LIVE_TURN_CLEAR_QUEUED_PREFIX,
+        file.display(),
+        pane,
+        evidence,
+        source,
         file.display()
     )
 }
@@ -2030,6 +2064,10 @@ Welcome to Claude Code
 
     /// GH #232: the pre-delivery live-turn refusal carries the typed unblocker
     /// and says nothing was sent.
+    ///
+    /// `#clearqueuedliveturn`: it must not claim the clear is queued. The old
+    /// refusal borrowed `clear_queued_behind_busy_turn` from the post-delivery
+    /// harness-queued verdict while stating that no `/clear` was sent.
     #[test]
     fn live_turn_clear_refusal_message_names_unblocker_and_no_send() {
         let message = live_turn_clear_refusal_message(
@@ -2039,10 +2077,34 @@ Welcome to Claude Code
             "turn_active_lease",
         );
         assert!(message.contains("harness_turn_live=true evidence=turn_active_lease"));
-        assert!(message.contains("no `/clear` was sent"));
+        assert!(message.contains("no `/clear` was sent or queued"));
         assert!(message.contains("ui_outcome=blocked_with_exact_unblocker"));
         assert!(message.contains("next_action=wait_for_turn_or_interrupt_then_retry"));
-        assert!(message.contains("unblocker=clear_queued_behind_busy_turn"));
+        assert!(message.contains(&format!("unblocker={LIVE_TURN_CLEAR_REFUSAL_UNBLOCKER}")));
+        assert!(
+            !message.contains(ContextClearSubmitStatus::HarnessQueuedInput.unblocker()),
+            "a refusal that queued nothing must not name the harness-queued unblocker"
+        );
+        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    /// `#clearqueuedliveturn`: the queued outcome is a success report, names no
+    /// blocker, and states nothing was typed into the running turn.
+    #[test]
+    fn live_turn_clear_queued_message_reports_a_queued_non_error_outcome() {
+        let message = live_turn_clear_queued_message(
+            Path::new("/tmp/doc.md"),
+            Some("%149"),
+            "authoritative_actor",
+            "dispatch_turn_running",
+        );
+        assert!(message.starts_with(LIVE_TURN_CLEAR_QUEUED_PREFIX));
+        assert!(message.contains("evidence=dispatch_turn_running"));
+        assert!(message.contains("no `/clear` was typed into the running turn"));
+        assert!(message.contains("ui_outcome=queued ui_outcome_class=queued"));
+        assert!(message.contains("unblocker=none"));
+        assert!(!message.contains("refused"));
+        assert!(!message.contains("blocked_with_exact_unblocker"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
     }
 }

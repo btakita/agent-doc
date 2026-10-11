@@ -73,21 +73,103 @@ pub enum BusyClearOutcome {
     /// next idle gap. Do not refresh the marker, rewrite cooldown state, or send
     /// another clear into the live pane.
     AlreadyDeferred,
+    /// (`#clearqueuedliveturn`) No auto-queue loop, but the busy pane is running
+    /// a harness turn the operator-clear guard proved live, and the document's
+    /// supervisor owns that pane and can observe the turn end. Queue one clear
+    /// for delivery at that idle boundary instead of refusing: the operator
+    /// asked for a clear, the turn will end, and the supervisor is the actor
+    /// that sees it end. Nothing is typed into the running turn.
+    DeferBehindLiveTurn,
 }
 
 /// Decide what a non-interrupting `clear` does against a busy pane: a busy pane
-/// driven by an active auto-queue loop defers (pause → idle gap → run), while a
-/// busy pane with no loop keeps the existing hard block. The destructive
-/// "Interrupt and Clear" path never reaches here — it interrupts immediately.
-pub fn plan_busy_clear(queue_active: bool, deferred_clear_pending: bool) -> BusyClearOutcome {
+/// driven by an active auto-queue loop defers (pause → idle gap → run); a pane
+/// running a proven-live harness turn whose end the supervisor can observe
+/// queues the clear behind that turn (`#clearqueuedliveturn`); any other busy
+/// pane keeps the hard block, because no actor would ever deliver a queued
+/// clear there. The destructive "Interrupt and Clear" path never reaches here —
+/// it interrupts immediately.
+pub fn plan_busy_clear(
+    queue_active: bool,
+    deferred_clear_pending: bool,
+    live_turn_deliverable: bool,
+) -> BusyClearOutcome {
     if deferred_clear_pending {
         return BusyClearOutcome::AlreadyDeferred;
     }
     if queue_active {
         BusyClearOutcome::PauseAndDefer
+    } else if live_turn_deliverable {
+        BusyClearOutcome::DeferBehindLiveTurn
     } else {
         BusyClearOutcome::HardBlock
     }
+}
+
+/// (`#clearqueuedliveturn`) Supersession of a deferred operator clear by a
+/// newer prompt.
+///
+/// A deferred clear belongs to the turn that was running when the operator
+/// asked for it. If a NEWER prompt starts on the pane before the clear is
+/// delivered (the operator typed or routed another prompt, or the harness ran
+/// a message the operator queued in its composer), the operator has chosen to
+/// continue the conversation, and delivering the clear after that turn would
+/// wipe context the new prompt depends on. The clear is then retired, never
+/// delivered.
+///
+/// The turn identity is the harness-authored turn-active lease's start second
+/// (`UserPromptSubmit` writes it once per prompt; nothing refreshes it mid-turn).
+/// The baseline is the FIRST lease observed for this deferral, not the lease at
+/// deferral time: a clear queued on `dispatch_turn_running` evidence can be
+/// recorded before the dispatched turn's hook writes its lease, and that lease
+/// is the deferred turn itself, not a newer prompt.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DeferredClearTurnBaseline {
+    clear_epoch: Option<u64>,
+    turn_started_at: Option<u64>,
+}
+
+impl DeferredClearTurnBaseline {
+    /// Observe the pane's current turn lease (`None` when no turn is live) for
+    /// the deferred clear `clear_epoch`. Returns `true` when a newer prompt has
+    /// superseded the clear. A different `clear_epoch` restarts the baseline.
+    pub fn observe(&mut self, clear_epoch: u64, current_turn_started_at: Option<u64>) -> bool {
+        if self.clear_epoch != Some(clear_epoch) {
+            *self = Self {
+                clear_epoch: Some(clear_epoch),
+                turn_started_at: current_turn_started_at,
+            };
+            return false;
+        }
+        match (self.turn_started_at, current_turn_started_at) {
+            (Some(baseline), Some(current)) => current > baseline,
+            (None, Some(current)) => {
+                self.turn_started_at = Some(current);
+                false
+            }
+            (_, None) => false,
+        }
+    }
+
+    /// Forget the baseline (the deferred clear was delivered or retired).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// (`#clearqueuedliveturn`) Is the pane at an idle boundary where a deferred
+/// clear may be delivered? A dispatch-ready prompt with no turn-active lease is
+/// the auto-loop gap. A clear queued behind a live turn additionally waits out
+/// a `running` dispatch receipt: that turn may have been proven live by the
+/// receipt alone, and a composer redrawn between tool calls is not an idle
+/// boundary (GH #232). The receipt settles on the turn's `Ready` edge.
+pub fn deferred_clear_delivery_ready(
+    prompt_visible: bool,
+    turn_active: bool,
+    live_turn_deferral: bool,
+    dispatch_turn_running: bool,
+) -> bool {
+    prompt_visible && !turn_active && !(live_turn_deferral && dispatch_turn_running)
 }
 
 /// What the supervisor idle-queue watch should do about a deferred operator
@@ -195,7 +277,7 @@ mod tests {
     #[test]
     fn busy_clear_on_active_loop_pauses_and_defers() {
         assert_eq!(
-            plan_busy_clear(true, false),
+            plan_busy_clear(true, false, false),
             BusyClearOutcome::PauseAndDefer,
             "a busy pane driven by an active auto-loop must defer, not hard-block"
         );
@@ -204,7 +286,7 @@ mod tests {
     #[test]
     fn busy_clear_without_active_loop_hard_blocks() {
         assert_eq!(
-            plan_busy_clear(false, false),
+            plan_busy_clear(false, false, false),
             BusyClearOutcome::HardBlock,
             "a busy pane with no loop keeps the existing fail-closed block"
         );
@@ -213,14 +295,173 @@ mod tests {
     #[test]
     fn busy_clear_already_deferred_does_not_refresh_or_send() {
         assert_eq!(
-            plan_busy_clear(true, true),
+            plan_busy_clear(true, true, false),
             BusyClearOutcome::AlreadyDeferred,
             "a repeated non-interrupting clear must not stack another clear while the first is queued"
         );
         assert_eq!(
-            plan_busy_clear(false, true),
+            plan_busy_clear(false, true, true),
             BusyClearOutcome::AlreadyDeferred,
             "the pending deferred-clear marker owns delivery even if queue state changed"
+        );
+    }
+
+    #[test]
+    fn busy_clear_behind_live_turn_queues_when_the_supervisor_can_deliver() {
+        assert_eq!(
+            plan_busy_clear(false, false, true),
+            BusyClearOutcome::DeferBehindLiveTurn,
+            "a clear during a proven-live turn is queued for the turn's idle boundary, not refused"
+        );
+        assert_eq!(
+            plan_busy_clear(true, false, true),
+            BusyClearOutcome::PauseAndDefer,
+            "an active auto-loop keeps its pause-and-defer path"
+        );
+        assert_eq!(
+            plan_busy_clear(false, false, false),
+            BusyClearOutcome::HardBlock,
+            "with no supervisor to deliver it, a queued clear would be a lie: refuse"
+        );
+    }
+
+    #[test]
+    fn deferred_clear_is_superseded_only_by_a_newer_prompt() {
+        let mut baseline = DeferredClearTurnBaseline::default();
+        // Deferred while turn 100 runs.
+        assert!(!baseline.observe(1, Some(100)));
+        assert!(!baseline.observe(1, Some(100)), "the same turn never supersedes");
+        // The turn ends: idle is not a newer prompt.
+        assert!(!baseline.observe(1, None));
+        // A newer prompt started before the clear was delivered.
+        assert!(baseline.observe(1, Some(160)));
+    }
+
+    #[test]
+    fn deferred_clear_adopts_the_dispatched_turns_late_lease_as_its_baseline() {
+        // Queued on `dispatch_turn_running` evidence before the hook wrote the
+        // lease: the first lease seen IS the deferred turn, not a newer prompt.
+        let mut baseline = DeferredClearTurnBaseline::default();
+        assert!(!baseline.observe(4, None));
+        assert!(!baseline.observe(4, Some(205)));
+        assert!(!baseline.observe(4, Some(205)));
+        assert!(baseline.observe(4, Some(260)));
+    }
+
+    #[test]
+    fn deferred_clear_baseline_restarts_for_a_new_clear_epoch() {
+        let mut baseline = DeferredClearTurnBaseline::default();
+        assert!(!baseline.observe(1, Some(100)));
+        assert!(
+            !baseline.observe(2, Some(300)),
+            "a fresh deferral baselines on its own live turn"
+        );
+        assert!(baseline.observe(2, Some(301)));
+        baseline.reset();
+        assert_eq!(baseline, DeferredClearTurnBaseline::default());
+    }
+
+    #[test]
+    fn live_turn_deferral_waits_out_a_running_dispatch_receipt() {
+        // Auto-loop gap: prompt + no lease is enough (unchanged behaviour).
+        assert!(deferred_clear_delivery_ready(true, false, false, true));
+        // Live-turn deferral: a running receipt means the turn is still live
+        // even when the composer is drawn and no lease exists yet.
+        assert!(!deferred_clear_delivery_ready(true, false, true, true));
+        assert!(deferred_clear_delivery_ready(true, false, true, false));
+        assert!(!deferred_clear_delivery_ready(true, true, true, false));
+        assert!(!deferred_clear_delivery_ready(false, false, true, false));
+    }
+
+    /// One supervisor-watch tick over the pane facts it observes, composed the
+    /// way `idle_watch` composes them: supersession first, then the delivery
+    /// gate, then the step.
+    #[derive(Clone, Copy)]
+    struct PaneTick {
+        prompt_visible: bool,
+        lease: Option<u64>,
+        dispatch_running: bool,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum TickOutcome {
+        Wait,
+        Deliver,
+        Superseded,
+    }
+
+    fn run_live_turn_deferral(ticks: &[PaneTick]) -> Vec<TickOutcome> {
+        let mut baseline = DeferredClearTurnBaseline::default();
+        let mut out = Vec::new();
+        for tick in ticks {
+            if baseline.observe(7, tick.lease) {
+                out.push(TickOutcome::Superseded);
+                break;
+            }
+            let ready = deferred_clear_delivery_ready(
+                tick.prompt_visible,
+                tick.lease.is_some(),
+                true,
+                tick.dispatch_running,
+            );
+            match plan_deferred_clear_step(true, ready) {
+                DeferredClearStep::Deliver => {
+                    out.push(TickOutcome::Deliver);
+                    break;
+                }
+                DeferredClearStep::WaitForIdle => out.push(TickOutcome::Wait),
+                DeferredClearStep::None => unreachable!("a deferral is pending"),
+            }
+        }
+        out
+    }
+
+    /// `#clearqueuedliveturn`: the pane %149 incident. The operator pressed
+    /// Clear Session Context while a dispatched turn ran (proven by its
+    /// `running` receipt before the hook wrote a lease). The composer redraws
+    /// between tool calls; the clear must wait the whole turn out and land
+    /// exactly once, at the idle boundary.
+    #[test]
+    fn queued_clear_waits_out_the_live_turn_and_delivers_once_at_idle() {
+        let ticks = [
+            // Dispatched, hook not yet written: composer drawn, receipt running.
+            PaneTick { prompt_visible: true, lease: None, dispatch_running: true },
+            // Hook wrote the lease for the SAME turn.
+            PaneTick { prompt_visible: false, lease: Some(500), dispatch_running: true },
+            // Composer redrawn between tool calls mid-turn.
+            PaneTick { prompt_visible: true, lease: Some(500), dispatch_running: true },
+            // Stop: lease cleared, receipt not yet settled by the Ready edge.
+            PaneTick { prompt_visible: true, lease: None, dispatch_running: true },
+            // Ready edge settled the receipt: idle boundary.
+            PaneTick { prompt_visible: true, lease: None, dispatch_running: false },
+            PaneTick { prompt_visible: true, lease: None, dispatch_running: false },
+        ];
+        assert_eq!(
+            run_live_turn_deferral(&ticks),
+            vec![
+                TickOutcome::Wait,
+                TickOutcome::Wait,
+                TickOutcome::Wait,
+                TickOutcome::Wait,
+                TickOutcome::Deliver,
+            ]
+        );
+    }
+
+    /// `#clearqueuedliveturn`: the operator started a newer prompt before the
+    /// queued clear was delivered (it ran straight from the composer queue, so
+    /// the watch never saw an idle tick). The clear must never fire.
+    #[test]
+    fn queued_clear_is_retired_when_a_newer_prompt_starts_first() {
+        let ticks = [
+            PaneTick { prompt_visible: false, lease: Some(500), dispatch_running: false },
+            PaneTick { prompt_visible: false, lease: Some(500), dispatch_running: false },
+            PaneTick { prompt_visible: false, lease: Some(530), dispatch_running: false },
+            PaneTick { prompt_visible: true, lease: None, dispatch_running: false },
+        ];
+        assert_eq!(
+            run_live_turn_deferral(&ticks),
+            vec![TickOutcome::Wait, TickOutcome::Wait, TickOutcome::Superseded]
         );
     }
 

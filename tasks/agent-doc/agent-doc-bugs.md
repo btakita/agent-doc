@@ -132,7 +132,7 @@ The repeated chat lines, "Can I delete the duplicated queue item now?" and "Do t
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#hookstalemsgfile]
+- ⏭️ do [#hookstalemsgfile]
 - 🚧 do [#relayhubtestisolation]
 - ~~do [#removeobsoleteicebox]~~
 - ⏭️ do [#respondfinalizehard]

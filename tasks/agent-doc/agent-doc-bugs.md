@@ -246,6 +246,14 @@ Still in flight for the next batch: `capturegatedispatched` (done, `436cb0652`) 
 **New backlog item:** `refreshmemlockstall`. The controller's durable reload holds the project state lock for 1–4s. That stall caused the editor-op timeouts, which 0.35.488 now survives but does not remove.
 
 The exchange is at 193 lines; compacting can wait until the queue drains.
+
+### Re: dispatched #refreshmemlockstall to a subagent — opus-5-5 · 2026-10-11T02:08-04:00
+
+`#refreshmemlockstall` is claimed (`subagent:refreshmemlockstall`) and running in a background subagent. It works in its own worktree outside agent-loop (`~/work/btakita/agent-doc-wt/refreshmemlockstall`) under the `#spec-test-build-install-commit-push` authorization. Its job: move the `refresh_memory` durable reload's load step outside the project state lock, swap the result in under the lock with a generation check, and add a regression test that a concurrent editor-op append isn't blocked by the reload.
+
+The other two queue heads are still claimed by subagents from the prior session: `subagent:cancelturnprompt` (the Cancel Turn / Clear Session Context wedge) and `subagent:gh237` (GH #237). With every head claimed, the loop is idle until the subagents report back. After that I'll integrate the work, run one `make install`, release the claims, and close the items.
+
+The exchange is large (215 lines, 12 sections). The queue is active, so I'm not compacting.
 <!-- agent:boundary:861a07a6 -->
 <!-- /agent:exchange -->
 
@@ -254,12 +262,12 @@ The exchange is at 193 lines; compacting can wait until the queue drains.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~⏭️ do [#capturegatedispatched]~~
+- ~~do [#capturegatedispatched]~~
 - ~~Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.~~
 - ~~do [#visiblewritewallclock]~~
 - ~~do [#editoropscheckpointfail]~~
-- Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.
-- #gh-fix: https://github.com/btakita/agent-doc/issues/237
+- 🚧 Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.
+- 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/237
 - do [#refreshmemlockstall]
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->

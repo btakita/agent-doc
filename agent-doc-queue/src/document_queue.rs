@@ -1461,11 +1461,13 @@ pub fn in_progress_marker_only_targets(
     let carries_skip_marker = before.iter().chain(&after).any(|entry| match entry {
         QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
             agent_doc_document::queue_projection::has_skip_marker(&prompt.text)
+                || agent_doc_document::queue_projection::has_awaiting_operator_marker(&prompt.text)
         }
         _ => false,
     });
-    // The skip projection has its own id-backed target set. Do not reinterpret a
-    // mixed `🚧`/`⏭️` update as an in-progress-only projection during rebase.
+    // The skip (`⏭️`) and awaiting-operator (`⏳`) projections have their own
+    // id-backed target sets. Do not reinterpret a mixed update as an
+    // in-progress-only projection during rebase.
     if before.len() != after.len()
         || carries_skip_marker
         || before
@@ -1503,21 +1505,46 @@ pub fn set_prompts_skipped(
     entries: &[QueueEntry],
     skipped_ids: &std::collections::HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
+    set_prompts_lifecycle_markers(entries, skipped_ids, &std::collections::HashSet::new())
+}
+
+/// Reconcile the id-backed lifecycle projections that follow the `🚧` pass:
+/// `⏳` on heads in `awaiting_ids` (`#queueawaitop`) and `⏭️` on heads in
+/// `skipped_ids` (`#queueskip`), clearing either marker from every other head.
+///
+/// A head that already carries `🚧` is left untouched (`#claimskipmarker`):
+/// `🚧` is the in-flight projection (the inline head or a worker's live claim),
+/// and a later pass must never re-label work that is running. Awaiting wins
+/// over skipped, because a head waiting on the operator was never dispatched,
+/// so it cannot have "come back unconsumed".
+pub fn set_prompts_lifecycle_markers(
+    entries: &[QueueEntry],
+    skipped_ids: &std::collections::HashSet<String>,
+    awaiting_ids: &std::collections::HashSet<String>,
+) -> Option<Vec<QueueEntry>> {
+    use agent_doc_document::queue_projection as qp;
     let mut changed = false;
     let out = entries
         .iter()
         .map(|entry| match entry {
-            QueueEntry::Prompt(prompt) => {
+            QueueEntry::Prompt(prompt) if !qp::has_in_progress_marker(&prompt.text) => {
                 let mut next = prompt.clone();
                 let id = do_prompt_id(&next.text);
-                let should_skip = id.is_some_and(|id| skipped_ids.contains(&id));
-                let has_marker = agent_doc_document::queue_projection::has_skip_marker(&next.text);
-                if should_skip && !has_marker {
-                    next.text = agent_doc_document::queue_projection::apply_skip_marker(&next.text);
-                    changed = true;
-                } else if !should_skip && has_marker {
-                    next.text =
-                        agent_doc_document::queue_projection::strip_in_progress_marker(&next.text);
+                let awaiting = id.as_ref().is_some_and(|id| awaiting_ids.contains(id));
+                let skipped = !awaiting && id.as_ref().is_some_and(|id| skipped_ids.contains(id));
+                let has_awaiting = qp::has_awaiting_operator_marker(&next.text);
+                let has_skip = qp::has_skip_marker(&next.text);
+                let text = if awaiting {
+                    (!has_awaiting).then(|| qp::apply_awaiting_operator_marker(&next.text))
+                } else if skipped {
+                    (!has_skip).then(|| qp::apply_skip_marker(&next.text))
+                } else if has_awaiting || has_skip {
+                    qp::strip_in_progress_marker_for_display(&next.text)
+                } else {
+                    None
+                };
+                if let Some(text) = text {
+                    next.text = text;
                     changed = true;
                 }
                 QueueEntry::Prompt(next)
@@ -3889,6 +3916,53 @@ mod tests {
         let marked = set_first_prompt_in_progress(&entries, true).unwrap();
         // `#qbulletlesshead`: slash-command heads keep their bullet.
         assert_eq!(render(&marked), "- /clear\n- do [#new]\n");
+    }
+
+    /// `#claimskipmarker` / `#queueawaitop`: the lifecycle pass after `🚧`
+    /// never re-labels a running (`🚧`) head, prefers `⏳` over `⏭️`, and clears
+    /// either marker once its head no longer qualifies.
+    #[test]
+    fn set_prompts_lifecycle_markers_respects_running_heads() {
+        let entries = parse(concat!(
+            "- 🚧 do [#claimed]\n",
+            "- do [#verify]\n",
+            "- ⏭\u{fe0f} do [#both]\n",
+            "- ⏳ do [#reclaimed]\n",
+            "- ⏭\u{fe0f} 📌 do [#unskipped]\n",
+            "- do [#stalled]\n",
+            "- ~~do [#done]~~\n",
+        ))
+        .unwrap();
+        let skipped: std::collections::HashSet<String> = [
+            "claimed".to_string(),
+            "both".to_string(),
+            "stalled".to_string(),
+        ]
+        .into();
+        let awaiting: std::collections::HashSet<String> = [
+            "claimed".to_string(),
+            "verify".to_string(),
+            "both".to_string(),
+        ]
+        .into();
+        let marked = set_prompts_lifecycle_markers(&entries, &skipped, &awaiting).unwrap();
+        assert_eq!(
+            render(&marked),
+            concat!(
+                "- 🚧 do [#claimed]\n",
+                "- ⏳ do [#verify]\n",
+                "- ⏳ do [#both]\n",
+                "- do [#reclaimed]\n",
+                "- 📌 do [#unskipped]\n",
+                "- ⏭\u{fe0f} do [#stalled]\n",
+                "- ~~do [#done]~~\n",
+            )
+        );
+        assert_eq!(
+            set_prompts_lifecycle_markers(&marked, &skipped, &awaiting),
+            None,
+            "the projection is idempotent"
+        );
     }
 
     #[test]

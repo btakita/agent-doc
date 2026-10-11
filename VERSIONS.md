@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **Subagent queue heads show their real lifecycle (`#queueawaitop`, `#claimskipmarker`).** A queue head whose
+  subagent finished and tagged its item `[operator-verify]` (or that names a gated `agent:review` row), with no inline
+  operator verdict and no live claim, now carries a `⏳` awaiting-operator projection instead of reverting to a bare
+  `do [#id]` that read as unstarted. A head a worker holds a live claim on keeps `🚧`: claimed and awaiting heads are
+  exempt from the `#queueskip` blame, so the next cycle no longer stamps `⏭️` over a running claim or over the first
+  `[operator-verify]` head. A claim still held on a head that already waits on the operator is named by the
+  `queue_claim_held_after_report` preflight warning with the `agent-doc queue release` command. `⏳` is stripped for
+  identity everywhere `🚧`/`⏭️` are (claims, CRDT keys, diff, done/backlog parsing).
+
 ## 0.35.488
 
 - **A prompt cancelled before Claude Code persists it no longer wedges Clear Session Context (`#sdkclearwedge`).** An

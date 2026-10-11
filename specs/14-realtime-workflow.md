@@ -577,6 +577,16 @@ change selected head identity. The canonical marker vocabulary is:
   no longer a live head. A skipped head is left in the queue for the operator (it
   is never auto-marked-done or dropped — halt-safety is preserved); the binary
   decides the skip deterministically so the agent is never asked to reconcile it.
+- `⏳` — AWAITING-OPERATOR head projection (`#queueawaitop`): a live head whose
+  agent work is finished and which now waits on a human — its tracked item is
+  `[operator-verify]` (and the head carries no inline operator verdict
+  `do [#id]: <text>`) or it names a gated `agent:review` row — and that no
+  worker holds a live claim on. `[focused-cycle]` is not awaiting the operator
+  and gets no marker. Like `⏭️` it is re-derived every maintenance pass,
+  stripped for identity, and clears once the head is consumed, claimed again, or
+  stops waiting on the operator. It exists because a subagent that finished,
+  tagged its item `[operator-verify]` and released its claim otherwise left a
+  bare `do [#id]` that read as unstarted.
 - `📌` (operator pin) / `📍` (agent pin) — priority pins. The binary INJECTS the
   direct emoji; the `:pushpin:` / `:round_pushpin:` shortcodes (and the
   `**pin**` / `*prioritized*` emphasis spellings) remain accepted on parse, so
@@ -593,6 +603,17 @@ pass over. The cycle's recorded heads include every live queue line, so a later
 tracked head must never inherit the blame. When the head that ran is a
 preset-only invocation (`#gh-fix <url>`) or free text, no tracked id was
 dispatched and nothing is skipped.
+
+Precedence (`#claimskipmarker`): `🚧` (the inline selection plus every head a
+worker holds a live `#queueclaim` on) is never overwritten by a later pass;
+otherwise `⏳` wins over `⏭️`. Claimed heads and awaiting-operator heads are
+exempt from the skip blame — neither the `🚧` search nor the first-head
+fallback may name them, and the carried skip set drops them — because a claimed
+head's `🚧` belongs to its worker, not to the inline turn, and an
+awaiting-operator head was never dispatched. When a claimed head already waits
+on the operator (its subagent reported but the claim was never released),
+preflight keeps `🚧` and emits the `queue_claim_held_after_report` warning naming
+the `agent-doc queue release` command.
 
 If the operator moves `🚧` in the current realtime source epoch, realtime treats
 that as a retarget request, validates it through the same auto-DAG dependency

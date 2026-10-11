@@ -610,6 +610,35 @@ pub fn deferred_head_count(content: &str) -> usize {
         .count()
 }
 
+/// Lowercased ids of live queue heads whose agent work is finished and which
+/// now wait on the operator (`#queueawaitop`).
+///
+/// A head qualifies when its tracked item is `[operator-verify]` (the deferral
+/// no agent drain scope ever runs) or it names a GATED `agent:review` row, and
+/// the head itself carries no inline operator verdict (`do [#id]: <text>`,
+/// `#opverifyanswered`) — a verdict makes the head the operator's answer,
+/// i.e. agent work again. `[focused-cycle]` is NOT awaiting the operator: the
+/// supervisor runs it in a fresh context, so it is excluded.
+///
+/// Preflight projects `⏳` onto these heads unless a worker claim or the inline
+/// selection already projects `🚧`. Before this, a subagent that finished,
+/// tagged its item `[operator-verify]` and released its claim left the head as
+/// a bare `do [#id]` that read as unstarted.
+pub fn awaiting_operator_head_ids(content: &str) -> HashSet<String> {
+    let Some((_, entries)) = queue_component_entries(content) else {
+        return HashSet::new();
+    };
+    let operator_verify = deferred_backlog_ids_split(content, DrainScope::Supervisor);
+    let gated_review = gated_review_ids(content);
+    document_queue::prompts(&entries)
+        .into_iter()
+        .filter(|prompt| !head_carries_operator_verdict(&prompt.text))
+        .filter_map(|prompt| extract_head_id(&prompt.text))
+        .map(|id| id.to_ascii_lowercase())
+        .filter(|id| operator_verify.all.contains(id) || gated_review.contains(id))
+        .collect()
+}
+
 /// Active queue continuation head, without drainability filtering.
 pub fn live_continuation_head(content: &str) -> Option<String> {
     let (_, activation) = active_queue(content)?;
@@ -1952,6 +1981,39 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    /// `#queueawaitop`: the haiven-dev `tasks/sdk.md` backlog shapes of
+    /// 2026-10-11. Operator-verify items (with or without a `[blocked: ...]`
+    /// tag) and gated review rows wait on the operator; a plain open item, a
+    /// `[focused-cycle]` item, and a head carrying an inline operator verdict
+    /// do not.
+    #[test]
+    fn awaiting_operator_head_ids_names_heads_whose_agent_work_is_done() {
+        let mut content = doc_with_backlog(
+            &[
+                "⏭\u{fe0f} do [#quirkbigint]",
+                "do [#quirkinventory]",
+                "do [#verdict]: verified, ship it",
+                "do [#cligenport]",
+                "do [#focused]",
+                "do [#gate]",
+            ],
+            &[
+                "- [ ] [#quirkbigint] [operator-verify] [blocked: #paritycorpusmain merge] PR #126 opened",
+                "- [ ] [#quirkinventory] [operator-verify] haiven-sdk: COMMITTED locally, not pushed",
+                "- [ ] [#verdict] [operator-verify] needs a look",
+                "- [ ] 🚧 [#cligenport] port the generator",
+                "- [ ] [#focused] [focused-cycle] dedicated turn",
+            ],
+        );
+        content.push_str(
+            "\n<!-- agent:review -->\n- [/] [#gate] waiting on review\n<!-- /agent:review -->\n",
+        );
+        let ids = awaiting_operator_head_ids(&content);
+        let mut ids = ids.into_iter().collect::<Vec<_>>();
+        ids.sort();
+        assert_eq!(ids, vec!["gate", "quirkbigint", "quirkinventory"]);
     }
 
     #[test]

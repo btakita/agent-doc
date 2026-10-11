@@ -40,6 +40,26 @@ pub const IN_PROGRESS_MARKER: &str = "🚧";
 /// stripped by `strip_in_progress_marker` / `strip_priority_markers`) and clears
 /// automatically once the head becomes drainable/consumed again.
 pub const SKIP_MARKER: &str = "⏭\u{fe0f}";
+/// Visible projection marker for a live queue head whose agent work is finished
+/// and which now waits on the operator (`#queueawaitop`): its tracked item is
+/// `[operator-verify]` (no inline operator verdict yet) or a gated
+/// `agent:review` row, and no worker holds a claim on it. Without it, a head
+/// whose subagent finished and released its claim reverted to a bare
+/// `do [#id]` that read as "unstarted" (observed 2026-10-11 on
+/// `src/haiven-dev/tasks/sdk.md`). Like `🚧`/`⏭️` it is a re-derived cosmetic
+/// projection: stripped for identity and cleared automatically once the head is
+/// consumed, claimed again, or no longer waits on the operator.
+pub const AWAITING_OPERATOR_MARKER: &str = "⏳";
+
+/// Every leading lifecycle marker the binary projects onto a queue head.
+pub const LIFECYCLE_MARKERS: [&str; 3] =
+    [IN_PROGRESS_MARKER, SKIP_MARKER, AWAITING_OPERATOR_MARKER];
+
+fn strip_lifecycle_prefix(text: &str) -> Option<&str> {
+    LIFECYCLE_MARKERS
+        .iter()
+        .find_map(|marker| text.strip_prefix(marker))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueuePromptRow {
@@ -79,10 +99,7 @@ pub fn strip_in_progress_marker(text: &str) -> String {
     let mut kept_prefixes = Vec::new();
     loop {
         let trimmed = rest.trim_start();
-        if let Some(after_marker) = trimmed
-            .strip_prefix(IN_PROGRESS_MARKER)
-            .or_else(|| trimmed.strip_prefix(SKIP_MARKER))
-        {
+        if let Some(after_marker) = strip_lifecycle_prefix(trimmed) {
             rest = after_marker.trim_start();
             continue;
         }
@@ -129,6 +146,16 @@ pub fn apply_skip_marker(text: &str) -> String {
     )
 }
 
+/// Prepend the awaiting-operator projection marker (`⏳`, `#queueawaitop`),
+/// preserving pins and replacing any existing lifecycle marker.
+pub fn apply_awaiting_operator_marker(text: &str) -> String {
+    let (content, trailing) = split_trailing_whitespace(text);
+    format!(
+        "{AWAITING_OPERATOR_MARKER} {}{trailing}",
+        strip_in_progress_marker(content)
+    )
+}
+
 fn split_trailing_whitespace(text: &str) -> (&str, &str) {
     let content = text.trim_end();
     (&text[..content.len()], &text[content.len()..])
@@ -141,6 +168,18 @@ pub fn has_in_progress_marker(text: &str) -> bool {
 /// True when the head carries a leading skip marker (`⏭️`), past any pins.
 pub fn has_skip_marker(text: &str) -> bool {
     has_leading_lifecycle_marker(text, SKIP_MARKER)
+}
+
+/// True when the head carries a leading awaiting-operator marker (`⏳`).
+pub fn has_awaiting_operator_marker(text: &str) -> bool {
+    has_leading_lifecycle_marker(text, AWAITING_OPERATOR_MARKER)
+}
+
+/// True when the head carries any leading lifecycle marker (`🚧`/`⏭️`/`⏳`).
+pub fn has_lifecycle_marker(text: &str) -> bool {
+    LIFECYCLE_MARKERS
+        .iter()
+        .any(|marker| has_leading_lifecycle_marker(text, marker))
 }
 
 fn has_leading_lifecycle_marker(text: &str, marker: &str) -> bool {
@@ -162,7 +201,7 @@ fn has_leading_lifecycle_marker(text: &str, marker: &str) -> bool {
 }
 
 pub fn strip_in_progress_marker_for_display(text: &str) -> Option<String> {
-    if !has_in_progress_marker(text) && !has_skip_marker(text) {
+    if !has_lifecycle_marker(text) {
         return None;
     }
     let (content, trailing) = split_trailing_whitespace(text);
@@ -229,21 +268,18 @@ pub fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: 
     updated
 }
 
-/// Strip priority, in-progress, and skip markers from the visible prompt
-/// identity, so a `🚧`/`⏭️`/pin-decorated head compares equal to its bare form.
+/// Strip priority and lifecycle (`🚧`/`⏭️`/`⏳`) markers from the visible prompt
+/// identity, so a marker- or pin-decorated head compares equal to its bare form.
 pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
     loop {
         let trimmed = t.trim_start();
-        let stripped = trimmed
-            .strip_prefix(IN_PROGRESS_MARKER)
-            .or_else(|| trimmed.strip_prefix(SKIP_MARKER))
-            .or_else(|| {
-                PRIORITIZED_MARKERS
-                    .iter()
-                    .chain(AGENT_PRIORITIZED_MARKERS.iter())
-                    .find_map(|m| trimmed.strip_prefix(m))
-            });
+        let stripped = strip_lifecycle_prefix(trimmed).or_else(|| {
+            PRIORITIZED_MARKERS
+                .iter()
+                .chain(AGENT_PRIORITIZED_MARKERS.iter())
+                .find_map(|m| trimmed.strip_prefix(m))
+        });
         match stripped {
             Some(rest) => t = rest.trim_start(),
             None => break,
@@ -511,6 +547,32 @@ mod tests {
         assert_eq!(
             strip_in_progress_marker("⏭\u{fe0f} do [#sy71]"),
             "do [#sy71]"
+        );
+    }
+
+    #[test]
+    fn awaiting_operator_marker_is_cosmetic_for_identity() {
+        // `#queueawaitop`: `⏳` is a third lifecycle marker with the same
+        // identity rules as `🚧`/`⏭️`.
+        assert_eq!(
+            apply_awaiting_operator_marker("do [#quirkbigint]"),
+            "⏳ do [#quirkbigint]"
+        );
+        assert_eq!(
+            apply_awaiting_operator_marker("⏭\u{fe0f} 📍 do [#quirkbigint]  "),
+            "⏳ 📍 do [#quirkbigint]  ",
+            "replaces the lifecycle marker, keeps pins and trailing whitespace"
+        );
+        assert!(has_awaiting_operator_marker("📌 ⏳ do [#a]"));
+        assert!(!has_awaiting_operator_marker("🚧 do [#a]"));
+        assert!(!has_in_progress_marker("⏳ do [#a]"));
+        assert!(!has_skip_marker("⏳ do [#a]"));
+        assert!(has_lifecycle_marker("⏳ do [#a]"));
+        assert_eq!(strip_priority_markers("⏳ 📌 do [#a]"), "do [#a]");
+        assert_eq!(strip_in_progress_marker("⏳ 📌 do [#a]"), "📌 do [#a]");
+        assert_eq!(
+            strip_in_progress_marker_for_display("⏳ do [#a]\n").as_deref(),
+            Some("do [#a]\n")
         );
     }
 

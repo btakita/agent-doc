@@ -408,25 +408,25 @@ Both promotions went to the end of the queue, so they don't preempt in-flight wo
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#removeobsoleteicebox]~~
-- do [#respondfinalizehard]
-- do [#pypireleaseworkflow]
-- #gh-fix https://github.com/btakita/agent-doc/issues/235
-- #gh-fix https://github.com/btakita/agent-doc/issues/236
-- fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
+- 🚧 do [#respondfinalizehard]
+- 🚧 do [#pypireleaseworkflow]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/235
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/236
+- 🚧 fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
 Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md because a turn is live in pane %127 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md` to intentionally interrupt the turn and clear context.
 - ~~Run Agent Doc on tools.md was slow to go.~~
 - 🚧 release + publish
-- do [#visiblewriteloadflake]
-- do [#idefocusowner]
+- 🚧 do [#visiblewriteloadflake]
+- 🚧 do [#idefocusowner]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#visiblewriteloadflake] [agent-doc] Fix flaky agent-doc-write-runtime-io visible_write_content_snapshot_tests (test_lazily_visible_write_event_read, test_poll_lazily_event_*): under host load (load average around 50) they time out with 'timed out after 2.0s waiting for project controller response' at ipc.rs:170 (record_lazily_visible_write_candidate); seen in 2 of about 6 full runs on 2026-10-10. Fix the nondeterminism instead of rerunning: warm the controller before the timed RPC, or charge cold-start launch separately from CONTROLLER_RPC_TIMEOUT, so a busy runner cannot decide the outcome. Prove it under load stress. (Promoted from icebox visiblewriteloadtimeout.)
-- [ ] [#idefocusowner] [agent-doc] Two JetBrains IDEs on one project: only the most recently focused IDE drives the shared tmux agent-doc window, which stops the layout from flipping between IDEA and Rider (both installed on this machine). About 1 day. Builds on idearidereditors 9796d8c8a (installation-scoped editor-surface client families). Fully independent per-IDE navigation stays in the icebox as ideriderindependentnav. (Promoted from icebox ideriderstopgap.)
-- [ ] [#respondfinalizehard] respond/finalize hard-fails with 'queue consume: no prompt to consume' (then write --commit fails 'failed to compose completed tracked-work target') when the cycle's quoted Queue prompt / --done target was already struck/consumed earlier (all queue heads struck, item already in agent:done). The response write landed and the cycle wedged at write_applied until a bare 'agent-doc write --commit' recovered it as AlreadyApplied. Consuming an already-consumed head must be idempotent. Repro 2026-10-10 cycle-1791675315432.
-- [ ] [#pypireleaseworkflow] PyPI release workflow races the GitHub Release: the PyPI job polls at most 30 minutes for the Release's SHA256SUMS, but v0.35.485's cross-platform builds took about 33 minutes, so publish failed at 21:45:30Z and the Release went up at 21:47:24Z (run 38086853278; a rerun of the failed job published it). Trigger PyPI from the release:published event, or from the Release workflow after its assets upload, instead of a fixed wall-clock poll.
+- [ ] 🚧 [#visiblewriteloadflake] [agent-doc] Fix flaky agent-doc-write-runtime-io visible_write_content_snapshot_tests (test_lazily_visible_write_event_read, test_poll_lazily_event_*): under host load (load average around 50) they time out with 'timed out after 2.0s waiting for project controller response' at ipc.rs:170 (record_lazily_visible_write_candidate); seen in 2 of about 6 full runs on 2026-10-10. Fix the nondeterminism instead of rerunning: warm the controller before the timed RPC, or charge cold-start launch separately from CONTROLLER_RPC_TIMEOUT, so a busy runner cannot decide the outcome. Prove it under load stress. (Promoted from icebox visiblewriteloadtimeout.)
+- [ ] 🚧 [#idefocusowner] [agent-doc] Two JetBrains IDEs on one project: only the most recently focused IDE drives the shared tmux agent-doc window, which stops the layout from flipping between IDEA and Rider (both installed on this machine). About 1 day. Builds on idearidereditors 9796d8c8a (installation-scoped editor-surface client families). Fully independent per-IDE navigation stays in the icebox as ideriderindependentnav. (Promoted from icebox ideriderstopgap.)
+- [ ] 🚧 [#respondfinalizehard] respond/finalize hard-fails with 'queue consume: no prompt to consume' (then write --commit fails 'failed to compose completed tracked-work target') when the cycle's quoted Queue prompt / --done target was already struck/consumed earlier (all queue heads struck, item already in agent:done). The response write landed and the cycle wedged at write_applied until a bare 'agent-doc write --commit' recovered it as AlreadyApplied. Consuming an already-consumed head must be idempotent. Repro 2026-10-10 cycle-1791675315432.
+- [ ] 🚧 [#pypireleaseworkflow] PyPI release workflow races the GitHub Release: the PyPI job polls at most 30 minutes for the Release's SHA256SUMS, but v0.35.485's cross-platform builds took about 33 minutes, so publish failed at 21:45:30Z and the Release went up at 21:47:24Z (run 38086853278; a rerun of the failed job published it). Trigger PyPI from the release:published event, or from the Release workflow after its assets upload, instead of a fixed wall-clock poll.
 <!-- /agent:backlog -->
 
 ## Review

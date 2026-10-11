@@ -3733,7 +3733,9 @@ fn queue_entries_for_id(
 /// re-typed) by the operator, so queue maintenance must not re-strike it. The
 /// active epoch is preferred; the newest retained checkpoint covers an epoch a
 /// non-operator projection already closed before this maintenance pass ran.
-/// With no matching op evidence the set is empty and `#qeditdupguard` applies.
+/// A head the operator typed again as a fresh line in the active epoch is a
+/// re-arm as well (`#retypestruck`), whatever the epoch's base. With no
+/// matching op evidence the set is empty and `#qeditdupguard` applies.
 fn operator_rearmed_queue_identities(
     file: &Path,
     snapshot_text: &str,
@@ -3748,10 +3750,32 @@ fn operator_rearmed_queue_identities(
                 .ok()
                 .flatten()
         });
+    // `#retypestruck`: a head the operator typed again as a fresh line is a
+    // re-arm too. This evidence is base-independent, so it survives the common
+    // case where the active epoch's base is not the committed snapshot and the
+    // exact-base replay above has nothing to offer.
+    let retyped = agent_doc_op_capture_io::active_operator_inserted_runs(file)
+        .map(|runs| {
+            agent_doc_queue::document_queue::operator_retyped_queue_identities(
+                snapshot_queue_entries,
+                &runs,
+            )
+        })
+        .unwrap_or_default();
+    if !retyped.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_operator_retype_preserved file={} heads={} (#retypestruck)",
+                file.display(),
+                retyped.len()
+            ),
+        );
+    }
     let Some(operator_cut) = operator_cut else {
-        return std::collections::HashSet::new();
+        return retyped;
     };
-    let rearmed = agent_doc_queue::document_queue::operator_rearmed_queue_identities(
+    let mut rearmed = agent_doc_queue::document_queue::operator_rearmed_queue_identities(
         snapshot_queue_entries,
         &queue_entries_in_content(&operator_cut),
     );
@@ -3765,6 +3789,7 @@ fn operator_rearmed_queue_identities(
             ),
         );
     }
+    rearmed.extend(retyped);
     rearmed
 }
 
@@ -10098,6 +10123,146 @@ mod tests {
         assert!(
             live_release(&doc),
             "the second maintenance pass re-struck the operator's unstrike:\n{}",
+            std::fs::read_to_string(&doc).unwrap()
+        );
+    }
+
+    /// `#retypestruck` (live, agent-doc-bugs.md 2026-10-11 06:20-06:21Z): the
+    /// committed snapshot held the answered `~~release + publish~~ — auto-struck
+    /// … (#ftstrike)` row. The operator first added an unrelated head (which
+    /// advanced the editor-op epoch base past the snapshot), then deleted the
+    /// struck row and typed a fresh `- release + publish` at the end of the
+    /// queue, meaning "release once the claimed items land". The next preflight
+    /// queue maintenance found no exact-base op evidence (epoch base !=
+    /// snapshot), treated the new head as a stale re-emit of the snapshot-struck
+    /// identity (`#qeditdupguard`) and rewrote it to a bare
+    /// `~~release + publish~~`. It happened twice. No response quoted the head.
+    ///
+    /// The operator's own typed line is base-independent evidence: the head
+    /// must stay live through maintenance, a closeout that does not quote it,
+    /// and the following maintenance pass.
+    #[test]
+    fn retyped_head_of_an_answered_identity_stays_live_when_op_base_is_not_the_snapshot() {
+        // The live shape: the operator deleted the struck row, then typed.
+        assert_retyped_head_survives_maintenance(true);
+    }
+
+    /// `#retypestruck` variant: the operator leaves the struck row in place and
+    /// appends the new head below it. Once the epoch closes, the snapshot still
+    /// holds the struck copy, so the next pass must not drop the live repeat.
+    #[test]
+    fn retyped_head_below_its_kept_struck_row_stays_live() {
+        assert_retyped_head_survives_maintenance(false);
+    }
+
+    fn assert_retyped_head_survives_maintenance(delete_struck_row: bool) {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: v0.35.488 released — claude\n\n",
+            "> **Queue prompt:** release + publish\n\n",
+            "Released.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents preset=\"#spec-test-build-install-commit-push\" priority go -->\n",
+            "- 🚧 do [#stillopen]\n",
+            "- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, snapshot_content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        // An earlier operator edit (a new `#gh-fix` head) already landed, so the
+        // active epoch's base is that text, not the snapshot.
+        let epoch_base = snapshot_content.replace(
+            "- 🚧 do [#stillopen]\n",
+            "- 🚧 do [#stillopen]\n- #gh-fix: https://github.com/btakita/agent-doc/issues/238\n",
+        );
+        assert_ne!(epoch_base, snapshot_content);
+        let struck_row = "- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)\n";
+        let struck_at = epoch_base.find(struck_row).unwrap();
+        let (mut ops, mut at) = if delete_struck_row {
+            (
+                vec![agent_doc_merge::crdt::EditorOp::Delete {
+                    offset: struck_at,
+                    len: struck_row.len(),
+                }],
+                struck_at,
+            )
+        } else {
+            (Vec::new(), struck_at + struck_row.len())
+        };
+        for batch in ["- r", "ele", "ase", " + ", "pub", "lis", "h\n"] {
+            ops.push(agent_doc_merge::crdt::EditorOp::Insert {
+                offset: at,
+                text: batch.to_string(),
+            });
+            at += batch.len();
+        }
+        let typed = agent_doc_merge::crdt::replay_editor_ops(&epoch_base, &ops).unwrap();
+        assert!(typed.contains("- release + publish\n<!-- /agent:queue -->"));
+        agent_doc_op_capture_io::record_editor_ops(
+            &doc,
+            &agent_doc_hash::content_hash(&epoch_base),
+            ops,
+        )
+        .unwrap();
+        std::fs::write(&doc, &typed).unwrap();
+
+        let live_release = |doc: &Path| {
+            read_queue_entries(doc).iter().any(|entry| {
+                matches!(
+                    entry,
+                    agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                        if prompt.text.contains("release + publish")
+                )
+            })
+        };
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        assert!(
+            live_release(&doc),
+            "queue maintenance struck the operator's re-typed head:\n{}",
+            std::fs::read_to_string(&doc).unwrap()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .matches("~~release + publish~~")
+                .count(),
+            usize::from(!delete_struck_row),
+            "the re-typed head must not be rewritten to the struck representative"
+        );
+
+        // A closeout that dispatched other work and never quoted it.
+        let struck = agent_doc_queue_io::queue_consume::strike_answered_free_text_queue_heads(
+            &doc,
+            "> **Queue prompt:** do [#stillopen]\n\nDispatched to a subagent.\n",
+            true,
+            &TEST_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
+        .unwrap();
+        assert_eq!(struck, 0, "an unquoted re-typed head is not an answer");
+
+        // In production the maintenance projection closes the operator's epoch
+        // (`editor_op_epoch_closed cause=non_operator_projection`), so the next
+        // pass runs with no active op evidence at all.
+        agent_doc_op_capture_io::clear_op_capture(&doc).unwrap();
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        assert!(
+            live_release(&doc),
+            "the second maintenance pass struck the operator's re-typed head:\n{}",
             std::fs::read_to_string(&doc).unwrap()
         );
     }

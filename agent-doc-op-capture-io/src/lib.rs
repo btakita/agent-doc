@@ -1031,6 +1031,26 @@ pub fn operator_rearmed_queue_item_keys(
         .unwrap_or_default()
 }
 
+/// `#retypestruck`: text the operator typed or pasted in the ACTIVE editor-op
+/// epoch, as contiguous runs (see
+/// [`agent_doc_merge::crdt::editor_ops_inserted_runs`]).
+///
+/// Unlike [`operator_text_for_base`] this is base-independent: the epoch's base
+/// is routinely not the committed snapshot (an earlier operator edit or an agent
+/// projection advanced it), and exact-base replay then yields no evidence at
+/// all. Only the active epoch is read. It opens after the last non-operator
+/// projection, so its keystrokes postdate every strike the agent projected; a
+/// retained (closed) checkpoint may hold the keystrokes that typed a head the
+/// agent has since answered, and is therefore never evidence of a re-type.
+pub fn active_operator_inserted_runs(doc: &Path) -> Result<Vec<String>> {
+    let Some(capture) = load_op_capture(doc)? else {
+        return Ok(Vec::new());
+    };
+    Ok(agent_doc_merge::crdt::editor_ops_inserted_runs(
+        &capture.ops,
+    ))
+}
+
 /// Clear the active Lazily op-capture epoch. Idempotent at the public boundary:
 /// clearing an absent epoch succeeds while retaining a monotonic clear marker.
 pub fn clear_op_capture(doc: &Path) -> Result<()> {

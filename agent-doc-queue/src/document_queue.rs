@@ -3373,6 +3373,49 @@ pub fn operator_rearmed_queue_identities(
         .collect()
 }
 
+/// Snapshot-struck identities the operator RE-TYPED as a fresh live line
+/// (`#retypestruck`).
+///
+/// `inserted_runs` is the text the operator's own editor ops inserted (see
+/// `agent_doc_merge::crdt::editor_ops_inserted_runs`); it needs no base, so it
+/// still proves authorship when the editor-op epoch was captured against a text
+/// other than the committed snapshot, which is exactly when
+/// [`operator_rearmed_queue_identities`] has no replay to inspect. A whole line
+/// of typed text whose queue identity the snapshot holds struck is a new request
+/// for the same work (`release + publish` again), not a stale re-emit: a stale
+/// editor flush is never recorded as operator keystrokes. Struck (`~~`) lines
+/// and partial lines typed into existing text are not evidence.
+pub fn operator_retyped_queue_identities(
+    snapshot_entries: &[QueueEntry],
+    inserted_runs: &[String],
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    let snapshot_struck = snapshot_struck_representatives(snapshot_entries);
+    if snapshot_struck.is_empty() {
+        return std::collections::HashSet::new();
+    }
+    let mut retyped = std::collections::HashSet::new();
+    for run in inserted_runs {
+        for line in run.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.contains("~~") {
+                continue;
+            }
+            let Ok(entries) = parse(line) else {
+                continue;
+            };
+            for entry in &entries {
+                if let QueueEntry::Prompt(_) = entry
+                    && let Some(identity) = queue_item_identity(entry)
+                    && snapshot_struck.contains_key(&identity)
+                {
+                    retyped.insert(identity);
+                }
+            }
+        }
+    }
+    retyped
+}
+
 /// [`converge_queue_via_lifecycle`] with operator re-arm evidence
 /// (`#unstrikelost`). Snapshot-struck dominance (`#qeditdupguard`) still
 /// rewrites a stale live re-emit back to its struck representative, EXCEPT for
@@ -7389,6 +7432,58 @@ mod tests {
             .is_none(),
             "operator re-arm convergence is idempotent"
         );
+    }
+
+    /// `#retypestruck` (live, agent-doc-bugs.md 2026-10-11): the operator
+    /// deleted the answered `~~release + publish~~` row and typed a fresh
+    /// `release + publish` head to run after the in-flight items. The editor-op
+    /// epoch was captured against a base other than the snapshot, so there was
+    /// no replay evidence, and `#qeditdupguard` rewrote the new head to the
+    /// snapshot's struck representative. The typed line itself is the evidence.
+    #[test]
+    fn converge_keeps_operator_retyped_head_of_a_snapshot_struck_identity_live() {
+        let line = "release + publish";
+        let snapshot = vec![p("🚧 do [#refreshmemlockstall]"), c(line)];
+        // Both live shapes: the struck row deleted, or kept above the new one.
+        let deleted_then_retyped = vec![p("🚧 do [#refreshmemlockstall]"), p(line)];
+        let retyped_below = vec![p("🚧 do [#refreshmemlockstall]"), c(line), p(line)];
+
+        // Pre-fix behavior, kept as the no-evidence baseline: both shapes are
+        // re-struck or dropped.
+        assert_eq!(
+            converge(&deleted_then_retyped, &snapshot),
+            vec![p("🚧 do [#refreshmemlockstall]"), c(line)]
+        );
+        assert_eq!(
+            converge(&retyped_below, &snapshot),
+            vec![p("🚧 do [#refreshmemlockstall]"), c(line)]
+        );
+
+        let typed = vec!["\n- release + publish".to_string()];
+        let retyped = operator_retyped_queue_identities(&snapshot, &typed);
+        assert_eq!(retyped.len(), 1);
+        for live in [&deleted_then_retyped, &retyped_below] {
+            assert!(
+                converge_queue_via_lifecycle_with_operator_rearmed(
+                    live,
+                    &snapshot,
+                    &Default::default(),
+                    &retyped,
+                )
+                .is_none(),
+                "an operator re-typed head must stay live: {live:?}"
+            );
+        }
+
+        // Not evidence: typed strikethrough, an unrelated line, or a fragment
+        // that is not the whole head.
+        for not_evidence in ["- ~~release + publish~~", "- deploy staging", "publish"] {
+            assert!(
+                operator_retyped_queue_identities(&snapshot, &[not_evidence.to_string()])
+                    .is_empty(),
+                "{not_evidence:?}"
+            );
+        }
     }
 
     /// Without operator op evidence the same live copy is indistinguishable from

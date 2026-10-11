@@ -39,6 +39,27 @@ Released agent-doc v0.35.475. v0.35.476 is not yet tagged or published; the acti
 Compacted content:
 - Archived 20 response topic(s): queue go; `#runctrlclaude` re-trigger; `#runctrlclaude` pressed again; 17 more
 - Prior summary/context: prior compacted content: Archived 48 response topic(s): actionable review; queue subagent dispatch (claude coordinato...
+
+### Re: actionable-review dispatched; v0.35.487 batch status — opus-5.5 · 2026-10-10T23:40-04:00
+
+`#actionable-review` is claimed by `subagent:actionable-review2` and dispatched read-only. It is the first dispatch with the binary-emitted `subagent_prompt_preamble` from `#waypostauthorization`, pasted verbatim. It re-checks the 5 gated review items: `#operatorverifylive` / `#frontendlivedispatch` look like duplicates, plus `#jb262dynlauncherrecommen`, `#drivecapturedsplice` and `#pypiquotarecheck`. It also verifies two candidate follow-ups:
+- 10 `agent-doc-crdt-relay-io` relay-hub tests fail under plain `cargo test` but pass under nextest, which looks like process-shared state.
+- The coined-id commit hook blocked a commit over `#devclear`, an id that wasn't in that commit's text.
+
+I'll apply its findings to the backlog and queue when it reports.
+
+**v0.35.487 batch** (worktree `agent-doc-toolsslow-int-20261010`, all merged cleanly onto main `ab6cf0fe7`):
+- `bb5ab38aa` retained tracked-work publish now records actionable ids
+- `#respondfinalizehard` `8c9a39af9`
+- `#pypireleaseworkflow` `df08ab8a9`
+- GH #235 `4c2708194`
+- GH #236 `bf2924b2c`: native save gated on protocol compatibility, so the 263 IDE on 0.2.508 is admitted
+- dev.md Codex clear `925b6fc4f`: a Codex `turn_aborted` interrupt releases the turn lease
+- `#idefocusowner` `fd04ad845`: only the most recently focused JetBrains installation drives the tmux window
+
+`make check-fast` on the first six passed 8309/8309. Lint is clean after `#idefocusowner` merged. `#visiblewriteloadflake` is still with its subagent. When it lands I'll run one full `make check`, then release + publish v0.35.487, and close every item it ships.
+
+This dispatch cycle adds no backlog items; the review's findings are captured when its subagent reports.
 <!-- agent:boundary:2c9385e2 -->
 <!-- /agent:exchange -->
 
@@ -58,6 +79,7 @@ Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-
 - 🚧 release + publish
 - 🚧 do [#visiblewriteloadflake]
 - 🚧 do [#idefocusowner]
+- #actionable-review
 <!-- /agent:queue -->
 
 ## Backlog

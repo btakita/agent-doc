@@ -14,9 +14,9 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::{
     document_queue::{QueueEntry, QueuePrompt},
     queue_consume::{
-        IpcNodeOp, QueueConsumptionPlan, consume_queue_nodes_by_key,
-        consume_queue_prompts_by_exact_spans, first_n_queue_prompt_texts,
-        head_id_names_open_backlog_item, id_backed_head_node_keys,
+        ApprovedQueueHead, IpcNodeOp, QueueConsumptionPlan, approved_queue_head_matches,
+        consume_queue_nodes_by_key, consume_queue_prompts_by_exact_spans,
+        first_n_queue_prompt_texts, head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
         project_answered_free_text_strike_with_claims, queue_consume_count_for_done_ids,
         queue_consume_node_ops, queue_mark_done_node_ops, queue_prompt_node_keys_for_count,
@@ -328,10 +328,18 @@ pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
 /// A response closeout's consume, fenced to the heads preflight selected for
 /// the cycle (`#qselectedheadonly`). An id-naming closeout keeps the id match;
 /// an empty `selected_heads` keeps the unfenced behaviour.
+///
+/// `approved_head` (`#qconsumeapprovedhead`, gh#240) is the head the
+/// closeout's consumption decision judged answered, captured from the document
+/// that decision read. A free-text consume (no done-ids) takes the leading
+/// live head only when it is still that exact head; otherwise it is a
+/// monotonic no-op. Ignored for an id-naming closeout, whose id match already
+/// binds the consume to a proven head.
 pub fn consume_queue_prompts_for_done_ids_selected_with_outcome(
     file: &Path,
     done_ids: &[String],
     selected_heads: &[String],
+    approved_head: Option<&ApprovedQueueHead>,
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
@@ -340,18 +348,19 @@ pub fn consume_queue_prompts_for_done_ids_selected_with_outcome(
     } else {
         done_ids_free_text_budget(done_ids)
     };
-    let selected: &[String] = if done_ids.is_empty() {
-        selected_heads
+    let (selected, approved_head): (&[String], _) = if done_ids.is_empty() {
+        (selected_heads, approved_head)
     } else {
-        &[]
+        (&[], None)
     };
-    consume_queue_prompts_with_options(
+    consume_queue_prompts_with_options_fenced(
         file,
         done_ids,
         budget,
         skip_visible_guard,
         None,
         selected,
+        approved_head,
         effects,
     )
 }
@@ -585,6 +594,29 @@ fn consume_queue_prompts_with_options(
     selected_heads: &[String],
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_options_fenced(
+        file,
+        done_ids,
+        free_text_count,
+        skip_visible_guard,
+        expected_head,
+        selected_heads,
+        None,
+        effects,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn consume_queue_prompts_with_options_fenced(
+    file: &Path,
+    done_ids: &[String],
+    free_text_count: usize,
+    skip_visible_guard: bool,
+    expected_head: Option<&str>,
+    selected_heads: &[String],
+    approved_head: Option<&ApprovedQueueHead>,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<Option<QueueConsumptionOutcome>> {
     // `#crdtstructops` Phase D follow-on: no file-TOCTOU flock across the
     // read-parse-write cycle. The detached single-writer consumes directly; the
     // editor-attached path converges via the relay. The consume still computes
@@ -642,6 +674,33 @@ fn consume_queue_prompts_with_options(
             ),
         );
         return Ok(None);
+    }
+    // `#qconsumeapprovedhead` (gh#240): the consume must take the head the
+    // closeout's decision approved, not whatever leads the queue now. A
+    // captured-finalize resume's repair pass struck the answered `#upgrade`
+    // between the `respond` closeout's decision and this re-read, so the plan
+    // landed on the next, unanswered `[#id]: go`, drained the queue, and
+    // cleared `queue: go`. Node identity (strike-stable) separates two heads
+    // with identical text.
+    if let Some(approved) = approved_head {
+        let consumed_node_key = plan.node_ops.first().map(|op| op.node_id.as_str());
+        if !approved_queue_head_matches(approved, &plan.consumed_text, consumed_node_key) {
+            let approved_hash = match approved {
+                ApprovedQueueHead::NoHead => "none".to_string(),
+                ApprovedQueueHead::Head { text, .. } => agent_doc_hash::content_hash(text),
+            };
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_consume_unapproved_head_noop file={} approved_hash={} observed_hash={} \
+                     recovery=monotonic_noop #qconsumeapprovedhead",
+                    file.display(),
+                    approved_hash,
+                    agent_doc_hash::content_hash(plan.consumed_text.trim())
+                ),
+            );
+            return Ok(None);
+        }
     }
     // `#qselectedheadonly`: a free-text closeout may consume only a head
     // preflight selected for this cycle. When the answered-strike already struck

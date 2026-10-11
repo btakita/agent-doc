@@ -609,7 +609,14 @@ change selected head identity. The canonical marker vocabulary is:
   stripped for identity, and clears once the head is consumed, claimed again, or
   stops waiting on the operator. It exists because a subagent that finished,
   tagged its item `[operator-verify]` and released its claim otherwise left a
-  bare `do [#id]` that read as unstarted.
+  bare `do [#id]` that read as unstarted. An awaiting-operator head is never
+  agent work (`#regressionawaitingoperat`): it is never listed under
+  `queue_subagent_dispatch` (neither through an item `#subagents` tag nor the
+  queue-level `subagents` attribute), and it is never the head preflight
+  synthesizes as the cycle's continuation diff, so it never becomes a
+  `prompt_target`, the turn driver, `pipeline.queue_task_id`, or a
+  `--done` obligation. Repeated preflights over an unchanged document whose
+  only remaining head awaits the operator report `no_changes`.
 - `📌` (operator pin) / `📍` (agent pin) — priority pins. The binary INJECTS the
   direct emoji; the `:pushpin:` / `:round_pushpin:` shortcodes (and the
   `**pin**` / `*prioritized*` emphasis spellings) remain accepted on parse, so

@@ -3471,6 +3471,143 @@ mod tests {
         doc
     }
 
+    /// `#regressionawaitingoperat`: the 2026-10-11 `agent-doc-bugs.md` shape.
+    /// A `subagents` queue whose first head `do [#verify]` is `[operator-verify]`
+    /// (projected `⏳`) above a dispatchable head. Every preflight reported
+    /// `+do [#verify]` as the cycle diff (`[user+]`, `prompt_target`, turn driver,
+    /// `pipeline.queue_task_id`), listed it under `queue_subagent_dispatch`, and
+    /// the closeout guard then demanded `--done` for it. The synthetic
+    /// continuation head was the first unclaimed head regardless of
+    /// drainability, while its gate (`queue_supervisor_drainable`) was true
+    /// because of the head BELOW it.
+    fn awaiting_operator_doc(queue_attrs: &str, extra_heads: &str, extra_backlog: &str) -> String {
+        format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "queue: go\n",
+                "---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: earlier — test\n\n",
+                "Answered.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Queue\n\n",
+                "<!-- agent:queue{queue_attrs} -->\n",
+                "- do [#verify]\n",
+                "{extra_heads}",
+                "<!-- /agent:queue -->\n\n",
+                "## Backlog\n\n",
+                "<!-- agent:backlog queue -->\n",
+                "- [ ] [#verify] [operator-verify] Live proof that needs real keystrokes\n",
+                "{extra_backlog}",
+                "<!-- /agent:backlog -->\n",
+            ),
+            queue_attrs = queue_attrs,
+            extra_heads = extra_heads,
+            extra_backlog = extra_backlog,
+        )
+    }
+
+    fn dispatch_items(parsed: &serde_json::Value) -> Vec<String> {
+        parsed["queue_subagent_dispatch"]
+            .as_array()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry["item"].as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn awaiting_operator_head_is_never_the_continuation_diff_or_dispatch_work() {
+        let dir = setup_project();
+        let content = awaiting_operator_doc(
+            " subagents",
+            "- do [#work]\n",
+            "- [ ] [#work] Fix the flaky supervisor test\n",
+        );
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        for press in 1..=3 {
+            let parsed = claimed_head_preflight(&doc);
+            let diff = parsed["diff"].as_str().unwrap_or_default();
+            assert!(
+                !diff.contains("#verify"),
+                "press {press}: the operator-verify head must never be the cycle diff: {parsed:#}"
+            );
+            assert!(
+                !parsed["annotated_diff"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("#verify"),
+                "press {press}: {parsed:#}"
+            );
+            assert_ne!(
+                parsed["pipeline"]["queue_task_id"], "#verify",
+                "press {press}: the operator-verify head must not drive the turn: {parsed:#}"
+            );
+            assert_eq!(
+                dispatch_items(&parsed),
+                vec!["do [#work]".to_string()],
+                "press {press}: only the agent-workable head is dispatch work: {parsed:#}"
+            );
+            let state = agent_doc_cycle_state_io::load(&doc).unwrap();
+            assert!(
+                state.as_ref().is_none_or(|state| !state
+                    .expect_done_or_gate_ids
+                    .iter()
+                    .any(|id| id.trim_start_matches('#') == "verify")),
+                "press {press}: no `--done` obligation for the operator-verify head: {state:?}"
+            );
+            let on_disk = std::fs::read_to_string(&doc).unwrap();
+            assert!(
+                on_disk.contains("- ⏳ do [#verify]\n"),
+                "press {press}: the head still projects the awaiting-operator marker:\n{on_disk}"
+            );
+        }
+    }
+
+    /// Repeated preflights over an unchanged document whose only head waits on
+    /// the operator: nothing changed, nothing is dispatched, no cycle opens.
+    #[test]
+    fn repeated_preflight_over_an_awaiting_operator_only_queue_reports_no_changes() {
+        let dir = setup_project();
+        let content = awaiting_operator_doc(" subagents", "", "");
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        for press in 1..=3 {
+            let parsed = claimed_head_preflight(&doc);
+            assert_eq!(parsed["no_changes"], true, "press {press}: {parsed:#}");
+            assert!(parsed["diff"].is_null(), "press {press}: {parsed:#}");
+            assert!(
+                dispatch_items(&parsed).is_empty(),
+                "press {press}: an operator-verify head is never subagent dispatch work: {parsed:#}"
+            );
+            assert!(
+                !closeout_cycle_is_open(&doc).unwrap(),
+                "press {press}: an awaiting-operator-only queue must not open a cycle"
+            );
+        }
+    }
+
     #[test]
     fn explicit_run_on_a_claimed_only_queue_head_opens_no_cycle_and_names_the_claim() {
         let dir = setup_project();

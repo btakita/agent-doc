@@ -4,6 +4,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+- **A head waiting on the operator (`⏳`) is no longer reported as a fresh operator prompt every preflight
+  (`#regressionawaitingoperat`).** On a `subagents` queue whose first head `do [#id]` tracked an
+  `[operator-verify]` item, every preflight reported `+do [#id]` as the cycle diff (`[user+]`, a
+  `prompt_target`, the turn driver, `pipeline.queue_task_id`), listed the head under
+  `queue_subagent_dispatch`, and the closeout guard then demanded `--done` for it. The `⏳` marker itself was
+  not the cause: snapshot and document both carried it, and the diff header was the synthetic `+++ queue`.
+  Two derivations disagreed. The synthetic continuation head was the first unclaimed live head regardless of
+  drainability, while its gate (`queue_supervisor_drainable`) was true because of a drainable head below it;
+  the head is now the one that gate found. Queue subagent dispatch never offers a head awaiting the operator,
+  through either the item tag or the queue-level attribute, until the operator answers it inline.
+
 - **Each checkout's test ceiling always bounds that checkout (`#checktmpdirleak`).** The report that one
   worktree's `make check` "printed another worktree's path" in its nextest `test-isolation` setup line was a
   shared log, not a shared TMPDIR: concurrent subagents redirected `make check` to the same fixed

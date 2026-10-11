@@ -717,6 +717,26 @@ pub fn live_drainable_continuation_head_excluding_claimed(
     scope: DrainScope,
     claimed: &ClaimedQueueItems,
 ) -> Option<String> {
+    let stripped = live_drainable_head_prompt_text_excluding_claimed(content, scope, claimed)?;
+    let preset_only = preset_only_identity_ids(content);
+    Some(tracked_head_id(&stripped, &preset_only).unwrap_or(stripped))
+}
+
+/// [`live_drainable_continuation_head_excluding_claimed`], returning the head's
+/// marker-stripped **prompt text** (`do [#id]`) instead of its bare id.
+///
+/// `#regressionawaitingoperat`: preflight synthesizes this head as the cycle's
+/// continuation diff. Its `queue_supervisor_drainable` gate already asked
+/// "is SOME unclaimed head drainable?", but the head it then synthesized was
+/// the first unclaimed head regardless of drainability, so an `[operator-verify]`
+/// head (`⏳`) above a drainable one was reported every preflight as a fresh
+/// `[user+] do [#id]` prompt and became the cycle's turn driver. The gate and
+/// the head must be the same derivation, which this is.
+pub fn live_drainable_head_prompt_text_excluding_claimed(
+    content: &str,
+    scope: DrainScope,
+    claimed: &ClaimedQueueItems,
+) -> Option<String> {
     let (queue_facts, activation) =
         active_queue_for_supervisor_start(content, matches!(scope, DrainScope::Supervisor))?;
     let entries: Vec<QueueEntry> = activation
@@ -733,9 +753,7 @@ pub fn live_drainable_continuation_head_excluding_claimed(
         queue_facts.preset_supplies_directive,
         scope,
     )?;
-    let stripped = strip_in_progress_marker(&head.text);
-    let preset_only = preset_only_identity_ids(content);
-    Some(tracked_head_id(&stripped, &preset_only).unwrap_or(stripped))
+    Some(strip_in_progress_marker(&head.text))
 }
 
 /// Live drainable active queue head **prompt text** for `scope` (`do [#id]`),

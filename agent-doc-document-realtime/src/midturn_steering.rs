@@ -788,6 +788,18 @@ fn executable_queue_items(content: &str) -> Vec<QueueItem> {
         .collect()
 }
 
+/// Whether a queue head waits on the operator (`#queueawaitop`, `⏳`): its
+/// tracked item is `[operator-verify]` or a gated `agent:review` row and the
+/// head carries no inline operator verdict. Such a head has no agent work, so
+/// it is never subagent dispatch work (`#regressionawaitingoperat`): before
+/// this, a finished `[operator-verify]` head whose worker released its claim
+/// was re-listed under `queue_subagent_dispatch` every preflight.
+fn head_awaits_operator(norm: &str, awaiting_operator: &std::collections::HashSet<String>) -> bool {
+    !awaiting_operator.is_empty()
+        && agent_doc_queue::queue_continuation::extract_head_id(norm)
+            .is_some_and(|id| awaiting_operator.contains(&id.to_ascii_lowercase()))
+}
+
 /// The shared queue-head work identity (`#claimdispatchidentity`):
 /// alignment, dispatch newness and claims all key on
 /// [`agent_doc_element_queue::queue_head_identity`].
@@ -1624,11 +1636,14 @@ pub fn queue_attr_subagent_heads(
     let mode = agent_doc_queue::subagent_intent::queue_subagents_mode(&queue.attrs)?;
     let presets = PresetContext::new(content, &[]);
     let items = executable_queue_items(content);
+    let awaiting_operator =
+        agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
     let eligible = items
         .iter()
         .filter(|item| {
             presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
         })
+        .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
         .map(|item| item.norm.clone())
         .collect();
     let live = items.into_iter().map(|item| item.norm).collect();
@@ -1660,11 +1675,14 @@ pub fn subagent_dispatch_heads(content: &str, reference_queue: Option<&[String]>
             }
             (queue.iter().map(String::as_str).collect(), identities)
         });
+    let awaiting_operator =
+        agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
     executable_queue_items(content)
         .into_iter()
         .filter(|item| {
             presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
         })
+        .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
         .filter(|item| {
             reference.as_ref().is_none_or(|(norms, identities)| {
                 !norms.contains(item.norm.as_str())
@@ -2607,6 +2625,35 @@ mod tests {
             subagent_dispatch_heads(&scoped, Some(&reference)),
             vec!["#subagents do [#new1]".to_string(), "plain new".to_string()]
         );
+    }
+
+    /// `#regressionawaitingoperat`: a head whose tracked item waits on the
+    /// operator (`[operator-verify]`, projected `⏳`) is never dispatch work,
+    /// through either the item tag or the queue-level attribute, until the
+    /// operator answers it inline.
+    #[test]
+    fn awaiting_operator_heads_are_never_dispatch_heads() {
+        let backlog = "\n<!-- agent:backlog -->\n- [ ] [#verify] [operator-verify] live proof\n- [ ] [#work] fix it\n<!-- /agent:backlog -->\n";
+        let tagged = format!(
+            "{}{backlog}",
+            doc(
+                "- ⏳ #subagents do [#verify]\n- #subagents do [#work]\n",
+                EX
+            )
+        );
+        assert_eq!(
+            subagent_dispatch_heads(&tagged, None),
+            vec!["#subagents do [#work]".to_string()]
+        );
+        let attr = format!("{}{backlog}", doc("- ⏳ do [#verify]\n- do [#work]\n", EX))
+            .replace("<!-- agent:queue -->", "<!-- agent:queue subagents -->");
+        let (_, eligible, live) = queue_attr_subagent_heads(&attr).unwrap();
+        assert_eq!(eligible, vec!["do [#work]".to_string()]);
+        assert_eq!(live.len(), 2, "{live:?}");
+        // An inline operator verdict makes the head agent work again.
+        let answered = attr.replace("- ⏳ do [#verify]", "- do [#verify]: verified, ship it");
+        let (_, eligible, _) = queue_attr_subagent_heads(&answered).unwrap();
+        assert_eq!(eligible.len(), 2, "{eligible:?}");
     }
 
     /// `#claimdispatchidentity` (live 2026-10-03): a tag-only edit of a line

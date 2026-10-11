@@ -2632,6 +2632,12 @@ pub struct QueueState {
     /// phantom `+:pushpin: do [#id]` prompt diff, which previously kept
     /// `no_changes:false` every preflight and sustained the qchurn flood.
     pub queue_supervisor_drainable: bool,
+    /// `#regressionawaitingoperat`: the head `queue_supervisor_drainable`
+    /// found — the first unclaimed live head drainable in the SUPERVISOR scope,
+    /// as marker-stripped prompt text. [`QueueState::continuation_head`] falls
+    /// back to it, so the synthetic continuation diff names a head some drainer
+    /// will act on, never an `[operator-verify]` (`⏳`) head queued above it.
+    pub queue_supervisor_continuation_head: Option<String>,
     /// `#qmaintorphan`: whether queue maintenance mutated the document this
     /// preflight. Queue maintenance runs at step 4b2, *after* the single step-2
     /// commit, so its mutation is normally committed by the cycle's own
@@ -2663,14 +2669,14 @@ impl QueueState {
     }
 
     /// The queue head this cycle would continue on: the first selected head,
-    /// else the first live head that no worker claimed (`#explicitrunqueue`).
-    /// A claimed head is in flight elsewhere and is never a continuation head.
+    /// else the first unclaimed live head drainable in the supervisor scope
+    /// (`#explicitrunqueue`, `#regressionawaitingoperat`). A claimed head is in
+    /// flight elsewhere and an `[operator-verify]` / gated-review head waits on
+    /// the operator (`⏳`); neither is ever a continuation head.
     pub fn continuation_head(&self) -> Option<&String> {
-        self.selected_queue_prompts.first().or_else(|| {
-            self.queue_prompts
-                .iter()
-                .find(|prompt| !self.head_is_claimed(prompt))
-        })
+        self.selected_queue_prompts
+            .first()
+            .or(self.queue_supervisor_continuation_head.as_ref())
     }
 }
 
@@ -3059,6 +3065,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             queue_drainable_head_count: 0,
             queue_continuation_required: false,
             queue_supervisor_drainable: false,
+            queue_supervisor_continuation_head: None,
             // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
             maintenance_mutated: false,
             claimed_queue_heads: vec![],
@@ -3085,6 +3092,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             queue_drainable_head_count: 0,
             queue_continuation_required: false,
             queue_supervisor_drainable: false,
+            queue_supervisor_continuation_head: None,
             // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
             maintenance_mutated: false,
             claimed_queue_heads: vec![],
@@ -3133,13 +3141,16 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         0
     };
     let queue_continuation_required = activation.active && queue_drainable_head_count > 0;
-    let queue_supervisor_drainable = activation.active
-        && agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+    let queue_supervisor_continuation_head = if activation.active {
+        agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_excluding_claimed(
             &drainability_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
             &claimed_queue_items,
         )
-        .is_some();
+    } else {
+        None
+    };
+    let queue_supervisor_drainable = queue_supervisor_continuation_head.is_some();
     let claimed_queue_heads = if activation.active && !claimed_queue_items.is_empty() {
         claimed_queue_head_facts(file, &content)
     } else {
@@ -3205,6 +3216,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         queue_drainable_head_count,
         queue_continuation_required,
         queue_supervisor_drainable,
+        queue_supervisor_continuation_head,
         // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
         maintenance_mutated: false,
         claimed_queue_heads,
@@ -5529,6 +5541,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
                 queue_supervisor_drainable: false,
+                queue_supervisor_continuation_head: None,
                 // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
                 maintenance_mutated: false,
                 claimed_queue_heads: vec![],
@@ -5564,6 +5577,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
                 queue_supervisor_drainable: false,
+                queue_supervisor_continuation_head: None,
                 // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
                 maintenance_mutated: false,
                 claimed_queue_heads: vec![],
@@ -6344,13 +6358,16 @@ pub fn run_queue_maintenance_with_coin_gate(
     // subagent claimed is in flight elsewhere; counting it here made an explicit
     // Run Agent Doc synthesize `+do [#id]` for the claimed head on every press,
     // opening a no-op cycle that tripped `expect_done_or_gate_guard`.
-    let queue_supervisor_drainable = activation.active
-        && agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+    let queue_supervisor_continuation_head = if activation.active {
+        agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_excluding_claimed(
             &current_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
             &claimed_queue_items,
         )
-        .is_some();
+    } else {
+        None
+    };
+    let queue_supervisor_drainable = queue_supervisor_continuation_head.is_some();
     let claimed_queue_heads = if activation.active && !claimed_queue_items.is_empty() {
         claimed_queue_head_facts(file, &current_content)
     } else {
@@ -6404,6 +6421,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         queue_drainable_head_count,
         queue_continuation_required,
         queue_supervisor_drainable,
+        queue_supervisor_continuation_head,
         // `#qmaintorphan`: only the persisted mutation counts. `mutated` is set
         // by the branches above and written to BOTH the visible document and the
         // snapshot by `persist_queue_maintenance_doc` + the snapshot sync block;

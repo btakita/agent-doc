@@ -31,6 +31,15 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   ignores, so the queue continuation never dispatched. Dim prompt bodies are now masked before matching, the same rule
   route already applied (`#routeghostdraft`).
 - **The catch-up residue strike no longer strikes a re-typed repeated report with an old answer (`#qheadresiduescope`).** Preflight's `#qheadresidue` catch-up matched a live free-text queue head against every `> **Queue prompt:**` echo in the exchange, so an operator who typed an already-answered report again (or un-struck it) had the new copy struck by the earlier answer before any cycle looked at it. Only echoes written after the head last entered the queue count now. The entry point is read from git history (newest commits first, stopping at the first commit where the head is not live; at most 128 commits), and only the exchange text after that commit (`queue_response::exchange_text_newer_than`) can answer the head. A head answered by a newer echo is still struck; documents with no history keep the old behavior; recurring-imperative heads stay exempt. Skips log `preflight_freetext_residue_strike_skipped_echo_predates_head_entry`. New `agent_doc_git_io::revision::walk_file_revisions`. Tests: `run_queue_maintenance_keeps_retyped_repeated_report_live` (struck row deleted and kept; fails with the scoping disabled), `run_queue_maintenance_strikes_retyped_report_answered_after_reentry`, `closeout_does_not_call_a_retyped_report_residue_from_an_older_echo`, `exchange_text_newer_than_returns_only_text_after_the_anchor`, `walk_file_revisions_*`.
+- **Concurrent queue subagents can no longer swap commit messages through a shared scratch file.**
+  Forked subagents dispatched by one coordinator share its scratchpad, and one subagent's commit-message file
+  overwrote a sibling's, so a commit carried the wrong message. The `#waypostauthorization` preamble (`agent-doc queue
+  brief` and preflight's `queue_subagent_dispatch[].authorization.subagent_prompt_preamble`) now restates a
+  scratch-isolation coordinator rule: commit messages go through `git commit -F -` (a stdin heredoc) or a file inside
+  the subagent's own worktree, never a file in a shared scratchpad or `/tmp`, and other temp files go in the
+  subagent's own worktree or a unique `mktemp` path. The rule text is one string-literal macro
+  (`subagent_scratch_isolation_rule!`), and the exchange-subagent dispatch texts, which carry no preamble (preflight `exchange_subagent_dispatch_guidance`,
+  the mid-turn hook and closeout steering directive), append the same rule verbatim.
 
 ## 0.35.489
 

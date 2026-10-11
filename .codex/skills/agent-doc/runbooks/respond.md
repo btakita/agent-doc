@@ -132,7 +132,9 @@ rule. This runbook carries the rest.
   (alias `fan-out`), preflight lists each new exchange prompt under
   `exchange_subagent_dispatch`. Dispatch every listed prompt immediately, one
   background subagent per prompt and a dedicated worktree for repository work.
-  Exchange prompts have no queue claim/release lifecycle. The parent retains
+  Exchange prompts have no queue claim/release lifecycle and no preamble, so
+  the coordinator puts the scratch-isolation rule (the
+  `exchange_subagent_dispatch_guidance` text) in each subagent prompt itself. The parent retains
   the response cycle: review the worker result, answer the exchange prompt, and
   perform the normal binary-owned closeout.
 - **Queue subagents coordinator (`#queuesubagents`).** Under
@@ -151,7 +153,7 @@ rule. This runbook carries the rest.
      `preset="#spec-test-build-install-commit-push"` → "update spec + tests.
      build + install for local testing. commit + push"), scoped to that one
      item, plus the coordinator rules (own worktree, never `make install` or a
-     release, never touch the session document). Never paraphrase or extend it. When
+     release, never touch the session document, scratch isolation). Never paraphrase or extend it. When
      `authorization.status` is `unresolved_preset`, the queue names a preset
      frontmatter does not define; the preamble already tells the subagent that
      no authorization beyond the item text was resolved, so do not add any.
@@ -169,7 +171,12 @@ rule. This runbook carries the rest.
      is offered for dispatch again and never drained inline.
   5. A subagent commits and pushes its branch (fast-forward only, never force).
      It never runs `make install`, a release build, a version bump, a tag, or a
-     release.
+     release. Concurrent subagents share the coordinator's scratchpad, so a
+     subagent passes its commit message through `git commit -F -` (a stdin
+     heredoc) or a file inside its own worktree, never a fixed file in a shared
+     scratchpad or `/tmp`, and puts other temp files in its own worktree or a
+     unique `mktemp` path (one subagent's commit once carried a sibling's
+     message).
   6. When subagents report back, integrate their work serially: rebase or
      cherry-pick each onto main, run the preset's verification, run ONE
      `make install` per integrated batch, and push. Then run

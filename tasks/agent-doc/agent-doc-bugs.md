@@ -271,6 +271,20 @@ The exchange is large (215 lines, 12 sections). The queue is active, so I'm not 
 **Release plan:** I've noted that you want a release + publish once these items finish. I'll merge each subagent branch as it reports and run one `make install`. After the remaining claimed items (`#refreshmemlockstall`, GH #237, GH #238, the Cancel Turn wedge, the struck-release bug) are merged, I'll cut one release covering all of them.
 
 The `#refreshmemlockstall` subagent is still running `make check-fast`.
+
+### Re: sdk.md queue out of sync with its subagents — dispatched — opus-5-5 · 2026-10-11T02:40-04:00
+
+**Dispatched (claimed `subagent:sdkqueuesync`):** the report that `src/haiven-dev/tasks/sdk.md` shows its queue items as unstarted even though their subagents mostly finished. The subagent treats sdk.md and haiven-dev's state as read-only. It will rebuild what actually happened from the doc's git history, the ops log and the claim listing. Then it finds which part of agent-doc fails to show a subagent's progress (claimed → in flight → reported → closed) in the queue, and fixes it with tests. It will also list which sdk.md items are actually complete, with evidence, so they can be closed. It works in its own worktree and checks for overlap with the struck-release subagent, which is in the same queue code.
+
+**Not dispatched: `#drivecapturedsplice`.** It's `[operator-verify]` and its only step sends real keystrokes into your desktop (`scripts/xdotool-live-verify.sh captured-splice`). It waits for your go-ahead.
+
+**Subagent status:**
+- **GH #237** (`agent-doc queue add`): code is written. Its fast checks (`make check-fast`) passed; the full `make check` is running, then commit + push.
+- **Cancel Turn wedge:** fix written (it removes the cancelled trigger from the input box and ends the cancelled turn immediately). Fast checks passed; `make check`, `make tmux-ci`, then push of `fix/cancelturnprompt`.
+- **`#refreshmemlockstall`:** in its full `make check`.
+- **GH #238** and the **struck "release + publish"** bug: still investigating.
+
+As each branch passes, I'll merge it, run one `make install`, close its items, then cut the release.
 <!-- agent:boundary:861a07a6 -->
 <!-- /agent:exchange -->
 
@@ -286,6 +300,7 @@ The `#refreshmemlockstall` subagent is still running `make check-fast`.
 - ~~#actionable-review~~
 - 🚧 I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.
 - ~~release + publish~~
+- sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.
 - do [#drivecapturedsplice]
 <!-- /agent:queue -->
 

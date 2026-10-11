@@ -167,6 +167,30 @@ are still byte-identical. It must not overwrite the editor from disk, merge the
 third-party value, or require another patch, finalize, commit, or session-check
 attempt to discover the completed save.
 
+**Native-save admission is protocol compatibility, not version equality**
+(GH #236). The controller sends `persist_current` to a registration when its
+plugin version is a package this release ships for any IDE line (the classic
+JetBrains package, the modular 262 package, the VS Code package) or is at or
+above that editor kind's native-save protocol floor
+(`agent_doc_reliable_sync_io::liveness::native_save_protocol_floor`: JetBrains
+`0.2.497`, the first build that answers a slow save `deferred` instead of
+`rejected`; VS Code `0.2.67`, the first version not shared with builds that
+predate `persist_current`). So a 263 IDE left on an older package because no
+package declares its build (#233) still receives native saves. A plugin below
+the floor, or one whose version does not parse, is fenced
+(`native_editor_save_request_generation_deferred ...
+native_save_protocol_floor=<v> compatibility=<token> fallback=exact_disk`). The
+fence never fails the closeout and never advises aligning generations: the
+retained write stays pending, logs
+`operator_action=update_editor_plugin_if_a_package_supports_this_ide_build`, and
+persists through the existing exact-disk proof (`retained_persistence_applied
+proof=exact_disk`) once the host's own save lands. The floor only moves when the
+binary starts requiring something new on this path; a change to the intent's
+meaning must use a new intent name, so a plugin newer than the binary still
+speaks the floor's protocol. Preflight likewise treats every release-paired
+package version as current, so a 262 IDE on the 262 package is not reported as
+"newer than this binary".
+
 On reconnect, the editor republishes its current value and generation. The
 controller rebases pending intents from `state.db`; the plugin must not reread
 an old delivery or replay a full document. A zero-member state is not proof of

@@ -54,9 +54,156 @@ pub fn expected_editor_plugin_version(editor_kind: &str) -> Option<&'static str>
     }
 }
 
-/// Exact generation fence for effects that can modify the user's disk.
+/// Exact generation identity with the editor kind's primary (classic) package.
+///
+/// This is a *display/staleness* question, not the native-save admission
+/// question: see [`editor_native_save_compatibility`] (GH #236).
 pub fn editor_plugin_generation_matches(editor_kind: &str, running: &str) -> bool {
     expected_editor_plugin_version(editor_kind).is_some_and(|expected| running.trim() == expected)
+}
+
+/// Every package version this binary's release pairs with an editor kind, one
+/// per IDE line (GH #236). JetBrains ships a classic package (242-261) and a
+/// modular 262 package under two distinct versions; the release workflow
+/// refuses a tag where they are equal, so a 262 IDE on the release-paired
+/// package can never report the classic version.
+pub fn release_paired_editor_plugin_versions(editor_kind: &str) -> Vec<&'static str> {
+    let mut versions = Vec::new();
+    if let Some(primary) = expected_editor_plugin_version(editor_kind) {
+        versions.push(primary);
+    }
+    if matches!(
+        editor_kind.trim().to_ascii_lowercase().as_str(),
+        "jetbrains" | "intellij" | "idea" | "jb"
+    ) && let Some(modular) = option_env!("AGENT_DOC_EXPECTED_JETBRAINS_262_PLUGIN_VERSION")
+        && !versions.contains(&modular)
+    {
+        versions.push(modular);
+    }
+    versions
+}
+
+/// Whether `running` is one of [`release_paired_editor_plugin_versions`].
+pub fn editor_plugin_version_is_release_paired(editor_kind: &str, running: &str) -> bool {
+    release_paired_editor_plugin_versions(editor_kind).contains(&running.trim())
+}
+
+/// Oldest plugin generation that speaks the native-save (`persist_current`)
+/// protocol this binary requires, per editor kind (GH #236).
+///
+/// The protocol, not the package version, is what a disk-writing native save
+/// depends on: a `persist_current` intent carrying the exact visible
+/// `expected_content_hash`/`expected_content_len`, answered by a terminal
+/// receipt (`applied`, `rejected`, or `deferred`). Floors:
+///
+/// - JetBrains `0.2.497` (`49241abcf`, netadv5 R2): the first build that
+///   answers a slow document-lane save `deferred` instead of `rejected`. An
+///   older build turns a timeout into a definitive refusal, which drops a live
+///   editor from the delivery cut, so it is a real protocol gap. The Kotlin
+///   `persist_current` path has not changed since.
+/// - VS Code `0.2.67`: the first version string not shared with builds that
+///   predate `persist_current` (`5c40923a4`; `0.2.66` shipped both sides).
+///
+/// The floor only moves when the binary starts requiring something new on this
+/// path; a change to the intent's meaning must use a new intent name, so a
+/// newer plugin than this binary knows still speaks the floor's protocol.
+pub fn native_save_protocol_floor(editor_kind: &str) -> Option<&'static str> {
+    match editor_kind.trim().to_ascii_lowercase().as_str() {
+        "jetbrains" | "intellij" | "idea" | "jb" => Some("0.2.497"),
+        "vscode" | "vs-code" | "code" => Some("0.2.67"),
+        _ => None,
+    }
+}
+
+/// Native-save admission verdict for one registration (GH #236).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeSaveCompatibility {
+    /// The running plugin is a package this release ships (any IDE line).
+    ReleasePaired,
+    /// Not a release-paired package (an older package left on an IDE build no
+    /// package covers, or a newer one), but at or above the protocol floor.
+    ProtocolCompatible { floor: &'static str },
+    /// Older than the protocol floor: a real protocol gap. Fail closed.
+    BelowProtocolFloor { floor: &'static str },
+    /// The running version does not parse, so no protocol can be claimed.
+    UnparsableVersion { floor: &'static str },
+    /// No native-save protocol is known for this editor kind.
+    UnknownKind,
+}
+
+impl NativeSaveCompatibility {
+    pub const fn admits_native_save(self) -> bool {
+        matches!(self, Self::ReleasePaired | Self::ProtocolCompatible { .. })
+    }
+
+    /// Stable ops-log token.
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::ReleasePaired => "release_paired",
+            Self::ProtocolCompatible { .. } => "protocol_compatible",
+            Self::BelowProtocolFloor { .. } => "below_native_save_protocol_floor",
+            Self::UnparsableVersion { .. } => "unparsable_plugin_version",
+            Self::UnknownKind => "unknown_editor_kind",
+        }
+    }
+
+    pub const fn floor(self) -> Option<&'static str> {
+        match self {
+            Self::ProtocolCompatible { floor }
+            | Self::BelowProtocolFloor { floor }
+            | Self::UnparsableVersion { floor } => Some(floor),
+            Self::ReleasePaired | Self::UnknownKind => None,
+        }
+    }
+}
+
+fn parse_dotted_version(version: &str) -> Option<Vec<u64>> {
+    let core = version.trim().trim_start_matches('v');
+    let core = core.split(['-', '+']).next().unwrap_or(core);
+    if core.is_empty() {
+        return None;
+    }
+    core.split('.')
+        .map(|part| part.parse::<u64>().ok())
+        .collect::<Option<Vec<_>>>()
+}
+
+fn dotted_version_at_least(running: &[u64], floor: &[u64]) -> bool {
+    for index in 0..running.len().max(floor.len()) {
+        let run = running.get(index).copied().unwrap_or(0);
+        let min = floor.get(index).copied().unwrap_or(0);
+        if run != min {
+            return run > min;
+        }
+    }
+    true
+}
+
+/// Whether a registration may receive a disk-writing native save (GH #236).
+///
+/// Admission is protocol compatibility, not equality with the classic package
+/// version: a 262 IDE on the 262 package, and a 263 IDE left on an older
+/// package because no package declares its build (#233), both speak the same
+/// `persist_current` protocol as the classic package.
+pub fn editor_native_save_compatibility(
+    editor_kind: &str,
+    running: &str,
+) -> NativeSaveCompatibility {
+    let Some(floor) = native_save_protocol_floor(editor_kind) else {
+        return NativeSaveCompatibility::UnknownKind;
+    };
+    if editor_plugin_version_is_release_paired(editor_kind, running) {
+        return NativeSaveCompatibility::ReleasePaired;
+    }
+    let (Some(run), Some(min)) = (parse_dotted_version(running), parse_dotted_version(floor))
+    else {
+        return NativeSaveCompatibility::UnparsableVersion { floor };
+    };
+    if dotted_version_at_least(&run, &min) {
+        NativeSaveCompatibility::ProtocolCompatible { floor }
+    } else {
+        NativeSaveCompatibility::BelowProtocolFloor { floor }
+    }
 }
 
 /// Metadata for one editor replica. This travels on the same reliable Lazily
@@ -565,6 +712,68 @@ mod tests {
             logical: 0,
             peer,
         }
+    }
+
+    /// GH #236: the native-save fence admits by protocol, not by equality with
+    /// the classic package version.
+    #[test]
+    fn gh236_native_save_compatibility_follows_the_protocol_not_the_classic_version() {
+        let classic = expected_editor_plugin_version("jetbrains")
+            .expect("classic JetBrains package version baked by build.rs");
+        let modular = release_paired_editor_plugin_versions("jetbrains")
+            .into_iter()
+            .find(|version| *version != classic)
+            .expect("262 JetBrains package version baked by build.rs");
+        assert_ne!(
+            classic, modular,
+            "release.yml refuses equal IDE-line versions"
+        );
+
+        // Matching classic package.
+        assert_eq!(
+            editor_native_save_compatibility("jetbrains", classic),
+            NativeSaveCompatibility::ReleasePaired
+        );
+        // The release-paired 262 package can never equal the classic version.
+        assert_eq!(
+            editor_native_save_compatibility("jetbrains", modular),
+            NativeSaveCompatibility::ReleasePaired
+        );
+        assert!(editor_plugin_version_is_release_paired(
+            "JetBrains",
+            modular
+        ));
+        assert!(!editor_plugin_generation_matches("jetbrains", modular));
+        // A 263 IDE left on 0.2.508 because no package declares build 263 (#233).
+        let gh236 = editor_native_save_compatibility("jetbrains", "0.2.508");
+        assert_eq!(
+            gh236,
+            NativeSaveCompatibility::ProtocolCompatible { floor: "0.2.497" }
+        );
+        assert!(gh236.admits_native_save());
+        // The floor itself is compatible; the build just before it is not.
+        assert!(editor_native_save_compatibility("jetbrains", "0.2.497").admits_native_save());
+        // A truly incompatible plugin: it answers a slow save `rejected`.
+        let old = editor_native_save_compatibility("jetbrains", "0.2.496");
+        assert_eq!(
+            old,
+            NativeSaveCompatibility::BelowProtocolFloor { floor: "0.2.497" }
+        );
+        assert!(!old.admits_native_save());
+        assert_eq!(old.token(), "below_native_save_protocol_floor");
+        // Unparsable versions and unknown kinds fail closed.
+        assert!(!editor_native_save_compatibility("jetbrains", "unknown").admits_native_save());
+        assert!(!editor_native_save_compatibility("jetbrains", "").admits_native_save());
+        assert_eq!(
+            editor_native_save_compatibility("zed", "9.9.9"),
+            NativeSaveCompatibility::UnknownKind
+        );
+        // VS Code: 0.2.66 shipped both before and after persist_current existed.
+        assert!(!editor_native_save_compatibility("vscode", "0.2.66").admits_native_save());
+        assert!(editor_native_save_compatibility("vscode", "0.2.67").admits_native_save());
+        // Suffixes and a `v` prefix do not change the verdict.
+        assert!(editor_native_save_compatibility("jb", "v0.2.508+local").admits_native_save());
+        assert!(editor_native_save_compatibility("jetbrains", "0.3").admits_native_save());
     }
 
     #[test]

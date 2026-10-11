@@ -170,6 +170,11 @@ impl std::fmt::Display for AwaitEditorReplicaNoDiskWrite {
 
 impl std::error::Error for AwaitEditorReplicaNoDiskWrite {}
 
+/// A native-save failure that retrying the current editor/CLI pair cannot
+/// change. GH #236: a plugin generation below the native-save protocol floor no
+/// longer produces this error (its retained write keeps the exact-disk
+/// fallback); the type and [`EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN`] remain so
+/// error text recorded by older binaries still classifies.
 #[derive(Debug)]
 pub struct EditorNativeSaveNeedsOperator(String);
 
@@ -185,14 +190,27 @@ impl std::error::Error for EditorNativeSaveNeedsOperator {}
 /// current editor/CLI pair cannot change.
 pub const EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN: &str = "editor_native_save_needs_operator";
 
-fn editor_native_save_needs_operator(path: &Path, diagnosis: &str) -> anyhow::Error {
-    EditorNativeSaveNeedsOperator(format!(
-        "native editor save for {} requires operator inspection: diagnosis={diagnosis} \
-         [{EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN}]. Keep editor authority; align the installed \
-         editor plugin and agent-doc binary generations, then retry without `--force-disk`",
-        path.display(),
-    ))
-    .into()
+/// Operator action for a pending native save (GH #236).
+///
+/// A plugin below the native-save protocol floor used to fail the closeout with
+/// "align the installed editor plugin and agent-doc binary generations". On an
+/// IDE build no published package covers (#233), the only alignment left was a
+/// binary downgrade, so that remedy was unreachable. The generation case now
+/// names the achievable action (update the plugin where a package supports the
+/// IDE build) and never fails the closeout: the retained write keeps its
+/// existing exact-disk fallback, exactly as preflight's advisory stale-plugin
+/// warning already describes the same skew.
+fn native_save_pending_operator_action(
+    save_class: Option<agent_doc_crdt_relay_io::ReplicaSignalClass>,
+    needs_operator: bool,
+) -> &'static str {
+    match save_class {
+        Some(agent_doc_crdt_relay_io::ReplicaSignalClass::PluginGenerationMismatch(_)) => {
+            "update_editor_plugin_if_a_package_supports_this_ide_build"
+        }
+        _ if needs_operator => "inspect_editor_endpoint",
+        _ => "none",
+    }
 }
 
 /// The stable machine-readable recovery token every retained-write refusal
@@ -1753,11 +1771,7 @@ fn canonical_editor_projection_is_persisted(
     } else {
         gate_blocker.needs_operator_inspection()
     };
-    let operator_action = if needs_operator {
-        "inspect_editor_endpoint"
-    } else {
-        "none"
-    };
+    let operator_action = native_save_pending_operator_action(save_class, needs_operator);
     agent_doc_ops_log_io::log_op(
         path,
         &format!(
@@ -1767,15 +1781,10 @@ fn canonical_editor_projection_is_persisted(
             agent_doc_hash::content_hash(canonical),
         ),
     );
-    // Missing or temporarily unreachable registrations still use document
-    // state edges for recovery. An exact generation mismatch is different:
-    // neither endpoint version can change until an operator updates one side.
-    if matches!(
-        save_class,
-        Some(agent_doc_crdt_relay_io::ReplicaSignalClass::PluginGenerationMismatch(_))
-    ) {
-        return Err(editor_native_save_needs_operator(path, &save_diagnosis));
-    }
+    // Missing or temporarily unreachable registrations use document state
+    // edges for recovery. A plugin below the native-save protocol floor is
+    // pending too (GH #236): the retained write keeps its exact-disk fallback
+    // rather than failing the closeout with a remedy that may be unreachable.
     Ok(false)
 }
 
@@ -6833,20 +6842,34 @@ fn defer_visible_delivery_projection_with_ownership(
 mod retained_refusal_token_tests {
     use super::*;
 
+    /// GH #236: a generation mismatch (below the native-save protocol floor)
+    /// names an achievable action and is not escalated to an operator-only
+    /// endpoint inspection; other operator classes keep their action.
     #[test]
-    fn native_save_operator_error_carries_structural_token_and_remedy() {
-        let err = editor_native_save_needs_operator(
-            Path::new("/tmp/plan.md"),
-            "plugin_generation_mismatch:1",
+    fn gh236_generation_mismatch_names_an_achievable_action() {
+        use agent_doc_crdt_relay_io::ReplicaSignalClass;
+        let mismatch = ReplicaSignalClass::PluginGenerationMismatch(1);
+        let action = native_save_pending_operator_action(
+            Some(mismatch),
+            mismatch.needs_operator_inspection(),
         );
-        let rendered = format!("{err:#}");
-        assert!(rendered.contains(EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN));
-        assert!(rendered.contains("plugin_generation_mismatch:1"));
-        assert!(rendered.contains("align the installed editor plugin and agent-doc binary"));
-        assert!(rendered.contains("without `--force-disk`"));
-        assert!(
-            err.downcast_ref::<EditorNativeSaveNeedsOperator>()
-                .is_some()
+        assert_eq!(
+            action,
+            "update_editor_plugin_if_a_package_supports_this_ide_build"
+        );
+        assert!(!action.contains("align"));
+        let refused = ReplicaSignalClass::DefinitivelyRefusedByAll(1);
+        assert_eq!(
+            native_save_pending_operator_action(Some(refused), refused.needs_operator_inspection()),
+            "inspect_editor_endpoint"
+        );
+        assert_eq!(
+            native_save_pending_operator_action(Some(ReplicaSignalClass::Requested(1)), false),
+            "none"
+        );
+        assert_eq!(
+            native_save_pending_operator_action(None, true),
+            "inspect_editor_endpoint"
         );
     }
 

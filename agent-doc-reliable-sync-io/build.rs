@@ -14,6 +14,17 @@ fn main() {
     );
     println!("cargo:rerun-if-changed={}", jb_props.display());
 
+    // GH #236: the modular 262 package is a second JetBrains IDE line released
+    // beside the classic package, under a version the release workflow requires
+    // to differ from the classic one. A 262 IDE running the release-paired
+    // package registers this version, so it must be a known generation too.
+    let jb_262_props = editors.join("jetbrains-262/gradle.properties");
+    emit(
+        "AGENT_DOC_EXPECTED_JETBRAINS_262_PLUGIN_VERSION",
+        read_property(&jb_262_props, "pluginVersion"),
+    );
+    println!("cargo:rerun-if-changed={}", jb_262_props.display());
+
     let vscode_pkg = editors.join("vscode/package.json");
     emit(
         "AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION",

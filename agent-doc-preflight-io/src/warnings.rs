@@ -470,10 +470,16 @@ pub fn live_plugin_generation_statuses_from_registrations(
                 running: running.to_string(),
                 expected: expected.to_string(),
                 timestamp_ms: u128::from(registration.timestamp_ms),
-                // Native effects require exact code-generation identity. A
-                // newer plugin paired with an older controller is just as
-                // incompatible as an older plugin paired with a newer one.
-                stale: running.trim() != expected,
+                // A plugin is current only at a package generation this
+                // release ships. A newer plugin paired with an older controller
+                // is as stale as an older plugin paired with a newer one. GH
+                // #236: the release-paired modular 262 package is a current
+                // generation too, although its version never equals the
+                // classic package's.
+                stale: running.trim() != expected
+                    && !agent_doc_reliable_sync_io::liveness::editor_plugin_version_is_release_paired(
+                        kind, running,
+                    ),
             })
         })
         .collect::<Vec<_>>();
@@ -1723,6 +1729,30 @@ mod tests {
         assert!(
             stale_plugin_warnings_from_registrations(&no_expectation, |_| None).is_empty(),
             "no baked expectation must not warn (fail-open)"
+        );
+    }
+
+    /// GH #236: a 262 IDE on the release-paired modular package is current,
+    /// not "newer than this binary".
+    #[test]
+    fn gh236_release_paired_262_package_is_not_stale() {
+        let Some(classic) = expected_plugin_version("jetbrains") else {
+            return;
+        };
+        let Some(modular) =
+            agent_doc_reliable_sync_io::liveness::release_paired_editor_plugin_versions(
+                "jetbrains",
+            )
+            .into_iter()
+            .find(|version| *version != classic)
+        else {
+            return;
+        };
+        let registrations = vec![registration_with_editor("jetbrains", modular)];
+        assert!(
+            stale_plugin_warnings_from_registrations(&registrations, expected_plugin_version)
+                .is_empty(),
+            "the release-paired 262 package must not warn"
         );
     }
 

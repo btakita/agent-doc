@@ -69,6 +69,20 @@ I've reworded the backlog text to say this.
 > **Queue prompt:** release + publish
 
 **Deferred:** the v0.35.490 Release run (38161702873) is still running. Linux, aarch64-darwin and plugins have passed; the x86_64-darwin and Windows builds are still in progress. Close this item once the run is green and PyPI shows 0.35.490.
+
+### Re: release status — opus-5.5 · 2026-10-11T14:19-04:00
+
+> **Chat prompt (#chatprompt):** what is the status of the release?
+
+v0.35.490 is tagged and pushed, but the release is not published yet. At 14:19 EDT, Release run 38161702873 had been running for about 23 minutes:
+
+- **Done:** plugins and four of the six builds: aarch64 and x86_64 linux-gnu, x86_64 musl, and aarch64-darwin.
+- **Still building:** x86_64-darwin and x86_64 Windows (MSVC). The Windows build is the job that failed v0.35.489. `f9b3a75d6b` is the fix, and this run is its first real test.
+- **Not yet created:** the GitHub Release itself (`gh release view v0.35.490` reports "release not found"). It is created after the builds finish.
+- **PyPI:** still at 0.35.488. The PyPI job runs after the Release assets upload, so 0.35.489 never published.
+- **Locally:** `agent-doc` 0.35.490 is already installed.
+
+`release + publish` stays open until the run is green, the release lists its archives plus `SHA256SUMS`, and PyPI shows 0.35.490. If Windows fails again, the next step is fixing that job.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 

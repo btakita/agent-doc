@@ -4630,3 +4630,182 @@ fn unstrike_then_response_closeout_without_quote_keeps_head_live_editor_absent()
 fn unstrike_then_response_closeout_without_quote_keeps_head_live_operator_saved() {
     unstrike_then_response_closeout_case(true);
 }
+
+// `#respondfinalizehard` (agent-doc-bugs.md, cycle-1791675315432, 2026-10-10):
+// `respond --done <id>` landed its response, then hard-failed
+// `queue consume: no prompt to consume` because every queue head was already
+// struck and `<id>` had already moved to `agent:done`. The recovery
+// `write --commit --done <id> --pending-only` then failed again with
+// `failed to compose completed tracked-work target`. Consuming an
+// already-consumed head (or `--done` on an already-done id) is an idempotent
+// already-satisfied no-op; only a never-existing id still fails closed.
+fn all_struck_queue_already_done_doc_content() -> String {
+    "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nqueue: go\nqueue_active: true\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ #gt-fix https://github.com/btakita/agent-doc/issues/234\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog queue -->\n- [ ] [#other1] Unrelated open item\n<!-- /agent:backlog -->\n\n<!-- agent:queue -->\n- ~~#gt-fix https://github.com/btakita/agent-doc/issues/234~~\n- ~~do [#done1]~~\n<!-- /agent:queue -->\n\n<!-- agent:done -->\n- [x] [#done1] Close the loop\n<!-- /agent:done -->\n".to_string()
+}
+
+const ALREADY_STRUCK_RESPONSE: &str = "<!-- patch:exchange -->\n### Re: gt-fix 234 — gpt-5\n> **Queue prompt:** #gt-fix https://github.com/btakita/agent-doc/issues/234\n\nAlready handled.\n<!-- /patch:exchange -->\n";
+
+#[test]
+fn respond_done_on_already_done_id_with_all_struck_queue_commits() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let original = all_struck_queue_already_done_doc_content();
+    fs::write(&doc, &original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .args(["respond", doc.to_str().unwrap(), "--done", "done1"])
+        .write_stdin(ALREADY_STRUCK_RESPONSE)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "respond --done on an already-done id with an all-struck queue must commit:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("no prompt to consume"),
+        "an already-consumed head must not be reported as a missing prompt:\n{stderr}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("### Re: gt-fix 234 — gpt-5") && head.contains("Already handled."),
+        "the response must be committed, not wedged at write_applied:\n{head}"
+    );
+    assert!(
+        head.contains("- ~~#gt-fix https://github.com/btakita/agent-doc/issues/234~~")
+            && head.contains("- ~~do [#done1]~~"),
+        "already-struck heads stay struck exactly once:\n{head}"
+    );
+    assert_eq!(
+        head.matches("[#done1] Close the loop").count(),
+        1,
+        "an already-done id must not be archived twice:\n{head}"
+    );
+    assert!(
+        head.contains("- [ ] [#other1] Unrelated open item"),
+        "an unrelated open item must be untouched:\n{head}"
+    );
+    let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("queue_consume_drained_noop"),
+        "the drained queue must be recorded as already satisfied:\n{ops_log}"
+    );
+}
+
+#[test]
+fn write_commit_done_on_already_done_id_with_all_struck_queue_commits() {
+    let (tmp, doc) = setup_session_stream_doc();
+    fs::write(&doc, all_struck_queue_already_done_doc_content()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "done1",
+        ])
+        .write_stdin(ALREADY_STRUCK_RESPONSE)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "write --commit --done on an already-done id with an all-struck queue must commit:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("failed to compose completed tracked-work target"),
+        "the tracked-work composer must treat an already-done id as satisfied:\n{stderr}"
+    );
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("Already handled."),
+        "the response must be committed:\n{head}"
+    );
+    assert_eq!(head.matches("[#done1] Close the loop").count(), 1, "{head}");
+}
+
+#[test]
+fn write_commit_pending_only_done_on_already_done_id_with_all_struck_queue_commits() {
+    let (tmp, doc) = setup_session_stream_doc();
+    // The incident's recovery shape: the response already landed (the cycle
+    // wedged at `write_applied`), so only the tracked-work closeout remains.
+    let original = all_struck_queue_already_done_doc_content().replace(
+        "<!-- agent:boundary:1234abcd -->",
+        "### Re: gt-fix 234 — gpt-5\n> **Queue prompt:** #gt-fix https://github.com/btakita/agent-doc/issues/234\n\nAlready handled.\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, &original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "done1",
+            "--pending-only",
+        ])
+        .write_stdin("")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "pending-only --done on an already-done id must be an idempotent no-op:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("no prompt to consume")
+            && !stderr.contains("failed to compose completed tracked-work target"),
+        "{stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        original,
+        "an already-satisfied closeout must not change the document"
+    );
+}
+
+#[test]
+fn write_commit_done_on_never_existing_id_with_all_struck_queue_fails_closed() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let original = all_struck_queue_already_done_doc_content();
+    fs::write(&doc, &original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "doen1",
+            "--pending-only",
+        ])
+        .write_stdin("")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "a never-existing (typo) id must still fail closed:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("doen1"),
+        "the failure must name the unknown id:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("no prompt to consume"),
+        "an unknown id must not be misreported as a queue consume failure:\n{stderr}"
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), original);
+}

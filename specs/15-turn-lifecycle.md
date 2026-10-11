@@ -393,7 +393,24 @@ for ~90s after "unwedge agent-doc" was interrupted).
   sidechain records are skipped; an unparseable record, a record still being
   written, or a leading fragment-only window reads as `Unknown`, so the probe
   never reaches past a record it cannot read to an older interrupt.
-  Unrecognised transcript shapes (Codex rollouts) are `Unknown`.
+- **Codex rollout evidence (`#devclear`).** Codex also runs no `Stop` hook on
+  an interrupt, and its `UserPromptSubmit` payload's `transcript_path` names
+  the rollout JSONL, so the same binding applies. Codex records the boundary
+  as `{"type":"event_msg","payload":{"type":"turn_aborted",
+  "reason":"interrupted"}}`. Scanning newest first: a `turn_aborted` with
+  reason `interrupted` and a readable top-level `timestamp` is the interrupt
+  (any other reason, or no timestamp, is `Unknown`); `response_item`,
+  `turn_context`, and the conversation events `task_started`,
+  `task_complete`, `user_message`, `agent_message`, `agent_reasoning`
+  (`CODEX_TURN_ACTIVITY_EVENTS`) are activity; every other `event_msg`
+  (`token_count`, `thread_settings_applied`, `thread_goal_updated`,
+  `item_completed`) and every other record type (`session_meta`,
+  `world_state`, `token_usage_record`) is skipped as bookkeeping. Late
+  `exec_command_end` / `mcp_tool_call_end` events, which a background command
+  the aborted turn left running can write after the abort, are skipped too: a
+  new Codex turn always writes `task_started`, `turn_context` and a
+  `response_item` first, so they never hide newer turn activity. A screen
+  scrape of Codex's "Conversation interrupted" banner is never evidence.
 - **Retirement.** A fresh lease is retired only when the newest conversation
   record is an interrupt no older than the lease heartbeat that has settled for
   `TURN_INTERRUPT_SETTLE_SECS` (`turn_lease_ended_by_interrupt`). The settle
@@ -410,6 +427,16 @@ This is harness-authored turn-boundary evidence, not prompt scraping: a
 rendered ready prompt is still never idle evidence, because harnesses redraw
 the composer between tool calls inside a live turn.
 
+Observed 2026-10-11 on haiven-dev `tasks/dev.md` (Codex pane %127): the route
+dispatched a prompt at 00:10:26Z, the lease was written at 00:10:27Z, the
+operator pressed Esc and the rollout recorded `turn_aborted` at 00:10:28Z.
+Clear Session Context then refused twice with `harness_turn_live=true
+evidence=turn_active_lease` because the classifier read Codex rollouts as
+`Unknown`; the only unblockers were `session interrupt-clear` or the
+one-hour TTL. The operator-clear guard reads `turn_active_for_pane`, which
+applies the retirement above, so the Codex interrupt now releases it (and
+leaves an `interrupt` receipt).
+
 ### Harness turn-end receipts (`#runctrlclaude`)
 
 A cleared lease says only "no turn is known to be live"; it cannot prove that
@@ -424,7 +451,8 @@ Writes are monotonic: an older boundary never moves a receipt back.
   as `turn-status active`) and records `session_start_clear` /
   `session_start_startup` / `session_start_resume`. The decision is
   `agent_doc_turn::turn_status::harness_turn_end_reason`.
-- **A settled interrupt record** that retires a lease (above) records
+- **A settled interrupt record** (Claude transcript or Codex `turn_aborted`)
+  that retires a lease (above) records
   `interrupt` at the record's own timestamp.
 - **Not receipts:** `Stop` (a Stop hook may answer `decision: "block"` and the
   harness keeps generating in the same turn), `SessionStart` source `compact`

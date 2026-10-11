@@ -4327,7 +4327,8 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "let snapshot_content = load_snapshot(file)?",
         "crate::queue_claim::claimed_items_for_content(file, &content)",
         "crate::queue_claim::claimed_items_for_content(file, content)",
-        "queue_continuation::required_continuation_excluding_claimed(",
+        "queue_continuation::required_continuation_excluding_claimed_scoped(",
+        "agent_doc_git_io::revision::free_text_head_entry_anchor_exchange(file, queue_id, head)",
     ] {
         assert!(
             queue_io_detect.contains(required_snippet),

@@ -3765,94 +3765,6 @@ fn queue_entries_in_content(content: &str) -> Vec<agent_doc_queue::document_queu
         .unwrap_or_default()
 }
 
-fn exchange_component_text(content: &str) -> String {
-    agent_doc_element::element::parse(content)
-        .ok()
-        .and_then(|comps| {
-            comps
-                .iter()
-                .find(|c| c.name == "exchange")
-                .map(|c| c.content(content).to_string())
-        })
-        .unwrap_or_default()
-}
-
-/// How many committed versions of a document the `#qheadresiduescope` walk
-/// reads before it stops looking for a free-text head's queue entry.
-const FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT: usize = 128;
-
-/// `#qheadresiduescope`: the exchange as it stood just before a live free-text
-/// queue head last (re-)entered the queue, or `None` when every echo counts.
-///
-/// The catch-up residue strike matches a head against the committed exchange,
-/// which keeps every earlier answer. An operator who types the same report
-/// again (a repeated bug report), or un-strikes an answered head, has asked
-/// for it again, so an echo written before that re-entry does not answer it.
-///
-/// The entry point comes from git history, the one record of when a line
-/// appeared that survives closed editor epochs, restarts and snapshot
-/// rewrites. The walk reads the document's commits newest first while the head
-/// is live in the queue (`gate_norm` identity, any `Prompt` row) and stops at
-/// the first commit in which it is not: struck, deleted, or not yet typed. That
-/// commit's exchange is the anchor, and only text written after it can answer
-/// the head. Operator op captures are not used: they hold only the active
-/// epoch, which a non-operator projection closes long before a later cycle's
-/// catch-up runs.
-///
-/// `None` (whole exchange, the prior behavior) when the document has no commit
-/// history or the head was live in every commit back to the document's first:
-/// every echo then postdates the head. When the walk hits its limit with the
-/// head still live, the oldest version read is the anchor. That can only hide
-/// an echo written more than the limit's worth of commits ago, which an earlier
-/// pass would already have struck.
-fn free_text_head_entry_anchor_exchange(
-    file: &Path,
-    queue_id: &str,
-    head_norm: &str,
-    gate_norm: &dyn Fn(&str) -> String,
-) -> Option<String> {
-    let head_live_in = |content: &str| -> bool {
-        let mut entries = queue_entries_for_id(content, queue_id);
-        if entries.is_empty() {
-            entries = queue_entries_in_content(content);
-        }
-        entries.iter().any(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(p) => {
-                gate_norm(&p.text) == head_norm
-            }
-            _ => false,
-        })
-    };
-    let mut anchor: Option<String> = None;
-    let mut oldest_live: Option<String> = None;
-    let visited = agent_doc_git_io::revision::walk_file_revisions(
-        file,
-        FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT,
-        |content| match content {
-            Some(content) if head_live_in(content) => {
-                oldest_live = Some(exchange_component_text(content));
-                true
-            }
-            Some(content) => {
-                anchor = Some(exchange_component_text(content));
-                false
-            }
-            None => {
-                anchor = Some(String::new());
-                false
-            }
-        },
-    )
-    .unwrap_or(0);
-    if anchor.is_some() {
-        return anchor;
-    }
-    if visited >= FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT {
-        return oldest_live;
-    }
-    None
-}
-
 fn queue_entries_for_id(
     content: &str,
     queue_id: &str,
@@ -5128,17 +5040,13 @@ pub fn run_queue_maintenance_with_coin_gate(
     // the strike to heads already present in the committed queue (mirroring
     // session-check's `committed_queue_contains_active_free_text_head`), so an
     // in-flight operator edit the convergence just added is never struck.
-    let exchange_text = exchange_component_text(&current_content);
+    let exchange_text =
+        agent_doc_queue::queue_head_entry::exchange_component_text(&current_content);
     if !exchange_text.trim().is_empty() {
         // Normalized prose of every free-text head committed in the snapshot — the
-        // in-flight-edit gate. `snapshot_queue_entries` was parsed above.
-        let gate_norm = |text: &str| -> String {
-            strip_priority_markers(text)
-                .to_lowercase()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
+        // in-flight-edit gate. `snapshot_queue_entries` was parsed above. The
+        // identity is the one the `#qheadresiduescope` entry walk matches by.
+        let gate_norm = agent_doc_queue::queue_head_entry::free_text_head_entry_identity;
         let committed_free_text: std::collections::HashSet<String> = snapshot_queue_entries
             .iter()
             .filter_map(|e| match e {
@@ -5199,11 +5107,10 @@ pub fn run_queue_maintenance_with_coin_gate(
                                 // after the head (re-)entered the queue
                                 // answers it. An echo of an earlier, already
                                 // answered copy of the same text is history.
-                                && match free_text_head_entry_anchor_exchange(
+                                && match agent_doc_git_io::revision::free_text_head_entry_anchor_exchange(
                                     file,
                                     &selected_queue_id,
-                                    &gate_norm(&p.text),
-                                    &gate_norm,
+                                    &p.text,
                                 ) {
                                     None => true,
                                     Some(anchor) => {

@@ -377,7 +377,22 @@ All eight subagent fixes are merged, verified on the combined code, installed, a
 **New backlog item (filed this cycle):** last cycle's closeout applied each of my four backlog adds twice. Each landed once under its own id and once under a generated id with my id left in the text, ending at 8 items and 8 queue lines. This happened on the path where the tracked-work half was retained and then absorbed. I removed the duplicates with `backlog remove` and `queue consume --id`. The new item asks for replay to be idempotent and comes with a regression test.
 
 **Still waiting on you:** `#drivecapturedsplice`. It types real keystrokes into your desktop, so write `go #drivecapturedsplice` when you can step away.
-<!-- agent:boundary:861a07a6 -->
+> **Chat prompt (#chatprompt):** tasks/sdk.md is still stuck: the editor that has it open isn't syncing with agent-doc. Restart or reload that editor, then run /agent-doc tasks/sdk.md, and I'll record everything from today in one pass. That covers the D1–D5 answers with PR #133, the D5 Unity version research, the 90-day retention confirmation, this PR #132 update and the missing haiven sdk fake-server text.
+
+> **Chat prompt (#chatprompt):** Can I restart Idea now?
+
+### Re: don't restart IDEA; sdk.md already recovered, press Enter in its pane — opus-5-5 · 2026-10-11T05:08-04:00
+
+**Don't restart IDEA. You don't need to.** sdk.md already recovered on its own. The only thing left is a trigger that never got submitted.
+
+- **What happened:** at 08:53 UTC, sdk.md's `/loop` turn (pane `%180`) ran session-check and got `INTERRUPTED: canonical editor authority and disk projection diverge`. It stopped the loop and asked you to restart the editor.
+- **Cause: my v0.35.489 install.** From 08:58:00 the ops log shows `native_editor_save_request_deferred … IPC build mismatch: listener=0.35.489, client=0.35.488` with `retained_persistence_retryable reason=no_exact_native_save_receipt`. The editor's save receipt couldn't cross the version skew while the controller was being swapped for the new build. The queue-claim, Cancel Turn and route-focus changes did not cause it.
+- **It healed itself:** at 08:58:15, `retained_persistence_applied proof=exact_disk`. At 08:58:40 the commit landed (`155131e3 agent-doc(sdk): 04:58:39`) with `captured_finalize_resume_committed`. I checked: `tasks/sdk.md` is clean in git, and session-check is ok.
+- **Still stuck:** the supervisor sent Enter for the pending `/agent-doc …/tasks/sdk.md` at 08:58:44, but it didn't submit. The pane still shows that trigger in the input box. **Fix:** focus pane `%180` and press Enter. That run will record today's D1–D5/PR #133, Unity version, 90-day retention, PR #132 and fake-server text in one pass.
+- **Side note:** a background shell in that session has been stuck for about 4 hours: `grep` is reading stdin because `$f` was empty. It's harmless. Stop it from the Claude shells UI if you like.
+
+The sdkwedge subagent is now fixing both root causes: the save receipt stalling across a build-version skew during install, and the supervisor's Enter resubmit not taking.
+<!-- agent:boundary:f6f2f5ef -->
 <!-- /agent:exchange -->
 
 <!--
@@ -395,6 +410,7 @@ All eight subagent fixes are merged, verified on the combined code, installed, a
 - ~~release + publish~~
 - ~~sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.~~
 - ⏳ do [#drivecapturedsplice]
+- do [#respondcloseoutbacklog]
 - ~~do [#wallclockbudget]~~
 - ~~do [#queuecatchresidue]~~
 - ~~do [#duringconcurrentcheck]~~

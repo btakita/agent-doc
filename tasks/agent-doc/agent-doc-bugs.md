@@ -149,6 +149,19 @@ Fixed in `clearlive` (`37bc4add5a`), on main as `472ec36906`, and installed. The
 > **Queue prompt:** Clear Session Context on api.md is wedged.
 
 Fixed in the same `clearlive` change, and installed. The background-agent row no longer hides the idle prompt.
+
+### Re: why a corrupted pane looks like tabs were inserted — opus-5.5 · 2026-10-11T18:34-04:00
+
+> **Queue prompt:** I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted.
+
+**Deferred:** this went to the same subagent as the frontend.md wedge (claim `subagent:frontendwedge`), because it has the same root cause. My working diagnosis, which the subagent is to confirm with a reproduction:
+- **What you're seeing:** a staircase, not real tabs. In img_4.png, each stray `[perf]` line starts one row down, at the column where the previous line ended.
+- **Why lines staircase:** Claude Code puts its terminal in raw mode. In raw mode a bare `\n` moves the cursor down a row but does not return it to column 0; normally the terminal adds that return, and raw mode turns it off. An `eprintln!` written straight to the pane emits exactly a bare `\n`, so each line begins where the last one stopped.
+- **Why it keeps looking broken:** the foreign bytes also throw off where the TUI thinks its cursor is. Its own partial repaints then land offset, which makes the whole layout look tab-shifted until a full redraw.
+
+**Recovery once it's corrupted:** force a full redraw. Resize the pane, or press Ctrl+L, or run `tmux refresh-client`. The subagent will confirm which of these works for Claude Code.
+
+**The fix:** remove the source (the unconditional `[perf]` print) and close the stderr channel to the pane. The subagent is also checking for other bare-newline writers on paths that inherit the pane, and adding a regression test that fails on today's leak by detecting the staircase on an isolated tmux server. It will also report whether agent-doc should trigger a redraw itself after it detects foreign output.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -163,6 +176,7 @@ Fixed in the same `clearlive` change, and installed. The background-agent row no
 - 🚧 do [#closeoutleaseresume]
 - 🚧 do [#flakyintegrate0494]
 - 🚧 do [#clearsupersedenotice]
+- I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted. ![img_5.png](img_5.png)
 <!-- /agent:queue -->
 
 ## Backlog

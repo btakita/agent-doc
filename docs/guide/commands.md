@@ -244,6 +244,18 @@ a plugin into a new IDE. Transient failures retry on the next poll, and a single
 per-user watcher lock prevents duplicate upgraders. Stop it with Ctrl-C; use your
 service manager if you want it to run persistently.
 
+## queue add
+
+```bash
+agent-doc queue add <FILE> --source <NAME> [--key <KEY>] [--attach <PATH>]... [--json] [TEXT]...
+```
+
+Appends an attributed head, `[from:<source>] <text>`, to the document's `agent:queue`, so an external tool (an editor plugin, a play-mode bridge, a CI watcher) can hand work to a session. The text comes from the trailing arguments or from stdin. The head is written through the binary-owned queue write path, so it lands in a live editor's buffer instead of conflicting with it on disk. Secrets in the text and attachments are redacted first. Each attachment is stored, redacted, under `.agent-doc/inbound/` and referenced from the head. `--key` dedupes: while a live head from the same source carries the key, a repeat add does nothing. A running session sees the head through mid-turn steering as `dispatch=drain_after_current`. It runs after the current item and does not interrupt it.
+
+```bash
+agent-doc queue add plan.md --source ci --key build-1234 --attach build.log "build 1234 failed on main"
+```
+
 ## Global flags
 
 ```

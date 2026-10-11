@@ -4178,6 +4178,37 @@ enum PendingAction {
 
 #[derive(Subcommand)]
 enum QueueAction {
+    /// Append an attributed free-text head `[from:<source>] <text>` to the
+    /// document's `agent:queue` (`#queueinbound`, GH #237): the supported way for
+    /// an external tool (editor plugin, play-mode bridge, CI watcher) to hand
+    /// work to a session. Writes through the binary-owned queue write path, so it
+    /// lands in a live editor's buffer instead of conflicting on disk. Text and
+    /// attachments are secret-redacted first; `--key` dedupes against live heads.
+    /// Running sessions see the head through mid-turn steering as
+    /// `dispatch=drain_after_current`.
+    Add {
+        /// Path to the session document
+        file: PathBuf,
+        /// Who is adding the head (e.g. `ci`, `unity`, `jetbrains`); rendered as
+        /// `[from:<source>]`. ASCII letters, digits, and `- _ . : / @` only.
+        #[arg(long)]
+        source: String,
+        /// Dedupe key: when a live (unstruck) head from the same source already
+        /// carries this key, the add is a no-op. Without a key, identical live
+        /// head text is the duplicate.
+        #[arg(long)]
+        key: Option<String>,
+        /// Text file to attach (repeatable). Copied, redacted, to
+        /// `.agent-doc/inbound/` and referenced from the head.
+        #[arg(long = "attach", value_name = "PATH")]
+        attach: Vec<PathBuf>,
+        /// Print the outcome as one JSON object
+        #[arg(long)]
+        json: bool,
+        /// Head text (joined with spaces, collapsed to one line). Read from
+        /// stdin when omitted.
+        text: Vec<String>,
+    },
     /// Claim a live queue head for a worker outside the in-session loop
     /// (`#queueclaim`), e.g. a dispatched subagent. A claimed head is in flight:
     /// the in-session loop, preflight selection, and the Stop-hook continuation
@@ -7063,6 +7094,35 @@ fn try_main() -> anyhow::Result<()> {
             }
         },
         Commands::Queue { action } => match action {
+            QueueAction::Add {
+                file,
+                source,
+                key,
+                attach,
+                json,
+                text,
+            } => {
+                let text = if text.is_empty() {
+                    let mut buffer = String::new();
+                    std::io::Read::read_to_string(&mut std::io::stdin(), &mut buffer)
+                        .context("queue add: read head text from stdin")?;
+                    buffer
+                } else {
+                    text.join(" ")
+                };
+                let queue_effects = CliQueueCommandEffects;
+                agent_doc_queue_io::queue_add::add(
+                    &queue_effects,
+                    &file,
+                    &agent_doc_queue_io::queue_add::QueueAddRequest {
+                        source: &source,
+                        key: key.as_deref(),
+                        text: &text,
+                        attachments: &attach,
+                    },
+                    json,
+                )
+            }
             QueueAction::Claim {
                 file,
                 item,

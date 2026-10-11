@@ -102,7 +102,22 @@ In sdk.md, Run Agent Doc while I was typing a queue item duplicated part of the 
 **New follow-up, `capturegatedispatched`:** the pre-write backlog-capture gate refused this cycle again because a capture preset rode along on queue steering. That preset's head is already dispatched to a subagent, so the capture belongs to whichever cycle closes that head. This is the second occurrence, so it is queued as a fix rather than suppressed.
 
 **v0.35.487:** seven fixes are merged and pass check-fast. `visiblewriteloadflake` is finishing its load-stress proof; its first after-fix run was 30/30. I'll release once it lands. Fixes that arrive later go into the following batch.
-<!-- agent:boundary:51a04023 -->
+> **Chat prompt (#chatprompt):** Can I delete the duplicated queue item now?
+
+> **Chat prompt (#chatprompt):** Do the fix in a subagent
+
+### Re: deleting the sdk.md duplicate; fix is in a subagent — opus-5.5 · 2026-10-11T00:05-04:00
+
+**Yes, delete it now.** The duplicated state is already preserved as evidence: haiven-dev commit `bb26315c` (2026-10-10 23:45:26) recorded `tasks/sdk.md` with the truncated twin. The subagent reconstructs the incident from that commit, git history and haiven-dev `ops.log`/`state.db`, not from the live buffer. Deleting the line loses nothing it needs. It reads sdk.md read-only and will not edit it.
+
+**The fix is already in a subagent** (`fix/typingforkdup`, worktree `~/worktrees/agent-doc-typingforkdup-20261011`). Its brief:
+- reconstruct the mechanism from evidence, now without the deleted "provide"/"have" premise;
+- state the invariant formally: agent-side reconciliation never duplicates operator-authored text, and never materializes a prefix of an in-progress line as its own item;
+- encode that invariant in the repo's TLA+/Lean checks, with a reproducing non-vacuity config;
+- fix it at the single chokepoint, with a deterministic replay regression.
+
+It runs under the queue preset's authorization (commit and push its own branch; no install or release). I integrate it in the next batch after v0.35.487.
+<!-- agent:boundary:041cd32f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -110,11 +125,11 @@ In sdk.md, Run Agent Doc while I was typing a queue item duplicated part of the 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#hookstalemsgfile]
-- do [#relayhubtestisolation]
+- 🚧 do [#hookstalemsgfile]
+- 🚧 do [#relayhubtestisolation]
 - ~~do [#removeobsoleteicebox]~~
 - ⏭️ do [#respondfinalizehard]
-- 🚧 do [#pypireleaseworkflow]
+- ⏭️ do [#pypireleaseworkflow]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/235
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/236
 - 🚧 fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
@@ -124,15 +139,15 @@ Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-
 - 🚧 do [#visiblewriteloadflake]
 - 🚧 do [#idefocusowner]
 - ~~#actionable-review~~
-- do [#capturegatedispatched]
+- 🚧 do [#capturegatedispatched]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#capturegatedispatched] [agent-doc] The finalize pre-write pending_capture gate ('active prompt requested backlog capture but no backlog mutations were recorded this cycle') fires on cycles whose only backlog-capture preset (for example the actionable-review item preset carried on queue steering) belongs to a head already claimed by or dispatched to a subagent. Coordinator dispatch-only cycles must then add a suppression marker or a filler backlog item. Seen twice on 2026-10-09/10 in agent-doc-bugs.md. Scope the gate to presets whose heads this cycle actually drains: a claimed or dispatched head's capture belongs to the cycle that closes it. Add regression coverage for a dispatch-only coordinator cycle.
-- [ ] [#hookstalemsgfile] [agent-doc] The coined-id PreToolUse hook (agent-doc-hooks-io/src/coined_id_pretooluse.rs, commit_scan_text / message_file_paths) reads a -F message file from disk BEFORE the command runs. So 'cat > msg.txt <<EOF ... EOF && git commit -F msg.txt' is checked against the PREVIOUS commit's message, while the new heredoc body is never scanned (commit_segment splits on newlines). Reproduced 2026-10-10: one subagent was blocked by an id left in a shared scratchpad msg.txt by another. Fix: when the same command writes the -F path (heredoc or > redirect), scan that body instead of the stale file, and resolve relative -F paths against a leading cd / git -C. Add regression tests for the false positive (stale file) and the false negative (unscanned heredoc).
-- [ ] [#relayhubtestisolation] [agent-doc] Plain 'cargo test -p agent-doc-crdt-relay-io' fails 9 relay-hub lib tests on origin/main ab6cf0fe7 (for example editor_exit_reap_leaves_another_editor_process_attached, provisional_replacement_preserves_predecessor_until_promoted, concurrent_refresh_registrations_elect_one_logical_successor), while all 121 pass with --test-threads=1 and under nextest (one process per test). The cause is process-global state shared across tests: the OnceLock hub REGISTRY and the PROJECTIONS/QUARANTINES maps (lib.rs around lines 365 and 759-869), DURABLE_LIVENESS_ROWIDS, and reap_exited_editor_replicas(pid), which reaps across every hub in the process. Isolate per-test state (unique document keys, or a scoped/test-local registry) so the suite passes in parallel; do not serialize it.
+- [ ] 🚧 [#capturegatedispatched] [agent-doc] The finalize pre-write pending_capture gate ('active prompt requested backlog capture but no backlog mutations were recorded this cycle') fires on cycles whose only backlog-capture preset (for example the actionable-review item preset carried on queue steering) belongs to a head already claimed by or dispatched to a subagent. Coordinator dispatch-only cycles must then add a suppression marker or a filler backlog item. Seen twice on 2026-10-09/10 in agent-doc-bugs.md. Scope the gate to presets whose heads this cycle actually drains: a claimed or dispatched head's capture belongs to the cycle that closes it. Add regression coverage for a dispatch-only coordinator cycle.
+- [ ] 🚧 [#hookstalemsgfile] [agent-doc] The coined-id PreToolUse hook (agent-doc-hooks-io/src/coined_id_pretooluse.rs, commit_scan_text / message_file_paths) reads a -F message file from disk BEFORE the command runs. So 'cat > msg.txt <<EOF ... EOF && git commit -F msg.txt' is checked against the PREVIOUS commit's message, while the new heredoc body is never scanned (commit_segment splits on newlines). Reproduced 2026-10-10: one subagent was blocked by an id left in a shared scratchpad msg.txt by another. Fix: when the same command writes the -F path (heredoc or > redirect), scan that body instead of the stale file, and resolve relative -F paths against a leading cd / git -C. Add regression tests for the false positive (stale file) and the false negative (unscanned heredoc).
+- [ ] 🚧 [#relayhubtestisolation] [agent-doc] Plain 'cargo test -p agent-doc-crdt-relay-io' fails 9 relay-hub lib tests on origin/main ab6cf0fe7 (for example editor_exit_reap_leaves_another_editor_process_attached, provisional_replacement_preserves_predecessor_until_promoted, concurrent_refresh_registrations_elect_one_logical_successor), while all 121 pass with --test-threads=1 and under nextest (one process per test). The cause is process-global state shared across tests: the OnceLock hub REGISTRY and the PROJECTIONS/QUARANTINES maps (lib.rs around lines 365 and 759-869), DURABLE_LIVENESS_ROWIDS, and reap_exited_editor_replicas(pid), which reaps across every hub in the process. Isolate per-test state (unique document keys, or a scoped/test-local registry) so the suite passes in parallel; do not serialize it.
 - [ ] 🚧 [#visiblewriteloadflake] [agent-doc] Fix flaky agent-doc-write-runtime-io visible_write_content_snapshot_tests (test_lazily_visible_write_event_read, test_poll_lazily_event_*): under host load (load average around 50) they time out with 'timed out after 2.0s waiting for project controller response' at ipc.rs:170 (record_lazily_visible_write_candidate); seen in 2 of about 6 full runs on 2026-10-10. Fix the nondeterminism instead of rerunning: warm the controller before the timed RPC, or charge cold-start launch separately from CONTROLLER_RPC_TIMEOUT, so a busy runner cannot decide the outcome. Prove it under load stress. (Promoted from icebox visiblewriteloadtimeout.)
 - [ ] 🚧 [#idefocusowner] [agent-doc] Two JetBrains IDEs on one project: only the most recently focused IDE drives the shared tmux agent-doc window, which stops the layout from flipping between IDEA and Rider (both installed on this machine). About 1 day. Builds on idearidereditors 9796d8c8a (installation-scoped editor-surface client families). Fully independent per-IDE navigation stays in the icebox as ideriderindependentnav. (Promoted from icebox ideriderstopgap.)
 - [ ] 🚧 [#respondfinalizehard] respond/finalize hard-fails with 'queue consume: no prompt to consume' (then write --commit fails 'failed to compose completed tracked-work target') when the cycle's quoted Queue prompt / --done target was already struck/consumed earlier (all queue heads struck, item already in agent:done). The response write landed and the cycle wedged at write_applied until a bare 'agent-doc write --commit' recovered it as AlreadyApplied. Consuming an already-consumed head must be idempotent. Repro 2026-10-10 cycle-1791675315432.

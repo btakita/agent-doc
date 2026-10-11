@@ -445,6 +445,15 @@ Each item below is claimed and running in its own worktree on main `a186f61e46`.
 - **`#continuationheadskip`:** scope the continuation-head skip to echoes written after a head was re-added, sharing the git-history helper with the residue-strike fix.
 
 **Still waiting on you:** `#drivecapturedsplice` (⏳). It reappeared in this cycle's diff only because of the ⏳ marker, not because you approved it.
+
+### Re: ⏳ marker regression dispatched; command-line write status follow-up — opus-5-5 · 2026-10-11T07:36-04:00
+
+**Dispatched (claimed `subagent:regressionawaitingoperat`):** a regression from the ⏳ awaiting-operator marker released in v0.35.489. Every preflight reported `do [#drivecapturedsplice]` as an operator edit (`[user+]`, a prompt target, and the turn driver), listed it under `queue_subagent_dispatch`, and then session-check warned that a `do #id` was resolved without `--done`. That's why `#drivecapturedsplice` kept coming back as new work. The subagent is told never to let lifecycle markers (🚧, ⏭️, ⏳) count as operator intent anywhere.
+- **Extra evidence:** my own command-line writes (`backlog add`, `queue sync`) also show up as `[user+]` in the next preflight, so I've sent that to the subagent too. The 🚧 claim markers were also missing on items claimed this cycle; the subagent is checking whether that has the same cause.
+
+**New follow-up (filed this cycle):** command-line writes on a document open in the editor exit with an error, plus a dogfood "fix this" prompt, even though the write lands a few seconds later. That happened 6+ times today. A write that is retained and then converges should wait for convergence and exit 0, or return a distinct "deferred" status.
+
+**In flight (6 subagents):** `#statesubscriberecords`, `#remainingwallclock`, `#replace120shang`, `#tlafailedonce`, `#continuationheadskip`, `#regressionawaitingoperat`. `#drivecapturedsplice` is still waiting for your `go`.
 <!-- agent:boundary:f6f2f5ef -->
 <!-- /agent:exchange -->
 
@@ -461,21 +470,24 @@ Each item below is claimed and running in its own worktree on main `a186f61e46`.
 - ~~do [#qheadresiduestrike]~~
 - ~~do [#checktmpdirleak]~~
 - ~~do [#subagentmsgcollide]~~
-- do [#statesubscriberecords]
-- do [#remainingwallclock]
-- do [#replace120shang]
-- do [#tlafailedonce]
-- do [#continuationheadskip]
+- 🚧 do [#statesubscriberecords]
+- 🚧 do [#remainingwallclock]
+- 🚧 do [#replace120shang]
+- 🚧 do [#tlafailedonce]
+- 🚧 do [#continuationheadskip]
+- 🚧 do [#regressionawaitingoperat]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#statesubscriberecords] [agent-doc] state_subscribe_records_only_the_previously_applied_live_peer_cursor (agent-doc-controller-io) failed twice under heavy concurrent load (panic: the durable OS-exit liveness transition evicts the crashed registration's ack) and passes alone; it has no wall-clock bound. Suspected race on the process-global liveness state keyed by the test process pid: a concurrent test's production path touching that pid between this test's reset and its exit call. Confirm and fix the race (isolate the liveness state per test or key it per test), with a stress reproduction.
-- [ ] [#remainingwallclock] [agent-doc] Remaining wall-clock asserts in tests: the 250ms 'not blocked by a blocked effect' asserts in agent-doc-controller-io (project_controller.rs blocking-document-effect around line 4747, rpc.rs) are the most load-sensitive; convert them to the closed-gate pattern used for captured_response_and_authority_reactively_project_answered_free_text_strike. The 1-5s 'returns instead of hanging' bounds in preflight-io debounce.rs, codex-stop-io and src/preflight_hook.rs can become hang ceilings.
-- [ ] [#replace120shang] [agent-doc] Replace the 120s hang ceilings in wait_for_test_controller (controller_client_connection_is_one_request) and agent-doc-ipc-io await_endpoint (a_bound_but_unaccepting_listener_is_evicted_not_protected) with a real readiness signal from the controller/listener, so the tests wait on an event instead of a bounded poll.
-- [ ] [#tlafailedonce] [agent-doc] make tla failed once during a concurrent make check in the respondcloseout worktree: TLC could not resolve the standard module Naturals (looked for /tmp/Naturals.tla) while parsing StopHookContinuation.tla; make tla alone passed. Each worktree has its own checksum-verified target/tla jar and a mktemp work dir, and disk-sweep did not clean that worktree. Find what made the jar's standard modules unavailable (cwd, TMPDIR, classpath, concurrent jar refresh) and make run_tla.sh robust to it.
-- [ ] [#continuationheadskip] [agent-doc] The continuation-head skip in agent-doc-queue/src/queue_continuation.rs still matches a live free-text head against the whole exchange, so an operator re-typed head that repeats an earlier answered prompt can be left out of the continuation offer (it is never struck). Scope it to echoes after the head's re-entry, sharing the git-history entry-point helper the residue-strike fix added.
+- [ ] [#binaryownedcli] [agent-doc] Binary-owned CLI writes on a document with a live editor (agent-doc backlog <FILE> add, agent-doc queue sync, agent-doc queue consume --id, agent-doc backlog <FILE> remove) exit non-zero with 'visible document write ... is retained by the lazy delivery projection' (or 'failed to write') plus a dogfood projection_failure prompt, even though the write converges and is visible seconds later (observed 6+ times on 2026-10-11 on agent-doc-bugs.md). A retained-then-converging write should block until convergence within a bounded wait and exit 0, or exit with a distinct deferred status that callers and agents do not treat as failure; only a real failure should print the dogfood fix prompt.
+- [ ] 🚧 [#regressionawaitingoperat] [agent-doc] Regression from the awaiting-operator queue marker (v0.35.489 queueawaitop): every preflight on agent-doc-bugs.md reports the operator-verify head as a new operator edit — diff '[user+] do [#drivecapturedsplice]', prompt_changes kind=prompt_target, turn driver queue:3:drivecapturedsplice — and lists it under queue_subagent_dispatch; session-check then warns that the 'do #id directive resolved this cycle' with no --done. The binary's own add/strip of the ⏳ projection appears to be attributed to the operator in the snapshot-vs-document diff. Make marker projection edits invisible to operator-intent diffing (strip lifecycle markers before diffing, or attribute them as agent edits), with a regression test over repeated preflight cycles.
+- [ ] 🚧 [#statesubscriberecords] [agent-doc] state_subscribe_records_only_the_previously_applied_live_peer_cursor (agent-doc-controller-io) failed twice under heavy concurrent load (panic: the durable OS-exit liveness transition evicts the crashed registration's ack) and passes alone; it has no wall-clock bound. Suspected race on the process-global liveness state keyed by the test process pid: a concurrent test's production path touching that pid between this test's reset and its exit call. Confirm and fix the race (isolate the liveness state per test or key it per test), with a stress reproduction.
+- [ ] 🚧 [#remainingwallclock] [agent-doc] Remaining wall-clock asserts in tests: the 250ms 'not blocked by a blocked effect' asserts in agent-doc-controller-io (project_controller.rs blocking-document-effect around line 4747, rpc.rs) are the most load-sensitive; convert them to the closed-gate pattern used for captured_response_and_authority_reactively_project_answered_free_text_strike. The 1-5s 'returns instead of hanging' bounds in preflight-io debounce.rs, codex-stop-io and src/preflight_hook.rs can become hang ceilings.
+- [ ] 🚧 [#replace120shang] [agent-doc] Replace the 120s hang ceilings in wait_for_test_controller (controller_client_connection_is_one_request) and agent-doc-ipc-io await_endpoint (a_bound_but_unaccepting_listener_is_evicted_not_protected) with a real readiness signal from the controller/listener, so the tests wait on an event instead of a bounded poll.
+- [ ] 🚧 [#tlafailedonce] [agent-doc] make tla failed once during a concurrent make check in the respondcloseout worktree: TLC could not resolve the standard module Naturals (looked for /tmp/Naturals.tla) while parsing StopHookContinuation.tla; make tla alone passed. Each worktree has its own checksum-verified target/tla jar and a mktemp work dir, and disk-sweep did not clean that worktree. Find what made the jar's standard modules unavailable (cwd, TMPDIR, classpath, concurrent jar refresh) and make run_tla.sh robust to it.
+- [ ] 🚧 [#continuationheadskip] [agent-doc] The continuation-head skip in agent-doc-queue/src/queue_continuation.rs still matches a live free-text head against the whole exchange, so an operator re-typed head that repeats an earlier answered prompt can be left out of the continuation offer (it is never struck). Scope it to echoes after the head's re-entry, sharing the git-history entry-point helper the residue-strike fix added.
 - [ ] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 <!-- /agent:backlog -->
 

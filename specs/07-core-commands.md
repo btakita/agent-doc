@@ -9,6 +9,23 @@ fail-open, 250 ms supervisor `pid` query at command entry. A stale-binary result
 automatically schedules the document owner for idempotent safe-boundary recycle;
 commands do not wait for the recycle and never interrupt an active turn.
 
+Stale-supervisor warnings (`#stalewarnscheduled`, GH #235) are shown only
+through one recycle-status-aware formatter
+(`agent_doc_controller::status::stale_supervisor_warning_for_display`). When the
+document's recycle request is `requested` — scheduled by this command or
+already outstanding in the state ledger — the warning states that the recycle
+is scheduled and tells the operator not to run `agent-doc admin recycle` or
+`restart-supervisor`; it never carries the manual remedy. When no recycle is
+scheduled, or the request was skipped or refused, the manual remedy stays.
+Read-only reporters (session-check's report, the editor route diagnostic)
+read the outstanding request and never schedule one. One process prints at
+most one stale-supervisor line per supervisor within 60 s: a line already
+shown by the CLI-entry check or by a turn-stage check suppresses the same
+supervisor's line in the session-check report that follows (logged as
+`stale_supervisor_warning_deduped`). Raw message builders stay private to the
+controller crates; a workspace source-shape test enforces that no other path
+shows a raw remedy.
+
 ## run
 
 `agent-doc [run] <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`

@@ -4447,7 +4447,80 @@ pub fn supervisor_drain_readiness_for_doc(file: &Path) -> status::SupervisorDrai
 /// document and is the common silent-stale offender. Fail-open — a missing project root,
 /// an unreachable controller, a missing lease, or any stat error yields `None` so the
 /// read-only check can never block a cycle.
+///
+/// GH #235: the returned message is already passed through
+/// [`status::stale_supervisor_warning_for_display`] with the document's
+/// OUTSTANDING recycle request (read-only — this never schedules one), so a
+/// supervisor whose recycle is already `requested` is reported in the
+/// `#stalewarnscheduled` form, never with the manual remedy beside it.
 pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
+    let message = stale_supervisor_condition_for_doc(file)?;
+    Some(status::stale_supervisor_warning_for_display(
+        &message,
+        outstanding_stale_supervisor_recycle_status(file).as_deref(),
+    ))
+}
+
+/// GH #235: the outstanding recycle request for `file`, rendered as a recycle
+/// status. Read-only and fail-open: no request, or an unreadable ledger, is
+/// `None`. The caller has just proven the supervisor stale, so a lapsed
+/// stale-supervisor request still counts (`supervisor_stale = true`).
+fn outstanding_stale_supervisor_recycle_status(file: &Path) -> Option<String> {
+    let request = agent_doc_supervisor_io::recycle_request::live_recycle_request(
+        &file.to_string_lossy(),
+        timestamp_secs(),
+        true,
+    );
+    status::pending_recycle_request_status(
+        request
+            .as_ref()
+            .map(|request| (request.reason.as_str(), request.requested_secs)),
+    )
+}
+
+/// GH #235: per-process ledger of stale-supervisor warnings already shown.
+fn stale_supervisor_warning_ledger()
+-> std::sync::MutexGuard<'static, status::StaleSupervisorWarningLedger> {
+    static LEDGER: std::sync::OnceLock<std::sync::Mutex<status::StaleSupervisorWarningLedger>> =
+        std::sync::OnceLock::new();
+    LEDGER
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// GH #235: record that a stale-supervisor warning was shown to the operator,
+/// so a later report site in this process does not print the same condition a
+/// second time. Every site that prints a warning returned by
+/// [`recycle_stale_supervisor_for_command`] or
+/// [`recycle_stale_supervisor_for_turn_stage`] calls this.
+pub fn note_stale_supervisor_warning_shown(message: &str) {
+    stale_supervisor_warning_ledger().record_shown(message, timestamp_secs());
+}
+
+/// GH #235: the stale-supervisor line a session-check REPORT should carry.
+/// `None` when nothing is stale, or when this process already showed the same
+/// supervisor's warning (the CLI-entry check, or closeout's turn-stage check)
+/// within the dedupe window — one run prints one stale-supervisor line.
+pub fn stale_supervisor_warning_for_report(file: &Path) -> Option<String> {
+    let message = stale_supervisor_warning_for_doc(file)?;
+    if !stale_supervisor_warning_ledger().admit(&message, timestamp_secs()) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "stale_supervisor_warning_deduped file={} reason=already_shown_this_process",
+                file.display()
+            ),
+        );
+        return None;
+    }
+    Some(message)
+}
+
+/// The raw stale-supervisor condition for `file`, ending in its manual remedy.
+/// Private: every caller that shows it goes through
+/// [`status::stale_supervisor_warning_for_display`] (GH #235).
+fn stale_supervisor_condition_for_doc(file: &Path) -> Option<String> {
     if let Some(message) = host_supervisor_stale_warning_for_doc(file) {
         return Some(message);
     }
@@ -4546,9 +4619,9 @@ pub fn recycle_stale_supervisor_for_command(file: &Path, source: &str) -> Option
     let supervisor_pid = stale_supervisor_pid_from_command_probe(file)?;
     let message = status::host_supervisor_stale_warning_message(supervisor_pid);
     let recycle_status = schedule_stale_supervisor_cp_recycle(file, source);
-    Some(status::stale_supervisor_warning_with_recycle_status(
+    Some(status::stale_supervisor_warning_for_display(
         &message,
-        &recycle_status,
+        Some(&recycle_status),
     ))
 }
 
@@ -4559,7 +4632,8 @@ pub fn recycle_stale_supervisor_for_command(file: &Path, source: &str) -> Option
 /// ordinary auto-recycle opt-out controls proactive recycling, but cannot leave
 /// a known-stale supervisor serving later generation/write/commit stages.
 pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Option<String> {
-    let (message, recycle_status) = if let Some(message) = stale_supervisor_warning_for_doc(file) {
+    let (message, recycle_status) = if let Some(message) = stale_supervisor_condition_for_doc(file)
+    {
         (message, schedule_stale_supervisor_cp_recycle(file, stage))
     } else if reliable_sync_editor_live_for_file(file)
         && matches!(
@@ -4580,9 +4654,9 @@ pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Opti
     } else {
         return None;
     };
-    Some(status::stale_supervisor_warning_with_recycle_status(
+    Some(status::stale_supervisor_warning_for_display(
         &message,
-        &recycle_status,
+        Some(&recycle_status),
     ))
 }
 
@@ -10697,6 +10771,12 @@ fn handle_editor_route_rpc_with_layout_delegate(
         host_supervisor_stale_warning_for_doc(&canonical),
     ) {
         EditorRouteSupervisorWarningTransition::Current(warning) => {
+            // GH #235: shown to the operator, so it goes through the
+            // recycle-status-aware formatter like every other site.
+            let warning = status::stale_supervisor_warning_for_display(
+                &warning,
+                outstanding_stale_supervisor_recycle_status(&canonical).as_deref(),
+            );
             agent_doc_ops_log_io::log_op(
                 &canonical,
                 &format!(

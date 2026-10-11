@@ -255,14 +255,19 @@ pub fn supervisor_stale_warning_message(
         .as_ref()
         .map(|id| format!(" launched as {}", id.version))
         .unwrap_or_default();
+    // GH #235: the manual remedy is the strippable [`CONTROLLER_STALE_REMEDY`]
+    // suffix, so [`stale_supervisor_warning_with_recycle_status`] can replace it
+    // with the scheduled-recycle fact exactly as it does for the host message.
     Some(format!(
         "the live session controller/supervisor{pid}{launched} is running a STALE agent-doc binary \
-         (a newer build is installed) — restart it so the latest fixes take effect: \
-         `agent-doc admin recycle` (recycles at the next idle boundary) or \
-         `agent-doc session restart-supervisor <FILE>`. A stale supervisor silently keeps \
-         producing File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift)."
+         (a newer build is installed); a stale supervisor silently keeps producing File Cache \
+         Conflict / IPC-drift dialogs (#fcc0/#ipcdrift).{CONTROLLER_STALE_REMEDY}"
     ))
 }
+
+const CONTROLLER_STALE_REMEDY: &str = " Restart it so the latest fixes take effect: \
+     `agent-doc admin recycle` (recycles at the next idle boundary) or \
+     `agent-doc session restart-supervisor <FILE>`.";
 
 /// `#fccsupwarn3` — user-facing warning for a stale route-owned host supervisor.
 /// Point at the routine non-destructive refresh: idle-boundary recycle or normal
@@ -288,8 +293,8 @@ const HOST_SUPERVISOR_STALE_REMEDY: &str = " Refresh it without discarding the l
 /// `admin recycle` from inside the turn only races that. Replace the remedy
 /// with that fact instead of printing both.
 pub fn stale_supervisor_warning_with_recycle_status(message: &str, recycle_status: &str) -> String {
-    let scheduled = recycle_status.trim_start().starts_with("requested");
-    match message.strip_suffix(HOST_SUPERVISOR_STALE_REMEDY) {
+    let scheduled = recycle_status_is_scheduled(recycle_status);
+    match strip_stale_supervisor_remedy(message) {
         Some(condition) if scheduled => format!(
             "{condition} A safe-boundary recycle is already scheduled, so no operator action is \
              needed: the supervisor re-execs onto the installed build at its next idle boundary \
@@ -297,6 +302,99 @@ pub fn stale_supervisor_warning_with_recycle_status(message: &str, recycle_statu
              recycle` or `restart-supervisor` for this. Recycle request status: {recycle_status}."
         ),
         _ => format!("{message} Automatic safe-boundary recycle request status: {recycle_status}."),
+    }
+}
+
+/// The manual-refresh remedies a stale-supervisor warning may end in. Every
+/// stale-supervisor message builder in this module ends in exactly one of these,
+/// so the recycle-status-aware formatter can always replace it.
+const STALE_SUPERVISOR_REMEDIES: [&str; 2] =
+    [HOST_SUPERVISOR_STALE_REMEDY, CONTROLLER_STALE_REMEDY];
+
+fn strip_stale_supervisor_remedy(message: &str) -> Option<&str> {
+    STALE_SUPERVISOR_REMEDIES
+        .iter()
+        .find_map(|remedy| message.strip_suffix(remedy))
+}
+
+fn recycle_status_is_scheduled(recycle_status: &str) -> bool {
+    recycle_status.trim_start().starts_with("requested")
+}
+
+/// GH #235: the condition a stale-supervisor warning reports — the warning with
+/// its manual remedy (or scheduled-recycle replacement) removed. Two warnings
+/// about the same stale supervisor share this key whatever recycle status each
+/// carried, so a reporter can recognise a line another site already printed.
+pub fn stale_supervisor_warning_condition(message: &str) -> &str {
+    if let Some(condition) = strip_stale_supervisor_remedy(message) {
+        return condition;
+    }
+    const CONDITION_END: &str = "(#fcc0/#ipcdrift).";
+    message
+        .find(CONDITION_END)
+        .map(|end| &message[..end + CONDITION_END.len()])
+        .unwrap_or(message)
+}
+
+/// GH #235: render the recycle status a READ-ONLY observer reports for a stale
+/// supervisor. A read-only report must not schedule a recycle, but it must not
+/// contradict one either: an outstanding request renders as `requested ...` (so
+/// the formatter drops the manual remedy); no request renders as `None` and the
+/// remedy stays.
+pub fn pending_recycle_request_status(outstanding: Option<(&str, u64)>) -> Option<String> {
+    outstanding.map(|(reason, requested_secs)| {
+        format!("requested (outstanding) reason={reason} requested_secs={requested_secs}")
+    })
+}
+
+/// GH #235: the single formatter every stale-supervisor warning goes through
+/// before it is shown. `recycle_status` is the request status the caller
+/// scheduled or observed; `None` means no recycle is scheduled, so the manual
+/// remedy is the only correct advice and the message is returned unchanged.
+pub fn stale_supervisor_warning_for_display(message: &str, recycle_status: Option<&str>) -> String {
+    match recycle_status {
+        Some(status) => stale_supervisor_warning_with_recycle_status(message, status),
+        None => message.to_string(),
+    }
+}
+
+/// GH #235: how long a stale-supervisor warning printed by one site of a
+/// process suppresses the same condition at a later report site of that
+/// process. Long enough to span one CLI command (entry check, then
+/// session-check's report), short enough that a long-lived process re-reports
+/// a supervisor that is still stale on a later cycle.
+pub const STALE_SUPERVISOR_WARNING_DEDUPE_SECS: u64 = 60;
+
+/// GH #235: the per-process record of stale-supervisor conditions already
+/// shown to the operator. One CLI run used to print the CLI-entry warning
+/// ("do not run `admin recycle`") and then session-check's own warning for the
+/// same supervisor; this ledger lets the second site stay silent instead.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StaleSupervisorWarningLedger {
+    shown: Vec<(String, u64)>,
+}
+
+impl StaleSupervisorWarningLedger {
+    /// Record that `message` was shown at `now_secs`.
+    pub fn record_shown(&mut self, message: &str, now_secs: u64) {
+        let condition = stale_supervisor_warning_condition(message).to_string();
+        self.shown.retain(|(shown, _)| *shown != condition);
+        self.shown.push((condition, now_secs));
+    }
+
+    /// Admit `message` for display unless the same condition was already shown
+    /// within [`STALE_SUPERVISOR_WARNING_DEDUPE_SECS`]. An admitted message is
+    /// recorded as shown.
+    pub fn admit(&mut self, message: &str, now_secs: u64) -> bool {
+        let condition = stale_supervisor_warning_condition(message);
+        let already_shown = self.shown.iter().any(|(shown, at)| {
+            shown == condition
+                && now_secs.saturating_sub(*at) < STALE_SUPERVISOR_WARNING_DEDUPE_SECS
+        });
+        if !already_shown {
+            self.record_shown(message, now_secs);
+        }
+        !already_shown
     }
 }
 
@@ -1600,6 +1698,165 @@ mod tests {
         let refused = stale_supervisor_warning_with_recycle_status(&msg, "refused reason=x");
         assert!(refused.contains("agent-doc admin recycle"), "{refused}");
         assert!(refused.contains("request status: refused"), "{refused}");
+    }
+
+    /// GH #235 regression: the exact two lines one `agent-doc session-check`
+    /// run printed during a live turn after a mid-turn upgrade.
+    const GH235_CLI_ENTRY_STATUS: &str =
+        "requested project_root=... checkpoint=deferred editor_replica_reregister=requested";
+
+    fn gh235_cli_entry_line() -> String {
+        format!(
+            "[agent-doc] {}",
+            stale_supervisor_warning_with_recycle_status(
+                &host_supervisor_stale_warning_message(447662),
+                GH235_CLI_ENTRY_STATUS,
+            )
+        )
+    }
+
+    fn stale_supervisor_lines(lines: &[String]) -> Vec<&String> {
+        lines
+            .iter()
+            .filter(|line| line.contains("STALE agent-doc binary"))
+            .collect()
+    }
+
+    #[test]
+    fn gh235_reproduces_the_contradictory_pair_from_the_issue() {
+        // Before the fix, session-check pushed the RAW message, ending in the
+        // manual remedy, right after the CLI entry's scheduled form.
+        let before = [
+            gh235_cli_entry_line(),
+            format!(
+                "[session-check] WARNING: {}",
+                host_supervisor_stale_warning_message(447662)
+            ),
+        ];
+        assert_eq!(
+            before[0],
+            "[agent-doc] the route-owned host supervisor (pid 447662) serving this document is \
+             mapping a STALE agent-doc binary while a newer build is installed, so it can keep \
+             producing File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). A safe-boundary \
+             recycle is already scheduled, so no operator action is needed: the supervisor \
+             re-execs onto the installed build at its next idle boundary (after a mid-turn \
+             install, when this cycle closes). Do not run `agent-doc admin recycle` or \
+             `restart-supervisor` for this. Recycle request status: requested project_root=... \
+             checkpoint=deferred editor_replica_reregister=requested."
+        );
+        assert_eq!(
+            before[1],
+            "[session-check] WARNING: the route-owned host supervisor (pid 447662) serving this \
+             document is mapping a STALE agent-doc binary while a newer build is installed, so it \
+             can keep producing File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). \
+             Refresh it without discarding the live turn: `agent-doc admin recycle` (recycles at \
+             the next idle boundary) or `agent-doc session restart-supervisor <FILE>` (refuses \
+             busy panes)."
+        );
+        // Same supervisor, same condition key: the ledger recognises them.
+        assert_eq!(
+            stale_supervisor_warning_condition(before[0].trim_start_matches("[agent-doc] ")),
+            stale_supervisor_warning_condition(
+                before[1].trim_start_matches("[session-check] WARNING: ")
+            ),
+        );
+    }
+
+    #[test]
+    fn gh235_one_run_prints_at_most_one_stale_supervisor_line_without_remedy() {
+        let now = 1_000;
+        let mut ledger = StaleSupervisorWarningLedger::default();
+        let mut lines = Vec::new();
+
+        // CLI entry: scheduled the recycle, printed the scheduled form.
+        let cli = gh235_cli_entry_line();
+        ledger.record_shown(cli.trim_start_matches("[agent-doc] "), now);
+        lines.push(cli);
+
+        // session-check's read-only report observes the outstanding request.
+        let outstanding =
+            pending_recycle_request_status(Some(("stale_supervisor_turn_stage", now)));
+        let report = stale_supervisor_warning_for_display(
+            &host_supervisor_stale_warning_message(447662),
+            outstanding.as_deref(),
+        );
+        assert!(!report.contains("Refresh it"), "{report}");
+        assert!(report.contains("already scheduled"), "{report}");
+        if ledger.admit(&report, now + 1) {
+            lines.push(format!("[session-check] WARNING: {report}"));
+        }
+
+        let stale = stale_supervisor_lines(&lines);
+        assert_eq!(stale.len(), 1, "{lines:#?}");
+        for line in &lines {
+            assert!(
+                !line.contains("Refresh it"),
+                "manual remedy printed: {line}"
+            );
+            assert!(
+                !line.contains("Restart it"),
+                "manual remedy printed: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn gh235_read_only_report_without_cli_entry_uses_scheduled_form() {
+        // A run that skipped the CLI-entry probe (or a later closeout report)
+        // still never prints the remedy beside an outstanding request.
+        let mut ledger = StaleSupervisorWarningLedger::default();
+        let outstanding = pending_recycle_request_status(Some(("supervisor_binary_stale", 5)));
+        let report = stale_supervisor_warning_for_display(
+            &host_supervisor_stale_warning_message(447662),
+            outstanding.as_deref(),
+        );
+        assert!(ledger.admit(&report, 10));
+        assert!(report.contains("already scheduled"), "{report}");
+        assert!(report.contains("requested (outstanding)"), "{report}");
+        assert!(!report.contains("Refresh it"), "{report}");
+        // The closeout path's second look at the same supervisor stays silent.
+        assert!(!ledger.admit(&report, 11));
+    }
+
+    #[test]
+    fn gh235_no_scheduled_recycle_keeps_the_manual_remedy() {
+        assert_eq!(pending_recycle_request_status(None), None);
+        let raw = host_supervisor_stale_warning_message(447662);
+        let shown = stale_supervisor_warning_for_display(&raw, None);
+        assert_eq!(shown, raw);
+        assert!(shown.contains("Refresh it without discarding the live turn"));
+        let refused = stale_supervisor_warning_for_display(&raw, Some("request_skipped reason=x"));
+        assert!(refused.contains("agent-doc admin recycle"), "{refused}");
+        assert!(
+            refused.contains("request status: request_skipped"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn gh235_controller_stale_warning_drops_its_remedy_once_scheduled() {
+        let current = identity("1.2.3", 42);
+        let stale = identity("1.2.2", 41);
+        let msg = supervisor_stale_warning_message(
+            &test_controller_status(true, Some(stale)),
+            Some(&current),
+        )
+        .unwrap();
+        let scheduled = stale_supervisor_warning_for_display(&msg, Some("requested x"));
+        assert!(scheduled.contains("already scheduled"), "{scheduled}");
+        assert!(!scheduled.contains("Restart it"), "{scheduled}");
+        assert!(scheduled.contains("(#fcc0/#ipcdrift)."), "{scheduled}");
+    }
+
+    #[test]
+    fn gh235_ledger_reports_a_still_stale_supervisor_again_after_the_window() {
+        let mut ledger = StaleSupervisorWarningLedger::default();
+        let raw = host_supervisor_stale_warning_message(7);
+        assert!(ledger.admit(&raw, 100));
+        assert!(!ledger.admit(&raw, 100 + STALE_SUPERVISOR_WARNING_DEDUPE_SECS - 1));
+        assert!(ledger.admit(&raw, 100 + STALE_SUPERVISOR_WARNING_DEDUPE_SECS));
+        // A different supervisor is a different condition.
+        assert!(ledger.admit(&host_supervisor_stale_warning_message(8), 101));
     }
 
     #[test]

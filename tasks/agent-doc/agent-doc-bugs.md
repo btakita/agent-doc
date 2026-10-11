@@ -296,6 +296,20 @@ As each branch passes, I'll merge it, run one `make install`, close its items, t
 
 > **[NOTIFY from src/haiven-dev/tasks/sdk.md]** (2026-10-11T06:49:49Z)
 > State mismatch between src/haiven-dev/tasks/sdk.md and its Claude Code coordinator session (2026-10-11 ~02:30); operator reports a subagent is already working on it. (1) Stale queue claim survived /clear: #cligenport was claimed (owner subagent:cligoshell-then-cligenport, 2h TTL) by a subagent dispatched before the coordinator /clear'd. That subagent finished only #cligoshell and never started #cligenport (no branch/worktree/commit), yet the claim kept the head 'in flight'; preflight no_changes guidance told the coordinator not to release it, and the post-clear coordinator (ListAgents: no live subagents) reported it as still running to the operator. Claims need to be bound to a live agent/session identity and invalidated on /clear or agent exit. (2) After 'queue release #cligenport', session-check INTERRUPTED with 'runnable agent:queue head #cligenport removed from the committed queue ... silently dropped' while the head was live in the editor buffer ('backlog requeue' replied 'already has a live queue head; unchanged'); the next session-check was OK with 'repaired committed historical committed_capture snapshot drift' - a false positive from release vs committed snapshot. (3) Same session: pending_done_guard kept flagging #quirkbigint after its kept-open --backlog-edit was already in HEAD (c0477a6a), and --backlog-edit on an id re-adds its struck queue head, so operator-gated heads kept re-appearing as the driver.
+
+### Re: sdk.md NOTIFY — dispatched — opus-5-5 · 2026-10-11T02:53-04:00
+
+**Dispatched (claimed `subagent:sdknotify`):** the NOTIFY from `src/haiven-dev/tasks/sdk.md` (posted 06:49Z). The subagent fixes its three defects, each with tests:
+1. **Queue claims tied to their owner.** A claim records the coordinator session that made it. When that session ends or is `/clear`ed, guidance marks the claim "owner session ended, unverifiable" and stops telling the new coordinator not to touch it, so the new coordinator can take it over or release it.
+   - It does not release claims automatically on `/clear`. Two subagents started before this session's `/clear` (Cancel Turn and GH #237) are still running and reporting back.
+2. **False "silently dropped" report after `queue release`.** session-check reports the item as dropped even though it is still in the editor.
+3. **Items reappearing.** `pending_done_guard` doesn't notice a keep-open `--backlog-edit` that is already committed. Separately, `--backlog-edit` re-adds a queue item that was already crossed out.
+
+Its claim code overlaps with the sdk.md queue-sync and struck-release subagents. It will list files it expects to conflict on, and I'll resolve conflicts when merging.
+
+**`#drivecapturedsplice` still waits for your `go`.** Its only step types real keystrokes into your desktop.
+
+**In flight (8 subagents):** `#refreshmemlockstall`, GH #237, Cancel Turn, GH #238, struck release, sdk.md queue sync, tmux focus sync, and the sdk.md NOTIFY. Cancel Turn's first full `make check` failed only on the timing test `closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes`: 3.70s against its 3s limit, with load average 70–82 from the sibling test suites. On its own the test takes 0.71s, so the change didn't cause it. That run stopped early, so a rerun is covering the tests it skipped; I won't count a passing rerun as proof. Making that test reliable under load is a follow-up I'll file when I integrate.
 <!-- agent:boundary:861a07a6 -->
 <!-- /agent:exchange -->
 
@@ -304,6 +318,7 @@ As each branch passes, I'll merge it, run one `make install`, close its items, t
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 See `NOTIFY from src/haiven-dev/tasks/sdk.md` in this document.
 - 🚧 Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.
 - 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/237
 - 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/238

@@ -62,9 +62,20 @@ pub fn isolated_tmux_socket_path(socket: &str) -> PathBuf {
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
+    base.join(format!("tmux-{}", current_uid())).join(socket)
+}
+
+#[cfg(unix)]
+fn current_uid() -> u32 {
     // SAFETY: getuid has no preconditions and cannot fail.
-    let uid = unsafe { libc::getuid() };
-    base.join(format!("tmux-{uid}")).join(socket)
+    unsafe { libc::getuid() }
+}
+
+/// tmux does not run natively on non-unix hosts; the path only has to be
+/// well-formed so the crate builds there.
+#[cfg(not(unix))]
+fn current_uid() -> u32 {
+    0
 }
 
 /// A test-private tmux server. Dereferences to [`tmux_router::IsolatedTmux`]

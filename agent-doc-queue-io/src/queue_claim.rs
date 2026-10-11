@@ -67,6 +67,7 @@ fn owner_session_from_env(var: impl Fn(&str) -> Option<String>) -> Option<ClaimO
     .non_empty()
 }
 
+#[cfg(unix)]
 fn pid_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
@@ -75,6 +76,14 @@ fn pid_alive(pid: u32) -> bool {
     // means the process exists.
     let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
     rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Without a signal-0 probe the owner pid cannot be judged, so it is treated as
+/// alive: the claim keeps its pre-liveness "in flight" reading rather than being
+/// reported stale on evidence this platform cannot produce.
+#[cfg(not(unix))]
+fn pid_alive(pid: u32) -> bool {
+    pid != 0
 }
 
 /// Judge `claim`'s owner session from this process (`#claimownerliveness`):

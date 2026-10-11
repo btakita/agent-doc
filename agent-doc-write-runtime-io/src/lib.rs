@@ -704,19 +704,42 @@ fn claim_foreground_closeout_owner(
     file: &Path,
     role: WriteCloseoutOwnerRole,
 ) -> Result<Option<CloseoutOwnerGuard>> {
+    Ok(match claim_closeout_owner(file, role, None)? {
+        CloseoutOwnerClaim::Held(guard) => Some(guard),
+        CloseoutOwnerClaim::Covered | CloseoutOwnerClaim::CycleSuperseded => None,
+    })
+}
+
+/// One closeout-owner claim, with the reasons a caller holds no guard kept
+/// apart: an actorless document or an outer guard on this thread is covered,
+/// while a superseded cycle means there is nothing left for this caller to
+/// close out.
+enum CloseoutOwnerClaim {
+    Held(CloseoutOwnerGuard),
+    /// No project actor (ignored/standalone document), or an outer closeout
+    /// guard on this thread already holds the lease for this document.
+    Covered,
+    CycleSuperseded,
+}
+
+fn claim_closeout_owner(
+    file: &Path,
+    role: WriteCloseoutOwnerRole,
+    expected_cycle_id: Option<&str>,
+) -> Result<CloseoutOwnerClaim> {
     use agent_doc_controller_io::project_controller as controller;
 
     // Ignored/untracked and standalone documents have no project actor. Their
     // existing write path decides whether to skip or use the explicit
     // actorless compatibility boundary.
     if agent_doc_project_root_io::project_root_containing(file).is_none() {
-        return Ok(None);
+        return Ok(CloseoutOwnerClaim::Covered);
     }
     let owner_key = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     if ACTIVE_FOREGROUND_CLOSEOUTS
         .with(|active| active.borrow().iter().any(|path| path == &owner_key))
     {
-        return Ok(None);
+        return Ok(CloseoutOwnerClaim::Covered);
     }
 
     let owner_id = stable_closeout_owner_id(role.owner_id_prefix());
@@ -728,7 +751,7 @@ fn claim_foreground_closeout_owner(
             controller::claim_closeout_owner_for_file(
                 file,
                 controller::CloseoutOwnerClaimRequest {
-                    expected_cycle_id: None,
+                    expected_cycle_id: expected_cycle_id.map(str::to_string),
                     owner_id: owner_id.clone(),
                     owner_pid,
                     role: role_name.to_string(),
@@ -765,7 +788,9 @@ fn claim_foreground_closeout_owner(
                 owner.expires_secs,
             );
         }
-        controller::CloseoutOwnerClaimOutcome::CycleSuperseded => return Ok(None),
+        controller::CloseoutOwnerClaimOutcome::CycleSuperseded => {
+            return Ok(CloseoutOwnerClaim::CycleSuperseded);
+        }
     };
 
     let (stop, stopped) = std::sync::mpsc::channel();
@@ -807,8 +832,8 @@ fn claim_foreground_closeout_owner(
                 }
                 CloseoutHeartbeatStep::RetrySoon => {
                     lost_refreshes = lost_refreshes.saturating_add(1);
-                    wait = std::time::Duration::from_secs(1u64 << lost_refreshes.min(5))
-                        .min(interval);
+                    wait =
+                        std::time::Duration::from_secs(1u64 << lost_refreshes.min(5)).min(interval);
                     agent_doc_ops_log_io::log_op(
                         &heartbeat_file,
                         &format!(
@@ -838,7 +863,7 @@ fn claim_foreground_closeout_owner(
         }
     });
     ACTIVE_FOREGROUND_CLOSEOUTS.with(|active| active.borrow_mut().push(owner_key.clone()));
-    Ok(Some(CloseoutOwnerGuard {
+    Ok(CloseoutOwnerClaim::Held(CloseoutOwnerGuard {
         file: file.to_path_buf(),
         owner_key,
         cycle_id,
@@ -847,6 +872,72 @@ fn claim_foreground_closeout_owner(
         heartbeat: Some(heartbeat),
         lease_lost,
     }))
+}
+
+/// The closeout lease a captured-finalize resume holds while it drives a
+/// closeout path that does not enter `run_command` first
+/// (`#closeoutleaseresume`).
+///
+/// `run_command` claims the lease itself, but the legacy repair fallback for
+/// a capture without a typed mutation plan strikes answered queue heads,
+/// advances the snapshot and commits before — or without — ever reaching it.
+/// That path ran with no lease while a live `respond` closeout held one, so
+/// two closeout drivers overlapped on one cycle (GH #240). Holding this value
+/// is the proof the resume may mutate. Nested write-runtime calls on the same
+/// thread are covered by it rather than claiming again.
+#[must_use = "the closeout lease is released when this value is dropped"]
+pub struct CapturedFinalizeResumeCloseoutLease {
+    guard: Option<CloseoutOwnerGuard>,
+}
+
+impl CapturedFinalizeResumeCloseoutLease {
+    /// Refuse to continue once the heartbeat learned, from an answered
+    /// refresh, that another closeout took the lease (`#netadv3` F5).
+    pub fn ensure_still_held(&self) -> Result<()> {
+        ensure_closeout_lease_still_held(self.guard.as_ref())
+    }
+}
+
+/// Outcome of [`claim_captured_finalize_resume_closeout_lease`].
+pub enum CapturedFinalizeResumeLeaseClaim {
+    Acquired(CapturedFinalizeResumeCloseoutLease),
+    /// The expected cycle is no longer the open one; there is nothing for this
+    /// resume to close out, and it must not mutate.
+    CycleSuperseded,
+}
+
+/// Claim the closeout lease for one captured-finalize resume of
+/// `expected_cycle_id`, through the same controller actor CAS `respond` uses.
+///
+/// A lease held by another live closeout is an error carrying
+/// [`CLOSEOUT_OWNER_RETRY_AT_MARKER`], so the supervisor defers to the lease
+/// deadline (or an earlier document edge) instead of mutating. An actorless
+/// document keeps the existing compatibility path and acquires an empty lease.
+pub fn claim_captured_finalize_resume_closeout_lease(
+    file: &Path,
+    expected_cycle_id: &str,
+) -> Result<CapturedFinalizeResumeLeaseClaim> {
+    Ok(
+        match claim_closeout_owner(
+            file,
+            WriteCloseoutOwnerRole::CapturedFinalizeResume,
+            Some(expected_cycle_id),
+        )? {
+            CloseoutOwnerClaim::Held(guard) => {
+                CapturedFinalizeResumeLeaseClaim::Acquired(CapturedFinalizeResumeCloseoutLease {
+                    guard: Some(guard),
+                })
+            }
+            CloseoutOwnerClaim::Covered => {
+                CapturedFinalizeResumeLeaseClaim::Acquired(CapturedFinalizeResumeCloseoutLease {
+                    guard: None,
+                })
+            }
+            CloseoutOwnerClaim::CycleSuperseded => {
+                CapturedFinalizeResumeLeaseClaim::CycleSuperseded
+            }
+        },
+    )
 }
 
 pub fn run_command_with_response(

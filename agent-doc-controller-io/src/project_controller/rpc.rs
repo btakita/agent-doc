@@ -20679,15 +20679,25 @@ fn run_closeout_owner_release(
         "closeout_owner_released",
     );
 
-    let released = {
+    let (released, released_role) = {
         let memory = runtime.memory.lock();
         memory
             .state_projection
             .document(&document_hash)
-            .is_some_and(|document| {
+            .filter(|document| {
                 document
                     .closeout
                     .owner_release_matches(&release.cycle_id, &release.owner_id)
+            })
+            .map_or((false, None), |document| {
+                (
+                    true,
+                    document
+                        .closeout
+                        .owner
+                        .as_ref()
+                        .map(|owner| owner.role.clone()),
+                )
             })
     };
     if released {
@@ -20699,7 +20709,7 @@ fn run_closeout_owner_release(
                 closeout_owner_event_nonce()
             ),
             StateFact::CloseoutOwnerReleased {
-                document_hash,
+                document_hash: document_hash.clone(),
                 cycle_id: release.cycle_id.clone(),
                 owner_id: release.owner_id.clone(),
                 reason: release.reason.clone(),
@@ -20708,9 +20718,45 @@ fn run_closeout_owner_release(
         );
         if append_state_event(&bootstrap.project_root, &event)? {
             runtime.apply_state_event(&event)?;
+            // `#closeoutleaseresume`: a captured-finalize resume refused by this
+            // owner's lease is waiting on it. Releasing the lease is the edge
+            // that makes the resume admissible, so publish it instead of
+            // leaving the resume on its lease deadline. A resume's own release
+            // is not an edge for itself: republishing it would turn one failed
+            // attempt into a retry loop.
+            if closeout_owner_release_wakes_captured_finalize(released_role.as_deref()) {
+                // Clone out of the memory lock: publishing sets state-plane
+                // cells and must not run under the projection lock.
+                let projection = {
+                    let memory = runtime.memory.lock();
+                    memory.state_projection.document(&document_hash).cloned()
+                };
+                // A committed cycle keeps its capture in the projection until
+                // the next preflight; only an open cycle has a resume to wake.
+                if let Some(projection) = projection.filter(|projection| {
+                    projection
+                        .closeout
+                        .phase
+                        .is_some_and(agent_doc_turn::CyclePhase::is_open)
+                }) {
+                    publish_captured_finalize_wake(
+                        runtime,
+                        &projection,
+                        CLOSEOUT_OWNER_RELEASED_WAKE_REASON,
+                    );
+                }
+            }
         }
     }
     Ok(released)
+}
+
+/// Captured-finalize wake reason for a released foreground closeout lease.
+pub(super) const CLOSEOUT_OWNER_RELEASED_WAKE_REASON: &str = "closeout_owner_released";
+
+/// Whether releasing an owner of `role` is a captured-finalize wake edge.
+fn closeout_owner_release_wakes_captured_finalize(role: Option<&str>) -> bool {
+    role.is_some_and(|role| role != CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME)
 }
 
 pub(crate) fn handle_closeout_cycle_progress_await(
@@ -43090,6 +43136,100 @@ mod tests {
             }) if owner_id == "captured-resume-1"
                 && role == agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME
         ));
+    }
+
+    /// `#closeoutleaseresume`: a captured-finalize resume refused by a live
+    /// foreground closeout's lease waits on that lease. Its release must wake
+    /// the resume reactively; the resume's own release must not, or one failed
+    /// attempt would re-trigger itself.
+    #[test]
+    fn foreground_closeout_release_wakes_captured_finalize_but_a_resume_release_does_not() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n"))
+            .unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let capture = agent_doc_state_backbone::StateEvent::new(
+            "capture-for-release-wake",
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash: document_hash.clone(),
+                cycle_id: cycle.cycle_id.clone(),
+                capture_id: "capture-1".into(),
+                response_sha256: "response-1".into(),
+                response_body: Some("response body".into()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        );
+        append_state_event(dir.path(), &capture).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+
+        let claim_and_release = |owner_id: &str, role: &str| {
+            assert!(matches!(
+                run_closeout_owner_claim(
+                    &bootstrap,
+                    &runtime,
+                    &doc,
+                    CloseoutOwnerClaimRequest {
+                        expected_cycle_id: Some(cycle.cycle_id.clone()),
+                        owner_id: owner_id.into(),
+                        owner_pid: std::process::id(),
+                        role: role.into(),
+                        now_secs: timestamp_secs(),
+                        lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                        allow_dead_owner_takeover: false,
+                    },
+                )
+                .unwrap(),
+                CloseoutOwnerClaimOutcome::Acquired(_)
+            ));
+            clear_captured_finalize_wake(&runtime, &document_hash);
+            assert!(
+                run_closeout_owner_release(
+                    &bootstrap,
+                    &runtime,
+                    &doc,
+                    CloseoutOwnerReleaseRequest {
+                        cycle_id: cycle.cycle_id.clone(),
+                        owner_id: owner_id.into(),
+                        reason: "finished".into(),
+                        released_secs: timestamp_secs(),
+                    },
+                )
+                .unwrap()
+            );
+            runtime
+                .captured_finalize_wakes
+                .lock()
+                .get(&document_hash)
+                .cloned()
+        };
+
+        let wake = claim_and_release(
+            "foreground-1",
+            agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE,
+        )
+        .expect("a released foreground lease must wake the waiting captured finalize");
+        assert_eq!(wake.reason, CLOSEOUT_OWNER_RELEASED_WAKE_REASON);
+        assert_eq!(wake.cycle_id, cycle.cycle_id);
+        assert_eq!(wake.capture_id, "capture-1");
+        assert_eq!(wake.response_sha256, "response-1");
+
+        assert!(
+            claim_and_release(
+                "captured-resume-1",
+                agent_doc_state_backbone::CLOSEOUT_OWNER_ROLE_CAPTURED_FINALIZE_RESUME,
+            )
+            .is_none(),
+            "a resume's own release is not a wake edge for itself"
+        );
     }
 
     /// `#closeoutwaitchurn` — the foreground PID may be the long-lived route

@@ -2465,6 +2465,138 @@ mod tests {
     /// `--backlog-add` had all landed and only the commit was outstanding, so
     /// the recovery named by the `#capturedresumeunowned` remedy could not run
     /// on exactly the document that needed it.
+    /// `#closeoutleaseresume` (GH #240 follow-up): a captured-finalize resume
+    /// whose capture predates the typed mutation plan falls back to the legacy
+    /// repair coordinator. Its already-applied branch strikes answered
+    /// free-text queue heads and commits — and it used to do both WITHOUT the
+    /// closeout lease a live `respond` closeout holds, so two closeout drivers
+    /// overlapped on one cycle.
+    ///
+    /// Reproduction: a foreground closeout holds the lease through the real
+    /// controller actor while the supervisor's resume runs. The resume must
+    /// defer on the lease (a bounded `RetryAt`) and mutate nothing; once the
+    /// foreground releases, the same resume lands the closeout exactly once.
+    #[test]
+    fn legacy_captured_finalize_resume_defers_to_a_live_closeout_lease() {
+        use agent_doc_controller_io::project_controller as controller;
+
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let head = "Fix the closeout lease race.";
+        let response =
+            format!("### Re: closeout lease race\n\n> **Queue prompt:** {head}\n\nFixed.\n");
+        let baseline = format!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\nqueue_active: true\n---\n\n\
+             ## Exchange\n\n<!-- agent:exchange patch=append -->\n\
+             <!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue -->\n- {head}\n- do [#other]\n<!-- /agent:queue -->\n"
+        );
+        let applied = format!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\nqueue_active: true\n---\n\n\
+             ## Exchange\n\n<!-- agent:exchange patch=append -->\n\
+             {response}<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue -->\n- {head}\n- do [#other]\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&baseline), Some(&baseline))
+                .unwrap();
+        // A capture with no typed mutation plan: the resume takes the legacy
+        // repair fallback, not `run_command_with_response`.
+        agent_doc_capture_io::capture_response_with_current_content_and_intent(
+            &doc, &response, &baseline, None,
+        )
+        .unwrap();
+        // The live closeout's response cell is visible; its queue strike and
+        // commit are still ahead of it.
+        std::fs::write(&doc, &applied).unwrap();
+
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("captured response should expose a durable resume key");
+
+        // The live `respond` closeout holds the lease through the actor.
+        let respond_owner = controller::new_closeout_owner_id("test-foreground-finalize");
+        let claimed = controller::claim_closeout_owner_for_file(
+            &doc,
+            controller::CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(cycle.cycle_id.clone()),
+                owner_id: respond_owner.clone(),
+                owner_pid: std::process::id(),
+                role: controller::CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.to_string(),
+                now_secs: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                lease_secs: controller::CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: true,
+            },
+        )
+        .unwrap();
+        assert!(
+            matches!(claimed, controller::CloseoutOwnerClaimOutcome::Acquired(_)),
+            "{claimed:?}"
+        );
+
+        let deferred = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            matches!(
+                deferred,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryAt { .. }
+            ),
+            "a resume that cannot acquire the closeout lease must defer on its deadline: {deferred:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            applied,
+            "the resume must not mutate the document while another closeout holds the lease"
+        );
+        assert!(
+            !agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("cycle state")
+                .phase
+                .eq(&agent_doc_turn::CyclePhase::Committed),
+            "the resume must not commit a cycle another closeout owns"
+        );
+
+        assert!(
+            controller::release_closeout_owner_for_file(
+                &doc,
+                &cycle.cycle_id,
+                &respond_owner,
+                "test_foreground_closeout_finished",
+            )
+            .unwrap()
+        );
+
+        let landed = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            matches!(
+                landed,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "{landed:?}"
+        );
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result.matches("Fixed.").count(), 1, "{result}");
+        assert!(
+            result.contains(&format!("~~{head}~~")),
+            "the lease holder strikes the answered head:\n{result}"
+        );
+        assert!(
+            result.contains("- do [#other]") && !result.contains("~~do [#other]~~"),
+            "the unanswered head stays live:\n{result}"
+        );
+    }
+
     #[test]
     fn binary_owned_resume_replays_an_already_applied_backlog_add_as_a_no_op() {
         let dir = setup_project();

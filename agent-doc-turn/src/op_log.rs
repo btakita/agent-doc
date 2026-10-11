@@ -162,6 +162,9 @@ ops_log_events! {
     EditorOpBaseHashUnresolved => "editor_op_base_hash_unresolved",
     ControllerCrdtCurrentText => "controller_crdt_current_text",
     ConvergenceGateBlocked => "convergence_gate_blocked",
+    CrdtResponseCellAdd => "crdt_response_cell_add",
+    CrdtDocumentOpDeltaIngested => "crdt_document_op_delta_ingested",
+    CrdtCommitBarrier => "crdt_commit_barrier",
 }
 
 /// Event name prefix emitted by preflight when a cycle starts.

@@ -486,13 +486,22 @@ case_captured_splice() {
   if [[ "$DRY_RUN" != 1 ]]; then
     wait_for_marker "editor_op_capture_proof" "${base%.md}" \
       || die "edit two did not produce a fresh operator capture proof within ${TIMEOUT}s"
-    wait_for_marker "controller_crdt_current_text" "${base%.md}" "source=captured-local-splice-recovery" \
-      || die "edit two did not reach captured-local-splice recovery within ${TIMEOUT}s"
+    # Either accepted recovery shape satisfies this wait: the fallback
+    # splice-recovery read, or the editor delta forwarded into canonical. The
+    # 2026-10-11 run recovered through the CRDT-forward path and never wrote the
+    # fallback receipt, so waiting on that one mechanism alone failed a run that
+    # proved the property. The binary decides which shape (if any) is proven.
+    wait_for_recovery_receipt "${base%.md}" \
+      || die "edit two reached neither captured-local-splice recovery nor an applied CRDT delta within ${TIMEOUT}s"
+    mark_advance_closeout
     await_advance_in_owner_pane \
       || warn "strict scratch closeout remained retained after the stale-replica proof; verifier receipts remain authoritative"
+    explain_advance_commit_boundary "${base%.md}"
   fi
 
   if [[ "$DRY_RUN" == 1 ]]; then
+    log "[dry-run] would wait for a fresh captured-local-splice-recovery read OR an applied crdt_document_op_delta_ingested for ${base%.md}"
+    log "[dry-run] would name a controller-side commit_skipped_ignored_path for ${base%.md} as the controller-env commit-boundary limit (see ensure_captured_splice_commit_repo)"
     log "[dry-run] would assert: agent-doc verify-captured-splice-recovery $rel"
     return 0
   fi
@@ -511,6 +520,20 @@ case_captured_splice() {
 # GIT_WORK_TREE. It MUST NOT create a nested `.git` beside the document: that
 # would also create a nested `.agent-doc`, split the controller/ops-log authority,
 # and make the proof meaningless.
+#
+# Reach of that boundary (`#splicevrfyforward`): the env prefix DOES reach the
+# `agent-doc write --commit` process in the owner pane. It does NOT reach the
+# commit, because the proof requires a live editor, and with a live editor
+# attached `write --commit` delegates the git commit to the already-running
+# project controller (`commit_document_via_controller` -> `controller_commit_document`).
+# The controller commits in ITS process with ITS environment, resolves the
+# product repository, and refuses the ignored scratch (`commit_skipped_ignored_path`
+# + `commit_error ... refusing to commit ignored untracked path`). No env export
+# from any pane can change a daemon's environment, so the isolated GIT_DIR covers
+# only the local-commit fallback (`controller_commit_document_unavailable
+# recovery=local_commit`). The recipe names the controller-side refusal instead
+# of reporting it as an unexplained commit_error; the splice verdict never
+# depends on the scratch commit.
 ADVANCE_GIT_DIR=""
 ensure_captured_splice_commit_repo() {
   local doc="$1" root rel
@@ -662,6 +685,55 @@ start_advance_in_owner_pane() {
   tmux send-keys -t "$SCRATCH_OWNER_PANE" -l -- \
     "cd $(printf '%q' "$REPO") && GIT_DIR=$(printf '%q' "$ADVANCE_GIT_DIR") GIT_WORK_TREE=$(printf '%q' "$REPO") agent-doc write --commit $(printf '%q' "$rel") < $(printf '%q' "$ADVANCE_BODY"); echo \$? > $(printf '%q' "$ADVANCE_SENTINEL")"
   tmux send-keys -t "$SCRATCH_OWNER_PANE" Enter
+}
+
+# wait_for_recovery_receipt <stem>: a fresh receipt for EITHER accepted
+# recovery shape — the fallback `captured-local-splice-recovery` read, or an
+# editor delta applied into canonical (`crdt_document_op_delta_ingested
+# outcome=Applied { changed: true }`).
+wait_for_recovery_receipt() {
+  local stem="$1" olog deadline fresh
+  olog="$(ops_log)"
+  deadline=$(( $(date +%s) + TIMEOUT ))
+  while :; do
+    if [[ -f "$olog" ]]; then
+      fresh="$(tail -c +"$(( MARK_OFFSET + 1 ))" "$olog" 2>/dev/null | grep -F -- "doc=$stem " || true)"
+      if grep -F -- "controller_crdt_current_text" <<<"$fresh" | grep -qF -- "source=captured-local-splice-recovery"; then
+        log "edit two reached the captured-local-splice-recovery fallback"
+        return 0
+      fi
+      if grep -F -- "crdt_document_op_delta_ingested" <<<"$fresh" | grep -qF -- "outcome=Applied { changed: true }"; then
+        log "edit two was forwarded into canonical as an applied CRDT delta"
+        return 0
+      fi
+    fi
+    (( $(date +%s) >= deadline )) && return 1
+    sleep 0.1
+  done
+}
+
+# Byte offset of ops.log before the advance's closeout is awaited, so the
+# commit-boundary explanation reads only that closeout's receipts.
+ADVANCE_CLOSEOUT_OFFSET=0
+mark_advance_closeout() {
+  local olog; olog="$(ops_log)"
+  ADVANCE_CLOSEOUT_OFFSET="$( [[ -f "$olog" ]] && stat -c %s "$olog" || echo 0 )"
+}
+
+# Name a controller-side ignored-path refusal as what it is (see
+# ensure_captured_splice_commit_repo): the controller, not the advance process,
+# ran the commit, so the isolated GIT_DIR never applied to it.
+explain_advance_commit_boundary() {
+  local stem="$1" olog fresh
+  olog="$(ops_log)"
+  [[ -f "$olog" ]] || return 0
+  fresh="$(tail -c +"$(( ADVANCE_CLOSEOUT_OFFSET + 1 ))" "$olog" 2>/dev/null | grep -F -- "doc=$stem " || true)"
+  grep -qF -- "commit_skipped_ignored_path" <<<"$fresh" || return 0
+  if grep -qF -- "controller_commit_document " <<<"$fresh"; then
+    warn "the advance's commit ran in the project controller (controller_commit_document), whose environment never carries the advance's GIT_DIR/GIT_WORK_TREE; it refused the ignored scratch (commit_skipped_ignored_path). This is the controller-delegated commit-boundary limit, not a splice-proof failure."
+  else
+    warn "the advance's commit refused the ignored scratch (commit_skipped_ignored_path) without a controller_commit_document receipt — the isolated GIT_DIR did not reach the committing process; inspect the advance's closeout receipts"
+  fi
 }
 
 await_advance_in_owner_pane() {

@@ -3706,7 +3706,8 @@ pub fn add_response_cell_for_file(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_response_cell_add file={} source={} cell_id={} applied={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
+            "{} file={} source={} cell_id={} applied={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
+            OpsLogEvent::CrdtResponseCellAdd,
             file.display(),
             source,
             result.cell_id,
@@ -4665,7 +4666,8 @@ fn commit_barrier_for_file_with_authority_and_delivery(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "crdt_commit_barrier file={} authority=multi_replica ready={} delivery_required={} visible_delivery_projected={} live_editors={}",
+                    "{} file={} authority=multi_replica ready={} delivery_required={} visible_delivery_projected={} live_editors={}",
+                    OpsLogEvent::CrdtCommitBarrier,
                     file.display(),
                     ready,
                     require_delivery_convergence,
@@ -4966,7 +4968,8 @@ pub fn apply_document_op_delta_for_file_in_lineage(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_document_op_delta_ingested file={} authority=multi_replica outcome={:?} frame_lineage={} delta_len={} fenced_registered_origins={} projections_queued={}",
+            "{} file={} authority=multi_replica outcome={:?} frame_lineage={} delta_len={} fenced_registered_origins={} projections_queued={}",
+            OpsLogEvent::CrdtDocumentOpDeltaIngested,
             file.display(),
             outcome,
             lineage.unwrap_or("legacy-unscoped"),

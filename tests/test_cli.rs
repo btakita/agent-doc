@@ -34105,3 +34105,60 @@ fn captured_splice_live_recipe_holds_delivery_and_uses_disposable_commit_boundar
         "the live driver must defer the verdict to the branch-specific verifier contract",
     );
 }
+
+/// `#splicevrfyforward`: the live recipe must not assert one recovery
+/// MECHANISM. The 2026-10-11 run recovered edit two through the CRDT forward
+/// path and never wrote the fallback splice-recovery receipt, so a hard wait on
+/// that receipt alone failed a run that proved the property. And the isolated
+/// GIT_DIR cannot reach the controller-delegated commit, so a controller-side
+/// ignored-path refusal must be named rather than left as a bare commit_error.
+#[test]
+fn captured_splice_live_recipe_accepts_either_recovery_shape_and_names_the_commit_boundary() {
+    let script = std::fs::read_to_string("scripts/xdotool-live-verify.sh")
+        .expect("read xdotool live verifier");
+    let case_start = script
+        .find("case_captured_splice() {")
+        .expect("captured-splice case");
+    let case_end = script[case_start..]
+        .find("\ncase_lvbatch_markers() {")
+        .map(|offset| case_start + offset)
+        .expect("captured-splice case end");
+    let recipe = &script[case_start..case_end];
+
+    assert!(
+        !recipe.contains(
+            "wait_for_marker \"controller_crdt_current_text\" \"${base%.md}\" \"source=captured-local-splice-recovery\""
+        ),
+        "edit two must not be gated on the fallback receipt alone",
+    );
+    let edit_two = recipe
+        .find("operator edit two after the advance")
+        .expect("second real editor edit");
+    let recovery = recipe
+        .find("wait_for_recovery_receipt \"${base%.md}\"")
+        .expect("either-shape recovery wait");
+    let completion = recipe
+        .find("await_advance_in_owner_pane")
+        .expect("advance completion");
+    let explain = recipe
+        .find("explain_advance_commit_boundary \"${base%.md}\"")
+        .expect("commit-boundary explanation");
+    assert!(edit_two < recovery && recovery < completion && completion < explain);
+
+    let helper_start = script
+        .find("wait_for_recovery_receipt() {")
+        .expect("recovery wait helper");
+    let helper =
+        &script[helper_start..helper_start + script[helper_start..].find("\n}\n").unwrap()];
+    assert!(
+        helper.contains("source=captured-local-splice-recovery")
+            && helper.contains("crdt_document_op_delta_ingested")
+            && helper.contains("outcome=Applied { changed: true }"),
+        "the wait must accept the fallback read OR an applied CRDT delta: {helper}",
+    );
+    assert!(
+        script.contains("controller_commit_document")
+            && script.contains("commit_skipped_ignored_path"),
+        "the controller-side ignored-path refusal must be recognised by name",
+    );
+}

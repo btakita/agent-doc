@@ -79,6 +79,7 @@ tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.486", features = ["test-support"] }
 agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.486" }
 agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.486", features = ["test-support"] }
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.486", features = ["test-support"] }

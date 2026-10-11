@@ -159,6 +159,48 @@ mod visible_write_content_snapshot_tests {
         )
     }
 
+    /// A project root served by a warm, in-process controller
+    /// (`#visiblewriteloadflake`).
+    ///
+    /// These tests used to let their first receipt RPC `connect_or_launch` a
+    /// detached `agent-doc controller serve` (whatever `AGENT_DOC_BIN`/`PATH`
+    /// resolved to, usually a ~600MB debug build). That launch is not what the
+    /// tests measure, but its whole cold start — exec and page-in, runtime
+    /// construction, first-touch `state.db` schema convergence — was charged to
+    /// the 2s test-mode connect and RPC deadlines. On a busy runner (load ~50)
+    /// the launch alone outlasted them and the fixture failed with `timed out
+    /// after 2.0s waiting for project controller response` while asserting
+    /// nothing about timing. Pinning the fixture to one core shared with 64-96
+    /// busy spinners reproduces it in 7-10 of 10 runs (with "timed out waiting
+    /// for project controller", the launch-wait half of the same window). The
+    /// state actor builds and hydrates its runtime
+    /// *before* binding the socket, so the first timed RPC only pays for its
+    /// own handler. No process is spawned, so none outlives the test either.
+    /// The actor serves each client on its own thread like production, so the
+    /// poller's receipt long-poll cannot starve the writer's receipt RPC.
+    ///
+    /// Field order is drop order: the actor stops before its root is deleted.
+    struct WarmControllerProject {
+        _actor: agent_doc_controller_io::project_controller::StateActorTestHandle,
+        tmp: TempDir,
+    }
+
+    impl WarmControllerProject {
+        fn new() -> Self {
+            let tmp = TempDir::new().unwrap();
+            std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+            let actor = agent_doc_controller_io::project_controller::start_state_actor_for_tests(
+                tmp.path(),
+            )
+            .unwrap();
+            Self { _actor: actor, tmp }
+        }
+
+        fn doc(&self) -> std::path::PathBuf {
+            self.tmp.path().join("session.md")
+        }
+    }
+
     fn record_lazily_visible_write_candidate(file: &Path, patch_id: &str, content: &str) {
         std::fs::write(file, content).unwrap();
         agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
@@ -168,16 +210,77 @@ mod visible_write_content_snapshot_tests {
             "unit_test",
         )
         .unwrap();
+        // The receipt must be served by the fixture's warm controller. A cold
+        // launch here is exactly the load-sensitive window this fixture removes.
+        let ops_log = file
+            .parent()
+            .unwrap()
+            .join(".agent-doc")
+            .join("logs")
+            .join("ops.log");
+        let log = std::fs::read_to_string(&ops_log).unwrap_or_default();
+        assert!(
+            !log.contains("controller_detached_child_launched"),
+            "visible-write receipt fixture must not cold-launch a detached controller:\n{log}"
+        );
+    }
+
+    /// `#visiblewriteloadflake`: the warm fixture controller must serve a
+    /// receipt while another client is mid-request, as production does.
+    ///
+    /// A client that has connected and is still sending its request (one byte at
+    /// a time, never the newline) occupies whichever thread serves it. When the
+    /// test actor served clients inline, that was its only thread: every later
+    /// RPC — here the visible-write receipt — waited unserved until it hit its
+    /// own deadline. The backlog is FIFO and the slow client connects first, so
+    /// the old actor fails this deterministically, with no load and no sleeps
+    /// in the assertion path.
+    #[cfg(unix)]
+    #[test]
+    fn warm_controller_serves_receipt_while_another_client_is_mid_request() {
+        use std::io::Write as _;
+        let project = WarmControllerProject::new();
+        let doc = project.doc();
+        let sock = project
+            .tmp
+            .path()
+            .join(".agent-doc")
+            .join("controller.sock");
+
+        let mut slow_client = std::os::unix::net::UnixStream::connect(&sock).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let trickle_stop = std::sync::Arc::clone(&stop);
+        let trickle = std::thread::spawn(move || {
+            // Keep the request incomplete but never idle long enough for the
+            // controller's per-read client timeout to drop it.
+            for byte in b"{\"command\":\"status\"".iter().cycle() {
+                if trickle_stop.load(std::sync::atomic::Ordering::SeqCst)
+                    || slow_client.write_all(&[*byte]).is_err()
+                {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        });
+
+        let recorded = agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+            &doc,
+            "concurrent-client",
+            "receipt content",
+            "unit_test",
+        );
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        trickle.join().unwrap();
+        let recorded = recorded
+            .expect("a client still sending its request must not block the receipt RPC behind it");
+        assert_eq!(recorded.patch_id, "concurrent-client");
     }
 
     #[test]
     fn test_lazily_visible_write_event_read() {
-        let tmp = TempDir::new().unwrap();
-        let project_root = tmp.path().to_path_buf();
+        let project = WarmControllerProject::new();
         let patch_id = "test-patch-abc123";
-
-        std::fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
-        let doc = project_root.join("session.md");
+        let doc = project.doc();
         record_lazily_visible_write_candidate(&doc, patch_id, "applied content from plugin");
 
         let result = poll_visible_write_content_lazily_event(
@@ -1200,12 +1303,9 @@ mod visible_write_content_snapshot_tests {
 
     #[test]
     fn test_poll_lazily_event_present_immediately() {
-        let tmp = TempDir::new().unwrap();
-        let project_root = tmp.path().to_path_buf();
+        let project = WarmControllerProject::new();
         let patch_id = "poll-immediate";
-
-        std::fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
-        let doc = project_root.join("session.md");
+        let doc = project.doc();
         record_lazily_visible_write_candidate(&doc, patch_id, "immediate content");
 
         let result = poll_visible_write_content_lazily_event(
@@ -1220,12 +1320,9 @@ mod visible_write_content_snapshot_tests {
 
     #[test]
     fn test_poll_lazily_event_appears_after_delay() {
-        let tmp = TempDir::new().unwrap();
-        let project_root = tmp.path().to_path_buf();
+        let project = WarmControllerProject::new();
         let patch_id = "poll-delayed";
-
-        std::fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
-        let doc = project_root.join("session.md");
+        let doc = project.doc();
 
         // Spawn a thread that records the durable lazily proof after 50ms. Wait
         // until it has actually started before beginning the polling budget:
@@ -1257,7 +1354,10 @@ mod visible_write_content_snapshot_tests {
         let project_root = tmp.path().to_path_buf();
         let patch_id = "poll-timeout";
 
-        // Don't record the lazily event — poll should timeout.
+        // Don't record the lazily event — poll should timeout. No controller is
+        // needed or launched: the receipt read and await only use an existing
+        // one, so this test never had the cold-launch window the
+        // `WarmControllerProject` fixture removes from the recording tests.
         std::fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
         let doc = project_root.join("session.md");
         std::fs::write(&doc, "unproven content").unwrap();

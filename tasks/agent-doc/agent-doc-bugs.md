@@ -118,6 +118,19 @@ Done as an automated live check instead of a manual one. `tests/clear_queued_liv
 > **Queue prompt:** release + publish
 
 **Deferred:** claimed by me (`coordinator:release-0491`). Main has both batches. I'm holding the tag until the frontend.md wedge fix lands, so v0.35.491 doesn't ship a known bug that breaks the pane. Then: `make release-version`, the `VERSIONS.md` entry, `make install-full`, and `make release`.
+
+### Re: what scrambles the tmux pane — opus-5.5 · 2026-10-11T18:28-04:00
+
+> **Chat prompt (#chatprompt):** What causes the tmux session formatting to get messed up?
+
+Two things combine, and only one is new.
+
+1. **What prints the text (old):** `agent-doc-element/src/element.rs:1028`. `find_code_ranges`, the markdown scan that finds code spans so component markers inside code aren't parsed, ends with `eprintln!("[perf] find_code_ranges: {}ms")` whenever a call takes 1ms or more. It's a library function, so it runs in every agent-doc process: the CLI, hooks, the supervisor and the editor's native library. On a large session doc nearly every call takes over 1ms, so it prints constantly. It has been there about 4 months (`95ea1b7aec`). Normally that output goes to a log file or a hook's captured stderr, so nobody sees it.
+2. **Where it goes (the likely new part):** a process whose stderr is the pane's own terminal. The repo rule (`#restartstderrbleed`) is that the supervisor sends its stderr to `.agent-doc/logs/supervisor-stderr.log`, and nothing it spawns inherits the pane. The text in your screenshot came from a process that broke that rule. Those writes go straight to the terminal, behind Claude Code's back. Claude Code's TUI draws by moving the cursor and repainting its own regions, so foreign bytes land wherever the cursor happens to be. That's why the text shows up inside the composer (`❯ [perf] …`), on the separator line, after the branch name, and after `← 4 agents`, and why the layout looks shredded until a full redraw. A composer with `[perf] …` in it also stops looking like an idle prompt, which can make agent-doc treat the turn as still running. That's the likely "wedge".
+
+**Suspected trigger:** I ran `make install` of the clear-fix batch at about 18:10. Install recycles every supervisor onto the new binary at its next idle boundary, and your screenshot is from 18:16. So the prime suspect is that the hot-reloaded supervisor, or the newly expanded `turn-status idle` hook path, ended up with its stderr on the pane. That's not confirmed yet. I sent the location and this lead to the frontend.md subagent. It will fix both layers: no unconditional perf printing in library code, and no process with stderr on the pane. If the stray text is the only problem, a redraw (resizing the pane, or Ctrl+L) clears it for now. If the session still won't accept input, the wedge is separate, and the subagent is checking for that too.
+
+I also dispatched the three new follow-ups to their own subagents: `#closeoutleaseresume` (the resume takes the closeout lease), `#flakyintegrate0494` (keep test output from every run and hunt the nondeterministic failure), and `#clearsupersedenotice` (tell you when a newer prompt drops a queued clear).
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 

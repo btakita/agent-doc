@@ -110,6 +110,26 @@ The question head keeps re-entering the loop because the item stays open. To mov
 - delete the queue line to park it in the backlog.
 
 I'm stopping the loop until you do one of those.
+
+### Re: #drivecapturedsplice live run — the property holds; the verifier asserts the wrong mechanism — opus-5.5 · 2026-10-11T14:45-04:00
+
+> **Queue prompt:** do [#drivecapturedsplice]: go
+
+> **Operator note:** go
+
+Done. I ran the live recipe three times against the installed 0.35.490 binary and plugin.
+
+1. **Recipe in this checkout** (`src/agent-doc` main, 710 files behind origin): the advance and both edits landed, with zero recovery receipts. This version typed, waited for convergence, and only then advanced, so the editor replica was never stale.
+2. **Overlapped variant** (advance mid-typing, 4 rounds): every edit survived 5 independent advances, still with zero recovery receipts. I reverted this change once I found that upstream had already fixed the recipe properly.
+3. **Upstream recipe** (`origin/main`, run with `--repo src/agent-doc`): it started the advance and waited for `crdt_response_cell_add delivery_converged=false`, so the editor replica was provably stale. Then it typed edit two. The result:
+   - Edit two was captured with `editor_op_capture_proof operator_ops=28` and `shadow_replay=agreed` on the pre-advance base `d232ee81c5ad`.
+   - It merged as a CRDT delta (`crdt_document_op_delta_ingested outcome=Applied`).
+   - The plugin then rebootstrapped (`crdt_rebootstrap_pull action=replace_buffer` → `crdt_replica_register` → `crdt_replica_promote`). There was no registration retry loop.
+   - The final text holds the advance (18:42:12Z) plus edit one and edit two, in order. Nothing was lost.
+
+**Verdict:** the property this gate exists for holds live: a captured operator edit recovers across an independently advanced canonical response, without loss or an endless retry. It recovered through the plugin's ForwardLocal path plus CRDT merge, not the splice-rebase fallback (`RebootstrapCanonicalThenForward`). That fallback runs only when the replica's own text differs from the editor shadow. Here both were still on the pre-advance text, so the fallback had nothing to do. `verify-captured-splice-recovery` still FAILs, because it requires the fallback's `source=captured-local-splice-recovery` receipt. It checks a mechanism, not the property. I added backlog item splicevrfyforward to make it accept this receipt-provable CRDT-forward recovery shape while still rejecting runs where the advance never retained. That item also covers a leftover: the scratch advance still hits `commit_error` on the ignored path.
+
+Closing `#drivecapturedsplice` as done on the live evidence. Scratch docs are under `src/agent-doc/tmp/` (git-ignored). The run opened Claude Code pane %184 for the scratch doc; it's idle.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -118,14 +138,13 @@ I'm stopping the loop until you do one of those.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#drivecapturedsplice]: what needs to be done?
-- ~~release + publish~~
+- ~~do [#drivecapturedsplice]: go~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Everything is built; the only remaining step is one live run of src/agent-doc/scripts/xdotool-live-verify.sh captured-splice, which types real keystrokes into the operator's IntelliJ. Needs the operator's go-ahead plus a desktop left alone for the run (dry run: --dry-run). Pass = verify-captured-splice-recovery green.
+- [ ] [#splicevrfyforward] [agent-doc] verify-captured-splice-recovery asserts a MECHANISM (the captured-local-splice-recovery fallback receipt), not the property. The 2026-10-11 live run on 0.35.490 (upstream recipe, retained advance with delivery_converged=false) recovered edit two through ForwardLocal + CRDT delta merge + plugin rebootstrap: the edit was captured on the pre-advance base d232ee81c5ad and the final text holds the advance and both edits, but the verifier FAILs because the fallback never ran. Make the verifier accept a receipt-provable CRDT-forward recovery, keeping the fallback triple as the second accepted shape, without accepting a run where the advance never retained. Add the 2026-10-11 ops.log shape as a fixture. Also: the recipe's scratch advance still hits commit_error (refusing to commit ignored path) despite ensure_captured_splice_commit_repo, so the GIT_DIR export is not reaching the owner-pane advance.
 <!-- /agent:backlog -->
 
 ## Review

@@ -157,6 +157,7 @@ impl SimWorld {
 
     pub(crate) fn run_seed_corpus(seeds: std::ops::Range<u64>, steps: usize) -> Result<CorpusRun> {
         let started = Instant::now();
+        let cpu_started = ThreadCpuClock::now();
         let mut coverage = Coverage::default();
         let mut schedules = 0usize;
         for seed in seeds {
@@ -170,7 +171,8 @@ impl SimWorld {
             coverage,
             schedules,
             steps,
-            elapsed: started.elapsed(),
+            wall_elapsed: started.elapsed(),
+            cpu_elapsed: cpu_started.elapsed(),
         })
     }
 

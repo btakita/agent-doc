@@ -28,6 +28,9 @@
 //! - `editor_ops_for_base` returns `Some(ops)` **only** when the stored
 //!   `base_hash` matches the hash of the supplied base text; otherwise `None`.
 //! - `clear_op_capture` is idempotent — clearing an absent epoch is `Ok(())`.
+//! - `consume_replayed_editor_op_epoch` decides "is the replayed epoch
+//!   consumed?" from the state: a clear that errors while the epoch reads back
+//!   absent is consumed, so a loaded host's missed reply is not a failure.
 //! - `agent_doc_hash::content_hash` is the single source of the base-hash
 //!   function shared by the producer (editor, via FFI) and the consumer (merge).
 //!
@@ -1067,6 +1070,81 @@ pub fn clear_op_capture_for_editor_projection(doc: &Path) -> Result<()> {
     clear_op_capture_with_timeout(doc, EDITOR_PROJECTION_FENCE_TIMEOUT)
 }
 
+/// Clear attempts [`consume_replayed_editor_op_epoch`] makes before it reports
+/// [`ReplayedEpochConsumption::Failed`].
+pub const REPLAYED_EPOCH_CLEAR_ATTEMPTS: u32 = 3;
+
+/// How consuming a replayed editor-op epoch after a successful write ended.
+#[derive(Debug)]
+pub enum ReplayedEpochConsumption {
+    /// The epoch is gone. `outcome` is the ops-log label: the clear itself was
+    /// acknowledged (`cleared_after_successful_write`), or the clear reported
+    /// an error while the state read back shows the epoch absent
+    /// (`already_absent_after_clear_error`, with that `error`).
+    Consumed {
+        outcome: &'static str,
+        attempt: u32,
+        error: Option<String>,
+    },
+    /// Every attempt failed and the epoch is still projected.
+    Failed { attempts: u32, error: anyhow::Error },
+}
+
+/// Consume the editor-op epoch a write just replayed and applied.
+///
+/// `#loadbudgettests` / `#compactclearidempotent`: the answer is read from the
+/// state, never from whether one bounded transport round trip beat the clock.
+/// An actor request can miss its budget on a loaded host while the actor still
+/// applies it, so a clear error is followed by a state read; an absent epoch
+/// is consumed. Each clear uses the causal-fence budget
+/// ([`clear_op_capture_for_editor_projection`]), not the typing hot-path one:
+/// an applied cut whose epoch stays open is replayed again by the next cycle.
+pub fn consume_replayed_editor_op_epoch(doc: &Path) -> ReplayedEpochConsumption {
+    consume_replayed_editor_op_epoch_with(
+        doc,
+        clear_op_capture_for_editor_projection,
+        |doc| matches!(load_op_capture(doc), Ok(None)),
+        std::thread::sleep,
+    )
+}
+
+fn consume_replayed_editor_op_epoch_with(
+    doc: &Path,
+    mut clear: impl FnMut(&Path) -> Result<()>,
+    mut epoch_absent: impl FnMut(&Path) -> bool,
+    mut backoff: impl FnMut(Duration),
+) -> ReplayedEpochConsumption {
+    let mut last_err = None;
+    for attempt in 1..=REPLAYED_EPOCH_CLEAR_ATTEMPTS {
+        match clear(doc) {
+            Ok(()) => {
+                return ReplayedEpochConsumption::Consumed {
+                    outcome: "cleared_after_successful_write",
+                    attempt,
+                    error: None,
+                };
+            }
+            Err(err) => {
+                if epoch_absent(doc) {
+                    return ReplayedEpochConsumption::Consumed {
+                        outcome: "already_absent_after_clear_error",
+                        attempt,
+                        error: Some(err.to_string()),
+                    };
+                }
+                last_err = Some(err);
+                if attempt < REPLAYED_EPOCH_CLEAR_ATTEMPTS {
+                    backoff(Duration::from_millis(50 * u64::from(attempt)));
+                }
+            }
+        }
+    }
+    ReplayedEpochConsumption::Failed {
+        attempts: REPLAYED_EPOCH_CLEAR_ATTEMPTS,
+        error: last_err.expect("every failed attempt records its error"),
+    }
+}
+
 fn clear_op_capture_with_timeout(doc: &Path, timeout: Duration) -> Result<()> {
     let (project_root, document_hash, _) = state_db_identity(doc)?;
     let nonce = event_nonce();
@@ -1465,6 +1543,97 @@ mod tests {
     fn editor_ops_for_base_none_when_empty_or_absent() {
         let (_dir, doc) = setup_doc();
         assert!(editor_ops_for_base(&doc, "anything").unwrap().is_none());
+    }
+
+    /// `#loadbudgettests`: a clear whose round trip misses its budget after the
+    /// actor applied it (what a loaded host produces) is still a consumed
+    /// epoch. The fault is injected as a clear that lands and then errors, so
+    /// the outcome does not depend on host timing.
+    #[test]
+    fn consume_replayed_epoch_reads_state_after_a_clear_that_landed_but_errored() {
+        let (_dir, doc) = setup_doc();
+        let h = content_hash("b\n");
+        record_editor_op(&doc, &h, EditorOp::Delete { offset: 0, len: 1 }).unwrap();
+        let mut backoffs = Vec::new();
+        let outcome = consume_replayed_editor_op_epoch_with(
+            &doc,
+            |doc| {
+                clear_op_capture(doc)?;
+                anyhow::bail!("injected: actor applied the clear, reply missed its budget")
+            },
+            |doc| matches!(load_op_capture(doc), Ok(None)),
+            |delay| backoffs.push(delay),
+        );
+        match outcome {
+            ReplayedEpochConsumption::Consumed {
+                outcome,
+                attempt,
+                error,
+            } => {
+                assert_eq!(outcome, "already_absent_after_clear_error");
+                assert_eq!(attempt, 1);
+                assert!(error.unwrap().contains("injected"));
+            }
+            other => panic!("a landed clear must read as consumed: {other:?}"),
+        }
+        assert!(
+            backoffs.is_empty(),
+            "no retry once the state shows it absent"
+        );
+        assert!(load_op_capture(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn consume_replayed_epoch_fails_while_the_epoch_is_still_projected() {
+        let (_dir, doc) = setup_doc();
+        let h = content_hash("b\n");
+        record_editor_op(&doc, &h, EditorOp::Delete { offset: 0, len: 1 }).unwrap();
+        let mut clears = 0;
+        let mut backoffs = Vec::new();
+        let outcome = consume_replayed_editor_op_epoch_with(
+            &doc,
+            |_| {
+                clears += 1;
+                anyhow::bail!("injected: clear never reached the actor")
+            },
+            |doc| matches!(load_op_capture(doc), Ok(None)),
+            |delay| backoffs.push(delay),
+        );
+        assert!(
+            matches!(
+                outcome,
+                ReplayedEpochConsumption::Failed { attempts, .. }
+                    if attempts == REPLAYED_EPOCH_CLEAR_ATTEMPTS
+            ),
+            "an epoch still projected must keep reporting failure: {outcome:?}"
+        );
+        assert_eq!(clears, REPLAYED_EPOCH_CLEAR_ATTEMPTS);
+        assert_eq!(
+            backoffs.len() as u32,
+            REPLAYED_EPOCH_CLEAR_ATTEMPTS - 1,
+            "backoff runs between attempts only"
+        );
+        assert!(load_op_capture(&doc).unwrap().is_some());
+    }
+
+    #[test]
+    fn consume_replayed_epoch_reports_an_acknowledged_clear() {
+        let (_dir, doc) = setup_doc();
+        let h = content_hash("b\n");
+        record_editor_op(&doc, &h, EditorOp::Delete { offset: 0, len: 1 }).unwrap();
+        let outcome = consume_replayed_editor_op_epoch(&doc);
+        assert!(
+            matches!(
+                outcome,
+                ReplayedEpochConsumption::Consumed {
+                    outcome: "cleared_after_successful_write",
+                    attempt: 1,
+                    error: None,
+                }
+            ),
+            "{outcome:?}"
+        );
+        assert!(load_op_capture(&doc).unwrap().is_none());
     }
 
     #[test]

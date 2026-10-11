@@ -788,24 +788,40 @@ fn run_with_options_at_root(
 /// Record a debounce lease for a file that was just renamed.
 /// Subsequent syncs within 5s will skip auto-start for this file.
 pub fn write_rename_debounce(file_path: &str) {
+    if let Err(err) =
+        write_rename_debounce_at(file_path, agent_doc_sqlite::state_store::timestamp_secs())
+    {
+        eprintln!("[sync] warning: rename debounce state not recorded for {file_path}: {err:#}");
+        sync_log(&format!(
+            "rename-debounce: record failed for {file_path} error={err:#}"
+        ));
+    }
+}
+
+/// Clock-injected core of [`write_rename_debounce`]: records the lease with
+/// `now_secs` as its heartbeat so tests can pin the debounce window instead of
+/// racing the wall clock. `Ok(false)` when the file has no state hash or no
+/// project root (nothing to debounce); a state.db failure is an error rather
+/// than a silently missing lease.
+fn write_rename_debounce_at(file_path: &str, now_secs: u64) -> anyhow::Result<bool> {
     let file = Path::new(file_path);
     let hash = agent_doc_fs::document_state_hash(file).unwrap_or_default();
     if hash.is_empty() {
-        return;
+        return Ok(false);
     }
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
-        return;
+        return Ok(false);
     };
-    let _ = agent_doc_controller_io::project_controller::upsert_coordination_lease(
+    agent_doc_controller_io::project_controller::upsert_coordination_lease(
         &project_root,
         &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
             scope_kind: "rename_debounce".to_string(),
             scope_id: hash.clone(),
             holder: file_path.to_string(),
             holder_pid: Some(std::process::id()),
-            heartbeat_secs: agent_doc_sqlite::state_store::timestamp_secs(),
+            heartbeat_secs: now_secs,
         },
-    );
+    )?;
     eprintln!(
         "[sync] rename debounce state recorded for {} ({})",
         file_path, hash
@@ -814,10 +830,17 @@ pub fn write_rename_debounce(file_path: &str) {
         "rename-debounce: recorded lease for {} hash={}",
         file_path, hash
     ));
+    Ok(true)
 }
 
 /// Check if a file has an active rename debounce lease (within TTL).
 fn has_rename_debounce(file_path: &Path) -> bool {
+    has_rename_debounce_at(file_path, agent_doc_sqlite::state_store::timestamp_secs())
+}
+
+/// Clock-injected core of [`has_rename_debounce`]: the lease is active while
+/// `now_secs - heartbeat_secs < RENAME_DEBOUNCE_TTL_SECS`.
+fn has_rename_debounce_at(file_path: &Path, now_secs: u64) -> bool {
     let hash = match agent_doc_fs::document_state_hash(file_path) {
         Ok(h) => h,
         Err(_) => return false,
@@ -834,9 +857,7 @@ fn has_rename_debounce(file_path: &Path) -> bool {
     .flatten() else {
         return false;
     };
-    let age = Duration::from_secs(
-        agent_doc_sqlite::state_store::timestamp_secs().saturating_sub(lease.heartbeat_secs),
-    );
+    let age = Duration::from_secs(now_secs.saturating_sub(lease.heartbeat_secs));
     let expired = rename_debounce_expired(age, Duration::from_secs(RENAME_DEBOUNCE_TTL_SECS));
     if expired {
         let _ = agent_doc_controller_io::project_controller::clear_coordination_lease(
@@ -9957,6 +9978,8 @@ mod tests {
         assert_eq!(entry.file, old_file);
         assert_eq!(entry.pane, "%42");
     }
+    /// Fixed virtual "now" for the rename-debounce tests (2026-01-01T00:00:00Z).
+    const RENAME_DEBOUNCE_TEST_EPOCH_SECS: u64 = 1_767_225_600;
     #[test]
     fn rename_debounce_suppresses_auto_start() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -9966,9 +9989,35 @@ mod tests {
         let file = tmp.path().join("test.md");
         std::fs::write(&file, "---\nagent_doc_session: abc123\n---\n").unwrap();
 
-        write_rename_debounce(&file.to_string_lossy());
-        assert!(has_rename_debounce(&file));
+        // Virtual clock: the window is pinned to the recorded heartbeat, so the
+        // assertion does not depend on how long the state.db write and read take
+        // on a loaded host.
+        let recorded_at = RENAME_DEBOUNCE_TEST_EPOCH_SECS;
+        assert!(write_rename_debounce_at(&file.to_string_lossy(), recorded_at).unwrap());
+        assert!(has_rename_debounce_at(&file, recorded_at));
+        assert!(has_rename_debounce_at(
+            &file,
+            recorded_at + RENAME_DEBOUNCE_TTL_SECS - 1
+        ));
         assert!(!tmp.path().join(".agent-doc/rename-debounce").exists());
+    }
+    #[test]
+    fn rename_debounce_expires_after_ttl() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "---\nagent_doc_session: expire123\n---\n").unwrap();
+
+        let recorded_at = RENAME_DEBOUNCE_TEST_EPOCH_SECS;
+        assert!(write_rename_debounce_at(&file.to_string_lossy(), recorded_at).unwrap());
+        assert!(has_rename_debounce_at(&file, recorded_at));
+        assert!(
+            !has_rename_debounce_at(&file, recorded_at + RENAME_DEBOUNCE_TTL_SECS),
+            "a lease aged exactly the TTL is expired"
+        );
+        // The expired check clears the lease: even a check back inside the
+        // original window no longer finds it.
+        assert!(!has_rename_debounce_at(&file, recorded_at));
     }
     #[test]
     fn rename_debounce_does_not_affect_other_files() {
@@ -9982,7 +10031,8 @@ mod tests {
 
         // Only record debounce state for file_a.
         let hash_a = agent_doc_fs::document_state_hash(&file_a).unwrap();
-        write_rename_debounce(&file_a.to_string_lossy());
+        let recorded_at = RENAME_DEBOUNCE_TEST_EPOCH_SECS;
+        assert!(write_rename_debounce_at(&file_a.to_string_lossy(), recorded_at).unwrap());
 
         // file_b should have a different hash, no marker
         let hash_b = agent_doc_fs::document_state_hash(&file_b).unwrap();
@@ -9990,8 +10040,8 @@ mod tests {
             hash_a, hash_b,
             "different files should have different hashes"
         );
-        assert!(has_rename_debounce(&file_a));
-        assert!(!has_rename_debounce(&file_b));
+        assert!(has_rename_debounce_at(&file_a, recorded_at));
+        assert!(!has_rename_debounce_at(&file_b, recorded_at));
         assert!(!tmp.path().join(".agent-doc/rename-debounce").exists());
     }
     #[test]

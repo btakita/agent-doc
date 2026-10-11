@@ -367,7 +367,7 @@ mod tests {
     use agent_doc_document_realtime::reconcile_current_doc;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Mutex, OnceLock};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     fn document(file: &Path, content: String) -> CurrentDocument {
         CurrentDocument::new(file, reconcile_current_doc(&content, None))
@@ -566,7 +566,6 @@ mod tests {
         let calls = Arc::new(AtomicU64::new(0));
 
         with_current_document_projection_pass(|| {
-            let started = Instant::now();
             for _ in 0..5 {
                 let projection = test_projection(
                     file,
@@ -581,9 +580,13 @@ mod tests {
                 );
                 assert!(projection.queue().unwrap().component("queue").is_some());
             }
-            assert_eq!(calls.load(Ordering::SeqCst), 1);
-            assert!(
-                started.elapsed() < Duration::from_millis(150),
+            // `#loadbudgettests`: the simulated authority delay lives only in
+            // the counted authority call, so one call proves the five readers
+            // reused it. A wall-clock bound added nothing but host-load
+            // sensitivity.
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
                 "five readers should reuse the one simulated authority delay"
             );
         });

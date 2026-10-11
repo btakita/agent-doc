@@ -2,6 +2,35 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **Tests no longer fail on a loaded host because they read the wall clock (`#loadbudgettests`).**
+  Under `make check` with several suites running (load average 70-140), four tests failed while doing the same work.
+  - The fast and medium simulator corpus budgets are perf-regression guards. They now measure the corpus thread's CPU
+    time, not wall clock. Under a load average of about 130, the fast corpus took 8.7s of wall clock but only 1.5s of
+    CPU time against its 3s budget.
+  - The rename-debounce lease takes an injected `now`, so its tests pin the 5s window instead of racing it. A lease
+    whose state.db write fails is now reported rather than silently dropped. A new `rename_debounce_expires_after_ttl`
+    test covers the boundary and the self-clean.
+  - `run_stream` (finalize / `write --stream`) now consumes a replayed editor-op epoch through the same state-based
+    helper as compact, `consume_replayed_editor_op_epoch`. It clears with the causal-fence budget and, after a clear
+    error, reads the state. An actor that applied the clear but replied late no longer logs `clear_failed` without
+    `consumed`. `finalize_editor_absent_replays_operator_deleted_struck_queue_rows` now asserts the epoch with a read
+    that can fail. The old `!has_pending_editor_ops` check passed even when the read errored, and here it always did:
+    the finalize's exited controller had left a socket that refused every read.
+  - The zero-budget replica-liveness wait asserts that it never sleeps, instead of finishing under 50ms. The
+    projection-reuse test relies on its single counted authority call, instead of finishing under 150ms.
+  - `serialized_atomic_write_defers_zero_replica_editor_owner_without_touching_disk` counts bounded editor-delivery
+    waits entered for its document and requires zero. A wait entry is the stall itself; it used to be timed against a
+    2.5s bound, which hit 4.3s under load on a path that entered no wait. `FAIL_FAST_BUDGET` is removed.
+  - `editor_receipt_pending_owned_cell_waits_past_the_ordinary_budget` lands its late delta after the waiter's
+    ordinary 200ms budget, measured from the waiter's own start. The pending budget is only a hang ceiling, so a
+    starved writer (5.7s under load) cannot become a refusal. Applying the ordinary budget to a pending cell still
+    refuses at 200ms.
+  - The ipc-io `await_endpoint` helper waits for liveness with a hang ceiling, not a 5s budget.
+    `a_bound_but_unaccepting_listener_is_evicted_not_protected` first spends up to the 3s connect timeout probing the
+    wedged socket before it rebinds, and failed the 5s budget in a full `make check` at load average ~100.
+
 ## 0.35.489
 
 - **A controller memory refresh no longer stalls editor-op appends behind a full ledger reload (`#refreshmemlockstall`).**

@@ -200,6 +200,14 @@ The subagent will identify which evidence refused the clear: a turn lease left b
 **Next batch:** `capturegatedispatched` is ready (`436cb0652`), and the sdk.md Clear Session Context wedge is still with `subagent:sdkclearwedge`.
 
 **Your action:** restart IntelliJ so it loads the 0.35.487 plugin projection. Delete the shorter duplicate line in sdk.md if you haven't already.
+
+### Re: two follow-ups dispatched — opus-5.5 · 2026-10-11T00:55-04:00
+
+Both new heads are claimed and dispatched with their authorization preambles. Their worktrees branch from v0.35.487 (`e6d36e647`).
+- `visiblewritewallclock`, on `fix/visiblewritewallclock`: make `test_poll_lazily_event_appears_after_delay` wait on the writer's receipt event instead of a 5s deadline, with before/after counts at K=96 on a pinned core.
+- `editoropscheckpointfail`, on `fix/editoropscheckpointfail`: reproduce the editor-op checkpoint append failure with a deterministic rapid-append test instead of waiting for a live recurrence, fix the root cause so no op is dropped, or report the exact log signature to watch for if it can't be determined offline.
+
+Still in flight for the next batch: `capturegatedispatched` (done, `436cb0652`) and the sdk.md Clear Session Context wedge (`subagent:sdkclearwedge`, running `check-fast`). The v0.35.487 GitHub Release workflow was still running at last check.
 <!-- agent:boundary:743193a6 -->
 <!-- /agent:exchange -->
 
@@ -208,11 +216,11 @@ The subagent will identify which evidence refused the clear: a turn lease left b
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~⏭️ do [#hookstalemsgfile]~~
-- ~~⏭️ do [#relayhubtestisolation]~~
+- ~~do [#hookstalemsgfile]~~
+- ~~do [#relayhubtestisolation]~~
 - ~~do [#removeobsoleteicebox]~~
-- ~~⏭️ do [#respondfinalizehard]~~
-- ~~⏭️ do [#pypireleaseworkflow]~~
+- ~~do [#respondfinalizehard]~~
+- ~~do [#pypireleaseworkflow]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/235~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/236~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
@@ -223,7 +231,7 @@ Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-
 - ~~do [#idefocusowner]~~
 - ~~#actionable-review~~
 - 🚧 do [#capturegatedispatched]
-- Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.
+- 🚧 Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.
 - do [#visiblewritewallclock]
 - do [#editoropscheckpointfail]
 <!-- /agent:queue -->

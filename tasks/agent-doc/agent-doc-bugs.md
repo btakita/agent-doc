@@ -183,7 +183,7 @@ It will quote each notice verbatim with screenshots, fix any defect it finds on 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#clearnoticeverify]: Test yourself
+- ~~do [#clearnoticeverify]: Test yourself~~
 - 🚧 frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
 - 🚧 release + publish
 - 🚧 do [#closeoutleaseresume]

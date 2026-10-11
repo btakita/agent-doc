@@ -176,7 +176,7 @@ Fixed in the same `clearlive` change, and installed. The background-agent row no
 - 🚧 do [#closeoutleaseresume]
 - 🚧 do [#flakyintegrate0494]
 - 🚧 do [#clearsupersedenotice]
-- I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted. ![img_5.png](img_5.png)
+- 🚧 I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted. ![img_5.png](img_5.png)
 <!-- /agent:queue -->
 
 ## Backlog

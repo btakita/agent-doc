@@ -891,8 +891,9 @@ pub unsafe extern "C" fn agent_doc_stop_ipc_listener(project_root: *const c_char
 
 /// Quiesce every writable/background resource owned by this native generation.
 ///
-/// Returns `1` only after all IPC accept/connection threads have joined and all
-/// cdylib-hosted CRDT replicas have been dropped. A timeout returns `0`; the
+/// Returns `1` only after all IPC accept/connection threads and IPC connect
+/// watchdog threads have joined and all cdylib-hosted CRDT replicas have been
+/// dropped. A timeout returns `0`; the
 /// caller must keep this generation loaded and may call
 /// [`agent_doc_resume_after_reload_failure`] before restarting its listeners.
 #[unsafe(no_mangle)]
@@ -936,6 +937,19 @@ pub extern "C" fn agent_doc_quiesce_for_reload(timeout_ms: i64) -> i32 {
     }
     for (_, generation) in generations.drain(..) {
         let _ = generation.thread.join();
+    }
+    // `#nativereloadhandoff`: every `wake_listener` above ran its connect on a
+    // watchdog thread. Those are joined inline, but one abandoned on a connect
+    // timeout may still be running this generation's code; it must exit before
+    // the host may `dlclose` us.
+    if !agent_doc_ipc_io::join_abandoned_connect_threads(deadline) {
+        eprintln!(
+            "[ffi] native generation quiesce timed out: {} IPC connect watchdog(s) still running",
+            agent_doc_ipc_io::abandoned_connect_thread_count()
+        );
+        NATIVE_GENERATION_QUIESCING.store(false, Ordering::SeqCst);
+        agent_doc_editor_surface_io::resume_after_reload_failure();
+        return 0;
     }
     agent_doc_ffi::close_all_replicas_for_reload();
     1

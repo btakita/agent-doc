@@ -19,6 +19,18 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   checker armed. Three inversions fail the new test: the pre-fix form, a
   frontier peek under the lock after waking, and `publish` holding the channel
   lock across its history write. No runtime behavior changes in release builds.
+- **A retired native generation is no longer left mapped by an IPC connect watchdog that outlived the quiesce
+  (`#nativereloadhandoff`).** `native_generations_handoff_without_sqlite_or_deleted_library_state` failed once
+  under load with `worker exit must run Rust TLS destructors so dlclose unmaps generation one` and passed alone.
+  The race was in the product, not the test: every IPC connect (including the `wake_listener` calls
+  `agent_doc_quiesce_for_reload` makes to unblock its listeners) ran on a detached watchdog thread, and the
+  caller continued as soon as the thread *sent* its result. The thread still had to return and run its Rust TLS
+  destructors; while it did, glibc counted those destructors against the cdylib, so a `dlclose` that arrived in
+  that window silently kept the generation mapped (a thread with no TLS destructors would instead have kept
+  executing unmapped code). Holding the watchdog 200 ms after its send failed the test every time. The
+  watchdog is now joined as soon as its result arrives, so a connect returns only after the thread has exited;
+  one abandoned on a connect timeout is parked in a per-generation registry, and quiesce returns `0` (the
+  generation stays loaded) until those watchdogs have exited too.
 
 - **A head waiting on the operator (`⏳`) is no longer reported as a fresh operator prompt every preflight
   (`#regressionawaitingoperat`).** On a `subagents` queue whose first head `do [#id]` tracked an

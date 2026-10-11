@@ -560,21 +560,57 @@ fn probe_endpoint_within(path: &Path, probe_timeout: Duration) -> EndpointProbe 
     }
 }
 
+/// Connect watchdog threads whose caller timed out while the blocking connect
+/// was still running (`#nativereloadhandoff`).
+///
+/// Inside an embedded editor host this crate is statically linked into one
+/// reloadable cdylib generation, so this registry is per generation. A
+/// watchdog left running past the generation's quiesce would still be
+/// executing — and holding Rust TLS destructors registered against — code the
+/// host is about to `dlclose`. [`join_abandoned_connect_threads`] is the fence
+/// that waits for them.
+static ABANDONED_CONNECT_THREADS: Mutex<Vec<std::thread::JoinHandle<()>>> = Mutex::new(Vec::new());
+
 fn run_connect_with_timeout<T, F>(path: &Path, connect_timeout: Duration, connect: F) -> Result<T>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T> + Send + 'static,
 {
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let result = connect();
-        // Receiver may already have timed out and dropped rx; that is fine, the
-        // orphaned connect result is simply discarded.
-        let _ = tx.send(result);
-    });
+    // `#nativereloadhandoff`: this watchdog used to be detached. Receiving its
+    // result proves only that `send` ran; the thread still has to return and run
+    // its TLS destructors. A native generation quiesced right after a
+    // `wake_listener` therefore raced that exit: while the thread lived, glibc
+    // counted its TLS destructors against this cdylib and `dlclose` silently
+    // refused to unmap the generation (under load the retired generation stayed
+    // mapped; without TLS destructors the thread would instead run unmapped
+    // code). The handle is joined on every path that has a result, and parked
+    // for the quiesce fence when the connect itself is still blocked.
+    let watchdog = match std::thread::Builder::new()
+        .name("agent-doc-ipc-connect".to_string())
+        .spawn(move || {
+            let result = connect();
+            // Receiver may already have timed out and dropped rx; that is fine,
+            // the orphaned connect result is simply discarded.
+            let _ = tx.send(result);
+        }) {
+        Ok(watchdog) => watchdog,
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "spawn IPC connect watchdog for {}: {error}",
+                path.display()
+            ));
+        }
+    };
     match rx.recv_timeout(connect_timeout) {
-        Ok(result) => result,
+        Ok(result) => {
+            // The thread has already sent; it only has to return. Joining is
+            // the exit event: `pthread_join` returns after its TLS destructors.
+            let _ = watchdog.join();
+            result
+        }
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            park_abandoned_connect_thread(watchdog);
             Err(anyhow::Error::new(ConnectTimedOut(format!(
                 "IPC connect timeout ({}ms) for {}",
                 connect_timeout.as_millis(),
@@ -582,9 +618,57 @@ where
             ))))
         }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = watchdog.join();
             Err(anyhow::anyhow!("IPC connect thread disconnected"))
         }
     }
+}
+
+fn park_abandoned_connect_thread(watchdog: std::thread::JoinHandle<()>) {
+    let mut abandoned = ABANDONED_CONNECT_THREADS.lock();
+    // Reap watchdogs whose connect has since returned so the registry stays
+    // bounded by the number of connects that are still blocked.
+    let (finished, running): (Vec<_>, Vec<_>) = abandoned
+        .drain(..)
+        .partition(std::thread::JoinHandle::is_finished);
+    *abandoned = running;
+    abandoned.push(watchdog);
+    drop(abandoned);
+    for handle in finished {
+        let _ = handle.join();
+    }
+}
+
+/// Join every connect watchdog this generation abandoned on a connect timeout,
+/// waiting until `deadline` for ones whose connect is still blocked.
+///
+/// Returns `true` only when no watchdog thread of this generation remains, so a
+/// native-reload quiesce can refuse to report the generation unloadable while
+/// one could still execute its code (`#nativereloadhandoff`). Watchdogs still
+/// running at the deadline stay registered for a later call.
+pub fn join_abandoned_connect_threads(deadline: std::time::Instant) -> bool {
+    loop {
+        let handles = std::mem::take(&mut *ABANDONED_CONNECT_THREADS.lock());
+        let (finished, running): (Vec<_>, Vec<_>) = handles
+            .into_iter()
+            .partition(std::thread::JoinHandle::is_finished);
+        for handle in finished {
+            let _ = handle.join();
+        }
+        if running.is_empty() {
+            return true;
+        }
+        ABANDONED_CONNECT_THREADS.lock().extend(running);
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Number of abandoned connect watchdogs this generation still owns.
+pub fn abandoned_connect_thread_count() -> usize {
+    ABANDONED_CONNECT_THREADS.lock().len()
 }
 
 /// Send a JSON message to the plugin via socket IPC.
@@ -2542,6 +2626,93 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "watchdog waited for the wedged connect worker to finish"
+        );
+    }
+
+    /// Sets its flag from a Rust TLS destructor, after a deliberate delay, so a
+    /// caller that merely received the connect result cannot observe the flag
+    /// unless it waited for the watchdog thread's exit (`#nativereloadhandoff`).
+    struct SlowTlsExitMarker(Option<Arc<AtomicBool>>);
+
+    impl Drop for SlowTlsExitMarker {
+        fn drop(&mut self) {
+            if let Some(exited) = self.0.take() {
+                thread::sleep(Duration::from_millis(200));
+                exited.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+
+    thread_local! {
+        static WATCHDOG_EXIT_MARKER: std::cell::RefCell<SlowTlsExitMarker> =
+            const { std::cell::RefCell::new(SlowTlsExitMarker(None)) };
+    }
+
+    fn arm_watchdog_exit_marker(exited: &Arc<AtomicBool>) {
+        let exited = Arc::clone(exited);
+        WATCHDOG_EXIT_MARKER.with(|marker| marker.borrow_mut().0 = Some(exited));
+    }
+
+    /// `#nativereloadhandoff`: a native generation is quiesced right after
+    /// `wake_listener` connects through this watchdog. Its TLS destructors must
+    /// have run by the time the connect returns, or `dlclose` keeps the retired
+    /// generation mapped (and a thread without TLS destructors would execute
+    /// unmapped code).
+    #[test]
+    fn connect_watchdog_has_exited_and_run_tls_destructors_when_connect_returns() {
+        let exited = Arc::new(AtomicBool::new(false));
+        let thread_exited = Arc::clone(&exited);
+        let value = run_connect_with_timeout(
+            Path::new("/nonexistent/exit-fence.sock"),
+            Duration::from_secs(30),
+            move || {
+                arm_watchdog_exit_marker(&thread_exited);
+                Ok(7_u8)
+            },
+        )
+        .expect("connect closure succeeds");
+        assert_eq!(value, 7);
+        assert!(
+            exited.load(Ordering::SeqCst),
+            "the connect watchdog must be joined (TLS destructors run) before its result is returned"
+        );
+    }
+
+    /// `#nativereloadhandoff`: a watchdog abandoned on a connect timeout is
+    /// still executing this generation's code; the quiesce fence must report it
+    /// until it exits, then join it.
+    #[test]
+    fn abandoned_connect_watchdog_holds_the_quiesce_fence_until_it_exits() {
+        let exited = Arc::new(AtomicBool::new(false));
+        let thread_exited = Arc::clone(&exited);
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let err = run_connect_with_timeout(
+            Path::new("/nonexistent/abandoned.sock"),
+            Duration::from_millis(20),
+            move || -> Result<()> {
+                arm_watchdog_exit_marker(&thread_exited);
+                let _ = released.recv();
+                Ok(())
+            },
+        )
+        .expect_err("a blocked connect times out");
+        assert!(
+            err.to_string().contains("IPC connect timeout (20ms)"),
+            "{err:#}"
+        );
+        assert!(
+            !join_abandoned_connect_threads(Instant::now()),
+            "a watchdog still blocked in connect must hold the quiesce fence"
+        );
+        assert!(abandoned_connect_thread_count() >= 1);
+        drop(release);
+        assert!(
+            join_abandoned_connect_threads(Instant::now() + Duration::from_secs(30)),
+            "the fence must join the watchdog once its connect returns"
+        );
+        assert!(
+            exited.load(Ordering::SeqCst),
+            "the fence must report clear only after the watchdog ran its TLS destructors"
         );
     }
 

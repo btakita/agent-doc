@@ -4,26 +4,35 @@ name: PyPI
 # copies of the native executable and FFI library. The launcher downloads the
 # matching checksummed archive from this version's GitHub Release on first run.
 # The wheel is small enough to publish on every tag without consuming the
-# project's storage quota, and publish waits for SHA256SUMS so a newly visible
+# project's storage quota, and publish requires SHA256SUMS so a newly visible
 # wheel never points at release assets that are still being assembled.
 #
-# `release: published` is kept for releases published by hand. Tag pushes stayed
-# the trigger of record because GitHub deliberately does not raise
-# workflow-triggering events for token-authored actions, so `release: published`
-# silently stopped firing once release creation moved into CI and 0.35.97
-# through 0.35.118 never reached PyPI. `skip-existing` makes the overlap
-# harmless.
+# `#pypireleaseworkflow`: this workflow is STARTED BY the Release workflow, never
+# raced against it. It used to run on its own `v*` tag push and poll at most 30
+# minutes for the Release's SHA256SUMS; v0.35.485's cross-platform builds took
+# about 33 minutes, so publish failed at 21:45:30Z and the Release went up at
+# 21:47:24Z (run 38086853278). Now `release.yml`'s `pypi` job, which `needs` the
+# job that uploads every asset including SHA256SUMS, dispatches this workflow on
+# the tag (`gh workflow run pypi.yml --ref <tag>`). Its GITHUB_TOKEN-authored
+# `workflow_dispatch` is the one event GitHub still raises for token-authored
+# actions; `release: published` is NOT raised for the token-created release,
+# which is why 0.35.97 through 0.35.118 never reached PyPI. The readiness check
+# below is therefore a single fail-closed check, never a wall-clock poll: when
+# it runs, the assets already exist, or something is genuinely wrong.
+#
+# Triggers:
+#   - `workflow_dispatch` on a `v*` tag ref: the trigger of record (dispatched
+#     by release.yml) and the manual re-publish path,
+#     `gh workflow run pypi.yml --ref v<version>`.
+#   - `release: published`: hand-published releases only (token-created
+#     releases never raise it). `skip-existing` absorbs any overlap.
 #
 # GH #225: `release: published` has no tag filter of its own, so publishing an
 # editor-only prerelease such as `jetbrains-262-preview-c39de1b` started this
-# workflow, and its publish job failed after 30 minutes waiting for a
-# `SHA256SUMS` that non-`v*` releases never carry. Every job that a release
-# event can reach is gated on `RELEASE_TAG_GATE` below: a `release` event runs
-# only for a `v*` tag name, while `v*` tag pushes and `workflow_dispatch` run
-# exactly as before.
+# workflow and its publish job failed waiting for a `SHA256SUMS` that non-`v*`
+# releases never carry. Every job that a release event can reach is gated on
+# `RELEASE_TAG_GATE` below: a `release` event runs only for a `v*` tag name.
 on:
-  push:
-    tags: ["v*"]
   release:
     types: [published]
   workflow_dispatch:
@@ -86,22 +95,63 @@ jobs:
     environment: pypi
 
     steps:
-      - name: Wait for the matching GitHub Release checksums
+      # `#pypireleaseworkflow`: one check, no poll. Refuse a non-tag ref, a
+      # release with no SHA256SUMS, a manifest that does not name exactly the
+      # six platform archives, an archive the manifest names but the release
+      # does not carry, and (where GitHub reports one) an asset digest that
+      # disagrees with the manifest.
+      - name: Verify the matching GitHub Release checksums
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF#refs/tags/}"
-          for attempt in $(seq 1 90); do
-            if gh release download "$tag" --pattern SHA256SUMS --dir /tmp/agent-doc-release-ready >/dev/null 2>&1; then
-              echo "GitHub Release $tag is ready"
-              exit 0
-            fi
-            sleep 20
-          done
-          echo "::error::GitHub Release $tag did not publish SHA256SUMS within 30 minutes"
-          exit 1
+          case "$GITHUB_REF" in
+            refs/tags/v*) tag="${GITHUB_REF#refs/tags/}" ;;
+            *)
+              echo "::error::PyPI publishes only from a v* tag ref; got $GITHUB_REF (dispatch with --ref v<version>)"
+              exit 1
+              ;;
+          esac
+          mkdir -p /tmp/agent-doc-release-ready
+          if ! gh release download "$tag" --pattern SHA256SUMS --dir /tmp/agent-doc-release-ready; then
+            echo "::error::GitHub Release $tag has no SHA256SUMS. This workflow runs after release.yml uploads every asset, so the Release is missing or incomplete: rerun the Release workflow's release job, then dispatch PyPI again."
+            exit 1
+          fi
+          gh api "repos/$GH_REPO/releases/tags/$tag" \
+            --jq '.assets[] | [.name, (.digest // "")] | @tsv' > /tmp/agent-doc-release-ready/assets.tsv
+          python3 - "$tag" <<'PY'
+          import sys
+
+          tag = sys.argv[1]
+          expected_count = 6
+          manifest = {}
+          for line in open("/tmp/agent-doc-release-ready/SHA256SUMS", encoding="ascii"):
+              line = line.strip()
+              if not line:
+                  continue
+              digest, name = line.split(maxsplit=1)
+              manifest[name.lstrip("*")] = digest.lower()
+          assets = {}
+          for line in open("/tmp/agent-doc-release-ready/assets.tsv", encoding="utf-8"):
+              name, _, digest = line.rstrip("\n").partition("\t")
+              assets[name] = digest
+          errors = []
+          if len(manifest) != expected_count:
+              errors.append(f"SHA256SUMS names {len(manifest)} archives, expected {expected_count}: {sorted(manifest)}")
+          for name, digest in sorted(manifest.items()):
+              if not name.startswith("agent-doc-"):
+                  errors.append(f"SHA256SUMS names a non-platform asset {name}")
+              if name not in assets:
+                  errors.append(f"SHA256SUMS names {name}, which release {tag} does not carry")
+              elif assets[name] and assets[name] != f"sha256:{digest}":
+                  errors.append(f"{name}: release digest {assets[name]} disagrees with SHA256SUMS {digest}")
+          if errors:
+              for error in errors:
+                  print(f"::error::{error}")
+              sys.exit(1)
+          print(f"GitHub Release {tag} is ready: {len(manifest)} archives match SHA256SUMS")
+          PY
 
       - uses: actions/download-artifact@v4
         with:

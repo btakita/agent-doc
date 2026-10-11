@@ -347,6 +347,41 @@ jobs:
               artifacts/* editor-packages/*
           fi
 
+  # `#pypireleaseworkflow`: start the PyPI publish only once this run's
+  # `release` job has uploaded every asset, SHA256SUMS included. PyPI used to
+  # run on its own tag push and poll a fixed 30 minutes for SHA256SUMS, which
+  # lost the race whenever these builds ran longer (v0.35.485: ~33 minutes, run
+  # 38086853278). The dispatch has to be explicit: GitHub raises no
+  # `release: published` for a release created with GITHUB_TOKEN, but it does
+  # raise `workflow_dispatch`. Dispatching (rather than `uses:`-calling
+  # pypi.yml) keeps pypi.yml the top-level workflow, which is what PyPI's
+  # trusted publisher is registered against. `--ref` is the tag, so the
+  # dispatched run builds the tagged commit and its `verify` job runs.
+  pypi:
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Confirm the release carries SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release download "$GITHUB_REF_NAME" --pattern SHA256SUMS --dir /tmp/agent-doc-release-sums
+          cat /tmp/agent-doc-release-sums/SHA256SUMS
+
+      - name: Dispatch the PyPI publish for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run pypi.yml --ref "$GITHUB_REF_NAME"
+          echo "Dispatched PyPI for $GITHUB_REF_NAME; follow it with: gh run list --workflow PyPI --limit 1"
+
   # GH #31: bump `btakita/homebrew-tap` to this tag's archives. Runs after the
   # release exists because the formula is rendered from the published
   # `SHA256SUMS`, including both Darwin archives built above.

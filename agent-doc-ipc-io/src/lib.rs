@@ -513,8 +513,12 @@ enum EndpointProbe {
 }
 
 fn probe_endpoint(path: &Path) -> EndpointProbe {
+    probe_endpoint_within(path, Duration::from_secs(IPC_CONNECT_TIMEOUT_SECS))
+}
+
+/// [`probe_endpoint`] with an explicit per-step deadline (connect, send, reply).
+fn probe_endpoint_within(path: &Path, probe_timeout: Duration) -> EndpointProbe {
     let path_for_thread = path.to_path_buf();
-    let probe_timeout = Duration::from_secs(IPC_CONNECT_TIMEOUT_SECS);
     let Ok(stream) = run_connect_with_timeout(path, probe_timeout, move || {
         let name = path_for_thread.to_fs_name::<GenericFilePath>()?;
         interprocess::local_socket::ConnectOptions::new()
@@ -1480,6 +1484,7 @@ where
         Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
         None,
         local_ipc_identity(),
+        None,
     )
 }
 
@@ -1506,6 +1511,38 @@ where
         Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
         Some(shutdown),
         local_ipc_identity(),
+        None,
+    )
+}
+
+/// [`start_listener_with_logger_until`], announcing on `ready` once the
+/// listener serves its endpoint (`#replace120shang`).
+///
+/// The announcement is sent after any stale or superseded endpoint has been
+/// evicted, the socket is bound under this process's name, and accept is
+/// armed — the accept loop runs next, so a client connecting from that moment
+/// is served. The sent path is the socket actually bound. A start that fails
+/// (including the refusal to evict a live same-build peer) returns without
+/// announcing and drops `ready`, so an owner blocked on it observes a
+/// disconnect at once instead of polling the socket until a deadline.
+pub fn start_listener_with_logger_until_ready<F>(
+    project_root: &Path,
+    handler: F,
+    ops_logger: OpsLogger,
+    shutdown: Arc<AtomicBool>,
+    ready: std::sync::mpsc::Sender<PathBuf>,
+) -> Result<()>
+where
+    F: Fn(&str) -> Option<String> + Send + Sync + 'static,
+{
+    start_listener_with_logger_and_read_timeout(
+        project_root,
+        handler,
+        ops_logger,
+        Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
+        Some(shutdown),
+        local_ipc_identity(),
+        Some(ready),
     )
 }
 
@@ -1522,6 +1559,7 @@ fn start_listener_with_logger_and_read_timeout<F>(
     listener_read_timeout: Duration,
     shutdown: Option<Arc<AtomicBool>>,
     listener_identity: IpcPeerIdentity,
+    ready: Option<std::sync::mpsc::Sender<PathBuf>>,
 ) -> Result<()>
 where
     F: Fn(&str) -> Option<String> + Send + Sync + 'static,
@@ -1657,6 +1695,15 @@ where
     listener
         .set_nonblocking(ListenerNonblockingMode::Accept)
         .context("set editor IPC listener accept to non-blocking")?;
+
+    // `#replace120shang`: the readiness edge. Eviction is done, the name is
+    // bound by this listener, and accept is armed with the loop below next, so
+    // a client connecting from here on lands in a backlog this loop drains.
+    // Announcing any earlier would let an owner connect to the evicted peer or
+    // to no socket at all.
+    if let Some(ready) = ready {
+        let _ = ready.send(sock_path.clone());
+    }
 
     // Handle each connection on its own thread so a slow/blocking apply handler
     // can never stall the accept loop and pile up connections in the socket
@@ -2129,22 +2176,75 @@ mod tests {
         assert_eq!(classify_connect_failure(&err), ConnectFailure::Inconclusive);
     }
 
-    /// Wait until `path` accepts a connection, or give up.
-    /// Wait until a listener serves `path`. `#loadbudgettests`: callers assert
-    /// that a listener eventually serves (liveness), not how fast, so the bound
-    /// is only a hang ceiling below nextest's 180s per-test guard. A 5s budget
-    /// failed `a_bound_but_unaccepting_listener_is_evicted_not_protected` at
-    /// load average ~100: its listener first spends up to the 3s connect
-    /// timeout probing the wedged socket before it evicts and rebinds.
-    fn await_endpoint(path: &Path) -> bool {
-        let deadline = Instant::now() + Duration::from_secs(120);
-        while Instant::now() < deadline {
-            if endpoint_answers(path) {
-                return true;
+    /// Hang ceiling for a listener's readiness announcement. `#replace120shang`:
+    /// tests wait on the listener's own readiness edge, not a connect poll, so
+    /// this bound never decides a passing run; it only turns a lost
+    /// announcement into a failure below nextest's 180s per-test guard. A start
+    /// that fails drops its sender and fails the wait at once.
+    const LISTENER_READY_HANG_CEILING: Duration = Duration::from_secs(120);
+
+    /// Per-step ceiling for the round trip that confirms an announced listener
+    /// serves. Generous for the same reason: under load the hello reply can
+    /// take longer than the production 3s probe, and a too-early announcement
+    /// fails this probe outright (no socket, or the wedged peer's silence).
+    const ANNOUNCED_LISTENER_PROBE_CEILING: Duration = Duration::from_secs(30);
+
+    /// Wait for a listener started with [`start_listener_with_logger_until_ready`]
+    /// (or the internal start with `Some(ready)`) to announce that it serves
+    /// `path`, then require one hello round trip to prove the announcement
+    /// was not early: an announced listener that does not answer is exactly
+    /// the bound-but-unaccepting endpoint `#ipcdupelistener` evicts.
+    fn await_listener_ready(
+        ready: &std::sync::mpsc::Receiver<PathBuf>,
+        path: &Path,
+    ) -> std::result::Result<(), String> {
+        use std::sync::mpsc::RecvTimeoutError;
+        match ready.recv_timeout(LISTENER_READY_HANG_CEILING) {
+            Ok(bound) if bound == path => {}
+            Ok(bound) => {
+                return Err(format!(
+                    "the listener announced {} instead of {}",
+                    bound.display(),
+                    path.display()
+                ));
             }
-            thread::sleep(Duration::from_millis(20));
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err("the listener exited without announcing readiness".to_string());
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                return Err(format!(
+                    "no readiness announcement within the {LISTENER_READY_HANG_CEILING:?} hang ceiling"
+                ));
+            }
         }
-        false
+        match probe_endpoint_within(path, ANNOUNCED_LISTENER_PROBE_CEILING) {
+            EndpointProbe::Unresponsive => Err(format!(
+                "the listener announced readiness but {} did not answer a hello",
+                path.display()
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// Spawn a [`start_listener_with_logger_until_ready`] listener for `root`
+    /// and return its join handle with the readiness receiver.
+    fn spawn_announcing_listener(
+        root: &Path,
+        shutdown: &Arc<AtomicBool>,
+    ) -> (thread::JoinHandle<()>, std::sync::mpsc::Receiver<PathBuf>) {
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let listener_root = root.to_path_buf();
+        let listener_shutdown = Arc::clone(shutdown);
+        let listener = thread::spawn(move || {
+            let _ = start_listener_with_logger_until_ready(
+                &listener_root,
+                |_| None,
+                noop_ops_logger,
+                listener_shutdown,
+                ready_tx,
+            );
+        });
+        (listener, ready_rx)
     }
 
     /// `#ipcdupelistener`: a second native generation must not steal the socket
@@ -2165,33 +2265,32 @@ mod tests {
         let sock_path = socket_path(&root);
 
         let shutdown = Arc::new(AtomicBool::new(false));
-        let listener_root = root.clone();
-        let listener_shutdown = Arc::clone(&shutdown);
-        let listener = thread::spawn(move || {
-            let _ = start_listener_with_logger_until(
-                &listener_root,
-                |_| None,
-                noop_ops_logger,
-                listener_shutdown,
-            );
+        let (listener, ready) = spawn_announcing_listener(&root, &shutdown);
+        await_listener_ready(&ready, &sock_path).unwrap_or_else(|why| {
+            panic!(
+                "the first generation's listener never came up at {}: {why}",
+                sock_path.display()
+            )
         });
-        assert!(
-            await_endpoint(&sock_path),
-            "the first generation's listener never came up at {}",
-            sock_path.display()
-        );
 
         // The second start runs off-thread with a bounded wait. A regressed
         // guard does not return an error — it binds the stolen name and blocks
         // in `accept` forever — so waiting on the thread is what turns that
         // regression into a clean failure instead of a hung suite.
         let (tx, rx) = std::sync::mpsc::channel();
+        let (second_ready_tx, second_ready) = std::sync::mpsc::channel();
         let second_root = root.clone();
         thread::spawn(move || {
             let _ = tx.send(
-                start_listener(&second_root, |_| None)
-                    .err()
-                    .map(|e| format!("{e:#}")),
+                start_listener_with_logger_until_ready(
+                    &second_root,
+                    |_| None,
+                    noop_ops_logger,
+                    Arc::new(AtomicBool::new(false)),
+                    second_ready_tx,
+                )
+                .err()
+                .map(|e| format!("{e:#}")),
             );
         });
         let outcome = rx
@@ -2211,6 +2310,13 @@ mod tests {
             "the refusal must name the contested endpoint: {message}"
         );
 
+        // `#replace120shang`: a refused start must never announce readiness,
+        // and must drop its sender so an owner waiting on it fails at once.
+        assert_eq!(
+            second_ready.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected),
+            "a refused start must drop its readiness sender unsent"
+        );
         assert!(
             endpoint_answers(&sock_path),
             "the refused start must leave the first listener serving its endpoint"
@@ -2235,6 +2341,7 @@ mod tests {
         let old_shutdown = Arc::new(AtomicBool::new(false));
         let old_root = root.clone();
         let old_token = Arc::clone(&old_shutdown);
+        let (old_ready_tx, old_ready) = std::sync::mpsc::channel();
         let old = thread::spawn(move || {
             let _ = start_listener_with_logger_and_read_timeout(
                 &old_root,
@@ -2243,9 +2350,11 @@ mod tests {
                 Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
                 Some(old_token),
                 IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.0.0+superseded-generation"),
+                Some(old_ready_tx),
             );
         });
-        assert!(await_endpoint(&sock_path), "the superseded listener never came up");
+        await_listener_ready(&old_ready, &sock_path)
+            .unwrap_or_else(|why| panic!("the superseded listener never came up: {why}"));
         assert_eq!(
             probe_endpoint(&sock_path),
             EndpointProbe::OtherBuild("0.0.0+superseded-generation".to_string()),
@@ -2301,17 +2410,9 @@ mod tests {
         let sock_path = socket_path(&root);
 
         let shutdown = Arc::new(AtomicBool::new(false));
-        let listener_root = root.clone();
-        let listener_shutdown = Arc::clone(&shutdown);
-        let listener = thread::spawn(move || {
-            let _ = start_listener_with_logger_until(
-                &listener_root,
-                |_| None,
-                noop_ops_logger,
-                listener_shutdown,
-            );
-        });
-        assert!(await_endpoint(&sock_path), "listener never came up");
+        let (listener, ready) = spawn_announcing_listener(&root, &shutdown);
+        await_listener_ready(&ready, &sock_path)
+            .unwrap_or_else(|why| panic!("listener never came up: {why}"));
 
         // Take the name away, exactly as an eviction does. From here nothing can
         // connect to the original listener, so no wake can ever reach it.
@@ -2363,21 +2464,11 @@ mod tests {
         );
 
         let shutdown = Arc::new(AtomicBool::new(false));
-        let listener_root = root.clone();
-        let listener_shutdown = Arc::clone(&shutdown);
-        let listener = thread::spawn(move || {
-            let _ = start_listener_with_logger_until(
-                &listener_root,
-                |_| None,
-                noop_ops_logger,
-                listener_shutdown,
-            );
-        });
+        let (listener, ready) = spawn_announcing_listener(&root, &shutdown);
 
-        assert!(
-            await_endpoint(&sock_path),
-            "the wedged listener must be replaced by one that actually serves"
-        );
+        await_listener_ready(&ready, &sock_path).unwrap_or_else(|why| {
+            panic!("the wedged listener must be replaced by one that actually serves: {why}")
+        });
 
         shutdown.store(true, Ordering::SeqCst);
         let _ = wake_listener(&root);
@@ -2404,21 +2495,11 @@ mod tests {
         );
 
         let shutdown = Arc::new(AtomicBool::new(false));
-        let listener_root = root.clone();
-        let listener_shutdown = Arc::clone(&shutdown);
-        let listener = thread::spawn(move || {
-            let _ = start_listener_with_logger_until(
-                &listener_root,
-                |_| None,
-                noop_ops_logger,
-                listener_shutdown,
-            );
-        });
+        let (listener, ready) = spawn_announcing_listener(&root, &shutdown);
 
-        assert!(
-            await_endpoint(&sock_path),
-            "the unresponsive socket must be replaced by a working listener"
-        );
+        await_listener_ready(&ready, &sock_path).unwrap_or_else(|why| {
+            panic!("the unresponsive socket must be replaced by a working listener: {why}")
+        });
 
         shutdown.store(true, Ordering::SeqCst);
         let _ = wake_listener(&root);
@@ -2475,6 +2556,7 @@ mod tests {
                 Duration::from_millis(100),
                 None,
                 local_ipc_identity(),
+                None,
             )
             .ok()
         });
@@ -2529,6 +2611,7 @@ mod tests {
                 Duration::from_secs(1),
                 Some(shutdown_clone),
                 listener_identity,
+                None,
             )
         });
         wait_for_test_listener(&root);
@@ -2594,6 +2677,7 @@ mod tests {
                 Duration::from_secs(2),
                 Some(shutdown_clone),
                 listener_identity,
+                None,
             )
         });
         wait_for_test_listener(&root);
@@ -3166,6 +3250,7 @@ mod tests {
                 Duration::from_secs(1),
                 Some(server_shutdown),
                 IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "older-compatible-build"),
+                None,
             )
             .unwrap();
         });

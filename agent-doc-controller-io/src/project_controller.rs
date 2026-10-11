@@ -11103,28 +11103,44 @@ pub(crate) fn test_bootstrap(dir: &tempfile::TempDir) -> ControllerBootstrap {
     }
 }
 
+/// Wait for a controller started with `serve_announcing_ready` to announce that
+/// it serves `project_root`.
+///
+/// `#replace120shang`: this waits on the controller's own serve-ready edge (the
+/// listener is bound and the accept loop armed), not on a `status` poll raced
+/// against a startup budget (`#loadbudgettests` replaced a 5s budget that failed
+/// at load average ~90 with a 120s poll ceiling; the poll itself was the
+/// problem). The ceiling below only stops a lost announcement from hanging the
+/// suite; a controller that exits before announcing fails at once through the
+/// dropped sender. The announced path must be this root's public socket, so an
+/// announcement from some other listener cannot satisfy the wait.
 #[cfg(test)]
-pub(crate) fn wait_for_test_controller(project_root: &Path) {
-    // `#loadbudgettests`: callers need the controller to come up (liveness),
-    // not to come up within a startup budget. A 5s budget failed
-    // `controller_client_connection_is_one_request` at load average ~90 while
-    // the same startup takes 0.42s alone, so the bound is only a hang ceiling
-    // below nextest's 180s per-test guard.
-    const STARTUP_HANG_CEILING: Duration = Duration::from_secs(120);
-    let started = Instant::now();
-    loop {
-        if status(project_root)
-            .map(|controller| controller.active)
-            .unwrap_or(false)
-        {
-            return;
+pub(crate) fn wait_for_test_controller(
+    project_root: &Path,
+    ready: &std::sync::mpsc::Receiver<PathBuf>,
+) {
+    const SERVE_READY_HANG_CEILING: Duration = Duration::from_secs(120);
+    match ready.recv_timeout(SERVE_READY_HANG_CEILING) {
+        Ok(bound) => assert_eq!(
+            bound,
+            socket_path(project_root),
+            "test controller announced readiness on a socket other than its public one"
+        ),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("test controller exited before its listener was ready")
         }
-        assert!(
-            started.elapsed() < STARTUP_HANG_CEILING,
-            "test controller did not start"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!(
+            "test controller never announced readiness within the {SERVE_READY_HANG_CEILING:?} hang ceiling"
+        ),
     }
+    // One request, not a poll: an announcement that preceded the bind or the
+    // accept loop is a lie this exposes (the request finds no socket, or no
+    // one accepting it).
+    let served = status(project_root).expect("read test controller status after readiness");
+    assert!(
+        served.active,
+        "test controller announced readiness but did not answer a status request"
+    );
 }
 
 #[cfg(test)]

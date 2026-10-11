@@ -15534,6 +15534,34 @@ pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
         None,
         None,
         ControllerHandoffState::Stable,
+        None,
+    )
+}
+
+/// [`serve`], announcing on `ready` when the listener is bound and its accept
+/// loop is armed (`#replace120shang`).
+///
+/// The announcement is the controller's own serve-ready edge — the same point
+/// that logs `controller_listener_serve_ready` — so an in-process caller waits
+/// on an event instead of polling `status` against a wall-clock ceiling. The
+/// sent path is the socket actually bound. If `serve` returns before that edge
+/// (startup error, or it skipped because an authoritative controller already
+/// serves), `ready` is dropped unsent and the waiter observes a disconnect at
+/// once rather than a timeout.
+#[cfg(test)]
+pub(crate) fn serve_announcing_ready(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+    ready: std::sync::mpsc::Sender<PathBuf>,
+) -> Result<()> {
+    serve_with_options(
+        project_root,
+        launch_mode,
+        None,
+        None,
+        None,
+        ControllerHandoffState::Stable,
+        Some(ready),
     )
 }
 
@@ -15880,6 +15908,7 @@ pub(crate) fn serve_with_options(
     controller_generation: Option<u64>,
     previous_controller_pid: Option<u32>,
     handoff_state: ControllerHandoffState,
+    serve_ready: Option<std::sync::mpsc::Sender<PathBuf>>,
 ) -> Result<()> {
     // `#ensurereplicagensup`: this process is about to become the relay-hub
     // owner. Everything that keys off `hub_registry()` needs to distinguish "the
@@ -16031,6 +16060,14 @@ pub(crate) fn serve_with_options(
             listener_bound_at.elapsed().as_millis(),
         ),
     );
+    // `#replace120shang`: the in-process readiness edge. The socket is bound,
+    // owned by this incarnation, and accept is non-blocking with the loop
+    // below next, so a client that connects from here on is served. Announce
+    // it only here: any earlier and a waiter would connect into nothing (or a
+    // stale path); a waiter whose serve bailed sees `ready` dropped unsent.
+    if let Some(ready) = serve_ready {
+        let _ = ready.send(sock.clone());
+    }
 
     let should_stop = Arc::new(AtomicBool::new(false));
     let active_clients = Arc::new(AtomicUsize::new(0));
@@ -32226,6 +32263,7 @@ pub fn run_serve(
         controller_generation,
         previous_controller_pid,
         status::parse_handoff_state(handoff_state)?,
+        None,
     )
 }
 
@@ -43703,8 +43741,11 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let project_root = dir.path().to_path_buf();
         let server_root = project_root.clone();
-        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
-        wait_for_test_controller(&project_root);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx).unwrap()
+        });
+        wait_for_test_controller(&project_root, &ready_rx);
 
         let idle_stream = connect(&project_root).unwrap();
         let response = request(&project_root, "status").unwrap();
@@ -43723,8 +43764,11 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let project_root = dir.path().to_path_buf();
         let server_root = project_root.clone();
-        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
-        wait_for_test_controller(&project_root);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx).unwrap()
+        });
+        wait_for_test_controller(&project_root, &ready_rx);
 
         let stream = connect(&project_root).unwrap();
         let (reader_half, mut writer_half) = stream.split();
@@ -43766,8 +43810,11 @@ mod tests {
         std::fs::write(&doc, "body\n").unwrap();
 
         let server_root = project_root.clone();
-        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
-        wait_for_test_controller(&project_root);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx).unwrap()
+        });
+        wait_for_test_controller(&project_root, &ready_rx);
 
         let state = agent_doc_cycle_state_io::mark_write_applied(
             &doc,
@@ -43804,8 +43851,11 @@ mod tests {
         std::fs::write(&doc, "body\n").unwrap();
 
         let server_root = project_root.clone();
-        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
-        wait_for_test_controller(&project_root);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx).unwrap()
+        });
+        wait_for_test_controller(&project_root, &ready_rx);
 
         agent_doc_cycle_state_io::mark_write_applied(&doc, "write_applied", None, Some("body\n"))
             .expect("write_applied through the command plane");
@@ -43966,11 +44016,13 @@ mod tests {
         let project_root = dir.path().to_path_buf();
         let server_root = project_root.clone();
         let (tx, rx) = std::sync::mpsc::channel();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
-            let result = serve(&server_root, LaunchMode::Lazy).map_err(|err| err.to_string());
+            let result = serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx)
+                .map_err(|err| err.to_string());
             let _ = tx.send(result);
         });
-        wait_for_test_controller(&project_root);
+        wait_for_test_controller(&project_root, &ready_rx);
 
         drop(dir);
         // Recreate the same path before the next idle tick. A path-existence check
@@ -44012,8 +44064,11 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let project_root = dir.path().to_path_buf();
         let server_root = project_root.clone();
-        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
-        wait_for_test_controller(&project_root);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx).unwrap()
+        });
+        wait_for_test_controller(&project_root, &ready_rx);
 
         let idle_stream = connect(&project_root).unwrap();
         let started = Instant::now();
@@ -44034,11 +44089,15 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let project_root = dir.path().to_path_buf();
         let server_root = project_root.clone();
-        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
-        wait_for_test_controller(&project_root);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx).unwrap()
+        });
+        wait_for_test_controller(&project_root, &ready_rx);
         let before = status(&project_root).unwrap();
         assert!(before.active);
 
+        let (skipped_ready_tx, skipped_ready) = std::sync::mpsc::channel();
         let started = Instant::now();
         serve_with_options(
             &project_root,
@@ -44047,8 +44106,15 @@ mod tests {
             None,
             None,
             ControllerHandoffState::Stable,
+            Some(skipped_ready_tx),
         )
         .unwrap();
+        assert_eq!(
+            skipped_ready.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected),
+            "a serve that skipped must drop its readiness sender unsent, so a waiter \
+             fails at once instead of waiting for a listener that never binds"
+        );
         assert!(
             started.elapsed() < Duration::from_secs(2),
             "second public serve should skip instead of replacing the active controller"
@@ -44111,8 +44177,11 @@ mod tests {
         assert!(stale_socket.is_file());
 
         let server_root = project_root.clone();
-        let server = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
-        wait_for_test_controller(&project_root);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx).unwrap()
+        });
+        wait_for_test_controller(&project_root, &ready_rx);
 
         let controller_status = status(&project_root).unwrap();
         assert!(controller_status.active);
@@ -44165,10 +44234,13 @@ mod tests {
         // no controller) and then block on the held lock.
         entering_rx.recv().unwrap();
         let server_root = project_root.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = std::thread::spawn(move || {
             let started = Instant::now();
             loop {
-                match serve(&server_root, LaunchMode::Lazy) {
+                // Each attempt gets its own sender; a failed attempt drops it
+                // unsent and the retry announces through the next clone.
+                match serve_announcing_ready(&server_root, LaunchMode::Lazy, ready_tx.clone()) {
                     Ok(()) => return Ok::<(), anyhow::Error>(()),
                     Err(err)
                         if err.to_string().contains("database is locked")
@@ -44180,7 +44252,7 @@ mod tests {
                 }
             }
         });
-        wait_for_test_controller(&project_root);
+        wait_for_test_controller(&project_root, &ready_rx);
 
         // Only now may the contended waiter proceed: it waited, so it must adopt
         // the controller published while it was blocked.
@@ -47894,6 +47966,24 @@ mod tests {
             liveness_restored < serve_ready_logged,
             "the bind-to-accept window must be measured at the accept loop, after every \
              startup step it is supposed to bound"
+        );
+        // `#replace120shang`: the in-process readiness announcement is the
+        // serve-ready edge itself. Sending it before the bind lets a waiter
+        // connect into no socket; sending it after the loop starts would make
+        // it never fire. It must sit between the serve-ready marker and the
+        // accept loop.
+        let ready_announced = serve
+            .find("let _ = ready.send(sock.clone());")
+            .expect("in-process serve-ready announcement");
+        let accept_loop = serve
+            .find("while !should_stop.load(Ordering::SeqCst) {")
+            .expect("controller accept loop");
+        assert!(
+            listener_nonblocking < ready_announced
+                && serve_ready_logged < ready_announced
+                && ready_announced < accept_loop,
+            "serve readiness must be announced after the listener is bound and accept is \
+             armed, and before the accept loop"
         );
 
         let restore = &source[source

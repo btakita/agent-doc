@@ -27,6 +27,21 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   failure. `make tla-runner-self-test` (in `make check`) checks this deterministically under a hostile
   `JAVA_TOOL_OPTIONS`, including that an unisolated TLC does fail there.
 
+- **Listener tests wait for the listener to say it is ready, not for a poll to succeed (`#replace120shang`).**
+  `wait_for_test_controller` (used by `controller_client_connection_is_one_request` and eight other controller
+  tests) and the ipc-io `await_endpoint` helper (used by `a_bound_but_unaccepting_listener_is_evicted_not_protected`
+  and four other listener tests) polled `status` / a hello round trip until a 120s ceiling. Both servers now
+  announce readiness at their serve-ready edge: the socket is bound under its final name, accept is armed, and
+  the accept loop runs next. The controller announces from `serve_with_options` just after its
+  `controller_listener_serve_ready` marker, and the IPC listener through the new public
+  `start_listener_with_logger_until_ready`. Each sends the bound socket path. A start that returns without
+  serving (startup error, a skipped public serve, the refusal to evict a live same-build peer) drops its sender
+  unsent, so the waiter fails at once instead of at the ceiling. Tests confirm each announcement with one
+  request rather than a poll. The 120s bound remains only as a hang ceiling. Mutations prove both directions:
+  announcing before the bind fails the tests (and a source-order check pins the controller announcement between
+  the serve-ready marker and the accept loop), and never announcing fails them at the ceiling. Production
+  behaviour is unchanged when no one waits; cross-process clients still find a detached controller by
+  connecting.
 - **Each checkout's test ceiling always bounds that checkout (`#checktmpdirleak`).** The report that one
   worktree's `make check` "printed another worktree's path" in its nextest `test-isolation` setup line was a
   shared log, not a shared TMPDIR: concurrent subagents redirected `make check` to the same fixed

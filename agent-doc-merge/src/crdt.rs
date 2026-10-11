@@ -2457,6 +2457,81 @@ pub fn replay_editor_ops(base: &str, ops: &[EditorOp]) -> Option<String> {
     Some(buf)
 }
 
+/// Text the operator's own editor ops inserted and that still survives the
+/// later ops of the same burst, as contiguous runs in document order
+/// (`#retypestruck`).
+///
+/// Unlike [`replay_editor_ops`] this needs no base text: it tracks only the
+/// bytes the ops themselves typed or pasted, so it stays exact when the epoch's
+/// base is not a text the caller holds (the editor's epoch base routinely lags
+/// or leads the committed snapshot). Consecutive keystroke batches at adjacent
+/// offsets coalesce into one run; a later delete (backspace, selection
+/// replacement) trims the runs it overlaps. Base text the ops deleted is never
+/// reported, so a run is evidence of operator authorship only.
+pub fn editor_ops_inserted_runs(ops: &[EditorOp]) -> Vec<String> {
+    // (start offset in the running document, inserted text)
+    let mut runs: Vec<(usize, String)> = Vec::new();
+    for op in ops {
+        match op {
+            EditorOp::Insert { offset, text } => {
+                if text.is_empty() {
+                    continue;
+                }
+                let at = *offset;
+                let host = runs.iter().position(|(start, run)| {
+                    *start <= at && at <= start + run.len() && run.is_char_boundary(at - start)
+                });
+                for (index, (start, _)) in runs.iter_mut().enumerate() {
+                    if Some(index) != host && *start >= at {
+                        *start += text.len();
+                    }
+                }
+                match host {
+                    Some(index) => {
+                        let (start, run) = &mut runs[index];
+                        let local = at - *start;
+                        run.insert_str(local, text);
+                    }
+                    None => runs.push((at, text.clone())),
+                }
+            }
+            EditorOp::Delete { offset, len } => {
+                if *len == 0 {
+                    continue;
+                }
+                let del_start = *offset;
+                let Some(del_end) = offset.checked_add(*len) else {
+                    continue;
+                };
+                for (start, run) in runs.iter_mut() {
+                    let run_end = *start + run.len();
+                    let cut_start = del_start.max(*start);
+                    let cut_end = del_end.min(run_end);
+                    if cut_start < cut_end {
+                        let local_start = cut_start - *start;
+                        let local_end = cut_end - *start;
+                        if run.is_char_boundary(local_start) && run.is_char_boundary(local_end) {
+                            run.replace_range(local_start..local_end, "");
+                        } else {
+                            // A delete splitting a multi-byte char cannot be
+                            // tracked exactly; drop the run rather than guess.
+                            run.clear();
+                        }
+                    }
+                    if *start >= del_end {
+                        *start -= *len;
+                    } else if *start > del_start {
+                        *start = del_start;
+                    }
+                }
+                runs.retain(|(_, run)| !run.is_empty());
+            }
+        }
+    }
+    runs.sort_by_key(|(start, _)| *start);
+    runs.into_iter().map(|(_, run)| run).collect()
+}
+
 /// Apply one captured editor operation to its running text revision.
 ///
 /// Kept crate-visible so lineage-sensitive merge policy can inspect the exact
@@ -2731,6 +2806,73 @@ mod tests {
         assert_eq!(replay_editor_ops(base, &insert), None);
         let delete = vec![EditorOp::Delete { offset: 3, len: 99 }];
         assert_eq!(replay_editor_ops(base, &delete), None);
+    }
+
+    /// `#retypestruck`: the live 2026-10-11 burst shape. The operator deleted
+    /// the old struck line, then typed a fresh `- release + publish` one batch
+    /// of keystrokes at a time, with a backspace correction. The inserted runs
+    /// recover exactly the typed line without the base text, and never report
+    /// base text the ops deleted.
+    #[test]
+    fn editor_ops_inserted_runs_recovers_typed_line_without_base() {
+        let base = "- do [#open]\n- ~~release + publish~~\n";
+        let struck_at = base.find("- ~~").unwrap();
+        let struck_len = "- ~~release + publish~~\n".len();
+        let typed = "- release + publish\n";
+        let mut ops = vec![EditorOp::Delete {
+            offset: struck_at,
+            len: struck_len,
+        }];
+        let mut at = struck_at;
+        for (index, ch) in typed.chars().enumerate() {
+            ops.push(EditorOp::Insert {
+                offset: at,
+                text: ch.to_string(),
+            });
+            at += ch.len_utf8();
+            if index == 4 {
+                // typo + backspace: "- relx" -> "- rel"
+                ops.push(EditorOp::Insert {
+                    offset: at,
+                    text: "x".to_string(),
+                });
+                ops.push(EditorOp::Delete { offset: at, len: 1 });
+            }
+        }
+        let replayed = replay_editor_ops(base, &ops).unwrap();
+        assert_eq!(replayed, "- do [#open]\n- release + publish\n");
+        assert_eq!(editor_ops_inserted_runs(&ops), vec![typed.to_string()]);
+    }
+
+    /// Runs shift with edits elsewhere and are trimmed by overlapping deletes;
+    /// every reported run is a substring of the replayed text.
+    #[test]
+    fn editor_ops_inserted_runs_tracks_shifts_and_trims() {
+        let base = "aaaa\nbbbb\n";
+        let ops = vec![
+            EditorOp::Insert {
+                offset: 5,
+                text: "NEW\n".to_string(),
+            },
+            // an earlier insert shifts the first run right
+            EditorOp::Insert {
+                offset: 0,
+                text: "XY".to_string(),
+            },
+            // delete spanning base text and the head of the first run
+            EditorOp::Delete { offset: 6, len: 3 },
+            EditorOp::Insert {
+                offset: 0,
+                text: "é".to_string(),
+            },
+        ];
+        let replayed = replay_editor_ops(base, &ops).unwrap();
+        let runs = editor_ops_inserted_runs(&ops);
+        assert_eq!(runs, vec!["éXY".to_string(), "W\n".to_string()]);
+        for run in &runs {
+            assert!(replayed.contains(run.as_str()), "{run:?} in {replayed:?}");
+        }
+        assert!(editor_ops_inserted_runs(&[EditorOp::Delete { offset: 0, len: 4 }]).is_empty());
     }
 
     #[test]

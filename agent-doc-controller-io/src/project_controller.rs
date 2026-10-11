@@ -3008,21 +3008,74 @@ struct ControllerMemoryState {
     /// the outgoing graph does not contain.
     state_document_versions: BTreeMap<String, u64>,
     state_projection: agent_doc_state_backbone::StateBackboneProjection,
+    /// `state_events.id` of the last durable row folded into
+    /// `state_projection` (0 when none). A durable reload that ran off the
+    /// ingress lock replays only the rows after it under the lock
+    /// (`#refreshmemlockstall`). Only meaningful on a freshly loaded snapshot:
+    /// the live projection also folds controller-owned appends whose row ids it
+    /// does not record.
+    durable_sequence: u64,
     map_backend: &'static str,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test seam: runs after every full durable ledger load on this thread, so
+    /// a regression test can act *while* a reload is in progress and observe
+    /// whether that load ran under `state_event_ingress` (`#refreshmemlockstall`).
+    static FULL_DURABLE_LOAD_TEST_HOOK: std::cell::RefCell<Option<Box<dyn FnMut()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_full_durable_load_test_hook(hook: Option<Box<dyn FnMut()>>) {
+    FULL_DURABLE_LOAD_TEST_HOOK.with(|slot| *slot.borrow_mut() = hook);
 }
 
 impl ControllerMemoryState {
     fn load(project_root: &Path) -> Result<(Self, ControllerActorStore)> {
-        let (state_projection, state_document_versions) =
+        let (state_projection, state_document_versions, durable_sequence) =
             load_compact_state_projection_with_versions(project_root)?;
+        #[cfg(test)]
+        {
+            let hook = FULL_DURABLE_LOAD_TEST_HOOK.with(|slot| slot.borrow_mut().take());
+            if let Some(mut hook) = hook {
+                hook();
+                FULL_DURABLE_LOAD_TEST_HOOK.with(|slot| {
+                    slot.borrow_mut().get_or_insert(hook);
+                });
+            }
+        }
         Ok((
             Self {
                 state_document_versions,
                 state_projection,
+                durable_sequence,
                 map_backend: "std_btree_map",
             },
             load_actor_store(project_root)?,
         ))
+    }
+
+    /// Fold every durable row committed after this snapshot's
+    /// `durable_sequence`, returning how many were applied.
+    ///
+    /// Snapshot rows `<= durable_sequence` plus the rows after it, in id order,
+    /// is exactly the full ledger replay, so the result is identical to a full
+    /// reload at this instant, at the cost of the delta instead of the ledger.
+    fn catch_up(&mut self, project_root: &Path) -> Result<usize> {
+        let conn = open_state_db(project_root)?;
+        let rows = state_store::load_state_events_after_from_db(&conn, self.durable_sequence)?;
+        let applied = rows.len();
+        for row in rows {
+            fold_state_event_row(
+                &mut self.state_projection,
+                &mut self.state_document_versions,
+                &mut self.durable_sequence,
+                &row,
+            )?;
+        }
+        Ok(applied)
     }
 }
 
@@ -3073,8 +3126,9 @@ impl Drop for StateEventIngressGuard<'_> {
 /// controller has already applied (`#editoropscheckpointfail`).
 ///
 /// An editor's append request has a short response budget. When the project
-/// state-ingress lock is held (a `refresh_memory` durable reload can hold it for
-/// seconds), the client's recv timeout fires while the request is still queued
+/// state-ingress lock is held (a `refresh_memory` durable reload held it for
+/// seconds before `#refreshmemlockstall`; any slow holder still can), the
+/// client's recv timeout fires while the request is still queued
 /// here; the controller then applies it anyway. The client cannot tell "late"
 /// from "lost", so it retains and re-sends the identical batch. This ledger makes
 /// that re-send idempotent: a nonce already applied is acknowledged without a
@@ -3123,9 +3177,10 @@ pub(crate) struct ControllerRuntime {
     /// lock to be dropped before durable I/O.
     state_event_ingress: Mutex<()>,
     /// Bumped by every live apply of a state event (under `memory`). A
-    /// `refresh_memory` whose unlocked durable load straddled a bump reloads
-    /// under `state_event_ingress` instead of swapping in a snapshot that
-    /// predates the applied fact (`#runfrontenddispatch`).
+    /// `refresh_memory` whose unlocked durable load straddled a bump logs the
+    /// race and re-reads the (tiny) actor store under `state_event_ingress`; the
+    /// state projection itself is always caught up there with the rows the load
+    /// missed (`#runfrontenddispatch`, `#refreshmemlockstall`).
     state_apply_generation: AtomicU64,
     actor_graph: ControllerActorGraph,
     document_authority_graph: ControllerDocumentAuthorityGraph,
@@ -7907,28 +7962,42 @@ impl ControllerRuntime {
     /// re-mint could not see it: the post-append projection it verifies against
     /// was the regressed one.
     ///
-    /// Every controller-owned append+apply holds `state_event_ingress` and
-    /// bumps `state_apply_generation`, so the swap is published under that
-    /// lock, and a load that raced an apply is redone under it (where no
-    /// controller-owned apply can interleave). The common no-race refresh still
-    /// loads without blocking ingress. `after_unlocked_load` is the seam the
-    /// regression test uses to land an append inside the race window.
+    /// Every controller-owned append+apply holds `state_event_ingress`, so the
+    /// swap is published under that lock, and the snapshot is first caught up
+    /// there with every durable row committed after the rows it folded (where
+    /// no controller-owned append can interleave). Snapshot + delta in id order
+    /// is exactly a full replay, so an append that landed during the load is
+    /// never erased.
+    ///
+    /// `#refreshmemlockstall`: the race used to be repaired by redoing the
+    /// *whole* load under the lock. On a 215MB / 80k-event ledger that is a
+    /// 1-4s replay (`state_event_ingress_slow site=refresh_memory
+    /// fact=durable_reload hold_ms=1000-4000`), and an editor typing burst
+    /// makes the race the common case, so every editor-op append queued behind
+    /// it and blew its 250ms budget (sdk.md, 2026-10-11). The lock now covers
+    /// only the delta (the rows appended while the bulk load ran) plus the
+    /// in-memory swap. `after_unlocked_load` is the seam the regression tests
+    /// use to land an append inside the race window.
     fn refresh_memory_with(&self, after_unlocked_load: impl FnOnce()) -> Result<()> {
         let project_root = self.bootstrap_snapshot()?.project_root;
         let seen_apply_generation = self.state_apply_generation.load(Ordering::Acquire);
-        let loaded = ControllerMemoryState::load(&project_root)?;
+        let (mut next, loaded_actor_store) = ControllerMemoryState::load(&project_root)?;
         after_unlocked_load();
         let _ingress =
             self.lock_state_event_ingress(&project_root, "refresh_memory", "durable_reload");
         let raced = self.state_apply_generation.load(Ordering::Acquire) != seen_apply_generation;
-        let (next, next_actor_store) = if raced {
+        let caught_up = next.catch_up(&project_root)?;
+        let next_actor_store = if raced {
             agent_doc_ops_log_io::log_op(
                 &project_root,
-                "controller_refresh_memory_reloaded_after_concurrent_apply (#runfrontenddispatch)",
+                &format!(
+                    "controller_refresh_memory_caught_up_after_concurrent_apply rows={caught_up} \
+                     (#runfrontenddispatch #refreshmemlockstall)"
+                ),
             );
-            ControllerMemoryState::load(&project_root)?
+            load_actor_store(&project_root)?
         } else {
-            loaded
+            loaded_actor_store
         };
         let recycle = next.state_projection.project_supervisor_recycle();
         let main_layout_eligibility = main_layout_eligibility_from_state(&next.state_projection);
@@ -9705,25 +9774,45 @@ fn load_compact_state_projection_with_versions(
 ) -> Result<(
     agent_doc_state_backbone::StateBackboneProjection,
     BTreeMap<String, u64>,
+    u64,
 )> {
     let conn = open_state_db(project_root)?;
     let mut projection = agent_doc_state_backbone::StateBackboneProjection::default();
     let mut document_versions: BTreeMap<String, u64> = BTreeMap::new();
+    let mut durable_sequence = 0;
     for row in load_state_events_from_db(&conn, None)? {
-        document_versions
-            .entry(row.document_hash.clone())
-            .and_modify(|version| *version = (*version).max(row.document_version))
-            .or_insert(row.document_version);
-        let event: agent_doc_state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
-            .with_context(|| {
+        fold_state_event_row(
+            &mut projection,
+            &mut document_versions,
+            &mut durable_sequence,
+            &row,
+        )?;
+    }
+    Ok((projection, document_versions, durable_sequence))
+}
+
+/// Fold one durable `state_events` row into a compact projection, advancing the
+/// per-document version and the folded-row high-water.
+fn fold_state_event_row(
+    projection: &mut agent_doc_state_backbone::StateBackboneProjection,
+    document_versions: &mut BTreeMap<String, u64>,
+    durable_sequence: &mut u64,
+    row: &state_store::StateEventStatus,
+) -> Result<()> {
+    document_versions
+        .entry(row.document_hash.clone())
+        .and_modify(|version| *version = (*version).max(row.document_version))
+        .or_insert(row.document_version);
+    let event: agent_doc_state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
+        .with_context(|| {
             format!(
                 "parse state backbone event {} from controller state",
                 row.event_id
             )
         })?;
-        projection.apply_durable_unique(&event);
-    }
-    Ok((projection, document_versions))
+    projection.apply_durable_unique(&event);
+    *durable_sequence = (*durable_sequence).max(row.sequence);
+    Ok(())
 }
 
 pub fn load_state_backbone_projection(
@@ -17047,6 +17136,7 @@ agent:queue\n\
             memory: Mutex::new(ControllerMemoryState {
                 state_document_versions: BTreeMap::new(),
                 state_projection,
+                durable_sequence: 0,
                 map_backend: "std_btree_map",
             }),
             state_event_ingress: Mutex::new(()),

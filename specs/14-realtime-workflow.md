@@ -1149,8 +1149,12 @@ batch FFI's first append keeps the editor's short (250ms) controller response
 budget, but that budget is routinely exceeded while the controller's project
 state-ingress lock is held by a durable reload (`state_event_ingress_slow
 site=refresh_memory fact=durable_reload hold_ms=1000-4000`); the stalled append
-is then applied late, after the editor has already logged it as failed. Both
-batch and one-op FFIs therefore record through `record_editor_ops_retaining`:
+is then applied late, after the editor has already logged it as failed. Since
+`#refreshmemlockstall` the reload holds that lock only for the rows appended
+during its unlocked load (see `13-state-backbone.md`), so this stall no longer
+occurs from the reload itself; retention still covers any other slow holder or
+a controller restart. Both batch and one-op FFIs record through
+`record_editor_ops_retaining`:
 
 - A transient failure (controller timeout, connect/protocol failure on a live
   socket, busy cold store) retains the burst in a per-document FIFO and returns

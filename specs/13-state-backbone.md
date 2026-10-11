@@ -94,8 +94,22 @@ racing reload restored `Requested@4350`, the settle minted `settled-4350`
 against it and read back `Settled`, and the ledger replayed `InFlight@4351`
 forever). Every controller-owned append+apply therefore holds the state-event
 ingress lock and bumps an apply generation; the reload publishes its swap under
-that lock and, when the generation moved during its unlocked load, reloads
-again under the lock before swapping (`#runfrontenddispatch`).
+that lock (`#runfrontenddispatch`).
+
+The full ledger replay never runs under that lock (`#refreshmemlockstall`). The
+unlocked load records the highest `state_events.id` it folded; under the lock
+the reload folds only the rows committed after that id, in id order, then swaps.
+SQLite serializes writers and `id` is `AUTOINCREMENT`, so snapshot plus delta
+is exactly a full replay at that instant, and an append that landed during the
+load survives the swap. When the apply generation moved during the load the
+reload logs `controller_refresh_memory_caught_up_after_concurrent_apply
+rows=<n>` and re-reads the (small) actor store under the lock. The earlier
+repair redid the *whole* load under the lock whenever the generation moved; on
+a 215MB, 80k-event ledger that held ingress 1-4s (`state_event_ingress_slow
+site=refresh_memory fact=durable_reload`), and an editor typing burst makes
+that race the common case, so every editor-op append queued behind it and
+exceeded its 250ms budget (sdk.md, 2026-10-11). The ingress hold is now bounded
+by the delta, not the ledger.
 
 Both repairs above prevent a new wedge; neither un-wedges a document whose
 ledger already ends `InFlight` with no covering settle, and the dispatch-only

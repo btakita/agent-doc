@@ -41946,6 +41946,133 @@ mod tests {
         assert!(projected.document.editor_op_capture.is_none());
     }
 
+    /// `#refreshmemlockstall`: a `refresh_memory` durable reload must never run
+    /// its full ledger replay under `state_event_ingress`. It used to: when an
+    /// append raced the unlocked load (the common case during a typing burst)
+    /// the whole load was redone under the lock, a 1-4s replay on a real
+    /// ledger, and every editor-op append queued behind it blew its 250ms
+    /// budget (sdk.md, 2026-10-11). The hook below runs inside every full
+    /// durable load and issues a real editor-op append from another thread;
+    /// each must complete while that load is still in progress. The race the
+    /// first append creates is then repaired from the delta alone, and the
+    /// raced append survives the swap.
+    #[test]
+    fn editor_op_append_is_not_blocked_by_a_durable_reload_in_progress() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/reload-race.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let append = {
+            let doc = doc.clone();
+            move |nonce: String| -> ControllerRequest {
+                serde_json::from_value(serde_json::json!({
+                    "command": "editor_op_capture_update",
+                    "file": doc,
+                    "diagnostic_payload": serde_json::to_string(&serde_json::json!({
+                        "action": "append",
+                        "base_hash": "base-a",
+                        "ops_json": serde_json::json!([{ "insert": nonce }]).to_string(),
+                        "updated_ms": 10,
+                        "event_nonce": nonce,
+                    }))
+                    .unwrap(),
+                }))
+                .unwrap()
+            }
+        };
+        // A non-empty ledger, so the snapshot and the delta are distinguishable.
+        for index in 0..4 {
+            assert!(
+                handle_editor_op_capture_update(
+                    &bootstrap,
+                    &runtime,
+                    append(format!("seed-{index}"))
+                )
+                .unwrap()
+            );
+        }
+
+        let full_loads = std::sync::Arc::new(AtomicUsize::new(0));
+        let blocked = std::sync::Arc::new(AtomicUsize::new(0));
+        let stragglers = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        {
+            let (bootstrap, runtime, append) = (bootstrap.clone(), runtime.clone(), append.clone());
+            let (full_loads, blocked, stragglers) =
+                (full_loads.clone(), blocked.clone(), stragglers.clone());
+            super::super::set_full_durable_load_test_hook(Some(Box::new(move || {
+                let load = full_loads.fetch_add(1, Ordering::SeqCst);
+                let (done_tx, done_rx) = std::sync::mpsc::channel();
+                let (bootstrap, runtime) = (bootstrap.clone(), runtime.clone());
+                let request = append(format!("during-load-{load}"));
+                let sender = std::thread::spawn(move || {
+                    let inserted =
+                        handle_editor_op_capture_update(&bootstrap, &runtime, request).unwrap();
+                    let _ = done_tx.send(inserted);
+                });
+                // The reload waits for the append, so an append that queues
+                // behind a reload holding ingress can never finish: the bound
+                // only turns that deadlock into a failure, it is not the sync.
+                match done_rx.recv_timeout(Duration::from_secs(10)) {
+                    Ok(inserted) => {
+                        assert!(inserted);
+                        sender.join().unwrap();
+                    }
+                    Err(_) => {
+                        blocked.fetch_add(1, Ordering::SeqCst);
+                        stragglers.lock().push(sender);
+                    }
+                }
+            })));
+        }
+        let refreshed = runtime.refresh_memory();
+        super::super::set_full_durable_load_test_hook(None);
+        for sender in stragglers.lock().drain(..) {
+            sender.join().unwrap();
+        }
+        refreshed.unwrap();
+
+        assert_eq!(
+            blocked.load(Ordering::SeqCst),
+            0,
+            "an editor-op append issued during a durable load waited on the reload's ingress lock"
+        );
+        assert_eq!(
+            full_loads.load(Ordering::SeqCst),
+            1,
+            "the race is repaired from the delta, never by a second full load"
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("controller_refresh_memory_caught_up_after_concurrent_apply rows=1 "),
+            "only the raced append is folded under the lock:\n{ops}"
+        );
+
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let capture = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap()
+            .document
+            .editor_op_capture
+            .expect("active capture");
+        let mut ops: Vec<String> =
+            serde_json::from_str::<Vec<serde_json::Value>>(&capture.ops_json)
+                .unwrap()
+                .into_iter()
+                .map(|op| op["insert"].as_str().unwrap().to_string())
+                .collect();
+        ops.sort();
+        assert_eq!(
+            ops,
+            ["during-load-0", "seed-0", "seed-1", "seed-2", "seed-3"],
+            "the append that raced the reload survives the swap"
+        );
+    }
+
     #[test]
     fn command_plane_submit_unknown_name_fails_closed_as_rejected_receipt() {
         // Every command resolves to a terminal receipt: an unknown command name

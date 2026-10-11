@@ -3537,6 +3537,34 @@ pub fn load_state_events_from_db(
     Ok(events)
 }
 
+/// Every state event committed after `after_sequence` (the `id` of the last
+/// row a caller already folded), in commit order.
+///
+/// SQLite serializes writers and `id` is `AUTOINCREMENT`, so ids become visible
+/// in increasing order: a reader that folded every row up to `after_sequence`
+/// gets exactly the rows it has not seen. This is the cheap, bounded delta a
+/// controller durable reload replays under its ingress lock after loading the
+/// bulk of the ledger without it (`#refreshmemlockstall`).
+pub fn load_state_events_after_from_db(
+    conn: &Connection,
+    after_sequence: u64,
+) -> Result<Vec<StateEventStatus>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, event_id, document_hash, document_version, domain, fact_type, payload_json, timestamp
+        FROM state_events
+        WHERE id > ?1
+        ORDER BY id
+        "#,
+    )?;
+    let after = sqlite_i64(after_sequence, "state event sequence")?;
+    let mut events = Vec::new();
+    for row in stmt.query_map(params![after], state_event_status_from_row)? {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
 /// Stable key for the PID-scoped editor registration that owns a replay cursor.
 ///
 /// The decimal PID is terminated by a delimiter, so arbitrary editor ids remain

@@ -313,6 +313,57 @@ Its claim code overlaps with the sdk.md queue-sync and struck-release subagents.
 
 > **[NOTIFY from src/haiven-dev/tasks/sdk.md]** (2026-10-11T08:30:33Z)
 > Queue admission dropped operator text (2026-10-11 ~04:27). The operator moved five annotated heads sharing one id into agent:queue: "- [#dxdecisions]: D1: …" through "- [#dxdecisions]: D5: …" (plus one other annotated head). Preflight (UserPromptSubmit hook) kept only D1 in the queue, rewrote D2 into a NEW agent:backlog item "- [ ] [#dxdecisions] : D2: …" (colliding with the existing gated review item #dxdecisions, flagged as preset_item_id_collision), and deleted the D3, D4 and D5 lines from the document. Warning shown: free_text_admission_item_skipped "pending add: custom id already exists: dxdecisions". Expected: multiple annotated heads for the same id stay in the queue verbatim (or are all surfaced as annotations), and nothing is converted to backlog or dropped. Recovered from the preflight diff by the agent. Then the closeout refused ("owned component(s) have not reached the current document authority: notes,queue,review"), and session-check reports authority/disk divergence on queue+review.
+
+### Re: batch integrated, released as v0.35.489, queue closed — opus-5-5 · 2026-10-11T04:58-04:00
+
+All eight subagent fixes are merged, verified on the combined code, installed, and released as **v0.35.489**. Main and tag `v0.35.489` are at `622bd006dd`; the Release workflow is publishing.
+
+**Verification on the merged tree:** `make check` passed all 10089 tests (142 skipped) and `make tmux-ci` passed; both exited 0, captured with RTK bypassed. `make release` ran them again on the version-bumped tree, tagged, pushed, and ran `install-full`. `agent-doc --version` now prints 0.35.489. I built and installed from a separate worktree (`~/work/btakita/agent-doc-wt/integrate-0489`), because the shared `src/agent-doc` checkout has another session's uncommitted edits (including `agent-doc-start-runtime-io/src/lib.rs`), which I didn't touch. That checkout is still on v0.35.488 and needs `git pull` once those edits are committed.
+
+**Merge conflicts:** `VERSIONS.md` conflicted five times (resolved by keeping every entry) and one `specs/07-orchestration-commands.md` paragraph conflicted (resolved by keeping both the `⏳` marker and the owner-session text). I added the missing changelog entries for the lock stall and GH #238, plus the release parity row the first `make release` attempt refused without.
+
+> **Queue prompt:** Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.
+
+**Fixed.** The cancel arrived while preflight was still running, so Claude Code put the `/agent-doc …` trigger back into the prompt box. Cancel Turn now clears it with one `C-u`, and only when the box contains exactly this document's trigger, the pane is idle, and no route is submitting. The cancelled turn then ends immediately instead of after 20s. Clear Session Context now refuses when the prompt box holds your own unsent text, instead of typing `/clear` on top of it.
+
+> **Queue prompt:** #gh-fix: https://github.com/btakita/agent-doc/issues/237
+
+**Fixed and closed.** New command: `agent-doc queue add <FILE> --source <NAME> [--key <K>] [--attach <PATH>]... [TEXT]`. It adds an attributed item to the queue, going through the editor buffer when one is open. A repeated `--key` doesn't add a duplicate, and text and attachments are scrubbed of secrets. `--for-path` is not included: nothing maps a path to its session document yet.
+
+> **Queue prompt:** #gh-fix: https://github.com/btakita/agent-doc/issues/238
+
+**Fixed and closed.** `upgrade` now checks which IDE actually loads plugins from the install folder, using the jars it has mapped, its `idea.plugins.path` setting, or its data directory. It does this before applying the exact-262 package's restart refusal. An install into the idle `IntelliJIdea2026.2` no longer asks for a restart, and a stale restart-required marker is cleared. An IDE that really runs from that folder still gets the restart prompt.
+
+> **Queue prompt:** do [#refreshmemlockstall]
+
+**Done.** When an editor change raced the controller's memory refresh, the refresh used to reload the whole 215 MB ledger while holding the lock, for 1–4 s. Now it applies only the rows written since its unlocked load. A regression test shows an editor-op append completing while a full load is in progress.
+
+> **Queue prompt:** I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.
+
+**Fixed, and released.** Preflight queue maintenance struck your new line as a stale editor re-emit. The exception that protects re-typed lines only applied when your keystrokes were recorded against the exact committed snapshot, and yours were one edit past it. Now a whole line you typed after the agent's last write counts as a new request. The release + publish you intended is done (v0.35.489), so you don't need to re-type it. It's still struck in the document, since that strike happened before this fix.
+
+> **Queue prompt:** sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.
+
+**Fixed.** There was no marker for "a subagent finished and it's waiting on you", and ⏭️ was being stamped over items with live 🚧 claims. Finished `[operator-verify]` items now show **⏳**. Claimed and ⏳ items are never blamed as skipped. A new preflight warning names any claim still held on an item that's already waiting on you. On sdk.md, `specmovesdk`, `quirkinventory`, `quirkbigint`, `paritycorpusmain`, `cligoshell`, `quirkidsasstrings` and `quirkrobloxaccess` are done on the agent side and waiting on pushes, PRs or decisions. `quirkaotserializer`, `specmovecontracts` and `cligenport` are not done. Markers redraw on sdk.md's next preflight.
+
+> **Queue prompt:** Navigating between sdk.md + rpg.md resulted in a tmux focus on rpg.md in the 1:stash tmux window. Please make sure the focus effects always sync with the current Editor document(s).
+
+**Fixed.** The layout did focus sdk.md correctly. Then an rpg.md request that was still in flight sent its trigger and called `select-pane` on rpg's pane, which had been parked in stash. That `select-pane` also switches the window (06:44:09 UTC in the logs). Requests now never move focus while the controller owns the layout, so the newest editor selection always wins. A live tmux test replays the sequence.
+
+> **Queue prompt:** See `NOTIFY from src/haiven-dev/tasks/sdk.md` in this document.
+
+**Fixed (two and a half of three).**
+1. A claim now records the coordinator session that made it. When that session has ended or been `/clear`ed, preflight reports a **stale claim** with ready-made adopt or release commands, instead of saying "in flight, do NOT release". Claims aren't released automatically: two subagents started before this session's `/clear` kept running and reported back.
+2. The "silently dropped" report came from preflight reading the buffer while you were deleting a `⏭️`, which left a bare `⏭do` the parser couldn't read. An item now counts as present while its id is on any live queue line.
+3. The guard now records a keep-open edit when a retained continuation absorbs it. The claim that `--backlog-edit` re-adds a struck item didn't reproduce in three experiments, and sdk.md's history only shows a different free-text line struck. A test now pins the correct behaviour.
+
+**Still waiting on you:** `#drivecapturedsplice`. It sends real keystrokes to your desktop, so write `go #drivecapturedsplice` when you can step away.
+
+**Follow-ups filed** (appended to the backlog):
+- `#loadbudgettests`: timing-budget tests fail under concurrent load.
+- `#qheadresiduestrike`: the residue strike can still strike a re-typed item that isn't a recurring command.
+- `#checktmpdirleak`: a test TMPDIR showed another worktree's path.
+- `#subagentmsgcollide`: concurrent subagents overwrote each other's commit-message files.
 <!-- agent:boundary:861a07a6 -->
 <!-- /agent:exchange -->
 
@@ -321,24 +372,39 @@ Its claim code overlaps with the sdk.md queue-sync and struck-release subagents.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 See `NOTIFY from src/haiven-dev/tasks/sdk.md` in this document.
-- 🚧 Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.
-- 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/237
-- 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/238
-- 🚧 do [#refreshmemlockstall]
+- ~~See `NOTIFY from src/haiven-dev/tasks/sdk.md` in this document.~~
+- ~~Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.~~
+- ~~#gh-fix: https://github.com/btakita/agent-doc/issues/237~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix: https://github.com/btakita/agent-doc/issues/238~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#refreshmemlockstall]~~
 - ~~#actionable-review~~
-- 🚧 I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.
+- ~~I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~release + publish~~
 - 🚧 sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.
 - do [#drivecapturedsplice]
-- 🚧 Navigating between sdk.md + rpg.md resulted in a tmux focus on rpg.md in the 1:stash tmux window. Please make sure the focus effects always sync with the current Editor document(s).
+- do [#wallclockbudget]
+- do [#queuecatchresidue]
+- do [#duringconcurrentcheck]
+- do [#forkedsubagentsdispatche]
+- do [#loadbudgettests]
+- do [#qheadresiduestrike]
+- do [#checktmpdirleak]
+- do [#subagentmsgcollide]
+- ~~Navigating between sdk.md + rpg.md resulted in a tmux focus on rpg.md in the 1:stash tmux window. Please make sure the focus effects always sync with the current Editor document(s).~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#wallclockbudget] #loadbudgettests [agent-doc] Wall-clock budget tests fail when many test suites run concurrently (load average 70-140 with 8 subagents in make check): closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes (3.70s and 5.7s vs a 3s budget; 0.7-1.5s alone), agent-doc-sync-io rename_debounce_suppresses_auto_start and rename_debounce_does_not_affect_other_files, finalize_editor_absent_replays_operator_deleted_struck_queue_rows (24.6s vs 10.3s alone). Make them deterministic (virtual clock or a CPU-time budget, not wall clock) instead of raising budgets or rerunning to green.
+- [ ] [#queuecatchresidue] #qheadresiduestrike [agent-doc] The queue catch-up residue strike can still strike an operator re-typed free-text head that is not a recurring command (for example a repeated bug report), because it matches against every earlier Queue prompt echo in the exchange, not only echoes written after the head was re-added. Scope the match to echoes newer than the head's re-entry; regression test with a re-typed repeated report.
+- [ ] [#duringconcurrentcheck] #checktmpdirleak [agent-doc] During concurrent make check runs in separate worktrees, the check-test-tmpdir setup step printed another worktree's path (/var/tmp:/home/brian/work/btakita/agent-doc-wt/sdkqueuesync). Find where the test TMPDIR is derived or cached across worktrees and isolate it per checkout.
+- [ ] [#forkedsubagentsdispatche] #subagentmsgcollide [agent-doc] Forked subagents dispatched by a queue coordinator share one scratchpad, and one subagent's commit-message file overwrote another's (sdk-queue-subagent-sync commit 32a13fb3e7 carries the cancel-turn message). Have the binary-emitted subagent authorization preamble require a per-subagent message file (or commit -F from stdin) so concurrent commits cannot swap messages.
+- [ ] [#loadbudgettests] [agent-doc] Wall-clock budget tests fail when many test suites run concurrently (load average 70-140 with 8 subagents in make check): closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes (3.70s and 5.7s vs a 3s budget; 0.7-1.5s alone), agent-doc-sync-io rename_debounce_suppresses_auto_start and rename_debounce_does_not_affect_other_files, finalize_editor_absent_replays_operator_deleted_struck_queue_rows (24.6s vs 10.3s alone). Make them deterministic (virtual clock or a CPU-time budget, not wall clock) instead of raising budgets or rerunning to green.
+- [ ] [#qheadresiduestrike] [agent-doc] The queue catch-up residue strike can still strike an operator re-typed free-text head that is not a recurring command (for example a repeated bug report), because it matches against every earlier Queue prompt echo in the exchange, not only echoes written after the head was re-added. Scope the match to echoes newer than the head's re-entry; regression test with a re-typed repeated report.
+- [ ] [#checktmpdirleak] [agent-doc] During concurrent make check runs in separate worktrees, the check-test-tmpdir setup step printed another worktree's path (/var/tmp:/home/brian/work/btakita/agent-doc-wt/sdkqueuesync). Find where the test TMPDIR is derived or cached across worktrees and isolate it per checkout.
+- [ ] [#subagentmsgcollide] [agent-doc] Forked subagents dispatched by a queue coordinator share one scratchpad, and one subagent's commit-message file overwrote another's (sdk-queue-subagent-sync commit 32a13fb3e7 carries the cancel-turn message). Have the binary-emitted subagent authorization preamble require a per-subagent message file (or commit -F from stdin) so concurrent commits cannot swap messages.
 - [ ] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
-- [ ] 🚧 [#refreshmemlockstall] [agent-doc] The controller's refresh_memory durable_reload holds the project state lock for 1-4s, which is the root of the editor-op append timeouts seen during the 2026-10-11 sdk.md typing burst. 0.35.488 (editoropscheckpointfail f99567825) survives them by retaining and re-sending with the same batch id; remove the stall itself: shrink the critical section (load outside the lock, swap under it) and add a regression test that a concurrent editor-op append is not blocked by a durable reload.
 <!-- /agent:backlog -->
 
 ## Review

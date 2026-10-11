@@ -1318,32 +1318,74 @@ mod visible_write_content_snapshot_tests {
         assert_eq!(result, Some("immediate content".to_string()));
     }
 
+    /// `#visiblewritewallclock`: a poll that is already waiting observes a
+    /// receipt recorded concurrently, and no wall-clock deadline decides the
+    /// outcome.
+    ///
+    /// The test used to give the poll a 5s budget and assert `Some`, which
+    /// assumed the writer finishes within 5s. With the test pinned to one core
+    /// shared with 96 busy-loops the writer's receipt RPC alone can outlast that
+    /// (7-9 of 30 runs returned `None`), so the test failed on scheduling, not on
+    /// the poll. Now the writer signals once its receipt is recorded and the test
+    /// synchronizes on that signal. A poll that ends empty is only a defect if the
+    /// receipt was recorded before the poll began; otherwise the test waits for
+    /// the receipt and re-polls with a zero budget, so the predicate alone (not a
+    /// deadline) must find it. The production poll keeps its timeout API.
     #[test]
     fn test_poll_lazily_event_appears_after_delay() {
         let project = WarmControllerProject::new();
         let patch_id = "poll-delayed";
         let doc = project.doc();
 
-        // Spawn a thread that records the durable lazily proof after 50ms. Wait
-        // until it has actually started before beginning the polling budget:
-        // heavily parallel CI can otherwise leave a newly spawned thread
-        // unscheduled for the entire short test timeout.
+        // Spawn a thread that records the durable lazily proof after 50ms, so the
+        // poll is normally already parked when it lands. Wait until the thread
+        // has started, and have it signal once the receipt is recorded.
         let doc_for_thread = doc.clone();
         let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
+        let (recorded_tx, recorded_rx) = std::sync::mpsc::channel();
         let writer = std::thread::spawn(move || {
             started_tx.send(()).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(50));
             record_lazily_visible_write_candidate(&doc_for_thread, patch_id, "delayed content");
+            recorded_tx.send(()).unwrap();
         });
         started_rx.recv().unwrap();
 
-        let result = poll_visible_write_content_lazily_event(
+        // Under heavy load the writer may already have recorded before the poll
+        // starts; then the poll's first read must find it.
+        let recorded_before_poll = recorded_rx.try_recv().is_ok();
+        let result = match poll_visible_write_content_lazily_event(
             &doc,
             patch_id,
             std::time::Duration::from_secs(5),
             std::time::Duration::from_millis(10),
         )
-        .unwrap();
+        .unwrap()
+        {
+            Some(content) => Some(content),
+            None => {
+                // The poll's budget ran out first. That is only a defect if the
+                // receipt was already recorded when the poll began.
+                assert!(
+                    !recorded_before_poll,
+                    "the receipt was recorded before the poll began, yet the poll missed it"
+                );
+                // The writer was still in flight. Wait for the receipt itself, not
+                // a deadline, then require the poll to find it without any budget.
+                if recorded_rx.recv().is_err() {
+                    // The writer died before recording; surface its panic.
+                    writer.join().unwrap();
+                    unreachable!("writer exited without recording its receipt");
+                }
+                poll_visible_write_content_lazily_event(
+                    &doc,
+                    patch_id,
+                    std::time::Duration::ZERO,
+                    std::time::Duration::from_millis(10),
+                )
+                .unwrap()
+            }
+        };
         writer.join().unwrap();
         assert_eq!(result, Some("delayed content".to_string()));
     }

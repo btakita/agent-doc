@@ -410,28 +410,28 @@ The sdkwedge subagent is now fixing both root causes: the save receipt stalling 
 - ~~release + publish~~
 - ~~sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.~~
 - ⏳ do [#drivecapturedsplice]
-- do [#respondcloseoutbacklog]
+- 🚧 do [#respondcloseoutbacklog]
 - ~~do [#wallclockbudget]~~
 - ~~do [#queuecatchresidue]~~
 - ~~do [#duringconcurrentcheck]~~
 - ~~do [#forkedsubagentsdispatche]~~
-- sdk.md turn with a subagent is wedged. Asking me to restart.
-- do [#loadbudgettests]
-- do [#qheadresiduestrike]
-- do [#checktmpdirleak]
-- do [#subagentmsgcollide]
+- 🚧 sdk.md turn with a subagent is wedged. Asking me to restart.
+- 🚧 do [#loadbudgettests]
+- 🚧 do [#qheadresiduestrike]
+- 🚧 do [#checktmpdirleak]
+- 🚧 do [#subagentmsgcollide]
 - ~~Navigating between sdk.md + rpg.md resulted in a tmux focus on rpg.md in the 1:stash tmux window. Please make sure the focus effects always sync with the current Editor document(s).~~
-- do [#respondcloseoutbacklog]
+- 🚧 do [#respondcloseoutbacklog]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#respondcloseoutbacklog] [agent-doc] A respond closeout with --backlog-add "<id> text" flags applied every add twice when its tracked-work half was retained by the delivery projection: once under the given id and once under a coined hash id with the id left in the text (2026-10-11 05:00 EDT on agent-doc-bugs.md: 4 adds became 8 backlog items and 8 queue heads; output said 'reopened a fresh cycle for a pending-only tracked-work update' then 'retained while their delivery projection converges', then 'appended 8 same-cycle actionable backlog id(s)'). Make the retained tracked-work replay idempotent by mutation identity, with a regression test reproducing the retained-then-absorbed path.
-- [ ] [#loadbudgettests] [agent-doc] Wall-clock budget tests fail when many test suites run concurrently (load average 70-140 with 8 subagents in make check): closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes (3.70s and 5.7s vs a 3s budget; 0.7-1.5s alone), agent-doc-sync-io rename_debounce_suppresses_auto_start and rename_debounce_does_not_affect_other_files, finalize_editor_absent_replays_operator_deleted_struck_queue_rows (24.6s vs 10.3s alone). Make them deterministic (virtual clock or a CPU-time budget, not wall clock) instead of raising budgets or rerunning to green.
-- [ ] [#qheadresiduestrike] [agent-doc] The queue catch-up residue strike can still strike an operator re-typed free-text head that is not a recurring command (for example a repeated bug report), because it matches against every earlier Queue prompt echo in the exchange, not only echoes written after the head was re-added. Scope the match to echoes newer than the head's re-entry; regression test with a re-typed repeated report.
-- [ ] [#checktmpdirleak] [agent-doc] During concurrent make check runs in separate worktrees, the check-test-tmpdir setup step printed another worktree's path (/var/tmp:/home/brian/work/btakita/agent-doc-wt/sdkqueuesync). Find where the test TMPDIR is derived or cached across worktrees and isolate it per checkout.
-- [ ] [#subagentmsgcollide] [agent-doc] Forked subagents dispatched by a queue coordinator share one scratchpad, and one subagent's commit-message file overwrote another's (sdk-queue-subagent-sync commit 32a13fb3e7 carries the cancel-turn message). Have the binary-emitted subagent authorization preamble require a per-subagent message file (or commit -F from stdin) so concurrent commits cannot swap messages.
+- [ ] 🚧 [#respondcloseoutbacklog] [agent-doc] A respond closeout with --backlog-add "<id> text" flags applied every add twice when its tracked-work half was retained by the delivery projection: once under the given id and once under a coined hash id with the id left in the text (2026-10-11 05:00 EDT on agent-doc-bugs.md: 4 adds became 8 backlog items and 8 queue heads; output said 'reopened a fresh cycle for a pending-only tracked-work update' then 'retained while their delivery projection converges', then 'appended 8 same-cycle actionable backlog id(s)'). Make the retained tracked-work replay idempotent by mutation identity, with a regression test reproducing the retained-then-absorbed path.
+- [ ] 🚧 [#loadbudgettests] [agent-doc] Wall-clock budget tests fail when many test suites run concurrently (load average 70-140 with 8 subagents in make check): closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes (3.70s and 5.7s vs a 3s budget; 0.7-1.5s alone), agent-doc-sync-io rename_debounce_suppresses_auto_start and rename_debounce_does_not_affect_other_files, finalize_editor_absent_replays_operator_deleted_struck_queue_rows (24.6s vs 10.3s alone). Make them deterministic (virtual clock or a CPU-time budget, not wall clock) instead of raising budgets or rerunning to green.
+- [ ] 🚧 [#qheadresiduestrike] [agent-doc] The queue catch-up residue strike can still strike an operator re-typed free-text head that is not a recurring command (for example a repeated bug report), because it matches against every earlier Queue prompt echo in the exchange, not only echoes written after the head was re-added. Scope the match to echoes newer than the head's re-entry; regression test with a re-typed repeated report.
+- [ ] 🚧 [#checktmpdirleak] [agent-doc] During concurrent make check runs in separate worktrees, the check-test-tmpdir setup step printed another worktree's path (/var/tmp:/home/brian/work/btakita/agent-doc-wt/sdkqueuesync). Find where the test TMPDIR is derived or cached across worktrees and isolate it per checkout.
+- [ ] 🚧 [#subagentmsgcollide] [agent-doc] Forked subagents dispatched by a queue coordinator share one scratchpad, and one subagent's commit-message file overwrote another's (sdk-queue-subagent-sync commit 32a13fb3e7 carries the cancel-turn message). Have the binary-emitted subagent authorization preamble require a per-subagent message file (or commit -F from stdin) so concurrent commits cannot swap messages.
 - [ ] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 <!-- /agent:backlog -->
 

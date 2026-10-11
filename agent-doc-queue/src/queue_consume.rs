@@ -127,6 +127,95 @@ pub struct NextQueueHeadSelection {
     pub stop_fence_at_head: bool,
 }
 
+/// The queue head a response closeout judged answered, captured from the SAME
+/// document the consumption decision read (`#qconsumeapprovedhead`, gh#240).
+///
+/// A free-text closeout decides "consume" against its pre-write document but
+/// the consume re-reads the live document. Between the two, another closeout
+/// driver (a captured-finalize resume's repair pass, an `#ftstrike` effect) can
+/// strike the answered head, so "the leading live head" at consume time is the
+/// NEXT operator prompt, which no response answered. Draining it also cleared
+/// `queue: go`. The consume therefore binds to this identity, never to
+/// "whatever is the head now".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApprovedQueueHead {
+    /// The decision read no live head, so a free-text consume has nothing it
+    /// is entitled to take.
+    NoHead,
+    /// The decision approved exactly this head.
+    Head {
+        /// Head text with the in-progress and priority markers removed.
+        text: String,
+        /// Strike-stable node identity (`{item id}:{occurrence}`, without the
+        /// component index), when the queue is AST-addressable. Distinguishes
+        /// two heads with identical text.
+        node_identity: Option<String>,
+    },
+}
+
+/// Capture the head a consume decision is about to approve, from the exact
+/// content that decision read.
+pub fn approved_queue_head_for_consume(content: &str) -> Result<ApprovedQueueHead> {
+    let Some(head) = crate::queue_heads::active_queue_head_text(content)? else {
+        return Ok(ApprovedQueueHead::NoHead);
+    };
+    let node_identity = queue_prompt_node_keys_for_count(content, 1)
+        .ok()
+        .filter(|keys| keys.ast_backed)
+        .and_then(|keys| keys.keys.into_iter().next())
+        .map(|key| queue_node_identity_without_component_index(&key));
+    Ok(ApprovedQueueHead::Head {
+        text: approved_head_text(&head),
+        node_identity,
+    })
+}
+
+fn approved_head_text(text: &str) -> String {
+    strip_priority_markers(&strip_in_progress_marker(text))
+        .trim()
+        .to_string()
+}
+
+/// `queue:{component index}:{item id}:{occurrence}` -> `{item id}:{occurrence}`.
+/// The component index is positional across ALL components, so an unrelated
+/// component inserted above the queue between decision and consume must not
+/// read as a different head.
+pub fn queue_node_identity_without_component_index(node_key: &str) -> String {
+    let mut parts = node_key.splitn(3, ':');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(_component), Some(index), Some(rest)) if index.parse::<usize>().is_ok() => {
+            rest.to_string()
+        }
+        _ => node_key.to_string(),
+    }
+}
+
+/// Whether the head a consume plan is about to take is the head the closeout
+/// approved. Text must match after marker normalization; when both sides carry
+/// a node identity it must match too.
+pub fn approved_queue_head_matches(
+    approved: &ApprovedQueueHead,
+    consumed_text: &str,
+    consumed_node_key: Option<&str>,
+) -> bool {
+    let ApprovedQueueHead::Head {
+        text,
+        node_identity,
+    } = approved
+    else {
+        return false;
+    };
+    if *text != approved_head_text(consumed_text) {
+        return false;
+    }
+    match (node_identity.as_deref(), consumed_node_key) {
+        (Some(approved), Some(consumed)) => {
+            approved == queue_node_identity_without_component_index(consumed)
+        }
+        _ => true,
+    }
+}
+
 /// The structural-op vocabulary for queue node mutations. Each variant maps to a
 /// [`QueueCrdt`](agent_doc_merge::queue_seqcrdt::QueueCrdt) effect (Phase A,
 /// `agent-doc-merge::queue_seqcrdt`):
@@ -1783,6 +1872,82 @@ mod tests {
 
     fn queue_doc(body: &str) -> String {
         format!("<!-- agent:queue -->\n{body}<!-- /agent:queue -->\n")
+    }
+
+    fn active_queue_doc(body: &str) -> String {
+        format!("---\nqueue: go\n---\n\n<!-- agent:queue go -->\n{body}<!-- /agent:queue -->\n")
+    }
+
+    fn first_live_node_key(content: &str) -> String {
+        queue_prompt_node_keys_for_count(content, 1)
+            .unwrap()
+            .keys
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    #[test]
+    fn approved_head_rejects_the_next_head_after_the_answered_head_is_struck() {
+        // #qconsumeapprovedhead (gh#240).
+        let decision = active_queue_doc("- #upgrade\n- [#rv1]: go\n");
+        let approved = approved_queue_head_for_consume(&decision).unwrap();
+        let struck = active_queue_doc(
+            "- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike)\n- [#rv1]: go\n",
+        );
+        let next_key = first_live_node_key(&struck);
+        assert!(!approved_queue_head_matches(
+            &approved,
+            "[#rv1]: go",
+            Some(&next_key)
+        ));
+        assert!(!approved_queue_head_matches(&approved, "[#rv1]: go", None));
+        let own_key = first_live_node_key(&decision);
+        assert!(approved_queue_head_matches(
+            &approved,
+            "#upgrade",
+            Some(&own_key)
+        ));
+    }
+
+    #[test]
+    fn approved_head_identity_separates_duplicate_text_heads() {
+        let decision = active_queue_doc("- go\n- go\n");
+        let approved = approved_queue_head_for_consume(&decision).unwrap();
+        let struck = active_queue_doc("- ~~go~~\n- go\n");
+        let second = first_live_node_key(&struck);
+        assert!(!approved_queue_head_matches(&approved, "go", Some(&second)));
+        assert!(approved_queue_head_matches(
+            &approved,
+            "go",
+            Some(&first_live_node_key(&decision))
+        ));
+    }
+
+    #[test]
+    fn approved_head_ignores_markers_and_component_index_drift() {
+        let decision = active_queue_doc(&format!("- :pushpin: {IN_PROGRESS_MARKER} ship it\n"));
+        let approved = approved_queue_head_for_consume(&decision).unwrap();
+        let key = first_live_node_key(&decision);
+        let drifted = key.replacen(":0:", ":7:", 1);
+        assert_ne!(
+            key, drifted,
+            "fixture must actually move the component index"
+        );
+        assert!(approved_queue_head_matches(
+            &approved,
+            "ship it",
+            Some(&drifted)
+        ));
+    }
+
+    #[test]
+    fn no_approved_head_matches_nothing() {
+        let paused =
+            "---\nqueue: stop\n---\n\n<!-- agent:queue -->\n- later\n<!-- /agent:queue -->\n";
+        let approved = approved_queue_head_for_consume(paused).unwrap();
+        assert_eq!(approved, ApprovedQueueHead::NoHead);
+        assert!(!approved_queue_head_matches(&approved, "later", None));
     }
 
     #[test]

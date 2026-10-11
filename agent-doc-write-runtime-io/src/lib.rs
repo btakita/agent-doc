@@ -1427,6 +1427,39 @@ fn consume_queue_prompts_for_done_ids_closeout(
     done_ids: &[String],
     force_disk: bool,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_approved_queue_prompts_for_done_ids_closeout(file, done_ids, None, force_disk)
+}
+
+/// Phase 3c's consume, bound to the head its decision approved
+/// (`#qconsumeapprovedhead`, gh#240). `decision_content` is the exact document
+/// `queue_consumption_allowed_for_response` read; the consume itself re-reads
+/// the live document, so a head struck in between (by another closeout driver)
+/// must turn the consume into a no-op instead of taking the next prompt.
+fn consume_queue_prompts_for_response_closeout(
+    file: &Path,
+    decision_content: &str,
+    done_ids: &[String],
+    force_disk: bool,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    let approved_head = if done_ids.is_empty() {
+        Some(agent_doc_queue::queue_consume::approved_queue_head_for_consume(decision_content)?)
+    } else {
+        None
+    };
+    consume_approved_queue_prompts_for_done_ids_closeout(
+        file,
+        done_ids,
+        approved_head.as_ref(),
+        force_disk,
+    )
+}
+
+fn consume_approved_queue_prompts_for_done_ids_closeout(
+    file: &Path,
+    done_ids: &[String],
+    approved_head: Option<&agent_doc_queue::queue_consume::ApprovedQueueHead>,
+    force_disk: bool,
+) -> Result<Option<QueueConsumptionOutcome>> {
     // `#qselectedheadonly`: fence a free-text consume to this cycle's
     // preflight-selected heads so it never takes the next, unanswered prompt.
     let selected_heads = agent_doc_cycle_state_io::load(file)?
@@ -1436,6 +1469,7 @@ fn consume_queue_prompts_for_done_ids_closeout(
         file,
         done_ids,
         &selected_heads,
+        approved_head,
         force_disk,
         queue_consume_writeback_effects(force_disk),
     );
@@ -3354,8 +3388,9 @@ fn run_command_inner_within_pass(
             CommitMode::None => {}
             CommitMode::BestEffort => {
                 if queue_consumption_allowed {
-                    if let Err(e) = consume_queue_prompts_for_done_ids_closeout(
+                    if let Err(e) = consume_queue_prompts_for_response_closeout(
                         file,
+                        current_content_for_queue.as_ref(),
                         &queue_resolution_ids,
                         options.force_disk,
                     ) {
@@ -3393,8 +3428,9 @@ fn run_command_inner_within_pass(
             }
             CommitMode::Required => {
                 if queue_consumption_allowed {
-                    consume_queue_prompts_for_done_ids_closeout(
+                    consume_queue_prompts_for_response_closeout(
                         file,
+                        current_content_for_queue.as_ref(),
                         &queue_resolution_ids,
                         options.force_disk,
                     )?;
@@ -5402,6 +5438,138 @@ mod tests {
         let loaded = fs::read_to_string(&snap_abs).unwrap();
         assert_eq!(loaded, content);
     }
+    /// gh#240 fixture: two free-text heads, `queue: go`, a response that
+    /// answers only the first.
+    fn gh240_documents() -> (String, String, String) {
+        let response = "> **Queue prompt:** #upgrade\n\n### Re: upgrade — opus-5\n\nUpgraded.\n";
+        let decision = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents preset=\"#auth\" priority go -->\n",
+            "- #upgrade\n",
+            "- [#rv1]: go\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string();
+        // The live document the consume re-reads: the response landed, and a
+        // second closeout driver (the captured-finalize resume's repair pass)
+        // already struck the answered head.
+        let struck = format!(
+            concat!(
+                "---\nqueue: go\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "{}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents preset=\"#auth\" priority go -->\n",
+                "- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike)\n",
+                "- [#rv1]: go\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response
+        );
+        (decision, struck, response.to_string())
+    }
+
+    #[test]
+    fn closeout_consume_never_takes_the_next_head_after_a_concurrent_answered_strike() {
+        // #qconsumeapprovedhead (gh#240): consumption was approved on the
+        // pre-write head `#upgrade`; the consume re-read a document whose
+        // answered head was already struck, consumed the unanswered
+        // `[#rv1]: go`, drained the queue, and cleared `queue: go`.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let (decision, struck, response) = gh240_documents();
+
+        assert!(
+            queue_consumption_allowed_for_response(&doc, None, &decision, &response, &[]).unwrap(),
+            "the decision must approve consuming the answered `#upgrade` head"
+        );
+
+        fs::write(&doc, &struck).unwrap();
+        let outcome =
+            consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true).unwrap();
+        assert!(outcome.is_none(), "{outcome:?}");
+        let after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            after, struck,
+            "the unanswered head and `queue: go` must survive"
+        );
+        assert!(after.contains("queue: go") && after.contains("- [#rv1]: go\n"));
+        let ops =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("queue_consume_unapproved_head_noop"),
+            "the moved head must be logged as a monotonic no-op:\n{ops}"
+        );
+    }
+
+    #[test]
+    fn closeout_consume_still_takes_the_approved_head_when_it_is_live() {
+        // #qconsumeapprovedhead: the fence is an identity check, not a veto.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let (decision, _struck, _response) = gh240_documents();
+        fs::write(&doc, &decision).unwrap();
+
+        let outcome = consume_queue_prompts_for_response_closeout(&doc, &decision, &[], true)
+            .unwrap()
+            .expect("the approved head is still the leading live head");
+        assert_eq!(outcome.consumed_text.trim(), "#upgrade");
+        assert_eq!(outcome.consumed_count, 1);
+        assert!(!outcome.drained);
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("queue: go"), "{after}");
+        assert!(after.contains("- [#rv1]: go\n"), "{after}");
+    }
+
+    #[test]
+    fn closeout_consume_never_takes_a_duplicate_text_head_after_a_concurrent_strike() {
+        // #qconsumeapprovedhead: text alone cannot tell `- go` from the next
+        // `- go`; the strike-stable node identity can.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let decision = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- go\n",
+            "- go\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let struck = decision.replacen(
+            "- go\n",
+            "- ~~go~~ — auto-struck: answered this cycle (#ftstrike)\n",
+            1,
+        );
+        fs::write(&doc, &struck).unwrap();
+
+        let outcome =
+            consume_queue_prompts_for_response_closeout(&doc, decision, &[], true).unwrap();
+        assert!(outcome.is_none(), "{outcome:?}");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), struck);
+    }
+
+    #[test]
+    fn closeout_consume_without_an_approved_head_takes_nothing() {
+        // #qconsumeapprovedhead: a decision that read no live head approved
+        // nothing, so a head that appeared since is not consumable.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let decision =
+            "---\nqueue: stop\n---\n\n<!-- agent:queue -->\n- later work\n<!-- /agent:queue -->\n";
+        let live = decision.replace("queue: stop", "queue: go");
+        fs::write(&doc, &live).unwrap();
+
+        let outcome =
+            consume_queue_prompts_for_response_closeout(&doc, decision, &[], true).unwrap();
+        assert!(outcome.is_none(), "{outcome:?}");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), live);
+    }
+
     #[test]
     fn closeout_consume_never_takes_an_unselected_next_head() {
         // #qselectedheadonly (agent-doc-bugs.md 2026-09-30): the answered-strike
@@ -5431,6 +5599,7 @@ mod tests {
             &doc,
             &[],
             &selected,
+            None,
             true,
             queue_consume_writeback_effects(true),
         )
@@ -5444,6 +5613,7 @@ mod tests {
             &doc,
             &[],
             &selected,
+            None,
             true,
             queue_consume_writeback_effects(true),
         )

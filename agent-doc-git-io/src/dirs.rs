@@ -159,18 +159,10 @@ pub fn resolve_relative_to_git_root_from(cwd: &Path, file: &Path) -> Result<(Pat
         return Ok(resolve_absolute_to_git_root(&resolved, cwd));
     }
 
-    let output = Command::new("git")
-        .current_dir(cwd)
-        .args(["rev-parse", "--show-superproject-working-tree"])
-        .output();
-    if let Ok(ref o) = output {
-        let root = String::from_utf8_lossy(&o.stdout).trim().to_string();
-        if !root.is_empty() {
-            let root_path = PathBuf::from(&root);
-            let resolved = root_path.join(file);
-            if resolved.exists() {
-                return Ok((root_path, resolved));
-            }
+    if let Some(root_path) = git_superproject_at(cwd) {
+        let resolved = root_path.join(file);
+        if resolved.exists() {
+            return Ok((root_path, resolved));
         }
     }
 
@@ -264,8 +256,16 @@ pub fn git_toplevel_at(dir: &Path) -> Option<PathBuf> {
 /// Get the superproject working tree from a specific directory.
 /// Returns `Some(path)` only when `dir` is inside a submodule. Returns `None`
 /// for top-level repos or when git is unavailable.
+///
+/// `--show-superproject-working-tree` inspects the filesystem parent of the
+/// work tree, so an exported `GIT_DIR`/`GIT_WORK_TREE` override still reports
+/// the enclosing checkout whose index has a gitlink at that path. Every later
+/// git command run "in the superproject" inherits the same override and talks
+/// to the overridden repository, never the parent, so the parent-pointer
+/// closeout can never converge. A superproject is only real when it resolves
+/// to a different git dir than `dir` itself.
 pub fn git_superproject_at(dir: &Path) -> Option<PathBuf> {
-    Command::new("git")
+    let superproject = Command::new("git")
         .current_dir(dir)
         .args(["rev-parse", "--show-superproject-working-tree"])
         .output()
@@ -277,7 +277,12 @@ pub fn git_superproject_at(dir: &Path) -> Option<PathBuf> {
             } else {
                 Some(PathBuf::from(s))
             }
-        })
+        })?;
+    let own_git_dir = absolute_git_dir_at(dir);
+    if own_git_dir.is_some() && own_git_dir == absolute_git_dir_at(&superproject) {
+        return None;
+    }
+    Some(superproject)
 }
 
 /// If `file` lives inside a submodule of `super_root`, return the submodule's

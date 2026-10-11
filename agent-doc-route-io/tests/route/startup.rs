@@ -3838,6 +3838,97 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
         assert_eq!(iso.list_window_panes(&agent_doc_window).unwrap().len(), 3);
     }
+    /// `#focussynccurrent` (2026-10-11 sdk.md/rpg.md): a controller
+    /// `editor_route` for `rpg.md` converged its layout (rpg pane visible and
+    /// focused), then the operator switched the editor to `sdk.md`. The layout
+    /// plane's newer generation swapped the sdk pane in and parked the rpg pane
+    /// in `stash`. The still-running rpg route then submitted its trigger and
+    /// called `select_pane` (`select-window` + `select-pane`), dragging tmux into
+    /// `stash` on rpg.md while the editor showed sdk.md. Under a
+    /// controller-owned layout the route's submit must leave focus exactly where
+    /// the newest editor selection put it.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn controller_owned_layout_route_submit_does_not_focus_pane_stashed_by_newer_selection() {
+        use agent_doc_route_io::direct_pane_dispatch::send_command_once_unchecked;
+        use agent_doc_route_io::invocation::LayoutOwnedByControllerGuard;
+        use agent_doc_route_io::route_focus::{RouteFocusDecision, focus_route_pane};
+
+        let iso = IsolatedTmux::new("route-test-controller-layout-late-focus");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let rpg = dir.path().join("rpg.md");
+        std::fs::write(&rpg, "# rpg\n").unwrap();
+
+        // Editor generation N: [agent-doc-bugs.md, rpg.md], rpg focused.
+        let left = iso.auto_start(session, &cwd).unwrap();
+        let _ = iso
+            .cmd()
+            .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
+            .status();
+        let rpg_pane = iso.auto_start(session, &cwd).unwrap();
+        agent_doc_tmux_io::join_pane_guarded(&iso, &rpg_pane, &left, session, "-dh").unwrap();
+        iso.select_pane(&rpg_pane).unwrap();
+        let agent_doc_window = iso.pane_window(&left).unwrap();
+
+        // Editor generation N+1 (operator switched to sdk.md): the layout plane
+        // swaps the sdk pane in, parks rpg in stash, and focuses sdk.
+        let sdk_pane = iso.auto_start(session, &cwd).unwrap();
+        agent_doc_tmux_io::join_pane_guarded(&iso, &sdk_pane, &left, session, "-dh").unwrap();
+        iso.stash_pane(&rpg_pane, session).unwrap();
+        iso.select_pane(&sdk_pane).unwrap();
+        let stash_window = iso.pane_window(&rpg_pane).unwrap();
+        assert_ne!(
+            stash_window, agent_doc_window,
+            "rpg pane is parked in stash"
+        );
+        assert_eq!(
+            iso.active_window(session).as_deref(),
+            Some(agent_doc_window.as_str())
+        );
+        assert_eq!(iso.active_pane(session).as_deref(), Some(sdk_pane.as_str()));
+
+        // The stale rpg route reaches its direct-pane submit.
+        {
+            let _guard = LayoutOwnedByControllerGuard::set(true);
+            send_command_once_unchecked(
+                &iso,
+                &rpg_pane,
+                rpg.to_str().unwrap(),
+                &HarnessConfig::claude(),
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            iso.active_window(session).as_deref(),
+            Some(agent_doc_window.as_str()),
+            "a late route submit must not switch the client into the stash window"
+        );
+        assert_eq!(
+            iso.active_pane(session).as_deref(),
+            Some(sdk_pane.as_str()),
+            "focus stays on the editor's CURRENT document (sdk.md)"
+        );
+        assert_eq!(
+            iso.pane_window(&rpg_pane).unwrap(),
+            stash_window,
+            "rpg stays parked"
+        );
+
+        // Control: a standalone route still owns focus, so the guard is what
+        // kept the client on sdk.md above.
+        assert_eq!(
+            focus_route_pane(&iso, &rpg, &rpg_pane, "test_control"),
+            RouteFocusDecision::Apply
+        );
+        assert_eq!(iso.active_pane(session).as_deref(), Some(rpg_pane.as_str()));
+        assert_eq!(
+            iso.active_window(session).as_deref(),
+            Some(stash_window.as_str())
+        );
+    }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn join_pane_rescue_places_left_of_target_when_requested() {

@@ -743,11 +743,7 @@ pub fn send_command_once_unchecked(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
         "sessions.send_submitted_text_for_harness",
     )?;
-    if !crate::invocation::preserve_route_layout()
-        && let Err(e) = tmux.select_pane(pane)
-    {
-        eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
-    }
+    crate::route_focus::focus_route_pane(tmux, Path::new(file_path), pane, "direct_pane_submit");
     eprintln!("[route] Sent {} → pane {}", trigger, pane);
     Ok(trigger)
 }

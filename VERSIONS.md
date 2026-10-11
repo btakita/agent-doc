@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **A late route no longer drags tmux focus off the editor's current document (`#focussynccurrent`).** Operator
+  report: switching the editor rpg.md → sdk.md left tmux on rpg.md in `0:1 stash`. Logs: the rpg `editor_route`
+  converged (`focus_applied:rpg.md:%182`), the editor switch published generation 42 (sdk `%180` in, `%182` to stash),
+  then the still-running rpg route logged `route_stash_rescue_skipped ... window=stash` and its direct-pane submit
+  called `select_pane(%182)`, which runs `select-window` + `select-pane` and switched the client into stash. Every route
+  focus effect now goes through `route_focus::focus_route_pane`: a controller-owned layout route never focuses (the
+  generation-sequenced layout plane already applied its focus and owns every newer selection) and logs
+  `route_focus_skipped ... reason=controller_layout_owns_focus`; preserved-layout routes stay focus-neutral; standalone
+  CLI routes keep focusing. Covered by `route_focus` unit tests and the live-tmux regression
+  `controller_owned_layout_route_submit_does_not_focus_pane_stashed_by_newer_selection` (mutation-checked).
+
 ## 0.35.488
 
 - **A prompt cancelled before Claude Code persists it no longer wedges Clear Session Context (`#sdkclearwedge`).** An

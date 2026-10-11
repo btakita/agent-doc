@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **A closeout's tracked-work half applies exactly once when it is retained and then replayed (`#respondcloseoutbacklog`).**
+  A `respond --backlog-add "#id text"` closeout whose tracked-work half was retained by the delivery projection was
+  applied twice: by the retained foreground write and by the captured-finalize resume replaying the same plan. The
+  second application saw `#id` taken and filed the item again under a coined id with `#id` left in the text, and the
+  queue mirror enqueued both (4 adds became 8 backlog items and 8 queue heads). An add whose explicit or inferred
+  bare-tag id already names an active item with the same text is now a no-op that reports that id
+  (`backlog_add_already_satisfied ... id=#<id>`), and the resume drops such adds before replaying
+  (`dropped=backlog-add:#<id>`). The same-cycle queue mirror now decides "already queued" from the live authority
+  instead of a disk projection that can lag a retained delivery.
+
 ## 0.35.489
 
 - **A controller memory refresh no longer stalls editor-op appends behind a full ledger reload (`#refreshmemlockstall`).**

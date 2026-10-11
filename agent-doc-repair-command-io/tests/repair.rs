@@ -2561,6 +2561,161 @@ mod tests {
     /// tracked-work mutations applied — backlog, queue, and review were
     /// byte-identical to their pre-cycle state. Recovery took a separate
     /// `write --pending-only --commit` plus `commit` from the owning pane.
+    /// `#respondcloseoutbacklog` — the retained-then-absorbed path applied
+    /// every bare-tag `--backlog-add` twice.
+    ///
+    /// Observed live 2026-10-11 on `tasks/agent-doc/agent-doc-bugs.md`
+    /// (`cycle-1791709177070`): `respond --backlog-add "#loadbudgettests
+    /// [agent-doc] ..."` (x4) reopened a committed cycle for the pending-only
+    /// update, its tracked-work half was retained by the delivery projection,
+    /// and the captured-finalize resume then replayed the same plan
+    /// (`captured_finalize_resume_tracked_work_replay
+    /// recovery=pending_only_no_commit`) while the foreground's retained write
+    /// converged and was absorbed. The witness said "unlanded" because the
+    /// retained transaction never flipped `tracked_work_mutations_applied`, and
+    /// the replayed add found `#loadbudgettests` taken, so it filed
+    /// `[#wallclockbudget] #loadbudgettests [agent-doc] ...` beside
+    /// `[#loadbudgettests] [agent-doc] ...`: 4 adds became 8 backlog items and
+    /// 8 queue heads.
+    ///
+    /// Here the foreground's retained write has ALREADY been absorbed (backlog
+    /// items and queue heads present under the given ids) when the resume
+    /// replays the captured plan; the replay must apply nothing.
+    #[test]
+    fn resume_replay_of_an_absorbed_retained_bare_tag_add_applies_exactly_once() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\n",
+            "session: test\n",
+            "agent_doc_format: append\n",
+            "agent_doc_write: merge\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#fix1]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#fix1] original next action\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## User\n\n",
+            "Hello\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let response = "Follow-ups filed for the retained closeout.";
+        let adds = [
+            "#loadbudgettests [agent-doc] Wall-clock budget tests fail under concurrent load",
+            "#qheadresiduestrike [agent-doc] The residue strike can still strike a re-typed head",
+        ];
+        let plan = agent_doc_write_command_io::CapturedCloseoutMutationPlan {
+            pending_add: adds.iter().map(|add| add.to_string()).collect(),
+            ..Default::default()
+        };
+        let plan_json = serde_json::to_string(&plan).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
+            &doc,
+            response,
+            content,
+            Some(response),
+            Some(&plan_json),
+        )
+        .unwrap();
+        // `#mutplanwitness`: the cycle asked for tracked-work mutations, and
+        // the retained transaction never recorded them as applied — exactly
+        // the facts the live witness saw, so the resume DOES replay.
+        agent_doc_cycle_state_io::record_requested_tracked_work_mutations(&doc).unwrap();
+
+        // The foreground's retained write converged and was absorbed: both
+        // halves are visible under the GIVEN ids.
+        let absorbed = concat!(
+            "---\n",
+            "session: test\n",
+            "agent_doc_format: append\n",
+            "agent_doc_write: merge\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#fix1]\n",
+            "- do [#loadbudgettests]\n",
+            "- do [#qheadresiduestrike]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#loadbudgettests] [agent-doc] Wall-clock budget tests fail under concurrent load\n",
+            "- [ ] [#qheadresiduestrike] [agent-doc] The residue strike can still strike a re-typed head\n",
+            "- [ ] [#fix1] original next action\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## User\n\n",
+            "Hello\n\n",
+            "## Assistant\n\n",
+            "Follow-ups filed for the retained closeout.\n",
+        );
+        std::fs::write(&doc, absorbed).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "test_response_cell_write_applied",
+            Some(absorbed),
+            Some(absorbed),
+        )
+        .unwrap();
+        agent_doc_repair_io::pending::clear_pending(&doc).unwrap();
+
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("write-applied capture should expose a durable resume key");
+        let outcome = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            matches!(
+                outcome,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "{outcome:?}"
+        );
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        for id in ["loadbudgettests", "qheadresiduestrike"] {
+            assert_eq!(
+                result
+                    .matches(&format!("- [ ] [#{id}] [agent-doc]"))
+                    .count(),
+                1,
+                "#{id} must be filed exactly once under its given id: {result}"
+            );
+            assert!(
+                !result.contains(&format!("] #{id} ")),
+                "#{id} must never be re-filed under a coined id with the given id left in the text: {result}"
+            );
+            assert_eq!(
+                result.matches(&format!("do [#{id}]")).count(),
+                1,
+                "#{id} must have exactly one queue head: {result}"
+            );
+        }
+        assert_eq!(
+            result.matches("- [ ] [#").count(),
+            3,
+            "the backlog holds the two follow-ups and #fix1, nothing else: {result}"
+        );
+        assert_eq!(result.matches(response).count(), 1, "{result}");
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("captured_finalize_resume_tracked_work_already_applied")
+                && ops_log.contains("backlog-add:#loadbudgettests")
+                && ops_log.contains("backlog-add:#qheadresiduestrike"),
+            "the resume must record that it dropped the absorbed adds by id: {ops_log}"
+        );
+    }
+
     ///
     /// The response half reaches `write_applied` first, so the resume takes the
     /// materialized-continuation branch; that branch continued straight to

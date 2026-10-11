@@ -2,6 +2,45 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.491
+
+- **Pane bleed: supervisor stderr never reaches the harness pane (`#perfpanebleed`).**
+  A hand-started `agent-doc start` supervisor kept the pane's terminal as its
+  stderr, because the redirect to `.agent-doc/logs/supervisor-stderr.log` only ran
+  for route-owned supervisors. Its 17-second midturn-steering check called
+  `find_code_ranges`, which printed `[perf] find_code_ranges: Nms`, and every
+  line landed in the pane. Claude's raw-mode terminal turned each bare newline
+  into a staircase, and the text left in the empty composer read as an unsent
+  operator draft, so the queue refused to dispatch (the frontend.md "wedge").
+  Every TUI-harness supervisor now redirects stderr before printing anything,
+  and does so again first thing on an install-triggered execve hot-reload. The
+  unconditional `[perf]` line is gone. Live isolated-tmux tests reproduce the
+  staircase and fail on any byte reaching the pane.
+- **Queued Clear Session Context (`#clearqueuedliveturn`, `#clearsupersedenotice`,
+  `#clearnoticeverify`).** A Clear pressed during a live turn is now queued and
+  delivered once at the idle boundary instead of failing with exit 1. The turn-end
+  hook settles the routed dispatch receipt, so a stale `running` receipt no longer
+  proves a live turn for 30 minutes. A repeat press re-arms the queued clear, a
+  run started before the press becomes the clear's turn, and Claude's
+  background-agent row no longer hides the idle prompt. The notice says when the
+  clear runs and shows re-arm and evidence age. A clear dropped by a newer prompt
+  now raises a "Queued clear not sent" notice in JetBrains and VS Code.
+- **Free-text closeout no longer consumes the next unanswered queue head
+  (GH #240).** The consume is now fenced to the exact head the response approved,
+  and the captured-finalize resume takes the closeout lease before its legacy
+  repair path mutates anything (`#closeoutleaseresume`).
+- **Declared scratch documents close out cleanly (`#splicectlcommit`).** With
+  `agent_doc_scratch: true`, a git-ignored document's controller-routed commit is
+  a clean skip instead of `commit_error`, recovery stops waiting on it, and a
+  stale submodule pointer no longer fails it. Undeclared ignored documents are
+  still refused.
+- **verify-captured-splice-recovery accepts the CRDT-forward recovery shape
+  (`#splicevrfyforward`)**, with the 2026-10-11 live run as a fixture and
+  per-clause mutation tests.
+- **JetBrains layout mirrors only the focused IDE window.** A document open in a
+  detached window no longer adds a phantom tmux column.
+- JetBrains plugin 0.2.541 (262: 0.2.542), VS Code extension 0.2.81.
+
 ## 0.35.490
 
 - **The state-plane subscriber lock-order test now detects an inversion

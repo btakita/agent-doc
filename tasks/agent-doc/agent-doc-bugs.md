@@ -276,6 +276,29 @@ These two fixes are not released. Queue `release + publish` to ship them as 0.35
 | `#pypireleaseworkflow` | `subagent:pypirelease` | Trigger PyPI from the Release workflow after assets upload, or via `workflow_run`, instead of a 30-minute poll. A GITHUB_TOKEN-created release does not fire `release:published`. |
 | GH #235 | `subagent:gh235` | session-check prints the manual recycle remedy next to the line saying not to run it. Route every stale-supervisor warning through the recycle-status-aware formatter. The coordinator closes the issue after integration. |
 | `release + publish` (new) | `coordinator:release-0487` | Ships those two fixes as v0.35.487 once they're integrated. |
+
+### Re: dev.md Clear Session Context refusal — dispatched — opus-5-5 · 2026-10-10T19:05-04:00
+
+**Dispatched:** the dev.md Clear Session Context failure went to `subagent:devclear` (worktree `agent-doc-wt/devclear`, based on `3c0680a6e`). The new queue line arrived as two lines and is treated as one item: the multi-line queue fix from 0.35.485 is working.
+
+**Evidence:** pane `%127` runs **Codex** and is idle. It shows `■ Conversation interrupted` and then an empty `› Ask Codex to do anything` prompt. Yet `turn_active_lease` still says a turn is live, so the clear was refused.
+
+**Likely cause:** this is the Codex counterpart of `#runctrlclaude`. A Codex interrupt never writes the turn-end receipt or releases the lease.
+
+**Brief:**
+- Find the Codex-side signal for a turn end, such as the Stop hook payload or a turn-aborted event in the rollout, and feed it into the existing receipt/reclaim path.
+- Stay fail-closed while a turn may truly be running.
+- Add a regression test and update the spec.
+- Report whether your current `%127` lease clears itself after install or needs a one-time action.
+
+Until that fix lands, `agent-doc session interrupt-clear src/haiven-dev/tasks/dev.md` clears dev.md now. It interrupts nothing real, since the Codex turn already ended.
+
+**Still in flight:**
+- **Release 0.35.486** (GH #234, test isolation): `make release` is running.
+- **Subagents:** `#respondfinalizehard`, `#pypireleaseworkflow`, GH #235.
+- **v0.35.487:** the queued `release + publish` ships these.
+
+No new backlog follow-ups this cycle. The item is tracked by its queue claim (`subagent:devclear`).
 <!-- agent:boundary:d2344b01 -->
 <!-- /agent:exchange -->
 
@@ -287,6 +310,8 @@ These two fixes are not released. Queue `release + publish` to ship them as 0.35
 - 🚧 do [#respondfinalizehard]
 - 🚧 do [#pypireleaseworkflow]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/235
+- fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
+Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md because a turn is live in pane %127 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md` to intentionally interrupt the turn and clear context.
 - 🚧 release + publish
 <!-- /agent:queue -->
 

@@ -402,6 +402,38 @@ The sdkwedge subagent is now fixing both root causes: the save receipt stalling 
 - **The "unsent trigger" in pane `%180` was Claude Code's dimmed prompt suggestion, not real input**, so my "press Enter" advice was likely wrong. The idle drain treated it as pending and sent a bare Enter, which an empty composer ignores. Fix: dimmed prompt text is masked before matching (the same rule routes already apply). sdk.md recovered on its own when a direct submit at 09:07 ran `/agent-doc sdk.md`.
 
 **In flight (7 subagents):** sdk.md wedge fixes (in `make check`), `#loadbudgettests`, `#qheadresiduestrike`, `#checktmpdirleak`, `#subagentmsgcollide` (re-running `make check` without stopping at the first failure; I'll check which test failed), `#respondcloseoutbacklog` (now also covering the duplicated queue line it created itself), and GH #239. `#drivecapturedsplice` shows ⏳ (the new awaiting-operator marker) until you write `go`.
+
+### Re: batch integrated and installed (main a186f61e46); queue items closed — opus-5-5 · 2026-10-11T07:35-04:00
+
+All seven fixes in this batch are merged into main (`a186f61e46`, fast-forward from v0.35.489) and installed with `make install`. Testing ran on the merged tree with logs written only to the integration worktree and exit codes taken from my own process: `make check` passed (10114 of 10114 tests, 142 skipped, TLA included) and `make tmux-ci` passed. I have **not** cut a new release. v0.35.489 is the latest tag; say the word and I'll release these as v0.35.490.
+
+> **Queue prompt:** sdk.md turn with a subagent is wedged. Asking me to restart.
+
+**Fixed.** No restart was needed: sdk.md recovered at 08:58 UTC and its turn ran at 09:07. There were two root causes:
+- The editor's 52 save rejections were never counted up, because a success on another transport cleared the record each time. Now a transport success clears only its own refusal count.
+- The supervisor pressed Enter on Claude Code's dimmed prompt suggestion, which an empty input box ignores. Dimmed prompt text is now ignored when checking for a pending trigger.
+
+> **Queue prompt:** #gh-fix: https://github.com/btakita/agent-doc/issues/239
+
+**Fixed and closed.** Editing a component's opening marker line no longer counts as replica corruption. A marker line only counts as removed when it was deleted or none of its own text survives. Typing into it keystroke by keystroke now keeps exactly what you typed, once. Deleting a whole marker line is still caught.
+
+**Done:**
+- **`#loadbudgettests`:** eight load-sensitive tests no longer depend on wall-clock time; they use CPU time, an injected clock, wait counts, or test-held gates. This turned up a real bug: finalize marked an editor-op epoch clear as failed when the reply arrived after 250ms. It now decides from the actual state.
+- **`#qheadresiduestrike`:** a retyped item is no longer struck by an answer to an earlier copy. Git history determines when the item was re-added.
+- **`#checktmpdirleak`:** the "leak" was subagents overwriting one shared `check.log`. The real gap was that a raw nextest run with an inherited search limit didn't bound its own workspace; each checkout now bounds its own. Subagents are now told to keep logs in their own worktree.
+- **`#subagentmsgcollide`:** the subagent authorization text now says commit messages go through `git commit -F -` and temp files stay in the subagent's own worktree.
+- **`#respondcloseoutbacklog`:** two processes (the foreground respond and the background resume) both applied the same backlog adds, and the second pass generated new ids. An identical add is now a no-op, the resume skips adds that already landed, and the queue mirror checks the live editor copy. The second `do [#respondcloseoutbacklog]` line was typed in the editor (31 bytes at 05:05:55), not written by agent-doc.
+
+**One decision for you:** in two tests (`controller_client_connection_is_one_request` and the IPC listener-eviction test) the timing limit became a 120s hang ceiling instead of a wait on an event, because there is no readiness signal to wait on yet. I filed adding one as a follow-up; delete that item if the ceilings are acceptable.
+
+**Follow-ups added to the backlog:**
+- A suspected race in the `state_subscribe` liveness test.
+- Remaining 250ms timing asserts in controller-io.
+- Readiness signals to replace the two 120s ceilings.
+- One `make tla` run that couldn't find the `Naturals` module.
+- The continuation-head skip still matching against the whole exchange.
+
+**Still waiting on you:** `#drivecapturedsplice`, which now shows ⏳. Write `go` when you can step away from the keyboard.
 <!-- agent:boundary:f6f2f5ef -->
 <!-- /agent:exchange -->
 
@@ -410,25 +442,25 @@ The sdkwedge subagent is now fixing both root causes: the save receipt stalling 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/239
+- ~~#gh-fix: https://github.com/btakita/agent-doc/issues/239~~
 - ⏳ do [#drivecapturedsplice]
-- 🚧 do [#respondcloseoutbacklog]
-- 🚧 sdk.md turn with a subagent is wedged. Asking me to restart.
-- 🚧 do [#loadbudgettests]
-- 🚧 do [#qheadresiduestrike]
-- 🚧 do [#checktmpdirleak]
-- 🚧 do [#subagentmsgcollide]
-- 🚧 do [#respondcloseoutbacklog]
+- ~~do [#respondcloseoutbacklog]~~
+- ~~sdk.md turn with a subagent is wedged. Asking me to restart.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#loadbudgettests]~~
+- ~~do [#qheadresiduestrike]~~
+- ~~do [#checktmpdirleak]~~
+- ~~do [#subagentmsgcollide]~~
+- ~~do [#respondcloseoutbacklog]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#respondcloseoutbacklog] [agent-doc] A respond closeout with --backlog-add "<id> text" flags applied every add twice when its tracked-work half was retained by the delivery projection: once under the given id and once under a coined hash id with the id left in the text (2026-10-11 05:00 EDT on agent-doc-bugs.md: 4 adds became 8 backlog items and 8 queue heads; output said 'reopened a fresh cycle for a pending-only tracked-work update' then 'retained while their delivery projection converges', then 'appended 8 same-cycle actionable backlog id(s)'). Make the retained tracked-work replay idempotent by mutation identity, with a regression test reproducing the retained-then-absorbed path.
-- [ ] 🚧 [#loadbudgettests] [agent-doc] Wall-clock budget tests fail when many test suites run concurrently (load average 70-140 with 8 subagents in make check): closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes (3.70s and 5.7s vs a 3s budget; 0.7-1.5s alone), agent-doc-sync-io rename_debounce_suppresses_auto_start and rename_debounce_does_not_affect_other_files, finalize_editor_absent_replays_operator_deleted_struck_queue_rows (24.6s vs 10.3s alone). Make them deterministic (virtual clock or a CPU-time budget, not wall clock) instead of raising budgets or rerunning to green.
-- [ ] 🚧 [#qheadresiduestrike] [agent-doc] The queue catch-up residue strike can still strike an operator re-typed free-text head that is not a recurring command (for example a repeated bug report), because it matches against every earlier Queue prompt echo in the exchange, not only echoes written after the head was re-added. Scope the match to echoes newer than the head's re-entry; regression test with a re-typed repeated report.
-- [ ] 🚧 [#checktmpdirleak] [agent-doc] During concurrent make check runs in separate worktrees, the check-test-tmpdir setup step printed another worktree's path (/var/tmp:/home/brian/work/btakita/agent-doc-wt/sdkqueuesync). Find where the test TMPDIR is derived or cached across worktrees and isolate it per checkout.
-- [ ] 🚧 [#subagentmsgcollide] [agent-doc] Forked subagents dispatched by a queue coordinator share one scratchpad, and one subagent's commit-message file overwrote another's (sdk-queue-subagent-sync commit 32a13fb3e7 carries the cancel-turn message). Have the binary-emitted subagent authorization preamble require a per-subagent message file (or commit -F from stdin) so concurrent commits cannot swap messages.
+- [ ] [#statesubscriberecords] [agent-doc] state_subscribe_records_only_the_previously_applied_live_peer_cursor (agent-doc-controller-io) failed twice under heavy concurrent load (panic: the durable OS-exit liveness transition evicts the crashed registration's ack) and passes alone; it has no wall-clock bound. Suspected race on the process-global liveness state keyed by the test process pid: a concurrent test's production path touching that pid between this test's reset and its exit call. Confirm and fix the race (isolate the liveness state per test or key it per test), with a stress reproduction.
+- [ ] [#remainingwallclock] [agent-doc] Remaining wall-clock asserts in tests: the 250ms 'not blocked by a blocked effect' asserts in agent-doc-controller-io (project_controller.rs blocking-document-effect around line 4747, rpc.rs) are the most load-sensitive; convert them to the closed-gate pattern used for captured_response_and_authority_reactively_project_answered_free_text_strike. The 1-5s 'returns instead of hanging' bounds in preflight-io debounce.rs, codex-stop-io and src/preflight_hook.rs can become hang ceilings.
+- [ ] [#replace120shang] [agent-doc] Replace the 120s hang ceilings in wait_for_test_controller (controller_client_connection_is_one_request) and agent-doc-ipc-io await_endpoint (a_bound_but_unaccepting_listener_is_evicted_not_protected) with a real readiness signal from the controller/listener, so the tests wait on an event instead of a bounded poll.
+- [ ] [#tlafailedonce] [agent-doc] make tla failed once during a concurrent make check in the respondcloseout worktree: TLC could not resolve the standard module Naturals (looked for /tmp/Naturals.tla) while parsing StopHookContinuation.tla; make tla alone passed. Each worktree has its own checksum-verified target/tla jar and a mktemp work dir, and disk-sweep did not clean that worktree. Find what made the jar's standard modules unavailable (cwd, TMPDIR, classpath, concurrent jar refresh) and make run_tla.sh robust to it.
+- [ ] [#continuationheadskip] [agent-doc] The continuation-head skip in agent-doc-queue/src/queue_continuation.rs still matches a live free-text head against the whole exchange, so an operator re-typed head that repeats an earlier answered prompt can be left out of the continuation offer (it is never struck). Scope it to echoes after the head's re-entry, sharing the git-history entry-point helper the residue-strike fix added.
 - [ ] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 <!-- /agent:backlog -->
 

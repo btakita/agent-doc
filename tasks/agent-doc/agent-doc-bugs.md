@@ -201,7 +201,7 @@ If the layout is still off once that tab closes, Sync Tmux Layout in the IDE (or
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#clearnoticeverify]: verified?~~ — auto-struck: answered this cycle (#ftstrike)
-- ⏳ The tmux panes are not laid out correctly. 2/3|1/3. There were 3 tmux panes during your [#clearnoticeverify] test.
+- 🚧 The tmux panes are not laid out correctly. 2/3|1/3. There were 3 tmux panes during your [#clearnoticeverify] test.
 - 🚧 frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
 - 🚧 release + publish
 - 🚧 do [#closeoutleaseresume]

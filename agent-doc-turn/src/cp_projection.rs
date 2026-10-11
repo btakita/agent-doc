@@ -235,6 +235,25 @@ pub struct TurnProjection {
     /// (`#turntasklabel`), e.g. `do [#jbunloadsig]`. Editors truncate it to fit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task: Option<String>,
+    /// (`#clearsupersedenotice`) The operator's most recent queued Clear Session
+    /// Context was dropped without being sent, because a newer prompt started
+    /// on the pane before the turn it was queued behind ended. Editors notify
+    /// once per `clear_epoch`; the field is independent of the turn phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deferred_clear_superseded: Option<DeferredClearSupersededProjection>,
+}
+
+/// (`#clearsupersedenotice`) A queued operator clear the supervisor dropped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeferredClearSupersededProjection {
+    /// Epoch of the dropped clear: the editor's once-per-drop identity.
+    pub clear_epoch: u64,
+    /// Pane the clear was queued for.
+    pub pane: String,
+    /// Why it was dropped (`newer_prompt`).
+    pub reason: String,
+    /// When the supervisor dropped it, Unix seconds.
+    pub superseded_at: u64,
 }
 
 /// Longest task label the controller publishes; editors truncate further to fit.
@@ -277,7 +296,17 @@ impl TurnProjection {
             realtime_steering: TurnSteeringProjection::none(),
             semantic_merge_conflicts: Vec::new(),
             task: None,
+            deferred_clear_superseded: None,
         }
+    }
+
+    /// Attach the latest dropped queued clear (`#clearsupersedenotice`).
+    pub fn with_deferred_clear_superseded(
+        mut self,
+        superseded: Option<DeferredClearSupersededProjection>,
+    ) -> Self {
+        self.deferred_clear_superseded = superseded;
+        self
     }
 
     /// Attach the in-flight task label; an idle projection never carries one.
@@ -470,6 +499,24 @@ mod tests {
         assert!(json.contains("removed prompt"));
         let back: TurnProjection = serde_json::from_str(&json).unwrap();
         assert_eq!(proj, back);
+    }
+
+    /// `#clearsupersedenotice`: the dropped-clear notice is absent from the
+    /// wire when there is none (older plugins keep parsing) and round-trips
+    /// with its epoch when present, on an idle projection too.
+    #[test]
+    fn deferred_clear_superseded_is_optional_and_round_trips() {
+        let idle = TurnProjection::from_phase(CyclePhase::Committed);
+        assert!(!serde_json::to_string(&idle).unwrap().contains("deferred_clear_superseded"));
+        let dropped = idle.with_deferred_clear_superseded(Some(DeferredClearSupersededProjection {
+            clear_epoch: 7,
+            pane: "%149".into(),
+            reason: "newer_prompt".into(),
+            superseded_at: 1_040,
+        }));
+        let json = serde_json::to_string(&dropped).unwrap();
+        assert!(json.contains("\"deferred_clear_superseded\":{\"clear_epoch\":7"), "{json}");
+        assert_eq!(serde_json::from_str::<TurnProjection>(&json).unwrap(), dropped);
     }
 
     #[test]

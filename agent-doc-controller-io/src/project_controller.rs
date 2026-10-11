@@ -4108,12 +4108,17 @@ impl ControllerDocumentAuthorityGraph {
                 let model_state = document_model_states
                     .observe(ctx, &key.document_id)
                     .flatten();
-                let closeout = document_projections
+                let document = document_projections
                     .observe(ctx, &key.document_hash)
-                    .flatten()
+                    .flatten();
+                let superseded = document
+                    .as_ref()
+                    .and_then(|document| deferred_clear_superseded_projection(&document.queue.context_clear));
+                let closeout = document
                     .map(|document| document.closeout)
                     .unwrap_or_default();
                 project_document_turn_authority(model_state, &closeout)
+                    .with_deferred_clear_superseded(superseded)
             },
         )
     }
@@ -4281,6 +4286,21 @@ fn project_document_turn_authority(
     } else {
         projection
     }
+}
+
+/// (`#clearsupersedenotice`) The editor-facing notice for the operator's latest
+/// queued clear that the supervisor dropped without sending.
+fn deferred_clear_superseded_projection(
+    context_clear: &agent_doc_state_backbone::QueueContextClearProjection,
+) -> Option<agent_doc_turn::cp_projection::DeferredClearSupersededProjection> {
+    context_clear.superseded.as_ref().map(|superseded| {
+        agent_doc_turn::cp_projection::DeferredClearSupersededProjection {
+            clear_epoch: superseded.clear_epoch,
+            pane: superseded.target.clone(),
+            reason: superseded.reason.clone(),
+            superseded_at: superseded.superseded_at,
+        }
+    })
 }
 
 /// The task the current cycle is working on (`#turntasklabel`): its first prompt target,
@@ -12129,6 +12149,69 @@ mod tests {
         assert_eq!(
             authority_graph.projection(document_hash, document_id).state,
             TurnState::Idle
+        );
+    }
+
+    /// `#clearsupersedenotice`: the supervisor dropping a queued clear reaches
+    /// the editor stream as a reactive edge of the document projection, with
+    /// no editor poll and independent of the turn phase.
+    #[test]
+    fn document_turn_authority_projects_superseded_queued_clear() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let document_graphs = ControllerDocumentGraphs::new_in(&scope);
+        let authority_graph = ControllerDocumentAuthorityGraph::new_in(
+            &scope,
+            actor_graph.document_model_states_handle(),
+            document_graphs.projection_handle(),
+        );
+        let document_hash = "authority-superseded-clear";
+        let document_id = "document-authority-superseded-clear";
+        assert_eq!(
+            authority_graph
+                .projection(document_hash, document_id)
+                .deferred_clear_superseded,
+            None
+        );
+        actor_graph.set(BTreeMap::from([(
+            document_id.to_string(),
+            actor_record_for_test(
+                document_id,
+                "%149",
+                agent_doc_controller::actor::ActorState::Busy,
+            ),
+        )]));
+        let mut document = agent_doc_state_backbone::DocumentStateProjection::new(document_hash);
+        document.queue.context_clear.superseded =
+            Some(agent_doc_state_backbone::QueueContextClearSupersession {
+                clear_epoch: 3,
+                target: "%149".into(),
+                source: Some("operator_live_turn_deferred_clear".into()),
+                reason: "newer_prompt".into(),
+                deferred_at: 1_000,
+                superseded_at: 1_040,
+            });
+        document_graphs.set_projection(document_hash, Some(document));
+        let projection = authority_graph.projection(document_hash, document_id);
+        assert!(projection.turn_in_flight, "the newer prompt's turn is still running");
+        assert_eq!(
+            projection.deferred_clear_superseded,
+            Some(agent_doc_turn::cp_projection::DeferredClearSupersededProjection {
+                clear_epoch: 3,
+                pane: "%149".into(),
+                reason: "newer_prompt".into(),
+                superseded_at: 1_040,
+            })
+        );
+        document_graphs.set_projection(
+            document_hash,
+            Some(agent_doc_state_backbone::DocumentStateProjection::new(document_hash)),
+        );
+        assert_eq!(
+            authority_graph
+                .projection(document_hash, document_id)
+                .deferred_clear_superseded,
+            None
         );
     }
 

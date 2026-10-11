@@ -60,6 +60,8 @@ export interface TurnProjection {
         reason: string;
         detail: string;
     }>;
+    /** `#clearsupersedenotice`: the latest queued clear the supervisor dropped unsent. */
+    deferred_clear_superseded?: DeferredClearSuperseded;
     realtime_steering?: {
         observed_content_hash?: string;
         state?: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
@@ -73,6 +75,54 @@ export interface TurnProjection {
             verbatim: string;
         }>;
     };
+}
+
+/** `#clearsupersedenotice`: a queued Clear Session Context the supervisor dropped. */
+export interface DeferredClearSuperseded {
+    clear_epoch: number;
+    pane: string;
+    reason: string;
+    superseded_at?: number;
+}
+
+/**
+ * `#clearsupersedenotice`: announce each dropped queued clear once per `clear_epoch`. The first
+ * ready projection observed for a document seeds the baseline (an old drop is not news), and a
+ * projection without the field never resets it, so a reconnect cannot re-raise the same drop.
+ * Parity with JetBrains `DeferredClearSupersededNotices`.
+ */
+export class DeferredClearSupersededNotices {
+    private readonly lastEpoch = new Map<string, number>();
+
+    observe(filePath: string, dropped: DeferredClearSuperseded | null | undefined): boolean {
+        const seen = this.lastEpoch.get(filePath);
+        if (seen === undefined) {
+            this.lastEpoch.set(filePath, dropped ? dropped.clear_epoch : -1);
+            return false;
+        }
+        if (dropped && dropped.clear_epoch !== seen) {
+            this.lastEpoch.set(filePath, dropped.clear_epoch);
+            return true;
+        }
+        return false;
+    }
+
+    forget(filePath: string): void {
+        this.lastEpoch.delete(filePath);
+    }
+}
+
+export function buildDeferredClearSupersededMessage(
+    relativePath: string,
+    dropped: DeferredClearSuperseded,
+): string {
+    const why = dropped.reason === 'newer_prompt'
+        ? `A newer prompt started in pane ${dropped.pane} before the turn it was queued behind `
+            + 'ended, so the clear was dropped to keep the context that prompt is using.'
+        : `The supervisor dropped it in pane ${dropped.pane} (reason=${dropped.reason}).`;
+    return `Queued Clear Session Context was not sent for ${relativePath}.\n`
+        + `${why} Press Clear Session Context again if you still want a fresh context, `
+        + 'or use Interrupt and clear to clear immediately.';
 }
 
 export interface TurnStatePresentation {

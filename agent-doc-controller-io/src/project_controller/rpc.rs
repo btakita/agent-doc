@@ -6539,6 +6539,10 @@ struct QueueContextClearPayload {
     command: String,
     head_sha256: Option<String>,
     head_bytes: Option<usize>,
+    /// (`#clearsupersedenotice`) Settle only: why a deferred clear was retired
+    /// undelivered. Older controllers ignore the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retired_reason: Option<String>,
 }
 
 pub fn queue_context_clear_started_for_file(
@@ -6556,6 +6560,7 @@ pub fn queue_context_clear_started_for_file(
         command: command.to_string(),
         head_sha256: active_head.map(agent_doc_hash::content_hash),
         head_bytes: active_head.map(str::len),
+        retired_reason: None,
     };
     request_controller(
         &project_root,
@@ -6609,6 +6614,7 @@ pub fn queue_context_clear_deferred_for_file(
         command: command.to_string(),
         head_sha256: active_head.map(agent_doc_hash::content_hash),
         head_bytes: active_head.map(str::len),
+        retired_reason: None,
     };
     request_controller(
         &project_root,
@@ -6639,6 +6645,26 @@ pub fn queue_context_clear_settled_for_file(
     source: Option<&str>,
     clear_epoch: u64,
 ) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
+    queue_context_clear_settled_with_reason_for_file(
+        file,
+        target,
+        harness,
+        command,
+        source,
+        clear_epoch,
+        None,
+    )
+}
+
+fn queue_context_clear_settled_with_reason_for_file(
+    file: &Path,
+    target: &str,
+    harness: &str,
+    command: &str,
+    source: Option<&str>,
+    clear_epoch: u64,
+    retired_reason: Option<&str>,
+) -> Result<agent_doc_state_backbone::QueueContextClearProjection> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     if connect(&project_root).is_err() {
@@ -6648,6 +6674,7 @@ pub fn queue_context_clear_settled_for_file(
         command: command.to_string(),
         head_sha256: None,
         head_bytes: None,
+        retired_reason: retired_reason.map(str::to_string),
     };
     request_controller(
         &project_root,
@@ -6764,6 +6791,34 @@ pub fn clear_queue_context_clear_manual_cooldown_for_file(file: &Path) -> Result
         &projection.command,
         projection.source.as_deref(),
         projection.clear_epoch,
+    )?;
+    Ok(true)
+}
+
+/// (`#clearsupersedenotice`) Retire a still-deferred clear WITHOUT delivering
+/// it because it was superseded (`reason`, e.g. `newer_prompt`). Unlike
+/// [`clear_queue_context_clear_deferred_for_file`], the settle carries the
+/// reason, so the controller projects a `superseded` notice that reaches the
+/// editor over the document-turn authority stream.
+pub fn retire_superseded_queue_context_clear_deferred_for_file(
+    file: &Path,
+    reason: &str,
+) -> Result<bool> {
+    let projection = queue_context_clear_status_for_file(file)?;
+    if !matches!(
+        projection.phase,
+        agent_doc_state_backbone::QueueContextClearPhase::Deferred
+    ) {
+        return Ok(false);
+    }
+    queue_context_clear_settled_with_reason_for_file(
+        file,
+        &projection.target,
+        &projection.harness,
+        &projection.command,
+        projection.source.as_deref(),
+        projection.clear_epoch,
+        Some(reason),
     )?;
     Ok(true)
 }
@@ -21047,6 +21102,7 @@ pub(crate) fn handle_queue_context_clear_settled(
             source: Some(source.clone()),
             clear_epoch,
             marked_secs: timestamp_secs(),
+            retired_reason: payload.retired_reason.clone(),
         },
     );
     append_apply_state_event(bootstrap, runtime, event)?;
@@ -21054,13 +21110,18 @@ pub(crate) fn handle_queue_context_clear_settled(
     agent_doc_ops_log_io::log_op(
         &file,
         &format!(
-            "queue_context_clear_projection_settled file={} target={} harness={} source={} clear_epoch={} phase={:?}",
+            "queue_context_clear_projection_settled file={} target={} harness={} source={} clear_epoch={} phase={:?} retired_reason={} superseded_epoch={}",
             file.display(),
             target,
             harness,
             source,
             clear_epoch,
-            projection.phase
+            projection.phase,
+            payload.retired_reason.as_deref().unwrap_or("none"),
+            projection
+                .superseded
+                .as_ref()
+                .map_or_else(|| "none".to_string(), |superseded| superseded.clear_epoch.to_string()),
         ),
     );
     Ok(projection)

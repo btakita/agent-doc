@@ -46,6 +46,8 @@ const FOCUSED_CYCLE_CONTEXT_RESET_REASON: &str = "active queue head is a [focuse
 const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str = "operator_deferred_clear";
 const CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED: &str =
     agent_doc_state_backbone::QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED;
+const DEFERRED_CLEAR_SUPERSEDED_REASON_NEWER_PROMPT: &str =
+    agent_doc_state_backbone::QUEUE_CONTEXT_CLEAR_RETIRED_NEWER_PROMPT;
 const CONTEXT_CLEAR_SOURCE_QUEUE_SLASH: &str = "queue_slash_command";
 const CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET: &str = "supervisor_background_context_reset";
 const ZERO_REPLICA_IDLE_WATCH_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
@@ -4557,14 +4559,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             agent_doc_ops_log_io::log_op(&path, &event);
                             Some(projection)
                         } else if newer_prompt {
-                            let settled = agent_doc_controller_io::project_controller::clear_queue_context_clear_deferred_for_file(&path);
+                            // `#clearsupersedenotice`: retire WITH the reason so the
+                            // controller projects a dropped-clear notice onto the
+                            // editor's document-turn authority stream; the operator
+                            // pressed Clear and must learn it was not sent.
+                            let settled = agent_doc_controller_io::project_controller::retire_superseded_queue_context_clear_deferred_for_file(
+                                &path,
+                                DEFERRED_CLEAR_SUPERSEDED_REASON_NEWER_PROMPT,
+                            );
                             let event = format!(
-                                "idle_queue_watch_deferred_clear_superseded file={} target={} clear_epoch={} deferred_at={} source={} reason=newer_prompt turn_started_at={} settled={} (#clearqueuedliveturn)",
+                                "idle_queue_watch_deferred_clear_superseded file={} target={} clear_epoch={} deferred_at={} source={} reason={} turn_started_at={} settled={} notice=editor_stream (#clearqueuedliveturn #clearsupersedenotice)",
                                 path.display(),
                                 projection.target,
                                 projection.clear_epoch,
                                 projection.marked_secs,
                                 projection.source.as_deref().unwrap_or("none"),
+                                DEFERRED_CLEAR_SUPERSEDED_REASON_NEWER_PROMPT,
                                 current_turn_started_at.map_or_else(|| "none".to_string(), |at| at.to_string()),
                                 settled.as_ref().map_or_else(|err| format!("error:{err:#}"), |ok| ok.to_string()),
                             );
@@ -6440,6 +6450,7 @@ mod tests {
             head_bytes: None,
             clear_epoch: 87,
             marked_secs: deferred_at,
+            superseded: None,
         };
         assert!(
             !deferred_clear_satisfied_by_harness(&doc, &projection),
@@ -6487,6 +6498,7 @@ mod tests {
             head_bytes: None,
             clear_epoch: 1,
             marked_secs: 42,
+            superseded: None,
         }
     }
 

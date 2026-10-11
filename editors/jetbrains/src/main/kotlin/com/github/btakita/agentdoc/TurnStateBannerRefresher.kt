@@ -79,6 +79,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     private val transientStatuses = TransientDocumentStatus()
     private val inputRequiredNotifications =
         InputRequiredNotifications<Notification> { it.expire() }
+    private val deferredClearSupersededNotices = DeferredClearSupersededNotices()
     private val listeners = CopyOnWriteArrayList<Listener>()
 
     fun start() {
@@ -109,6 +110,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                         presentations.remove(file.path)
                         transientStatuses.clear(file.path)
                         inputRequiredNotifications.clear(file.path)
+                        deferredClearSupersededNotices.forget(file.path)
                         notifyUi(file.path, "file-closed")
                     }
                 },
@@ -175,6 +177,14 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         val subscription =
             CpRouteClient.subscribeDocumentTurnAuthority(projectRoot, filePath) { authorityJson ->
                 if (project.isDisposed || !openPaths.contains(filePath)) return@subscribeDocumentTurnAuthority
+                // `#clearsupersedenotice`: the supervisor dropped the operator's queued clear long
+                // after `session clear` exited; this stream is the only path that reports it.
+                TurnStateBridge.deferredClearSupersededObservation(authorityJson)?.let { observation ->
+                    val dropped = observation.notice
+                    if (deferredClearSupersededNotices.observe(filePath, dropped) && dropped != null) {
+                        notifyDeferredClearSuperseded(filePath, dropped)
+                    }
+                }
                 val next =
                     TurnStateBridge.presentationFromDocumentAuthority(filePath, authorityJson)
                         ?: return@subscribeDocumentTurnAuthority
@@ -255,6 +265,36 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         return notification
     }
 
+    private fun notifyDeferredClearSuperseded(filePath: String, dropped: DeferredClearSuperseded) {
+        val relativePath = TerminalUtil.resolveProjectPath(project.basePath, filePath).second
+        LOG.info(
+            "[turn-state] queued clear dropped for $filePath clear_epoch=${dropped.clearEpoch} " +
+                "pane=${dropped.pane} reason=${dropped.reason} (#clearsupersedenotice)",
+        )
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            val notification =
+                NotificationGroupManager.getInstance()
+                    .getNotificationGroup("Agent Doc")
+                    .createNotification(
+                        "Queued clear not sent",
+                        TerminalUtil.notificationHtml(
+                            TerminalUtil.buildDeferredClearSupersededMessage(relativePath, dropped),
+                        ),
+                        NotificationType.INFORMATION,
+                    )
+            notification.addAction(
+                NotificationAction.createSimpleExpiring("Clear Session Context") {
+                    val file = LocalFileSystem.getInstance().findFileByPath(filePath)
+                    if (file != null && !project.isDisposed) {
+                        TerminalUtil.clearSessionContext(project, file)
+                    }
+                },
+            )
+            notification.notify(project)
+        }
+    }
+
     private fun notifyUi(filePath: String, reason: String) {
         ApplicationManager.getApplication().invokeLater {
             if (project.isDisposed) return@invokeLater
@@ -273,6 +313,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         presentations.clear()
         transientStatuses.clearAll()
         inputRequiredNotifications.clearAll()
+        deferredClearSupersededNotices.clearAll()
         listeners.clear()
     }
 

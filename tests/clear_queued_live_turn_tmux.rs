@@ -547,6 +547,16 @@ fn queued_clear_is_dropped_when_a_newer_prompt_starts_first() {
             .contains("idle_queue_watch_deferred_clear_superseded")
     });
     assert!(scenario.ops_log().contains("reason=newer_prompt"));
+    // `#clearsupersedenotice`: the controller folded the drop into the
+    // projection the editor's document-turn authority stream carries, so the
+    // operator who pressed Clear is told it was not sent.
+    scenario.wait_until("the controller projected the dropped-clear notice", || {
+        scenario.ops_log().lines().any(|line| {
+            line.contains("queue_context_clear_projection_settled")
+                && line.contains("retired_reason=newer_prompt")
+                && !line.contains("superseded_epoch=none")
+        })
+    });
 
     scenario.end_turn();
     std::thread::sleep(Duration::from_secs(6));

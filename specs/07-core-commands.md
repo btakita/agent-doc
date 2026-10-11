@@ -458,6 +458,22 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   dynamic upgrade entry point: the installer skips the attach, replaces the
   files, and reports restart-required naming that reason
   (`declined_by=modular_package`), not a legacy-package or upgrader failure.
+- A live IDE counts as owning a JetBrains install target only when it loads
+  plugins from that target (GH #238). Ownership is decided from process
+  evidence BEFORE any package-level refusal, strongest first: an agent-doc
+  plugin jar the process maps (`/proc/<pid>/maps`) under the target; an explicit
+  `-Didea.plugins.path=`; its data directory name (`-Didea.paths.selector=` or
+  the IDE home's `product-info.json` `dataDirectoryName`, never the install
+  directory name, which a RemoteDev dist can misstate) compared with the
+  target's data directory; an agent-doc jar mapped from another root. A pid
+  proven to load from elsewhere is excluded (logged as
+  `plugin_dynamic_upgrade live_pid_not_owner`); a pid with no conclusive
+  evidence stays a possible owner. With no possible owner the write is a plain
+  install ("no live IDE held it, so its next start loads it"): no restart
+  verdict, and any restart-required marker is cleared. `--no-dynamic` scopes its
+  live-pid check the same way. A live 263 IDE on `IntelliJIdea2026.3` therefore
+  never makes an exact-262 install into the idle `IntelliJIdea2026.2` "replaced
+  under a live IDE".
 - Downloaded editor packages are verified before they are extracted or handed to
   the editor CLI (`#editorpkgdigest`, GH #55). The expected digest comes from the
   release's `EDITOR-PACKAGES.sha256` manifest, and from GitHub's per-asset

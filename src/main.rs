@@ -86,6 +86,7 @@ mod patch;
 mod plan;
 mod plugin;
 mod plugin_activation;
+mod plugin_live_owner;
 mod preflight_hook;
 mod queue_dispatch;
 mod queue_recovery;

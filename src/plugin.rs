@@ -1749,28 +1749,80 @@ fn jetbrains_upgrade_reattach_warning(pid: u32, status_line: &str) -> Option<Str
     ))
 }
 
+/// GH #238: the live IDE pids that may load plugins from `target_dir`. A pid
+/// whose process evidence (mapped plugin jar, `idea.plugins.path`, data
+/// directory name) proves it loads plugins from another root cannot be running
+/// the generation this install replaces, so it never makes the write a
+/// replacement "under a live IDE". Pids without conclusive evidence stay.
+fn jetbrains_live_owner_candidates(
+    pids: Vec<u32>,
+    target_dir: &Path,
+    proc_root: &Path,
+) -> Vec<u32> {
+    let (candidates, elsewhere) =
+        crate::plugin_live_owner::partition_owner_candidates(proc_root, pids, target_dir);
+    for (pid, evidence) in elsewhere {
+        log_jetbrains_upgrade_decision(&format!(
+            "plugin_dynamic_upgrade live_pid_not_owner pid={pid} target={} evidence={evidence:?}",
+            target_dir.display()
+        ));
+    }
+    candidates
+}
+
+/// GH #238: decide whether a restart-free upgrade attempt applies at all
+/// before any package-level refusal. `Ok(None)` means no live IDE can own
+/// `target_dir`, so the write is a plain install that the next IDE start
+/// loads; `Err` is the package's entry-point refusal for a live owner;
+/// `Ok(Some(pids))` are the owner candidates to hand to the upgrade launcher.
+/// The exact-262 package always refuses, so before this gate any JetBrains IDE
+/// on the host -- even one running from another data directory -- turned its
+/// install into "replaced under a live IDE" with a restart verdict.
+fn jetbrains_hot_upgrade_admission(
+    live_pids: Vec<u32>,
+    target_dir: &Path,
+    proc_root: &Path,
+    package_range: impl FnOnce() -> Result<JetbrainsPackageRange>,
+    expected_version: &str,
+    launcher_has_main: impl FnOnce() -> Result<bool>,
+) -> Result<Option<Vec<u32>>> {
+    let pids = jetbrains_live_owner_candidates(live_pids, target_dir, proc_root);
+    if pids.is_empty() {
+        return Ok(None);
+    }
+    if let Some(refusal) = jetbrains_dynamic_upgrade_entry_point_refusal(
+        package_range()?,
+        expected_version,
+        launcher_has_main,
+    )? {
+        bail!("{refusal}");
+    }
+    Ok(Some(pids))
+}
+
 #[cfg(not(test))]
 fn try_hot_upgrade_jetbrains(
     zip_path: &Path,
     target_dir: &Path,
     expected_version: &str,
 ) -> Result<Option<JetbrainsHotUpgrade>> {
-    let pids = live_jetbrains_ide_pids()?;
-    if pids.is_empty() {
-        return Ok(None);
-    }
-    let package_range = jetbrains_zip_package_range(zip_path)?;
     let mut launcher = None;
-    if let Some(refusal) =
-        jetbrains_dynamic_upgrade_entry_point_refusal(package_range, expected_version, || {
+    let Some(pids) = jetbrains_hot_upgrade_admission(
+        live_jetbrains_ide_pids()?,
+        target_dir,
+        Path::new("/proc"),
+        || jetbrains_zip_package_range(zip_path),
+        expected_version,
+        || {
             let extracted = extract_jetbrains_upgrade_launcher(zip_path)?;
             let has_main = jetbrains_upgrade_launcher_has_main_manifest(extracted.path())?;
             launcher = Some(extracted);
             Ok(has_main)
-        })?
-    {
-        bail!("{refusal}");
-    }
+        },
+    )?
+    else {
+        return Ok(None);
+    };
     let launcher = launcher.context("JetBrains upgrade launcher was not extracted")?;
     let archive = tempfile::Builder::new()
         .prefix("agent-doc-jb-package-")
@@ -2250,7 +2302,10 @@ fn install_jetbrains_zip_into(
         expected_version,
         dynamic_upgrade_enabled(),
         || try_hot_upgrade_jetbrains(zip_path, target_dir, expected_version),
-        live_jetbrains_ide_pids,
+        || {
+            live_jetbrains_ide_pids()
+                .map(|pids| jetbrains_live_owner_candidates(pids, target_dir, Path::new("/proc")))
+        },
     )?;
     // A staged package is applied by the IDE at its next start, so the plugin
     // tree still holds the live generation's bytes by design.
@@ -5742,6 +5797,163 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
         // Not an agent-doc platform decline: no permanent-loss classification.
         assert!(!super::agent_doc_declined_dynamic_upgrade(&refusal));
+    }
+
+    /// GH #238 fixture host: a fake `/proc` with one RemoteDev backend whose
+    /// dist directory says 262 but whose product-info names
+    /// `IntelliJIdea2026.3`, mapping the plugin from that data dir.
+    fn gh238_fake_host(tmp: &TempDir, mapped_data_dir: &str) -> (PathBuf, u32) {
+        let share = tmp.path().join("share/JetBrains");
+        let mapped_lib = share.join(mapped_data_dir).join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&mapped_lib).unwrap();
+        let home = tmp.path().join("dist/IU-262.9437.185");
+        fs::create_dir_all(home.join("jbr/bin")).unwrap();
+        fs::write(home.join("jbr/bin/java"), "").unwrap();
+        fs::write(
+            home.join("product-info.json"),
+            r#"{"buildNumber":"263.6259.32","dataDirectoryName":"IntelliJIdea2026.3"}"#,
+        )
+        .unwrap();
+        let pid = 3274346;
+        let proc_dir = tmp.path().join("proc").join(pid.to_string());
+        fs::create_dir_all(&proc_dir).unwrap();
+        fs::write(
+            proc_dir.join("cmdline"),
+            format!("{}\0serverMode\0", home.join("bin/idea").display()),
+        )
+        .unwrap();
+        fs::write(
+            proc_dir.join("maps"),
+            format!(
+                "7f00-7f01 r--s 00000000 103:02 77 {}\n",
+                mapped_lib.join("agent-doc-jetbrains-0.2.508.jar").display()
+            ),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(home.join("jbr/bin/java"), proc_dir.join("exe")).unwrap();
+        (tmp.path().join("proc"), pid)
+    }
+
+    /// GH #238: the exact case from the issue. The only live IDE runs from
+    /// `IntelliJIdea2026.3`; the exact-262 package written into the idle
+    /// `IntelliJIdea2026.2` is a plain install -- no "replaced under a live
+    /// IDE", no restart verdict, no restart-required marker.
+    #[test]
+    fn gh238_live_ide_on_other_data_dir_leaves_262_install_restart_free() {
+        let tmp = TempDir::new().unwrap();
+        let (proc_root, pid) = gh238_fake_host(&tmp, "IntelliJIdea2026.3");
+        let target = tmp.path().join("share/JetBrains/IntelliJIdea2026.2");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("agent.doc-0.2.526.jar"), b"old").unwrap();
+        let marker = target.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
+        fs::write(&marker, "stale verdict from a pre-GH-238 upgrade").unwrap();
+        let zip = tmp.path().join("agent-doc-jetbrains-262-0.2.530.zip");
+        write_test_modular_jetbrains_zip(&zip, "0.2.530", b"new");
+
+        super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow_mut().clear());
+        let outcome = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            "0.2.530",
+            true,
+            || {
+                super::jetbrains_hot_upgrade_admission(
+                    vec![pid],
+                    &target,
+                    &proc_root,
+                    || super::jetbrains_zip_package_range(&zip),
+                    "0.2.530",
+                    || unreachable!("the 262 package has no launcher"),
+                )
+                .map(|admitted| {
+                    assert_eq!(admitted, None, "no live IDE owns IntelliJIdea2026.2");
+                    None
+                })
+            },
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+        assert_eq!(outcome, JetbrainsLocalInstallOutcome::Installed);
+        assert_eq!(fs::read(lib.join("agent.doc-0.2.530.jar")).unwrap(), b"new");
+        assert!(
+            !marker.exists(),
+            "a plain install clears the restart marker"
+        );
+        let logged = super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow().clone());
+        assert!(
+            logged
+                .iter()
+                .any(|line| line.contains("live_pid_not_owner")
+                    && line.contains("IntelliJIdea2026.3")),
+            "{logged:?}"
+        );
+
+        // `--no-dynamic` scopes its live-pid check the same way.
+        let no_dynamic = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            "0.2.530",
+            false,
+            || panic!("--no-dynamic must not attach"),
+            || {
+                Ok(super::jetbrains_live_owner_candidates(
+                    vec![pid],
+                    &target,
+                    &proc_root,
+                ))
+            },
+        )
+        .unwrap();
+        assert_eq!(no_dynamic, JetbrainsLocalInstallOutcome::Installed);
+    }
+
+    /// GH #238 true positive: the live IDE maps the plugin from the target data
+    /// dir, so the 262 package's missing entry point still yields the restart
+    /// verdict and marker.
+    #[test]
+    fn gh238_live_ide_on_same_data_dir_still_requires_restart() {
+        let tmp = TempDir::new().unwrap();
+        let (proc_root, pid) = gh238_fake_host(&tmp, "IntelliJIdea2026.3");
+        let target = tmp.path().join("share/JetBrains/IntelliJIdea2026.3");
+        let zip = tmp.path().join("agent-doc-jetbrains-262-0.2.530.zip");
+        write_test_modular_jetbrains_zip(&zip, "0.2.530", b"new");
+
+        let outcome = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            "0.2.530",
+            true,
+            || {
+                super::jetbrains_hot_upgrade_admission(
+                    vec![pid],
+                    &target,
+                    &proc_root,
+                    || super::jetbrains_zip_package_range(&zip),
+                    "0.2.530",
+                    || unreachable!("the 262 package has no launcher"),
+                )
+                .map(|_| unreachable!("the 262 package always refuses a live owner"))
+            },
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+        match &outcome {
+            JetbrainsLocalInstallOutcome::RestartRequired { reason } => assert!(
+                reason.contains(super::JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE),
+                "{reason}"
+            ),
+            other => panic!("expected RestartRequired, got {other:?}"),
+        }
+        assert!(
+            target
+                .join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER)
+                .exists()
+        );
+        assert_eq!(
+            super::jetbrains_live_owner_candidates(vec![pid], &target, &proc_root),
+            vec![pid]
+        );
     }
 
     /// A staged `--local` install leaves the live generation's jar in place, so

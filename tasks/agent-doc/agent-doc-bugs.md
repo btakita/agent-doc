@@ -310,7 +310,7 @@ As each branch passes, I'll merge it, run one `make install`, close its items, t
 - ~~release + publish~~
 - 🚧 sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.
 - do [#drivecapturedsplice]
-- Navigating between sdk.md + rpg.md resulted in a tmux focus on rpg.md in the 1:stash tmux window. Please make sure the focus effects always sync with the current Editor document(s).
+- 🚧 Navigating between sdk.md + rpg.md resulted in a tmux focus on rpg.md in the 1:stash tmux window. Please make sure the focus effects always sync with the current Editor document(s).
 <!-- /agent:queue -->
 
 ## Backlog

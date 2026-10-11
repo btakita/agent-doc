@@ -225,13 +225,28 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   are independent editor installations. Each registers its own PID-scoped CRDT replica per open
   document, so text edits, agent responses, and turn-state presentation converge in both buffers.
   Navigation is not independent: both IDEs publish surface observations to the same Project
-  Controller root, which owns one tmux `agent-doc` window per project, and every active surface
-  client re-folds against each tmux observation. When the two IDEs show different session
-  documents or split layouts, a focus or layout change in one re-projects the shared tmux window
-  and can drift the other IDE's retained surface into a structural `Sync`, and the reverse
-  tmux-to-editor focus mirror (installed by each IDE) may select the corresponding visible document in
-  the unfocused IDE (`focusEditor=false`). Per-editor tmux surfaces (one window or session per editor
-  installation, with reverse focus scoped to that installation) are not implemented.
+  Controller root, which owns one tmux `agent-doc` window per project. Only the installation that
+  most recently gained focus drives that window (`#idefocusowner`). The focus lane
+  (`jetbrains-focus@<installation>-pid:<pid>`, `focus_only`) publishes only while that IDE's
+  project frame is the OS-active window, so an accepted focus-lane fact is the focus-gain event;
+  spanning layout observations never claim, because their selection flags can come from an
+  unfocused IDE (for example the reverse tmux-to-editor mirror, `focusEditor=false`). The
+  controller folds claims into a per-root `InstallationFocusOwner` (a `Source` of the pure
+  `InstallationFocus` fold with a `Computed` owner in the controller `ProcessScope`) and gives every
+  surface graph a `Computed` `SurfaceAuthority` projection of it. A non-owner's observations are
+  accepted and keep its facts current, but fold to `Idle` and return `deferred_to=<owner
+  installation>` in the receipt (and `deferred_to_focus_owner=` in ops.log); a retained failed-effect
+  retry is not replayed for it, and a tmux refold cannot make it drive. Ownership moves only on a
+  claim by a different installation, each move starting a new ownership epoch; the first
+  observation a surface folds under a new epoch re-projects its whole layout unless tmux is
+  observed to already match it. When the owner's last surface on a root retires (shutdown, or a
+  cross-root move of both lanes) ownership falls back to the most recently focused live
+  installation under a fresh epoch. Unscoped clients (`jetbrains-pid:`, VS Code) neither claim nor
+  defer, and before any claim every installation drives as before. Known limits: an IDE activated
+  while a non-session file is selected publishes no focus-lane fact and does not claim until an
+  agent document gains focus there; a focus-lane fact claims only on the focused document's own
+  controller root. Fully independent per-IDE navigation (one tmux window or session per
+  installation, with reverse focus scoped to it) remains unimplemented (`ideriderindependentnav`).
 - An observation with no detected columns is structurally `unknown`, not a one-column layout.
   It may select the focused document's existing pane, but it cannot add, stash, reorder, or
   provision panes. A proven local single editor window publishes one column. The presence of

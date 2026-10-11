@@ -30,6 +30,7 @@
 
 pub mod editor_view_policy;
 pub mod graph;
+pub mod installation_focus;
 pub mod pane_placement;
 pub mod remote_layout;
 pub mod terminal_ownership;
@@ -43,6 +44,10 @@ pub use editor_view_policy::{
     MainLayoutEligibility, isolated_view_session_name,
 };
 pub use graph::{EditorSurfaceState, SurfaceFold};
+pub use installation_focus::{
+    FocusOwner, InstallationFocus, InstallationFocusOwner, SurfaceAuthority,
+    claims_installation_focus, editor_installation,
+};
 pub use remote_layout::{
     RemoteClientEditors, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,
     RemoteLayoutSource,
@@ -328,6 +333,12 @@ pub struct SurfaceObservationReceipt {
     /// Controller-owned decision for the one IDE-hosted terminal presentation.
     #[serde(default)]
     pub terminal_decision: terminal_ownership::SurfaceTerminalDecision,
+    /// The editor installation that currently drives the shared tmux surface,
+    /// when it is not this observation's (`#idefocusowner`). Such an
+    /// observation is accepted — its facts stay current — but derives no tmux
+    /// consequence until its own installation gains focus again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deferred_to: Option<String>,
 }
 
 /// Controller-published reactive projection for an accepted editor fact.

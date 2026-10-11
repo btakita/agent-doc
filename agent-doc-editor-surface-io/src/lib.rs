@@ -196,6 +196,7 @@ impl Registry {
             outcome,
             error,
             terminal_decision: Default::default(),
+            deferred_to: None,
         }
     }
 
@@ -317,6 +318,7 @@ pub fn observe(project_root: &Path, surface: EditorSurface) -> SurfaceObservatio
             outcome: None,
             error: Some(format!("controller observation unavailable: {error:#}")),
             terminal_decision: Default::default(),
+            deferred_to: None,
         }
     })
 }
@@ -328,6 +330,7 @@ fn quiescing_receipt() -> SurfaceObservationReceipt {
         outcome: None,
         error: Some("native editor generation is quiescing".to_string()),
         terminal_decision: Default::default(),
+        deferred_to: None,
     }
 }
 

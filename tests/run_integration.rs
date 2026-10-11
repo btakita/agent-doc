@@ -9,7 +9,6 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -17,18 +16,14 @@ fn agent_doc() -> Command {
     cargo_bin_cmd!("agent-doc")
 }
 
-static OWNED_PANE_FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
 struct OwnedPaneFixture {
-    tmux: tmux_router::IsolatedTmux,
+    tmux: agent_doc_tmux_io::IsolatedTestTmux,
     pane: String,
 }
 
 impl OwnedPaneFixture {
     fn new(root: &Path) -> Self {
-        let sequence = OWNED_PANE_FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let socket = format!("agent-doc-run-owner-test-{}-{sequence}", std::process::id());
-        let tmux = tmux_router::IsolatedTmux::new(&socket);
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("agent-doc-run-owner-test");
         let pane = tmux.new_session("owner", root).unwrap();
         Self { tmux, pane }
     }

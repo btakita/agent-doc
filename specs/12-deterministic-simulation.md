@@ -81,6 +81,27 @@ window reconciliation, shell readiness, or process-tree sampling costs. The
 explicit `make tmux-ci` target owns the ignored live-tmux sweep and GitHub
 Actions must run that target on Linux with `tmux` installed.
 
+Every live tmux test gets a server no other test run can reach. Tests build
+their server with `agent_doc_tmux_io::isolated_test_tmux(label)`, never
+`tmux_router::IsolatedTmux::new(name)` directly: `tmux -L <name>` resolves to
+`$TMUX_TMPDIR/tmux-<uid>/<name>` (default `/tmp/tmux-<uid>/`), a directory shared
+by every process of the user, so a fixed name is one server for every
+concurrent suite (two worktrees, or two `cargo test` runs). Such runs collided
+on `new-session -s main` (`duplicate session: main`) and the first to finish
+killed the server under the other (`server exited unexpectedly`). The helper
+appends the pid, a per-process sequence, and a start-time nonce to the label,
+so session names inside the server (`main`, ...) need no uniqueness. Dropping
+the handle kills the server and removes its socket file, which tmux itself
+leaves behind. The `agent-doc-tmux-io` test
+`workspace_builds_isolated_tmux_servers_only_through_the_helper` rejects any
+other `IsolatedTmux::new` call in the workspace, and
+`concurrent_runs_of_one_test_get_separate_tmux_servers` (`make tmux-ci`)
+reproduces the shared-name collision as its control before asserting that two
+same-label servers both create `main` and survive each other's teardown. A
+subprocess under test reaches the same server through `AGENT_DOC_TMUX_SOCKET`
+set from the handle's `server_socket`; no test may reach the operator's default
+server.
+
 Tests that mutate or inspect process-global state (`std::env` or the process
 current directory) must hold the reentrant shared test env lock from
 `test_support::env_lock()` or a helper backed by that same lock, and mutations

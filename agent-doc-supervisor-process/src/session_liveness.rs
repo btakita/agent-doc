@@ -119,9 +119,8 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn pane_owns_live_agent_tracks_foreground_command() {
         use std::time::Duration;
-        use tmux_router::IsolatedTmux;
 
-        let iso = IsolatedTmux::new("session-liveness-fg");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("session-liveness-fg");
         let cwd = std::env::current_dir().unwrap();
         let pane = iso.new_session("liveness", &cwd).unwrap();
 

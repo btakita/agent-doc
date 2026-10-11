@@ -22,6 +22,7 @@ agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 lazily = "0.57.1"
+libc = "0.2"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 
 [dev-dependencies]

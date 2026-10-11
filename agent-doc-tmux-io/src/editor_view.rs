@@ -734,8 +734,14 @@ mod tests {
         assert!(plan_editor_view_tmux(&pending_bind(), "%9", "main", &bad).is_err());
     }
 
-    fn fixture(socket: &str) -> (IsolatedTmux, EditorViewTmuxRequest, EditorViewMainSnapshot) {
-        let tmux = IsolatedTmux::new(socket);
+    fn fixture(
+        socket: &str,
+    ) -> (
+        crate::IsolatedTestTmux,
+        EditorViewTmuxRequest,
+        EditorViewMainSnapshot,
+    ) {
+        let tmux = crate::isolated_test_tmux(socket);
         let main_pane = tmux.new_session("main", Path::new("/tmp")).unwrap();
         tmux.raw_cmd(&["rename-window", "-t", &main_pane, "agent-doc"])
             .unwrap();

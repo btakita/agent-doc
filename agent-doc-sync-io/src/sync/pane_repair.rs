@@ -470,7 +470,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-proof-cache-actor");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-proof-cache-actor");
         let first_pane = iso.new_session("test", root).unwrap();
         let second_pane = iso.split_window(&first_pane, root, "-dh").unwrap();
         let first_window = iso.pane_window(&first_pane).unwrap();
@@ -542,7 +542,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-safe-passive-local-actor");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-safe-passive-local-actor");
         let pane = iso.new_session("test", root).unwrap();
         let window = iso.pane_window(&pane).unwrap();
         agent_doc_session_actor_io::project_binding_in(
@@ -894,7 +894,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-dead-pane-diagnostics");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-dead-pane-diagnostics");
         let pane = iso.new_session("test", tmp.path()).unwrap();
         iso.enable_remain_on_exit(&pane).unwrap();
         assert!(
@@ -1151,7 +1151,7 @@ mod tests {
         )
         .unwrap();
 
-        let iso = IsolatedTmux::new("sync-cross-root-focus-stability");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-cross-root-focus-stability");
         let root_pane = iso.new_session("test", root).unwrap();
         let window = iso.pane_window(&root_pane).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
@@ -1249,7 +1249,7 @@ mod tests {
         let doc = tmp.path().join("tasks/owned.md");
         std::fs::write(&doc, "---\nagent_doc_session: owned-session\n---\n").unwrap();
 
-        let iso = IsolatedTmux::new("sync-live-owner-proof");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-live-owner-proof");
         let pane = iso.new_session("test", tmp.path()).unwrap();
 
         assert!(
@@ -1275,7 +1275,7 @@ mod tests {
         let doc = tmp.path().join("tasks/owned.md");
         std::fs::write(&doc, "---\nagent_doc_session: owned-rebind-session\n---\n").unwrap();
 
-        let iso = IsolatedTmux::new("sync-owned-rebind-proof");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-owned-rebind-proof");
         let pane = iso.new_session("test", tmp.path()).unwrap();
         std::fs::write(
             tmp.path().join(".agent-doc/logs/owned-rebind-session.log"),

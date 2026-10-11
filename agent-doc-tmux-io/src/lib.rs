@@ -4,7 +4,12 @@
 //! document authority, merge behavior, queue projection, or turn commits.
 
 pub mod editor_view;
+pub mod isolated_test_server;
 pub mod observation_cache;
+
+pub use isolated_test_server::{
+    IsolatedTestTmux, isolated_test_tmux, isolated_tmux_socket_path, unique_isolated_tmux_socket,
+};
 
 pub use observation_cache::{
     ObservationScopeStats, TmuxObservationScope, begin_observation_scope, observation_scope_stats,
@@ -223,6 +228,12 @@ impl TmuxCommandRunner for tmux_router::Tmux {
 impl TmuxCommandRunner for tmux_router::IsolatedTmux {
     fn run(&self, command: &TmuxCommand) -> Result<String, TmuxIoError> {
         TmuxCommandRunner::run(&**self, command)
+    }
+}
+
+impl TmuxCommandRunner for IsolatedTestTmux {
+    fn run(&self, command: &TmuxCommand) -> Result<String, TmuxIoError> {
+        TmuxCommandRunner::run(&***self, command)
     }
 }
 
@@ -808,7 +819,7 @@ mod tests {
     /// isolated tmux server.
     #[test]
     fn mode_exit_on_a_pane_not_in_a_mode_does_not_fail_the_command() {
-        let iso = tmux_router::IsolatedTmux::new("tmux-io-not-in-a-mode");
+        let iso = crate::isolated_test_tmux("tmux-io-not-in-a-mode");
         iso.cmd()
             .args(["new-session", "-d", "-s", "t"])
             .status()

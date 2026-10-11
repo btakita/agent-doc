@@ -382,7 +382,7 @@ sleep 1
         )
         .unwrap();
 
-        let tmux = tmux_router::IsolatedTmux::new("prompt-opencode-tab-answer");
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("prompt-opencode-tab-answer");
         let pane = tmux
             .new_session("prompt-opencode-tab-answer", tmp.path())
             .unwrap();

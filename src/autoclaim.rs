@@ -218,7 +218,7 @@ fn sync_after_autoclaim_in(
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use tmux_router::{IsolatedTmux, Registry as SessionRegistry, RegistryEntry as SessionEntry};
+    use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry};
 
     fn env_lock() -> crate::test_support::ProcessGlobalLockGuard {
         crate::test_support::env_lock()
@@ -247,7 +247,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn autoclaim_focuses_pane_with_claim() {
         let _env_guard = env_lock();
-        let iso = IsolatedTmux::new("agent-doc-test-autoclaim-focus");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-autoclaim-focus");
         let dir = TempDir::new().unwrap();
 
         // Create the claimed file so it passes existence check
@@ -305,7 +305,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn autoclaim_syncs_layout_with_multiple_files() {
         let _env_guard = env_lock();
-        let iso = IsolatedTmux::new("agent-doc-test-autoclaim-sync");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("agent-doc-test-autoclaim-sync");
         let dir = TempDir::new().unwrap();
 
         // Create session documents with frontmatter so sync can resolve them

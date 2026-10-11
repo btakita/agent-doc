@@ -893,7 +893,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_stash_panes_bulk_preserves_agent_without_ownership_metadata() {
-        let iso = IsolatedTmux::new("resync-purge-agent-no-owner-bulk");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-agent-no-owner-bulk");
         let cwd = std::env::current_dir().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let agent_bin = dir.path().join("agent-doc");
@@ -926,7 +926,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn safe_passive_stash_cleanup_defers_live_agent_owner_proof() {
-        let iso = IsolatedTmux::new("resync-safe-passive-defer-agent-proof");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-safe-passive-defer-agent-proof");
         let cwd = std::env::current_dir().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let bin_dir = dir.path().join("bin");
@@ -965,7 +965,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_stash_panes_bulk_preserves_live_supervisor() {
-        let iso = IsolatedTmux::new("resync-purge-agent-live-supervisor-bulk");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-agent-live-supervisor-bulk");
         let cwd = std::env::current_dir().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let script = write_mock_agent_doc(dir.path());
@@ -1023,7 +1023,8 @@ mod tests {
         std::fs::create_dir_all(&child_root).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(root.path());
 
-        let iso = IsolatedTmux::new("resync-purge-agent-live-supervisor-cross-root");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("resync-purge-agent-live-supervisor-cross-root");
         let script = write_mock_agent_doc(&child_root);
         let pane1 = iso.auto_start("test", root.path()).unwrap();
         let pane2 = iso.split_window(&pane1, &child_root, "-dh").unwrap();
@@ -1068,7 +1069,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_orphan_agent_in_non_stash_window_preserves_live_agent_without_metadata() {
-        let iso = IsolatedTmux::new("resync-purge-orphan-agent");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-orphan-agent");
         let dir = tempfile::tempdir().unwrap();
         let agent_bin = dir.path().join("agent-doc");
         std::os::unix::fs::symlink("/bin/sleep", &agent_bin).unwrap();
@@ -1105,7 +1106,7 @@ mod tests {
         let script = write_mock_agent_doc(parent.path());
 
         let _cwd_guard = ScopedCurrentDir::set(parent.path());
-        let iso = IsolatedTmux::new("resync-preserve-nested-owner");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-preserve-nested-owner");
         let pane = iso.new_session("test", &nested).unwrap();
         let sibling = iso.split_window(&pane, &nested, "-dh").unwrap();
         launch_mock_agent_doc(&iso, &pane, &script, &doc);
@@ -1134,7 +1135,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_dead_non_stash_pane() {
-        let iso = IsolatedTmux::new("resync-purge-dead-non-stash");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-dead-non-stash");
         let cwd = std::env::current_dir().unwrap();
 
         let live_pane = iso.auto_start("test", &cwd).unwrap();
@@ -1162,7 +1163,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_orphan_does_not_kill_last_pane() {
         // A window with only one pane (even if orphaned agent) should not be touched.
-        let iso = IsolatedTmux::new("resync-purge-last-pane");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-last-pane");
         let cwd = std::env::current_dir().unwrap();
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
@@ -1180,7 +1181,7 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_dead_non_stash_panes_skips_last_pane() {
-        let iso = IsolatedTmux::new("resync-purge-dead-last-pane");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-dead-last-pane");
         let cwd = std::env::current_dir().unwrap();
 
         let pane = iso.auto_start("test", &cwd).unwrap();
@@ -1207,7 +1208,7 @@ mod tests {
     fn return_stashed_panes_moves_active_pane_back() {
         // A registered pane running an active process (sleep) in stash should be
         // returned to its original session window.
-        let iso = IsolatedTmux::new("resync-return-active");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-return-active");
         let cwd = std::env::current_dir().unwrap();
 
         // Create a pane with an active process (sleep)
@@ -1263,7 +1264,7 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn return_stashed_panes_skips_idle_shells() {
         // An idle shell in stash should NOT be returned — it's handled by purge.
-        let iso = IsolatedTmux::new("resync-return-idle");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-return-idle");
         let cwd = std::env::current_dir().unwrap();
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();

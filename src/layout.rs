@@ -399,7 +399,7 @@ fn pid_is_agent_session(pid: &str) -> bool {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use tmux_router::{IsolatedTmux, Registry as SessionRegistry, RegistryEntry as SessionEntry};
+    use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry};
 
     /// `#run3rdpaneswitch`, as a pure rule: BUSY changes where a pane goes, never
     /// whether it leaves. The regression was the opposite — busy meant "skip",
@@ -476,7 +476,7 @@ mod tests {
         let first = write_doc(root, "first.md", "sess-first");
         let second = write_doc(root, "second.md", "sess-second");
 
-        let iso = IsolatedTmux::new("layout-switch-while-busy");
+        let iso = agent_doc_tmux_io::isolated_test_tmux("layout-switch-while-busy");
         let busy_pane = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let pane_first = iso.split_window(&busy_pane, root, "-dh").unwrap();

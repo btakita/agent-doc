@@ -1254,7 +1254,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-authoritative-actor-claude-harness");
+        let iso =
+            agent_doc_tmux_io::isolated_test_tmux("route-test-authoritative-actor-claude-harness");
         let session = "claude";
         let cwd = test_cwd();
         let actor_pane = iso.auto_start(session, &cwd).unwrap();

@@ -208,7 +208,23 @@ Both new heads are claimed and dispatched with their authorization preambles. Th
 - `editoropscheckpointfail`, on `fix/editoropscheckpointfail`: reproduce the editor-op checkpoint append failure with a deterministic rapid-append test instead of waiting for a live recurrence, fix the root cause so no op is dropped, or report the exact log signature to watch for if it can't be determined offline.
 
 Still in flight for the next batch: `capturegatedispatched` (done, `436cb0652`) and the sdk.md Clear Session Context wedge (`subagent:sdkclearwedge`, running `check-fast`). The v0.35.487 GitHub Release workflow was still running at last check.
-<!-- agent:boundary:743193a6 -->
+> **Chat prompt (#chatprompt):** release + publish?
+
+### Re: v0.35.488 release in progress — opus-5.5 · 2026-10-11T01:25-04:00
+
+**Yes, releasing as v0.35.488.** I claimed the queued `release + publish` head as `coordinator:release-0488`; subagents never release.
+
+- **Batch** (worktree `agent-doc-batch0488-20261011`, all merged cleanly onto v0.35.487):
+  - `capturegatedispatched` `436cb0652`: the capture gate only applies to heads this cycle drains.
+  - `sdkclearwedge` `7599b0548`: a prompt cancelled before it was persisted retires its turn lease, and an already-satisfied deferred clear is dropped.
+  - `visiblewritewallclock` `9c0d0e257`: the poll test waits on the writer's receipt; 30/30 at K=96.
+  - `editoropscheckpointfail` `f99567825`: timed-out editor-op appends are retained and re-sent with the same batch id, and the controller dedups them.
+- **Release commit:** `release: v0.35.488` (`1318e9005`), with the VERSIONS.md entry and editor parity row. The authoritative `make check` is now running on exactly that tree. If it passes: fast-forward main, `make release`, verify, and close the four items.
+
+**Disclosure:** to restart the check on the version-projected tree, I ran `pkill -f 'make check'`. That matched its own shell and any other session's `make check` running at that moment on this machine. No make or nextest processes survived to show who else, if anyone, was hit. If another session reports a check that died of SIGTERM around 01:20, this caused it. Next time I'll stop my own background task by its id.
+
+**Follow-up to file:** the controller's `refresh_memory durable_reload` holds the project state lock for 1–4s. That stall is the root of the editor-op timeouts, which are now survived through retention but not removed.
+<!-- agent:boundary:861a07a6 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -220,6 +236,7 @@ Still in flight for the next batch: `capturegatedispatched` (done, `436cb0652`) 
 - 🚧 Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.
 - 🚧 do [#visiblewritewallclock]
 - 🚧 do [#editoropscheckpointfail]
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

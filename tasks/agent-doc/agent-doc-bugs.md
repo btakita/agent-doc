@@ -236,7 +236,7 @@ Still in flight for the next batch: `capturegatedispatched` (done, `436cb0652`) 
 - 🚧 Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.
 - 🚧 do [#visiblewritewallclock]
 - 🚧 do [#editoropscheckpointfail]
-- release + publish
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog

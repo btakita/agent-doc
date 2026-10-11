@@ -732,6 +732,28 @@ validation occurs before any traversal of the replica graph so neither a cyclic
 payload nor validation of a large retained history can pin the Project
 Controller while it holds document authority.
 
+A graph-valid update can still structurally corrupt the canonical: a stale or
+truncated editor buffer tombstones a component marker line and leaves the
+document unparseable (`#replica-structure-guard`). The relay restores the clean
+pre-update canonical, fences the sender for canonical projection, and logs
+`crdt_replica_update_corruption_rejected`, but only when the update introduced
+a `parse_error:` into a canonical that had none **and deleted a marker line**.
+An unparseable result alone is not evidence: operator typing passes through
+unparseable states. A half-typed code fence hides markers without deleting any
+(`#typingfencerevert`), and retyping a component name, changing a marker's
+attributes, or a stray key inside `<!--` edits characters inside a marker line
+that stays put (`#markerlineedit`, GH #239). The discriminator is what the
+update deleted, not whether the old marker text still appears: marker lines
+whose raw-text count dropped are located with a line diff, and each changed
+hunk holding one is diffed by character. A marker line is deleted when its hunk
+has no replacement lines, or when no contiguous run of at least four of its own
+non-whitespace characters (the `<!--` frame) survives; otherwise it was edited
+in place and the update is operator text that the relay keeps. Restoring an
+in-place edit is forbidden: the restored line merges with the operator's
+continued typing and the committed marker carries its text twice. Deleting every
+character of a marker line still reads as a deletion, because it cannot be told
+apart from a stale buffer.
+
 The durable replica caches the visible-text projection between mutations. An
 exact replay of the last accepted encoded update is rejected before the CRDT
 engine's apply path, and novel remote deltas use the engine's unprojected apply:
@@ -2091,6 +2113,11 @@ Implementations must keep tests for these cases:
 
 - ordinary non-prompt operator text typed during closeout is preserved;
 - queue and backlog edits typed during closeout are preserved;
+- an operator edit inside a component marker line (retyping the name or
+  attributes one key at a time, or a stray key inside `<!--`) is relayed as
+  operator text with no canonical restore, and the result holds the typed text
+  exactly once, while an update that deletes a whole marker line is still
+  restored (GH #239);
 - live-prompt-drift recovery rebases only the missing response block onto the
   realtime document;
 - compact exchange remains explicit `agent:exchange` replacement and preserves

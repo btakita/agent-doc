@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.488
+
+- **A prompt cancelled before Claude Code persists it no longer wedges Clear Session Context (`#sdkclearwedge`).** An
+  unanswered prompt snapshot after an ended turn, quiet for 20s, retires the turn lease with an `abandoned_prompt`
+  receipt; retiring harness evidence settles the turn's `running` dispatch receipts; a deferred clear already satisfied
+  by a later `/clear` or fresh conversation is dropped instead of delivered. Background subagents never count as a live
+  foreground turn.
+- **Editor-op provenance survives controller stalls (`#editoropscheckpointfail`).** A timed-out or busy editor-op
+  append is retained per document and re-sent with the same batch id until acknowledged, in typing order; the
+  controller dedups re-sent batch ids across epochs, so a late original plus its retry lands exactly once.
+- **The backlog-capture gate is scoped to heads the cycle drains (`#capturegatedispatched`).** Struck, claimed, held,
+  or subagent-dispatched queue heads no longer demand a backlog mutation from a coordinator dispatch-only cycle.
+- **Visible-write poll test waits on the writer's receipt, not a deadline (`#visiblewritewallclock`).**
+
 ## 0.35.487
 
 - **Promoted backlog items reach the queue on a deferred write (`#retainedactionablemirror`).** A retained tracked-work

@@ -1041,6 +1041,32 @@ mod tests {
         ));
     }
 
+    /// `#qheadresiduescope`: a closeout that does not quote a re-typed repeated
+    /// report never calls it completed residue, even though the committed
+    /// exchange still holds the echo that answered its earlier copy. The
+    /// closeout judges the head only against this cycle's captured response.
+    #[test]
+    fn closeout_does_not_call_a_retyped_report_residue_from_an_older_echo() {
+        let report = "the session list flickers when a second pane opens the same document";
+        let content = format!(
+            "<!-- agent:exchange -->\n### Re: session list flicker\n\n> **Queue prompt:** {report}\n\nFixed.\n\n### Re: other\n\n> **Queue prompt:** rename the export button to download\n\nRenamed.\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- ~~{report}~~\n- {report}\n<!-- /agent:queue -->\n"
+        );
+        let response = "### Re: other\n\n> **Queue prompt:** rename the export button to download\n\nRenamed.\n";
+        let decision = free_text_queue_head_provenance_decision(
+            &[report.to_string()],
+            &content,
+            Some(response),
+        )
+        .unwrap();
+        assert!(
+            decision.completed_residue.is_empty(),
+            "{:?}",
+            decision.completed_residue
+        );
+        assert!(decision.unresolved.is_empty(), "{:?}", decision.unresolved);
+        assert!(decision.response_proven_removed.is_empty());
+    }
+
     #[test]
     fn free_text_queue_head_provenance_decision_ignores_decorated_id_backed_state() {
         let content = doc("- [#sy71]\n", "");

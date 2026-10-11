@@ -26,6 +26,58 @@ pub fn show_rev(file: &Path, rev: &str) -> Result<Option<String>> {
     Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
 }
 
+/// Visit the committed versions of `file`, newest first, for at most `limit`
+/// commits that touched it.
+///
+/// `visit` receives each commit's content (`None` when the path is absent at
+/// that commit) and returns `false` to stop the walk. Returns the number of
+/// commits visited. A file outside git, or with no commits, visits nothing.
+/// The owning git root is narrowed to the submodule root, as in [`show_rev`].
+pub fn walk_file_revisions(
+    file: &Path,
+    limit: usize,
+    mut visit: impl FnMut(Option<&str>) -> bool,
+) -> Result<usize> {
+    let (super_root, resolved) = resolve_to_git_root(file)?;
+    let (git_root, _) = narrow_to_submodule(&super_root, &resolved);
+    let rel_path = relative_path_for_git_show(&resolved, &git_root);
+    let rel = rel_path.to_string_lossy().to_string();
+
+    let output = Command::new("git")
+        .current_dir(&git_root)
+        .args([
+            "log",
+            &format!("-{limit}"),
+            "--format=%H",
+            "--",
+            rel.as_str(),
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Ok(0);
+    }
+    let mut visited = 0usize;
+    for sha in String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|sha| !sha.is_empty())
+    {
+        let shown = Command::new("git")
+            .current_dir(&git_root)
+            .args(["show", &format!("{sha}:{rel}")])
+            .output()?;
+        visited += 1;
+        let content = shown
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&shown.stdout).to_string());
+        if !visit(content.as_deref()) {
+            break;
+        }
+    }
+    Ok(visited)
+}
+
 pub fn show_head(file: &Path) -> Result<Option<String>> {
     show_rev(file, "HEAD")
 }
@@ -254,6 +306,53 @@ mod tests {
         fs::write(&doc, "working tree\n").unwrap();
 
         assert_eq!(show_head(&doc).unwrap(), Some("committed\n".to_string()));
+    }
+
+    #[test]
+    fn walk_file_revisions_visits_newest_first_and_stops_on_request() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        let doc = root.join("doc.md");
+        for version in ["one\n", "two\n", "three\n"] {
+            fs::write(&doc, version).unwrap();
+            Command::new("git")
+                .current_dir(root)
+                .args(["add", "doc.md"])
+                .output()
+                .unwrap();
+            Command::new("git")
+                .current_dir(root)
+                .args(["commit", "-m", version.trim()])
+                .output()
+                .unwrap();
+        }
+        let mut seen = Vec::new();
+        let visited = walk_file_revisions(&doc, 10, |content| {
+            seen.push(content.unwrap_or_default().to_string());
+            content != Some("two\n")
+        })
+        .unwrap();
+        assert_eq!(visited, 2);
+        assert_eq!(seen, vec!["three\n".to_string(), "two\n".to_string()]);
+
+        let mut limited = 0;
+        walk_file_revisions(&doc, 1, |_| {
+            limited += 1;
+            true
+        })
+        .unwrap();
+        assert_eq!(limited, 1);
+    }
+
+    #[test]
+    fn walk_file_revisions_visits_nothing_without_commits() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        let doc = root.join("doc.md");
+        fs::write(&doc, "untracked\n").unwrap();
+        assert_eq!(walk_file_revisions(&doc, 10, |_| true).unwrap(), 0);
     }
 
     #[test]

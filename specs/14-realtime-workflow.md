@@ -387,6 +387,18 @@ re-decided at a site:
   retained `--done` had nothing that would ever commit it. A rejecting endpoint
   or an unserved replica withholds the narrow marker, so those stay refused
   with the recovery above.
+  An absorbed envelope also records its keep-open ids (`--backlog-edit`,
+  `--backlog-gate`/ungate targets, `--backlog-reorder`, review edits) on the
+  cycle state as `pending_kept_open_ids` (`#keptopenabsorbed`). Before, the
+  absorbed path returned before recording any lifecycle outcome, so once the
+  continuation committed the edit, `expect_done_or_gate` and the
+  `#queue-clear-unrun-items` guard still found no kept-open decision for the id
+  and kept firing on an edit already in HEAD (haiven-dev `tasks/sdk.md`
+  2026-10-11: `#quirkbigint`'s kept-open edit committed as `c0477a6a`, the
+  guard fired twice more). Only the keep-open fact is recorded at absorption,
+  because an edited item is open whether or not the envelope has landed;
+  `--done` and `--backlog-gate` facts still wait for the landing proof the
+  continuation owns.
 - **Settlement racing synchronous inspection continues through the same
   witnesses.** The controller may converge and retire the retained intent after
   the delivery barrier constructs its `retained=delivery_projection_pending`

@@ -51,6 +51,10 @@ const TURN_ACTIVE_TRANSCRIPT_SCOPE: &str = "turn_active_transcript";
 /// outlives the lease row on purpose: the lease answers "is a turn live now?",
 /// the receipt answers "did the harness reach a boundary after time T?".
 const TURN_ENDED_SCOPE: &str = "turn_ended";
+/// `#claimownerliveness`: the harness session id each pane's harness last
+/// reported through a turn hook (`holder` = session id, `heartbeat_secs` =
+/// when it was observed).
+const PANE_HARNESS_SESSION_SCOPE: &str = "pane_harness_session";
 const SUPERVISOR_STALE_SCOPE: &str = "supervisor_stale";
 // Compatibility key written by agent-doc versions before turn-active leases
 // became pane-scoped.
@@ -171,6 +175,48 @@ pub fn record_harness_turn_end_at(
 ) -> Result<()> {
     let conn = open_state_db(base)?;
     record_harness_turn_end_in_db(&conn, pane, ended_at, reason)
+}
+
+/// Record that `pane`'s harness reported `session_id` at `observed_at`
+/// (`#claimownerliveness`). Monotonic like the turn-end receipt.
+pub fn record_pane_harness_session_at(
+    base: &Path,
+    pane: &str,
+    session_id: &str,
+    observed_at: u64,
+) -> Result<()> {
+    let conn = open_state_db(base)?;
+    if let Some(existing) =
+        load_coordination_lease_from_db(&conn, PANE_HARNESS_SESSION_SCOPE, pane)?
+        && existing.heartbeat_secs > observed_at
+    {
+        return Ok(());
+    }
+    upsert_coordination_lease_in_db(
+        &conn,
+        &CoordinationLeaseRecord {
+            scope_kind: PANE_HARNESS_SESSION_SCOPE.to_string(),
+            scope_id: pane.to_string(),
+            holder: session_id.to_string(),
+            holder_pid: Some(std::process::id()),
+            heartbeat_secs: observed_at,
+        },
+    )
+}
+
+/// The session id `pane`'s harness last reported, with when it was observed.
+pub fn pane_harness_session(base: &Path, pane: &str) -> Option<(String, u64)> {
+    let conn = open_state_db(base).ok()?;
+    let row = load_coordination_lease_from_db(&conn, PANE_HARNESS_SESSION_SCOPE, pane)
+        .ok()
+        .flatten()?;
+    Some((row.holder, row.heartbeat_secs))
+}
+
+/// [`pane_harness_session`] for the project containing `file`.
+pub fn pane_harness_session_for_file(file: &Path, pane: &str) -> Option<(String, u64)> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    pane_harness_session(&root, pane)
 }
 
 /// The newest harness turn-end receipt for `pane`, if any.
@@ -655,6 +701,15 @@ pub fn apply_turn_status_hook_at(
     payload: Option<&str>,
     now: u64,
 ) -> Result<()> {
+    // `#claimownerliveness`: remember which harness session the pane runs, so
+    // a queue claim made by an earlier session in this pane reads as ended
+    // after `/clear`. Only the main session's own events carry it here
+    // (`UserPromptSubmit`, `Stop`, `SessionStart`); best-effort.
+    if let Some(session_id) = payload.and_then(hook_main_session_id_from_payload)
+        && let Err(err) = record_pane_harness_session_at(base, pane, &session_id, now)
+    {
+        eprintln!("[turn-status] warning: failed to record pane harness session: {err:#}");
+    }
     if active {
         let transcript = payload.and_then(hook_transcript_path_from_payload);
         return write_turn_active_marker_with_transcript_at(base, pane, now, transcript.as_deref());
@@ -664,6 +719,18 @@ pub fn apply_turn_status_hook_at(
         Some(reason) => record_harness_turn_end_at(base, pane, now, reason),
         None => Ok(()),
     }
+}
+
+/// The main-session `session_id` of a Claude hook payload: present only on
+/// events the main session itself fires (never `SubagentStop`).
+fn hook_main_session_id_from_payload(payload: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(payload.trim()).ok()?;
+    let event = value.get("hook_event_name")?.as_str()?;
+    if !matches!(event, "UserPromptSubmit" | "Stop" | "SessionStart") {
+        return None;
+    }
+    let session = value.get("session_id")?.as_str()?.trim();
+    (!session.is_empty()).then(|| session.to_string())
 }
 
 /// `#runctrlclaude`: the turn-end receipt a hook payload proves, if any.
@@ -707,6 +774,38 @@ fn resolve_marker_base() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use agent_doc_turn::turn_status::TURN_ACTIVE_TTL_SECS;
+
+    /// `#claimownerliveness`: the pane's harness session is recorded from the
+    /// main session's hooks (a `/clear` `SessionStart` replaces it), never from
+    /// a subagent event, and never moves backwards in time.
+    #[test]
+    fn hooks_record_the_panes_current_harness_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
+        let prompt =
+            r#"{"hook_event_name":"UserPromptSubmit","session_id":"pre-clear","prompt":"p"}"#;
+        apply_turn_status_hook_at(base, "%180", true, Some(prompt), 100).unwrap();
+        assert_eq!(
+            pane_harness_session(base, "%180"),
+            Some(("pre-clear".to_string(), 100))
+        );
+        let clear =
+            r#"{"hook_event_name":"SessionStart","source":"clear","session_id":"post-clear"}"#;
+        apply_turn_status_hook_at(base, "%180", false, Some(clear), 200).unwrap();
+        assert_eq!(
+            pane_harness_session(base, "%180"),
+            Some(("post-clear".to_string(), 200))
+        );
+        let subagent = r#"{"hook_event_name":"SubagentStop","session_id":"sub"}"#;
+        apply_turn_status_hook_at(base, "%180", false, Some(subagent), 300).unwrap();
+        record_pane_harness_session_at(base, "%180", "late-old", 150).unwrap();
+        assert_eq!(
+            pane_harness_session(base, "%180"),
+            Some(("post-clear".to_string(), 200))
+        );
+        assert_eq!(pane_harness_session(base, "%9"), None);
+    }
 
     #[test]
     fn turn_active_marker_write_read_clear_roundtrip() {

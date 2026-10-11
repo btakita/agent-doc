@@ -59,6 +59,26 @@ pub struct ClaimedQueueItemFact {
     pub owner: String,
     /// When the claim expires, ISO-8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`).
     pub expires_at: String,
+    /// `#claimownerliveness`: set when the coordinator session that made the
+    /// claim is known to have ended (`/clear`, restart, exit). The claim still
+    /// holds the head, but nothing proves its work is in flight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_session_ended: Option<StaleClaimFact>,
+}
+
+/// Why a claimed head is a **stale claim** and how the current coordinator
+/// resolves it (`#claimownerliveness`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StaleClaimFact {
+    /// Stable reason token (`owner_process_exited`, `session_replaced`).
+    pub reason: String,
+    /// Operator-facing reason.
+    pub detail: String,
+    /// Re-bind the claim to the current session, for a subagent that is
+    /// still working and reporting back.
+    pub adopt_command: String,
+    /// Release the claim so the head is dispatched again.
+    pub release_command: String,
 }
 
 /// Facts the preflight already holds when it reports `no_changes`.
@@ -118,22 +138,52 @@ pub fn queue_item_texts(content: &str) -> Vec<String> {
 /// claim holds — `` `do [#id]` is claimed by <owner>, expires <t> `` — plus the
 /// instruction the mid-turn steering path already gives for a claimed item
 /// (`dispatch=forward_to_owner`): nothing to dispatch, do not re-claim.
+///
+/// `#claimownerliveness`: a claim whose owner session ended is a **stale
+/// claim**. It is never described as in flight; the guidance names why it is
+/// unverifiable and gives the two exits (adopt or release) instead of "do NOT
+/// release", which kept a post-`/clear` coordinator reporting a subagent it had
+/// no record of as running.
 pub fn claimed_queue_guidance(claimed: &[ClaimedQueueItemFact]) -> String {
-    let listed = claimed
+    let (stale, live): (Vec<_>, Vec<_>) = claimed
         .iter()
-        .map(|fact| {
-            format!(
-                "`{}` is claimed by {}, expires {}",
-                fact.item, fact.owner, fact.expires_at
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    format!(
-        "Queue work is in flight elsewhere: {listed}. Nothing to dispatch in this session; \
-         do NOT respond to, re-dispatch, re-claim, or release a claimed item. It returns to \
-         the queue when its owner finishes or the claim expires."
-    )
+        .partition(|fact| fact.owner_session_ended.is_some());
+    let mut parts = Vec::new();
+    if !live.is_empty() {
+        let listed = live
+            .iter()
+            .map(|fact| {
+                format!(
+                    "`{}` is claimed by {}, expires {}",
+                    fact.item, fact.owner, fact.expires_at
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        parts.push(format!(
+            "Queue work is in flight elsewhere: {listed}. Nothing to dispatch in this session; \
+             do NOT respond to, re-dispatch, re-claim, or release a claimed item. It returns to \
+             the queue when its owner finishes or the claim expires."
+        ));
+    }
+    for fact in stale {
+        let Some(ended) = fact.owner_session_ended.as_ref() else {
+            continue;
+        };
+        parts.push(format!(
+            "Stale claim: `{}` is claimed by {} (expires {}), but {}, so nothing proves this work \
+             is in flight; do NOT tell the operator it is running. If one of YOUR live subagents \
+             is working on it, adopt the claim: `{}`. Otherwise release it so it is dispatched \
+             again: `{}`.",
+            fact.item,
+            fact.owner,
+            fact.expires_at,
+            ended.detail,
+            ended.adopt_command,
+            ended.release_command
+        ));
+    }
+    parts.join(" ")
 }
 
 /// Build the explanation for a `no_changes` preflight.
@@ -262,6 +312,7 @@ mod tests {
             item: "do [#runctrlclaude]".to_string(),
             owner: "subagent:runctrlclaude".to_string(),
             expires_at: "2026-10-10T19:32:32Z".to_string(),
+            owner_session_ended: None,
         }];
         let explanation = explain_no_changes(NoChangesFacts {
             read_source: NoChangesReadSource::LiveEditor,
@@ -283,6 +334,61 @@ mod tests {
         assert_eq!(
             json["claimed_queue_items"][0]["owner"],
             "subagent:runctrlclaude"
+        );
+    }
+
+    /// `#claimownerliveness` (haiven-dev tasks/sdk.md, 2026-10-11): a claim
+    /// whose coordinator session was `/clear`ed is reported as a stale claim
+    /// with adopt/release commands, never as in-flight work with "do NOT
+    /// release"; a live claim beside it keeps the in-flight wording.
+    #[test]
+    fn stale_claims_are_named_unverifiable_with_adopt_and_release_exits() {
+        let claimed = [
+            ClaimedQueueItemFact {
+                item: "do [#cligenport]".to_string(),
+                owner: "subagent:cligoshell-then-cligenport".to_string(),
+                expires_at: "2026-10-11T08:30:00Z".to_string(),
+                owner_session_ended: Some(StaleClaimFact {
+                    reason: "session_replaced".to_string(),
+                    detail: "the claiming coordinator session was replaced in its pane".to_string(),
+                    adopt_command: "agent-doc queue claim tasks/sdk.md --item '#cligenport' \
+                                    --owner subagent:cligoshell-then-cligenport --refresh"
+                        .to_string(),
+                    release_command: "agent-doc queue release tasks/sdk.md --item '#cligenport'"
+                        .to_string(),
+                }),
+            },
+            ClaimedQueueItemFact {
+                item: "do [#live]".to_string(),
+                owner: "subagent:live".to_string(),
+                expires_at: "2026-10-11T09:00:00Z".to_string(),
+                owner_session_ended: None,
+            },
+        ];
+        let guidance = claimed_queue_guidance(&claimed);
+        let (live_part, stale_part) = guidance.split_once("Stale claim:").unwrap();
+        assert!(
+            live_part.contains("`do [#live]` is claimed by subagent:live"),
+            "{guidance}"
+        );
+        assert!(!live_part.contains("cligenport"), "{guidance}");
+        assert!(
+            stale_part.contains("nothing proves this work is in flight"),
+            "{guidance}"
+        );
+        assert!(stale_part.contains("--refresh"), "{guidance}");
+        assert!(
+            stale_part.contains("agent-doc queue release tasks/sdk.md --item '#cligenport'"),
+            "{guidance}"
+        );
+        assert!(!stale_part.contains("do NOT respond"), "{guidance}");
+        let json = serde_json::to_value(&claimed[0]).unwrap();
+        assert_eq!(json["owner_session_ended"]["reason"], "session_replaced");
+        assert!(
+            serde_json::to_value(&claimed[1])
+                .unwrap()
+                .get("owner_session_ended")
+                .is_none()
         );
     }
 

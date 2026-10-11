@@ -97,6 +97,7 @@ fn pending_only_retention_beside_committed_response_is_absorbed() {
             CommitMode::BestEffort,
             &error,
             Some(existing.as_str()),
+            &["turnleasesweep".to_string()],
         )
         .unwrap(),
         None,
@@ -120,6 +121,7 @@ fn pending_only_retention_beside_committed_response_is_absorbed() {
         CommitMode::BestEffort,
         &error,
         prior.as_deref(),
+        &["turnleasesweep".to_string()],
     )
     .unwrap();
     let target_hash = agent_doc_hash::content_hash(&done_target);
@@ -131,6 +133,28 @@ fn pending_only_retention_beside_committed_response_is_absorbed() {
         state.pending_only_commit_target_hash.as_deref(),
         Some(target_hash.as_str()),
         "session-check must find the continuation that commits the retained --done"
+    );
+    // `#keptopenabsorbed`: the absorbed envelope's keep-open decision is a
+    // recorded lifecycle outcome, so `expect_done_or_gate` passes for it
+    // instead of re-firing after its continuation commits.
+    assert_eq!(
+        state.pending_kept_open_ids,
+        vec!["turnleasesweep".to_string()]
+    );
+    assert_eq!(
+        agent_doc_turn::closeout_signal::expect_done_or_gate_decision(
+            agent_doc_turn::closeout_signal::ExpectDoneOrGateEvidence {
+                cycle_open: false,
+                capture_committed: true,
+                response_body: "Deferred: kept open.",
+                directed_ids: &["turnleasesweep".to_string()],
+                pending_done_ids: &state.pending_done_ids,
+                pending_kept_open_ids: &state.pending_kept_open_ids,
+                reaped_pending_ids: &state.reaped_pending_ids,
+                open_backlog_ids: &["turnleasesweep".to_string()],
+            },
+        ),
+        agent_doc_turn::closeout_signal::ExpectDoneOrGateDecision::Pass,
     );
     let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
     assert!(

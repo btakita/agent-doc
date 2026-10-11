@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **A queue claim knows whether the coordinator session that made it is still alive (`#claimownerliveness`).** A claim
+  records the claiming harness session (session id, tmux pane, pid; a subagent inherits its coordinator's). Once that
+  session has ended (`/clear`, restart, harness exit), preflight reports the head as a stale claim with ready-to-run
+  adopt (`queue claim --refresh`, which rebinds the claim) and release commands. Before, it said the work was in flight
+  and "do NOT release". The claim still holds the head until its TTL, because a pre-`/clear` subagent may still be
+  running. `queue claims` shows each claim's `owner_session_state`.
+- **The queue-removal guard no longer reports a head the operator is still editing as dropped (`#releasevssnapshot`).**
+  A recorded head whose `#id` is still on a live queue line counts as present, even when a half-deleted `⏭️` marker
+  makes the line unreadable as `do [#id]`.
+- **A kept-open `--backlog-edit` absorbed into a retained commit continuation is recorded (`#keptopenabsorbed`).**
+  Before, `expect_done_or_gate` kept firing on the edit after it was already in HEAD. A regression test also pins
+  that `--backlog-edit` on an id whose queue head is struck does not requeue it (`#editnorequeue`).
+
 ## 0.35.488
 
 - **A prompt cancelled before Claude Code persists it no longer wedges Clear Session Context (`#sdkclearwedge`).** An

@@ -2679,13 +2679,44 @@ fn claimed_queue_head_facts(
                 .find(|head| agent_doc_queue::queue_claim::claim_identity(head) == claim.identity)
                 .map(|head| strip_in_progress_marker(head))
                 .unwrap_or_else(|| claim.item_text.trim().to_string());
+            let owner_session_ended =
+                match agent_doc_queue_io::queue_claim::claim_owner_liveness(file, &claim) {
+                    agent_doc_queue::queue_claim::ClaimOwnerLiveness::Ended(reason) => {
+                        Some(stale_claim_fact(file, &claim, reason))
+                    }
+                    _ => None,
+                };
             agent_doc_queue::no_changes_explanation::ClaimedQueueItemFact {
                 item,
                 owner: claim.owner,
                 expires_at: agent_doc_log_time::format_log_timestamp(claim.expires_at_secs),
+                owner_session_ended,
             }
         })
         .collect()
+}
+
+/// `#claimownerliveness`: the adopt/release exits for a claim whose owner
+/// session ended, as runnable commands for this document.
+fn stale_claim_fact(
+    file: &Path,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+    reason: agent_doc_queue::queue_claim::OwnerSessionEndReason,
+) -> agent_doc_queue::no_changes_explanation::StaleClaimFact {
+    let quote = |text: &str| format!("'{}'", text.replace('\'', "'\\''"));
+    let doc = quote(&file.display().to_string());
+    let handle = quote(&agent_doc_queue::queue_claim::claim_item_handle(
+        &claim.item_text,
+    ));
+    agent_doc_queue::no_changes_explanation::StaleClaimFact {
+        reason: reason.as_str().to_string(),
+        detail: reason.describe().to_string(),
+        adopt_command: format!(
+            "agent-doc queue claim {doc} --item {handle} --owner {} --refresh",
+            quote(&claim.owner)
+        ),
+        release_command: format!("agent-doc queue release {doc} --item {handle}"),
+    }
 }
 
 fn record_selected_queue_head_state(

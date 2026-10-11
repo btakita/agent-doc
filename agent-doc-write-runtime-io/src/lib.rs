@@ -2752,6 +2752,7 @@ fn run_command_inner_within_pass(
                 commit_mode,
                 &error,
                 prior_retained_intent.as_deref(),
+                &pending_kept_open_ids,
             )? {
                 eprintln!(
                     "[write] {}",
@@ -3534,6 +3535,7 @@ fn absorb_retained_pending_only_mutation(
     commit_mode: CommitMode,
     error: &anyhow::Error,
     prior_retained_intent: Option<&str>,
+    pending_kept_open_ids: &[String],
 ) -> Result<Option<String>> {
     let message = format!("{error:#}");
     let own_retained_intent = agent_doc_document_realtime_io::pending_document_write(file)
@@ -3588,6 +3590,22 @@ fn absorb_retained_pending_only_mutation(
     );
     match (retention, continuation_target) {
         (agent_doc_turn::write_ownership::PendingOnlyRetention::Absorbed, Some(target_hash)) => {
+            // `#keptopenabsorbed`: the absorbed envelope is this cycle's
+            // explicit keep-open decision (`--backlog-edit` and friends), and
+            // its continuation commits exactly that target. Returning without
+            // recording it left `expect_done_or_gate` and the queue-removal
+            // guard blind to a kept-open edit already in HEAD (haiven-dev
+            // tasks/sdk.md 2026-10-11: `#quirkbigint`'s edit committed as
+            // c0477a6a, the guard kept firing). Only the keep-open fact is
+            // recorded here: an edited item is open whether or not the envelope
+            // has landed yet, while `--done`/`--backlog-gate` facts still wait
+            // for the landing proof the continuation owns.
+            if !pending_kept_open_ids.is_empty() {
+                agent_doc_cycle_state_io::record_pending_kept_open_ids(file, pending_kept_open_ids)
+                    .context(
+                        "failed to record kept-open ids of the absorbed pending-only envelope",
+                    )?;
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -3642,12 +3660,7 @@ fn await_settled_pending_only_mutation(
     agent_doc_cycle_state_io::mark_tracked_work_mutations_retained(file)
         .context("failed to record settled pending-only tracked-work delivery")?;
     await_deferred_tracked_work_commit(file, force_disk)?;
-    finish_settled_pending_only_mutation(
-        file,
-        pending_done,
-        pending_gate,
-        pending_kept_open_ids,
-    )?;
+    finish_settled_pending_only_mutation(file, pending_done, pending_gate, pending_kept_open_ids)?;
     Ok(true)
 }
 

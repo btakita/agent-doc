@@ -410,7 +410,7 @@ The sdkwedge subagent is now fixing both root causes: the save receipt stalling 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix: https://github.com/btakita/agent-doc/issues/239
+- 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/239
 - ⏳ do [#drivecapturedsplice]
 - 🚧 do [#respondcloseoutbacklog]
 - 🚧 sdk.md turn with a subagent is wedged. Asking me to restart.

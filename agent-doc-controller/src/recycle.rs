@@ -490,6 +490,63 @@ pub fn stale_restart_recently_attempted(
     (age < backoff.as_secs()).then_some(age)
 }
 
+/// `#drainingpredecessor`: durable lease naming the controller that just handed
+/// off and is still draining its already-accepted RPCs and admitted async
+/// editor workers (a Run Agent Doc `editor_route` the editor is awaiting on that
+/// process). Same-project duplicate reaping must not SIGTERM that pid before
+/// `deadline_secs`: killing it drops the editor's await connection, the editor
+/// replays the route from scratch against the successor, and the operator waits
+/// for a second full route (2026-10-10 `tools.md`: 58s instead of ~12s).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PredecessorDrainLease {
+    pub pid: u32,
+    pub generation: u64,
+    pub deadline_secs: u64,
+}
+
+/// Does `lease` protect `pid` from duplicate reaping at `now_secs`? Only the
+/// exact leased pid, and only before the deadline: a predecessor wedged past
+/// its drain budget is reaped as before.
+pub fn predecessor_drain_lease_protects(
+    lease: Option<&PredecessorDrainLease>,
+    pid: u32,
+    now_secs: u64,
+) -> bool {
+    lease.is_some_and(|lease| lease.pid == pid && now_secs < lease.deadline_secs)
+}
+
+/// `#drainingpredecessor`: how a client's stale-binary restart, delegated to
+/// the stale controller's own (draining) self-recycle, ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DelegatedStaleRestartOutcome {
+    /// A successor on the current binary answers the public socket.
+    SuccessorAdopted { polls: u32 },
+    /// No adoptable successor within the budget; the caller falls back.
+    TimedOut { polls: u32 },
+}
+
+/// Poll for the successor of a delegated self-recycle. Clock and sleep are
+/// injected so the bound is pinned without wall-clock timing.
+pub fn await_delegated_stale_restart(
+    mut successor_adoptable: impl FnMut() -> bool,
+    mut elapsed: impl FnMut() -> Duration,
+    mut sleep: impl FnMut(Duration),
+    budget: Duration,
+    poll: Duration,
+) -> DelegatedStaleRestartOutcome {
+    let mut polls = 0u32;
+    loop {
+        polls = polls.saturating_add(1);
+        if successor_adoptable() {
+            return DelegatedStaleRestartOutcome::SuccessorAdopted { polls };
+        }
+        if elapsed() >= budget {
+            return DelegatedStaleRestartOutcome::TimedOut { polls };
+        }
+        sleep(poll);
+    }
+}
+
 /// Parse `agent-doc --version` output (`agent-doc 0.35.449`) into the version.
 pub fn parse_agent_doc_version_output(stdout: &str) -> Option<String> {
     let line = stdout
@@ -646,6 +703,77 @@ mod gh128_tests {
             stale_restart_recently_attempted(Some(&recent), Some(7), 35, 1_002, backoff),
             None
         );
+    }
+
+    /// `#drainingpredecessor`: only the leased pid, and only before its
+    /// deadline, is protected from duplicate reaping.
+    #[test]
+    fn draining_predecessor_lease_protects_exact_pid_until_deadline() {
+        let lease = PredecessorDrainLease {
+            pid: 3726008,
+            generation: 2241,
+            deadline_secs: 1_360,
+        };
+        assert!(predecessor_drain_lease_protects(
+            Some(&lease),
+            3726008,
+            1_000
+        ));
+        assert!(predecessor_drain_lease_protects(
+            Some(&lease),
+            3726008,
+            1_359
+        ));
+        assert!(!predecessor_drain_lease_protects(
+            Some(&lease),
+            3726008,
+            1_360
+        ));
+        assert!(!predecessor_drain_lease_protects(
+            Some(&lease),
+            2854081,
+            1_000
+        ));
+        assert!(!predecessor_drain_lease_protects(None, 3726008, 1_000));
+    }
+
+    /// `#drainingpredecessor`: the delegated restart adopts the successor as
+    /// soon as it answers, without sleeping past it.
+    #[test]
+    fn delegated_stale_restart_adopts_successor_on_first_adoptable_poll() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let mut answers = [false, false, true].into_iter();
+        let mut slept = Vec::new();
+        let outcome = await_delegated_stale_restart(
+            || answers.next().unwrap_or(true),
+            || clock.get(),
+            |delay| {
+                slept.push(delay);
+                clock.set(clock.get() + delay);
+            },
+            Duration::from_secs(30),
+            Duration::from_millis(50),
+        );
+        assert_eq!(
+            outcome,
+            DelegatedStaleRestartOutcome::SuccessorAdopted { polls: 3 }
+        );
+        assert_eq!(slept, vec![Duration::from_millis(50); 2]);
+    }
+
+    /// `#drainingpredecessor`: a self-recycle that never promotes is bounded by
+    /// the budget on the injected clock, so the caller can fall back.
+    #[test]
+    fn delegated_stale_restart_times_out_at_budget() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let outcome = await_delegated_stale_restart(
+            || false,
+            || clock.get(),
+            |delay| clock.set(clock.get() + delay),
+            Duration::from_secs(1),
+            Duration::from_millis(250),
+        );
+        assert_eq!(outcome, DelegatedStaleRestartOutcome::TimedOut { polls: 5 });
     }
 
     #[test]

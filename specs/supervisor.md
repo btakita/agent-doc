@@ -777,6 +777,29 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   same-project controller. If forwarding fails the route is rejected
   explicitly with `handoff_forward_failed` and a re-run instruction; it is never
   dropped silently.
+  `#drainingpredecessor`: the drain only helps if nothing kills the
+  predecessor first. A predecessor that is draining holds a durable drain lease
+  (`predecessor_drain_lease` in `state.db`: pid, generation, deadline), written
+  before the public socket is renamed (self-handoff) or by the delegating client
+  while it still holds the launch claim (below). Same-project duplicate reaping
+  (`reap_stale_duplicate_controllers`, run by every adopting client) skips the
+  leased pid until the deadline (`controller_duplicate_reap_protected_draining_predecessor`);
+  after it, a wedged predecessor is reaped as before. A client that finds a
+  Stable controller on a stale binary no longer hands it off itself: it first
+  asks it to `recycle_force` (reason `stale_binary_client`), leases it, releases
+  the launch claim, and polls `status` (bounded by one replacement hydration,
+  `HANDOFF_CONNECT_WAIT`) until a successor on the current binary is adoptable
+  (`controller_active_stale_binary_restart_delegated` →
+  `controller_active_stale_binary_restart_completed ... via=self_recycle_delegated`).
+  Only when the stale controller refuses the delegation, or is still the same
+  Stable generation after the budget, does the client fall back to the direct
+  handoff, after expiring the lease so promotion reaps the undrained
+  predecessor. Before this, a `make install` that landed while a Run Agent Doc
+  route was in its final ready probe SIGTERMed the controller running it in the
+  same second as promotion; the editor's await dropped and it replayed the whole
+  route against the successor (2026-10-10 `tools.md`: dispatched after 58s
+  instead of ~12s, including a stale-supervisor re-exec the original route had
+  already passed).
   `agent-doc admin recycle --force` is a real flag (no
   `-- ` separator needed), composes with `--all-projects`, and skips only the
   normal controller debounce.

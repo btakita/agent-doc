@@ -5468,12 +5468,52 @@ pub(crate) fn reap_verified_controller_pid(project_root: &Path, pid: u32, genera
     }
 }
 
+/// `#drainingpredecessor`: drop the predecessor that is still draining after a
+/// handoff from duplicate-reap candidates. It holds already-accepted RPCs and
+/// admitted async editor workers (the editor awaits a Run Agent Doc route on
+/// it); SIGTERM there drops that await and the editor replays the whole route
+/// against the successor. The lease deadline bounds the protection, after which
+/// a wedged predecessor is reaped as before.
+pub(crate) fn reap_candidates_excluding_draining_predecessor(
+    project_root: &Path,
+    candidates: Vec<u32>,
+    now_secs: u64,
+) -> Vec<u32> {
+    if candidates.is_empty() {
+        return candidates;
+    }
+    let lease = read_predecessor_drain_lease(project_root);
+    candidates
+        .into_iter()
+        .filter(|pid| {
+            let protected = agent_doc_controller::recycle::predecessor_drain_lease_protects(
+                lease.as_ref(),
+                *pid,
+                now_secs,
+            );
+            if protected && let Some(lease) = lease.as_ref() {
+                agent_doc_ops_log_io::log_op(
+                    project_root,
+                    &format!(
+                        "controller_duplicate_reap_protected_draining_predecessor pid={pid} generation={} deadline_secs={} (#drainingpredecessor)",
+                        lease.generation, lease.deadline_secs,
+                    ),
+                );
+            }
+            !protected
+        })
+        .collect()
+}
+
 pub(crate) fn reap_stale_duplicate_controllers(
     project_root: &Path,
     authoritative_pid: Option<u32>,
     generation: u64,
 ) {
-    for pid in discover_stale_duplicate_pids(project_root, authoritative_pid) {
+    let candidates = discover_stale_duplicate_pids(project_root, authoritative_pid);
+    for pid in
+        reap_candidates_excluding_draining_predecessor(project_root, candidates, timestamp_secs())
+    {
         if let Some(previous_pid) = authoritative_pid
             && crate::process::is_preparing_handoff_successor_pid(
                 project_root,
@@ -14148,6 +14188,20 @@ fn handoff_controller_generation(
         anyhow::bail!("replacement controller refused promotion: {promoted_response}");
     }
 
+    // `#drainingpredecessor`: a self-handoff predecessor drains after this
+    // rename (`drain_predecessor_after_promotion`). Lease it BEFORE the rename
+    // so no adopting client's duplicate reap can SIGTERM it mid-drain.
+    if let Some(pid) = old_pid
+        && pid == std::process::id()
+    {
+        record_predecessor_drain_lease(
+            project_root,
+            pid,
+            old_generation,
+            ASYNC_EDITOR_PREDECESSOR_DRAIN_BUDGET,
+        );
+    }
+
     if public_sock.exists() {
         let _ = std::fs::remove_file(&public_sock);
     }
@@ -14259,6 +14313,125 @@ fn identity_version_label(identity: Option<&ControllerBinaryIdentity>) -> String
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// `#drainingpredecessor`: how a client's stale-binary restart, delegated to the
+/// stale controller's own self-recycle, ended.
+enum DelegatedStaleRestart {
+    /// A successor on the current binary answers the public socket.
+    Adopted(interprocess::local_socket::Stream),
+    /// The stale controller did not accept the delegation; the caller still
+    /// holds its launch claim and falls back to the direct handoff.
+    NotDelegated,
+    /// Accepted, but no successor within the budget; the launch claim was
+    /// released and the caller must re-acquire it before falling back.
+    TimedOut,
+}
+
+/// `#drainingpredecessor`: how long a client waits for a delegated self-recycle
+/// to promote its successor — one replacement hydration, the same bound the
+/// direct client handoff waits for its replacement.
+const DELEGATED_STALE_RESTART_BUDGET: Duration = HANDOFF_CONNECT_WAIT;
+
+/// `#drainingpredecessor`: ask a Stable, stale controller to recycle itself
+/// (`recycle_force`) instead of handing it off from this client.
+///
+/// The controller's own self-handoff drains its accepted RPCs and admitted async
+/// editor workers after promotion (`drain_predecessor_after_promotion`), so a
+/// Run Agent Doc route the editor is awaiting on it completes there. The direct
+/// client handoff instead SIGTERMed it at promotion: on 2026-10-10 a `make
+/// install` landed while `tools.md`'s route was in its final ready probe, the
+/// route died with the controller, and the editor replayed it from scratch
+/// against the successor — 58s instead of ~12s. The drain lease is written
+/// while this client still holds the launch claim (the self-recycle needs that
+/// claim to start), so no adopting client can reap the predecessor mid-drain.
+fn delegate_stale_restart_to_self_recycle(
+    project_root: &Path,
+    stale_status: &ControllerStatus,
+    launch_claim: &mut Option<LaunchClaim>,
+) -> DelegatedStaleRestart {
+    let Some(pid) = stale_status.pid else {
+        return DelegatedStaleRestart::NotDelegated;
+    };
+    let generation = stale_status.controller_generation.unwrap_or(0);
+    let accepted = request_with_reason(project_root, "recycle_force", "stale_binary_client")
+        .is_ok_and(|response| response.contains("\"ok\":true"));
+    if !accepted {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "controller_active_stale_binary_restart_delegation_refused pid={pid} generation={generation} fallback=direct_handoff (#drainingpredecessor)"
+            ),
+        );
+        return DelegatedStaleRestart::NotDelegated;
+    }
+    record_predecessor_drain_lease(
+        project_root,
+        pid,
+        generation,
+        ASYNC_EDITOR_PREDECESSOR_DRAIN_BUDGET.saturating_add(DELEGATED_STALE_RESTART_BUDGET),
+    );
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "controller_active_stale_binary_restart_delegated pid={pid} generation={generation} via=self_recycle budget_ms={} (#drainingpredecessor)",
+            DELEGATED_STALE_RESTART_BUDGET.as_millis(),
+        ),
+    );
+    // The self-recycle serializes on the launch claim; release it so the
+    // stale controller can start its handoff.
+    drop(launch_claim.take());
+    let current_binary = current_binary_identity().ok();
+    let started = Instant::now();
+    let mut adopted: Option<ControllerStatus> = None;
+    let outcome = agent_doc_controller::recycle::await_delegated_stale_restart(
+        || match status(project_root) {
+            Ok(active)
+                if active.pid != Some(pid)
+                    && active_controller_status_is_adoptable(&active, current_binary.as_ref()) =>
+            {
+                adopted = Some(active);
+                true
+            }
+            _ => false,
+        },
+        || started.elapsed(),
+        std::thread::sleep,
+        DELEGATED_STALE_RESTART_BUDGET,
+        CONNECT_POLL,
+    );
+    match (outcome, adopted) {
+        (
+            agent_doc_controller::recycle::DelegatedStaleRestartOutcome::SuccessorAdopted { polls },
+            Some(successor),
+        ) => {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_active_stale_binary_restart_completed pid={pid} generation={generation} old_version={} new_pid={} new_generation={} new_version={} via=self_recycle_delegated polls={polls} elapsed_ms={}",
+                    identity_version_label(stale_status.controller_binary.as_ref()),
+                    optional_pid_label(successor.pid),
+                    successor.controller_generation.unwrap_or(0),
+                    identity_version_label(successor.controller_binary.as_ref()),
+                    started.elapsed().as_millis(),
+                ),
+            );
+            match connect(project_root) {
+                Ok(stream) => DelegatedStaleRestart::Adopted(stream),
+                Err(_) => DelegatedStaleRestart::TimedOut,
+            }
+        }
+        _ => {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_active_stale_binary_restart_delegation_timed_out pid={pid} generation={generation} budget_ms={} fallback=direct_handoff_if_still_stable (#drainingpredecessor)",
+                    DELEGATED_STALE_RESTART_BUDGET.as_millis(),
+                ),
+            );
+            DelegatedStaleRestart::TimedOut
+        }
+    }
+}
+
 /// GH #128 — restart a Stable controller whose binary is stale, at most once
 /// per pid + generation per [`STALE_RESTART_ATTEMPT_BACKOFF`].
 ///
@@ -14274,6 +14447,7 @@ fn request_stable_stale_controller_restart(
     project_root: &Path,
     launch_mode: LaunchMode,
     stale_status: ControllerStatus,
+    mut launch_claim: Option<LaunchClaim>,
 ) -> Result<interprocess::local_socket::Stream> {
     use agent_doc_controller::recycle::{
         STALE_RESTART_ATTEMPT_BACKOFF, stale_restart_recently_attempted,
@@ -14305,6 +14479,42 @@ fn request_stable_stale_controller_restart(
     record_stale_restart_attempt(project_root, pid, generation, "client");
     log_stable_stale_controller_restart(project_root, &stale_status);
     let old_version = identity_version_label(stale_status.controller_binary.as_ref());
+    // `#drainingpredecessor`: ask the stale controller to run its OWN drained
+    // self-handoff instead of handing it off from here and SIGTERMing it. A
+    // client-driven handoff killed the predecessor the instant the successor
+    // was promoted, so a Run Agent Doc route it was mid-way through died with
+    // it and the editor replayed the whole route (2026-10-10 `tools.md`).
+    match delegate_stale_restart_to_self_recycle(project_root, &stale_status, &mut launch_claim) {
+        DelegatedStaleRestart::Adopted(stream) => return Ok(stream),
+        DelegatedStaleRestart::NotDelegated => {}
+        DelegatedStaleRestart::TimedOut => {
+            launch_claim = LaunchClaim::acquire_blocking(project_root, LAUNCH_CLAIM_WAIT).ok();
+            if let Ok(active) = status(project_root)
+                && active.active
+                && (active.pid != pid
+                    || active.controller_generation.unwrap_or(0) != generation
+                    || active
+                        .handoff_state
+                        .unwrap_or(ControllerHandoffState::Stable)
+                        != ControllerHandoffState::Stable)
+            {
+                // The self-recycle progressed (or a sibling restarted it)
+                // while we waited; never start a second handoff over it.
+                drop(launch_claim);
+                return connect(project_root);
+            }
+        }
+    }
+    // Fallback (the stale controller refused the delegation, or never started
+    // its self-recycle within the budget): the direct client handoff, under the
+    // launch claim as before. That predecessor does not drain, so expire any
+    // drain lease the delegation wrote and let promotion reap it as before.
+    if let Some(stale_pid) = pid
+        && read_predecessor_drain_lease(project_root).is_some_and(|lease| lease.pid == stale_pid)
+    {
+        record_predecessor_drain_lease(project_root, stale_pid, generation, Duration::ZERO);
+    }
+    let _launch_claim = launch_claim;
     match handoff_controller_generation(project_root, launch_mode, pid, generation.max(1)) {
         Ok((stream, replacement)) => {
             agent_doc_ops_log_io::log_op(
@@ -14501,6 +14711,7 @@ fn connect_or_launch_with_claim_wait_and_before_claim(
                         project_root,
                         launch_mode,
                         old_status,
+                        Some(launch_claim),
                     );
                 } else {
                     abort_non_stable_active_controller_for_recovery(
@@ -14529,6 +14740,7 @@ fn connect_or_launch_with_claim_wait_and_before_claim(
                                 project_root,
                                 launch_mode,
                                 recovered_status,
+                                Some(launch_claim),
                             );
                         } else {
                             anyhow::bail!(
@@ -38192,7 +38404,8 @@ mod tests {
 
         // No controller is listening in the fixture, so the fallback connect
         // fails — what matters is that no replacement was launched.
-        let result = request_stable_stale_controller_restart(dir.path(), LaunchMode::Lazy, stale);
+        let result =
+            request_stable_stale_controller_restart(dir.path(), LaunchMode::Lazy, stale, None);
         assert!(result.is_err());
 
         let log = gh128_ops_log(&dir);
@@ -38217,6 +38430,154 @@ mod tests {
                     .to_string_lossy()
                     .starts_with("controller-handoff-")),
             "a suppressed restart must not launch a replacement"
+        );
+    }
+
+    /// `#drainingpredecessor`: 2026-10-10 `tools.md` — a client-driven
+    /// stale-binary restart promoted a successor and SIGTERMed the predecessor
+    /// in the same second, killing the Run Agent Doc route it was finishing;
+    /// the editor replayed the whole route (58s). A stale controller that
+    /// accepts `recycle_force` now hands itself off (and drains); the client
+    /// leases it against duplicate reaping, never prepares a handoff itself,
+    /// and adopts the successor.
+    #[test]
+    fn stale_restart_delegates_to_draining_self_recycle_instead_of_reaping() {
+        let dir = async_handoff_test_project();
+        let sock = socket_path(dir.path());
+        let name = sock.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let mut successor =
+            active_controller_status_with_handoff_state(ControllerHandoffState::Stable);
+        successor.project_root = dir.path().to_path_buf();
+        successor.pid = Some(2854081);
+        successor.controller_generation = Some(2242);
+        successor.controller_binary = current_binary_identity().ok();
+        let successor_json = serde_json::to_string(&successor).unwrap();
+        let server = std::thread::spawn(move || {
+            let mut commands = Vec::new();
+            // recycle_force, one adopting status poll, then the client's
+            // connect. Incidental reads (ops-log document projection) are
+            // answered as unsupported and not recorded.
+            while commands.last().map(String::as_str) != Some("<connect>") {
+                assert!(
+                    commands.len() < 8,
+                    "unexpected request sequence {commands:?}"
+                );
+                let stream = listener.accept().unwrap();
+                let (reader_half, mut writer_half) = stream.split();
+                let mut line = String::new();
+                BufReader::new(reader_half).read_line(&mut line).unwrap();
+                if line.trim().is_empty() {
+                    commands.push("<connect>".to_string());
+                    continue;
+                }
+                let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                let command = request["command"].as_str().unwrap().to_string();
+                let response = match command.as_str() {
+                    "recycle_force" => {
+                        assert_eq!(request["reason"], "stale_binary_client");
+                        r#"{"ok":true}"#.to_string()
+                    }
+                    "status" => successor_json.clone(),
+                    _ => {
+                        let _ = writeln!(writer_half, r#"{{"ok":false,"error":"unsupported"}}"#);
+                        continue;
+                    }
+                };
+                writeln!(writer_half, "{response}").unwrap();
+                writer_half.flush().unwrap();
+                commands.push(command);
+            }
+            commands
+        });
+        let mut stale = active_controller_status_with_handoff_state(ControllerHandoffState::Stable);
+        stale.project_root = dir.path().to_path_buf();
+        stale.pid = Some(3726008);
+        stale.controller_generation = Some(2241);
+
+        let stream =
+            request_stable_stale_controller_restart(dir.path(), LaunchMode::Lazy, stale, None)
+                .expect("the delegated self-recycle's successor is adopted");
+        drop(stream);
+        let commands = server.join().unwrap();
+
+        assert_eq!(commands, vec!["recycle_force", "status", "<connect>"]);
+        let lease = read_predecessor_drain_lease(dir.path()).expect("drain lease recorded");
+        assert_eq!((lease.pid, lease.generation), (3726008, 2241));
+        assert!(
+            agent_doc_controller::recycle::predecessor_drain_lease_protects(
+                Some(&lease),
+                3726008,
+                timestamp_secs()
+            ),
+            "the draining predecessor must be protected from duplicate reaping"
+        );
+        let log = gh128_ops_log(&dir);
+        assert!(
+            log.contains(
+                "controller_active_stale_binary_restart_delegated pid=3726008 generation=2241 via=self_recycle"
+            ),
+            "{log}"
+        );
+        assert!(
+            log.contains("new_pid=2854081 new_generation=2242")
+                && log.contains("via=self_recycle_delegated"),
+            "{log}"
+        );
+        assert!(
+            !log.contains("controller_reap_signal")
+                && !log.contains("controller_detached_child_launched"),
+            "the client must neither launch a replacement nor signal the predecessor: {log}"
+        );
+    }
+
+    /// `#drainingpredecessor`: a stale controller that refuses the delegation
+    /// (no controller answers here) falls back to the direct handoff without
+    /// leaving a lease that would shield an undrained predecessor from reaping.
+    #[test]
+    fn stale_restart_delegation_refusal_leaves_no_drain_lease() {
+        let dir = async_handoff_test_project();
+        let mut stale = active_controller_status_with_handoff_state(ControllerHandoffState::Stable);
+        stale.project_root = dir.path().to_path_buf();
+        stale.pid = Some(3726008);
+        stale.controller_generation = Some(2241);
+        let mut claim = None;
+        assert!(matches!(
+            delegate_stale_restart_to_self_recycle(dir.path(), &stale, &mut claim),
+            DelegatedStaleRestart::NotDelegated
+        ));
+        assert!(read_predecessor_drain_lease(dir.path()).is_none());
+        assert!(
+            gh128_ops_log(&dir).contains(
+                "controller_active_stale_binary_restart_delegation_refused pid=3726008 generation=2241 fallback=direct_handoff"
+            ),
+            "{}",
+            gh128_ops_log(&dir)
+        );
+    }
+
+    /// `#drainingpredecessor`: duplicate reaping skips exactly the leased,
+    /// still-draining predecessor until its deadline; everything else (and the
+    /// predecessor after the deadline) stays reapable.
+    #[test]
+    fn duplicate_reap_skips_leased_draining_predecessor_until_deadline() {
+        let dir = async_handoff_test_project();
+        record_predecessor_drain_lease(dir.path(), 3726008, 2241, Duration::from_secs(60));
+        let now = timestamp_secs();
+        assert_eq!(
+            reap_candidates_excluding_draining_predecessor(dir.path(), vec![3726008, 1685180], now),
+            vec![1685180]
+        );
+        assert!(gh128_ops_log(&dir).contains(
+            "controller_duplicate_reap_protected_draining_predecessor pid=3726008 generation=2241"
+        ));
+        assert_eq!(
+            reap_candidates_excluding_draining_predecessor(
+                dir.path(),
+                vec![3726008, 1685180],
+                now + 61
+            ),
+            vec![3726008, 1685180]
         );
     }
 

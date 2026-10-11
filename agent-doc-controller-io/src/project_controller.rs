@@ -9259,6 +9259,43 @@ pub(crate) fn record_stale_restart_attempt(
     }
 }
 
+/// `#drainingpredecessor`: single-slot durable lease for the controller that is
+/// handing off and must drain before it retires.
+const PREDECESSOR_DRAIN_LEASE_SCOPE: &str = "predecessor_drain_lease";
+
+pub(crate) fn read_predecessor_drain_lease(
+    project_root: &Path,
+) -> Option<agent_doc_controller::recycle::PredecessorDrainLease> {
+    let conn = open_state_db(project_root).ok()?;
+    let json =
+        state_store::load_controller_bootstrap_json_from_db(&conn, PREDECESSOR_DRAIN_LEASE_SCOPE)
+            .ok()??;
+    serde_json::from_str(&json).ok()
+}
+
+pub(crate) fn record_predecessor_drain_lease(
+    project_root: &Path,
+    pid: u32,
+    generation: u64,
+    ttl: Duration,
+) {
+    let lease = agent_doc_controller::recycle::PredecessorDrainLease {
+        pid,
+        generation,
+        deadline_secs: timestamp_secs().saturating_add(ttl.as_secs()),
+    };
+    let Ok(json) = serde_json::to_string(&lease) else {
+        return;
+    };
+    if let Ok(conn) = open_state_db(project_root) {
+        let _ = state_store::store_controller_bootstrap_json_in_db(
+            &conn,
+            PREDECESSOR_DRAIN_LEASE_SCOPE,
+            &json,
+        );
+    }
+}
+
 fn write_bootstrap(project_root: &Path, launch_mode: LaunchMode) -> Result<ControllerBootstrap> {
     let prior = read_bootstrap(project_root)?.map(|state| state.controller_generation);
     write_bootstrap_with_options(

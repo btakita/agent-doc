@@ -3525,6 +3525,87 @@ mod tests {
         assert_eq!(claims[0].owner, "subagent:runctrlclaude");
     }
 
+    /// `#claimownerliveness` (haiven-dev tasks/sdk.md, 2026-10-11): the
+    /// claim was made by a coordinator session that has since `/clear`ed in
+    /// its pane. Preflight still holds the head (a pre-`/clear` subagent may
+    /// legitimately be running), but it no longer says the work is in flight
+    /// or forbids release: it names a stale claim with the adopt and release
+    /// commands, and releasing returns the head to this session.
+    #[test]
+    fn a_claim_whose_coordinator_session_cleared_is_reported_stale_not_in_flight() {
+        let dir = setup_project();
+        let doc = seed_claimed_head_doc(&dir);
+        let pane = "%claimlivenesspreflight";
+        agent_doc_queue_io::queue_claim::claim_with_session(
+            &doc,
+            "do [#runctrlclaude]",
+            "subagent:cligoshell-then-cligenport",
+            3600,
+            Some(agent_doc_queue::queue_claim::ClaimOwnerSession {
+                harness: Some("claude".to_string()),
+                session_id: Some("pre-clear".to_string()),
+                pane: Some(pane.to_string()),
+                pid: Some(std::process::id()),
+            }),
+        )
+        .unwrap();
+        // The same pane's harness reports a new session (`/clear`).
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        agent_doc_turn_status_io::apply_turn_status_hook_at(
+            dir.path(),
+            pane,
+            false,
+            Some(
+                r#"{"hook_event_name":"SessionStart","source":"clear","session_id":"post-clear"}"#,
+            ),
+            now + 1,
+        )
+        .unwrap();
+
+        let parsed = claimed_head_preflight(&doc);
+        assert_eq!(parsed["no_changes"], true, "{parsed:#}");
+        assert_eq!(parsed["queue_drainable_head_count"], 0, "{parsed:#}");
+        let fact = &parsed["no_changes_explanation"]["claimed_queue_items"][0];
+        assert_eq!(
+            fact["owner_session_ended"]["reason"], "session_replaced",
+            "{parsed:#}"
+        );
+        let guidance = parsed["no_changes_explanation"]["guidance"]
+            .as_str()
+            .unwrap();
+        assert!(guidance.contains("Stale claim"), "{guidance}");
+        assert!(!guidance.contains("in flight elsewhere"), "{guidance}");
+        assert!(
+            !guidance.contains("do NOT respond to, re-dispatch"),
+            "{guidance}"
+        );
+        let release = fact["owner_session_ended"]["release_command"]
+            .as_str()
+            .unwrap();
+        assert!(
+            release.starts_with("agent-doc queue release ")
+                && release.ends_with("--item '#runctrlclaude'"),
+            "{release}"
+        );
+        assert!(
+            fact["owner_session_ended"]["adopt_command"]
+                .as_str()
+                .unwrap()
+                .ends_with("--owner 'subagent:cligoshell-then-cligenport' --refresh"),
+            "{parsed:#}"
+        );
+
+        // Following the release exit returns the head to this session.
+        agent_doc_queue_io::queue_claim::release(&doc, "#runctrlclaude")
+            .unwrap()
+            .expect("the stale claim is released");
+        let parsed = claimed_head_preflight(&doc);
+        assert_eq!(parsed["no_changes"], false, "{parsed:#}");
+    }
+
     /// Control for the test above: the same document with NO claim still
     /// synthesizes the queue head as this cycle's work, so the claimed-only
     /// outcome is caused by the claim, not by the fixture.

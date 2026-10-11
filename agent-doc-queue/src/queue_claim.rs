@@ -45,6 +45,38 @@
 //!   queue-level `subagents` attribute an expired claim returns the head to the
 //!   dispatch set, never to inline drainage.
 //!
+//! # Owner session liveness (`#claimownerliveness`)
+//!
+//! A claim also records the **coordinator session** that made it
+//! ([`ClaimOwnerSession`]: harness session id, tmux pane, harness pid), read
+//! from the claiming process's environment. A background subagent has no
+//! observable heartbeat, but the coordinator session that dispatched it does.
+//! Observed 2026-10-11 on haiven-dev `tasks/sdk.md`: `#cligenport` was claimed
+//! by a subagent dispatched before the coordinator `/clear`ed; the subagent
+//! finished a different item and never started this one, yet for the rest of
+//! the 2h TTL preflight told the post-`/clear` coordinator the work was "in
+//! flight elsewhere ... do NOT release", and the coordinator reported a
+//! subagent it had no record of as running.
+//!
+//! [`owner_session_liveness`] judges a claim against what the caller can see:
+//!
+//! * the recorded harness **pid exited** — the coordinator process is gone;
+//! * the **pane's harness session changed** — the caller, or the pane's newest
+//!   harness hook, runs a different session id in the claim's pane (`/clear`,
+//!   a restart, a resume of another session);
+//! * otherwise the owner session is **live**, or **unrecorded** (a claim made
+//!   outside a harness, or before this field existed) and judged as before.
+//!
+//! An ended owner session does NOT release the claim. A subagent spawned
+//! before `/clear` can legitimately outlive it and report back (that happened
+//! in the same coordinator session that hit the stale claim), so the claim
+//! keeps holding the head out of inline drainage until its TTL. What changes is
+//! what agent-doc asserts: the claim is reported as `owner_session_ended` —
+//! unverifiable, not "in flight" — with the two concrete exits for the new
+//! coordinator: **adopt** it (`queue claim --refresh` under the same `--owner`
+//! rebinds the claim to the caller's session, for a subagent it still hears
+//! from) or **release** it (`queue release`, so the head is dispatched again).
+//!
 //! This module is pure: no clock, no storage. The caller supplies `now`.
 
 use std::collections::HashSet;
@@ -67,12 +99,143 @@ pub struct QueueClaim {
     pub owner: String,
     pub claimed_at_secs: u64,
     pub expires_at_secs: u64,
+    /// The coordinator session that made (or last adopted) the claim
+    /// (`#claimownerliveness`). `None` for a claim made outside a harness or
+    /// written before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_session: Option<ClaimOwnerSession>,
 }
 
 impl QueueClaim {
     pub fn is_expired(&self, now_secs: u64) -> bool {
         now_secs >= self.expires_at_secs
     }
+}
+
+/// The harness session a claim was made from (`#claimownerliveness`). Every
+/// field is optional: each one only adds a liveness signal when present.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimOwnerSession {
+    /// Which harness `session_id` came from (`claude`, `codex`). Session ids
+    /// are only compared within one harness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    /// The harness session id (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`).
+    /// A subagent inherits its coordinator's, so a claim a subagent makes is
+    /// still bound to the coordinator session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// The tmux pane the harness runs in (`TMUX_PANE`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// The harness process (`CLAUDE_PID`). It survives `/clear`; it does not
+    /// survive the harness exiting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+}
+
+impl ClaimOwnerSession {
+    /// `None` when no field carries a value, so a claim made outside any
+    /// harness stays unrecorded instead of looking recorded-but-empty.
+    pub fn non_empty(self) -> Option<Self> {
+        (self.session_id.is_some() || self.pane.is_some() || self.pid.is_some()).then_some(self)
+    }
+}
+
+/// What the caller can observe about a claim's owner session.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OwnerSessionObservation<'a> {
+    /// The calling process's own harness session (the coordinator, or one of
+    /// its subagents).
+    pub caller: Option<&'a ClaimOwnerSession>,
+    /// Whether the recorded owner pid is alive; `None` when no pid is recorded
+    /// or it could not be probed.
+    pub owner_pid_alive: Option<bool>,
+    /// The session id the claim's pane's harness most recently reported
+    /// through a turn hook, with the time it was observed; `None` when unknown.
+    pub pane_session: Option<(&'a str, u64)>,
+}
+
+/// Why a claim's owner session is known to have ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OwnerSessionEndReason {
+    /// The recorded harness process exited.
+    OwnerProcessExited,
+    /// The claim's pane now runs a different harness session (`/clear`,
+    /// restart, or another session resumed there).
+    SessionReplaced,
+}
+
+impl OwnerSessionEndReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OwnerProcessExited => "owner_process_exited",
+            Self::SessionReplaced => "session_replaced",
+        }
+    }
+
+    /// Operator-facing phrase.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::OwnerProcessExited => "the claiming coordinator process exited",
+            Self::SessionReplaced => {
+                "the claiming coordinator session was replaced in its pane (`/clear` or restart)"
+            }
+        }
+    }
+}
+
+/// Liveness of a claim's owner session (`#claimownerliveness`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimOwnerLiveness {
+    /// No owner session was recorded; judge the claim by expiry/closure only.
+    Unrecorded,
+    /// Nothing the caller observes contradicts the owner session being alive.
+    Live,
+    /// The owner session is gone. The claim still holds the head until its
+    /// TTL, but nothing proves its work is in flight.
+    Ended(OwnerSessionEndReason),
+}
+
+/// Judge `claim`'s owner session against `observation`. Pure.
+pub fn owner_session_liveness(
+    claim: &QueueClaim,
+    observation: OwnerSessionObservation<'_>,
+) -> ClaimOwnerLiveness {
+    let Some(owner) = claim.owner_session.as_ref() else {
+        return ClaimOwnerLiveness::Unrecorded;
+    };
+    if observation.owner_pid_alive == Some(false) {
+        return ClaimOwnerLiveness::Ended(OwnerSessionEndReason::OwnerProcessExited);
+    }
+    if let (Some(owner_pane), Some(owner_session)) =
+        (owner.pane.as_deref(), owner.session_id.as_deref())
+    {
+        // The caller sits in the claim's pane under another session of the same
+        // harness: one harness runs per pane, so the owner session is gone.
+        if let Some(caller) = observation.caller
+            && caller.pane.as_deref() == Some(owner_pane)
+            && caller.harness == owner.harness
+            && caller
+                .session_id
+                .as_deref()
+                .is_some_and(|session| session != owner_session)
+        {
+            return ClaimOwnerLiveness::Ended(OwnerSessionEndReason::SessionReplaced);
+        }
+        // The pane's harness reported a different session after the claim was
+        // made. Only Claude hook payloads are known to carry the same id as
+        // `CLAUDE_CODE_SESSION_ID`, so other harnesses skip this signal.
+        if owner.harness.as_deref() == Some("claude")
+            && let Some((pane_session, observed_at)) = observation.pane_session
+            && observed_at >= claim.claimed_at_secs
+            && pane_session != owner_session
+        {
+            return ClaimOwnerLiveness::Ended(OwnerSessionEndReason::SessionReplaced);
+        }
+    }
+    ClaimOwnerLiveness::Live
 }
 
 /// The document's claim ledger.
@@ -162,6 +325,19 @@ impl QueueClaimLedger {
 
     /// Claim `item` for `owner` until `now_secs + ttl_secs`.
     pub fn claim(&mut self, item: &str, owner: &str, now_secs: u64, ttl_secs: u64) -> ClaimOutcome {
+        self.claim_in_session(item, owner, now_secs, ttl_secs, None)
+    }
+
+    /// [`Self::claim`] bound to the claiming coordinator session
+    /// (`#claimownerliveness`).
+    pub fn claim_in_session(
+        &mut self,
+        item: &str,
+        owner: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+        owner_session: Option<ClaimOwnerSession>,
+    ) -> ClaimOutcome {
         let identity = claim_identity(item);
         let expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
         let fresh = QueueClaim {
@@ -170,6 +346,7 @@ impl QueueClaimLedger {
             owner: owner.trim().to_string(),
             claimed_at_secs: now_secs,
             expires_at_secs,
+            owner_session,
         };
         match self
             .claims
@@ -206,6 +383,21 @@ impl QueueClaimLedger {
         now_secs: u64,
         ttl_secs: u64,
     ) -> Result<QueueClaim, QueueClaimRefreshRefused> {
+        self.refresh_in_session(item, owner, now_secs, ttl_secs, None)
+    }
+
+    /// [`Self::refresh`] that also **adopts** the claim into `owner_session`
+    /// (`#claimownerliveness`): a coordinator that replaced the claiming
+    /// session (`/clear`) and still hears from the subagent re-binds the claim
+    /// to itself, so it reads as live again. `None` keeps the recorded session.
+    pub fn refresh_in_session(
+        &mut self,
+        item: &str,
+        owner: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+        owner_session: Option<ClaimOwnerSession>,
+    ) -> Result<QueueClaim, QueueClaimRefreshRefused> {
         let identity = claim_identity(item);
         let owner = owner.trim();
         let refused = |reason| QueueClaimRefreshRefused {
@@ -232,6 +424,9 @@ impl QueueClaimLedger {
             }));
         }
         existing.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
+        if owner_session.is_some() {
+            existing.owner_session = owner_session;
+        }
         Ok(existing.clone())
     }
 
@@ -378,6 +573,7 @@ impl QueueClaimLedger {
                 }
                 Some(existing) => {
                     existing.owner = source_claim.owner.clone();
+                    existing.owner_session = source_claim.owner_session.clone();
                     existing.item_text = target_text;
                     existing.expires_at_secs =
                         existing.expires_at_secs.max(source_claim.expires_at_secs);
@@ -388,6 +584,7 @@ impl QueueClaimLedger {
                     owner: source_claim.owner.clone(),
                     claimed_at_secs: source_claim.claimed_at_secs,
                     expires_at_secs: source_claim.expires_at_secs,
+                    owner_session: source_claim.owner_session.clone(),
                 }),
             }
             transferred.push((source.clone(), id, source_claim.owner));
@@ -786,6 +983,158 @@ impl ClaimedQueueItems {
 mod tests {
     use super::*;
 
+    fn session(harness: &str, id: &str, pane: &str, pid: u32) -> ClaimOwnerSession {
+        ClaimOwnerSession {
+            harness: Some(harness.to_string()),
+            session_id: Some(id.to_string()),
+            pane: Some(pane.to_string()),
+            pid: Some(pid),
+        }
+    }
+
+    /// `#claimownerliveness` (haiven-dev tasks/sdk.md, 2026-10-11): a claim
+    /// made by the pre-`/clear` coordinator session in pane %180 reads as
+    /// ended once the pane runs another session — seen by the caller itself
+    /// or by the pane's newest harness hook — and as ended when the harness
+    /// process exits. The same session (including its own subagents, which
+    /// inherit the session id) reads as live; a claim without a recorded
+    /// session stays unrecorded.
+    #[test]
+    fn owner_session_liveness_detects_cleared_replaced_and_exited_sessions() {
+        let mut ledger = QueueClaimLedger::default();
+        let before_clear = session("claude", "pre-clear", "%180", 4242);
+        ledger.claim_in_session(
+            "do [#cligenport]",
+            "subagent:cligoshell-then-cligenport",
+            100,
+            7200,
+            Some(before_clear.clone()),
+        );
+        let claim = ledger.claims[0].clone();
+        assert_eq!(claim.owner_session.as_ref(), Some(&before_clear));
+
+        let live = |obs| owner_session_liveness(&claim, obs);
+        // Same session, or a subagent of it: live.
+        assert_eq!(
+            live(OwnerSessionObservation {
+                caller: Some(&before_clear),
+                owner_pid_alive: Some(true),
+                pane_session: Some(("pre-clear", 150)),
+            }),
+            ClaimOwnerLiveness::Live
+        );
+        // The post-`/clear` coordinator in the same pane: replaced.
+        let after_clear = session("claude", "post-clear", "%180", 4242);
+        assert_eq!(
+            live(OwnerSessionObservation {
+                caller: Some(&after_clear),
+                owner_pid_alive: Some(true),
+                pane_session: None,
+            }),
+            ClaimOwnerLiveness::Ended(OwnerSessionEndReason::SessionReplaced)
+        );
+        // A caller outside the pane (a hook, another document's coordinator)
+        // learns it from the pane's harness hook observed after the claim.
+        let elsewhere = session("claude", "other-doc", "%7", 999);
+        assert_eq!(
+            live(OwnerSessionObservation {
+                caller: Some(&elsewhere),
+                owner_pid_alive: Some(true),
+                pane_session: Some(("post-clear", 200)),
+            }),
+            ClaimOwnerLiveness::Ended(OwnerSessionEndReason::SessionReplaced)
+        );
+        // A pane observation older than the claim proves nothing.
+        assert_eq!(
+            live(OwnerSessionObservation {
+                caller: None,
+                owner_pid_alive: None,
+                pane_session: Some(("older-session", 99)),
+            }),
+            ClaimOwnerLiveness::Live
+        );
+        // The harness process is gone.
+        assert_eq!(
+            live(OwnerSessionObservation {
+                caller: None,
+                owner_pid_alive: Some(false),
+                pane_session: None,
+            }),
+            ClaimOwnerLiveness::Ended(OwnerSessionEndReason::OwnerProcessExited)
+        );
+        // Session ids are only compared within one harness.
+        let codex_owner = QueueClaim {
+            owner_session: Some(session("codex", "thread-a", "%180", 4242)),
+            ..claim.clone()
+        };
+        assert_eq!(
+            owner_session_liveness(
+                &codex_owner,
+                OwnerSessionObservation {
+                    caller: None,
+                    owner_pid_alive: Some(true),
+                    pane_session: Some(("claude-session", 200)),
+                }
+            ),
+            ClaimOwnerLiveness::Live
+        );
+        // No recorded owner session: judged as before.
+        let mut legacy = QueueClaimLedger::default();
+        legacy.claim("do [#a]", "subagent:a", 100, 600);
+        assert_eq!(
+            owner_session_liveness(
+                &legacy.claims[0],
+                OwnerSessionObservation {
+                    caller: Some(&after_clear),
+                    owner_pid_alive: None,
+                    pane_session: None,
+                }
+            ),
+            ClaimOwnerLiveness::Unrecorded
+        );
+        assert_eq!(ClaimOwnerSession::default().non_empty(), None);
+    }
+
+    /// Adoption: the post-`/clear` coordinator refreshes the claim under the
+    /// same owner and its own session; the claim is live again for it. A
+    /// refresh without a session keeps the recorded one.
+    #[test]
+    fn refresh_in_session_adopts_the_claim_into_the_caller_session() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim_in_session(
+            "do [#a]",
+            "subagent:a",
+            100,
+            600,
+            Some(session("claude", "pre-clear", "%180", 1)),
+        );
+        let after_clear = session("claude", "post-clear", "%180", 1);
+        let adopted = ledger
+            .refresh_in_session("#a", "subagent:a", 200, 600, Some(after_clear.clone()))
+            .unwrap();
+        assert_eq!(adopted.owner_session.as_ref(), Some(&after_clear));
+        assert_eq!(adopted.expires_at_secs, 800);
+        assert_eq!(
+            owner_session_liveness(
+                &adopted,
+                OwnerSessionObservation {
+                    caller: Some(&after_clear),
+                    owner_pid_alive: Some(true),
+                    pane_session: Some(("post-clear", 200)),
+                }
+            ),
+            ClaimOwnerLiveness::Live
+        );
+        let kept = ledger.refresh("#a", "subagent:a", 300, 600).unwrap();
+        assert_eq!(kept.owner_session.as_ref(), Some(&after_clear));
+        // A stored ledger without the field still loads.
+        let legacy = QueueClaimLedger::from_state_payload(
+            r#"{"claims":[{"identity":{"kind":"id","key":"a"},"item_text":"do [#a]","owner":"subagent:a","claimed_at_secs":1,"expires_at_secs":2}]}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.claims[0].owner_session, None);
+    }
+
     /// `#freetextqueue`: a claimed free-text head promoted into `do [#id]`
     /// keeps its claim under the new id (2026-10-10: the claimed
     /// "Run Agent Doc on frontend.md crashed …" head became
@@ -1075,6 +1424,7 @@ mod tests {
                     owner: "subagent:a".into(),
                     claimed_at_secs: 1,
                     expires_at_secs: 50,
+                    owner_session: None,
                 },
                 QueueClaim {
                     identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
@@ -1082,6 +1432,7 @@ mod tests {
                     owner: "subagent:b".into(),
                     claimed_at_secs: 2,
                     expires_at_secs: 90,
+                    owner_session: None,
                 },
             ],
         };

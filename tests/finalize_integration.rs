@@ -4809,3 +4809,95 @@ fn write_commit_done_on_never_existing_id_with_all_struck_queue_fails_closed() {
     );
     assert_eq!(fs::read_to_string(&doc).unwrap(), original);
 }
+
+/// `#keptopenabsorbed` / `#editnorequeue` (haiven-dev tasks/sdk.md,
+/// 2026-10-11): `--backlog-edit` is the keep-open flag. On an id whose queue
+/// head is already struck (consumed), it narrows the backlog item and must not
+/// bring the head back — only an explicit `backlog reopen --queue` /
+/// `backlog requeue` re-arms a struck head. A go-mode queue with a
+/// `queue`-attr backlog is the shape that made operator-gated items the driver
+/// again; the following preflight's mirror must not resurrect it either.
+#[test]
+fn backlog_edit_on_a_struck_head_id_does_not_requeue_it() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: editnorequeue\n",
+        "agent_doc_format: template\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: earlier\n\n",
+        "Done.\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue subagents priority go -->\n",
+        "- ~~do [#quirkbigint]~~\n",
+        "- do [#other]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog priority queue -->\n",
+        "- [ ] [#quirkbigint] [blocked: #other] decoder half\n",
+        "- [ ] [#other] other work\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let queue_of = |doc: &Path| {
+        let text = fs::read_to_string(doc).unwrap();
+        let (_, tail) = text.split_once("<!-- agent:queue").unwrap();
+        tail.split_once("<!-- /agent:queue -->")
+            .unwrap()
+            .0
+            .to_string()
+    };
+    let assert_not_requeued = |stage: &str| {
+        let queue = queue_of(&doc);
+        assert!(
+            queue.contains("~~do [#quirkbigint]~~"),
+            "{stage}: the struck head stays struck:\n{queue}"
+        );
+        assert_eq!(
+            queue.matches("[#quirkbigint]").count(),
+            1,
+            "{stage}: no live head was re-added for the kept-open id:\n{queue}"
+        );
+    };
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    assert_not_requeued("preflight");
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--backlog-edit",
+            "quirkbigint=[blocked: #other] decoder half; kept open 2026-10-11",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: kept\n\nKept open.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+    assert_not_requeued("write --commit --backlog-edit");
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("decoder half; kept open 2026-10-11"),
+        "the edit landed"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    assert_not_requeued("next preflight");
+}

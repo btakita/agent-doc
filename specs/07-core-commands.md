@@ -612,6 +612,21 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   needs an admitted cycle, so both stay legal after a preflight
   admission-deadline refusal, which forbids a response write but names these
   repairs as permitted; the finding clears without `write --commit`.
+- The `#queue-clear-unrun-items` guard treats a head as removed only when its
+  `#id` is gone from every live (unstruck) queue line (`#releasevssnapshot`).
+  A head the directive grammar cannot read but whose `#id` is still on a live
+  line, such as a lifecycle marker mid-edit (`⏭️` backspaced to a bare `⏭`
+  glued onto `do`) or an annotation (`[#id]: note`), is neither lost nor proven
+  removed. The guard reads the live editor buffer, so an operator editing a
+  recorded head while `session-check` ran made it report the head "silently
+  dropped" (haiven-dev `tasks/sdk.md` 2026-10-11, `#cligenport`: the buffer was
+  4 bytes shorter than the committed `- ⏭️ do [#cligenport]`, then 3 more as
+  the marker went; the `queue release` just before was unrelated).
+- `--backlog-edit` is the keep-open flag (`#editnorequeue`): it narrows a
+  backlog item and never strikes or re-arms its queue head. On an id whose
+  head is already struck, neither the write nor the next preflight's
+  backlog→queue mirror adds a live head back; only `backlog reopen --queue`
+  or `backlog requeue` re-arms a struck head.
 - Non-item separator lines and headings inside backlog/icebox must be preserved during mutation.
 - Flush-left parent items are the tracked units; indented nested lists travel with the parent during edit/reorder/reap/transfer.
 - `backlog <FILE> set-attr <ATTR> [VALUE]` / `unset-attr <ATTR>` mutate the

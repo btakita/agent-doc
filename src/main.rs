@@ -4232,7 +4232,8 @@ enum QueueAction {
         /// Extend the TTL of the live claim `--owner` already holds on
         /// `--item` (a heartbeat for a long-running worker). Refuses, without
         /// creating a claim, when the item is unclaimed, the claim expired, or
-        /// another owner holds it.
+        /// another owner holds it. Also adopts the claim into the calling
+        /// harness session, e.g. after the claiming coordinator `/clear`ed.
         #[arg(long)]
         refresh: bool,
     },
@@ -4260,7 +4261,10 @@ enum QueueAction {
         #[arg(long)]
         json: bool,
     },
-    /// List the document's active queue claims as JSON (`#queueclaim`).
+    /// List the document's active queue claims as JSON (`#queueclaim`), each
+    /// with `owner_session_state` (`live` / `unrecorded` / `ended`): whether the
+    /// coordinator session that made the claim is still running
+    /// (`#claimownerliveness`).
     Claims {
         /// Path to the session document
         file: PathBuf,
@@ -7176,8 +7180,10 @@ fn try_main() -> anyhow::Result<()> {
             QueueAction::Claims { file } => {
                 let content = std::fs::read_to_string(&file)
                     .with_context(|| format!("read {}", file.display()))?;
+                // `#claimownerliveness`: each claim carries whether the
+                // coordinator session that made it is still alive.
                 let claims =
-                    agent_doc_queue_io::queue_claim::active_claims_for_content(&file, &content)?;
+                    agent_doc_queue_io::queue_claim::claim_reports_for_content(&file, &content)?;
                 println!("{}", serde_json::to_string_pretty(&claims)?);
                 Ok(())
             }

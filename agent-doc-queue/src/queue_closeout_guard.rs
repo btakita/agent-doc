@@ -243,6 +243,30 @@ pub fn committed_queue_head_ids(content: &str) -> Vec<String> {
     queue_directive::do_directive_target_ids(&[queue.content(content).to_string()])
 }
 
+/// Every `#id` referenced on a live (unstruck) `agent:queue` prompt line,
+/// normalized. Wider than [`committed_queue_head_ids`]: it also reads lines the
+/// directive grammar rejects (a mid-edit lifecycle marker, an annotation), so a
+/// removal guard never reports a head the operator is still holding as lost.
+pub fn live_queue_line_reference_ids(content: &str) -> HashSet<String> {
+    let Ok(components) = element::parse(content) else {
+        return HashSet::new();
+    };
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return HashSet::new();
+    };
+    document_queue::parse(queue.content(content))
+        .unwrap_or_default()
+        .iter()
+        .filter(|entry| matches!(entry, document_queue::QueueEntry::Prompt(_)))
+        .flat_map(document_queue::queue_entry_reference_ids)
+        .map(|id| normalize_id(&id))
+        .filter(|id| !id.is_empty())
+        .collect()
+}
+
 /// `do [#id]` target ids for the current live queue head only.
 pub fn committed_current_queue_head_ids(content: &str) -> Vec<String> {
     let Ok(components) = element::parse(content) else {
@@ -356,6 +380,7 @@ pub fn queue_head_removal_decision(
         .into_iter()
         .map(|id| normalize_id(&id))
         .collect();
+    let still_mentioned = live_queue_line_reference_ids(content);
 
     let mut lost = Vec::new();
     let mut removal_proofs = Vec::new();
@@ -365,6 +390,15 @@ pub fn queue_head_removal_decision(
             continue;
         }
         if still_queued.contains(&norm) {
+            continue;
+        }
+        // `#releasevssnapshot`: the head's `#id` is still on a live (unstruck)
+        // queue line the directive parser cannot read as `do [#id]` — the
+        // operator is mid-edit (`⏭️` backspaced to a bare `⏭` glued onto
+        // `do`, observed 2026-10-11 on haiven-dev tasks/sdk.md as a 4-byte
+        // buffer delta) or annotated it into prose. Nothing removed it, so it
+        // is neither lost nor proven removed.
+        if still_mentioned.contains(&norm) {
             continue;
         }
         if !open_backlog_ids.contains(&norm) {
@@ -840,6 +874,51 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// `#releasevssnapshot` (haiven-dev tasks/sdk.md, 2026-10-11): the
+    /// operator was deleting the `⏭️` skip marker off a recorded head. The
+    /// committed queue held `- ⏭️ do [#cligenport]` (30613 bytes); the live
+    /// buffer the guard read was 4 bytes shorter — `⏭️ ` lost its VS16 and
+    /// space, leaving a bare `⏭` glued onto `do` that the directive grammar
+    /// cannot read — and 3 bytes later it was `- do [#cligenport]`. The guard
+    /// reported the head "removed ... silently dropped" while it sat in the
+    /// buffer. A head whose `#id` is still on a live queue line is not lost; a
+    /// struck or deleted one still is.
+    #[test]
+    fn queue_head_removal_decision_ignores_a_head_mid_edit_on_a_live_line() {
+        let recorded = [
+            "⏭\u{fe0f} do [#cligenport]".to_string(),
+            "do [#gone]".to_string(),
+        ];
+        let open = set(&["cligenport", "gone"]);
+        for live_line in [
+            "- \u{23ed}do [#cligenport]\n",
+            "- \u{23ed} do [#cligenport]\n",
+            "- [#cligenport]: note this is in a Coder environment\n",
+        ] {
+            let content = doc(
+                &format!("{live_line}- ~~do [#gone]~~\n"),
+                "- [ ] [#cligenport] port\n- [ ] [#gone] gone\n",
+            );
+            let decision =
+                queue_head_removal_decision(&recorded, &content, &open, &set(&[]), &set(&[]));
+            assert_eq!(
+                decision.lost,
+                vec!["gone".to_string()],
+                "{live_line:?}: only the struck head is lost"
+            );
+        }
+        // Deleting the line outright is still a loss.
+        let content = doc("- do [#other]\n", "- [ ] [#cligenport] port\n");
+        let decision = queue_head_removal_decision(
+            &recorded[..1],
+            &content,
+            &set(&["cligenport"]),
+            &set(&[]),
+            &set(&[]),
+        );
+        assert_eq!(decision.lost, vec!["cligenport".to_string()]);
     }
 
     #[test]

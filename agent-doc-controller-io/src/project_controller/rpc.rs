@@ -15654,18 +15654,36 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     let actor_root = project_root.to_path_buf();
     let thread = std::thread::spawn(move || {
         install_controller_request_thread_context(&runtime);
+        // `#visiblewriteloadflake`: serve each client on its own thread, as
+        // `serve_with_options` does. Serving inline let one long-poll (a
+        // `visible_write_commit_candidate_patch_await` chunk) hold the only
+        // accept thread, so the receipt that would satisfy it queued unserved in
+        // the backlog until the await expired — a serialization production does
+        // not have, which turned the poller's wall-clock budget into a load test.
+        let mut clients = Vec::new();
         while !thread_stop.load(Ordering::SeqCst) && actor_root.is_dir() {
             match listener.accept() {
                 Ok(stream) => {
-                    if let Err(err) = serve_client(stream, &runtime, &thread_stop, &sock) {
-                        eprintln!("[agent-doc] test Lazily state actor client failed: {err:#}");
-                    }
+                    let runtime = Arc::clone(&runtime);
+                    let client_stop = Arc::clone(&thread_stop);
+                    let sock = sock.clone();
+                    clients.retain(|client: &std::thread::JoinHandle<()>| !client.is_finished());
+                    clients.push(std::thread::spawn(move || {
+                        if let Err(err) = serve_client(stream, &runtime, &client_stop, &sock) {
+                            eprintln!("[agent-doc] test Lazily state actor client failed: {err:#}");
+                        }
+                    }));
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     std::thread::sleep(CONNECT_POLL);
                 }
                 Err(_) => break,
             }
+        }
+        // Every client request is bounded (idle read timeout, capped awaits), so
+        // joining keeps the actor's runtime from outliving its handle.
+        for client in clients {
+            let _ = client.join();
         }
         if let Err(err) = std::fs::remove_file(&sock)
             && err.kind() != ErrorKind::NotFound

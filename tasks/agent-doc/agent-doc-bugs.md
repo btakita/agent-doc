@@ -96,6 +96,20 @@ v0.35.490 is published.
 > **Queue prompt:** do [#drivecapturedsplice]: what needs to be done?
 
 **Deferred:** answered in the previous response. One live run of `scripts/xdotool-live-verify.sh captured-splice` remains, and it waits for your go-ahead because it types into your IntelliJ window. I left the item open with the same wording.
+
+### Re: #drivecapturedsplice still waiting on your go-ahead — opus-5.5 · 2026-10-11T14:31-04:00
+
+> **Queue prompt:** do [#drivecapturedsplice]: what needs to be done?
+
+> **Operator note:** what needs to be done?
+
+**Deferred:** this has the same answer as the 14:18 response. All the code is done. What's left is one live run of `src/agent-doc/scripts/xdotool-live-verify.sh captured-splice`, which types into your IntelliJ window. I'm not running it, or handing it to a subagent, without your go-ahead.
+
+The question head keeps re-entering the loop because the item stays open. To move it on, do one of these:
+- change the queue line to `do [#drivecapturedsplice]: go` and leave the desktop alone for a few minutes, or
+- delete the queue line to park it in the backlog.
+
+I'm stopping the loop until you do one of those.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -105,7 +119,7 @@ v0.35.490 is published.
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ⏭️ do [#drivecapturedsplice]: what needs to be done?
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish~~
 <!-- /agent:queue -->
 
 ## Backlog

@@ -779,11 +779,55 @@ pub fn apply_turn_status_hook_at(
         let transcript = payload.and_then(hook_transcript_path_from_payload);
         return write_turn_active_marker_with_transcript_at(base, pane, now, transcript.as_deref());
     }
+    let ended_turn_started_at = pane_turn_active_lease_heartbeat(base, pane);
     clear_turn_active_marker(base, pane)?;
+    if let Some(turn_started_at) = ended_turn_started_at
+        && let Err(err) = settle_dispatch_turns_ended_on_pane(base, pane, turn_started_at)
+    {
+        // Best-effort: the in-flight horizon still bounds an unsettled receipt.
+        eprintln!("[turn-status] warning: failed to settle ended dispatch turn: {err:#}");
+    }
     match payload.and_then(hook_turn_end_reason_from_payload) {
         Some(reason) => record_harness_turn_end_at(base, pane, now, reason),
         None => Ok(()),
     }
+}
+
+/// The `UserPromptSubmit` second of `pane`'s turn-active lease (pane-scoped, or
+/// a matching legacy singleton), whatever its freshness: the turn-end hook
+/// settles the turn that lease started even when it outlived the TTL.
+fn pane_turn_active_lease_heartbeat(base: &Path, pane: &str) -> Option<u64> {
+    let conn = open_state_db(base).ok()?;
+    match load_coordination_lease_from_db(&conn, TURN_ACTIVE_SCOPE, pane).ok()? {
+        Some(lease) => Some(lease.heartbeat_secs),
+        None => load_coordination_lease_from_db(&conn, TURN_ACTIVE_SCOPE, PROJECT_SCOPE_ID)
+            .ok()?
+            .filter(|legacy| legacy.holder == pane)
+            .map(|legacy| legacy.heartbeat_secs),
+    }
+}
+
+/// `#clearqueuedliveturn`: the harness's own turn-end hook is the turn boundary
+/// a route dispatch otherwise never reports. A route dispatch does not move the
+/// actor, so the `running` receipt its turn's preflight promoted is never
+/// settled by a `Ready` edge, and the turn kept reading as live
+/// (`dispatch_turn_running`) for the whole in-flight horizon after it ended —
+/// holding a queued operator clear (and refusing/queuing every fresh one) for
+/// up to 30 minutes. Settle the receipts of the pane's documents dispatched at
+/// or before the ended turn started; a newer turn's receipt is untouched.
+/// Without a lease there is no turn identity to bound the settle, so nothing is
+/// settled (the in-flight horizon remains the bound). Returns the count.
+pub fn settle_dispatch_turns_ended_on_pane(
+    base: &Path,
+    pane: &str,
+    turn_started_at: u64,
+) -> Result<usize> {
+    let conn = open_state_db(base)?;
+    agent_doc_sqlite::state_store::settle_running_dispatch_turns_for_pane_started_at_or_before(
+        &conn,
+        pane,
+        i64::try_from(turn_started_at).unwrap_or(i64::MAX),
+    )
 }
 
 /// The main-session `session_id` of a Claude hook payload: present only on
@@ -839,6 +883,89 @@ fn resolve_marker_base() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use agent_doc_turn::turn_status::TURN_ACTIVE_TTL_SECS;
+
+    fn seed_actor_dispatch(base: &Path, document_id: &str, pane: &str, dispatched_at: u64) {
+        let conn = open_state_db(base).unwrap();
+        conn.execute(
+            "INSERT INTO documents (document_id, canonical_path, session_id, generation, pane_id, \
+             window_id, harness_id, actor_state) VALUES (?1, ?1, 's', 1, ?2, '@1', 'claude', 'ready')",
+            (document_id, pane),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO dispatch_attempts (document_id, generation, command_kind, result_status, \
+             dispatch_start_proven, timestamp) VALUES (?1, 1, 'run', 'accepted', 0, ?2)",
+            (document_id, dispatched_at as i64),
+        )
+        .unwrap();
+        // The dispatched turn's own preflight (`#dispatchturnstartreceipt`).
+        assert_eq!(
+            agent_doc_sqlite::state_store::mark_open_dispatches_turn_started(&conn, document_id)
+                .unwrap(),
+            1
+        );
+    }
+
+    fn dispatch_turn_running(base: &Path, document_id: &str, now: u64) -> bool {
+        let conn = open_state_db(base).unwrap();
+        agent_doc_sqlite::state_store::has_running_dispatch_turn_as_of(
+            &conn,
+            document_id,
+            now as i64,
+        )
+        .unwrap()
+    }
+
+    /// `#clearqueuedliveturn`: a route-dispatched turn never moves the actor, so
+    /// the only turn-end evidence for its `running` receipt is the harness's own
+    /// turn-end hook. Before the fix the `Stop` hook cleared the lease but left
+    /// the receipt `running`, so the turn read as live for the whole in-flight
+    /// horizon after it ended and a clear queued behind it waited ~30 minutes.
+    #[test]
+    fn stop_hook_settles_the_route_dispatched_turn_it_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
+        let dispatched_at = now_secs() - 30;
+        seed_actor_dispatch(base, "doc", "%149", dispatched_at);
+        let prompt_at = dispatched_at + 2;
+        apply_turn_status_hook_at(base, "%149", true, None, prompt_at).unwrap();
+        assert!(dispatch_turn_running(base, "doc", prompt_at + 1));
+
+        let stop = r#"{"hook_event_name":"Stop","session_id":"s"}"#;
+        apply_turn_status_hook_at(base, "%149", false, Some(stop), prompt_at + 20).unwrap();
+        assert!(
+            !dispatch_turn_running(base, "doc", prompt_at + 21),
+            "the Stop hook must end the dispatched turn it closes"
+        );
+    }
+
+    /// The settle is bounded by the ended turn's lease: a receipt dispatched
+    /// after that turn started belongs to a newer turn, a pane without a lease
+    /// has no turn identity, and another pane's document is untouched.
+    #[test]
+    fn stop_hook_settles_nothing_beyond_the_turn_it_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
+        let now = now_secs();
+        // A newer dispatch than the ended turn's prompt.
+        seed_actor_dispatch(base, "doc", "%149", now - 5);
+        apply_turn_status_hook_at(base, "%149", true, None, now - 10).unwrap();
+        apply_turn_status_hook_at(base, "%149", false, None, now).unwrap();
+        assert!(dispatch_turn_running(base, "doc", now));
+
+        // No lease at all: nothing bounds the settle.
+        seed_actor_dispatch(base, "lease-less", "%150", now - 30);
+        apply_turn_status_hook_at(base, "%150", false, None, now).unwrap();
+        assert!(dispatch_turn_running(base, "lease-less", now));
+
+        // Another pane's turn end.
+        seed_actor_dispatch(base, "other", "%7", now - 30);
+        apply_turn_status_hook_at(base, "%151", true, None, now - 20).unwrap();
+        apply_turn_status_hook_at(base, "%151", false, None, now).unwrap();
+        assert!(dispatch_turn_running(base, "other", now));
+    }
 
     /// `#claimownerliveness`: the pane's harness session is recorded from the
     /// main session's hooks (a `/clear` `SessionStart` replaces it), never from

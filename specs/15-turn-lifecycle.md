@@ -488,6 +488,17 @@ its prompt, until the operator typed `/clear` by hand.
   receipts dispatched at or before the retired lease heartbeat
   (`settle_running_dispatch_turns_started_at_or_before`). A newer dispatch
   belongs to a newer turn and is untouched.
+  A NORMAL turn end settles it too (`#clearqueuedliveturn`): `turn-status
+  idle` (Claude `Stop` / `SessionStart`, Codex `Stop`, OpenCode
+  `session.idle`) reads the pane's lease heartbeat before clearing the lease,
+  then settles the `running` receipts of every document whose actor runs in
+  that pane (`documents.pane_id`) dispatched at or before that heartbeat
+  (`settle_running_dispatch_turns_for_pane_started_at_or_before`). Without a
+  lease there is no turn identity to bound the settle, so nothing is settled
+  and the in-flight horizon stays the bound. Before this, a route-dispatched
+  turn that ended normally read as live (`dispatch_turn_running`) for the
+  whole 30-minute horizon, so a clear queued behind it waited that long and a
+  fresh Clear press after the turn was still queued as live-turn.
 - **Operator clear.** The clear guard retires a harness-ended turn before it
   reads `turn_active_lease` / `dispatch_turn_running`. An idle prompt plus a
   settled cancelled turn therefore classifies as `IdlePrompt` and the clear
@@ -514,6 +525,20 @@ finishes, its completion reaches the foreground as a queued input
 foreground turn with its own conversation records, and the queue operation
 keeps an older abandoned snapshot from retiring the lease (fail closed). The
 `Stop` hook then retires the lease normally.
+
+The same decision holds for the pane's prompt detection
+(`#clearqueuedliveturn`). While background subagents or shells run, Claude
+Code renders the footer as `⏵⏵ … · 1 shell · ← N agents` and adds a task row
+BELOW it (`◯ general-purpose  Checking DecisionFeed.jsx …  6m 10s · ↓ 95.4k
+tokens`). That row is idle chrome (`is_claude_background_task_row`: a hollow
+task glyph and a bare elapsed token, never the parenthesised spinner timer or
+`esc to interrupt`), so the `❯` composer above it stays the dispatch-ready
+prompt. Before this, the row hid the composer from the ready-prompt scan, and
+the supervisor never saw the idle boundary: a clear queued behind the turn
+never fired, even after its stale receipt aged out (haiven-dev `tasks/api.md`,
+pane %165, 2026-10-11, four presses in 25s with no effect). An operator Clear
+at that prompt therefore runs; what `/clear` does to the background agents is
+Claude Code's business.
 
 ### Cancelled trigger restored into the composer (`#cancelturnprompt`)
 

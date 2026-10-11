@@ -751,7 +751,8 @@ pub fn busy_clear_refusal_message(
 /// is only reached when no supervisor owns the pane to deliver a queued clear
 /// at the turn's end; with one, the clear is queued instead
 /// ([`live_turn_clear_queued_message`]).
-pub const LIVE_TURN_CLEAR_REFUSAL_UNBLOCKER: &str = "wait_for_turn_end_no_supervisor_to_queue_clear";
+pub const LIVE_TURN_CLEAR_REFUSAL_UNBLOCKER: &str =
+    "wait_for_turn_end_no_supervisor_to_queue_clear";
 
 /// GH #232: refusal when the operator-clear guard sees
 /// the supervisor's live-turn evidence (`harness_turn_live`) and no supervisor
@@ -788,15 +789,31 @@ pub fn live_turn_clear_queued_message(
     pane_id: Option<&str>,
     source: &str,
     evidence: &str,
+    evidence_age_secs: Option<u64>,
+    rearmed: bool,
 ) -> String {
     let pane = pane_id.unwrap_or("unknown");
+    // `#clearqueuedliveturn`: cite how old the live-turn evidence is, so a
+    // receipt that outlived its turn is visible to the operator instead of
+    // silently absorbing every press.
+    let age = evidence_age_secs.map_or_else(|| "unknown".to_string(), |secs| secs.to_string());
+    // `#clearqueuedliveturn`: a repeat press re-arms the one queued clear for
+    // the turn live now, so a turn started before this press cannot drop it.
+    let queued = if rearmed {
+        "The clear that was already queued is re-armed for this turn (still one clear)"
+    } else {
+        "One clear is queued"
+    };
     format!(
-        "{} {} — a turn is live in pane {} (harness_turn_live=true evidence={}, source={}), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends; it is dropped instead if a newer prompt starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none. Run `agent-doc session interrupt-clear {}` to interrupt the turn and clear now.",
+        "{} {} — a turn is live in pane {} (harness_turn_live=true evidence={} evidence_age_secs={}, source={}), so no `/clear` was typed into the running turn. {} and the supervisor delivers it automatically when the turn ends; it is dropped instead if a newer prompt starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed={}. Run `agent-doc session interrupt-clear {}` to interrupt the turn and clear now.",
         LIVE_TURN_CLEAR_QUEUED_PREFIX,
         file.display(),
         pane,
         evidence,
+        age,
         source,
+        queued,
+        rearmed,
         file.display()
     )
 }
@@ -2097,8 +2114,23 @@ Welcome to Claude Code
             Some("%149"),
             "authoritative_actor",
             "dispatch_turn_running",
+            Some(1_200),
+            false,
         );
+        assert!(message.contains("evidence=dispatch_turn_running evidence_age_secs=1200"));
         assert!(message.starts_with(LIVE_TURN_CLEAR_QUEUED_PREFIX));
+        assert!(message.contains("One clear is queued"));
+        let rearmed = live_turn_clear_queued_message(
+            Path::new("/tmp/doc.md"),
+            Some("%149"),
+            "authoritative_actor",
+            "dispatch_turn_pending",
+            None,
+            true,
+        );
+        assert!(rearmed.starts_with(LIVE_TURN_CLEAR_QUEUED_PREFIX));
+        assert!(rearmed.contains("re-armed for this turn (still one clear)"));
+        assert!(rearmed.contains("ui_outcome=queued"));
         assert!(message.contains("evidence=dispatch_turn_running"));
         assert!(message.contains("no `/clear` was typed into the running turn"));
         assert!(message.contains("ui_outcome=queued ui_outcome_class=queued"));

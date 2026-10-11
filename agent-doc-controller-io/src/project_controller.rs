@@ -9818,6 +9818,65 @@ pub fn dispatch_turn_running_for_file(file: &Path) -> Result<bool> {
     state_store::has_running_dispatch_turn_as_of(&conn, &document_id, timestamp_secs() as i64)
 }
 
+/// `#clearqueuedliveturn`: is a dispatch for this document accepted but its turn
+/// not yet started (inside the pre-turn grace)? See
+/// [`state_store::has_pending_dispatch_turn_as_of`]. Read-only; a missing
+/// project root reads as `false`.
+pub fn dispatch_turn_pending_for_file(file: &Path) -> Result<bool> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(false);
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
+    let conn = open_state_db(&project_root)?;
+    state_store::has_pending_dispatch_turn_as_of(&conn, &document_id, timestamp_secs() as i64)
+}
+
+/// `#clearqueuedliveturn`: an open dispatch for this document accepted after
+/// `after_secs` and at or before `at_or_before_secs`. See
+/// [`state_store::has_open_dispatch_accepted_between`].
+pub fn dispatch_open_accepted_between_for_file(
+    file: &Path,
+    after_secs: u64,
+    at_or_before_secs: u64,
+) -> Result<bool> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(false);
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
+    let conn = open_state_db(&project_root)?;
+    state_store::has_open_dispatch_accepted_between(
+        &conn,
+        &document_id,
+        i64::try_from(after_secs).unwrap_or(i64::MAX),
+        i64::try_from(at_or_before_secs).unwrap_or(i64::MAX),
+        timestamp_secs() as i64,
+    )
+}
+
+/// `#clearqueuedliveturn`: when the oldest dispatch proving this document's turn
+/// live or pending was accepted (Unix seconds). See
+/// [`state_store::oldest_open_dispatch_turn_at`].
+pub fn oldest_open_dispatch_turn_at_for_file(file: &Path) -> Result<Option<u64>> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(None);
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
+    let conn = open_state_db(&project_root)?;
+    Ok(
+        state_store::oldest_open_dispatch_turn_at(&conn, &document_id, timestamp_secs() as i64)?
+            .and_then(|at| u64::try_from(at).ok()),
+    )
+}
+
 /// `#sdkclearwedge`: settle this document's `running` dispatch receipts for a
 /// turn the harness proved ended (interrupt / abandoned prompt) at or after
 /// `turn_started_at`. See

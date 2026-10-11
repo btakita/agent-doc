@@ -853,6 +853,7 @@ impl HarnessConfig {
                     || is_claude_artifact_attachment_line(trimmed)
                     || is_claude_permission_mode_chrome_line(trimmed)
                     || is_claude_composer_rule_line(trimmed)
+                    || is_claude_background_task_row(trimmed)
             }
             _ => false,
         }
@@ -2131,6 +2132,41 @@ fn recent_normalized_bottom_lines(output: &str, max_lines: usize) -> Vec<String>
 /// shows an active turn: the interrupt hint (`esc to interrupt`) or a working
 /// spinner with an elapsed-seconds timer (e.g. `· roosting… (14s · ↓ 487 tokens
 /// · thinking with high effort)`). (#jb-stale-busy-idle-footer part 1)
+/// `#clearqueuedliveturn`: a Claude Code background-task row, which Claude
+/// renders BELOW the idle composer footer while background subagents or
+/// shells run (`◯ general-purpose  Checking DecisionFeed.jsx …  6m 10s · ↓ 95.4k
+/// tokens`, haiven-dev `tasks/api.md` pane %165, 2026-10-11). It is idle
+/// chrome, not a foreground turn and not composer input: background agents
+/// never hold a clear or a dispatch (`specs/15-turn-lifecycle.md`). Before
+/// this, the row hid the `❯` composer from the ready-prompt scan, so the
+/// supervisor never saw the idle boundary and a queued Clear Session Context
+/// never fired. Narrow by shape: a hollow task glyph, then a description with a
+/// bare elapsed token (`12s`, `6m`), never the parenthesised spinner timer or
+/// the interrupt hint of a live foreground turn.
+fn is_claude_background_task_row(line: &str) -> bool {
+    let Some(rest) = ['◯', '○', '◉', '◎']
+        .iter()
+        .find_map(|glyph| line.strip_prefix(*glyph))
+    else {
+        return false;
+    };
+    if !rest.starts_with(char::is_whitespace) {
+        return false;
+    }
+    let lower = rest.to_ascii_lowercase();
+    if lower.contains("esc to interrupt") || contains_elapsed_seconds_timer(&lower) {
+        return false;
+    }
+    rest.split_whitespace().any(|token| {
+        let Some(unit) = token.chars().last() else {
+            return false;
+        };
+        matches!(unit, 'h' | 'm' | 's')
+            && token.len() > 1
+            && token[..token.len() - 1].chars().all(|c| c.is_ascii_digit())
+    })
+}
+
 fn claude_active_turn_busy(recent_lower: &[String]) -> bool {
     recent_lower
         .iter()
@@ -2888,6 +2924,36 @@ mod tests {
         "  Opus 4.8 ctx:18% ~/work/btakita/agent-loop main brian@cachyos-x8664\n",
         "  ⏵⏵ bypass permissions on · 1 shell · ← for agents\n",
     );
+
+    /// `#clearqueuedliveturn`: haiven-dev `tasks/api.md` pane %165: an idle
+    /// composer with background subagents running renders a task row below the
+    /// footer. The composer is still the dispatch-ready prompt, and the row is
+    /// neither a busy cue nor a draft.
+    #[test]
+    fn background_task_row_below_the_footer_keeps_the_idle_composer_ready() {
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "────────────────────────────────────────\n",
+            "❯\n",
+            "────────────────────────────────────────\n",
+            "  Opus 4.8 ctx:18% ~/work/btakita/agent-loop main brian@cachyos-x8664\n",
+            "  ⏵⏵ bypass permissions on · 1 shell · ← 4 agents\n",
+            "  ◯ general-purpose  Checking DecisionFeed.jsx for chat-safety status                         6m 10s · ↓ 95.4k tokens\n",
+        );
+        assert!(ready_prompt_candidate(pane, &h).is_some());
+        assert_eq!(h.dispatch_blocker_reason(pane), None);
+        assert_eq!(pane_composer_draft(&h, pane), None);
+        assert!(h.is_ignorable_output_line("◯ general-purpose  Exploring tests  12s"));
+        assert!(
+            !h.is_ignorable_output_line("✶ Generating… (3s · esc to interrupt)"),
+            "a live foreground spinner is never background chrome"
+        );
+        assert!(!h.is_ignorable_output_line("◯ general-purpose (14s · esc to interrupt)"));
+        assert!(
+            !h.is_ignorable_output_line("◯ plan the release"),
+            "no elapsed token"
+        );
+    }
 
     #[test]
     fn idle_pane_is_dispatch_ready_under_every_permission_footer_variant() {

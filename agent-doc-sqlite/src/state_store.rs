@@ -4585,6 +4585,12 @@ pub const DISPATCH_PRE_TURN_GRACE_SECS: i64 = 120;
 /// promote the NEXT receipt and claim a turn that has not started. A document's actor
 /// runs one turn at a time, so an unconsumed `running` receipt means this turn is
 /// already accounted for.
+///
+/// `#clearqueuedliveturn`: operator command receipts (`session_clear`,
+/// `session_restart`, ...) share this table but are never a dispatched turn.
+/// Promoting the oldest open row let a turn's preflight promote an earlier
+/// Clear press's `session_clear` receipt instead of its own dispatch, leaving
+/// that dispatch `accepted` for the next turn to claim.
 pub fn mark_open_dispatches_turn_started(conn: &Connection, document_id: &str) -> Result<usize> {
     let promoted = conn.execute(
         r#"
@@ -4597,6 +4603,7 @@ pub fn mark_open_dispatches_turn_started(conn: &Connection, document_id: &str) -
               AND failed_stage IS NULL
               AND COALESCE(result_status, '') IN ('accepted', 'queued')
               AND dispatch_start_proven = 0
+              AND command_kind NOT LIKE 'session\_%' ESCAPE '\'
             ORDER BY timestamp ASC, id ASC
             LIMIT 1
           )
@@ -4643,6 +4650,108 @@ pub fn has_running_dispatch_turn_as_of(
     Ok(count > 0)
 }
 
+/// `#clearqueuedliveturn`: is a dispatch for this document ACCEPTED but its turn
+/// not yet started? True for an `accepted`/`queued` receipt inside
+/// [`DISPATCH_PRE_TURN_GRACE_SECS`] — Run Agent Doc was accepted, and the
+/// trigger is being submitted or is still passing its `UserPromptSubmit` hooks.
+/// A clear typed into the pane in that window races the trigger, so the
+/// operator-clear guard queues it behind the dispatched turn instead. Operator
+/// commands (`session_*` receipts, e.g. `session_clear` itself) are not
+/// dispatches. Bounded by the pre-turn grace so a lost trigger cannot pin it.
+pub fn has_pending_dispatch_turn_as_of(
+    conn: &Connection,
+    document_id: &str,
+    now_secs: i64,
+) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM dispatch_attempts
+        WHERE document_id = ?1
+          AND failed_stage IS NULL
+          AND COALESCE(result_status, '') IN ('accepted', 'queued')
+          AND dispatch_start_proven = 0
+          AND command_kind NOT LIKE 'session\_%' ESCAPE '\'
+          AND timestamp > ?2
+        "#,
+        params![document_id, now_secs - DISPATCH_PRE_TURN_GRACE_SECS],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// `#clearqueuedliveturn`: does this document have an open (accepted, queued or
+/// running, unsettled) dispatch accepted AFTER `after_secs` and at or before
+/// `at_or_before_secs`? A deferred operator clear asks this when a newer prompt
+/// appears on its pane: a dispatch the operator started BEFORE pressing Clear
+/// (Run Agent Doc, then Clear) but after the clear's own turn started is not
+/// "a newer prompt that continued the conversation" — the clear belongs after
+/// that turn. The lower bound excludes the clear's own turn's dispatch.
+/// Operator command receipts (`session_*`) are not dispatches. Bounded by
+/// [`OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS`].
+pub fn has_open_dispatch_accepted_between(
+    conn: &Connection,
+    document_id: &str,
+    after_secs: i64,
+    at_or_before_secs: i64,
+    now_secs: i64,
+) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM dispatch_attempts
+        WHERE document_id = ?1
+          AND failed_stage IS NULL
+          AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
+          AND dispatch_start_proven = 0
+          AND command_kind NOT LIKE 'session\_%' ESCAPE '\'
+          AND timestamp > ?2
+          AND timestamp <= ?3
+          AND timestamp > ?4
+        "#,
+        params![
+            document_id,
+            after_secs,
+            at_or_before_secs,
+            now_secs - OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS
+        ],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// `#clearqueuedliveturn`: when the oldest dispatch that currently proves a
+/// turn live or pending was accepted — a `running` receipt inside the in-flight
+/// horizon or an `accepted`/`queued` one inside the pre-turn grace. Operator
+/// feedback for a queued clear cites its age, so a receipt that has outlived
+/// its turn is visible instead of silently holding every press.
+pub fn oldest_open_dispatch_turn_at(
+    conn: &Connection,
+    document_id: &str,
+    now_secs: i64,
+) -> Result<Option<i64>> {
+    Ok(conn.query_row(
+        r#"
+        SELECT MIN(timestamp)
+        FROM dispatch_attempts
+        WHERE document_id = ?1
+          AND failed_stage IS NULL
+          AND dispatch_start_proven = 0
+          AND command_kind NOT LIKE 'session\_%' ESCAPE '\'
+          AND (
+            (COALESCE(result_status, '') = 'running' AND timestamp > ?2)
+            OR (COALESCE(result_status, '') IN ('accepted', 'queued') AND timestamp > ?3)
+          )
+        "#,
+        params![
+            document_id,
+            now_secs - OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS,
+            now_secs - DISPATCH_PRE_TURN_GRACE_SECS
+        ],
+        |row| row.get::<_, Option<i64>>(0),
+    )?)
+}
+
 /// `#sdkclearwedge`: settle the `running` receipts whose turn the harness proved
 /// ended without a `Ready` transition — an operator interrupt or a prompt
 /// abandoned before it was persisted retires the turn-active lease, but a
@@ -4668,6 +4777,46 @@ pub fn settle_running_dispatch_turns_started_at_or_before(
           AND timestamp <= ?2
         "#,
         params![document_id, turn_started_at],
+    )?;
+    Ok(settled)
+}
+
+/// `#clearqueuedliveturn`: settle the `running` receipts of every document whose
+/// actor runs in `pane_id`, dispatched at or before `turn_started_at`, because
+/// the harness's own turn-end hook (`Stop` / `SessionStart` → `turn-status
+/// idle`) proved that pane's turn over.
+///
+/// A route dispatch never moves the actor (`#dispatchturnstartreceipt`): its
+/// receipt is promoted to `running` by the turn's own preflight and, with the
+/// actor already `Ready`, no `Ready` edge ever arrives to settle it
+/// ([`mark_open_dispatches_consumed`]). Before this settle, a route-dispatched
+/// turn that ENDED NORMALLY kept reading as live
+/// ([`has_running_dispatch_turn_as_of`]) for the whole
+/// [`OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS`]: an operator clear queued behind it
+/// (`operator_live_turn_deferred_clear`) waited out that horizon instead of the
+/// turn end, and a fresh Clear press after the turn was still treated as
+/// live-turn.
+///
+/// The hook knows its pane, not its document; the actor table (`documents`)
+/// maps one to the other. `turn_started_at` is the retired lease's
+/// `UserPromptSubmit` second, so a receipt dispatched after the ended turn
+/// started — a newer turn's — is never settled. Returns the number settled.
+pub fn settle_running_dispatch_turns_for_pane_started_at_or_before(
+    conn: &Connection,
+    pane_id: &str,
+    turn_started_at: i64,
+) -> Result<usize> {
+    let settled = conn.execute(
+        r#"
+        UPDATE dispatch_attempts
+        SET dispatch_start_proven = 1
+        WHERE document_id IN (SELECT document_id FROM documents WHERE pane_id = ?1)
+          AND failed_stage IS NULL
+          AND COALESCE(result_status, '') = 'running'
+          AND dispatch_start_proven = 0
+          AND timestamp <= ?2
+        "#,
+        params![pane_id, turn_started_at],
     )?;
     Ok(settled)
 }
@@ -6516,6 +6665,173 @@ mod tests {
 
         assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 1);
         assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 0);
+        Ok(())
+    }
+
+    /// `#clearqueuedliveturn`: the harness turn-end hook settles the `running`
+    /// receipt of the document whose actor runs in that pane — and nothing
+    /// else: not a receipt dispatched after the ended turn started, not another
+    /// pane's document, not a receipt whose turn never started.
+    #[test]
+    fn a_pane_turn_end_settles_only_that_panes_started_receipts() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE documents (document_id TEXT PRIMARY KEY, pane_id TEXT NOT NULL);
+            INSERT INTO documents (document_id, pane_id) VALUES ('doc', '%149'), ('other', '%7');
+            "#,
+        )?;
+        let turn_started_at = 1_000_000i64;
+        insert_open_dispatch(&conn, "doc", turn_started_at - 5, "running")?; // 1: this turn
+        insert_open_dispatch(&conn, "doc", turn_started_at + 5, "running")?; // 2: a newer turn
+        insert_open_dispatch(&conn, "doc", turn_started_at - 5, "accepted")?; // 3: never started
+        insert_open_dispatch(&conn, "other", turn_started_at - 5, "running")?; // 4: other pane
+
+        assert!(has_running_dispatch_turn_as_of(
+            &conn,
+            "doc",
+            turn_started_at
+        )?);
+        assert_eq!(
+            settle_running_dispatch_turns_for_pane_started_at_or_before(
+                &conn,
+                "%149",
+                turn_started_at
+            )?,
+            1
+        );
+        assert!(receipt_proven(&conn, 1)?);
+        assert!(
+            !receipt_proven(&conn, 2)?,
+            "a newer turn's receipt stays live"
+        );
+        assert!(
+            !receipt_proven(&conn, 3)?,
+            "an unstarted trigger is not this turn"
+        );
+        assert!(
+            !receipt_proven(&conn, 4)?,
+            "another pane's turn did not end"
+        );
+        assert_eq!(
+            settle_running_dispatch_turns_for_pane_started_at_or_before(
+                &conn,
+                "%149",
+                turn_started_at
+            )?,
+            0,
+            "idempotent"
+        );
+        assert_eq!(
+            settle_running_dispatch_turns_for_pane_started_at_or_before(
+                &conn,
+                "%404",
+                turn_started_at
+            )?,
+            0,
+            "a pane no actor owns settles nothing"
+        );
+        Ok(())
+    }
+
+    /// `#clearqueuedliveturn`: an accepted dispatch whose turn has not started
+    /// is pending inside the pre-turn grace only; operator command receipts and
+    /// started or settled receipts are not pending dispatches.
+    #[test]
+    fn a_pending_dispatch_is_an_accepted_unstarted_trigger_inside_the_grace() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        assert!(!has_pending_dispatch_turn_as_of(&conn, "doc", now)?);
+        conn.execute(
+            "INSERT INTO dispatch_attempts (document_id, generation, command_kind, result_status, dispatch_start_proven, timestamp) \
+             VALUES ('doc', 1, 'session_clear', 'accepted', 0, ?1)",
+            params![now - 1],
+        )?;
+        assert!(
+            !has_pending_dispatch_turn_as_of(&conn, "doc", now)?,
+            "an operator clear's own receipt is not a dispatch"
+        );
+        insert_open_dispatch(&conn, "doc", now - 3, "accepted")?;
+        assert!(has_pending_dispatch_turn_as_of(&conn, "doc", now)?);
+        assert!(
+            !has_pending_dispatch_turn_as_of(&conn, "doc", now + DISPATCH_PRE_TURN_GRACE_SECS)?,
+            "a trigger that never started is lost after the pre-turn grace"
+        );
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert!(
+            !has_pending_dispatch_turn_as_of(&conn, "doc", now)?,
+            "a started turn is running, not pending"
+        );
+        Ok(())
+    }
+
+    /// `#clearqueuedliveturn`: Clear → Run Agent Doc. The turn's preflight
+    /// promotes the dispatch it belongs to, never the older Clear press's
+    /// operator-command receipt.
+    #[test]
+    fn a_turn_start_never_promotes_an_operator_command_receipt() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        conn.execute(
+            "INSERT INTO dispatch_attempts (document_id, generation, command_kind, result_status, dispatch_start_proven, timestamp) \
+             VALUES ('doc', 1, 'session_clear', 'accepted', 0, ?1)",
+            params![now - 30],
+        )?;
+        insert_open_dispatch(&conn, "doc", now - 3, "accepted")?;
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert_eq!(receipt_status(&conn, 1)?, "accepted");
+        assert_eq!(receipt_status(&conn, 2)?, "running");
+        Ok(())
+    }
+
+    #[test]
+    fn an_open_dispatch_between_the_turn_start_and_the_press_is_found() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        insert_open_dispatch(&conn, "doc", now - 10, "running")?;
+        assert!(has_open_dispatch_accepted_between(
+            &conn,
+            "doc",
+            now - 11,
+            now - 10,
+            now
+        )?);
+        assert!(
+            !has_open_dispatch_accepted_between(&conn, "doc", now - 11, now - 11, now)?,
+            "accepted after the press"
+        );
+        assert!(
+            !has_open_dispatch_accepted_between(&conn, "doc", now - 10, now, now)?,
+            "the clear's own turn's dispatch is excluded"
+        );
+        assert_eq!(
+            settle_running_dispatch_turns_started_at_or_before(&conn, "doc", now)?,
+            1
+        );
+        assert!(
+            !has_open_dispatch_accepted_between(&conn, "doc", now - 11, now, now)?,
+            "a settled dispatch is not open"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_oldest_open_dispatch_turn_is_reported_for_operator_feedback() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        assert_eq!(oldest_open_dispatch_turn_at(&conn, "doc", now)?, None);
+        insert_open_dispatch(&conn, "doc", now - 600, "running")?;
+        insert_open_dispatch(&conn, "doc", now - 5, "accepted")?;
+        insert_open_dispatch(
+            &conn,
+            "doc",
+            now - DISPATCH_PRE_TURN_GRACE_SECS - 1,
+            "accepted",
+        )?;
+        assert_eq!(
+            oldest_open_dispatch_turn_at(&conn, "doc", now)?,
+            Some(now - 600)
+        );
         Ok(())
     }
 

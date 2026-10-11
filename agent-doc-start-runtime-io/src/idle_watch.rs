@@ -4523,9 +4523,40 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 &projection.target,
                             )
                             .map(|marker| marker.written_at);
-                        if deferred_clear_turn_baseline
-                            .observe(projection.clear_epoch, current_turn_started_at)
+                        let newer_prompt = deferred_clear_turn_baseline
+                            .observe(projection.clear_epoch, current_turn_started_at);
+                        // `#clearqueuedliveturn`: a newer prompt the operator
+                        // started BEFORE the (latest) press — Run Agent Doc,
+                        // then Clear — is the turn the clear belongs after, not
+                        // a continuation that supersedes it. Its dispatch was
+                        // accepted at or before the deferral was (re-)armed.
+                        let dispatched_before_press = newer_prompt
+                            && deferred_clear_turn_baseline.turn_started_at().is_some_and(
+                                |own_turn_started_at| {
+                                    agent_doc_controller_io::project_controller::dispatch_open_accepted_between_for_file(
+                                        &path,
+                                        own_turn_started_at,
+                                        projection.marked_secs,
+                                    )
+                                    .unwrap_or(false)
+                                },
+                            );
+                        if dispatched_before_press
+                            && let Some(turn_started_at) = current_turn_started_at
                         {
+                            deferred_clear_turn_baseline.adopt(turn_started_at);
+                            let event = format!(
+                                "idle_queue_watch_deferred_clear_adopted_turn file={} target={} clear_epoch={} deferred_at={} turn_started_at={} reason=dispatched_before_press (#clearqueuedliveturn)",
+                                path.display(),
+                                projection.target,
+                                projection.clear_epoch,
+                                projection.marked_secs,
+                                turn_started_at,
+                            );
+                            log_event(&mut session_log, &event);
+                            agent_doc_ops_log_io::log_op(&path, &event);
+                            Some(projection)
+                        } else if newer_prompt {
                             let settled = agent_doc_controller_io::project_controller::clear_queue_context_clear_deferred_for_file(&path);
                             let event = format!(
                                 "idle_queue_watch_deferred_clear_superseded file={} target={} clear_epoch={} deferred_at={} source={} reason=newer_prompt turn_started_at={} settled={} (#clearqueuedliveturn)",
@@ -4555,10 +4586,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     .as_ref()
                     .is_some_and(|projection| projection.is_live_turn_deferred_operator_clear());
                 // A clear queued behind a live turn may have been proven live by
-                // its `running` dispatch receipt alone; wait that receipt out too.
-                // An unreadable receipt store fails closed (keep waiting).
+                // its `running` dispatch receipt alone; wait that receipt out too,
+                // and an accepted dispatch whose turn has not started yet (the
+                // clear was queued behind it: a prompt redrawn before the trigger
+                // lands is not the turn's end). An unreadable receipt store fails
+                // closed (keep waiting).
                 let dispatch_turn_running = live_turn_deferral
                     && agent_doc_controller_io::project_controller::dispatch_turn_running_for_file(&path)
+                        .and_then(|running| {
+                            Ok(running
+                                || agent_doc_controller_io::project_controller::dispatch_turn_pending_for_file(&path)?)
+                        })
                         .unwrap_or_else(|err| {
                             let event = format!(
                                 "idle_queue_watch_deferred_clear_dispatch_probe_failed file={} action=keep_waiting error={:?} (#clearqueuedliveturn)",

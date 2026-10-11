@@ -530,6 +530,30 @@ The ⏳ fix is confirmed working: `#drivecapturedsplice` was not listed for disp
 - **Plan:** add both fixes to `integrate-0492` once its full check finishes, push, install, then cut **v0.35.490** containing everything since 0.35.488. I'll only report it published after confirming that the Release run is green on every platform and PyPI shows it. Windows can't be checked locally (the C dependencies need MSVC), so the Release run is the real test. I'm also filing a follow-up for a Windows compile check in CI, so this breaks a PR instead of a release.
 
 **Auto-reap tmux sockets?** Not as general agent-doc behaviour. `/tmp/tmux-1000` is shared with everything you run, and a dead socket is a harmless tmux leftover. Nearly all 10k were agent-doc test leftovers, and the test-isolation branch now removes each test's socket when it is dropped, so they shouldn't build up again. If you want a backstop, the right home is a narrow `bin/disk-sweep` pass: only sockets nothing is listening on, never `default`, and only ones older than about an hour.
+
+### Re: closing out the 0.35.490 batch left behind by the exited coordinator — opus-5.5 · 2026-10-11T14:12-04:00
+
+> **Queue prompt:** do [#concurrenttestsuites]
+
+> **Queue prompt:** do [#nativereloadhandoff]
+
+> **Queue prompt:** do [#backlogiceboxreview]
+
+> **Queue prompt:** do [#stateplanesubscriber]
+
+The coordinator session that claimed these items (pane %149, pid 2913466) finished the work but exited before closeout, so the claims were stale. I released them and checked the work. All four fixes are merged into `integrate-0492`, which is an ancestor of `origin/main`, and tag `v0.35.490` points at `cd3799b575`:
+
+- `#concurrenttestsuites`: `06f6202efd`, "test: give every live tmux test its own server" (tmuxiso).
+- `#nativereloadhandoff`: `9555f05e6f`, "fix(ffi): join IPC connect watchdogs before a native generation unloads" (nativereload).
+- `#backlogiceboxreview`: `3de27687e7`, "fix(cli): attribute standalone backlog/icebox/review writes to the baseline" (agentwriteattr).
+- `#stateplanesubscriber`: lockorder, with the lock-inversion fix and the `f1cba7bbca` regression test.
+- `f9b3a75d6b` fixes the Windows build that failed the v0.35.489 Release run.
+
+The local `agent-doc --version` reports 0.35.490.
+
+> **Queue prompt:** release + publish
+
+**Deferred:** v0.35.490 is tagged and pushed, but Release run 38161702873 is still in progress. PyPI still shows 0.35.488, because 0.35.489's Release run failed on the Windows build. Close this item once the run is green and PyPI shows 0.35.490. If the Windows job fails again, fix it there.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -539,19 +563,16 @@ The ⏳ fix is confirmed working: `#drivecapturedsplice` was not listed for disp
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ⏳ do [#drivecapturedsplice]
-- ⏭️ do [#concurrenttestsuites]
-- do [#nativereloadhandoff]
-- do [#backlogiceboxreview]
-- do [#stateplanesubscriber]
+- ~~do [#concurrenttestsuites]~~
+- ~~do [#nativereloadhandoff]~~
+- ~~do [#backlogiceboxreview]~~
+- ~~do [#stateplanesubscriber]~~
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#concurrenttestsuites] [agent-doc] Concurrent test suites collide on tmux: controller-io tests controller_reconciles_detached_view_and_persists_verified_placement and one_complete_snapshot_settles_two_detached_view_effects failed with 'tmux new-session failed: duplicate session: main' / 'server exited unexpectedly' when two suites ran at once (separate worktrees or parallel runs). Give each test its own tmux server (-L/-S socket under the test's tmpdir) and unique session names so concurrent runs cannot share a server.
-- [ ] 🚧 [#nativereloadhandoff] [agent-doc] native_reload_handoff::native_generations_handoff_without_sqlite_or_deleted_library_state failed once under load (~127) with 'worker exit must run Rust TLS destructors so dlclose unmaps generation one; threads=[...]' and passes alone in 1.63s. Likely a race between worker thread exit and the dlclose check; find the ordering and wait on an exit event instead of observing thread state.
-- [ ] 🚧 [#backlogiceboxreview] [agent-doc] backlog/icebox/review CLI mutations (agent-doc backlog <FILE> add|remove|edit, icebox, review) never advance the session snapshot/baseline on any path, so the next preflight labels the binary's own write as an operator edit ([user+], no_changes:false). queue sync / queue consume --id were fixed in cli-write-deferred-status by letting their existing snapshot step run; these need a snapshot-ownership decision (attribute as agent edit without folding in concurrent operator edits) plus a regression test.
-- [ ] 🚧 [#stateplanesubscriber] [agent-doc] state_plane_subscriber_never_inverts_channel_and_process_scope_locks (agent-doc-controller-io) does not detect a lock-order inversion: a deliberate inversion mutation survived both the old 250ms form and the new 30s deadlock-ceiling form. Make the test actually exercise the contended interleaving (deterministic gates forcing both lock acquisition orders) so an inversion deadlocks or is caught, and prove it with the mutation.
 - [ ] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 <!-- /agent:backlog -->
 

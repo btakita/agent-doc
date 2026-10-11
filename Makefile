@@ -14,6 +14,17 @@ NEXTEST_QUIET_FLAGS ?= --cargo-quiet --show-progress none --status-level fail --
 BATCHED_TEST_PACKAGES := agent-doc-controller agent-doc-controller-io agent-doc-route-io agent-doc-session-check-io agent-doc-start-runtime-io
 BATCHED_TEST_PACKAGE_ARGS := $(foreach package,$(BATCHED_TEST_PACKAGES),-p $(package))
 NEXTEST_NON_BATCHED_FILTER := not (package(agent-doc-controller) | package(agent-doc-controller-io) | package(agent-doc-route-io) | package(agent-doc-session-check-io) | package(agent-doc-start-runtime-io))
+# `#flakyintegrate0494`: every test step `make test`/`check` runs keeps its
+# output, exit status, nextest JUnit report (with the failing test's captured
+# output), and a snapshot of concurrent test runs under one per-invocation,
+# per-checkout directory outside target/, so a failure can never be lost to a
+# deleted log. See scripts/test-run-record for layout and pruning.
+TEST_RUN_ARTIFACT_ROOT ?= $(CURDIR)/tmp/test-runs
+ifndef TEST_RUN_DIR
+TEST_RUN_DIR := $(TEST_RUN_ARTIFACT_ROOT)/$(shell date -u +%Y%m%dT%H%M%SZ)-$(shell echo $$PPID)
+endif
+NEXTEST_JUNIT := $(CARGO_TARGET_DIR_ABS)/nextest/default/junit.xml
+TEST_RECORD = python3 scripts/test-run-record exec --run-dir "$(TEST_RUN_DIR)"
 LOCAL_INSTALL_PROFILE ?= release-local
 LOCAL_INSTALL_TARGET_DIR ?= target/local-install
 LOCAL_LINKER ?= $(shell if command -v mold >/dev/null 2>&1; then printf '%s' mold; elif command -v ld.lld >/dev/null 2>&1 || command -v lld >/dev/null 2>&1; then printf '%s' lld; fi)
@@ -113,43 +124,17 @@ test:
 	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
 	$(CARGO_CLEAN_ENV) $(CARGO_CMD) build --bin agent-doc --lib --quiet; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) nextest run --workspace --all-targets -E '$(NEXTEST_NON_BATCHED_FILTER)' $(NEXTEST_QUIET_FLAGS); then \
-			exit 1; \
-		fi; \
-		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-batched-test.XXXXXX.log"); \
-		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test $(BATCHED_TEST_PACKAGE_ARGS) --all-targets --quiet -- --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
-			cat "$$log"; \
-			rm -f "$$log"; \
-			exit 1; \
-		fi; \
-		rm -f "$$log"; \
-		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-doctest.XXXXXX.log"); \
-		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --doc --quiet >"$$log" 2>&1; then \
-			cat "$$log"; \
-			rm -f "$$log"; \
-			exit 1; \
-		fi; \
-		rm -f "$$log"; \
+		AGENT_DOC_BIN="$$test_agent_doc_bin" $(TEST_RECORD) --label nextest --junit "$(NEXTEST_JUNIT)" --echo -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) nextest run --workspace --all-targets -E '$(NEXTEST_NON_BATCHED_FILTER)' $(NEXTEST_QUIET_FLAGS); \
+		AGENT_DOC_BIN="$$test_agent_doc_bin" $(TEST_RECORD) --label batched -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test $(BATCHED_TEST_PACKAGE_ARGS) --all-targets --quiet -- --test-threads="$(TEST_THREADS)"; \
+		AGENT_DOC_BIN="$$test_agent_doc_bin" $(TEST_RECORD) --label doctest -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --doc --quiet; \
 	else \
-		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-test.XXXXXX.log"); \
-		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --all-targets --quiet -- --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
-			cat "$$log"; \
-			rm -f "$$log"; \
-			exit 1; \
-		fi; \
-		rm -f "$$log"; \
+		AGENT_DOC_BIN="$$test_agent_doc_bin" $(TEST_RECORD) --label cargo-test -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --all-targets --quiet -- --test-threads="$(TEST_THREADS)"; \
 	fi
 
 # Wider deterministic simulator budget. Kept outside normal cargo test via
 # #[ignore], but make check runs it explicitly so CI exercises more schedules.
 sim-medium:
-	@log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-sim-medium.XXXXXX.log"); \
-	if ! $(CARGO_CLEAN_ENV) $(CARGO_CMD) test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget --quiet -- --ignored --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
-		cat "$$log"; \
-		rm -f "$$log"; \
-		exit 1; \
-	fi; \
-	rm -f "$$log"
+	@$(TEST_RECORD) --label sim-medium -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget --quiet -- --ignored --test-threads="$(TEST_THREADS)"
 
 # `#netadv4`: the fast corpus schedules (seeds 0..512) under the seeded
 # `coder_zscaler` and `hostile` network profiles, each across the fixed net seeds
@@ -158,13 +143,7 @@ sim-medium:
 # KNOWN_OPEN_NET_FINDINGS fails the run. Scripted scenarios can be replayed under a
 # profile ad hoc: AGENT_DOC_SIM_NET_PROFILE=hostile AGENT_DOC_SIM_NET_SEED=3 cargo test sim_world::
 sim-net:
-	@log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-sim-net.XXXXXX.log"); \
-	if ! $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --bin agent-doc sim_world::net::tests::closeout_sim_net_ --quiet -- --ignored --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
-		cat "$$log"; \
-		rm -f "$$log"; \
-		exit 1; \
-	fi; \
-	rm -f "$$log"
+	@$(TEST_RECORD) --label sim-net -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --bin agent-doc sim_world::net::tests::closeout_sim_net_ --quiet -- --ignored --test-threads="$(TEST_THREADS)"
 
 # `#netadv6`: deterministic simulation fuzzing on FRESH seeds for FUZZ_SECS
 # seconds (src/sim_world/fuzz.rs). `make check` already runs the short fixed
@@ -349,6 +328,7 @@ lean:
 # binary while every version marker matched.
 dev-check-self-test:
 	@python3 scripts/dev-check.py self-test
+	@python3 scripts/test-run-record self-test
 
 release-driver-self-test:
 	@python3 scripts/release-driver.py --self-test

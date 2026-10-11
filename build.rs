@@ -27,19 +27,16 @@ fn main() {
     let build_id = agent_doc_hash::workspace_source_digest(&root)
         .unwrap_or_else(|error| panic!("failed to compute the build identity: {error}"));
 
-    // One declaration per hashed file, plus the directory holding it so that
-    // adding or removing a source also re-runs this script. A file-only
-    // declaration cannot observe creation.
-    let mut directories = std::collections::BTreeSet::from([".".to_string()]);
+    // One declaration per hashed file, plus each directory holding one so that
+    // adding or removing a source also re-runs this script (a file-only
+    // declaration cannot observe creation). Cargo scans a declared directory
+    // recursively, so the workspace root -- which holds `target/` -- is never
+    // declared (`#flakyintegrate0494`); see `source_digest_watch_directories`.
     for relative in &inputs {
         println!("cargo:rerun-if-changed={}", relative.display());
-        let parent = relative.parent().map(|parent| parent.display().to_string());
-        if let Some(parent) = parent.filter(|parent| !parent.is_empty()) {
-            directories.insert(parent);
-        }
     }
-    for directory in directories {
-        println!("cargo:rerun-if-changed={directory}");
+    for directory in agent_doc_hash::source_digest_watch_directories(&root, &inputs) {
+        println!("cargo:rerun-if-changed={}", directory.display());
     }
 
     println!("cargo:rustc-env=AGENT_DOC_BUILD_ID={build_id}");

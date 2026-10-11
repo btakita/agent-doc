@@ -23,21 +23,6 @@ pub(crate) fn record_test_visible_write_receipt(
         );
 }
 
-#[cfg(test)]
-pub(crate) fn record_test_visible_write_receipt_with_relay(
-    file: &Path,
-    patch_id: &str,
-    content: &str,
-    source: &str,
-) {
-    agent_doc_test_support::publish_editor_text_via_crdt_relay(
-        file,
-        "visible-write-test-editor",
-        content,
-    );
-    record_test_visible_write_receipt(file, patch_id, content, source);
-}
-
 /// Attempt to write via IPC (socket-first, file-based fallback).
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
@@ -198,10 +183,76 @@ mod submodule_patch_routing_tests {
     // --show-toplevel` from `/tmp/...` walks up into the source tree. The
     // fallback path is exercised in production by non-git workspaces.
 
+    /// `#flakyintegrate0494` (`#visiblewriteloadflake` class): the
+    /// already-applied receipt fixtures record a visible-write receipt through a
+    /// controller RPC. Without a warm controller, that first RPC
+    /// `connect_or_launch`ed a detached `agent-doc controller serve` whose
+    /// startup (3s+ under a concurrent full suite) was charged to the 2s
+    /// test-mode deadlines; the receipt helper discarded the timeout, the
+    /// receipt was silently missing, and the code under test then took the
+    /// missing-receipt branch, failing the assertion about the receipt branch.
+    /// Pinning the group to one core shared with 64 spinners reproduced it in
+    /// 5 of 5 runs. The fixture hosts a warm in-process controller (hydrated
+    /// before it binds its socket), records the receipt strictly, and asserts no
+    /// detached controller was cold-launched.
+    ///
+    /// Field order is drop order: the actor stops before its root is deleted.
+    struct WarmControllerRoot {
+        _actor: agent_doc_controller_io::project_controller::StateActorTestHandle,
+        _dir: TempDir,
+        root: PathBuf,
+    }
+
+    impl WarmControllerRoot {
+        fn new() -> Self {
+            let dir = TempDir::new().unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            fs::create_dir_all(root.join(".agent-doc")).unwrap();
+            let actor =
+                agent_doc_controller_io::project_controller::start_state_actor_for_tests(&root)
+                    .unwrap();
+            Self {
+                _actor: actor,
+                _dir: dir,
+                root,
+            }
+        }
+
+        fn assert_no_cold_controller_launch(&self) {
+            let log =
+                fs::read_to_string(self.root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+            assert!(
+                !log.contains("controller_detached_child_launched"),
+                "the receipt fixture must be served by its warm controller, not a cold launch:\n{log}"
+            );
+        }
+    }
+
+    fn record_receipt_on_warm_controller(file: &Path, patch_id: &str, content: &str, source: &str) {
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+            file, patch_id, content, source,
+        )
+        .expect("the warm fixture controller must record the visible-write receipt");
+    }
+
+    fn record_receipt_on_warm_controller_with_relay(
+        file: &Path,
+        patch_id: &str,
+        content: &str,
+        source: &str,
+    ) {
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            file,
+            "visible-write-test-editor",
+            content,
+        );
+        record_receipt_on_warm_controller(file, patch_id, content, source);
+    }
+
     #[test]
     fn already_applied_visible_write_content_does_not_overwrite_newer_visible_operator_edit() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let fixture = WarmControllerRoot::new();
+        let root = fixture.root.clone();
         for subdir in [
             "visible-write",
             "patches",
@@ -257,12 +308,7 @@ mod submodule_patch_routing_tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-stale-visible-write";
-        crate::ipc::transport::record_test_visible_write_receipt(
-            &doc,
-            patch_id,
-            content_ours,
-            "test_already_applied",
-        );
+        record_receipt_on_warm_controller(&doc, patch_id, content_ours, "test_already_applied");
         fs::write(&doc, newer_visible).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
@@ -305,12 +351,13 @@ mod submodule_patch_routing_tests {
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "stale visible-write receipt rejection should be auditable:\n{log}"
         );
+        fixture.assert_no_cold_controller_launch();
     }
 
     #[test]
     fn already_applied_visible_write_content_does_not_overwrite_unsaved_live_editor_edit() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let fixture = WarmControllerRoot::new();
+        let root = fixture.root.clone();
         for subdir in [
             "visible-write",
             "patches",
@@ -367,7 +414,7 @@ mod submodule_patch_routing_tests {
 
         let patch_id = "already-applied-unsaved-live-editor";
         let editor_id = "jetbrains-test-editor";
-        crate::ipc::transport::record_test_visible_write_receipt(
+        record_receipt_on_warm_controller(
             &doc,
             patch_id,
             stale_visible_write_content,
@@ -418,6 +465,7 @@ mod submodule_patch_routing_tests {
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "stale live-editor visible-write receipt should fail closed before snapshot adoption:\n{log}"
         );
+        fixture.assert_no_cold_controller_launch();
     }
 
     #[test]
@@ -496,8 +544,8 @@ mod submodule_patch_routing_tests {
 
     #[test]
     fn already_applied_receipt_missing_response_retries_cell_without_document_write() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let fixture = WarmControllerRoot::new();
+        let root = fixture.root.clone();
         for subdir in ["visible-write", "snapshots", "crdt", "logs", "state/cycles"] {
             fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
         }
@@ -530,7 +578,7 @@ mod submodule_patch_routing_tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-receipt-missing-response";
-        crate::ipc::transport::record_test_visible_write_receipt_with_relay(
+        record_receipt_on_warm_controller_with_relay(
             &doc,
             patch_id,
             receipt_current,
@@ -575,15 +623,13 @@ mod submodule_patch_routing_tests {
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "receipt-backed response retry must be explicit and non-mutating:\n{log}"
         );
+        fixture.assert_no_cold_controller_launch();
     }
 
-    // #stale-already-applied — when the authoritative editor cut moves beyond an
-    // `already_applied` receipt, the receipt is no longer proof for the current
-    // document. Keep the response operation pending without touching disk.
     #[test]
     fn already_applied_socket_stale_receipt_leaves_response_pending_without_disk_write() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let fixture = WarmControllerRoot::new();
+        let root = fixture.root.clone();
         for subdir in ["visible-write", "snapshots", "crdt", "logs", "state/cycles"] {
             fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
         }
@@ -631,7 +677,7 @@ mod submodule_patch_routing_tests {
         .unwrap();
         fs::write(&doc, disk_now).unwrap();
         let patch_id = "already-applied-not-idle";
-        crate::ipc::transport::record_test_visible_write_receipt_with_relay(
+        record_receipt_on_warm_controller_with_relay(
             &doc,
             patch_id,
             ack_current,
@@ -675,6 +721,7 @@ mod submodule_patch_routing_tests {
             disk_now,
             "a deferred repair must not write a partial/scrambled document to disk"
         );
+        fixture.assert_no_cold_controller_launch();
     }
 
     #[test]

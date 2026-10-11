@@ -2,7 +2,10 @@
 
 pub mod source_digest;
 
-pub use source_digest::{SOURCE_DIGEST_HEX_LEN, source_digest_inputs, workspace_source_digest};
+pub use source_digest::{
+    SOURCE_DIGEST_HEX_LEN, source_digest_inputs, source_digest_watch_directories,
+    workspace_source_digest,
+};
 
 use sha2::{Digest, Sha256};
 use std::io;

@@ -76,6 +76,48 @@ I gave this to the same subagent as the sdk.md item (claim `subagent:clearlive`)
 - An explicit, tested rule for a Clear when the prompt is idle but background agents or shells are still running.
 
 **Now:** if it hasn't cleared by 17:08, run `agent-doc session interrupt-clear tasks/api.md` from `src/haiven-dev`. It interrupts whatever is running in that pane, which here likely means that background subagent too.
+
+### Re: two integration batches landed and installed; frontend.md wedge dispatched; release held for it — opus-5.5 · 2026-10-11T18:25-04:00
+
+> **Queue prompt:** do [#splicectlcommit]
+
+Done (branch `splicectl`, `341d2d142a`, on main via `3fbe838baa`).
+- **Scratch flag:** a document can declare `agent_doc_scratch: true`. If it's git-ignored, the controller-routed commit now ends in a clean skip (`commit_skipped_ignored_scratch`). It never stages the file, and it no longer logs `commit_error`. An undeclared ignored document is still refused, exactly as before.
+- **Ignored-path closeout:** it no longer waits forever in capture recovery (new terminal outcome `ClosedIgnoredPath`). It also no longer fails on an unrelated stale submodule pointer.
+- **Recipe:** it now declares its scratch doc instead of relying on GIT_DIR.
+- **Not yet proven live:** the post-closeout session-check under a real editor. The next live captured-splice run will show it.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/240
+
+Fixed and closed (branch `gh240`, `f82ea45372`, on main via `3fbe838baa`). The issue closed automatically when the commit landed, and I posted the explanation as a comment. The closeout now records exactly which head it approved, and the consume takes the leading head only if it is still that same head. Otherwise it does nothing, the other head stays live, and `queue: go` stays set. The regression test reproduces the incident without the fix. I filed the remaining risk, two closeout drivers overlapping, as closeoutleaseresume.
+
+> **Queue prompt:** Clear Session Context on sdk.md did not take effect despite me running it twice. Run Agent Doc was sandwiched in between the 2 Clear Session Context calls.
+
+> **Queue prompt:** Clear Session Context on api.md is wedged.
+
+Both fixed, together with `#clearqueuedliveturn` below (branch `clearlive`, `37bc4add5a`, on main as `472ec36906`, now installed). It was one defect with three parts:
+1. **The stale receipt:** after a routed Run Agent Doc turn, the dispatch receipt stayed `running` for 30 minutes after the turn ended, so the pane looked live. The turn-end hook (`turn-status idle`) now settles it.
+2. **Lost presses:** a repeat press re-arms the queued clear instead of being absorbed. A run you started before pressing Clear becomes the clear's turn instead of cancelling it. A run that's accepted but hasn't started yet counts as a live turn.
+3. **Background agents hid the prompt:** Claude's background-agent row (`◯ general-purpose …`) hid the `❯` prompt from the idle check, which is why api.md never fired even after the 30 minutes. That row is now treated as screen decoration.
+
+The notice also now shows `evidence_age_secs`. By the spec, an idle prompt with background agents running is not a live turn.
+
+> **Queue prompt:** do [#clearqueuedliveturn]
+
+Done as an automated live check instead of a manual one. `tests/clear_queued_live_turn_tmux.rs` runs the real `agent-doc start` supervisor on a private tmux server against a fake `claude`. It covers four cases: a turn proven live only by its receipt clears exactly once after Stop, a newer prompt drops the clear, a repeat press re-arms it, and Clear→Run→Clear delivers both clears in order. I ran that suite on the integrated tree: 4/4 passed. Disabling any one of the five fixes makes at least one of those tests fail. What still needs your eyes is filed as clearnoticeverify: the IntelliJ notice wording, and what `/clear` does to running background agents. Separately, a newer prompt dropping a queued clear still only logs it without telling you, filed as clearsupersedenotice.
+
+**Integration and verification:**
+- **Batch 1 (`splicectl` + `gh240`):** I made a mistake here. I pushed `3fbe838baa` to main before reading `make check`'s result. That first run had stopped after 1 failure in 101 of 10205 tests. The rerun on the same commit passed all 10205, so the failure is nondeterministic. I deleted the first log before reading it, so I can't name the test. I filed flakyintegrate0494 to capture it when it recurs. I didn't rerun it away. After the passing rerun, I ran `make install` (exit 0).
+- **Batch 2 (`clearlive`):** `make check` exit 0, 10215 tests passed. The live tmux suite passed 4/4. Pushed `472ec36906` and ran `make install` (exit 0).
+- One note: the clear subagent briefly started the real `claude` program by accident, inside its private tmux server in a temp directory, then killed it within seconds. Your real tmux server, panes and IDE were not touched.
+
+> **Queue prompt:** frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
+
+**Deferred:** this went to a background subagent (claim `subagent:frontendwedge`, worktree `agent-doc-wt/frontendwedge` off `472ec36906`). The screenshot shows repeated `[perf] find_code_ranges: Nms` lines written straight over the Claude Code composer, footer and status line. That means a process at end of turn, likely a hook or a supervisor child, still has the pane's terminal as its stderr, and the stray text in the composer plausibly defeats ready-prompt detection. The subagent will find what emits it and route it away from the pane, add tests, and check whether the wedge is only the polluted composer or a separate hang.
+
+> **Queue prompt:** release + publish
+
+**Deferred:** claimed by me (`coordinator:release-0491`). Main has both batches. I'm holding the tag until the frontend.md wedge fix lands, so v0.35.491 doesn't ship a known bug that breaks the pane. Then: `make release-version`, the `VERSIONS.md` entry, `make install-full`, and `make release`.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -84,18 +126,25 @@ I gave this to the same subagent as the sdk.md item (claim `subagent:clearlive`)
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#clearqueuedliveturn]
-- 🚧 do [#splicectlcommit]
+- ~~do [#clearqueuedliveturn]~~
+- ~~do [#splicectlcommit]~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/240
 - 🚧 Clear Session Context on sdk.md did not take effect despite me running it twice. Run Agent Doc was sandwiched in between the 2 Clear Session Context calls.
-- Clear Session Context on api.md is wedged.
+- 🚧 Clear Session Context on api.md is wedged.
+- frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
+- release + publish
+- do [#closeoutleaseresume]
+- do [#flakyintegrate0494]
+- do [#clearsupersedenotice]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#splicectlcommit] [agent-doc] A strict write --commit on a git-ignored scratch doc under a live editor is routed to the project controller (commit_document_via_controller), which commits against the product repo and refuses the ignored path (commit_skipped_ignored_path + commit_error), so the captured-splice recipe's isolated GIT_DIR never applies. Either give the controller commit an explicit commit-target override or treat an ignored scratch doc as a clean skip instead of commit_error. Evidence: src/agent-doc ops.log doc=xdotool-captured-splice-1791744122 18:42:24Z.
-- [ ] 🚧 [#clearqueuedliveturn] [operator-verify] [agent-doc] Live-check the queued Clear Session Context (merged 23a5d7c0a4): press Clear while a route-dispatched turn is running; expect an info notice 'queued … runs when that turn ends', exit 0, then exactly one /clear at the idle boundary, and none if a newer prompt starts first. Specifically confirm the turn-ended projection arrives when the turn is proven live only by its dispatch receipt (the pane %149 case).
+- [ ] [#closeoutleaseresume] [agent-doc] The controller's captured-finalize resume can fall back to the legacy repair path, which strikes answered queue heads (agent-doc-repair-io/src/lib.rs ~1094) without first acquiring the closeout lease respond holds; the resume's start gate (agent-doc-supervisor/src/idle_watch.rs:37) does not check the lease either. Two closeout drivers can overlap (GH #240 incident). Make the resume acquire the closeout lease before any repair mutation, with a regression test.
+- [ ] [#flakyintegrate0494] [agent-doc] A full make check on integrate-0494 (merge of splicectl + gh240, 3fbe838baa) stopped at 1 failure after 101/10205 tests; the rerun on the same commit passed 10205/10205. The first log was deleted before reading, so the test is unknown. Capture it on recurrence (keep nextest junit/output from every authoritative run) and fix the nondeterminism; never rerun to green.
+- [ ] [#clearsupersedenotice] [agent-doc] When a newer prompt drops an operator-queued Clear Session Context (idle_queue_watch_deferred_clear_superseded), the operator gets no notice; surface it in the editor like the queued notice.
+- [ ] [#clearnoticeverify] [operator-verify] [agent-doc] Eyeball the queued Clear Session Context notices in IntelliJ after 472ec36906 (queued / re-armed / evidence_age_secs wording) and confirm /clear with running Claude background agents behaves as you expect.
 <!-- /agent:backlog -->
 
 ## Review

@@ -511,7 +511,26 @@ All four are claimed, each running in its own worktree on main `e6d90cbe90`:
 - **`#stateplanesubscriber`:** force the risky lock interleaving with gates, or add a lock-order checker in test builds, so an inversion is actually caught. A deliberate inversion must make the test fail.
 
 The ⏳ fix is confirmed working: `#drivecapturedsplice` was not listed for dispatch this cycle. It still waits for your `go`.
-<!-- agent:boundary:f6f2f5ef -->
+> **Chat prompt (#chatprompt):** yes, delete the dead tmux socket files
+
+> **Chat prompt (#chatprompt):** Did we release?
+
+> **Chat prompt (#chatprompt):** Should agent-doc auto-reap dead tmux socket files?
+
+> **Chat prompt (#chatprompt):** Did the linux release publish?
+
+### Re: tmux socket cleanup; v0.35.489 did NOT publish (Windows build broke) — opus-5-5 · 2026-10-11T12:55-04:00
+
+**Tmux sockets: done.** I deleted 10,094 dead socket files from `/tmp/tmux-1000`. A file counted as dead only if `ss` showed nothing listening on it and it was more than 30 minutes old. `default` was always kept, and your server still answers. 199 recent files remain, from test runs in progress.
+
+**Release: no, and that includes Linux.** I reported v0.35.489 as published without checking afterwards. That was wrong. The tag is pushed, but the Release run failed. Its `release`, `pypi` and `homebrew` jobs only run after every platform build passes, so they were all skipped: there is no GitHub release and PyPI still shows 0.35.488. The Linux and macOS builds passed, but their output was never published.
+- **Cause:** the Windows build broke on `agent-doc-queue-io/src/queue_claim.rs:76`, where the new claim owner-liveness check calls Unix-only `libc::kill` / `libc::pid_t` without a Unix-only guard.
+- **Fix ready:** I wrapped it in `#[cfg(unix)]` with a non-Unix fallback that treats the owner as alive. That is the same pattern `queue_edit_owner.rs` already uses in the same crate.
+- **Second break caught before shipping:** an audit of every Unix-only API added since 0.35.488 found `agent-doc-tmux-io/src/isolated_test_server.rs` calling `libc::getuid` unguarded. It comes from the tmux test-isolation branch in the batch now integrating. I'll guard it the same way.
+- **Plan:** add both fixes to `integrate-0492` once its full check finishes, push, install, then cut **v0.35.490** containing everything since 0.35.488. I'll only report it published after confirming that the Release run is green on every platform and PyPI shows it. Windows can't be checked locally (the C dependencies need MSVC), so the Release run is the real test. I'm also filing a follow-up for a Windows compile check in CI, so this breaks a PR instead of a release.
+
+**Auto-reap tmux sockets?** Not as general agent-doc behaviour. `/tmp/tmux-1000` is shared with everything you run, and a dead socket is a harmless tmux leftover. Nearly all 10k were agent-doc test leftovers, and the test-isolation branch now removes each test's socket when it is dropped, so they shouldn't build up again. If you want a backstop, the right home is a narrow `bin/disk-sweep` pass: only sockets nothing is listening on, never `default`, and only ones older than about an hour.
+<!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -519,22 +538,8 @@ The ⏳ fix is confirmed working: `#drivecapturedsplice` was not listed for disp
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#binaryownedcli]~~
-- ~~#gh-fix: https://github.com/btakita/agent-doc/issues/239~~
 - ⏳ do [#drivecapturedsplice]
-- ~~do [#respondcloseoutbacklog]~~
-- ~~sdk.md turn with a subagent is wedged. Asking me to restart.~~
-- ~~do [#loadbudgettests]~~
-- ~~do [#qheadresiduestrike]~~
-- ~~do [#checktmpdirleak]~~
-- ~~do [#subagentmsgcollide]~~
-- ~~do [#statesubscriberecords]~~
-- ~~do [#remainingwallclock]~~
-- ~~do [#replace120shang]~~
-- ~~do [#tlafailedonce]~~
-- ~~do [#continuationheadskip]~~
-- ~~do [#regressionawaitingoperat]~~
-- do [#concurrenttestsuites]
+- ⏭️ do [#concurrenttestsuites]
 - do [#nativereloadhandoff]
 - do [#backlogiceboxreview]
 - do [#stateplanesubscriber]

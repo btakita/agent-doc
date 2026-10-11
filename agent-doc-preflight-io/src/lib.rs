@@ -3277,8 +3277,12 @@ fn disk_edit_newer_than_registered_authority_with_lineage(
 /// Live 2026-09-30 on infra.md: the line-based `Semantic` rung kept both of two
 /// different edits of one queue item, adopting it twice; the authority
 /// subsumption check cannot see an addition. `formal/tla/AdmissionSplitMerge.tla`
-/// proves this guard alone restores `NoDuplicateItem` (its GuardOffWedge config
-/// shows stopping on `equals_authority` is not sufficient).
+/// proves this guard restores `NoDuplicateItem` for two edits of one item (its
+/// GuardOffWedge config shows stopping on `equals_authority` is not sufficient).
+/// It cannot see a revision twin -- two revisions of one item BOTH sides added --
+/// because the twin is itself growth over the baseline (`typingforkdup`,
+/// TwinWedge); `agent_doc_merge::merge` projects those out of disk first, and
+/// callers must pass the projected disk (`MergePlan::merged_agent`) here.
 fn merge_invents_list_items(
     baseline: &str,
     authority: &str,
@@ -3372,11 +3376,22 @@ fn merge_admission_three_way_split(
             lineage_projection.suppressed_queue_revisions
         ));
     }
+    let mut twins_logged = false;
     for engine in [
         agent_doc_merge::MergeRequest::cell(baseline, merge_disk, authority),
         agent_doc_merge::MergeRequest::semantic(baseline, merge_disk, authority),
     ] {
         let plan = agent_doc_merge::merge(engine);
+        if plan.revision_twins_collapsed > 0 && !twins_logged {
+            // `typingforkdup`: disk carried an earlier revision of an item the
+            // operator added (a mid-typing native save). `merge` projected it
+            // out of disk before any rung saw it.
+            rungs.push(format!(
+                "RevisionTwin=collapsed({})",
+                plan.revision_twins_collapsed
+            ));
+            twins_logged = true;
+        }
         let durable_merged = durable(&plan.merged_doc);
         let outcome = if plan.fell_back {
             // The per-cell engine declined; its contract requires the next strategy.
@@ -3395,13 +3410,31 @@ fn merge_admission_three_way_split(
             // Nothing from disk survived: the compare-and-swap write is a no-op.
             "equals_authority"
         } else if let Some(invented) =
-            merge_invents_list_items(baseline, authority, merge_disk, &plan.merged_doc)
+            merge_invents_list_items(baseline, authority, &plan.merged_agent, &plan.merged_doc)
         {
             // `#admissionmergedup`: count conservation. A merge may not hold more
             // items than baseline + each side's additions; formal model
-            // `formal/tla/AdmissionSplitMerge.tla`.
+            // `formal/tla/AdmissionSplitMerge.tla`. Disk's additions are counted
+            // on the side the engine MERGED (`merged_agent`): a revision twin
+            // projected out of disk must not leave a spare slot in this bound.
             rungs.push(format!(
                 "{:?}=would_duplicate_items({invented})",
+                plan.engine
+            ));
+            continue;
+        } else if let Some(invented) = agent_doc_merge::revision_twin::merge_invents_revision_twins(
+            baseline,
+            &plan.merged_agent,
+            authority,
+            &plan.merged_doc,
+        ) {
+            // `typingforkdup`: the merge put two revisions of one authored item
+            // side by side that neither input authored as a pair (e.g. disk holds
+            // a NEWER revision than the authority's replica). The live editor
+            // owns that item's text; proceed on the authority rather than adopt
+            // a duplicate.
+            rungs.push(format!(
+                "{:?}=would_duplicate_revision({invented})",
                 plan.engine
             ));
             continue;
@@ -9242,6 +9275,137 @@ mod tests {
         assert!(
             body.contains("drift if there is drift if there is drift."),
             "{merged}"
+        );
+    }
+
+    /// `typingforkdup` (sdk.md, 2026-10-11): the operator was typing a NEW queue
+    /// item. A native save put a 279-byte cut of it on disk (ending mid-sentence,
+    /// with a trailing space); the live editor authority held the 344-byte
+    /// revision; the baseline held neither. The shipped ladder answered
+    /// `Cell=equals_authority Semantic=adopted` and the adopted revision carried
+    /// the item twice -- the full line and its truncated prefix -- because the
+    /// count guard counted disk's cut as an independent disk addition. The
+    /// byte-exact replay on the reconstructed triple returned the logged 53079
+    /// bytes; this fixture keeps the shape with neutral text.
+    fn admission_typing_fork_docs(
+        disk_queue: &str,
+        authority_queue: &str,
+    ) -> (String, String, String) {
+        let doc = |queue: &str| {
+            format!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+                 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior\n\nPrior answer.\n\
+                 <!-- agent:boundary:bcb96c78 -->\n<!-- /agent:exchange -->\n\n\
+                 # Queue\n\n<!-- agent:queue subagents priority go -->\n- do [#first]\n{queue}<!-- /agent:queue -->\n\n\
+                 # Notes\n\n<!-- agent:notes -->\n<!-- /agent:notes -->\n"
+            )
+        };
+        (doc(""), doc(authority_queue), doc(disk_queue))
+    }
+
+    const TYPING_FULL: &str = "- We also need documentation on all steps of the DX. The tooling \
+         should be self-guiding. The generation DX needs to have developer friendly \
+         documentation. The agentic layer needs documen";
+    const TYPING_CUT: &str = "- We also need documentation on all steps of the DX. The tooling \
+         should be self-guiding. The generation DX needs to have ";
+
+    fn queue_lines_starting(merged: &str, prefix: &str) -> usize {
+        component_body(merged, "queue")
+            .lines()
+            .filter(|line| line.starts_with(prefix))
+            .count()
+    }
+
+    #[test]
+    fn admission_split_merge_never_materializes_a_typing_cut_as_a_second_item() {
+        let dir = setup_project();
+        let doc = dir.path().join("sdk.md");
+        let (baseline, authority, disk) =
+            admission_typing_fork_docs(&format!("{TYPING_CUT}\n"), &format!("{TYPING_FULL}\n"));
+        std::fs::write(&doc, &disk).unwrap();
+        // Precondition: the line rung on the raw triple duplicates -- this is the
+        // incident, and it must stay reproducible or the test proves nothing.
+        let raw =
+            agent_doc_merge::document_cell_merge::document_cell_merge(&baseline, &disk, &authority)
+                .merged_doc;
+        assert_eq!(
+            queue_lines_starting(&raw, "- We also need documentation"),
+            2,
+            "the unprojected line merge must reproduce the duplicate:\n{raw}"
+        );
+
+        let merged =
+            merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
+                .unwrap()
+                .unwrap_or_else(|| authority.clone());
+        assert_eq!(
+            queue_lines_starting(&merged, "- We also need documentation"),
+            1,
+            "the operator's in-progress item must stay one item:\n{merged}"
+        );
+        assert_eq!(merged, authority, "operator text is authoritative");
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("RevisionTwin=collapsed(1)"),
+            "the collapse must be visible in the admission log:\n{log}"
+        );
+    }
+
+    /// Independent disk work saved in the SAME native save as the stale cut still
+    /// lands; only the cut is projected out (`AdmissionSplitMergeTwinReach`).
+    #[test]
+    fn admission_split_merge_keeps_disk_work_saved_beside_a_typing_cut() {
+        let dir = setup_project();
+        let doc = dir.path().join("sdk.md");
+        let (baseline, authority, disk) = admission_typing_fork_docs(
+            &format!("{TYPING_CUT}\n- disk branch\n"),
+            &format!("{TYPING_FULL}\n"),
+        );
+        let merged =
+            merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
+                .unwrap()
+                .expect("independent disk work must merge");
+        assert_eq!(
+            queue_lines_starting(&merged, "- We also need documentation"),
+            1,
+            "{merged}"
+        );
+        assert!(merged.contains(TYPING_FULL), "{merged}");
+        assert!(merged.contains("- disk branch\n"), "{merged}");
+    }
+
+    /// A disk revision NEWER than the authority's (a native save ahead of the
+    /// replica) is not projected; the twin-pair guard refuses every candidate
+    /// that would hold both, and admission proceeds on the authority
+    /// (`AdmissionSplitMergeTwinPairWedge`).
+    #[test]
+    fn admission_split_merge_refuses_a_newer_disk_revision_beside_the_authority() {
+        let dir = setup_project();
+        let doc = dir.path().join("sdk.md");
+        // The authority's cut carries no trailing space here: the line rung trims
+        // trailing whitespace, and a trimmed authority line would be refused as
+        // `would_drop_authority_content` before the twin-pair guard is reached.
+        let (baseline, authority, disk) = admission_typing_fork_docs(
+            &format!("{TYPING_FULL}\n"),
+            &format!("{}\n", TYPING_CUT.trim_end()),
+        );
+        std::fs::write(&doc, &disk).unwrap();
+        let merged =
+            merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
+                .unwrap()
+                .unwrap_or_else(|| authority.clone());
+        assert_eq!(
+            queue_lines_starting(&merged, "- We also need documentation"),
+            1,
+            "{merged}"
+        );
+        assert_eq!(merged, authority, "operator text is authoritative");
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("Semantic=would_duplicate_revision(revision_twin_pairs:1>0)"),
+            "the twin-pair guard must be what refused the line rung:\n{log}"
         );
     }
 

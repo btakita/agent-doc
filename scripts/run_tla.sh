@@ -148,6 +148,15 @@ must_violate=(
     AdmissionSplitMerge:AdmissionSplitMergeWedge
     AdmissionSplitMerge:AdmissionSplitMergeGuardOffWedge
     AdmissionSplitMerge:AdmissionSplitMergeReach
+    # typingforkdup: disk held an intermediate revision of the queue item the
+    # operator was typing (sdk.md, 2026-10-11); the count guard admits it as a
+    # disk addition. Collapse off MUST duplicate; collapsing each rung's OUTPUT
+    # (instead of projecting the input) MUST duplicate too, and so must a NEWER
+    # disk revision with the twin-pair guard off.
+    AdmissionSplitMerge:AdmissionSplitMergeTwinWedge
+    AdmissionSplitMerge:AdmissionSplitMergeTwinPairWedge
+    AdmissionSplitMerge:AdmissionSplitMergeTwinOutputWedge
+    AdmissionSplitMerge:AdmissionSplitMergeTwinReach
     # `#editorauthority`: adopting the CRDT over an open editor rolls it back
     # (api.md, 2026-09-29); forward merging still delivers agent work.
     EditorAuthorityLadder:EditorAuthorityLadderWedge

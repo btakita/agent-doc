@@ -1674,7 +1674,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
             agent_doc_ops_log_io::log_op(
                 &file_path_buf,
                 &format!(
-                    "editor_ops_record_failed count={op_count} transaction=batch error={error} #qbasehashmemo"
+                    "editor_ops_record_failed count={op_count} transaction=batch error={error:#} #qbasehashmemo"
                 ),
             );
             0

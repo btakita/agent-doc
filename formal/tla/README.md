@@ -216,7 +216,18 @@ line-based `Semantic` rung keeps both of two different edits of one item.
 `NoDuplicateItem`, the 2026-09-30 `infra.md` duplicate;
 `AdmissionSplitMergeGuardOffWedge.cfg` shows ending the ladder on
 `equals_authority` is no substitute for the guard; `AdmissionSplitMergeReach.cfg`
-must show disk-only additions still land.
+must show disk-only additions still land. The same model also covers revision
+twins (`typingforkdup`, 2026-10-11 `sdk.md`). Disk held an intermediate cut of a
+queue item the operator was still typing, and both sides "added" it. The count
+guard counts the cut as a disk addition, so it admits the duplicate.
+`AdmissionSplitMergeTwinWedge.cfg` (no projection, no pair guard) must violate
+`NoDuplicateItem`. `AdmissionSplitMergeTwinOutputWedge.cfg` must violate it too:
+filtering each rung's output instead of projecting the input leaves a spare
+slot in the count bound. `AdmissionSplitMergeTwinPairWedge.cfg` must violate it
+for a newer disk revision when the twin-pair guard is off.
+`AdmissionSplitMergeTwinReach.cfg` must show that independent disk work saved
+beside a stale cut still lands. With the projection off, that property holds,
+so the projection is load-bearing for progress.
 
 `StaleColumnRecycle.tla` checks GH #136: the stale-supervisor column gate and
 the safe-boundary recycle request it depends on. The editor link is an

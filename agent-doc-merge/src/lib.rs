@@ -21,6 +21,7 @@ pub mod frontmatter_crdt;
 pub mod queue_seqcrdt;
 pub mod repair_proof;
 pub mod response_cell;
+pub mod revision_twin;
 pub mod salient_response;
 
 pub use document_cell::{
@@ -97,35 +98,58 @@ pub struct MergePlan {
     /// True when the per-cell engine declined and the caller must choose another
     /// pure merge strategy before scheduling any realtime write.
     pub fell_back: bool,
+    /// The agent side the engine actually merged: the request's agent text with
+    /// revision twins of operator additions projected out (`typingforkdup`).
+    /// Any guard that bounds the merge by "what each side added" must read this,
+    /// not the raw request -- an unprojected twin leaves a spare slot in such a
+    /// bound (`formal/tla/AdmissionSplitMergeTwinOutputWedge.cfg`).
+    pub merged_agent: String,
+    /// Agent-side item occurrences removed as revision twins.
+    pub revision_twins_collapsed: usize,
 }
 
 /// Merge three document revisions without side effects.
+///
+/// Every engine runs behind one projection of its agent input: an agent-side
+/// list item that is an earlier revision (prefix or equal) of an item the
+/// operator added since `base` is the same authored item, so it is removed
+/// before the engine can emit it as a second item (`typingforkdup`,
+/// [`revision_twin`]). Projecting the input -- not filtering each engine's
+/// output -- is what keeps callers' additions-based guards sound; see
+/// `formal/tla/AdmissionSplitMerge.tla`.
 pub fn merge(request: MergeRequest<'_>) -> MergePlan {
-    match request.engine {
+    let projection =
+        revision_twin::project_out_revision_twins(request.base, request.agent, request.operator);
+    let agent = projection.agent_text.as_str();
+    let (merged_doc, conflict_advisories, conflicts, fell_back) = match request.engine {
         MergeEngine::Semantic => {
-            let outcome = document_cell_merge::document_cell_merge(
-                request.base,
-                request.agent,
-                request.operator,
-            );
-            MergePlan {
-                merged_doc: outcome.merged_doc,
-                conflict_advisories: outcome.conflict_advisories,
-                conflicts: Vec::new(),
-                engine: MergeEngine::Semantic,
-                fell_back: false,
-            }
+            let outcome =
+                document_cell_merge::document_cell_merge(request.base, agent, request.operator);
+            (
+                outcome.merged_doc,
+                outcome.conflict_advisories,
+                Vec::new(),
+                false,
+            )
         }
         MergeEngine::Cell => {
-            let outcome = cell_merge_3way(request.base, request.agent, request.operator);
-            MergePlan {
-                merged_doc: outcome.merged_text,
-                conflict_advisories: Vec::new(),
-                conflicts: outcome.conflicts,
-                engine: MergeEngine::Cell,
-                fell_back: outcome.fell_back,
-            }
+            let outcome = cell_merge_3way(request.base, agent, request.operator);
+            (
+                outcome.merged_text,
+                Vec::new(),
+                outcome.conflicts,
+                outcome.fell_back,
+            )
         }
+    };
+    MergePlan {
+        merged_doc,
+        conflict_advisories,
+        conflicts,
+        engine: request.engine,
+        fell_back,
+        revision_twins_collapsed: projection.collapsed,
+        merged_agent: projection.agent_text,
     }
 }
 

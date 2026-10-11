@@ -460,6 +460,47 @@ Each item below is claimed and running in its own worktree on main `a186f61e46`.
 **Dispatched (claimed `subagent:binaryownedcli`):** command-line writes (`backlog add|remove`, `queue sync`, `queue consume --id`) on a document open in the editor will get the same deferred-write handling `respond` already has. Each one waits for the editor to catch up and then exits 0. If the wait times out while the write is still safely held, the command exits with a separate, documented "deferred" status, which is not an error and prints no dogfood fix prompt. Real failures still fail. The no-disk-write guarantee is unchanged.
 
 Every queue head except `#drivecapturedsplice` (⏳, waiting for your `go`) is now with a subagent, so the loop stops here until they report back.
+
+### Re: batch integrated and installed (main e6d90cbe90); seven items closed — opus-5-5 · 2026-10-11T09:58-04:00
+
+> **Queue prompt:**
+>
+> do [#binaryownedcli]
+>
+> do [#statesubscriberecords]
+>
+> do [#remainingwallclock]
+>
+> do [#replace120shang]
+>
+> do [#tlafailedonce]
+>
+> do [#continuationheadskip]
+>
+> do [#regressionawaitingoperat]
+
+
+All seven fixes in this batch are merged into main (`e6d90cbe90`, a fast-forward from `a186f61e46`) and installed with `make install`. I tested the merged tree with logs kept inside the integration worktree. `make check` passed: 10143 of 10143 tests (142 skipped), the TLA runner self-test, and TLA itself. `make tmux-ci` also passed. There is still no new release tag; v0.35.489 is the latest. Say the word and I'll cut v0.35.490 with both batches.
+
+**Done:**
+- **`#statesubscriberecords`:** two production races in the editor-exit cleanup, not just a test problem.
+  - Ordering: the cleanup chose documents from the editor pid's live registrations. If another reader had already marked the editor dead, it found none and left the ack behind.
+  - Locking: the SQLite cleanup started as a deferred transaction and failed outright when another writer committed mid-way.
+  - Under stress: 11 failures in 4,500 runs before the fix, 0 in 9,000 after.
+- **`#remainingwallclock`:** the remaining 250ms "not blocked" checks now use gates, and "returns instead of hanging" bounds became hang ceilings. Each changed test was checked with a mutation and under load. One production change: in test builds only, a warm in-process test actor gets a 30s limit; the production 250ms limit is unchanged.
+- **`#replace120shang`:** the controller and the IPC listener now send a one-time "ready" message once they are accepting connections, and the tests wait on it. A failed start fails right away instead of waiting out the 120s limit.
+- **`#tlafailedonce`:** reproduced. TLC copies its standard modules out to a fixed shared file such as `/tmp/Naturals.tla`, and Java ignores `TMPDIR`. One run's exit deleted the copy another run was about to read. Each run now gets its own Java temp directory and its own verified copy of the jar. A failure to load a standard module is reported as an environment error, and a new runner self-test is part of `make check`.
+- **`#continuationheadskip`:** the next-head offer only counts answers written after a head was last re-added, sharing one helper with the residue strike.
+- **`#regressionawaitingoperat`:** the ⏳ marker wasn't the cause. Preflight's "is there work to continue" check and its "which head to run" pick disagreed. The pick fell back to `#drivecapturedsplice` and drove the turn. Separately, the dispatch check couldn't see that item's `[operator-verify]` tag. Both now use the same drainable-head check, and heads waiting on you are never dispatched.
+- **`#binaryownedcli`:** the `backlog`/`icebox`/`review`/`queue` commands now wait for a held write to land and exit 0. If the wait times out they exit 75 ("deferred, don't re-run") with no error and no dogfood prompt. Real failures still exit 1. `queue sync` and `queue consume --id` now also move the snapshot forward when their write lands.
+
+**Follow-ups filed:**
+- Concurrent test suites collide on the shared tmux session `main`.
+- A thread-teardown race in the native-reload handoff test.
+- `backlog`/`icebox`/`review` writes still don't move the snapshot forward; this needs a decision on who owns the snapshot.
+- The lock-order test doesn't actually detect an inversion.
+
+**Housekeeping:** some `/var/tmp/agent-doc-statesubscribe-*` scratch directories from the last subagent remain, because a hook blocked deleting them; they can be removed by hand. `#drivecapturedsplice` (⏳) still waits for your `go`.
 <!-- agent:boundary:f6f2f5ef -->
 <!-- /agent:exchange -->
 
@@ -468,7 +509,7 @@ Every queue head except `#drivecapturedsplice` (⏳, waiting for your `go`) is n
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#binaryownedcli]
+- ~~do [#binaryownedcli]~~
 - ~~#gh-fix: https://github.com/btakita/agent-doc/issues/239~~
 - ⏳ do [#drivecapturedsplice]
 - ~~do [#respondcloseoutbacklog]~~
@@ -477,24 +518,25 @@ Every queue head except `#drivecapturedsplice` (⏳, waiting for your `go`) is n
 - ~~do [#qheadresiduestrike]~~
 - ~~do [#checktmpdirleak]~~
 - ~~do [#subagentmsgcollide]~~
-- 🚧 do [#statesubscriberecords]
-- 🚧 do [#remainingwallclock]
-- 🚧 do [#replace120shang]
-- 🚧 do [#tlafailedonce]
-- 🚧 do [#continuationheadskip]
-- 🚧 do [#regressionawaitingoperat]
+- ~~do [#statesubscriberecords]~~
+- ~~do [#remainingwallclock]~~
+- ~~do [#replace120shang]~~
+- ~~do [#tlafailedonce]~~
+- ~~do [#continuationheadskip]~~
+- ~~do [#regressionawaitingoperat]~~
+- do [#concurrenttestsuites]
+- do [#nativereloadhandoff]
+- do [#backlogiceboxreview]
+- do [#stateplanesubscriber]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#binaryownedcli] [agent-doc] Binary-owned CLI writes on a document with a live editor (agent-doc backlog <FILE> add, agent-doc queue sync, agent-doc queue consume --id, agent-doc backlog <FILE> remove) exit non-zero with 'visible document write ... is retained by the lazy delivery projection' (or 'failed to write') plus a dogfood projection_failure prompt, even though the write converges and is visible seconds later (observed 6+ times on 2026-10-11 on agent-doc-bugs.md). A retained-then-converging write should block until convergence within a bounded wait and exit 0, or exit with a distinct deferred status that callers and agents do not treat as failure; only a real failure should print the dogfood fix prompt.
-- [ ] 🚧 [#regressionawaitingoperat] [agent-doc] Regression from the awaiting-operator queue marker (v0.35.489 queueawaitop): every preflight on agent-doc-bugs.md reports the operator-verify head as a new operator edit — diff '[user+] do [#drivecapturedsplice]', prompt_changes kind=prompt_target, turn driver queue:3:drivecapturedsplice — and lists it under queue_subagent_dispatch; session-check then warns that the 'do #id directive resolved this cycle' with no --done. The binary's own add/strip of the ⏳ projection appears to be attributed to the operator in the snapshot-vs-document diff. Make marker projection edits invisible to operator-intent diffing (strip lifecycle markers before diffing, or attribute them as agent edits), with a regression test over repeated preflight cycles.
-- [ ] 🚧 [#statesubscriberecords] [agent-doc] state_subscribe_records_only_the_previously_applied_live_peer_cursor (agent-doc-controller-io) failed twice under heavy concurrent load (panic: the durable OS-exit liveness transition evicts the crashed registration's ack) and passes alone; it has no wall-clock bound. Suspected race on the process-global liveness state keyed by the test process pid: a concurrent test's production path touching that pid between this test's reset and its exit call. Confirm and fix the race (isolate the liveness state per test or key it per test), with a stress reproduction.
-- [ ] 🚧 [#remainingwallclock] [agent-doc] Remaining wall-clock asserts in tests: the 250ms 'not blocked by a blocked effect' asserts in agent-doc-controller-io (project_controller.rs blocking-document-effect around line 4747, rpc.rs) are the most load-sensitive; convert them to the closed-gate pattern used for captured_response_and_authority_reactively_project_answered_free_text_strike. The 1-5s 'returns instead of hanging' bounds in preflight-io debounce.rs, codex-stop-io and src/preflight_hook.rs can become hang ceilings.
-- [ ] 🚧 [#replace120shang] [agent-doc] Replace the 120s hang ceilings in wait_for_test_controller (controller_client_connection_is_one_request) and agent-doc-ipc-io await_endpoint (a_bound_but_unaccepting_listener_is_evicted_not_protected) with a real readiness signal from the controller/listener, so the tests wait on an event instead of a bounded poll.
-- [ ] 🚧 [#tlafailedonce] [agent-doc] make tla failed once during a concurrent make check in the respondcloseout worktree: TLC could not resolve the standard module Naturals (looked for /tmp/Naturals.tla) while parsing StopHookContinuation.tla; make tla alone passed. Each worktree has its own checksum-verified target/tla jar and a mktemp work dir, and disk-sweep did not clean that worktree. Find what made the jar's standard modules unavailable (cwd, TMPDIR, classpath, concurrent jar refresh) and make run_tla.sh robust to it.
-- [ ] 🚧 [#continuationheadskip] [agent-doc] The continuation-head skip in agent-doc-queue/src/queue_continuation.rs still matches a live free-text head against the whole exchange, so an operator re-typed head that repeats an earlier answered prompt can be left out of the continuation offer (it is never struck). Scope it to echoes after the head's re-entry, sharing the git-history entry-point helper the residue-strike fix added.
+- [ ] [#concurrenttestsuites] [agent-doc] Concurrent test suites collide on tmux: controller-io tests controller_reconciles_detached_view_and_persists_verified_placement and one_complete_snapshot_settles_two_detached_view_effects failed with 'tmux new-session failed: duplicate session: main' / 'server exited unexpectedly' when two suites ran at once (separate worktrees or parallel runs). Give each test its own tmux server (-L/-S socket under the test's tmpdir) and unique session names so concurrent runs cannot share a server.
+- [ ] [#nativereloadhandoff] [agent-doc] native_reload_handoff::native_generations_handoff_without_sqlite_or_deleted_library_state failed once under load (~127) with 'worker exit must run Rust TLS destructors so dlclose unmaps generation one; threads=[...]' and passes alone in 1.63s. Likely a race between worker thread exit and the dlclose check; find the ordering and wait on an exit event instead of observing thread state.
+- [ ] [#backlogiceboxreview] [agent-doc] backlog/icebox/review CLI mutations (agent-doc backlog <FILE> add|remove|edit, icebox, review) never advance the session snapshot/baseline on any path, so the next preflight labels the binary's own write as an operator edit ([user+], no_changes:false). queue sync / queue consume --id were fixed in cli-write-deferred-status by letting their existing snapshot step run; these need a snapshot-ownership decision (attribute as agent edit without folding in concurrent operator edits) plus a regression test.
+- [ ] [#stateplanesubscriber] [agent-doc] state_plane_subscriber_never_inverts_channel_and_process_scope_locks (agent-doc-controller-io) does not detect a lock-order inversion: a deliberate inversion mutation survived both the old 250ms form and the new 30s deadlock-ceiling form. Make the test actually exercise the contended interleaving (deterministic gates forcing both lock acquisition orders) so an inversion deadlocks or is caught, and prove it with the mutation.
 - [ ] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 <!-- /agent:backlog -->
 

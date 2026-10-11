@@ -26,8 +26,8 @@ use agent_doc_turn_executor_tmux::context_clear::{
     context_clear_submit_blocked_line, context_clear_submit_blocked_message,
     context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
     context_clear_submit_retry_action, interrupt_clear_timeout_message,
-    live_turn_clear_queued_message, live_turn_clear_refusal_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
-    protected_clear_refusal_message, terminal_editor_command,
+    live_turn_clear_queued_message, live_turn_clear_refusal_message, operator_interrupt_key_plan,
+    operator_interrupt_step_delay, protected_clear_refusal_message, terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
@@ -1215,11 +1215,14 @@ fn reconcile_idle_projection_before_clear(
                     .unwrap_or(None)
                 })
                 .is_some();
-            let deferred_clear_pending =
+            let pending_deferred_clear =
                 agent_doc_controller_io::project_controller::queue_context_clear_deferred_operator_for_file(
                     &ctx.canonical_file,
-                )?
-                .is_some();
+                )?;
+            let deferred_clear_pending = pending_deferred_clear.is_some();
+            let pending_is_live_turn_deferral = pending_deferred_clear
+                .as_ref()
+                .is_some_and(|projection| projection.is_live_turn_deferred_operator_clear());
             // `#clearqueuedliveturn`: a proven-live harness turn ends, and the
             // document's supervisor is the actor that observes that end. When it
             // owns the evidence pane, queue the clear behind the turn instead of
@@ -1234,9 +1237,13 @@ fn reconcile_idle_projection_before_clear(
             match agent_doc_queue::queue_preemption::plan_busy_clear(
                 queue_active,
                 deferred_clear_pending,
+                pending_is_live_turn_deferral,
                 live_turn_deliverable,
             ) {
-                agent_doc_queue::queue_preemption::BusyClearOutcome::DeferBehindLiveTurn => {
+                outcome @ (agent_doc_queue::queue_preemption::BusyClearOutcome::DeferBehindLiveTurn
+                | agent_doc_queue::queue_preemption::BusyClearOutcome::RearmBehindLiveTurn) => {
+                    let rearmed = outcome
+                        == agent_doc_queue::queue_preemption::BusyClearOutcome::RearmBehindLiveTurn;
                     let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
                     let live_evidence = live_turn_evidence.unwrap_or("unknown");
                     agent_doc_controller_io::project_controller::queue_context_clear_deferred_for_file(
@@ -1250,11 +1257,12 @@ fn reconcile_idle_projection_before_clear(
                     agent_doc_ops_log_io::log_op(
                         &ctx.canonical_file,
                         &format!(
-                            "session_clear_live_turn_deferred file={} pane={} source={} evidence={} ui_outcome=queued (#clearqueuedliveturn)",
+                            "session_clear_live_turn_deferred file={} pane={} source={} evidence={} rearmed={} ui_outcome=queued (#clearqueuedliveturn)",
                             ctx.canonical_file.display(),
                             pane,
                             evidence.source,
                             live_evidence,
+                            rearmed,
                         ),
                     );
                     eprintln!(
@@ -1264,6 +1272,8 @@ fn reconcile_idle_projection_before_clear(
                             evidence.pane_id.as_deref(),
                             evidence.source,
                             live_evidence,
+                            live_turn_evidence_age_secs(ctx, pane, live_evidence),
+                            rearmed,
                         )
                     );
                     return Ok(ClearPreflightOutcome::DeferredPreempt);
@@ -1421,9 +1431,44 @@ fn harness_turn_live_evidence(
     {
         return Some("turn_active_lease");
     }
-    agent_doc_controller_io::project_controller::dispatch_turn_running_for_file(&ctx.canonical_file)
+    if agent_doc_controller_io::project_controller::dispatch_turn_running_for_file(
+        &ctx.canonical_file,
+    )
+    .unwrap_or(false)
+    {
+        return Some("dispatch_turn_running");
+    }
+    // `#clearqueuedliveturn`: a dispatch accepted for this document whose turn
+    // has not started yet (Run Agent Doc pressed, trigger not yet submitted or
+    // not yet past its `UserPromptSubmit` hooks). A clear typed now would race
+    // the trigger into the composer; queue it behind that turn instead. Bounded
+    // by the pre-turn grace, so a lost trigger cannot hold clears.
+    agent_doc_controller_io::project_controller::dispatch_turn_pending_for_file(&ctx.canonical_file)
         .unwrap_or(false)
-        .then_some("dispatch_turn_running")
+        .then_some("dispatch_turn_pending")
+}
+
+/// `#clearqueuedliveturn`: how old the live-turn evidence a queued clear waits
+/// on is — the turn lease's `UserPromptSubmit` second, or the oldest open
+/// dispatch receipt — for the operator notice.
+fn live_turn_evidence_age_secs(ctx: &SessionContext, pane: &str, evidence: &str) -> Option<u64> {
+    let since = match evidence {
+        "turn_active_lease" => agent_doc_turn_status_io::turn_active_marker_for_pane_for_file(
+            &ctx.canonical_file,
+            pane,
+        )
+        .map(|marker| marker.written_at),
+        _ => agent_doc_controller_io::project_controller::oldest_open_dispatch_turn_at_for_file(
+            &ctx.canonical_file,
+        )
+        .ok()
+        .flatten(),
+    }?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(now.saturating_sub(since))
 }
 
 /// `#sdkclearwedge`: retire `pane`'s turn-active lease when the harness
@@ -5695,10 +5740,13 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             },
         )
         .unwrap();
+        // `#clearqueuedliveturn`: an accepted dispatch whose turn has not
+        // started is pending evidence — a clear typed now would race the
+        // trigger into the composer — but it is not yet a running turn.
         assert_eq!(
             harness_turn_live_evidence(&ctx, &idle),
-            None,
-            "a pre-turn receipt alone is not a live turn"
+            Some("dispatch_turn_pending"),
+            "a pre-turn receipt is a pending dispatched turn, not a running one"
         );
         assert_eq!(
             agent_doc_sqlite::state_store::mark_open_dispatches_turn_started(&conn, &document_id)
@@ -7026,7 +7074,15 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             !live_turn_clear_deliverable_by_supervisor(true, Some("%7"), Some("%149")),
             "the supervisor only delivers into its own pane"
         );
-        assert!(!live_turn_clear_deliverable_by_supervisor(true, None, Some("%149")));
-        assert!(!live_turn_clear_deliverable_by_supervisor(true, Some("%149"), None));
+        assert!(!live_turn_clear_deliverable_by_supervisor(
+            true,
+            None,
+            Some("%149")
+        ));
+        assert!(!live_turn_clear_deliverable_by_supervisor(
+            true,
+            Some("%149"),
+            None
+        ));
     }
 }

@@ -1001,10 +1001,16 @@ fn preset_only_identity_ids(content: &str) -> std::collections::HashSet<String> 
 /// preset-only, free-text, or non-directive head means no tracked id was
 /// dispatched, and nothing is skipped: a false non-skip costs one
 /// re-dispatch, while a false skip silently drops the operator's work.
+///
+/// `exempt` (`#claimskipmarker`) holds ids that were never the inline turn's to
+/// run: heads a worker holds a live claim on (their `🚧` is the worker's, not
+/// the turn's) and heads waiting on the operator (`#queueawaitop`, never
+/// dispatched by any agent drain). Neither is a candidate for the blame.
 fn prior_dispatched_queue_id(
     heads: &[String],
     carried: &std::collections::HashSet<String>,
     preset_only: &std::collections::HashSet<String>,
+    exempt: &std::collections::HashSet<String>,
 ) -> Option<String> {
     let head_id = |head: &str| {
         let bare = agent_doc_element_queue::strip_priority_markers(head);
@@ -1020,11 +1026,15 @@ fn prior_dispatched_queue_id(
         head.strip_suffix(bare.as_str())
             .is_some_and(|markers| markers.contains('🚧'))
     };
-    let dispatched = heads.iter().find(|head| in_progress(head)).or_else(|| {
-        heads
-            .iter()
-            .find(|head| head_id(head).is_none_or(|id| !carried.contains(&id)))
-    })?;
+    let is_exempt = |head: &str| head_id(head).is_some_and(|id| exempt.contains(&id));
+    let dispatched = heads
+        .iter()
+        .find(|head| in_progress(head) && !is_exempt(head))
+        .or_else(|| {
+            heads.iter().find(|head| {
+                !is_exempt(head) && head_id(head).is_none_or(|id| !carried.contains(&id))
+            })
+        })?;
     head_id(dispatched).filter(|id| !preset_only.contains(id) && !carried.contains(id))
 }
 
@@ -5635,6 +5645,73 @@ pub fn run_queue_maintenance_with_coin_gate(
     // instead of re-dispatching a dead ref. Carried skips persist until their id
     // is consumed or no longer a live head. Computed from the prior cycle's
     // state-ledger projection before `start_preflight` advances this run.
+    // `#claimskipmarker` / `#queueawaitop`: ids a worker holds a live claim on,
+    // and ids whose agent work is finished and which wait on the operator. A
+    // claimed head is in flight (`🚧`), an awaiting head was never dispatched;
+    // neither may be blamed as "dispatched and came back unconsumed", so both
+    // are exempt from the skip set. Before this, a claimed subagent head was the
+    // `🚧` row `prior_dispatched_queue_id` blamed, so the next cycle stamped
+    // `⏭️` over the claim's `🚧`, and the first `[operator-verify]` head was
+    // blamed by the fallback (observed 2026-10-11 on haiven-dev `tasks/sdk.md`:
+    // claimed `#cligenport` and deferred `#quirkbigint` both showed `⏭️`).
+    let claimed_head_ids: std::collections::HashSet<String> = if activation.active {
+        agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(file, &current_content)
+            .iter()
+            .filter_map(|text| agent_doc_queue::queue_continuation::extract_head_id(text))
+            .map(|id| id.to_ascii_lowercase())
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
+    let awaiting_operator_all: std::collections::HashSet<String> = if activation.active {
+        agent_doc_queue::queue_continuation::awaiting_operator_head_ids(&current_content)
+    } else {
+        std::collections::HashSet::new()
+    };
+    let awaiting_operator_ids: std::collections::HashSet<String> = awaiting_operator_all
+        .difference(&claimed_head_ids)
+        .cloned()
+        .collect();
+    let skip_exempt_ids: std::collections::HashSet<String> = claimed_head_ids
+        .union(&awaiting_operator_ids)
+        .cloned()
+        .collect();
+    let mut claims_held_after_report = awaiting_operator_all
+        .intersection(&claimed_head_ids)
+        .cloned()
+        .collect::<Vec<_>>();
+    claims_held_after_report.sort();
+    if !claims_held_after_report.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_queue_claim_held_after_report file={} ids={} (#queueawaitop)",
+                file.display(),
+                claims_held_after_report.join(","),
+            ),
+        );
+        queue_warnings.push(PreflightWarning {
+            code: "queue_claim_held_after_report".to_string(),
+            message: format!(
+                "claimed queue head(s) {} now wait on the operator ([operator-verify] or a gated review row) but the worker claim was never released, so the queue still shows them in flight. Once the subagent has reported, release each claim: {}",
+                claims_held_after_report
+                    .iter()
+                    .map(|id| format!("#{id}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                claims_held_after_report
+                    .iter()
+                    .map(|id| format!(
+                        "`agent-doc queue release {} --item '#{id}'`",
+                        file.display()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            ),
+            document_agent: None,
+            active_harness: None,
+        });
+    }
     let skipped_queue_head_ids: std::collections::HashSet<String> = if activation.active {
         // `#presetargdedup`: a `#gh-fix <url>` head names a prompt PRESET, not a
         // tracked item. Treating `gh-fix` as a dispatched-but-unresolved item id
@@ -5668,7 +5745,14 @@ pub fn run_queue_maintenance_with_coin_gate(
         let prior_dispatched = prior
             .as_ref()
             .filter(|s| prior_cycle_hosted_a_turn(s))
-            .and_then(|s| prior_dispatched_queue_id(&s.active_queue_heads, &carried, &preset_only));
+            .and_then(|s| {
+                prior_dispatched_queue_id(
+                    &s.active_queue_heads,
+                    &carried,
+                    &preset_only,
+                    &skip_exempt_ids,
+                )
+            });
         let operator_unskipped =
             agent_doc_queue::queue_projection::operator_unskipped_queue_ids(diff);
         if !operator_unskipped.is_empty() {
@@ -5683,13 +5767,15 @@ pub fn run_queue_maintenance_with_coin_gate(
                 ),
             );
         }
-        advance_skipped_queue_head_ids(
+        let mut fresh = advance_skipped_queue_head_ids(
             carried,
             prior_dispatched.as_deref(),
             &prior_resolved,
             &current_live_ids,
             &operator_unskipped,
-        )
+        );
+        fresh.retain(|id| !skip_exempt_ids.contains(id));
+        fresh
     } else {
         std::collections::HashSet::new()
     };
@@ -5847,12 +5933,14 @@ pub fn run_queue_maintenance_with_coin_gate(
         mutated = true;
         in_progress_markers_changed = true;
     }
-    // `#queueskip`: stamp `⏭️` on skipped heads (and clear it from heads no longer
-    // skipped), AFTER the `🚧` pass so the selected head keeps `🚧` and skipped
-    // heads carry the visible skip marker.
-    if let Some(skip_marked) = agent_doc_queue::document_queue::set_prompts_skipped(
+    // `#queueskip` / `#queueawaitop`: stamp `⏭️` on skipped heads and `⏳` on
+    // heads waiting on the operator (and clear either from heads that no longer
+    // qualify), AFTER the `🚧` pass so the selected head and every claimed
+    // worker head keep `🚧`.
+    if let Some(skip_marked) = agent_doc_queue::document_queue::set_prompts_lifecycle_markers(
         &activation.entries_after,
         &skipped_queue_head_ids,
+        &awaiting_operator_ids,
     ) {
         let new_body = agent_doc_queue::document_queue::render(&skip_marked);
         current_content = {
@@ -7953,10 +8041,13 @@ mod tests {
             "🚧 #gh-fix https://x/issues/77".to_string(),
             ":pin: #release".to_string(),
         ];
-        assert_eq!(prior_dispatched_queue_id(&heads, &none, &preset_only), None);
+        assert_eq!(
+            prior_dispatched_queue_id(&heads, &none, &preset_only, &none),
+            None
+        );
         // No `🚧` recorded: the first head ran, and it is a preset.
         assert_eq!(
-            prior_dispatched_queue_id(&heads[..1], &none, &preset_only),
+            prior_dispatched_queue_id(&heads[..1], &none, &preset_only, &none),
             None
         );
         // A free-text head that ran dispatches no tracked id either.
@@ -7964,23 +8055,26 @@ mod tests {
             "look at the old issues".to_string(),
             ":pin: #release".to_string(),
         ];
-        assert_eq!(prior_dispatched_queue_id(&free, &none, &preset_only), None);
+        assert_eq!(
+            prior_dispatched_queue_id(&free, &none, &preset_only, &none),
+            None
+        );
         // A `⏭️` head is not the running one.
         let skipped = vec!["⏭️ :pin: #release".to_string(), "🚧 do [#hmw9]".to_string()];
         assert_eq!(
-            prior_dispatched_queue_id(&skipped, &none, &preset_only),
+            prior_dispatched_queue_id(&skipped, &none, &preset_only, &none),
             Some("hmw9".to_string())
         );
         // A tracked head that ran and came back is still reported.
         let tracked = vec!["do [#sy71]".to_string(), "do [#hmw9]".to_string()];
         assert_eq!(
-            prior_dispatched_queue_id(&tracked, &none, &preset_only),
+            prior_dispatched_queue_id(&tracked, &none, &preset_only, &none),
             Some("sy71".to_string())
         );
         // A head already skipped is passed over, as selection passes over it.
         let carried: std::collections::HashSet<String> = ["sy71".to_string()].into();
         assert_eq!(
-            prior_dispatched_queue_id(&tracked, &carried, &preset_only),
+            prior_dispatched_queue_id(&tracked, &carried, &preset_only, &none),
             Some("hmw9".to_string())
         );
     }
@@ -8049,6 +8143,189 @@ mod tests {
             persisted.skipped_queue_head_ids.is_empty(),
             "{:?}",
             persisted.skipped_queue_head_ids
+        );
+    }
+
+    /// `#claimskipmarker` / `#queueawaitop` fixture: the haiven-dev `tasks/sdk.md`
+    /// shape of 2026-10-11 — a subagent-claimed head, a head whose subagent
+    /// finished and tagged its item `[operator-verify]`, and a plain open head —
+    /// after a prior cycle that hosted a turn with the claimed head's `🚧`
+    /// recorded among its active heads.
+    fn sdk_queue_lifecycle_fixture(claim_item: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — test\n\nDispatched subagents.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#verify]\n",
+            "- do [#claimed]\n",
+            "- do [#plain]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#verify] [operator-verify] subagent committed locally; operator: approve push\n",
+            "- [ ] [#claimed] a subagent is still working this\n",
+            "- [ ] [#plain] a real open task\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, claim_item, "subagent:worker", 3600).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_active_queue_heads(
+            &doc,
+            // The coordinator's turn only dispatched: no inline head ran, and
+            // `#plain` was queued after it.
+            &["do [#verify]".to_string(), "🚧 do [#claimed]".to_string()],
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(content),
+            Some(content),
+            &agent_doc_hash::content_hash("### Re: dispatch\n\nsubagents running\n"),
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "committed", Some(content), Some(content))
+            .unwrap();
+        (dir, doc)
+    }
+
+    fn queue_line<'a>(doc: &'a str, id: &str) -> &'a str {
+        let needle = format!("[#{id}]");
+        doc.lines()
+            .find(|line| line.starts_with("- ") && line.contains(&needle) && !line.contains("[ ]"))
+            .unwrap_or_else(|| panic!("no queue line for #{id}:\n{doc}"))
+    }
+
+    /// `#claimskipmarker` + `#queueawaitop` (live, haiven-dev `tasks/sdk.md`
+    /// 2026-10-11): the claimed head was the `🚧` row the prior cycle recorded, so
+    /// it was blamed as "dispatched and came back unconsumed" and the next cycle
+    /// stamped `⏭️` over the claim; the `[operator-verify]` head whose subagent
+    /// had finished showed no marker at all and read as unstarted. Now the claim
+    /// keeps `🚧`, the finished head shows `⏳`, and nothing is skipped — across
+    /// repeated maintenance passes.
+    #[test]
+    fn run_queue_maintenance_projects_claim_and_awaiting_operator_lifecycle() {
+        let (_dir, doc) = sdk_queue_lifecycle_fixture("#claimed");
+        for pass in 0..2 {
+            let state = run_queue_maintenance(&doc, None).unwrap();
+            let updated = std::fs::read_to_string(&doc).unwrap();
+            assert_eq!(
+                queue_line(&updated, "claimed"),
+                "- 🚧 do [#claimed]",
+                "pass {pass}: a live claim keeps its in-flight marker:\n{updated}"
+            );
+            assert_eq!(
+                queue_line(&updated, "verify"),
+                "- ⏳ do [#verify]",
+                "pass {pass}: a head waiting on the operator is not unstarted:\n{updated}"
+            );
+            assert!(
+                !updated.contains('\u{23ed}'),
+                "pass {pass}: no head may be skipped:\n{updated}"
+            );
+            assert_eq!(
+                state.selected_queue_prompts,
+                vec!["do [#plain]".to_string()],
+                "pass {pass}: selection runs the real open head inline:\n{updated}"
+            );
+            assert!(
+                !state
+                    .warnings
+                    .iter()
+                    .any(|w| w.code == "queue_claim_held_after_report"),
+                "pass {pass}: {:?}",
+                state.warnings
+            );
+            let persisted = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+            assert!(
+                persisted.skipped_queue_head_ids.is_empty(),
+                "pass {pass}: {:?}",
+                persisted.skipped_queue_head_ids
+            );
+        }
+
+        // Releasing the claim (the subagent reported) drops `🚧` on the next pass;
+        // the head returns to the open queue rather than vanishing.
+        agent_doc_queue_io::queue_claim::release(&doc, "#claimed").unwrap();
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !queue_line(&updated, "claimed").contains('\u{23f3}'),
+            "an open (not operator-verify) item never shows awaiting:\n{updated}"
+        );
+        assert_eq!(queue_line(&updated, "verify"), "- ⏳ do [#verify]");
+    }
+
+    /// `#queueawaitop`: a claim held on a head whose item already waits on the
+    /// operator keeps `🚧` (the claim is real) but preflight names it, so the
+    /// coordinator releases it instead of leaving the queue showing work in
+    /// flight that finished.
+    #[test]
+    fn run_queue_maintenance_warns_when_a_reported_head_keeps_its_claim() {
+        let (_dir, doc) = sdk_queue_lifecycle_fixture("#verify");
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            queue_line(&updated, "verify"),
+            "- 🚧 do [#verify]",
+            "{updated}"
+        );
+        let warning = state
+            .warnings
+            .iter()
+            .find(|w| w.code == "queue_claim_held_after_report")
+            .unwrap_or_else(|| panic!("missing warning: {:?}", state.warnings));
+        assert!(warning.message.contains("#verify"), "{}", warning.message);
+        assert!(
+            warning.message.contains("agent-doc queue release"),
+            "{}",
+            warning.message
+        );
+    }
+
+    /// `#claimskipmarker`: claimed and awaiting-operator heads are never the
+    /// blamed dispatch, whether found by their `🚧` or by the first-head
+    /// fallback.
+    #[test]
+    fn prior_dispatched_queue_id_exempts_claimed_and_awaiting_heads() {
+        let none = std::collections::HashSet::new();
+        let heads = vec![
+            "do [#verify]".to_string(),
+            "🚧 do [#claimed]".to_string(),
+            "do [#plain]".to_string(),
+        ];
+        assert_eq!(
+            prior_dispatched_queue_id(&heads, &none, &none, &none),
+            Some("claimed".to_string()),
+            "without exemptions the claim's marker is blamed (the 2026-10-11 bug)"
+        );
+        let exempt: std::collections::HashSet<String> =
+            ["verify".to_string(), "claimed".to_string()].into();
+        assert_eq!(
+            prior_dispatched_queue_id(&heads, &none, &none, &exempt),
+            Some("plain".to_string())
+        );
+        let inline = vec!["🚧 do [#claimed]".to_string(), "🚧 do [#plain]".to_string()];
+        assert_eq!(
+            prior_dispatched_queue_id(&inline, &none, &none, &exempt),
+            Some("plain".to_string()),
+            "the inline head's 🚧 is found past a claimed head's 🚧"
         );
     }
 
@@ -10414,8 +10691,9 @@ mod tests {
             "actionable item mirrored into queue:\n{updated}"
         );
         assert!(
-            updated.contains("- do [#opv]"),
-            "operator-verify item must ALSO be mirrored into the queue (#mirrorall):\n{updated}"
+            updated.contains("- ⏳ do [#opv]"),
+            "operator-verify item must ALSO be mirrored into the queue (#mirrorall), \
+             marked awaiting the operator (#queueawaitop):\n{updated}"
         );
         // ...but the operator-verify head must NOT count as drainable: the loop is
         // safe because only the actionable head is countable.
@@ -12289,8 +12567,9 @@ mod tests {
         assert_eq!(state.queue_drainable_head_count, 1);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- do [#verify]\n- do [#focused]\n- 🚧 do [#ready]"),
-            "in-progress marker must project the first in-session drainable head:\n{updated}"
+            updated.contains("- ⏳ do [#verify]\n- do [#focused]\n- 🚧 do [#ready]"),
+            "in-progress marker must project the first in-session drainable head \
+             (`#queueawaitop`: the operator-verify head shows ⏳, `[focused-cycle]` none):\n{updated}"
         );
         assert!(updated.contains("- [ ] [#verify] [operator-verify] needs a human"));
         assert!(updated.contains("- [ ] [#focused] [focused-cycle] needs a clean turn"));

@@ -284,7 +284,7 @@ fn id_prefix(text: &str) -> &str {
         .unwrap_or("")
 }
 
-/// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🚧`/`⏭️`
+/// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🚧`/`⏭️`/`⏳`
 /// and the `**pin**`/`**prioritized**` word forms) from a queue head so a
 /// marker-decorated line keys to the same durable identity as the bare line.
 /// Shared with the CRDT cell-merge free-text keyer so merge, convergence, and
@@ -309,6 +309,8 @@ pub fn strip_priority_markers(text: &str) -> String {
             "📍",
             "🚧",
             "⏭\u{fe0f}",
+            // `#queueawaitop`: awaiting-operator lifecycle projection.
+            "⏳",
         ]
         .iter()
         .find_map(|marker| trimmed.strip_prefix(marker));
@@ -509,6 +511,7 @@ mod tests {
             "📌 fix the flaky test",
             "📍 fix the flaky test",
             "⏭\u{fe0f} fix the flaky test",
+            "⏳ fix the flaky test",
             ":pushpin: fix the flaky test",
             "**pin** fix the flaky test",
         ] {

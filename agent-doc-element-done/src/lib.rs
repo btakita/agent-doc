@@ -106,7 +106,7 @@ fn terminal_debris_line_is_redundant(managed: &str, line: &str) -> bool {
     let normalized_stub = line
         .trim_start_matches(['-', '*'])
         .trim()
-        .trim_start_matches(['🚧', '⏭'])
+        .trim_start_matches(['🚧', '⏭', '⏳'])
         .trim();
     if matches!(normalized_stub, "[ ]" | "[/]" | "[x]" | "[X]") {
         return true;

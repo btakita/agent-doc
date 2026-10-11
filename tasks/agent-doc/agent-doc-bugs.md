@@ -117,7 +117,14 @@ In sdk.md, Run Agent Doc while I was typing a queue item duplicated part of the 
 - fix it at the single chokepoint, with a deterministic replay regression.
 
 It runs under the queue preset's authorization (commit and push its own branch; no install or release). I integrate it in the next batch after v0.35.487.
-<!-- agent:boundary:041cd32f -->
+> **Chat prompt (#chatprompt):** it was written in error
+
+### Re: retracted speculation — opus-5.5 · 2026-10-11T00:10-04:00
+
+Understood. The "have" vs "provide" divergence was your speculation and is now withdrawn. The `fix/typingforkdup` subagent already has that correction: it determines the duplication mechanism from evidence only (haiven-dev commit `bb26315c`, git history, `ops.log`/`state.db`) and does not assume the fork.
+
+The repeated chat lines, "Can I delete the duplicated queue item now?" and "Do the fix in a subagent", were answered in the previous response. Yes, delete the duplicate; the evidence is preserved in `bb26315c`. The fix is already running in that subagent. Nothing else changes.
+<!-- agent:boundary:1b97294e -->
 <!-- /agent:exchange -->
 
 <!--

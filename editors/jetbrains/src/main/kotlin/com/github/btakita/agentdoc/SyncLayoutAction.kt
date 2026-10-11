@@ -604,6 +604,20 @@ object LayoutDetector {
     }
 
     /**
+     * `#clearnoticeverify`: the editor windows of the frame the operator is looking
+     * at. Editor windows of other frames (a detached editor window) are a separate
+     * screen surface: their bounds cannot be measured against this frame's
+     * splitters, and they are not columns of this split. Falls back to every window
+     * when no window belongs to [activeOwner] (an unresolved owner never hides the
+     * layout).
+     */
+    internal fun <W, O> windowsInActiveFrame(windows: List<W>, ownerOf: (W) -> O?, activeOwner: O?): List<W> {
+        if (activeOwner == null) return windows
+        val inFrame = windows.filter { ownerOf(it) === activeOwner }
+        return inFrame.ifEmpty { windows }
+    }
+
+    /**
      * Detect the editor layout as a list of columns, each containing stacked files.
      * Returns null only when detection fails. A proven single local editor window
      * returns one column so consumers can distinguish it from an unknown layout.
@@ -615,7 +629,23 @@ object LayoutDetector {
     ): EditorLayout? {
         try {
             val managerEx = FileEditorManagerEx.getInstanceEx(project)
-            val windows = surfaceWindows ?: managerEx.windows.toList()
+            val windows = surfaceWindows ?: run {
+                // `#clearnoticeverify` (2026-10-11): `managerEx.windows` holds the
+                // editor windows of EVERY frame, including a detached editor frame.
+                // Measured against the first window's splitters, a detached frame's
+                // editor got foreign coordinates (-56,-117), sorted first, and was
+                // published as an extra tmux column: a 2-split main frame became 3
+                // panes. Mirror only the frame the operator is looking at.
+                val all = managerEx.windows.toList()
+                val activeOwner = managerEx.currentWindow?.owner ?: managerEx.splitters
+                val inFrame = windowsInActiveFrame(all, { it.owner }, activeOwner)
+                if (inFrame.size < all.size) {
+                    LOG.debug(
+                        "[layout-detect] ignoring ${all.size - inFrame.size} editor window(s) in other frames",
+                    )
+                }
+                inFrame
+            }
             val remoteClients =
                 if (surfaceWindows == null) {
                     remoteClientSessionEditors(project, sessionDocumentPaths)

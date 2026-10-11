@@ -817,9 +817,55 @@ class TerminalUtilTest {
         assertFalse(TerminalUtil.isDeferredQueuePreemptClear(output))
         assertNull(TerminalUtil.parseBusySessionClearRefusal(output))
         val message = TerminalUtil.buildLiveTurnQueuedClearMessage("tasks/agent-doc/agent-doc-bugs.md", queued)
-        assertTrue(message.startsWith("Clear Session Context queued for tasks/agent-doc/agent-doc-bugs.md."))
-        assertTrue(message.contains("runs automatically when that turn ends"))
+        assertTrue(message.startsWith("Clear Session Context queued for tasks/agent-doc/agent-doc-bugs.md: it runs when the turn in pane %149 ends."))
+        assertTrue(message.contains("live-turn evidence: turn_active_lease)"))
         assertNull(TerminalUtil.parseLiveTurnQueuedClear("Cleared session context for /repo/plan.md"))
+    }
+
+    // #clearnoticeverify: live-verified 2026-10-11 in IntelliJ — the notice
+    // dropped the CLI's re-arm and evidence age, so a re-armed press read
+    // exactly like the first one, and the 3s balloon collapsed before "when
+    // that turn ends" was visible.
+    @Test
+    fun `live turn queued clear notice carries evidence age and re-arm`() {
+        val first = """
+            session_clear queued for /repo/tmp/doc.md — a turn is live in pane %185 (harness_turn_live=true evidence=turn_active_lease evidence_age_secs=42, source=authoritative_actor), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends; it is dropped instead if a newer prompt starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false. Run `agent-doc session interrupt-clear /repo/tmp/doc.md` to interrupt the turn and clear now.
+        """.trimIndent()
+        val queued = TerminalUtil.parseLiveTurnQueuedClear(first)!!
+        assertEquals("%185", queued.pane)
+        assertEquals("turn_active_lease", queued.evidence)
+        assertEquals(42L, queued.evidenceAgeSecs)
+        assertFalse(queued.rearmed)
+        val message = TerminalUtil.buildLiveTurnQueuedClearMessage("tmp/doc.md", queued)
+        // The outcome and when it runs fit the collapsed balloon's first line.
+        assertEquals(
+            "Clear Session Context queued for tmp/doc.md: it runs when the turn in pane %185 ends.",
+            message.lineSequence().first(),
+        )
+        assertTrue(message.contains("(live-turn evidence: turn_active_lease, 42s old)"))
+        assertFalse(message.contains("re-armed"))
+
+        val rearmedOutput = first
+            .replace("evidence_age_secs=42", "evidence_age_secs=4000")
+            .replace("rearmed=false", "rearmed=true")
+            .replace("One clear is queued", "The clear that was already queued is re-armed for this turn (still one clear)")
+        val rearmed = TerminalUtil.parseLiveTurnQueuedClear(rearmedOutput)!!
+        assertTrue(rearmed.rearmed)
+        assertEquals(4000L, rearmed.evidenceAgeSecs)
+        val rearmedMessage = TerminalUtil.buildLiveTurnQueuedClearMessage("tmp/doc.md", rearmed)
+        assertEquals(
+            "Clear Session Context re-armed for tmp/doc.md: still one clear, it runs when the turn in pane %185 ends.",
+            rearmedMessage.lineSequence().first(),
+        )
+        assertTrue(rearmedMessage.contains("(live-turn evidence: turn_active_lease, 66m 40s old)"))
+
+        // An unknown age (no lease marker or receipt time) shows the evidence only.
+        val unknownAge = TerminalUtil.parseLiveTurnQueuedClear(first.replace("evidence_age_secs=42", "evidence_age_secs=unknown"))!!
+        assertNull(unknownAge.evidenceAgeSecs)
+        assertTrue(
+            TerminalUtil.buildLiveTurnQueuedClearMessage("tmp/doc.md", unknownAge)
+                .contains("(live-turn evidence: turn_active_lease)"),
+        )
     }
 
     @Test

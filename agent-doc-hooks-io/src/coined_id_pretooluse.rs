@@ -73,6 +73,16 @@ pub enum PreToolUseDecision {
 /// Returns `None` for tools that cannot make a tag durable, so the common case
 /// (reads, searches, tests) short-circuits without parsing.
 pub fn persisted_text_for_tool(tool_name: &str, tool_input: &serde_json::Value) -> Option<String> {
+    persisted_text_for_tool_in(tool_name, tool_input, None)
+}
+
+/// [`persisted_text_for_tool`] with a `git commit`'s relative paths resolved
+/// against `cwd`, the directory the harness reports the command runs in.
+pub fn persisted_text_for_tool_in(
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+    cwd: Option<&Path>,
+) -> Option<String> {
     let field = |key: &str| {
         tool_input
             .get(key)
@@ -85,7 +95,7 @@ pub fn persisted_text_for_tool(tool_name: &str, tool_input: &serde_json::Value) 
         "Edit" => field("new_string"),
         "Write" => field("content"),
         "NotebookEdit" => field("new_source"),
-        "Bash" => commit_scan_text(&field("command")?),
+        "Bash" => commit_scan_text_in(&field("command")?, cwd),
         _ => None,
     }
 }
@@ -95,11 +105,18 @@ pub fn persisted_text_for_tool(tool_name: &str, tool_input: &serde_json::Value) 
 /// Only `git commit` persists prose into history. `git add`, `git status`, and a
 /// command that merely mentions the word commit must not be inspected.
 pub fn is_commit_command(command: &str) -> bool {
-    commit_segment(command).is_some()
+    commit_scan_text(command).is_some()
 }
 
 /// The text a `git commit` would actually record, or `None` when this command
-/// records none.
+/// records none. Relative paths resolve against this process's directory; the
+/// hook itself uses [`commit_scan_text_in`] with the harness-reported `cwd`.
+pub fn commit_scan_text(command: &str) -> Option<String> {
+    commit_scan_text_in(command, None)
+}
+
+/// The text a `git commit` would actually record, with relative paths resolved
+/// against `cwd` (then any leading `cd` and `git -C`).
 ///
 /// The guard used to hand the WHOLE shell command to the scanner whenever any
 /// part of it was a `git commit`. That is a proxy for the message, and it was
@@ -117,77 +134,24 @@ pub fn is_commit_command(command: &str) -> bool {
 ///   untracked id passed whenever the id appeared nowhere in the command text —
 ///   which is the normal shape for any message long enough to need a file.
 ///
-/// Now: the commit SEGMENT, plus the contents of any `-F`/`--file` message file
-/// whose path is literal. A path built from a shell variable cannot be resolved
-/// here, and this module fails open by policy ("a hook that guesses wrong costs
-/// the operator a turn"), so such a message is not scanned rather than being
-/// approximated by the surrounding command text.
-pub fn commit_scan_text(command: &str) -> Option<String> {
-    let segment = commit_segment(command)?;
-    let mut text = segment.to_string();
-    for path in message_file_paths(segment) {
-        if let Ok(contents) = std::fs::read_to_string(&path) {
-            text.push('\n');
-            text.push_str(&contents);
-        }
-    }
-    Some(text)
-}
-
-/// `-F` / `--file` values that name a readable path as written. A value
-/// containing a shell expansion is skipped: it cannot be resolved from the
-/// unexpanded command, and guessing is how the scan drifted from the message in
-/// the first place.
-fn message_file_paths(segment: &str) -> Vec<String> {
-    let mut paths = Vec::new();
-    let mut words = segment.split_whitespace().peekable();
-    while let Some(word) = words.next() {
-        let candidate = if let Some(value) = word.strip_prefix("--file=") {
-            Some(value.to_string())
-        } else if matches!(word, "-F" | "--file") {
-            words.peek().map(|value| value.to_string())
-        } else {
-            None
-        };
-        if let Some(candidate) = candidate {
-            let candidate = candidate.trim_matches(['"', '\'']);
-            if !candidate.contains('$') && !candidate.contains('`') && !candidate.is_empty() {
-                paths.push(candidate.to_string());
-            }
-        }
-    }
-    paths
-}
-
-/// The `;`/`&&`/`|`/newline-separated segment that is a `git commit`, if any.
-fn commit_segment(command: &str) -> Option<&str> {
-    command
-        .split(['\n', ';', '&', '|'])
-        .find(|segment| -> bool {
-            let mut words = segment.split_whitespace().skip_while(|word| {
-                matches!(*word, "sudo" | "env" | "rtk" | "proxy") || word.contains('=')
-            });
-            if words.next() != Some("git") {
-                return false;
-            }
-            // Global flags may take a VALUE (`git -C /repo commit`); consuming only
-            // the flag would mistake that value for the subcommand.
-            let mut rest = words.peekable();
-            while let Some(word) = rest.peek() {
-                if !word.starts_with('-') {
-                    break;
-                }
-                let takes_value = matches!(
-                    *word,
-                    "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--exec-path"
-                );
-                rest.next();
-                if takes_value {
-                    rest.next();
-                }
-            }
-            rest.next() == Some("commit")
-        })
+/// Then the `-F` read itself was a proxy (`#hookstalemsgfile`): the hook runs
+/// BEFORE the command, so `cat > msg.txt <<EOF ... EOF && git commit -F msg.txt`
+/// was checked against the PREVIOUS message left in `msg.txt` (false positive)
+/// while the new heredoc body was never scanned (false negative, since segments
+/// were cut at every newline). Observed 2026-10-10: a subagent was blocked by an
+/// id another agent had left in a shared scratchpad `msg.txt`.
+///
+/// Now: the commit SEGMENT (quote-aware, so a multi-line `-m` stays whole), plus
+/// each `-F`/`--file` message as THIS command leaves it — the body the command
+/// writes to that path (heredoc, here-string, `echo`/`printf`, `tee`, a pipe
+/// into `-F -`) when it writes one, otherwise the file on disk. A path the scan
+/// cannot resolve (a shell variable, a `cd` to an unknown place) or a file the
+/// command writes with output it cannot know contributes nothing: this module
+/// fails open by policy ("a hook that guesses wrong costs the operator a
+/// turn"), so such a message is not scanned rather than approximated by the
+/// surrounding command text or a stale file.
+pub fn commit_scan_text_in(command: &str, cwd: Option<&Path>) -> Option<String> {
+    crate::commit_message_source::commit_scan_text_in(command, cwd)
 }
 
 /// Decide whether a tool call may proceed.
@@ -205,10 +169,22 @@ pub fn pretooluse_decision(
     ids: &DocumentIds,
     project_root: Option<&Path>,
 ) -> PreToolUseDecision {
+    pretooluse_decision_in(tool_name, tool_input, ids, project_root, None)
+}
+
+/// [`pretooluse_decision`] for a call running in `cwd` (the harness payload's
+/// `cwd`), which anchors a `git commit -F` relative message path.
+pub fn pretooluse_decision_in(
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+    ids: &DocumentIds,
+    project_root: Option<&Path>,
+    cwd: Option<&Path>,
+) -> PreToolUseDecision {
     if matches!(ids, DocumentIds::Ungoverned) {
         return PreToolUseDecision::Allow;
     }
-    let Some(text) = persisted_text_for_tool(tool_name, tool_input) else {
+    let Some(text) = persisted_text_for_tool_in(tool_name, tool_input, cwd) else {
         return PreToolUseDecision::Allow;
     };
     let scan_text = coined_id_scan_text(tool_name, tool_input, &text);
@@ -510,7 +486,7 @@ pub fn handle_pretooluse() -> anyhow::Result<()> {
     let pane = std::env::var("TMUX_PANE").ok();
     let ids = document_ids(&cwd, pane.as_deref());
     let root = agent_doc_fs::find_project_root(&cwd);
-    let decision = pretooluse_decision(tool_name, tool_input, &ids, root.as_deref());
+    let decision = pretooluse_decision_in(tool_name, tool_input, &ids, root.as_deref(), Some(&cwd));
     if let PreToolUseDecision::Deny { reason } = decision {
         eprintln!("{reason}");
         std::process::exit(2);
@@ -618,6 +594,138 @@ mod tests {
             None
         );
         assert_eq!(commit_scan_text("grep -r 'git commit' ."), None);
+    }
+
+    fn decide_in(command: &str, cwd: &Path) -> PreToolUseDecision {
+        pretooluse_decision_in(
+            "Bash",
+            &json!({ "command": command }),
+            &DocumentIds::Known(known(&["tracked"])),
+            None,
+            Some(cwd),
+        )
+    }
+
+    /// `#hookstalemsgfile` FALSE POSITIVE. The hook runs before the command, so
+    /// a message file the command rewrites still holds the PREVIOUS message on
+    /// disk. Reproduced 2026-10-10: one agent's stale id in a shared scratchpad
+    /// `msg.txt` blocked another agent's clean commit.
+    #[test]
+    fn a_stale_message_file_the_command_rewrites_is_not_scanned() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("msg.txt"),
+            "old commit\n\nRefs #orphandrain\n",
+        )
+        .unwrap();
+        let command = concat!(
+            "cat > msg.txt <<'EOF'\n",
+            "fix(drain): close it\n",
+            "\n",
+            "Refs #tracked\n",
+            "EOF\n",
+            "git commit -F msg.txt"
+        );
+        assert_eq!(decide_in(command, dir.path()), PreToolUseDecision::Allow);
+        // Same shape joined with `&&` and an absolute path.
+        let message = dir.path().join("msg.txt");
+        let command = format!(
+            "cat <<EOF > {path} &&\nfix(drain): close it\nEOF\ngit commit -F {path}",
+            path = message.display()
+        );
+        assert_eq!(
+            decide_in(&command, Path::new("/")),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    /// `#hookstalemsgfile` FALSE NEGATIVE. The heredoc body is the message the
+    /// commit records; cutting segments at every newline never scanned it, and
+    /// the clean file on disk vouched for it instead.
+    #[test]
+    fn a_coined_id_in_a_heredoc_written_message_file_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("msg.txt"), "old clean message\n").unwrap();
+        let command = concat!(
+            "cat > msg.txt <<'EOF'\n",
+            "fix(drain): close it\n",
+            "\n",
+            "Refs #orphandrain\n",
+            "EOF\n",
+            "git commit -F msg.txt"
+        );
+        match decide_in(command, dir.path()) {
+            PreToolUseDecision::Deny { reason } => {
+                assert!(reason.contains("#orphandrain"), "{reason}")
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    /// Other shapes that record a message the old newline-split never saw:
+    /// a heredoc on `-F -` stdin, and the `-m "$(cat <<'EOF' ...)"` idiom.
+    #[test]
+    fn heredoc_messages_on_stdin_and_in_substitutions_block() {
+        let dir = tempfile::tempdir().unwrap();
+        for command in [
+            "git commit -F - <<'EOF'\nfix: x\n\nRefs #orphandrain\nEOF",
+            "git commit -m \"$(cat <<'EOF'\nfix: x\n\nRefs #orphandrain\nEOF\n)\"",
+            "printf 'fix: x\\n\\nRefs #orphandrain\\n' > m.txt && git commit -F m.txt",
+        ] {
+            assert!(
+                matches!(
+                    decide_in(command, dir.path()),
+                    PreToolUseDecision::Deny { .. }
+                ),
+                "must block: {command}"
+            );
+        }
+    }
+
+    /// Relative `-F` paths resolve against the harness `cwd`, a leading `cd`,
+    /// and `git -C` — not against wherever the hook process happens to run.
+    #[test]
+    fn relative_message_paths_resolve_against_cd_and_git_c() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        std::fs::write(repo.join("msg.txt"), "fix: x\n\nRefs #orphandrain\n").unwrap();
+        for command in [
+            "git commit -F msg.txt".to_string(),
+            format!("cd {} && git commit -F msg.txt", repo.display()),
+            format!("git -C {} commit -F msg.txt", repo.display()),
+        ] {
+            let cwd = if command.starts_with("git commit") {
+                repo.clone()
+            } else {
+                dir.path().to_path_buf()
+            };
+            assert!(
+                matches!(decide_in(&command, &cwd), PreToolUseDecision::Deny { .. }),
+                "must block: {command}"
+            );
+        }
+        // The same relative path from a directory that holds no such file reads
+        // nothing.
+        assert_eq!(
+            decide_in("git commit -F msg.txt", dir.path()),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    /// A message file written by a program whose output the scan cannot know
+    /// is not approximated by the stale file it is about to replace.
+    #[test]
+    fn a_message_file_written_by_an_unknown_program_is_not_read_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("msg.txt"), "Refs #orphandrain\n").unwrap();
+        assert_eq!(
+            decide_in(
+                "python3 gen.py > msg.txt && git commit -F msg.txt",
+                dir.path()
+            ),
+            PreToolUseDecision::Allow
+        );
     }
 
     #[test]

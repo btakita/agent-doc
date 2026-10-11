@@ -1574,6 +1574,18 @@ balanced component markers, and at most one live exchange boundary marker.
   that exact editor revision to perform its native save, then re-observes
   authority and disk equality before checkpoint, commit, and the durable
   compact-settled receipt. Compact admission itself never issues this save.
+- Native-save admission is native-save protocol compatibility, not equality
+  with the classic plugin package version (GH #236). A registration receives
+  `persist_current` when its plugin is a package this release ships for any
+  IDE line (classic JetBrains, modular 262, VS Code) or is at or above the
+  editor kind's protocol floor
+  (`agent_doc_reliable_sync_io::liveness::native_save_protocol_floor`). A 263
+  IDE left on an older package because no package declares its build (#233)
+  therefore still saves natively. A plugin below the floor, or with an
+  unparsable version, stays fenced; that fence never fails the closeout or asks
+  the operator to align generations. The retained write stays pending with
+  `operator_action=update_editor_plugin_if_a_package_supports_this_ide_build`
+  and settles through the exact-disk proof.
 - A replacement controller observes the already-retained registered editor/CRDT
   projection as the `AwaitingDelivery` transition's activation Effect. The
   controller listener is bound before restored liveness publishes

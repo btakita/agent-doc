@@ -5384,7 +5384,10 @@ struct NativeSaveGenerationMismatch {
     route: ReplicaSignalRoute,
     editor_kind: String,
     running: String,
-    expected: String,
+    /// Oldest plugin generation that speaks this binary's native-save protocol.
+    protocol_floor: String,
+    /// [`agent_doc_reliable_sync_io::liveness::NativeSaveCompatibility::token`].
+    reason: &'static str,
 }
 
 fn native_save_capable_editor_kind(editor_kind: &str) -> bool {
@@ -5443,24 +5446,28 @@ fn generation_fenced_native_save_routes(
             editor_id: registration.editor_id,
             editor_pid: registration.pid,
         };
-        let Some(expected) = agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version(
-            &registration.editor_kind,
-        ) else {
-            continue;
-        };
-        if agent_doc_reliable_sync_io::liveness::editor_plugin_generation_matches(
+        // GH #236: admit by native-save protocol compatibility. Comparing with
+        // the classic package version alone fenced a 263 IDE left on 0.2.508
+        // (no package declares build 263, #233) and every release-paired 262
+        // package, whose version can never equal the classic one.
+        let compatibility = agent_doc_reliable_sync_io::liveness::editor_native_save_compatibility(
             &registration.editor_kind,
             &registration.editor_version,
-        ) {
+        );
+        if compatibility.admits_native_save() {
             routes.insert(route);
-        } else {
-            mismatches.push(NativeSaveGenerationMismatch {
-                route,
-                editor_kind: registration.editor_kind,
-                running: registration.editor_version,
-                expected: expected.to_string(),
-            });
+            continue;
         }
+        let Some(floor) = compatibility.floor() else {
+            continue;
+        };
+        mismatches.push(NativeSaveGenerationMismatch {
+            route,
+            editor_kind: registration.editor_kind,
+            running: registration.editor_version,
+            protocol_floor: floor.to_string(),
+            reason: compatibility.token(),
+        });
     }
     let mut routes = routes.into_iter().collect::<Vec<_>>();
     routes.sort_by(|left, right| {
@@ -5553,14 +5560,15 @@ pub fn request_native_save_for_current_projection(
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "native_editor_save_request_generation_deferred file={} editor_pid={} editor_id={} editor_kind={} running={} expected={} content_hash={} reason=plugin_generation_mismatch",
+                "native_editor_save_request_generation_deferred file={} editor_pid={} editor_id={} editor_kind={} running={} native_save_protocol_floor={} content_hash={} reason=plugin_generation_mismatch compatibility={} fallback=exact_disk",
                 canonical.display(),
                 mismatch.route.editor_pid,
                 mismatch.route.editor_id,
                 mismatch.editor_kind,
                 mismatch.running,
-                mismatch.expected,
+                mismatch.protocol_floor,
                 expected_content_hash,
+                mismatch.reason,
             ),
         );
     }
@@ -5642,7 +5650,9 @@ pub enum ReplicaSignalClass {
     /// No registration was found at all: a stale-attachment wedge inside
     /// agent-doc.
     NoLiveRegistration,
-    /// Every live route was fenced on a plugin generation mismatch.
+    /// Every live route was fenced because its plugin is older than the
+    /// native-save protocol floor (GH #236: not merely a different package
+    /// version). The retained write keeps its exact-disk fallback.
     PluginGenerationMismatch(usize),
     /// The shared refusal-run policy suppressed this targeted delivery until
     /// its bounded probe window opens.
@@ -5761,8 +5771,11 @@ impl ReplicaSignalClass {
     /// cannot default into "nothing to do" by being absent from a token list.
     ///
     /// A generation mismatch remains retryable, but it also needs operator
-    /// inspection: the exact-version fence is doing its job, and retrying the
-    /// same binary/plugin pair cannot change either reported generation.
+    /// attention: the plugin is below the native-save protocol floor, and
+    /// retrying the same binary/plugin pair cannot change either generation.
+    /// It never fails a closeout (GH #236): updating the plugin is not
+    /// possible on an IDE build no package covers, so the retained write keeps
+    /// its exact-disk fallback while the operator is told what would help.
     pub const fn needs_operator_inspection(self) -> bool {
         match self {
             Self::NoLiveRegistration
@@ -7013,7 +7026,7 @@ mod tests {
     }
 
     #[test]
-    fn native_save_routes_require_an_exact_supported_plugin_generation() {
+    fn native_save_routes_require_a_protocol_compatible_plugin_generation() {
         let expected_jetbrains =
             agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version("jetbrains")
                 .expect("JetBrains package generation baked by workspace build");
@@ -7049,7 +7062,68 @@ mod tests {
         );
         assert_eq!(mismatches.len(), 1);
         assert_eq!(mismatches[0].route.editor_id, "jb-stale");
-        assert_eq!(mismatches[0].expected, expected_jetbrains);
+        assert_eq!(mismatches[0].protocol_floor, "0.2.497");
+        assert_eq!(mismatches[0].reason, "below_native_save_protocol_floor");
+    }
+
+    /// GH #236: a 263 IDE left on 0.2.508 (no package declares build 263,
+    /// #233), a 262 IDE on the release-paired modular package, and a classic
+    /// IDE on the matching classic package all receive the native save. Only a
+    /// plugin below the protocol floor is fenced, and the outcome it produces
+    /// still classifies as a retryable, non-failing generation mismatch.
+    #[test]
+    fn gh236_native_save_fence_admits_every_protocol_compatible_ide_line() {
+        let classic =
+            agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version("jetbrains")
+                .expect("classic JetBrains package generation baked by workspace build");
+        let modular = agent_doc_reliable_sync_io::liveness::release_paired_editor_plugin_versions(
+            "jetbrains",
+        )
+        .into_iter()
+        .find(|version| *version != classic)
+        .expect("262 JetBrains package generation baked by workspace build");
+        let registration = |pid, id: &str, version: &str| {
+            agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                document_hash: "doc".into(),
+                pid,
+                path: "/tmp/session.md".into(),
+                editor_id: id.into(),
+                editor_kind: "jetbrains".into(),
+                editor_version: version.into(),
+                capabilities: Vec::new(),
+                timestamp_ms: pid,
+            }
+        };
+        let (routes, mismatches) = generation_fenced_native_save_routes(vec![
+            registration(21, "ide-263-on-0.2.508", "0.2.508"),
+            registration(22, "ide-262-on-modular", modular),
+            registration(23, "ide-251-on-classic", classic),
+            registration(24, "ide-251-pre-deferred-receipt", "0.2.496"),
+        ]);
+        assert_eq!(
+            routes
+                .iter()
+                .map(|route| route.editor_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "ide-263-on-0.2.508",
+                "ide-262-on-modular",
+                "ide-251-on-classic"
+            ]
+        );
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(
+            mismatches[0].route.editor_id,
+            "ide-251-pre-deferred-receipt"
+        );
+        assert_eq!(mismatches[0].running, "0.2.496");
+        assert_eq!(mismatches[0].protocol_floor, "0.2.497");
+
+        // The 263 IDE alone (the issue's rig) is never classified as a mismatch.
+        let (routes, mismatches) =
+            generation_fenced_native_save_routes(vec![registration(31, "ide-263", "0.2.508")]);
+        assert_eq!(routes.len(), 1);
+        assert!(mismatches.is_empty());
     }
 
     /// GH 90 — `tasks/laptop/laptop.md`: the native-save fence deferred

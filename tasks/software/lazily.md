@@ -813,6 +813,28 @@ Evidence reviewed: the spec’s existing required/optional surface split, cross-
 Changed paths before closeout: none outside this session document. No source or build surface changed, so no project test suite was required. Confidence: high. Escalation: the final Core-profile approval remains the explicit operator decision in `#lzbetascope`.
 
 Session accretion remains in warning range; I continued draining the active queue without compaction.
+
+### Re: Lazily Core plan, backlog, and queue — gpt-5 · 2026-10-10T23:44-04:00
+
+> **Queue prompt:** Create a plan + backlog + queue items for your recommendation.
+
+Created `tasks/software/plan-lazily-core-beta.md` and committed it as `e26e21e0bf` (`docs: plan Lazily Core beta profile`). The plan turns the recommendation into seven ordered phases:
+
+1. define the canonical candidate Core profile and dependency rules;
+2. make conformance claims truthful and close the Core fixture set;
+3. add idiomatic, backward-compatible Core facades where useful;
+4. add per-binding API compatibility and migration gates;
+5. prove clean packaged consumers and publish the support contract;
+6. build a pinned, reproducible cohort and publication pipeline;
+7. qualify and promote only the bindings whose complete evidence is green.
+
+I added one actionable backlog item per phase (`#lzcoreprofile`, `#lzcoreclaims`, `#lzcorefacades`, `#lzcorecompat`, `#lzcoreconsumers`, `#lzcorecohort`, and `#lzcorebeta1`). They are mirrored into the queue in dependency order and each cites the exact plan path. Phases 3–5 explicitly fan out by binding; three read-only subagent reviews independently covered architecture boundaries, test/conformance truth, and packaging/release readiness, and their findings were reconciled into the plan.
+
+I kept `#lzbetascope` in review and narrowed it to the final promotion decision. Candidate metadata and proof infrastructure may proceed, but this planning request does not silently announce Beta. The final item also remains dependent on `#lzreleasepins`, publication readiness including `#lzrustpublish` where applicable, and two reproducible release candidates or the four-week compatibility freeze.
+
+Verification: `git diff --check -- tasks/software/plan-lazily-core-beta.md` passed; the Markdown structure was inspected through tsift; only the new plan file was staged in the ordinary repository commit. No source or build surface changed, so no project test suite was required. Confidence: high. Escalation: none for planning; the explicit promotion and external publishing decisions remain gated.
+
+Session accretion remains in the warning range; I continued the active queue without compacting it.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -825,6 +847,13 @@ Session accretion remains in warning range; I continued draining the active queu
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: create the canonical candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates.
+- [ ] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.
+- [ ] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
+- [ ] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
+- [ ] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
+- [ ] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
+- [ ] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 <!-- /agent:backlog -->
 
 ## Review
@@ -835,7 +864,7 @@ Session accretion remains in warning range; I continued draining the active queu
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit with counterpart durability classification (commits 667eb4766, 434b32548) lives at src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-27/ and is confirmed the ONLY handoff on disk, so only one basis can be authorized. Run the plan from src/agent-doc with `python3 scripts/purge-actions-artifacts.py`; the destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000` and the 250 default cap otherwise aborts. TWO authorizable options, both re-proved by live dry run: (a) full plan — 2,666 artifacts (43.83 GB), 0 refused, 0 skipped; (b) `--durability durable` — 2,136 artifacts (34.83 GB), refusing exactly the 530 rows whose only counterpart is a PyPI file. Prefer (b): the prune floor is 0.35.113 and v0.35.119, the oldest PyPI-only-backed version, is only the THIRD live release above it, so option (a) additionally accepts that 9.01 GB rests on a thinner margin than version numbering suggests. 2,136 rows rest on GitHub release assets, which have not decayed. 571 artifacts are withheld at audit time and are never deletable. Hard deadline: the 7-day `--max-handoff-age-days` guard aborts the whole run after 2026-10-04T05:56:08Z unless the audit is regenerated or `--allow-stale-handoff` is passed; `make review-gate-status` imports that guard from the purge script and flips this gate to `evidence_stale` 24h BEFORE it expires rather than after. Blocked solely on explicit destructive authorization; no artifact has been deleted.
-- [/] [#lzbetascope] [operator-decision] Approve Lazily Core as the only Beta compatibility profile: Context, Source, Computed, Effect, batching, scopes/disposal, typed contexts, and supported execution flavors. Name the remainder Lazily Modules or Lazily Capabilities with independent maturity; keep one umbrella package/repo per language and split artifacts only at real dependency, security, platform, or release boundaries. After approval, implement the machine-readable profile registry, core_api_generation and symbol compatibility gates; correct conformance/FFI/wire/schema claims; publish API/deprecation/support policies; repair Rust Trusted Publishing and remaining consumer distribution gates; and require #lzreleasepins green.
+- [/] [#lzbetascope] [operator-decision] Approve final promotion of the candidate Lazily Core profile to Beta under tasks/software/plan-lazily-core-beta.md after #lzcoreprofile, #lzcoreclaims, #lzcorefacades, #lzcorecompat, #lzcoreconsumers, #lzcorecohort, #lzreleasepins, and publication blockers are green. The public promise remains: Lazily Core is Beta; Lazily Modules graduate independently.
 <!-- /agent:review -->
 
 ## Icebox

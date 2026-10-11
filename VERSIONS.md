@@ -2,6 +2,34 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.487
+
+- **Promoted backlog items reach the queue on a deferred write (`#retainedactionablemirror`).** A retained tracked-work
+  publish now records its planned adds/ungates as actionable, so the closeout queue mirror inserts them even when the
+  backlog mutations land later.
+- **A partially typed queue line is never duplicated by an admission merge (`#typingforkdup`).** `agent_doc_merge`
+  drops agent/disk-added queue and backlog items that are prefix-or-equal revision twins of an operator-added item
+  before any strategy runs, and refuses a merge that would leave a newer disk revision beside the authority. Model
+  checked in `formal/tla/AdmissionSplitMerge.tla` with wedge/output/pair/reach configs.
+- **A stale-binary controller drains instead of being killed mid-route (`#drainingpredecessor`).** A client now asks
+  the stale controller to recycle itself (bounded 30s wait) and the duplicate-controller reap skips a draining
+  predecessor until its lease deadline, so a mid-route install no longer replays Run Agent Doc from scratch.
+- **Native saves gate on protocol compatibility, not the classic package version (GH #236).** Any shipped ranged
+  package, or a plugin at/above the native-save protocol floor, is admitted; an incompatible plugin falls back to the
+  exact-disk path instead of failing closeout with an impossible remedy.
+- **An interrupted Codex turn releases its turn lease (dev.md Clear Session Context).** The rollout's
+  `turn_aborted`/`interrupted` record retires the lease and leaves an interrupt turn-end receipt.
+- **Only the most recently focused JetBrains installation drives the shared tmux window (`#idefocusowner`).**
+- **Queue subagent dispatch carries the operator's authorization (`#waypostauthorization` follow-ups)**,
+  **`queue finalize` consume is idempotent (`#respondfinalizehard`)**, **PyPI publishes from the Release workflow after
+  assets upload (`#pypireleaseworkflow`)**, and **session-check never prints the manual recycle remedy beside the line
+  forbidding it (GH #235).**
+- **The coined-id commit hook scans the message the command writes (`#hookstalemsgfile`)**, not a stale `-F` file,
+  and now scans heredoc / multi-line `-m` bodies.
+- **Test determinism:** visible-write receipt tests run against a warm in-process controller that serves clients
+  concurrently (`#visiblewriteloadflake`); relay-hub tests isolate editor pids so plain parallel `cargo test` passes
+  (`#relayhubtestisolation`).
+
 ## 0.35.486
 
 - **Remote Dev survivors keep their side across split width changes (GH #234).** `RemoteLayoutMemory::ordered_columns`

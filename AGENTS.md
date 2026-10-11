@@ -383,14 +383,23 @@ When publishing a release:
 
    **PyPI carries a universal bootstrap, not native binaries (`#pypislim`).**
    `.github/workflows/pypi.yml` publishes every tag as one small `py3-none-any`
-   wheel. Its launcher waits for the matching GitHub Release, downloads the
-   platform archive on first invocation, verifies `SHA256SUMS`, and keeps the
-   executable and cdylib together in a versioned user cache. It runs on `v*` tag
-   pushes (the trigger of record), `workflow_dispatch`, and hand-published
-   releases; the `release: published` path is gated to `v*` tag names, so an
+   wheel. Its launcher downloads the platform archive from the matching GitHub
+   Release on first invocation, verifies `SHA256SUMS`, and keeps the executable
+   and cdylib together in a versioned user cache. **The Release workflow starts
+   it (`#pypireleaseworkflow`):** `release.yml`'s `pypi` job `needs` the
+   asset-uploading `release` job and runs `gh workflow run pypi.yml --ref <tag>`,
+   so PyPI never races the Release on a wall clock (the old 30-minute
+   `SHA256SUMS` poll lost to v0.35.485's ~33-minute builds, run 38086853278). A
+   GITHUB_TOKEN dispatch is used because GitHub raises no `release: published`
+   for the token-created Release, and dispatching (not `uses:`) keeps `pypi.yml`
+   the top-level workflow PyPI's trusted publisher names. The publish job's
+   readiness check runs once and fails closed (`v*` tag ref, six archives in
+   `SHA256SUMS`, each present on the Release, digests matching). Re-publish any
+   tag with `gh workflow run pypi.yml --ref v<version>`. `release: published`
+   remains for hand-published releases and is gated to `v*` tag names, so an
    editor-only prerelease (for example `jetbrains-262-preview-*`, which carries no
-   `SHA256SUMS`) never starts a PyPI publish (GH #225). A hand-published `v*`
-   release also fires the tag-push run; `skip-existing` absorbs that overlap.
+   `SHA256SUMS`) never starts a PyPI publish (GH #225); `skip-existing` absorbs
+   any overlap.
 
    That cutover is what bounds PyPI storage growth, so the project ceiling is a
    measurement, not a guess: `make pypi-quota-check` sums per-file sizes from the

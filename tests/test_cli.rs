@@ -14471,7 +14471,7 @@ fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
 
     let pypi = fs::read_to_string(manifest_dir.join(".github/workflows/pypi.yml")).unwrap();
     assert!(
-        pypi.contains("tags: [\"v*\"]"),
+        release.contains("gh workflow run pypi.yml --ref \"$GITHUB_REF_NAME\""),
         "the small universal bootstrap must publish with every GitHub release"
     );
     assert!(
@@ -14481,9 +14481,9 @@ fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
         "the PyPI job must fail closed unless it built one small native-free universal wheel"
     );
     assert!(
-        pypi.contains("Wait for the matching GitHub Release checksums")
+        pypi.contains("Verify the matching GitHub Release checksums")
             && pypi.contains("gh release download \"$tag\" --pattern SHA256SUMS"),
-        "PyPI publishing must wait until the native release and its checksum manifest exist"
+        "PyPI publishing must refuse until the native release and its checksum manifest exist"
     );
     assert!(
         pypi.contains("workflow_dispatch"),
@@ -14657,16 +14657,157 @@ fn test_release_published_workflows_gate_every_job_on_v_tags() {
          guard must still be exercising it (found: {release_triggered:?})"
     );
 
-    // The tag-push trigger of record and the manual trigger stay unconditional.
+    // The dispatch trigger of record (release.yml dispatches it once assets
+    // exist, `#pypireleaseworkflow`) and the manual re-publish stay unconditional.
     let pypi = fs::read_to_string(workflows_dir.join("pypi.yml")).unwrap();
     assert!(
-        pypi.contains("  push:\n    tags: [\"v*\"]") && pypi.contains("  workflow_dispatch:"),
-        "`v*` tag pushes and workflow_dispatch must keep publishing exactly as before"
+        pypi.contains("  workflow_dispatch:"),
+        "workflow_dispatch is the trigger of record and the manual re-publish path"
     );
     assert!(
         pypi.contains("skip-existing: true"),
-        "a hand-published `v*` release also fires the tag-push run; skip-existing keeps \
+        "a hand-published `v*` release can overlap a dispatched run; skip-existing keeps \
          that overlap from double-publishing"
+    );
+}
+
+/// Split a GitHub workflow's `jobs:` block into `(name, body lines)` at its
+/// two-space job keys. Mirrors the line-structured parsing the release-event
+/// guard above uses; the workflows are hand-written in that shape.
+fn workflow_jobs(text: &str) -> Vec<(String, Vec<String>)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let jobs_start = lines
+        .iter()
+        .position(|line| *line == "jobs:")
+        .expect("workflow has a jobs block");
+    let mut jobs: Vec<(String, Vec<String>)> = Vec::new();
+    for line in &lines[jobs_start + 1..] {
+        if !line.is_empty() && !line.starts_with(' ') && !line.starts_with('#') {
+            break;
+        }
+        let is_job_key = line.starts_with("  ")
+            && !line.starts_with("   ")
+            && !line.trim_start().starts_with('#')
+            && line.trim_end().ends_with(':');
+        if is_job_key {
+            jobs.push((line.trim().trim_end_matches(':').to_string(), Vec::new()));
+        } else if let Some((_, body)) = jobs.last_mut() {
+            body.push(line.to_string());
+        }
+    }
+    jobs
+}
+
+/// `#pypireleaseworkflow`: PyPI's publish job polled at most 30 minutes for the
+/// GitHub Release's `SHA256SUMS`, and v0.35.485's cross-platform builds took
+/// about 33, so publish failed two minutes before the Release went up (run
+/// 38086853278). PyPI must be STARTED BY the Release workflow after the job that
+/// uploads every asset, never race it on a wall clock.
+#[test]
+fn test_pypi_publish_is_dispatched_after_release_assets_not_a_wall_clock_poll() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workflows_dir = manifest_dir.join(".github/workflows");
+    let release = fs::read_to_string(workflows_dir.join("release.yml")).unwrap();
+    let pypi = fs::read_to_string(workflows_dir.join("pypi.yml")).unwrap();
+
+    // Release side: the job that uploads assets produces SHA256SUMS, and a job
+    // that needs it dispatches PyPI on the tag.
+    let release_jobs = workflow_jobs(&release);
+    let job = |name: &str| -> &Vec<String> {
+        &release_jobs
+            .iter()
+            .find(|(job, _)| job == name)
+            .unwrap_or_else(|| panic!("release.yml has no `{name}` job"))
+            .1
+    };
+    let uploader = job("release").join("\n");
+    assert!(
+        uploader.contains("> artifacts/SHA256SUMS")
+            && uploader.contains("gh release create \"$tag\"")
+            && uploader.contains("artifacts/*"),
+        "release.yml's `release` job must generate and upload SHA256SUMS with the archives"
+    );
+    let dispatcher = job("pypi");
+    assert!(
+        dispatcher.iter().any(|line| line == "    needs: [release]"),
+        "the PyPI dispatch must wait for the asset-uploading `release` job: {dispatcher:?}"
+    );
+    let dispatcher = dispatcher.join("\n");
+    assert!(
+        dispatcher.contains("gh workflow run pypi.yml --ref \"$GITHUB_REF_NAME\""),
+        "release.yml must dispatch pypi.yml on the tag ref, so the dispatched run \
+         builds the tagged commit and keeps pypi.yml the top-level workflow PyPI's \
+         trusted publisher is registered against"
+    );
+    assert!(
+        dispatcher.contains("actions: write"),
+        "dispatching a workflow with GITHUB_TOKEN needs `actions: write`"
+    );
+    assert!(
+        !release.contains("uses: ./.github/workflows/pypi.yml"),
+        "calling pypi.yml as a reusable workflow would make release.yml the OIDC \
+         workflow PyPI sees, which its trusted publisher does not name"
+    );
+
+    // PyPI side: no tag-push trigger to race the Release, and no polling loop
+    // before publish. (The post-publish `verify` job's bounded wait is for
+    // PyPI's own index propagation, not for the Release.)
+    let on_block: String = pypi
+        .split_once("\non:\n")
+        .expect("pypi.yml has a top-level `on:` block")
+        .1
+        .lines()
+        .take_while(|line| line.is_empty() || line.starts_with(' ') || line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !on_block.contains("  push:"),
+        "pypi.yml must not start on its own tag push; that is the race this fixed"
+    );
+    assert!(
+        on_block.contains("  workflow_dispatch:"),
+        "pypi.yml must stay dispatchable: the trigger of record and the manual re-publish"
+    );
+    let pypi_jobs = workflow_jobs(&pypi);
+    let publish = pypi_jobs
+        .iter()
+        .find(|(name, _)| name == "publish")
+        .expect("pypi.yml has a publish job")
+        .1
+        .join("\n");
+    for forbidden in [
+        "sleep ",
+        "seq 1",
+        "within 30 minutes",
+        "Wait for the matching",
+    ] {
+        assert!(
+            !publish.contains(forbidden),
+            "the PyPI publish job must not wait on a wall clock for the Release (found `{forbidden}`)"
+        );
+    }
+    for required in [
+        "refs/tags/v*)",
+        "gh release download \"$tag\" --pattern SHA256SUMS",
+        "expected_count = 6",
+        "which release {tag} does not carry",
+        "disagrees with SHA256SUMS",
+        "skip-existing: true",
+    ] {
+        assert!(
+            publish.contains(required),
+            "the PyPI publish job must keep its fail-closed release verification: {required}"
+        );
+    }
+    let verify_position = publish
+        .find("Verify the matching GitHub Release checksums")
+        .expect("readiness check present");
+    let upload_position = publish
+        .find("gh-action-pypi-publish")
+        .expect("upload step present");
+    assert!(
+        verify_position < upload_position,
+        "the release readiness check must run before the PyPI upload"
     );
 }
 

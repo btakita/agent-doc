@@ -402,13 +402,23 @@ on the next poll. The watcher records the effective binary and reconciled releas
 in memory so the old process that replaced its own executable does not reinstall
 the same release forever.
 
-PyPI publishing is cadence-gated (`#pypicadence`): milestone tags (`vX.Y.0`)
-publish automatically and any other tag publishes on demand with
-`gh workflow run PyPI --ref <tag>`. Every tag still produces a GitHub Release.
-Per-tag PyPI publishing exhausted the 10 GiB project quota at ~5 GiB/month, which
-made uploads fail with `400 Project size too large` and left PyPI 20 versions
-behind the newest tag without surfacing; the PyPI workflow now asserts the tagged
-version is resolvable on PyPI after publishing so that drift fails loudly.
+PyPI publishes one small universal bootstrap wheel for every `v*` tag
+(`#pypislim`; this superseded the earlier `#pypicadence` milestone gate). The
+PyPI workflow is started by the Release workflow, never raced against it
+(`#pypireleaseworkflow`): `release.yml`'s `pypi` job `needs` the job that uploads
+every asset including `SHA256SUMS`, then dispatches `pypi.yml` on the tag
+(`gh workflow run pypi.yml --ref <tag>`). PyPI previously ran on its own tag
+push and polled a fixed 30 minutes for `SHA256SUMS`, so a Release whose builds
+ran longer (v0.35.485, ~33 minutes) left that version unpublished. The publish
+job therefore checks readiness once and fails closed — no wall-clock wait: the
+ref must be a `v*` tag, `SHA256SUMS` must name exactly the six platform
+archives, each must be a release asset, and GitHub's per-asset digest must
+match the manifest where reported. Uploads use `skip-existing`, a
+hand-published `v*` release (`release: published`, which GitHub never raises for
+the token-created Release) may also start it, and any tag can be re-published
+with `gh workflow run pypi.yml --ref <tag>`. After publishing, the workflow
+asserts the tagged version is installable from PyPI's simple index and runs the
+pinned native release, so drift fails loudly.
 
 The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.json`.
 

@@ -3405,7 +3405,11 @@ mod tests {
             ])
             .env(CHILD_ENV, "1")
             .env(STOP_HOOK_BUDGET_ENV, "1")
-            .env(STOP_HOOK_TEST_DELAY_MS_ENV, "5000")
+            // `#remainingwallclock`: the worker effectively never finishes
+            // (10 minutes), so a hook that waited for it can only hang; the
+            // ceiling below turns that into a failure. A hook that terminates
+            // after flushing returns in about its 1s budget at any load.
+            .env(STOP_HOOK_TEST_DELAY_MS_ENV, "600000")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -3420,14 +3424,24 @@ mod tests {
             )
             .unwrap();
 
-        let started = std::time::Instant::now();
-        let output = child.wait_with_output().unwrap();
+        const HANG_CEILING: std::time::Duration = std::time::Duration::from_secs(60);
+        let child_pid = child.id();
+        let (output_tx, output_rx) = std::sync::mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            let _ = output_tx.send(child.wait_with_output());
+        });
+        let output = match output_rx.recv_timeout(HANG_CEILING) {
+            Ok(output) => output.unwrap(),
+            Err(_) => {
+                let _ = ProcessCommand::new("kill")
+                    .args(["-KILL", &child_pid.to_string()])
+                    .status();
+                let _ = waiter.join();
+                panic!("timed-out hook waited for the detached worker past {HANG_CEILING:?}");
+            }
+        };
+        waiter.join().unwrap();
         assert!(output.status.success(), "child failed: {output:?}");
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(4),
-            "timed-out hook waited for the detached worker: {:?}",
-            started.elapsed()
-        );
         let stdout = String::from_utf8(output.stdout).unwrap();
         assert!(stdout.contains("\"continue\":false"), "{stdout}");
         assert!(

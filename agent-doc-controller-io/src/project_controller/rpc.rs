@@ -1083,7 +1083,7 @@ fn request_path_json(path: &Path, request_value: serde_json::Value) -> Result<St
     // the admission deadline, and none may start once it is spent.
     let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
         "project_controller_rpc",
-        CONTROLLER_RPC_TIMEOUT,
+        controller_response_timeout(path, CONTROLLER_RPC_TIMEOUT),
     )?;
     let stream = connect_path(path)?;
     stream
@@ -1099,6 +1099,64 @@ fn request_path_json(path: &Path, request_value: serde_json::Value) -> Result<St
     let mut response = String::new();
     read_controller_response_line_with_timeout(&mut reader, &mut response, timeout)?;
     Ok(response.trim().to_string())
+}
+
+/// The response deadline for one controller RPC on `socket`.
+///
+/// `#remainingwallclock`: the test-mode `CONTROLLER_RPC_TIMEOUT` (2s) exists so a
+/// genuinely absent or silent controller fails fast. A socket served by an
+/// in-process test state actor ([`start_state_actor_for_tests`]) is known to be
+/// live, so a slow answer there is host load, not absence, and the deadline is
+/// only a hang ceiling. Without this, a full `make check` at load average
+/// 60-100 failed fixtures with `timed out after 2.0s waiting for project
+/// controller response` while they asserted nothing about timing.
+fn controller_response_timeout(socket: &Path, timeout: Duration) -> Duration {
+    #[cfg(feature = "test-support")]
+    if warm_test_actor_sockets::serves(socket) {
+        return timeout.max(warm_test_actor_sockets::RESPONSE_HANG_CEILING);
+    }
+    let _ = socket;
+    timeout
+}
+
+/// Test-support view of [`controller_response_timeout`].
+#[cfg(feature = "test-support")]
+pub fn controller_response_timeout_for_tests(socket: &Path, timeout: Duration) -> Duration {
+    controller_response_timeout(socket, timeout)
+}
+
+/// Sockets currently served by an in-process test state actor.
+#[cfg(feature = "test-support")]
+mod warm_test_actor_sockets {
+    use parking_lot::Mutex;
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    pub(super) const RESPONSE_HANG_CEILING: Duration = Duration::from_secs(30);
+
+    static SOCKETS: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+    fn key(socket: &Path) -> PathBuf {
+        socket
+            .canonicalize()
+            .unwrap_or_else(|_| socket.to_path_buf())
+    }
+
+    pub(super) fn register(socket: &Path) -> PathBuf {
+        let key = key(socket);
+        SOCKETS.lock().insert(key.clone());
+        key
+    }
+
+    pub(super) fn unregister(key: &Path) {
+        SOCKETS.lock().remove(key);
+    }
+
+    pub(super) fn serves(socket: &Path) -> bool {
+        let sockets = SOCKETS.lock();
+        !sockets.is_empty() && sockets.contains(&key(socket))
+    }
 }
 
 fn read_controller_response_line_with_timeout<R: BufRead>(
@@ -1919,7 +1977,7 @@ fn request_controller_on_stream_with_timeout<T: DeserializeOwned>(
     // refused before it is sent once that deadline is spent.
     let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
         "project_controller_rpc",
-        timeout,
+        controller_response_timeout(&socket_path(project_root), timeout),
     )?;
     stream
         .set_recv_timeout(Some(timeout))
@@ -15547,6 +15605,8 @@ pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
 pub struct StateActorTestHandle {
     should_stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
+    /// Registered in `warm_test_actor_sockets` while the actor serves it.
+    warm_socket: PathBuf,
 }
 
 #[cfg(feature = "test-support")]
@@ -15573,6 +15633,7 @@ fn ensure_state_actor_for_tests(project_root: &Path) -> Result<()> {
 #[cfg(feature = "test-support")]
 impl Drop for StateActorTestHandle {
     fn drop(&mut self) {
+        warm_test_actor_sockets::unregister(&self.warm_socket);
         self.should_stop.store(true, Ordering::SeqCst);
         if let Some(thread) = self.thread.take()
             && thread.join().is_err()
@@ -15652,6 +15713,9 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     let should_stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&should_stop);
     let actor_root = project_root.to_path_buf();
+    // The listener is bound, so the socket path canonicalizes to the key the
+    // clients' lookups will compute.
+    let warm_socket = warm_test_actor_sockets::register(&sock);
     let thread = std::thread::spawn(move || {
         install_controller_request_thread_context(&runtime);
         // `#visiblewriteloadflake`: serve each client on its own thread, as
@@ -15697,6 +15761,7 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     Ok(StateActorTestHandle {
         should_stop,
         thread: Some(thread),
+        warm_socket,
     })
 }
 
@@ -33300,7 +33365,7 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(
-            elapsed < Duration::from_secs(1),
+            elapsed < timeout / 2,
             "expected an immediate refusal, waited {elapsed:?} of a {timeout:?} budget"
         );
         let message = format!("{err:#}");
@@ -33328,7 +33393,7 @@ mod tests {
         let err = wait_for_controller_path_with_launch(&sock, Duration::from_secs(30), &launch)
             .expect_err("an exited replacement can never report ready");
 
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(started.elapsed() < Duration::from_secs(30) / 2);
         let message = format!("{err:#}");
         assert!(message.contains("pid 424242 exited"), "{message}");
         assert!(message.contains("exit status"), "{message}");
@@ -36085,7 +36150,7 @@ mod tests {
                 },
             )
         });
-        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(30)).unwrap();
 
         let second_runtime = Arc::clone(&runtime);
         let (second_done_tx, second_done_rx) = std::sync::mpsc::channel();
@@ -36109,7 +36174,11 @@ mod tests {
 
         release.wait();
         assert!(first.join().unwrap());
-        assert!(second_done_rx.recv_timeout(Duration::from_secs(2)).unwrap());
+        assert!(
+            second_done_rx
+                .recv_timeout(Duration::from_secs(30))
+                .unwrap()
+        );
         second.join().unwrap();
 
         let current = runtime
@@ -38324,7 +38393,7 @@ mod tests {
             "kept re-observing until the deadline: {elapsed:?}"
         );
         assert!(
-            elapsed < budget + Duration::from_secs(2),
+            elapsed < budget + Duration::from_secs(30),
             "bounded: {elapsed:?}"
         );
         assert!(observed >= 2, "re-observed at least once: {observed}");
@@ -38512,7 +38581,7 @@ mod tests {
         let started = std::time::Instant::now();
         record_controller_model_pressure(dir.path(), &doc, "locked_test", "controller busy");
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(2),
+            started.elapsed() < std::time::Duration::from_secs(15),
             "an advisory pressure marker must not inherit the 30s state-db timeout",
         );
         drop(tx);
@@ -39932,10 +40001,10 @@ mod tests {
         let started = Instant::now();
         let err = runtime
             .async_editor_commands
-            .await_terminal_adopting("cmd-never-forwarded", Duration::from_secs(5), || None)
+            .await_terminal_adopting("cmd-never-forwarded", Duration::from_secs(60), || None)
             .unwrap_err();
         assert!(
-            started.elapsed() < Duration::from_secs(1),
+            started.elapsed() < Duration::from_secs(30),
             "no predecessor: fail at once"
         );
         let message = format!("{err:#}");
@@ -42015,7 +42084,8 @@ mod tests {
                 // The reload waits for the append, so an append that queues
                 // behind a reload holding ingress can never finish: the bound
                 // only turns that deadlock into a failure, it is not the sync.
-                match done_rx.recv_timeout(Duration::from_secs(10)) {
+                // `#remainingwallclock`: a 30s hang ceiling, not a 10s budget.
+                match done_rx.recv_timeout(Duration::from_secs(30)) {
                     Ok(inserted) => {
                         assert!(inserted);
                         sender.join().unwrap();
@@ -43056,7 +43126,7 @@ mod tests {
 
         assert_eq!(outcome, CloseoutCycleWaitOutcome::OwnerReleased);
         assert!(
-            elapsed < Duration::from_secs(5),
+            elapsed < Duration::from_secs(15),
             "projection release must wake the waiter, not its deadline ({elapsed:?})"
         );
     }
@@ -43117,7 +43187,7 @@ mod tests {
             agent_doc_turn::CyclePhase::PreflightStarted
         );
         assert!(
-            elapsed < Duration::from_secs(5),
+            elapsed < Duration::from_secs(15),
             "projection notification must wake the waiter, not its deadline ({elapsed:?})"
         );
     }
@@ -43166,7 +43236,7 @@ mod tests {
 
         assert_eq!(outcome, CloseoutCycleWaitOutcome::OwnerReleased);
         assert!(
-            elapsed < Duration::from_secs(3),
+            elapsed < Duration::from_secs(15),
             "lease expiry must wake the waiter, not its request deadline ({elapsed:?})"
         );
     }
@@ -43228,7 +43298,7 @@ mod tests {
 
         assert_eq!(outcome, CloseoutCycleWaitOutcome::OwnerReleased);
         assert!(
-            elapsed < Duration::from_secs(2),
+            elapsed < Duration::from_secs(15),
             "a dead owner must release promptly, not by lease expiry ({elapsed:?})"
         );
         let memory = runtime.memory.lock();
@@ -43285,7 +43355,7 @@ mod tests {
 
         assert_eq!(outcome, CloseoutCycleWaitOutcome::OwnerReleased);
         assert!(
-            elapsed < Duration::from_secs(3),
+            elapsed < Duration::from_secs(15),
             "owner exit must release the waiter promptly ({elapsed:?})"
         );
     }
@@ -43983,7 +44053,8 @@ mod tests {
             // beyond two seconds even though its normal polling cadence is
             // much shorter. Keep the assertion bounded without turning
             // scheduler contention into a release-gating failure.
-            .recv_timeout(Duration::from_secs(10))
+            // `#remainingwallclock`: a hang ceiling, not a reaper budget.
+            .recv_timeout(Duration::from_secs(60))
             .expect("controller should exit after its temp project root is removed");
         assert_eq!(result, Ok(()));
         handle.join().unwrap();
@@ -44016,14 +44087,23 @@ mod tests {
         wait_for_test_controller(&project_root);
 
         let idle_stream = connect(&project_root).unwrap();
-        let started = Instant::now();
-        run_status(Some(&project_root), true).unwrap();
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "controller status --ensure should complete without holding an idle stream"
-        );
-
+        // `#remainingwallclock`: the property is that the status completes
+        // WHILE the idle stream is still held. A controller serialized behind
+        // that stream never answers until it is dropped (the server sets no
+        // read timeout), so the 30s bound is only a hang ceiling that turns
+        // that regression into a failure instead of a suite hang.
+        let status_root = project_root.clone();
+        let (status_tx, status_rx) = std::sync::mpsc::channel();
+        let status_thread = std::thread::spawn(move || {
+            let _ = status_tx.send(run_status(Some(&status_root), true).map_err(|e| e.to_string()));
+        });
+        let completed_while_idle_stream_held = status_rx.recv_timeout(Duration::from_secs(30));
         drop(idle_stream);
+        status_thread.join().unwrap();
+        completed_while_idle_stream_held
+            .expect("controller status --ensure should complete without holding an idle stream")
+            .unwrap();
+
         let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         handle.join().unwrap();
@@ -44050,7 +44130,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < Duration::from_secs(30),
             "second public serve should skip instead of replacing the active controller"
         );
 
@@ -44172,7 +44252,7 @@ mod tests {
                     Ok(()) => return Ok::<(), anyhow::Error>(()),
                     Err(err)
                         if err.to_string().contains("database is locked")
-                            && started.elapsed() < Duration::from_secs(5) =>
+                            && started.elapsed() < Duration::from_secs(30) =>
                     {
                         std::thread::sleep(Duration::from_millis(25));
                     }
@@ -46710,7 +46790,7 @@ mod tests {
         }
 
         let received = rx
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(Duration::from_secs(30))
             .expect("aborted drop-guard must send a request to the replacement");
         assert!(
             received.contains("\"command\":\"shutdown\""),
@@ -47586,7 +47666,7 @@ mod tests {
 
         assert_eq!(proof.patch_id, "patch-present");
         assert!(
-            started.elapsed() < Duration::from_secs(5),
+            started.elapsed() < Duration::from_secs(15),
             "an already-folded receipt must not wait on the deadline"
         );
     }
@@ -47627,7 +47707,7 @@ mod tests {
 
         assert_eq!(proof.patch_id, "patch-pushed");
         assert!(
-            elapsed < Duration::from_secs(10),
+            elapsed < Duration::from_secs(15),
             "waiter must be woken by the append, not by its own deadline (elapsed {elapsed:?})"
         );
     }
@@ -47716,7 +47796,7 @@ mod tests {
         )
         .expect("await handler ok");
         assert!(missing.proof.is_none());
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(30));
     }
 
     /// `#lazily-hot-path` Theme A — a controller that hosts no hub for the document
@@ -47749,7 +47829,7 @@ mod tests {
             "an unobservable document must never be reported as converged"
         );
         assert!(
-            started.elapsed() < Duration::from_secs(5),
+            started.elapsed() < Duration::from_secs(15),
             "an absent hub is known immediately; it must not wait out the deadline"
         );
     }

@@ -128,8 +128,35 @@ property that host load can stretch. Pin the clock instead: inject `now` (the
 rename-debounce lease window), count observations and injected sleeps (a
 zero-budget wait never sleeps), or answer from state (a replayed editor-op
 epoch is consumed when it reads back absent, not when one bounded clear round
-trip beat the clock). Coarse "returns instead of hanging" bounds of a second or
-more remain where no deterministic witness exists yet.
+trip beat the clock).
+
+A "not blocked by a blocked effect" property is proven by ordering, not by a
+latency bound (`#remainingwallclock`): the effect's test fixture blocks on a
+gate the test holds closed, and the test requires that the gate has not been
+passed when the call under test returns (a call that waited on the effect could
+only return after the gate opened), after first waiting for the effect to reach
+the gate so the check is not vacuous. The gate opens itself at a hang ceiling,
+so the regression fails instead of hanging the suite. "Admitted without waiting"
+is proven by counting observations, and "refused before the backstop" by the
+refusal's type (the backstop's overrun is untyped).
+
+Where a wall-clock bound remains, it is a hang ceiling, never a latency budget:
+either a generous ceiling (30-60s, well under nextest's 180s per-test guard)
+over an operation that otherwise hangs, run on a helper thread or child process
+when the regression would block the test thread forever, or a ceiling at half
+of the long deadline the test distinguishes from ("woken by the event, not by
+its 30s deadline" asserts under 15s), with the test's input deadline raised
+until that margin holds.
+
+A transport deadline compiled short for tests (the 2s test-mode controller RPC
+deadline) exists so that an absent or silent peer fails fast. Against a peer
+the test has proven live, it is only a hang ceiling. Controller RPCs to a socket
+served by an in-process test state actor (`start_state_actor_for_tests`) wait
+up to 30s. Fixtures serve their RPCs from such a warm actor, not from a
+cold-launched detached controller. Test setup that only needs a fact recorded
+uses the retaining or state-deciding production path (`record_editor_ops_retaining`
+plus `wait_for_retained_editor_ops`, `consume_replayed_editor_op_epoch`). It does
+not use the strict single-reply 250ms optional-evidence budget.
 
 To replay one seed while reducing a failure, run a focused test with the seed
 mentioned in the panic trace and temporarily promote that schedule into a named

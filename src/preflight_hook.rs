@@ -1397,21 +1397,26 @@ mod tests {
     #[test]
     fn crossing_the_deadline_at_a_phase_boundary_refuses_by_name_before_the_backstop() {
         use agent_doc_preflight_command_io::progress::{PreflightAdmissionRefused, RefusalPoint};
-        // 2s budget => 1.5s deadline: the 1.6s phase crosses it, and the
-        // refusal lands ~0.4s before the backstop would have fired.
-        let started = std::time::Instant::now();
+        // 2s budget => 1.5s deadline: the phase sleeps exactly to the deadline
+        // (a 30s bound clamped to it), so the refusal lands ~0.5s before the
+        // backstop would have fired.
+        //
+        // `#remainingwallclock`: "before the backstop" is proven by the typed
+        // refusal, not by elapsed time: the backstop's overrun is an untyped
+        // error, so the downcast below fails if it fired first.
         let err = run_within_budget(
             Path::new("/nonexistent/agent-doc-deadline-probe.md"),
             std::time::Duration::from_secs(2),
             || -> anyhow::Result<()> {
                 agent_doc_preflight_command_io::progress::enter("commit_previous_cycle")?;
-                std::thread::sleep(std::time::Duration::from_millis(1600));
+                std::thread::sleep(agent_doc_debounce::admission_deadline::clamp(
+                    std::time::Duration::from_secs(30),
+                ));
                 agent_doc_preflight_command_io::progress::enter("settle_debounce")?;
                 panic!("the phase after the deadline must never start");
             },
         )
         .expect_err("a run past its deadline cannot admit");
-        assert!(started.elapsed() < std::time::Duration::from_secs(2));
 
         let refusal = err
             .downcast_ref::<PreflightAdmissionRefused>()
@@ -1529,7 +1534,9 @@ mod tests {
     #[test]
     fn a_bounded_wait_is_clamped_to_the_deadline_and_refuses_in_its_phase() {
         use agent_doc_preflight_command_io::progress::{PreflightAdmissionRefused, RefusalPoint};
-        let started = std::time::Instant::now();
+        // `#remainingwallclock`: "ends at the deadline, before the 800ms
+        // backstop" is proven by the typed refusal (the backstop's overrun is
+        // untyped) and by the clamped bound, not by elapsed time.
         let err = run_within_budget(
             Path::new("/nonexistent/agent-doc-deadline-probe.md"),
             std::time::Duration::from_millis(800),
@@ -1546,7 +1553,6 @@ mod tests {
             },
         )
         .expect_err("a wait that hit the deadline cannot admit");
-        assert!(started.elapsed() < std::time::Duration::from_millis(800));
         let refusal = err
             .downcast_ref::<PreflightAdmissionRefused>()
             .unwrap_or_else(|| panic!("the refusal must stay typed: {err:#}"));

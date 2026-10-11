@@ -2261,7 +2261,9 @@ mod tests {
             let _ = tx.send(outcome.err().map(|e| format!("{e:#}")));
         });
 
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // `#remainingwallclock`: takeover liveness, not speed; the bound is a
+        // hang ceiling (a refused takeover reports itself on `rx` at once).
+        let deadline = Instant::now() + Duration::from_secs(60);
         while probe_endpoint(&sock_path) != EndpointProbe::SameBuild && Instant::now() < deadline {
             if let Ok(refused) = rx.try_recv() {
                 panic!("the current generation refused to take over: {refused:?}");
@@ -2321,7 +2323,9 @@ mod tests {
 
         shutdown.store(true, Ordering::SeqCst);
 
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // `#remainingwallclock`: a listener that ignores its token never
+        // finishes, so the bound is only a hang ceiling for that regression.
+        let deadline = Instant::now() + Duration::from_secs(60);
         while !listener.is_finished() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(20));
         }
@@ -2810,7 +2814,9 @@ mod tests {
             )
         });
 
-        let deadline = Instant::now() + Duration::from_secs(2);
+        // `#remainingwallclock`: publication liveness, not speed; the bounds
+        // here are hang ceilings.
+        let deadline = Instant::now() + Duration::from_secs(60);
         while !socket_path(&root).exists() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
@@ -2822,7 +2828,7 @@ mod tests {
         let mut stream = try_connect_with_timeout_for_pid(
             &root,
             u64::from(std::process::id()),
-            Duration::from_secs(1),
+            Duration::from_secs(30),
         )
         .expect("connect to cancellable listener");
         stream

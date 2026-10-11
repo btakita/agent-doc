@@ -11,6 +11,7 @@
 //! queue projection, active-head marker placement, and signals that observe
 //! queue/turn/supervisor state.
 
+pub mod baseline_attribution;
 pub mod component_scope;
 pub mod element;
 pub mod id;

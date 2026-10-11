@@ -13,4 +13,5 @@ name = "agent_doc_element"
 [dependencies]
 anyhow = "1"
 pulldown-cmark = "0.13"
+similar = "3"
 uuid = { version = "1", features = ["v4"] }

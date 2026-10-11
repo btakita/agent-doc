@@ -221,6 +221,46 @@ fn backlog_add_converges_after_retention_and_succeeds() {
     assert!(text.contains("[#keepme]"), "{text}");
 }
 
+/// `#backlogiceboxreview`: on the live-editor path the attribution runs only
+/// once the retained write has converged, and replays the write's own delta
+/// onto the baseline: the item is carried, a concurrent operator edit in
+/// another component is not.
+#[test]
+fn backlog_add_attributes_the_converged_write_to_the_baseline() {
+    let identity = "binaryownedcli-backlog-add-attribution";
+    let (_dir, file) = attached_document(BACKLOG_DOC, identity);
+    let stale_baseline = BACKLOG_DOC.replace("Done.\n", "Done earlier.\n");
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &file,
+        &stale_baseline,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+    let (result, awaits) =
+        run_against_late_converging_editor(&file, identity, Duration::from_secs(30), |file| {
+            agent_doc_element_backlog_io::with_agent_write_baseline_attribution(|| {
+                agent_doc_element_backlog_io::backlog_cmd::add_verified(
+                    file,
+                    "Track the attributed live write",
+                    false,
+                )
+            })
+        });
+    assert_retained_then_converged(&file, awaits, result);
+    let baseline = agent_doc_snapshot_io::load_document_baseline(&file)
+        .unwrap()
+        .expect("baseline");
+    assert!(
+        baseline.contains("Track the attributed live write"),
+        "the converged CLI write is an agent edit:\n{baseline}"
+    );
+    assert!(
+        baseline.contains("Done earlier.\n") && !baseline.contains("\nDone.\n"),
+        "the exchange difference the baseline has not absorbed stays visible:\n{baseline}"
+    );
+    assert!(ops_log(&file).contains("document_baseline_agent_write_attribution"));
+}
+
 #[test]
 fn backlog_remove_contains_converges_after_retention_and_succeeds() {
     let identity = "binaryownedcli-backlog-remove";

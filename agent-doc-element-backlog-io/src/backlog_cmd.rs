@@ -253,10 +253,16 @@ fn persist_pending_write_now(
                 agent_doc_hash::content_hash(target)
             ),
         );
+        crate::attribute_agent_write_to_baseline(file, current, target);
         return Ok(());
     }
 
-    crate::converge_or_disk_write(file, current, target, "pending_write")
+    crate::converge_or_disk_write(file, current, target, "pending_write")?;
+    // `#backlogiceboxreview`: only a write that landed is attributed. A deferred
+    // (still-retained) write returns `Err` above and leaves the baseline alone,
+    // so a write that never lands cannot be pre-absorbed into it.
+    crate::attribute_agent_write_to_baseline(file, current, target);
+    Ok(())
 }
 
 fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()> {

@@ -3787,6 +3787,289 @@ mod tests {
         assert!(!diff.contains("+do [#runctrlclaude]"), "{parsed:#}");
     }
 
+    /// `#backlogiceboxreview`: a session document whose operator has typed into
+    /// the exchange since the last baseline. The active mirror of an archived
+    /// `agent:done` entry makes the next preflight's pending maintenance mutate
+    /// the document (done-mirror reap).
+    const ATTRIBUTION_DOC: &str = concat!(
+        "---\n",
+        "agent_doc_session: test\n",
+        "agent_doc_format: template\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: earlier — test\n\n",
+        "Answered.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#existing] Keep the existing item\n",
+        "- [ ] [#stale] Drop the stale item\n",
+        "- [ ] [#mirror] Already finished work\n",
+        "<!-- /agent:backlog -->\n\n",
+        "## Done\n\n",
+        "<!-- agent:done -->\n",
+        "- [x] [#mirror] Already finished work\n",
+        "<!-- /agent:done -->\n",
+    );
+
+    const OPERATOR_QUESTION: &str = "What about the retry path?";
+
+    fn attribution_doc_with_operator_edit(dir: &TempDir) -> std::path::PathBuf {
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, ATTRIBUTION_DOC).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            ATTRIBUTION_DOC,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        commit_all(dir.path(), "add doc", None);
+        // The operator edits another component; the baseline has not absorbed it.
+        std::fs::write(
+            &doc,
+            ATTRIBUTION_DOC.replace(
+                "Answered.\n",
+                &format!("Answered.\n\n{OPERATOR_QUESTION}\n"),
+            ),
+        )
+        .unwrap();
+        doc
+    }
+
+    fn run_standalone_tracked_work_command(command: impl FnOnce() -> anyhow::Result<()>) {
+        agent_doc_element_backlog_io::with_backlog_command_effects(
+            &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
+            || agent_doc_element_backlog_io::with_agent_write_baseline_attribution(command),
+        )
+        .unwrap();
+    }
+
+    /// Maintenance write effects of a live editor whose delivery projection has
+    /// not converged: every maintenance write is retained, so preflight defers
+    /// maintenance AND its tracked-surface snapshot resync
+    /// (`#retaineddeferisnotafailure`).
+    struct RetainedMaintenanceWriteEffects;
+
+    impl agent_doc_preflight_io::PreflightMaintenanceWriteEffects for RetainedMaintenanceWriteEffects {
+        fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
+
+        fn guard_visible_write_expected_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected_current: &str,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current_content: &str,
+            _target_content: &str,
+            source: &str,
+        ) -> anyhow::Result<()> {
+            anyhow::bail!(
+                "{source}: visible document write for {} is retained by the lazy delivery \
+                 projection because the editor state projection has not converged; no \
+                 secondary snapshot/commit or forced disk write was attempted. [{}] [{}]",
+                file.display(),
+                agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+                agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+            )
+        }
+    }
+
+    fn component_body(content: &str, name: &str) -> String {
+        let components = agent_doc_element::element::parse(content).unwrap();
+        let component = components.iter().find(|c| c.name == name).unwrap();
+        component.content(content).to_string()
+    }
+
+    /// The baseline the next preflight diffs against, after the live-editor
+    /// preflight's pending maintenance deferred its write (and therefore its
+    /// tracked-surface snapshot resync).
+    fn baseline_after_deferred_maintenance(doc: &Path) -> String {
+        agent_doc_preflight_io::run_pending_maintenance(doc, &RetainedMaintenanceWriteEffects)
+            .expect("a retained maintenance write defers, it does not fail");
+        assert!(
+            std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log"))
+                .unwrap_or_default()
+                .contains("pending_maintenance_deferred_"),
+            "test setup: maintenance must have mutated and deferred"
+        );
+        agent_doc_snapshot_io::load_document_baseline(doc)
+            .unwrap()
+            .expect("baseline")
+    }
+
+    /// `#backlogiceboxreview`: `agent-doc backlog <FILE> add` never advanced the
+    /// baseline. A detached preflight hid that (pending maintenance resyncs the
+    /// tracked surfaces into the baseline), but on a live editor whose delivery
+    /// projection is still converging maintenance defers and skips that resync,
+    /// so the binary's own item reached the diff as `[user+]`. The write now
+    /// advances the baseline by its own delta only: the item is carried, the
+    /// operator's concurrent exchange edit is not.
+    #[test]
+    fn standalone_backlog_add_is_an_agent_edit_and_keeps_concurrent_operator_edits() {
+        let dir = setup_project();
+        let doc = attribution_doc_with_operator_edit(&dir);
+        run_standalone_tracked_work_command(|| {
+            agent_doc_element_backlog_io::backlog_cmd::add(
+                &doc,
+                "Track the attributed follow-up",
+                false,
+            )
+        });
+        let current = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            current.contains("Track the attributed follow-up"),
+            "test setup: the add must land"
+        );
+
+        let baseline = baseline_after_deferred_maintenance(&doc);
+        assert!(
+            component_body(&baseline, "backlog").contains("Track the attributed follow-up"),
+            "the binary's own backlog add must be in the baseline, not an operator edit:\n{baseline}"
+        );
+        assert!(
+            !baseline.contains(OPERATOR_QUESTION),
+            "the concurrent operator edit must stay out of the baseline (visible as [user+]):\n{baseline}"
+        );
+        assert_eq!(
+            component_body(&baseline, "backlog"),
+            component_body(&current, "backlog"),
+        );
+    }
+
+    /// `#backlogiceboxreview`: removals and in-place edits are attributed the
+    /// same way (`backlog remove`, `backlog edit`), and so is `icebox add`.
+    #[test]
+    fn standalone_backlog_remove_edit_and_icebox_add_are_agent_edits() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let with_icebox = format!(
+            "{ATTRIBUTION_DOC}\n## Icebox\n\n<!-- agent:icebox -->\n- [ ] [#parked] Parked work\n<!-- /agent:icebox -->\n"
+        );
+        std::fs::write(&doc, &with_icebox).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &with_icebox,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        commit_all(dir.path(), "add doc", None);
+        std::fs::write(
+            &doc,
+            with_icebox.replace(
+                "Answered.\n",
+                &format!("Answered.\n\n{OPERATOR_QUESTION}\n"),
+            ),
+        )
+        .unwrap();
+        run_standalone_tracked_work_command(|| {
+            agent_doc_element_backlog_io::backlog_cmd::remove(&doc, "stale item", true)?;
+            agent_doc_element_backlog_io::backlog_cmd::edit(
+                &doc,
+                "existing",
+                "Keep the existing item, reworded",
+            )?;
+            agent_doc_element_backlog_io::backlog_cmd::icebox_add(&doc, "Park another idea")
+        });
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let baseline = baseline_after_deferred_maintenance(&doc);
+        assert!(!baseline.contains("[#stale]"), "{baseline}");
+        assert!(baseline.contains("reworded"), "{baseline}");
+        assert!(baseline.contains("Park another idea"), "{baseline}");
+        assert!(!baseline.contains(OPERATOR_QUESTION), "{baseline}");
+        assert_eq!(
+            component_body(&baseline, "icebox"),
+            component_body(&current, "icebox")
+        );
+    }
+
+    /// `#backlogiceboxreview`: outside the standalone-command scope (the
+    /// response/closeout path, whose commit owns the cycle's baseline) a
+    /// tracked-work write leaves the baseline alone.
+    #[test]
+    fn tracked_work_writes_outside_the_standalone_scope_leave_the_baseline() {
+        let dir = setup_project();
+        let doc = attribution_doc_with_operator_edit(&dir);
+        agent_doc_element_backlog_io::with_backlog_command_effects(
+            &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
+            || agent_doc_element_backlog_io::backlog_cmd::add(&doc, "Closeout owned add", false),
+        )
+        .unwrap();
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
+            Some(ATTRIBUTION_DOC)
+        );
+    }
+
+    /// `#backlogiceboxreview` (closeout queue mirror): the 2026-10-11 14:32Z
+    /// `agent-doc-bugs.md` closeout appended four same-cycle heads through the
+    /// retained tracked-work path (`actionable_backlog_sync` →
+    /// `tracked_work_deferral_converged_continue_commit`), and its commit
+    /// checkpointed the baseline WITH them (`preflight_diff_start
+    /// snap_len=64769 file_len=64769`). The next preflight's `[user+] do [#id]`
+    /// was the synthetic queue-continuation diff of a `go` queue, not an
+    /// unattributed write: it must not be operator intent.
+    #[test]
+    fn appended_queue_heads_carried_by_the_baseline_are_continuation_not_operator_intent() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let before_mirror = CLAIMED_HEAD_DOC.replace(
+            "- [ ] [#runctrlclaude] Fix background supervisor thrash\n",
+            "- [ ] [#runctrlclaude] Fix background supervisor thrash\n- [ ] [#mirrored] Newly filed follow-up\n",
+        );
+        std::fs::write(&doc, &before_mirror).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &before_mirror,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        // The closeout mirror's tracked-work fallback (no standalone scope).
+        agent_doc_element_backlog_io::with_backlog_command_effects(
+            &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
+            || {
+                agent_doc_element_backlog_io::backlog_cmd::apply_document_rewrite(
+                    &doc,
+                    "actionable_backlog_sync_fallback",
+                    |live| {
+                        Ok(Some(live.replace(
+                            "- do [#runctrlclaude]\n",
+                            "- do [#runctrlclaude]\n- do [#mirrored]\n",
+                        )))
+                    },
+                )
+            },
+        )
+        .unwrap();
+        let after_mirror = std::fs::read_to_string(&doc).unwrap();
+        assert!(after_mirror.contains("- do [#mirrored]\n"));
+        // The closeout commit checkpoints the committed document.
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &after_mirror,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let parsed = claimed_head_preflight(&doc);
+        assert!(
+            parsed["user_intent_prompt_changes"]
+                .as_array()
+                .is_none_or(|changes| changes.is_empty()),
+            "a mirrored head the baseline carries is never operator intent: {parsed:#}"
+        );
+        let diff = parsed["diff"].as_str().unwrap_or_default();
+        assert!(!diff.contains("#mirrored"), "{parsed:#}");
+    }
+
     /// `#capturegatedispatched`: the 2026-10-09/10 `agent-doc-bugs.md` shape.
     /// `#actionable-review` expands to "Add actionable review items into
     /// backlog + queue", so ANY cycle whose diff carried that queue line used to

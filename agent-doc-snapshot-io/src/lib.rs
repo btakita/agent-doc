@@ -149,6 +149,50 @@ pub fn checkpoint_document_baseline_with_effects(
     Ok(())
 }
 
+/// `#backlogiceboxreview`: attribute a landed binary-owned component write to
+/// the agent by replaying its structural delta (`before` → `after`) onto the
+/// stored baseline, so the next preflight does not present it as an operator
+/// edit while any operator edit the baseline has not absorbed stays visible.
+///
+/// The baseline is left untouched when none is stored, or when the delta cannot
+/// be replayed without guessing (see
+/// [`agent_doc_element::baseline_attribution`]). Returns the attribution label
+/// that was logged.
+pub fn attribute_agent_write_to_document_baseline(
+    doc: &Path,
+    before: &str,
+    after: &str,
+    mut logger: impl FnMut(&Path, &str),
+) -> Result<&'static str> {
+    use agent_doc_element::baseline_attribution::{BaselineAttribution, attribute_component_write};
+    let Some(baseline) = load_document_baseline(doc)? else {
+        logger(
+            doc,
+            &format!(
+                "document_baseline_agent_write_attribution file={} outcome=no_baseline",
+                doc.display()
+            ),
+        );
+        return Ok("no_baseline");
+    };
+    let attribution = attribute_component_write(&baseline, before, after);
+    let label = attribution.label();
+    logger(
+        doc,
+        &format!(
+            "document_baseline_agent_write_attribution file={} outcome={label} before_len={} after_len={} baseline_len={}",
+            doc.display(),
+            before.len(),
+            after.len(),
+            baseline.len()
+        ),
+    );
+    if let BaselineAttribution::Patched(patched) = attribution {
+        checkpoint_document_baseline(doc, &patched, logger)?;
+    }
+    Ok(label)
+}
+
 fn load_document_state_projection(
     doc: &Path,
 ) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {

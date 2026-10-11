@@ -13,6 +13,7 @@ name = "agent_doc_snapshot_io"
 [dependencies]
 agent-doc-document = { path = "../agent-doc-document", version = "0.35.489" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.489" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.489" }
 agent-doc-diff-io = { path = "../agent-doc-diff-io", version = "0.35.489" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.489" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.489" }

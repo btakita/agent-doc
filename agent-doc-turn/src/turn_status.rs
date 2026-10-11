@@ -140,6 +140,14 @@ pub fn pane_title_status_marker_count(title: &str) -> usize {
 // transcript the hook named in its `transcript_path`. That record is
 // harness-authored turn-boundary evidence, unlike a scraped ready prompt, which
 // a harness redraws between tool calls inside a live turn.
+//
+// `#devclear`: Codex behaves the same way. Its `UserPromptSubmit` hook writes
+// the lease bound to the rollout JSONL named in `transcript_path`, and an
+// interrupted turn runs no `Stop` hook. Codex records the boundary in the
+// rollout as `{"type":"event_msg","payload":{"type":"turn_aborted",
+// "reason":"interrupted",...}}`; every new Codex turn writes `task_started`,
+// `turn_context` and `response_item` records after it, so the same
+// newest-decisive-record rule applies.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -155,7 +163,8 @@ pub fn pane_title_status_marker_count(title: &str) -> usize {
 // - `SessionStart` with source `clear`, `startup` or `resume`: the harness is
 //   at an idle prompt in a new or reloaded conversation. `compact` is excluded
 //   because auto-compaction fires `SessionStart` in the middle of a live turn.
-// - A settled `[Request interrupted by user…]` transcript record (above).
+// - A settled `[Request interrupted by user…]` transcript record, or a Codex
+//   rollout `turn_aborted` (reason `interrupted`) record (above).
 //
 // `Stop` is deliberately NOT a receipt: a Stop hook may answer
 // `decision: "block"` (open cycle, queue continuation), and the harness then
@@ -205,10 +214,31 @@ pub enum TranscriptTailEvidence {
     /// assistant message, a tool result).
     Activity,
     /// Nothing provable: no complete conversation record in the window, an
-    /// unparseable or still-being-written record, or a transcript shape this
-    /// policy does not recognise (for example a Codex rollout).
+    /// unparseable or still-being-written record, a record without a readable
+    /// timestamp, or a turn abort whose reason is not an operator interrupt.
     Unknown,
 }
+
+/// Codex rollout `event_msg` payload type the harness writes when a turn ends
+/// without completing (`#devclear`).
+pub const CODEX_TURN_ABORTED_EVENT: &str = "turn_aborted";
+
+/// The only Codex `turn_aborted` reason accepted as an interrupt. Every abort
+/// observed in local rollouts carries it; any other reason proves nothing.
+pub const CODEX_TURN_ABORTED_INTERRUPTED_REASON: &str = "interrupted";
+
+/// Codex rollout `event_msg` payload types that are main-turn conversation
+/// activity. Other `event_msg` types are bookkeeping (`token_count`,
+/// `thread_settings_applied`, `thread_goal_updated`, `item_completed`) or
+/// late completions of work an interrupted turn left running in the
+/// background (`exec_command_end`, `mcp_tool_call_end`), and are skipped.
+pub const CODEX_TURN_ACTIVITY_EVENTS: &[&str] = &[
+    "task_started",
+    "task_complete",
+    "user_message",
+    "agent_message",
+    "agent_reasoning",
+];
 
 /// True when `text` is a harness interrupt record.
 pub fn is_harness_interrupt_marker_text(text: &str) -> bool {
@@ -290,6 +320,34 @@ fn record_text_is_interrupt(content: &serde_json::Value) -> bool {
     }
 }
 
+fn record_timestamp_evidence(record: &serde_json::Value) -> TranscriptTailEvidence {
+    record
+        .get("timestamp")
+        .and_then(serde_json::Value::as_str)
+        .and_then(parse_rfc3339_utc_secs)
+        .map_or(TranscriptTailEvidence::Unknown, |at_secs| {
+            TranscriptTailEvidence::Interrupted { at_secs }
+        })
+}
+
+/// `#devclear`: what one Codex rollout `event_msg` record proves, or `None`
+/// when it is bookkeeping the scan skips.
+fn classify_codex_event(record: &serde_json::Value) -> Option<TranscriptTailEvidence> {
+    let payload = record.get("payload")?;
+    let kind = payload.get("type").and_then(serde_json::Value::as_str)?;
+    if kind == CODEX_TURN_ABORTED_EVENT {
+        let reason = payload.get("reason").and_then(serde_json::Value::as_str);
+        return Some(if reason == Some(CODEX_TURN_ABORTED_INTERRUPTED_REASON) {
+            record_timestamp_evidence(record)
+        } else {
+            TranscriptTailEvidence::Unknown
+        });
+    }
+    CODEX_TURN_ACTIVITY_EVENTS
+        .contains(&kind)
+        .then_some(TranscriptTailEvidence::Activity)
+}
+
 /// Classify the newest conversation record in a transcript tail.
 ///
 /// `tail` is the last bytes of a JSONL transcript; `starts_mid_file` is true
@@ -297,7 +355,10 @@ fn record_text_is_interrupt(content: &serde_json::Value) -> bool {
 /// fragment and is discarded. Records are scanned newest first. Bookkeeping
 /// records (attachments, links, system summaries, queue operations, file
 /// history) and subagent sidechain records are skipped; the first `user` or
-/// `assistant` record decides. Any unparseable segment met before that record,
+/// `assistant` record decides. For a Codex rollout (`#devclear`) the first
+/// `response_item`, `turn_context`, conversation `event_msg`, or interrupted
+/// `turn_aborted` record decides; other `event_msg` records are skipped. Any
+/// unparseable segment met before that record,
 /// including a trailing line still being written, yields
 /// [`TranscriptTailEvidence::Unknown`]: the probe never reaches past a record
 /// it cannot read to an older interrupt.
@@ -327,17 +388,19 @@ pub fn classify_transcript_tail(tail: &str, starts_mid_file: bool) -> Transcript
                     .get("message")
                     .and_then(|message| message.get("content"));
                 if content.is_some_and(record_text_is_interrupt) {
-                    return record
-                        .get("timestamp")
-                        .and_then(serde_json::Value::as_str)
-                        .and_then(parse_rfc3339_utc_secs)
-                        .map_or(TranscriptTailEvidence::Unknown, |at_secs| {
-                            TranscriptTailEvidence::Interrupted { at_secs }
-                        });
+                    return record_timestamp_evidence(&record);
                 }
                 return TranscriptTailEvidence::Activity;
             }
             Some("assistant") => return TranscriptTailEvidence::Activity,
+            // Codex rollout records (`#devclear`).
+            Some("response_item") | Some("turn_context") => {
+                return TranscriptTailEvidence::Activity;
+            }
+            Some("event_msg") => match classify_codex_event(&record) {
+                Some(evidence) => return evidence,
+                None => continue,
+            },
             _ => continue,
         }
     }
@@ -693,15 +756,135 @@ mod tests {
             classify_transcript_tail("tail of a huge tool result\"}\n", true),
             TranscriptTailEvidence::Unknown
         );
-        // A transcript shape this policy does not know (Codex rollout) proves nothing.
-        let codex = r#"{"type":"event_msg","payload":{"type":"turn_aborted"}}"#;
-        assert_eq!(
-            classify_transcript_tail(codex, false),
-            TranscriptTailEvidence::Unknown
-        );
+        // A Codex abort without a timestamp or an interrupt reason proves nothing.
+        for codex in [
+            r#"{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}"#,
+            r#"{"timestamp":"2026-10-11T00:10:28.372Z","type":"event_msg","payload":{"type":"turn_aborted"}}"#,
+            r#"{"timestamp":"2026-10-11T00:10:28.372Z","type":"event_msg","payload":{"type":"turn_aborted","reason":"replaced"}}"#,
+        ] {
+            assert_eq!(
+                classify_transcript_tail(codex, false),
+                TranscriptTailEvidence::Unknown,
+                "{codex}"
+            );
+        }
         assert_eq!(
             classify_transcript_tail("", false),
             TranscriptTailEvidence::Unknown
+        );
+    }
+
+    fn codex_line(at: u64, kind: &str, payload: serde_json::Value) -> String {
+        serde_json::json!({
+            "timestamp": format_rfc3339_utc_secs(at),
+            "type": kind,
+            "payload": payload,
+        })
+        .to_string()
+    }
+
+    fn codex_event(at: u64, event: &str) -> String {
+        codex_line(at, "event_msg", serde_json::json!({"type": event}))
+    }
+
+    fn codex_aborted(at: u64) -> String {
+        codex_line(
+            at,
+            "event_msg",
+            serde_json::json!({
+                "type": "turn_aborted", "turn_id": "t1", "reason": "interrupted",
+                "started_at": at - 2, "completed_at": at, "duration_ms": 1711,
+            }),
+        )
+    }
+
+    /// `#devclear` (live 2026-10-11, haiven-dev dev.md pane %127): the tail of
+    /// the Codex rollout after the operator interrupted a dispatched turn two
+    /// seconds in. The interrupt is the newest decisive record.
+    #[test]
+    fn codex_rollout_tail_reports_an_interrupted_turn() {
+        let tail = [
+            codex_line(
+                1_791_677_426,
+                "event_msg",
+                serde_json::json!({"type": "thread_settings_applied"}),
+            ),
+            codex_event(1_791_677_426, "task_started"),
+            codex_line(
+                1_791_677_426,
+                "response_item",
+                serde_json::json!({"type": "message", "role": "user", "content": []}),
+            ),
+            codex_line(1_791_677_426, "world_state", serde_json::json!({})),
+            codex_line(1_791_677_426, "turn_context", serde_json::json!({})),
+            codex_line(
+                1_791_677_428,
+                "response_item",
+                serde_json::json!({"type": "message", "role": "developer",
+                    "content": [{"type": "input_text", "text": "<turn_aborted>\n..."}]}),
+            ),
+            codex_aborted(1_791_677_428),
+            String::new(),
+        ]
+        .join("\n");
+        assert_eq!(
+            classify_transcript_tail(&tail, false),
+            TranscriptTailEvidence::Interrupted {
+                at_secs: 1_791_677_428
+            }
+        );
+        // Bookkeeping and background completions after the abort are skipped.
+        for late in [
+            codex_event(1_791_677_429, "token_count"),
+            codex_event(1_791_677_429, "exec_command_end"),
+            codex_event(1_791_677_429, "mcp_tool_call_end"),
+            codex_event(1_791_677_429, "item_completed"),
+            codex_event(1_791_677_429, "thread_goal_updated"),
+            codex_line(1_791_677_429, "token_usage_record", serde_json::json!({})),
+        ] {
+            let tail = format!("{tail}{late}\n");
+            assert_eq!(
+                classify_transcript_tail(&tail, false),
+                TranscriptTailEvidence::Interrupted {
+                    at_secs: 1_791_677_428
+                },
+                "{late}"
+            );
+        }
+    }
+
+    /// `#devclear`: any record of a newer Codex turn supersedes the abort.
+    #[test]
+    fn codex_rollout_newer_turn_activity_supersedes_the_abort() {
+        let aborted = codex_aborted(100);
+        for newer in [
+            codex_event(101, "task_started"),
+            codex_event(101, "user_message"),
+            codex_event(101, "agent_message"),
+            codex_event(101, "task_complete"),
+            codex_line(101, "turn_context", serde_json::json!({})),
+            codex_line(
+                101,
+                "response_item",
+                serde_json::json!({"type": "function_call", "name": "exec_command"}),
+            ),
+        ] {
+            let tail = format!("{aborted}\n{newer}\n");
+            assert_eq!(
+                classify_transcript_tail(&tail, false),
+                TranscriptTailEvidence::Activity,
+                "{newer}"
+            );
+        }
+        // A live Codex turn with no abort anywhere is activity, not unknown.
+        let live = format!(
+            "{}\n{}\n",
+            codex_event(100, "task_started"),
+            codex_event(101, "token_count")
+        );
+        assert_eq!(
+            classify_transcript_tail(&live, false),
+            TranscriptTailEvidence::Activity
         );
     }
 

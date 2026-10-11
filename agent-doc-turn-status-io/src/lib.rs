@@ -1055,6 +1055,56 @@ mod tests {
             clear_turn_active_marker(&self.base, self.pane).unwrap();
         }
 
+        /// `#devclear`: one Codex rollout record at the virtual clock.
+        fn codex_record(&self, kind: &str, payload: serde_json::Value) {
+            self.append(serde_json::json!({
+                "timestamp": self.stamp(), "type": kind, "payload": payload,
+            }));
+        }
+
+        /// Codex prompt submission: the rollout records `task_started`, the
+        /// `UserPromptSubmit` hook (`turn-status active`) writes the lease
+        /// bound to the rollout named in its payload, then the prompt lands.
+        fn codex_submit_prompt(&self, text: &str) {
+            self.codex_record(
+                "event_msg",
+                serde_json::json!({"type": "thread_settings_applied"}),
+            );
+            self.codex_record("event_msg", serde_json::json!({"type": "task_started"}));
+            let payload = serde_json::json!({
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "01a11743",
+                "turn_id": "01a1284b",
+                "transcript_path": self.transcript,
+                "cwd": "/repo",
+                "prompt": text,
+            })
+            .to_string();
+            apply_turn_status_hook_at(&self.base, self.pane, true, Some(&payload), self.now)
+                .unwrap();
+            self.codex_record(
+                "response_item",
+                serde_json::json!({"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": text}]}),
+            );
+            self.codex_record("turn_context", serde_json::json!({"cwd": "/repo"}));
+        }
+
+        /// Codex Esc: the rollout records `turn_aborted` and Codex runs NO
+        /// Stop hook.
+        fn codex_interrupt(&self) {
+            self.codex_record(
+                "response_item",
+                serde_json::json!({"type": "message", "role": "developer",
+                    "content": [{"type": "input_text", "text": "<turn_aborted>\nThe previous turn was interrupted on purpose.\n</turn_aborted>"}]}),
+            );
+            self.codex_record(
+                "event_msg",
+                serde_json::json!({"type": "turn_aborted", "turn_id": "01a1284b",
+                    "reason": "interrupted", "duration_ms": 1711}),
+            );
+        }
+
         fn live(&self) -> bool {
             read_turn_active_marker_for_pane_at(&self.base, self.pane, self.now).is_some()
         }
@@ -1220,6 +1270,124 @@ mod tests {
         let marker = read_turn_active_marker_at(&world.base, world.now).expect("sibling lease");
         assert_eq!(marker.pane, "%200");
         assert_eq!(turn_active_rows(&world.base), vec!["%200".to_string()]);
+    }
+
+    /// `#devclear` (live 2026-10-11, haiven-dev dev.md pane %127): the route
+    /// dispatched a prompt into a Codex pane, the operator pressed Esc ~2s
+    /// later, and Codex printed "Conversation interrupted" at an idle prompt.
+    /// Codex runs no Stop hook on an interrupt, so the lease stayed live and
+    /// Clear Session Context refused `evidence=turn_active_lease`. The
+    /// rollout's `turn_aborted` record must retire the lease and leave an
+    /// interrupt receipt, exactly as Claude's interrupt record does.
+    #[test]
+    fn sim_codex_interrupted_turn_lease_retires_without_a_stop_hook() {
+        let mut world = TurnSimWorld::new("%127");
+        world.codex_submit_prompt("Run agent-doc on tasks/dev.md");
+        assert!(world.live(), "a submitted Codex turn is live");
+        world.tick(2);
+        world.codex_interrupt();
+        let interrupted_at = world.now;
+        assert!(world.live(), "an unsettled interrupt keeps the lease");
+        // A background command the aborted turn left running finishes later:
+        // not turn activity.
+        world.tick(1);
+        world.codex_record("event_msg", serde_json::json!({"type": "exec_command_end"}));
+        world.codex_record("event_msg", serde_json::json!({"type": "token_count"}));
+        world.tick(agent_doc_turn::turn_status::TURN_INTERRUPT_SETTLE_SECS);
+        assert!(
+            !world.live(),
+            "the idle Codex pane no longer reads as mid-turn"
+        );
+        assert!(turn_active_rows(&world.base).is_empty());
+        let receipt =
+            last_harness_turn_end_for_pane(&world.base, world.pane).expect("interrupt receipt");
+        assert_eq!(receipt.ended_at, interrupted_at);
+        assert_eq!(receipt.reason, "interrupt");
+
+        // The next Codex prompt opens a lease the old abort cannot retire,
+        // and Codex's Stop hook (not a receipt) clears it normally.
+        world.tick(30);
+        world.codex_submit_prompt("next");
+        world.tick(20);
+        assert!(world.live());
+        assert_eq!(
+            reclaim_interrupted_turn_for_pane_at(&world.base, world.pane, world.now),
+            None
+        );
+        let stop = r#"{"hook_event_name":"Stop","stop_hook_active":false}"#;
+        apply_turn_status_hook_at(&world.base, world.pane, false, Some(stop), world.now).unwrap();
+        assert!(!world.live());
+        assert_eq!(
+            last_harness_turn_end_for_pane(&world.base, world.pane),
+            Some(receipt)
+        );
+    }
+
+    /// `#devclear`: fail closed while a Codex turn may still be running.
+    #[test]
+    fn sim_codex_abort_never_retires_a_live_or_newer_turn() {
+        let mut world = TurnSimWorld::new("%127");
+        // An abort of an EARLIER turn, then a new prompt a second later
+        // whose hook wrote the lease before the turn's records landed.
+        world.codex_submit_prompt("first");
+        world.tick(2);
+        world.codex_interrupt();
+        write_turn_active_marker_with_transcript_at(
+            &world.base,
+            world.pane,
+            world.now + 1,
+            Some(&world.transcript),
+        )
+        .unwrap();
+        world.tick(10);
+        assert!(
+            world.live(),
+            "an abort older than the lease says nothing about it"
+        );
+
+        // A live Codex turn that is only emitting bookkeeping stays live.
+        let mut world = TurnSimWorld::new("%127");
+        world.codex_submit_prompt("long tool call");
+        world.tick(1);
+        world.codex_record("event_msg", serde_json::json!({"type": "token_count"}));
+        world.tick(600);
+        assert!(world.live());
+        // An abort with an unrecognised reason proves nothing.
+        world.codex_record(
+            "event_msg",
+            serde_json::json!({"type": "turn_aborted", "reason": "replaced"}),
+        );
+        world.tick(30);
+        assert!(world.live());
+    }
+
+    /// `#devclear`: the exact read Clear Session Context's live-turn guard makes
+    /// (`turn_active_for_pane`, real clock) releases an interrupted Codex turn.
+    #[test]
+    fn codex_interrupt_releases_the_operator_clear_guard_read() {
+        let dir = agent_doc_base();
+        let base = dir.path();
+        let rollout = base.join("rollout-codex.jsonl");
+        let now = now_secs();
+        let started = now - 10;
+        let stamp = agent_doc_turn::turn_status::format_rfc3339_utc_secs;
+        std::fs::write(
+            &rollout,
+            format!(
+                "{}\n{}\n",
+                serde_json::json!({"timestamp": stamp(started), "type": "event_msg",
+                    "payload": {"type": "task_started"}}),
+                serde_json::json!({"timestamp": stamp(started + 2), "type": "event_msg",
+                    "payload": {"type": "turn_aborted", "reason": "interrupted"}}),
+            ),
+        )
+        .unwrap();
+        write_turn_active_marker_with_transcript_at(base, "%127", started, Some(&rollout)).unwrap();
+        assert!(!turn_active_for_pane(base, "%127"));
+        assert_eq!(
+            last_harness_turn_end_for_pane(base, "%127").map(|r| r.ended_at),
+            Some(started + 2)
+        );
     }
 
     #[test]

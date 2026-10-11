@@ -268,14 +268,14 @@ The exchange is large (215 lines, 12 sections). The queue is active, so I'm not 
 - ~~do [#editoropscheckpointfail]~~
 - 🚧 Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.
 - 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/237
-- do [#refreshmemlockstall]
+- 🚧 do [#refreshmemlockstall]
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#refreshmemlockstall] [agent-doc] The controller's refresh_memory durable_reload holds the project state lock for 1-4s, which is the root of the editor-op append timeouts seen during the 2026-10-11 sdk.md typing burst. 0.35.488 (editoropscheckpointfail f99567825) survives them by retaining and re-sending with the same batch id; remove the stall itself: shrink the critical section (load outside the lock, swap under it) and add a regression test that a concurrent editor-op append is not blocked by a durable reload.
+- [ ] 🚧 [#refreshmemlockstall] [agent-doc] The controller's refresh_memory durable_reload holds the project state lock for 1-4s, which is the root of the editor-op append timeouts seen during the 2026-10-11 sdk.md typing burst. 0.35.488 (editoropscheckpointfail f99567825) survives them by retaining and re-sending with the same batch id; remove the stall itself: shrink the critical section (load outside the lock, swap under it) and add a regression test that a concurrent editor-op append is not blocked by a durable reload.
 <!-- /agent:backlog -->
 
 ## Review

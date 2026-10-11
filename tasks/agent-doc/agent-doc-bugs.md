@@ -364,6 +364,19 @@ All eight subagent fixes are merged, verified on the combined code, installed, a
 - `#qheadresiduestrike`: the residue strike can still strike a re-typed item that isn't a recurring command.
 - `#checktmpdirleak`: a test TMPDIR showed another worktree's path.
 - `#subagentmsgcollide`: concurrent subagents overwrote each other's commit-message files.
+
+### Re: sdk.md wedge and the four follow-ups dispatched — opus-5-5 · 2026-10-11T05:08-04:00
+
+**Dispatched in this cycle; each item is claimed and has its own worktree on v0.35.489:**
+- **sdk.md subagent turn wedged** (`subagent:sdkwedge`). This one is urgent. The subagent works read-only on the live system: no keys, recycles, restarts or writes. Its first job is to send me a quick diagnosis of what is wedged and whether restarting is safe, or what gentler recovery to use; I'll pass that on as soon as it arrives. Then it fixes the root cause, including checking whether the v0.35.489 install or recycle triggered the wedge.
+- **`#loadbudgettests`**: rewrite the four timing-limit tests so they pass or fail deterministically, using an injected clock, event barriers or operation counts. Each must still pass with the CPU saturated and still fail when the behaviour is actually broken. Raising limits and rerunning until green are both off the table.
+- **`#qheadresiduestrike`**: the catch-up residue strike will only count answers written after a head was re-added, so a re-typed repeat bug report stays live.
+- **`#checktmpdirleak`**: find how the test TMPDIR leaked between worktrees, check whether tests could have written into another checkout, and isolate the TMPDIR per checkout.
+- **`#subagentmsgcollide`**: add a rule to the subagent authorization text the binary emits: commit messages go through `git commit -F -`, and temp files live in the subagent's own worktree, never a shared scratch file. Every place that text is rendered must read from one source.
+
+**New backlog item (filed this cycle):** last cycle's closeout applied each of my four backlog adds twice. Each landed once under its own id and once under a generated id with my id left in the text, ending at 8 items and 8 queue lines. This happened on the path where the tracked-work half was retained and then absorbed. I removed the duplicates with `backlog remove` and `queue consume --id`. The new item asks for replay to be idempotent and comes with a regression test.
+
+**Still waiting on you:** `#drivecapturedsplice`. It types real keystrokes into your desktop, so write `go #drivecapturedsplice` when you can step away.
 <!-- agent:boundary:861a07a6 -->
 <!-- /agent:exchange -->
 
@@ -374,32 +387,31 @@ All eight subagent fixes are merged, verified on the combined code, installed, a
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~See `NOTIFY from src/haiven-dev/tasks/sdk.md` in this document.~~
 - ~~Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.~~
-- ~~#gh-fix: https://github.com/btakita/agent-doc/issues/237~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix: https://github.com/btakita/agent-doc/issues/238~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix: https://github.com/btakita/agent-doc/issues/237~~
+- ~~#gh-fix: https://github.com/btakita/agent-doc/issues/238~~
 - ~~do [#refreshmemlockstall]~~
 - ~~#actionable-review~~
-- ~~I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.~~
 - ~~release + publish~~
-- 🚧 sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.
-- do [#drivecapturedsplice]
-- do [#wallclockbudget]
-- do [#queuecatchresidue]
-- do [#duringconcurrentcheck]
-- do [#forkedsubagentsdispatche]
+- ~~sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.~~
+- ⏳ do [#drivecapturedsplice]
+- ~~do [#wallclockbudget]~~
+- ~~do [#queuecatchresidue]~~
+- ~~do [#duringconcurrentcheck]~~
+- ~~do [#forkedsubagentsdispatche]~~
+- sdk.md turn with a subagent is wedged. Asking me to restart.
 - do [#loadbudgettests]
 - do [#qheadresiduestrike]
 - do [#checktmpdirleak]
 - do [#subagentmsgcollide]
-- ~~Navigating between sdk.md + rpg.md resulted in a tmux focus on rpg.md in the 1:stash tmux window. Please make sure the focus effects always sync with the current Editor document(s).~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Navigating between sdk.md + rpg.md resulted in a tmux focus on rpg.md in the 1:stash tmux window. Please make sure the focus effects always sync with the current Editor document(s).~~
+- do [#respondcloseoutbacklog]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#wallclockbudget] #loadbudgettests [agent-doc] Wall-clock budget tests fail when many test suites run concurrently (load average 70-140 with 8 subagents in make check): closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes (3.70s and 5.7s vs a 3s budget; 0.7-1.5s alone), agent-doc-sync-io rename_debounce_suppresses_auto_start and rename_debounce_does_not_affect_other_files, finalize_editor_absent_replays_operator_deleted_struck_queue_rows (24.6s vs 10.3s alone). Make them deterministic (virtual clock or a CPU-time budget, not wall clock) instead of raising budgets or rerunning to green.
-- [ ] [#queuecatchresidue] #qheadresiduestrike [agent-doc] The queue catch-up residue strike can still strike an operator re-typed free-text head that is not a recurring command (for example a repeated bug report), because it matches against every earlier Queue prompt echo in the exchange, not only echoes written after the head was re-added. Scope the match to echoes newer than the head's re-entry; regression test with a re-typed repeated report.
-- [ ] [#duringconcurrentcheck] #checktmpdirleak [agent-doc] During concurrent make check runs in separate worktrees, the check-test-tmpdir setup step printed another worktree's path (/var/tmp:/home/brian/work/btakita/agent-doc-wt/sdkqueuesync). Find where the test TMPDIR is derived or cached across worktrees and isolate it per checkout.
-- [ ] [#forkedsubagentsdispatche] #subagentmsgcollide [agent-doc] Forked subagents dispatched by a queue coordinator share one scratchpad, and one subagent's commit-message file overwrote another's (sdk-queue-subagent-sync commit 32a13fb3e7 carries the cancel-turn message). Have the binary-emitted subagent authorization preamble require a per-subagent message file (or commit -F from stdin) so concurrent commits cannot swap messages.
+- [ ] [#respondcloseoutbacklog] [agent-doc] A respond closeout with --backlog-add "<id> text" flags applied every add twice when its tracked-work half was retained by the delivery projection: once under the given id and once under a coined hash id with the id left in the text (2026-10-11 05:00 EDT on agent-doc-bugs.md: 4 adds became 8 backlog items and 8 queue heads; output said 'reopened a fresh cycle for a pending-only tracked-work update' then 'retained while their delivery projection converges', then 'appended 8 same-cycle actionable backlog id(s)'). Make the retained tracked-work replay idempotent by mutation identity, with a regression test reproducing the retained-then-absorbed path.
 - [ ] [#loadbudgettests] [agent-doc] Wall-clock budget tests fail when many test suites run concurrently (load average 70-140 with 8 subagents in make check): closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes (3.70s and 5.7s vs a 3s budget; 0.7-1.5s alone), agent-doc-sync-io rename_debounce_suppresses_auto_start and rename_debounce_does_not_affect_other_files, finalize_editor_absent_replays_operator_deleted_struck_queue_rows (24.6s vs 10.3s alone). Make them deterministic (virtual clock or a CPU-time budget, not wall clock) instead of raising budgets or rerunning to green.
 - [ ] [#qheadresiduestrike] [agent-doc] The queue catch-up residue strike can still strike an operator re-typed free-text head that is not a recurring command (for example a repeated bug report), because it matches against every earlier Queue prompt echo in the exchange, not only echoes written after the head was re-added. Scope the match to echoes newer than the head's re-entry; regression test with a re-typed repeated report.
 - [ ] [#checktmpdirleak] [agent-doc] During concurrent make check runs in separate worktrees, the check-test-tmpdir setup step printed another worktree's path (/var/tmp:/home/brian/work/btakita/agent-doc-wt/sdkqueuesync). Find where the test TMPDIR is derived or cached across worktrees and isolate it per checkout.

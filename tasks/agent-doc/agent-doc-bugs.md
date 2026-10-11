@@ -224,6 +224,28 @@ Still in flight for the next batch: `capturegatedispatched` (done, `436cb0652`) 
 **Disclosure:** to restart the check on the version-projected tree, I ran `pkill -f 'make check'`. That matched its own shell and any other session's `make check` running at that moment on this machine. No make or nextest processes survived to show who else, if anyone, was hit. If another session reports a check that died of SIGTERM around 01:20, this caused it. Next time I'll stop my own background task by its id.
 
 **Follow-up to file:** the controller's `refresh_memory durable_reload` holds the project state lock for 1–4s. That stall is the root of the editor-op timeouts, which are now survived through retention but not removed.
+
+### Re: v0.35.488 released; two new heads dispatched — opus-5.5 · 2026-10-11T02:10-04:00
+
+> **Queue prompt:** release + publish
+
+> **Queue prompt:** Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.
+
+**v0.35.488 is released and installed.** The `make release` started before your `/clear` kept running and exited 0 with `tag_publish_handoff=complete local_install_full=complete`. `main` is pushed to `1318e9005` (`release: v0.35.488`), and `agent-doc --version` reports 0.35.488. The tag's GitHub Release workflow, which publishes PyPI and Homebrew, was still running at closeout.
+
+**Shipped and closed:**
+- `capturegatedispatched` `436cb0652`: the capture gate now only applies to heads that this cycle drains.
+- the sdk.md Clear Session Context wedge, `sdkclearwedge` `7599b0548`: a prompt cancelled before it was persisted retires its turn lease, and a deferred clear that is already satisfied is dropped.
+- `visiblewritewallclock` `9c0d0e257`: the poll test waits on the writer's receipt; it passed 30/30 with 96 busy-loops sharing its core.
+- `editoropscheckpointfail` `f99567825`: an editor-op append that times out is kept and re-sent with the same batch id, and the controller dedups it.
+
+**Dispatched this cycle**, each claimed, in its own worktree branched from `v0.35.488`, with its authorization preamble pasted verbatim:
+- The Cancel Turn issue you just reported, on `fix/cancelturnprompt`. It will find which component left `/agent-doc <FILE>` in the Claude prompt after the cancel, and why Clear Session Context stayed refused after you emptied the prompt. It fixes both at the root with regression tests and a spec update. This looks like a different path from `sdkclearwedge`. It will also say whether your current state needs any action.
+- GH #237, on `fix/gh237-queue-add`: `agent-doc queue add` for external tools. Per the issue it goes through the binary write path so it works under a live editor, dedupes by key, redacts secrets, and reaches running sessions as `drain_after_current` steering. I close the issue after integrating and releasing.
+
+**New backlog item:** `refreshmemlockstall`. The controller's durable reload holds the project state lock for 1–4s. That stall caused the editor-op timeouts, which 0.35.488 now survives but does not remove.
+
+The exchange is at 193 lines; compacting can wait until the queue drains.
 <!-- agent:boundary:861a07a6 -->
 <!-- /agent:exchange -->
 
@@ -232,19 +254,20 @@ Still in flight for the next batch: `capturegatedispatched` (done, `436cb0652`) 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#capturegatedispatched]
-- 🚧 Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.
-- 🚧 do [#visiblewritewallclock]
-- 🚧 do [#editoropscheckpointfail]
-- 🚧 release + publish
+- ~~⏭️ do [#capturegatedispatched]~~
+- ~~Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.~~
+- ~~do [#visiblewritewallclock]~~
+- ~~do [#editoropscheckpointfail]~~
+- Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.
+- #gh-fix: https://github.com/btakita/agent-doc/issues/237
+- do [#refreshmemlockstall]
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#visiblewritewallclock] [agent-doc] test_poll_lazily_event_appears_after_delay (agent-doc-write-runtime-io) still assumes the writer finishes within its 5s poll deadline: it fails 7/30 with the test process pinned to one core shared with 96 busy-loops, even after the visiblewriteloadflake fix (30/30 at 56 and 64 busy-loops). Remove the wall-clock assumption by making the poll wait on the writer's receipt event, not on a deadline; do not raise the timeout. Prove it with the pinned-core stress script (scratchpad pinned.sh pattern) at K=96.
-- [ ] 🚧 [#editoropscheckpointfail] [agent-doc] During the 2026-10-11 03:40Z sdk.md typing burst, editor_ops_record_failed ('append Lazily editor-op checkpoint') fired three times, so the editor-op history had no record of the edits that led to the typingforkdup duplicate. 0.35.487 logs the full error chain. On the next occurrence, find from that chain why the editor-op checkpoint append fails under rapid typing, and fix it so op provenance is never lost.
-- [ ] 🚧 [#capturegatedispatched] [agent-doc] The finalize pre-write pending_capture gate ('active prompt requested backlog capture but no backlog mutations were recorded this cycle') fires on cycles whose only backlog-capture preset (for example the actionable-review item preset carried on queue steering) belongs to a head already claimed by or dispatched to a subagent. Coordinator dispatch-only cycles must then add a suppression marker or a filler backlog item. Seen twice on 2026-10-09/10 in agent-doc-bugs.md. Scope the gate to presets whose heads this cycle actually drains: a claimed or dispatched head's capture belongs to the cycle that closes it. Add regression coverage for a dispatch-only coordinator cycle.
+- [ ] [#refreshmemlockstall] [agent-doc] The controller's refresh_memory durable_reload holds the project state lock for 1-4s, which is the root of the editor-op append timeouts seen during the 2026-10-11 sdk.md typing burst. 0.35.488 (editoropscheckpointfail f99567825) survives them by retaining and re-sending with the same batch id; remove the stall itself: shrink the critical section (load outside the lock, swap under it) and add a regression test that a concurrent editor-op append is not blocked by a durable reload.
 <!-- /agent:backlog -->
 
 ## Review

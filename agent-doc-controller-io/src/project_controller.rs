@@ -3069,6 +3069,48 @@ impl Drop for StateEventIngressGuard<'_> {
     }
 }
 
+/// Per-document record of editor-op append batches (client `event_nonce`) the
+/// controller has already applied (`#editoropscheckpointfail`).
+///
+/// An editor's append request has a short response budget. When the project
+/// state-ingress lock is held (a `refresh_memory` durable reload can hold it for
+/// seconds), the client's recv timeout fires while the request is still queued
+/// here; the controller then applies it anyway. The client cannot tell "late"
+/// from "lost", so it retains and re-sends the identical batch. This ledger makes
+/// that re-send idempotent: a nonce already applied is acknowledged without a
+/// second append, so retry can never duplicate typed operations.
+///
+/// Bounded per document; a client retries a batch within seconds, never after
+/// thousands of newer batches for the same document.
+#[derive(Debug, Default)]
+pub(crate) struct EditorOpCaptureAppliedNonces {
+    by_document: std::collections::HashMap<String, std::collections::VecDeque<String>>,
+}
+
+impl EditorOpCaptureAppliedNonces {
+    pub(crate) const PER_DOCUMENT_LIMIT: usize = 1024;
+
+    pub(crate) fn contains(&self, document_hash: &str, nonce: &str) -> bool {
+        self.by_document
+            .get(document_hash)
+            .is_some_and(|nonces| nonces.iter().any(|seen| seen == nonce))
+    }
+
+    pub(crate) fn record(&mut self, document_hash: &str, nonce: &str) {
+        let nonces = self
+            .by_document
+            .entry(document_hash.to_string())
+            .or_default();
+        if nonces.iter().any(|seen| seen == nonce) {
+            return;
+        }
+        if nonces.len() >= Self::PER_DOCUMENT_LIMIT {
+            nonces.pop_front();
+        }
+        nonces.push_back(nonce.to_string());
+    }
+}
+
 pub(crate) struct ControllerRuntime {
     bootstrap: Mutex<ControllerBootstrap>,
     memory: Mutex<ControllerMemoryState>,
@@ -3116,7 +3158,12 @@ pub(crate) struct ControllerRuntime {
     /// Serialize editor-op epoch read/derive/append transitions. The checkpoint
     /// fact contains the complete epoch, so two concurrent IDE callbacks must
     /// not derive from the same predecessor and overwrite one another.
-    editor_op_capture_writes: Mutex<()>,
+    ///
+    /// `#editoropscheckpointfail`: the guarded value remembers which append
+    /// batches (by client `event_nonce`) this controller already applied, so a
+    /// client re-sending a batch whose first attempt timed out while it was
+    /// still queued here is an idempotent no-op instead of a duplicated op run.
+    pub(crate) editor_op_capture_writes: Mutex<EditorOpCaptureAppliedNonces>,
     /// `#lazily-hot-path` W1 — notified whenever the in-memory state projection
     /// advances (`apply_state_event` / `refresh_memory`). Bounded awaits park here
     /// instead of making every waiter re-poll the projection on its own timer, so
@@ -7505,7 +7552,7 @@ impl ControllerRuntime {
             document_path_transition_graph,
             async_editor_commands,
             supervisor_recycle_waiters: Condvar::new(),
-            editor_op_capture_writes: Mutex::new(()),
+            editor_op_capture_writes: Mutex::new(EditorOpCaptureAppliedNonces::default()),
             state_projection_waiters: Condvar::new(),
             document_graphs,
             recycle_requested: AtomicBool::new(false),
@@ -16986,7 +17033,7 @@ agent:queue\n\
             supervisor_recycle_graph,
             coordination_graph,
             supervisor_recycle_waiters: Condvar::new(),
-            editor_op_capture_writes: Mutex::new(()),
+            editor_op_capture_writes: Mutex::new(EditorOpCaptureAppliedNonces::default()),
             state_projection_waiters: Condvar::new(),
             document_graphs,
             state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),

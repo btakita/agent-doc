@@ -2940,8 +2940,10 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         {
             // Regression fixture for the controller/actor cycle: the reactive
             // Effect must hand this adapter work to its worker instead of
-            // holding the Lazily context while the adapter is blocked.
-            std::thread::sleep(Duration::from_millis(750));
+            // holding the Lazily context while the adapter is blocked. The
+            // adapter blocks on a gate the test holds closed (`#loadbudgettests`),
+            // not on a 750ms sleep the test raced against a 250ms bound.
+            blocking_strike_adapter_gate::pass();
         }
         let current = std::fs::read_to_string(&invocation.file)
             .context("project controller test free-text strike: failed to read document")?;
@@ -2957,6 +2959,58 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
 #[cfg(test)]
 static TEST_RUNTIME_EFFECTS: TestProjectControllerRuntimeEffects =
     TestProjectControllerRuntimeEffects;
+
+/// Gate for the `blocking-session.md` free-text strike adapter fixture.
+///
+/// `#loadbudgettests`: "publishing must not wait for the adapter" is proven by
+/// ordering, not elapsed time. The test closes the gate, publishes, and then
+/// requires that the adapter has NOT passed the gate: a publish that waited on
+/// the adapter could only have returned after the gate opened. The gate opens
+/// itself after [`blocking_strike_adapter_gate::HANG_CEILING`], so that
+/// regression fails the assertion instead of hanging the suite.
+#[cfg(test)]
+mod blocking_strike_adapter_gate {
+    use std::time::{Duration, Instant};
+
+    pub(super) const HANG_CEILING: Duration = Duration::from_secs(30);
+
+    struct Gate {
+        open: bool,
+        passed: usize,
+    }
+
+    static GATE: parking_lot::Mutex<Gate> = parking_lot::Mutex::new(Gate {
+        open: true,
+        passed: 0,
+    });
+    static OPENED: parking_lot::Condvar = parking_lot::Condvar::new();
+
+    pub(super) fn close() {
+        let mut gate = GATE.lock();
+        gate.open = false;
+        gate.passed = 0;
+    }
+
+    pub(super) fn open() {
+        GATE.lock().open = true;
+        OPENED.notify_all();
+    }
+
+    pub(super) fn passed() -> usize {
+        GATE.lock().passed
+    }
+
+    pub(super) fn pass() {
+        let deadline = Instant::now() + HANG_CEILING;
+        let mut gate = GATE.lock();
+        while !gate.open {
+            if OPENED.wait_until(&mut gate, deadline).timed_out() {
+                break;
+            }
+        }
+        gate.passed += 1;
+    }
+}
 
 /// `#orchver` — stamp the binary crate's `CARGO_PKG_VERSION` into controller identity.
 /// This keeps stale-binary warnings tied to the installed `agent-doc` executable even if
@@ -11051,6 +11105,12 @@ pub(crate) fn test_bootstrap(dir: &tempfile::TempDir) -> ControllerBootstrap {
 
 #[cfg(test)]
 pub(crate) fn wait_for_test_controller(project_root: &Path) {
+    // `#loadbudgettests`: callers need the controller to come up (liveness),
+    // not to come up within a startup budget. A 5s budget failed
+    // `controller_client_connection_is_one_request` at load average ~90 while
+    // the same startup takes 0.42s alone, so the bound is only a hang ceiling
+    // below nextest's 180s per-test guard.
+    const STARTUP_HANG_CEILING: Duration = Duration::from_secs(120);
     let started = Instant::now();
     loop {
         if status(project_root)
@@ -11060,7 +11120,7 @@ pub(crate) fn wait_for_test_controller(project_root: &Path) {
             return;
         }
         assert!(
-            started.elapsed() < Duration::from_secs(5),
+            started.elapsed() < STARTUP_HANG_CEILING,
             "test controller did not start"
         );
         std::thread::sleep(Duration::from_millis(10));
@@ -21386,11 +21446,12 @@ revised operator request
             .document_queue_authority_observe(&document_hash, &canonical, content.clone())
             .unwrap();
 
-        let projection_started = Instant::now();
+        blocking_strike_adapter_gate::close();
         append_state_event(dir.path(), &captured).unwrap();
         runtime.apply_state_event(&captured).unwrap();
-        assert!(
-            projection_started.elapsed() < Duration::from_millis(250),
+        assert_eq!(
+            blocking_strike_adapter_gate::passed(),
+            0,
             "publishing ResponseCaptured must not wait for the actor/editor adapter"
         );
         let durable = runtime
@@ -21413,7 +21474,10 @@ revised operator request
             "captured response plus authority must derive a target: {strike:?}"
         );
 
-        let deadline = Instant::now() + Duration::from_secs(3);
+        // Release the adapter; the asynchronous worker now applies the strike.
+        // The wait below is for that event, bounded only by a hang ceiling.
+        blocking_strike_adapter_gate::open();
+        let deadline = Instant::now() + blocking_strike_adapter_gate::HANG_CEILING;
         let projected = loop {
             let projected = std::fs::read_to_string(&canonical).unwrap();
             if projected.contains("auto-struck: answered this cycle (#ftstrike)") {

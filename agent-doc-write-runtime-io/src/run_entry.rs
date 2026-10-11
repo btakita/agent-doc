@@ -277,29 +277,39 @@ fn application_baseline_for_preflight_witness<'a>(
     }
 }
 
+/// Consume the editor-op epoch a successful write replayed. `#loadbudgettests`:
+/// the outcome is read from the state
+/// ([`agent_doc_op_capture_io::consume_replayed_editor_op_epoch`]), so a clear
+/// whose reply missed its budget on a loaded host while the actor applied it
+/// still logs `consumed`, not `clear_failed`.
 fn clear_replayed_editor_ops_after_write(file: &Path, replayed: bool, source: &str) {
     if !replayed {
         return;
     }
-    match agent_doc_op_capture_io::clear_op_capture(file) {
-        Ok(()) => agent_doc_ops_log_io::log_op(
+    match agent_doc_op_capture_io::consume_replayed_editor_op_epoch(file) {
+        agent_doc_op_capture_io::ReplayedEpochConsumption::Consumed {
+            outcome,
+            attempt,
+            error,
+        } => agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "{source}_pending_editor_cut_consumed file={} outcome=cleared_after_successful_write",
+                "{source}_pending_editor_cut_consumed file={} outcome={outcome} attempt={attempt}{}",
                 file.display(),
+                error.map(|err| format!(" error={err}")).unwrap_or_default(),
             ),
         ),
-        Err(err) => {
+        agent_doc_op_capture_io::ReplayedEpochConsumption::Failed { attempts, error } => {
             eprintln!(
-                "[write] warning: failed to clear replayed editor-op capture for {} after successful write: {err}",
+                "[write] warning: failed to clear replayed editor-op capture for {} after successful write: {error}",
                 file.display(),
             );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "{source}_pending_editor_cut_clear_failed file={} error={}",
+                    "{source}_pending_editor_cut_clear_failed file={} attempts={attempts} error={}",
                     file.display(),
-                    err,
+                    error,
                 ),
             );
         }

@@ -2130,8 +2130,14 @@ mod tests {
     }
 
     /// Wait until `path` accepts a connection, or give up.
+    /// Wait until a listener serves `path`. `#loadbudgettests`: callers assert
+    /// that a listener eventually serves (liveness), not how fast, so the bound
+    /// is only a hang ceiling below nextest's 180s per-test guard. A 5s budget
+    /// failed `a_bound_but_unaccepting_listener_is_evicted_not_protected` at
+    /// load average ~100: its listener first spends up to the 3s connect
+    /// timeout probing the wedged socket before it evicts and rebinds.
     fn await_endpoint(path: &Path) -> bool {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(120);
         while Instant::now() < deadline {
             if endpoint_answers(path) {
                 return true;

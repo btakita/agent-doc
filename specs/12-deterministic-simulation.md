@@ -108,10 +108,28 @@ nextest passed. Plain parallel `cargo test -p agent-doc-crdt-relay-io`,
 
 Current deterministic budgets:
 
-- Fast corpus: seeds `0..512`, `24` commands per seed, budget `3s`, always run
-  by `cargo test`.
-- Medium corpus: seeds `0..2048`, `32` commands per seed, budget `12s`, run by
-  `make check`.
+- Fast corpus: seeds `0..512`, `24` commands per seed, CPU-time budget `3s`,
+  always run by `cargo test`.
+- Medium corpus: seeds `0..2048`, `32` commands per seed, CPU-time budget
+  `12s`, run by `make check`.
+
+The budgets are perf-regression guards on the simulator's own work, so they are
+measured in the corpus thread's CPU time (`CLOCK_THREAD_CPUTIME_ID`), never wall
+clock (`#loadbudgettests`). The corpora run single-threaded and in memory; a
+thread descheduled by host load accrues no CPU time, so a loaded `make check`
+(load average 70-140 with several suites running) cannot fail them while the
+same work stretched the wall-clock run from ~1s to 5.7s. The diagnostic line
+prints both (`cpu_ms=… wall_ms=… cpu_budget_ms=…`). A platform without a
+per-thread CPU clock reports the run and skips the budget rather than falling
+back to wall clock.
+
+Tests in the default suite must not assert a wall-clock bound to prove a
+property that host load can stretch. Pin the clock instead: inject `now` (the
+rename-debounce lease window), count observations and injected sleeps (a
+zero-budget wait never sleeps), or answer from state (a replayed editor-op
+epoch is consumed when it reads back absent, not when one bounded clear round
+trip beat the clock). Coarse "returns instead of hanging" bounds of a second or
+more remain where no deterministic witness exists yet.
 
 To replay one seed while reducing a failure, run a focused test with the seed
 mentioned in the panic trace and temporarily promote that schedule into a named

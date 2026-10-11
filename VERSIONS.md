@@ -58,6 +58,43 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   deleted: a marker line counts as removed only when its line-diff hunk has no replacement lines or none of its own
   characters survive as a run of at least four (the `<!--` frame). An update that deletes a whole marker line is still
   restored and logged as `crdt_replica_update_corruption_rejected`.
+- **Tests no longer fail on a loaded host because they read the wall clock (`#loadbudgettests`).**
+  Under `make check` with several suites running (load average 70-140), four tests failed while doing the same work.
+  - The fast and medium simulator corpus budgets are perf-regression guards. They now measure the corpus thread's CPU
+    time, not wall clock. Under a load average of about 130, the fast corpus took 8.7s of wall clock but only 1.5s of
+    CPU time against its 3s budget.
+  - The rename-debounce lease takes an injected `now`, so its tests pin the 5s window instead of racing it. A lease
+    whose state.db write fails is now reported rather than silently dropped. A new `rename_debounce_expires_after_ttl`
+    test covers the boundary and the self-clean.
+  - `run_stream` (finalize / `write --stream`) now consumes a replayed editor-op epoch through the same state-based
+    helper as compact, `consume_replayed_editor_op_epoch`. It clears with the causal-fence budget and, after a clear
+    error, reads the state. An actor that applied the clear but replied late no longer logs `clear_failed` without
+    `consumed`. `finalize_editor_absent_replays_operator_deleted_struck_queue_rows` now asserts the epoch with a read
+    that can fail. The old `!has_pending_editor_ops` check passed even when the read errored, and here it always did:
+    the finalize's exited controller had left a socket that refused every read.
+  - The zero-budget replica-liveness wait asserts that it never sleeps, instead of finishing under 50ms. The
+    projection-reuse test relies on its single counted authority call, instead of finishing under 150ms.
+  - `serialized_atomic_write_defers_zero_replica_editor_owner_without_touching_disk` counts bounded editor-delivery
+    waits entered for its document and requires zero. A wait entry is the stall itself; it used to be timed against a
+    2.5s bound, which hit 4.3s under load on a path that entered no wait. `FAIL_FAST_BUDGET` is removed.
+  - `editor_receipt_pending_owned_cell_waits_past_the_ordinary_budget` lands its late delta after the waiter's
+    ordinary 200ms budget, measured from the waiter's own start. The pending budget is only a hang ceiling, so a
+    starved writer (5.7s under load) cannot become a refusal. Applying the ordinary budget to a pending cell still
+    refuses at 200ms.
+  - The ipc-io `await_endpoint` helper waits for liveness with a hang ceiling, not a 5s budget.
+    `a_bound_but_unaccepting_listener_is_evicted_not_protected` first spends up to the 3s connect timeout probing the
+    wedged socket before it rebinds, and failed the 5s budget in a full `make check` at load average ~100.
+  - `captured_response_and_authority_reactively_project_answered_free_text_strike` proves that publishing
+    `ResponseCaptured` does not wait for the strike adapter by ordering. The `blocking-session.md` adapter fixture
+    blocks on a gate that the test holds closed, where it used to sleep 750ms against a 250ms bound. The test requires
+    that the adapter has not passed the gate when the publish returns. If the publish waited on the adapter, the gate
+    opens at its 30s ceiling, the adapter passes it first, and the assertion fails.
+  - The controller-io `wait_for_test_controller` helper waits for startup with a hang ceiling, not a 5s budget. That
+    budget failed `controller_client_connection_is_one_request` under load, even though startup takes 0.42s alone.
+  - `scripts/dev-check.py` probes each toolchain version once per process. A probe can hit its 10s timeout under load
+    and answer `version-unavailable` while the next one answers a version. That made two fingerprints taken in the
+    same run differ, which failed `dev-check-self-test` ("index metadata is not repository content") in a loaded
+    `make check`.
 
 ## 0.35.489
 

@@ -553,103 +553,44 @@ pub fn parse_invocation_lint(lint: Option<&str>) -> Result<Option<LintCliMode>> 
         .transpose()
 }
 
-/// What a compact should record about the replayed editor-op epoch.
-///
-/// `#compactclearidempotent`: separated from the I/O so the decision is
-/// testable. The clear transaction can fail its bounded budget (250ms) while
-/// the epoch is nonetheless already gone — a concurrent clear, or a transport
-/// error after the actor applied it. The question this answers is "is the epoch
-/// consumed?", not "did my transaction win".
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum EditorCutClearOutcome {
-    Consumed { outcome: &'static str },
-    Failed,
-}
-
-fn editor_cut_clear_outcome(cleared: bool, epoch_absent_after: bool) -> EditorCutClearOutcome {
-    match (cleared, epoch_absent_after) {
-        (true, _) => EditorCutClearOutcome::Consumed {
-            outcome: "cleared_after_successful_write",
-        },
-        (false, true) => EditorCutClearOutcome::Consumed {
-            outcome: "already_absent_after_clear_error",
-        },
-        (false, false) => EditorCutClearOutcome::Failed,
-    }
-}
-
-/// Attempts at clearing the replayed editor-op epoch before reporting
-/// `clear_failed`. Each attempt has the clear transaction's own bounded budget
-/// (250ms); under a loaded machine one attempt can miss it while the epoch is
-/// still present (seen in a parallel `make check` at load average 80).
-const EDITOR_CUT_CLEAR_ATTEMPTS: u32 = 3;
-
+/// `#compactclearidempotent` / `#loadbudgettests`: whether the replayed epoch
+/// is consumed is answered from the state by
+/// [`agent_doc_op_capture_io::consume_replayed_editor_op_epoch`] (shared with
+/// `run_stream`), not by whether one bounded clear round trip beat the clock.
+/// Turned CI red on 0.35.212 with the contradictory pair: the capture read as
+/// absent while the same compact logged `clear_failed` and never `consumed`.
 fn clear_replayed_editor_ops_after_compact(file: &Path, replayed: bool) {
     if !replayed {
         return;
     }
-    let mut last_err = None;
-    for attempt in 1..=EDITOR_CUT_CLEAR_ATTEMPTS {
-        match agent_doc_op_capture_io::clear_op_capture(file) {
-            Ok(()) => {
-                let EditorCutClearOutcome::Consumed { outcome } =
-                    editor_cut_clear_outcome(true, true)
-                else {
-                    unreachable!("a successful clear always consumes the epoch")
-                };
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "compact_pending_editor_cut_consumed file={} outcome={outcome} attempt={attempt}",
-                        file.display(),
-                    ),
-                );
-                return;
-            }
-            Err(err) => {
-                // `#compactclearidempotent`: the clear transaction can fail its
-                // bounded budget (250ms) while the epoch is nonetheless already
-                // gone — a concurrent clear, or a transport error after the actor
-                // applied it. The question this function answers is "is the epoch
-                // consumed?", not "did my transaction win", so ask the state
-                // directly before reporting a failure. Turned CI red on 0.35.212
-                // with the contradictory pair: the capture read as absent while the
-                // same compact logged `clear_failed` and never logged `consumed`.
-                let epoch_absent_after =
-                    matches!(agent_doc_op_capture_io::load_op_capture(file), Ok(None));
-                if let EditorCutClearOutcome::Consumed { outcome } =
-                    editor_cut_clear_outcome(false, epoch_absent_after)
-                {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "compact_pending_editor_cut_consumed file={} outcome={outcome} attempt={attempt} error={}",
-                            file.display(),
-                            err,
-                        ),
-                    );
-                    return;
-                }
-                last_err = Some(err);
-                if attempt < EDITOR_CUT_CLEAR_ATTEMPTS {
-                    std::thread::sleep(std::time::Duration::from_millis(50 * u64::from(attempt)));
-                }
-            }
+    match agent_doc_op_capture_io::consume_replayed_editor_op_epoch(file) {
+        agent_doc_op_capture_io::ReplayedEpochConsumption::Consumed {
+            outcome,
+            attempt,
+            error,
+        } => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "compact_pending_editor_cut_consumed file={} outcome={outcome} attempt={attempt}{}",
+                file.display(),
+                error.map(|err| format!(" error={err}")).unwrap_or_default(),
+            ),
+        ),
+        agent_doc_op_capture_io::ReplayedEpochConsumption::Failed { attempts, error } => {
+            eprintln!(
+                "[compact] warning: failed to clear replayed editor-op capture for {} after successful write: {error}",
+                file.display(),
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "compact_pending_editor_cut_clear_failed file={} attempts={attempts} error={}",
+                    file.display(),
+                    error,
+                ),
+            );
         }
     }
-    let err = last_err.expect("every failed attempt records its error");
-    eprintln!(
-        "[compact] warning: failed to clear replayed editor-op capture for {} after successful write: {err}",
-        file.display(),
-    );
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "compact_pending_editor_cut_clear_failed file={} attempts={EDITOR_CUT_CLEAR_ATTEMPTS} error={}",
-            file.display(),
-            err,
-        ),
-    );
 }
 
 /// Execute compaction inside the CP process. This entrypoint is wired only by
@@ -5576,43 +5517,6 @@ mod tests {
             ops_log.contains("compact_pending_editor_cut_replayed")
                 && ops_log.contains("compact_pending_editor_cut_consumed"),
             "{ops_log}"
-        );
-    }
-
-    /// `#compactclearidempotent`: a clear that fails its bounded budget while
-    /// the epoch is already gone has still consumed it.
-    ///
-    /// Turned CI red on 0.35.212 with a contradictory pair inside one compact:
-    /// `load_op_capture` read the capture as absent (so the state was right)
-    /// while the same run logged `compact_pending_editor_cut_clear_failed` and
-    /// never logged `compact_pending_editor_cut_consumed`. The function answers
-    /// "is the epoch consumed?", not "did my transaction win", so it re-reads
-    /// the state before reporting a failure.
-    #[test]
-    fn a_clear_error_with_no_remaining_epoch_still_reports_consumed() {
-        // A failed clear whose epoch is gone anyway HAS consumed it. This is
-        // the branch CI hit on 0.35.212: `load_op_capture` read absent (the
-        // state was right) while the same compact logged `clear_failed` and
-        // never logged `consumed`.
-        assert_eq!(
-            editor_cut_clear_outcome(false, true),
-            EditorCutClearOutcome::Consumed {
-                outcome: "already_absent_after_clear_error"
-            },
-        );
-        // A failed clear with the epoch STILL outstanding is a real failure and
-        // must keep saying so — this is what stops the fix from becoming a
-        // blanket "report success on error".
-        assert_eq!(
-            editor_cut_clear_outcome(false, false),
-            EditorCutClearOutcome::Failed,
-        );
-        // The ordinary success path is unchanged.
-        assert_eq!(
-            editor_cut_clear_outcome(true, true),
-            EditorCutClearOutcome::Consumed {
-                outcome: "cleared_after_successful_write"
-            },
         );
     }
 

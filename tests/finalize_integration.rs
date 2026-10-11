@@ -601,10 +601,39 @@ fn finalize_editor_absent_replays_operator_deleted_struck_queue_rows() {
         assert!(!materialized.contains("#old-a"));
         assert!(!materialized.contains("#old-b"));
     }
-    assert!(!agent_doc_op_capture_io::has_pending_editor_ops(&doc));
+    // `#loadbudgettests`: assert the consumed epoch from the state, and read it
+    // with `load_op_capture` so a state read that errors fails the test instead
+    // of passing it vacuously the way `!has_pending_editor_ops` did: the
+    // finalize's controller has exited and left its socket behind, which every
+    // read refused. With no listener, read the durable ledger cold.
+    #[cfg(unix)]
+    {
+        let socket = tmp.path().join(".agent-doc/controller.sock");
+        if socket.exists() && std::os::unix::net::UnixStream::connect(&socket).is_err() {
+            fs::remove_file(&socket).unwrap();
+        }
+    }
+    assert!(
+        agent_doc_op_capture_io::load_op_capture(&doc)
+            .unwrap()
+            .is_none(),
+        "the replayed editor-op epoch must be consumed after the write"
+    );
     let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
-    assert!(ops.contains("run_stream_pending_editor_cut_replayed"));
-    assert!(ops.contains("run_stream_pending_editor_cut_consumed"));
+    assert!(
+        ops.contains("run_stream_pending_editor_cut_replayed"),
+        "{ops}"
+    );
+    // The consumed line is decided from the state, not from whether one clear
+    // round trip beat the clock, so it holds under host load too.
+    assert!(
+        ops.contains("run_stream_pending_editor_cut_consumed"),
+        "{ops}"
+    );
+    assert!(
+        !ops.contains("run_stream_pending_editor_cut_clear_failed"),
+        "{ops}"
+    );
 }
 
 #[test]

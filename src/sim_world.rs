@@ -11,10 +11,50 @@ use std::time::{Duration, Instant};
 
 const FAST_CORPUS_SEEDS: std::ops::Range<u64> = 0..512;
 const FAST_CORPUS_STEPS: usize = 24;
+/// Perf-regression guard for the fast corpus, measured in the corpus thread's
+/// own CPU time ([`ThreadCpuClock`]), not wall clock: under `make check` with
+/// many suites running concurrently (load average 70-140) the wall-clock run
+/// stretched from ~1s to 5.7s while doing the same work.
 const FAST_CORPUS_BUDGET: Duration = Duration::from_secs(3);
 const MEDIUM_CORPUS_SEEDS: std::ops::Range<u64> = 0..2_048;
 const MEDIUM_CORPUS_STEPS: usize = 32;
 const MEDIUM_CORPUS_BUDGET: Duration = Duration::from_secs(12);
+
+/// CPU time consumed by the calling thread. The seed corpora run single-threaded
+/// and in memory, so this measures the simulator's own work and is insensitive to
+/// how many other test processes share the host (a descheduled thread accrues no
+/// CPU time). Wall clock is kept only for the diagnostic line.
+#[derive(Clone, Copy)]
+pub(crate) struct ThreadCpuClock(Option<Duration>);
+
+impl ThreadCpuClock {
+    pub(crate) fn now() -> Self {
+        Self(thread_cpu_time())
+    }
+
+    /// CPU time the current thread spent since `self`, or `None` where the
+    /// platform exposes no per-thread CPU clock.
+    pub(crate) fn elapsed(self) -> Option<Duration> {
+        let start = self.0?;
+        Some(thread_cpu_time()?.saturating_sub(start))
+    }
+}
+
+#[cfg(unix)]
+fn thread_cpu_time() -> Option<Duration> {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `ts` is a valid, writable timespec for the duration of the call.
+    let rc = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) };
+    (rc == 0).then(|| Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32))
+}
+
+#[cfg(not(unix))]
+fn thread_cpu_time() -> Option<Duration> {
+    None
+}
 
 /// `#pane-layout-reactive-latest` reference model: a newer desired layout
 /// published while the current effect is finishing remains owned by one active
@@ -6545,7 +6585,10 @@ struct CorpusRun {
     coverage: Coverage,
     schedules: usize,
     steps: usize,
-    elapsed: Duration,
+    /// Wall clock, diagnostic only: it stretches with host load.
+    wall_elapsed: Duration,
+    /// CPU time of the corpus thread; `None` without a per-thread CPU clock.
+    cpu_elapsed: Option<Duration>,
 }
 
 impl CorpusRun {
@@ -6553,20 +6596,29 @@ impl CorpusRun {
         self.schedules * self.steps
     }
 
+    /// Assert the corpus's CPU cost stays within `budget`. The budget is a
+    /// perf-regression guard on the simulator's own work, so it is checked
+    /// against thread CPU time, never wall clock.
     fn assert_within_budget(&self, budget: Duration, label: &str) {
         eprintln!(
-            "{label}: schedules={} steps={} commands={} elapsed_ms={} budget_ms={}",
+            "{label}: schedules={} steps={} commands={} cpu_ms={} wall_ms={} cpu_budget_ms={}",
             self.schedules,
             self.steps,
             self.command_count(),
-            self.elapsed.as_millis(),
+            self.cpu_elapsed
+                .map_or_else(|| "n/a".to_string(), |cpu| cpu.as_millis().to_string()),
+            self.wall_elapsed.as_millis(),
             budget.as_millis()
         );
+        let Some(cpu) = self.cpu_elapsed else {
+            // No per-thread CPU clock on this platform: a wall-clock fallback
+            // would reintroduce the load sensitivity, so report only.
+            return;
+        };
         assert!(
-            self.elapsed <= budget,
-            "{label} exceeded runtime budget: elapsed={:?} budget={:?}",
-            self.elapsed,
-            budget
+            cpu <= budget,
+            "{label} exceeded CPU-time budget: cpu={cpu:?} budget={budget:?} (wall={:?})",
+            self.wall_elapsed
         );
     }
 }

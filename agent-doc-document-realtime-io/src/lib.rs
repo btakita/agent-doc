@@ -714,6 +714,7 @@ impl ProjectionObservationState {
             signal_immediately,
             max_wait_ms,
         } = request;
+        note_editor_delivery_wait_entered(file);
         if signal_immediately {
             if self.wait(file, source, live_editors)?
                 == ProjectionObservationWait::ForegroundDeadline
@@ -1274,6 +1275,7 @@ fn await_visible_editor_projection_receipt(path: &Path, target_hash: &str) -> Re
         if remaining.is_zero() {
             return Ok(false);
         }
+        note_editor_delivery_wait_entered(path);
         if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(path) {
             let observed = agent_doc_crdt_relay_io::await_delivery_revision_change_for_file(
                 path,
@@ -6550,22 +6552,40 @@ fn record_editor_relay_authority(file: &std::path::Path, source: &str, text: &st
 
 const VISIBLE_WRITE_CURRENT_TRANSITION_TIMEOUT_MS: u64 = 5_000;
 
-/// Upper bound for "this path failed fast rather than stalling the turn".
-///
-/// `#failfastproxyload`: the fail-fast tests asserted a flat 1s. That is a
-/// *proxy* for "did not enter the bounded editor-delivery wait", and the thing
-/// it distinguishes against is
-/// [`VISIBLE_WRITE_CURRENT_TRANSITION_TIMEOUT_MS`] — 5s. One second leaves only
-/// 5x headroom, which a loaded CI runner eats: 0.35.220 went red on
-/// `serialized_atomic_write_defers_zero_replica_editor_owner_without_touching_disk`
-/// while the same test took 0.02s locally, and the change under test does not
-/// touch that path.
-///
-/// Derived from the stall threshold instead of hardcoded, so the assertion stays
-/// meaningful (a genuine stall is >= 5s) without failing on scheduler noise.
+/// `#loadbudgettests`: bounded editor-delivery waits entered per document, the
+/// deterministic witness for "this path failed fast rather than stalling the
+/// turn". A wait entry is the stall itself; elapsed time only measured it, and
+/// host load stretched that measurement past its 2.5s bound (4.3s at load
+/// average ~100) on a path that entered no wait at all. It replaces the former
+/// `FAIL_FAST_BUDGET` (half of [`VISIBLE_WRITE_CURRENT_TRANSITION_TIMEOUT_MS`],
+/// itself a `#failfastproxyload` widening of a flat 1s proxy).
 #[cfg(test)]
-const FAIL_FAST_BUDGET: std::time::Duration =
-    std::time::Duration::from_millis(VISIBLE_WRITE_CURRENT_TRANSITION_TIMEOUT_MS / 2);
+static EDITOR_DELIVERY_WAITS_ENTERED: LazyLock<
+    Mutex<std::collections::HashMap<std::path::PathBuf, usize>>,
+> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+#[inline]
+fn note_editor_delivery_wait_entered(file: &Path) {
+    #[cfg(test)]
+    {
+        *EDITOR_DELIVERY_WAITS_ENTERED
+            .lock()
+            .entry(file.to_path_buf())
+            .or_default() += 1;
+    }
+    #[cfg(not(test))]
+    let _ = file;
+}
+
+#[cfg(test)]
+fn editor_delivery_waits_entered(file: &Path) -> usize {
+    EDITOR_DELIVERY_WAITS_ENTERED
+        .lock()
+        .get(file)
+        .copied()
+        .unwrap_or(0)
+}
+
 
 /// Max re-merge attempts when reconciling the visible-write guard with a
 /// foreign disk write that landed after the merge was computed
@@ -7273,6 +7293,7 @@ fn guard_visible_write_current_transition_with_policy(
             }
             continue;
         }
+        note_editor_delivery_wait_entered(file);
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
@@ -7966,18 +7987,31 @@ pub fn wait_for_editor_replica_liveness_change(
     file: &std::path::Path,
     budget: std::time::Duration,
 ) -> bool {
+    wait_for_liveness_change_with(
+        budget,
+        || editor_replica_liveness_witness(file),
+        std::thread::sleep,
+    )
+}
+
+/// Witness-and-sleep-injected core of [`wait_for_editor_replica_liveness_change`].
+fn wait_for_liveness_change_with<W: PartialEq>(
+    budget: std::time::Duration,
+    mut witness: impl FnMut() -> W,
+    mut sleep: impl FnMut(std::time::Duration),
+) -> bool {
     const POLL: std::time::Duration = std::time::Duration::from_millis(50);
-    let before = editor_replica_liveness_witness(file);
+    let before = witness();
     let deadline = std::time::Instant::now() + budget;
     loop {
-        if editor_replica_liveness_witness(file) != before {
+        if witness() != before {
             return true;
         }
         let now = std::time::Instant::now();
         if now >= deadline {
             return false;
         }
-        std::thread::sleep(POLL.min(deadline - now));
+        sleep(POLL.min(deadline - now));
     }
 }
 
@@ -10652,13 +10686,29 @@ mod tests {
     #[test]
     fn witness_wait_with_no_budget_returns_immediately() {
         let file = std::path::Path::new("/tmp/agent-doc-witness-retry-gate-zero.md");
-
-        let started = std::time::Instant::now();
         assert!(!wait_for_editor_replica_liveness_change(
             file,
             std::time::Duration::ZERO
         ));
-        assert!(started.elapsed() < std::time::Duration::from_millis(50));
+
+        // `#loadbudgettests`: "immediate" is asserted as no sleep and exactly
+        // the before/after observations, not as a 50ms wall-clock bound that a
+        // loaded host can miss while doing the same work.
+        let mut observations = 0;
+        let mut sleeps = Vec::new();
+        assert!(!wait_for_liveness_change_with(
+            std::time::Duration::ZERO,
+            || {
+                observations += 1;
+                "unchanged"
+            },
+            |delay| sleeps.push(delay),
+        ));
+        assert_eq!(
+            observations, 2,
+            "one baseline and one immediate observation"
+        );
+        assert!(sleeps.is_empty(), "a zero budget must not sleep: {sleeps:?}");
     }
 
     /// A controller transport error while the editor is still registered is
@@ -12856,10 +12906,12 @@ mod tests {
             .expect("editor replica should attach");
         agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.deregister(client_id)).unwrap();
 
-        let started = std::time::Instant::now();
         let err = atomic_write_through_authority(&file, target).unwrap_err();
-        assert!(
-            started.elapsed() < FAIL_FAST_BUDGET,
+        // `#loadbudgettests`: "fail fast" means no bounded editor-delivery wait
+        // was entered: counted, not timed.
+        assert_eq!(
+            editor_delivery_waits_entered(&file),
+            0,
             "zero-replica authority must fail fast instead of stalling the turn"
         );
         let message = format!("{err:#}");
@@ -15906,12 +15958,23 @@ mod tests {
         test_support_register_replica_for_file(&file, identity)
             .unwrap()
             .expect("editor replica should attach");
+        // `#loadbudgettests`: the question is WHICH budget governs a pending
+        // owned cell, not how fast the late delta lands. The late delta is
+        // ordered after the ordinary budget from the waiter's own start, and
+        // the pending budget is only a hang ceiling: the writer always lands
+        // the delta, so the wait ends on that revision edge. A starved writer
+        // on a loaded host (5.7s at load average ~100) therefore cannot turn
+        // into a refusal, while a waiter that applied the ordinary budget to
+        // the pending cell still refuses at 200ms, before the delta exists.
+        const ORDINARY_BUDGET: std::time::Duration = std::time::Duration::from_millis(200);
+        const PENDING_HANG_CEILING: std::time::Duration = std::time::Duration::from_secs(120);
         let writer_file = file.clone();
         let (writer_pre, writer_receipt) = (pre.clone(), receipt.clone());
+        let (start_tx, start_rx) = std::sync::mpsc::channel::<std::time::Instant>();
         let writer = std::thread::spawn(move || {
+            let waiter_started = start_rx.recv().unwrap();
             // Unrelated operator revision first, then the late exchange delta
-            // after the ordinary budget has expired.
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            // strictly after the waiter's ordinary budget has expired.
             let operator = writer_pre.replace("- do #a\n", "- do #a!\n");
             apply_cp_write_through_relay_authority(
                 &writer_file,
@@ -15920,7 +15983,8 @@ mod tests {
                 "pending_operator_revision",
             )
             .unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(400));
+            let late = waiter_started + ORDINARY_BUDGET + std::time::Duration::from_millis(300);
+            std::thread::sleep(late.saturating_duration_since(std::time::Instant::now()));
             let landed = writer_receipt.replace("- do #a\n", "- do #a!\n");
             apply_cp_write_through_relay_authority(
                 &writer_file,
@@ -15931,13 +15995,14 @@ mod tests {
             .unwrap();
             landed
         });
+        start_tx.send(std::time::Instant::now()).unwrap();
         let adopted = adopt_verified_editor_receipt_by_cells_within(
             &file,
             &receipt,
             "cellcollide_pending_receipt",
             Some(&exchange_scope(&pre)),
-            std::time::Duration::from_millis(200),
-            std::time::Duration::from_secs(5),
+            ORDINARY_BUDGET,
+            PENDING_HANG_CEILING,
         );
         let landed = writer.join().unwrap();
         assert_eq!(

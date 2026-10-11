@@ -2118,6 +2118,24 @@ fn apply_pending_and_status_mutations_with_mode(
                                 file.display()
                             );
                         }
+                        // `#retainedactionablemirror`: the same planned intent
+                        // also makes these items actionable. A retained publish
+                        // lands the adds/ungates later, and the closeout's
+                        // queue mirror reads only this record — skipping it left
+                        // promoted items in the backlog with no queue head.
+                        if let Err(err) = record_planned_actionable_mutations(
+                            &added_ids.borrow(),
+                            &options.pending_ungate,
+                            |ids| {
+                                agent_doc_cycle_state_io::record_pending_actionable_ids(file, ids)
+                                    .map(|_| ())
+                            },
+                        ) {
+                            eprintln!(
+                                "[write] warning: failed to record same-cycle actionable ids for {} before propagating the tracked-work error: {err:#}",
+                                file.display()
+                            );
+                        }
                     }
                     transaction?;
                     // `#mutplanwitness`: the envelope published. Anything that
@@ -2268,6 +2286,24 @@ fn record_pending_actionable_mutations(
         agent_doc_cycle_state_io::record_pending_actionable_ids(file, &ids)?;
     }
     Ok(())
+}
+
+/// `#retainedactionablemirror`: the actionable ids a planned (possibly retained)
+/// tracked-work envelope carries — same-cycle backlog adds plus explicit
+/// ungates, the exact set `record_pending_actionable_mutations` records on the
+/// applied path. Review (gated) adds are not actionable. Pure over the planned
+/// ids so both paths provably agree; `record` is the cycle-state sink.
+fn record_planned_actionable_mutations(
+    planned: &Option<(Vec<String>, Vec<String>, Vec<String>)>,
+    ungated_ids: &[String],
+    record: impl FnOnce(&[String]) -> Result<()>,
+) -> Result<()> {
+    let same_cycle: &[String] = planned.as_ref().map_or(&[], |(same, _, _)| same.as_slice());
+    let ids: Vec<String> = same_cycle.iter().chain(ungated_ids).cloned().collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    record(&ids)
 }
 
 /// `#retainedprojexit1`: whether this cycle's own recorded tracked-work
@@ -4984,6 +5020,63 @@ mod tests {
                 "phase2".to_string(),
             ])
         );
+    }
+
+    #[test]
+    fn retained_planned_actionable_ids_cover_adds_and_ungates_but_not_review_adds() {
+        let planned = Some((
+            vec![
+                "visiblewriteloadflake".to_string(),
+                "idefocusowner".to_string(),
+            ],
+            vec!["reviewonly".to_string()],
+            vec!["anchored".to_string()],
+        ));
+        let mut recorded = Vec::new();
+        record_planned_actionable_mutations(&planned, &["ungated".to_string()], |ids| {
+            recorded.extend_from_slice(ids);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            recorded,
+            vec![
+                "visiblewriteloadflake".to_string(),
+                "idefocusowner".to_string(),
+                "ungated".to_string(),
+            ]
+        );
+
+        let mut called = false;
+        record_planned_actionable_mutations(&None, &[], |_| {
+            called = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(!called, "an empty plan must not touch cycle state");
+    }
+
+    /// `#retainedactionablemirror`: the retained (transaction-error) branch is
+    /// the only place a deferred publish can record actionable intent; without
+    /// it the closeout queue mirror reads an empty set and promoted backlog
+    /// items never get a queue head.
+    #[test]
+    fn retained_tracked_work_branch_records_actionable_ids_for_queue_mirror() {
+        let src = include_str!("lib.rs");
+        let branch_start = src
+            .find("if transaction.is_err() {")
+            .expect("retained tracked-work branch");
+        let branch_end = branch_start
+            + src[branch_start..]
+                .find("transaction?;")
+                .expect("retained branch ends at transaction?");
+        let branch = &src[branch_start..branch_end];
+        assert!(branch.contains("record_pending_added_ids"));
+        assert!(
+            branch.contains("record_planned_actionable_mutations("),
+            "retained branch must record actionable ids for the queue mirror"
+        );
+        assert!(branch.contains("record_pending_actionable_ids"));
     }
 
     #[allow(clippy::too_many_arguments)]

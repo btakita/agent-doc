@@ -29,6 +29,37 @@ agent-doc-style mutation (`status` changed and/or `exchange` gained a new `### R
 `pending` gained a superset of stable IDs) while the redacted document structure is unchanged,
 `agent-doc commit` checkpoints the live current document before staging. This repairs lost
 patchbacks/pending ops without turning plain user prompts into committed content.
+- **Agent-write attribution (`#backlogiceboxreview`)**: a standalone tracked-work
+  command (`agent-doc backlog|icebox|review <FILE> ...`) is an agent edit. Once
+  one of its writes has landed (a converged editor write, or a `--force-disk`
+  write), the baseline advances by that write's *structural delta* only: the
+  component-body change from the document the command planned against
+  (`before`) to the target it wrote (`after`) is replayed onto the stored
+  baseline (`agent_doc_element::baseline_attribution::attribute_component_write`,
+  applied by `agent_doc_snapshot_io::attribute_agent_write_to_document_baseline`).
+  The whole document is never re-snapshotted, so an operator edit the baseline
+  has not absorbed (anywhere, including elsewhere in the same component) stays
+  visible to the next diff as operator input. The replay is a line-level
+  three-way merge over `before`; it is refused, leaving the baseline untouched,
+  when the write is not expressible as component-body edits (it created or
+  removed a component, or moved text between components), when a changed
+  component is missing from the baseline, or when the write's change overlaps
+  or touches a difference the baseline has not absorbed. Fail safe: an agent
+  edit shown as an operator edit is noise; an operator edit hidden by the
+  baseline is lost intent. A deferred (exit 75, still retained) write is not
+  attributed, so a write that never lands cannot be pre-absorbed. Every
+  attempt logs `document_baseline_agent_write_attribution outcome=<patched |
+  already_carried | no_component_change | no_baseline | unscoped_write |
+  component_missing_from_baseline | overlaps_unabsorbed_edit>`. The scope is
+  installed by `main` for those commands only; the response/closeout path does
+  not enter it (its commit owns the cycle's baseline), and `queue` commands keep
+  their own snapshot steps.
+  Why preflight's own absorption was not enough: pending maintenance resyncs
+  the tracked surfaces into the baseline before diffing
+  (`#pending-gate-snapshot-desync`), but when its write is retained by a live
+  editor's converging delivery projection it defers and reverts that resync
+  too (`#retaineddeferisnotafailure`), so the CLI write reached the diff as
+  `[user+]`.
 - **Reset**: `reset` appends typed clear facts and may remove associated crash
   evidence. Deleting a crash file never decides or changes live authority.
 - **Missing**: Diff treats a missing ledger baseline as first submit. Git may

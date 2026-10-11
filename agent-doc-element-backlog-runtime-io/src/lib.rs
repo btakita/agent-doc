@@ -34,4 +34,25 @@ impl agent_doc_element_backlog_io::BacklogCommandEffects for RuntimeBacklogComma
     fn record_document_write_provenance(&self, file: &Path, content: &str) {
         agent_doc_document_realtime_io::record_document_write_provenance(file, content);
     }
+
+    fn attribute_agent_write_to_baseline(&self, file: &Path, before: &str, after: &str) {
+        // Attribution is best-effort bookkeeping on a write that already landed:
+        // a failure leaves the baseline untouched (the fail-safe direction) and
+        // must not turn the successful command into a failure.
+        if let Err(err) = agent_doc_snapshot_io::attribute_agent_write_to_document_baseline(
+            file,
+            before,
+            after,
+            agent_doc_ops_log_io::log_op,
+        ) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_baseline_agent_write_attribution file={} outcome=error error={}",
+                    file.display(),
+                    format!("{err:#}").replace('\n', " | ")
+                ),
+            );
+        }
+    }
 }

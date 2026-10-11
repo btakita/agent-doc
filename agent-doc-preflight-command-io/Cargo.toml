@@ -73,6 +73,7 @@ anyhow = "1"
 serde_json = "1"
 
 [dev-dependencies]
+agent-doc-element-backlog-runtime-io = { path = "../agent-doc-element-backlog-runtime-io", version = "0.35.489" }
 agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.489" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.489", features = ["test-support"] }
 agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.489" }

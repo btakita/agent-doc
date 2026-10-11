@@ -4937,6 +4937,17 @@ fn try_main() -> anyhow::Result<()> {
         )
     });
 
+    // `#backlogiceboxreview`: a standalone tracked-work mutation is an agent
+    // edit. Each landed write advances the session baseline by its own
+    // structural delta, so the next preflight neither labels it `[user+]` nor
+    // absorbs concurrent operator edits. `queue` commands keep their own
+    // snapshot steps; the response/closeout commit owns the baseline there.
+    let _agent_write_baseline_attribution = matches!(
+        cli.command,
+        Commands::Backlog { .. } | Commands::Icebox { .. } | Commands::Review { .. }
+    )
+    .then(agent_doc_element_backlog_io::enter_agent_write_baseline_attribution);
+
     match cli.command {
         Commands::Env { json } => env_cmd::run(json),
         Commands::Tmux { action } => match action {

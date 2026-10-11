@@ -832,6 +832,7 @@ version = "0.35.489"
 dependencies = [
  "anyhow",
  "pulldown-cmark",
+ "similar 3.1.1",
  "uuid",
 ]
 
@@ -877,6 +878,8 @@ version = "0.35.489"
 dependencies = [
  "agent-doc-document-realtime-io",
  "agent-doc-element-backlog-io",
+ "agent-doc-ops-log-io",
+ "agent-doc-snapshot-io",
  "agent-doc-write-converge-io",
  "anyhow",
 ]
@@ -1471,6 +1474,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-backlog-io",
+ "agent-doc-element-backlog-runtime-io",
  "agent-doc-element-exchange",
  "agent-doc-flow-io",
  "agent-doc-frontmatter",
@@ -2267,6 +2271,7 @@ dependencies = [
  "agent-doc-diff-io",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-element",
  "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-git-io",

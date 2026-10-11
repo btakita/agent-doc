@@ -492,9 +492,10 @@ Because the retention is settled at the write boundary, a command's own
 post-write steps now run after a converged retention: `queue sync`'s baseline
 checkpoint and `queue consume --id`'s snapshot strike advance the snapshot, so
 the next preflight no longer diffs those binary-authored writes as operator
-input (`[user+]`). Standalone `backlog`/`icebox`/`review` mutations have no
-snapshot step on any path (detached or attached) and remain unattributed in
-the next diff; agent-attributing them is a separate snapshot-ownership change.
+input (`[user+]`). Standalone `backlog`/`icebox`/`review` mutations advance the
+baseline by their own structural delta once each write lands
+(`#backlogiceboxreview`, see [Baseline and Crash-State
+Sidecars](03-snapshot-system.md)); a deferred (exit 75) write is not attributed.
 
 No step writes disk, requests a delivery, or forces anything; waiting is the
 only effect. A queue-consume write that already spent this bounded wait does

@@ -32,6 +32,29 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   one abandoned on a connect timeout is parked in a per-generation registry, and quiesce returns `0` (the
   generation stays loaded) until those watchdogs have exited too.
 
+- **Standalone `backlog`/`icebox`/`review` writes are agent edits in the baseline (`#backlogiceboxreview`).**
+  These commands wrote the document but never advanced the session baseline. A detached preflight hid
+  that, because pending maintenance resyncs the tracked surfaces into the baseline before diffing. On a
+  live editor whose delivery projection is still converging, maintenance defers its retained write and
+  reverts that resync too, so the binary's own item reached the next diff as an operator edit (`[user+]`).
+  Each landed write now advances the baseline by its own structural delta: the component-body change from
+  the document the command planned against to the target it wrote is replayed onto the stored baseline
+  (a line-level three-way merge, `agent_doc_element::baseline_attribution`). The document is never
+  re-snapshotted wholesale, so an operator edit the baseline has not absorbed stays visible. When the
+  delta cannot be replayed cleanly (a component created or removed, a component missing from the
+  baseline, or a change that overlaps an unabsorbed edit) the baseline is left alone; ops-log
+  `document_baseline_agent_write_attribution outcome=...` records each attempt. A deferred (exit 75) write
+  is not attributed. Only `main`'s `backlog`/`icebox`/`review` commands enter this scope; the
+  response/closeout path and `queue` commands keep their own snapshot steps. Separately, the reported
+  `[user+] do [#id]` after the 2026-10-11 14:32Z closeout's queue-mirror append was not a missed write:
+  the commit checkpointed the appended heads (`preflight_diff_start snap_len=64769 file_len=64769`). It was
+  the synthetic continuation diff of a `go` queue, which `annotated_diff` marks `[user+]` while
+  `user_intent_prompt_changes` stays empty. Tests: `standalone_backlog_add_is_an_agent_edit_and_keeps_concurrent_operator_edits`,
+  `standalone_backlog_remove_edit_and_icebox_add_are_agent_edits` (both fail with the attribution
+  disabled, and the first also fails with a whole-document re-snapshot),
+  `tracked_work_writes_outside_the_standalone_scope_leave_the_baseline`,
+  `appended_queue_heads_carried_by_the_baseline_are_continuation_not_operator_intent`,
+  `backlog_add_attributes_the_converged_write_to_the_baseline` (live editor), and `baseline_attribution::tests::*`.
 - **A head waiting on the operator (`⏳`) is no longer reported as a fresh operator prompt every preflight
   (`#regressionawaitingoperat`).** On a `subagents` queue whose first head `do [#id]` tracked an
   `[operator-verify]` item, every preflight reported `+do [#id]` as the cycle diff (`[user+]`, a

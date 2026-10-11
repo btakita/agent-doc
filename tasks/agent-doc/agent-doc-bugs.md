@@ -174,6 +174,16 @@ Fixed (subagent branch `clearqueued`, commit `52bc0984d3`). The bug was confirme
 - **Not yet tested live**, especially a route-dispatched turn proven live only by its dispatch receipt. I filed that as clearqueuedliveturn, which is also the anchor the code and spec comments use.
 
 **Integration:** I merged both branches into `integrate-0493` on top of `origin/main`. `make check` passed (exit 0, 10190 tests run, all passed, 143 skipped). I fast-forwarded `main` to `23a5d7c0a4` and ran `make install` (exit 0). The installed binary still reports 0.35.490, because nothing new is tagged. CI for `23a5d7c0a4` is in progress; I checked it once and didn't wait.
+
+### Re: dispatched #splicectlcommit and #clearqueuedliveturn to subagents — opus-5.5 · 2026-10-11T16:06-04:00
+
+> **Queue prompt:** do [#splicectlcommit]
+
+**Deferred:** this went to a background subagent (claim `subagent:splicectl`, worktree `agent-doc-wt/splicectl`, based on `23a5d7c0a4`). A git-ignored scratch doc must close out cleanly under a live editor, never staging an ignored file into the product repo, while real session documents keep the refusal. The subagent will choose between two fixes: a typed, validated commit-target override carried through the controller request, or a clean skip. It will add tests for both the scratch case and the still-refused real case.
+
+> **Queue prompt:** do [#clearqueuedliveturn]
+
+**Deferred:** this went to a background subagent (claim `subagent:clearlive`, worktree `agent-doc-wt/clearlive`). It will turn the live check into a deterministic end-to-end test of the real supervisor code. The test runs on an isolated tmux server with a fake harness whose turn is proven live only by its dispatch receipt (the pane %149 case). It asserts four things: `queued` with exit 0, then exactly one `/clear` after the turn ends, none if a newer prompt arrives first, and repeat presses reporting the existing queued clear. If the turn-ended projection doesn't arrive, it fixes that in product code. It won't touch your real tmux server, panes, IDE or session documents, and won't use xdotool. Afterwards, the only operator-only part left should be the IntelliJ notice wording.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -182,8 +192,7 @@ Fixed (subagent branch `clearqueued`, commit `52bc0984d3`). The bug was confirme
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Clear Session Context on agent-doc-bugs.md issue: agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md because a turn is live in pane %149 (harness_turn_live=true evidence=dispatch_turn_running, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` to intentionally interrupt the turn and clear context. [dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class=terminal_failure issue_key=4fc76633465ea41b5b45095f979f41b07bebd824d967142596722502299060a2 Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating a retry as the remedy. Preserve any retained capture and obey no-resubmit/no-recycle guidance in the original diagnostic.~~
-- ~~do [#splicevrfyforward]~~
+- ⏳ do [#clearqueuedliveturn]
 - do [#splicectlcommit]
 <!-- /agent:queue -->
 

@@ -5308,8 +5308,9 @@ fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
     // `#restartbleednonroute`: prefer an explicit LOG fd over fd2.
     //
     // The default plan dups fd2, which is off-pane only while
-    // `SupervisorStderrRedirect` is active. On a non-route-owned TUI — or a
-    // route-owned supervisor whose redirect fell back to inactive on error —
+    // `SupervisorStderrRedirect` is active. On a non-TUI harness — or a TUI
+    // supervisor whose redirect fell back to inactive on error (every TUI
+    // supervisor redirects since `#perfpanebleed`, route-owned or not) —
     // fd2 IS the agent pane, so `make install` output bleeds straight into the
     // live session. Holding the log file open for the whole sequence makes the
     // child's stdio independent of route ownership; fd2 remains the fallback so

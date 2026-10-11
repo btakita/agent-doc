@@ -265,9 +265,34 @@ a closed actor record is replaceable through the stale-authority path.
   (`AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN`) so normal supervisor
   filtering cannot print diagnostics into the managed TUI while the operator is
   typing.
-- Every `agent-doc start` opens its supervisor stderr log; managed
-  Claude/Codex/OpenCode route-owned starts additionally redirect stderr to that
-  opened file in-process. The shell start command carries no `2>>` redirect.
+- Every `agent-doc start` opens its supervisor stderr log; every start whose
+  harness is a TUI (Claude/Codex/OpenCode/Grok) additionally redirects fd2 to
+  that opened file in-process, route-owned **or started by hand**
+  (`#perfpanebleed`). Route ownership is not an input: a hand-started
+  supervisor runs the same in-process idle-queue watch, steering poll,
+  closeout, and commit paths, and any stderr diagnostic they emit while fd2 is
+  the pane TTY is painted over the composer, separator, and status line. A
+  painted `❯ [perf] ...` composer row persists in the tmux grid (the harness
+  never repaints an unchanged empty composer), projects as an operator draft,
+  and the idle-queue draft guard then refuses every dispatch — the session
+  wedges at the end of its turn. Only non-TUI harnesses keep inherited stderr.
+  An `execve` hot-reload that adopts a surviving child moves fd2 to the log at
+  its very first instruction (`start_for_surviving_child_reexec`), before start
+  admission, so a predecessor image that handed over the pane TTY as fd2 cannot
+  leak the replacement's reentry/status output; a redirected predecessor's fd2
+  is never restored before `execve`, so the replacement inherits the log.
+  Leaked lines also explain the "tabs inserted" look: the harness puts the pty
+  in raw mode (`-opost`, no `ONLCR`), so a bare `\n` moves down one row without
+  returning to column 0 and each leaked line starts where the previous one
+  ended (a staircase). Recovery from an already-painted pane is a full TUI
+  repaint (resize/zoom-toggle the pane so the harness gets `SIGWINCH`, or the
+  harness's own redraw key); `tmux refresh-client` alone only replays tmux's
+  grid, which still holds the foreign bytes. The live regressions are
+  `pane_bleed_tests` in `agent-doc-supervisor-process-io` (`make tmux-ci`).
+  Dropping the redirect guard restores the original fd2 so a start that fails
+  or exits reports its error to the operator. Pure (non-`-io`) crates emit no
+  stderr diagnostics at all; latency belongs in the caller's ops-log phases.
+  The shell start command carries no `2>>` redirect.
   The start binary resolves `agent_doc_supervisor_stderr_log` from
   `.agent-doc/config.toml` (relative paths are project-root-relative), creates
   its parent directories, and defaults to

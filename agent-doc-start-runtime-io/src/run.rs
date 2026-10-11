@@ -699,6 +699,21 @@ pub fn run_with_reap_policy_resume_and_harness(
     let preserved_child_survived = pending_adopt
         .as_ref()
         .is_some_and(|state| state.child_survived());
+    // `#perfpanebleed`: an execve hot-reload adopts a child whose TUI is
+    // already live on the pane, so fd2 must leave the pane before this image
+    // writes anything — not only once start admission reaches the harness-aware
+    // redirect. Declared first so it is dropped last.
+    let _reexec_stderr_redirect = if preserved_child_survived {
+        agent_doc_project_root_io::project_root_containing(file)
+            .map(|root| {
+                agent_doc_supervisor_process_io::SupervisorStderrRedirect::start_for_surviving_child_reexec(
+                    &root,
+                )
+            })
+            .unwrap_or_else(agent_doc_supervisor_process_io::SupervisorStderrRedirect::inactive)
+    } else {
+        agent_doc_supervisor_process_io::SupervisorStderrRedirect::inactive()
+    };
     if !preserved_child_survived {
         // `#runfrontendcrashed`: a predecessor killed mid-session leaves the
         // pane raw; normalize before the first status line so it doesn't stair-step.
@@ -3041,15 +3056,19 @@ mod tests {
     }
 
     #[test]
-    fn route_owned_tui_supervisor_stderr_redirect_targets_log() {
+    fn every_tui_supervisor_stderr_redirect_targets_log() {
         let tmp = TempDir::new().unwrap();
         let codex = agent_doc_harness::HarnessConfig::codex();
         let mut generic = codex.clone();
         generic.binary = "bash".to_string();
 
-        assert!(supervisor_stderr_redirect_needed(&codex, true));
-        assert!(!supervisor_stderr_redirect_needed(&codex, false));
-        assert!(!supervisor_stderr_redirect_needed(&generic, true));
+        // `#perfpanebleed`: route ownership is not an input. A hand-started
+        // TUI supervisor paints diagnostics over its composer just the same.
+        assert!(supervisor_stderr_redirect_needed(&codex));
+        assert!(supervisor_stderr_redirect_needed(
+            &agent_doc_harness::HarnessConfig::claude()
+        ));
+        assert!(!supervisor_stderr_redirect_needed(&generic));
         assert_eq!(
             supervisor_stderr_log_path(tmp.path()).unwrap(),
             tmp.path()

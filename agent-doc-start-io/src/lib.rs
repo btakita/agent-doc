@@ -1430,7 +1430,7 @@ fn prepare_start_runtime_with_admission(
             session_log: &mut session_log,
             route_owned,
         };
-        SupervisorStderrRedirect::maybe_start(&project_root, &harness, route_owned, &mut launch_log)
+        SupervisorStderrRedirect::maybe_start(&project_root, &harness, &mut launch_log)
     };
     report_harness_resolution(&fm, &global_config, &harness, &mut session_log, route_owned);
 

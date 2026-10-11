@@ -2608,6 +2608,7 @@ dependencies = [
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
+ "agent-doc-tmux-io",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
  "anyhow",

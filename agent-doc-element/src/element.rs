@@ -979,7 +979,6 @@ fn split_attr_tokens(attr_text: &str) -> Vec<(String, Option<String>)> {
 /// Uses `pulldown-cmark` AST parsing with `offset_iter()` to accurately detect
 /// code regions per the CommonMark spec.
 pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
-    let t = std::time::Instant::now();
     let mut ranges = Vec::new();
     let parser = Parser::new_ext(doc, Options::empty());
     let mut iter = parser.into_offset_iter();
@@ -1023,10 +1022,11 @@ pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
         }
     }
     ranges.sort_unstable();
-    let elapsed = t.elapsed().as_millis();
-    if elapsed > 0 {
-        eprintln!("[perf] find_code_ranges: {}ms", elapsed);
-    }
+    // `#perfpanebleed`: no timing line here. This pure parser runs on every
+    // document read of a hot supervisor poll (steering, idle queue, closeout),
+    // and an unconditional `eprintln!` from it was the `[perf]
+    // find_code_ranges: 2ms` text painted over a live Claude composer. A pure
+    // crate owns no I/O; latency belongs to the `-io` caller's ops-log phase.
     ranges
 }
 

@@ -357,6 +357,35 @@ mod tests {
         );
     }
 
+    /// `#perfpanebleed`: why a supervisor's fd2 must never be the pane TTY.
+    ///
+    /// Captured from `tasks/frontend.md` (haiven-dev, 2026-10-11): a
+    /// hand-started supervisor's steering poll painted `[perf]
+    /// find_code_ranges: 2ms` over the empty Claude composer. Claude never
+    /// repaints an unchanged empty composer, so the painted row persists in the
+    /// tmux grid and projects as operator text. The draft guard is right to
+    /// refuse it (the watch cannot tell painted bytes from typed ones), so the
+    /// idle queue never dispatched again: the end-of-turn wedge. The fix is at
+    /// the source (every TUI supervisor redirects fd2); this pins the
+    /// consequence so the guard is never "fixed" by loosening it instead.
+    #[test]
+    fn stderr_painted_over_an_empty_composer_reads_as_a_draft_and_blocks_the_queue() {
+        let harness = HarnessConfig::claude();
+        let pane = concat!(
+            "───────────────────────────────────────\n",
+            "❯ [perf] find_code_ranges: 2ms\n",
+            "──────────────[perf] find_code_ranges: 3ms──────────\n",
+            "  Opus 5.5 ctx:31% ~/…/src/haiven-dev docs/fpe-service-top[perf] find_code_ranges: 3mschyos-x8664\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 4 agents       [perf] find_code_ranges: 2ms\n",
+        );
+
+        assert_eq!(
+            idle_queue_prompt_visibility(pane, &harness, true),
+            IdleQueuePromptVisibility::Hidden,
+            "a composer row carrying painted stderr is indistinguishable from operator text"
+        );
+    }
+
     /// The guard must not block a genuinely empty composer, or the queue stalls.
     #[test]
     fn idle_queue_still_dispatches_into_an_empty_composer() {

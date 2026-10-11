@@ -53,8 +53,23 @@ pub struct SupervisorStderrRedirect {
     saved_stderr: Option<OwnedFd>,
 }
 
-pub fn supervisor_stderr_redirect_needed(harness: &HarnessConfig, route_owned: bool) -> bool {
-    route_owned && harness.is_tui_harness()
+/// Whether the supervisor must move its own fd2 off the pane before the agent
+/// TUI renders (`#restartstderrbleed`, `#perfpanebleed`).
+///
+/// Route ownership is deliberately NOT an input. A supervisor started by hand
+/// (`agent-doc start <FILE>` typed into a pane) hosts the same TUI child, the
+/// same idle-queue watch, steering poll, closeout, and commit work in-process
+/// as a route-owned one, and every one of those paths may write diagnostics to
+/// stderr (`[perf] find_code_ranges: 2ms`, `[diff] ...`, `[perf] commit ...`).
+/// While fd2 is the pane TTY those bytes are painted straight over the TUI's
+/// composer, separator and status line. The painted `❯ [perf] ...` composer
+/// row then persists in the tmux grid (the TUI never repaints an unchanged
+/// empty composer), so `capture-pane` projects it as an operator draft and the
+/// idle-queue watch refuses to dispatch forever: the session wedges at the end
+/// of a turn. Every TUI supervisor therefore redirects; only non-TUI harnesses
+/// (a plain shell child that owns no composer) keep inherited stderr.
+pub fn supervisor_stderr_redirect_needed(harness: &HarnessConfig) -> bool {
+    harness.is_tui_harness()
 }
 
 #[derive(Debug)]
@@ -206,7 +221,6 @@ impl SupervisorStderrRedirect {
     pub fn maybe_start(
         project_root: &Path,
         harness: &HarnessConfig,
-        route_owned: bool,
         log: &mut dyn SupervisorLaunchLog,
     ) -> Self {
         let stderr_log = match open_supervisor_stderr_log(project_root) {
@@ -224,7 +238,7 @@ impl SupervisorStderrRedirect {
                 return Self::inactive();
             }
         };
-        if !supervisor_stderr_redirect_needed(harness, route_owned) {
+        if !supervisor_stderr_redirect_needed(harness) {
             let fallback = stderr_log
                 .fallback_from()
                 .map(|path| path.display().to_string())
@@ -254,6 +268,40 @@ impl SupervisorStderrRedirect {
         }
     }
 
+    /// `#perfpanebleed`: move fd2 to the supervisor log at the very first
+    /// instruction of an `execve` hot-reload that adopts a surviving child.
+    ///
+    /// The surviving child's TUI is already live on the pane, so every byte the
+    /// replacement image writes before start admission reaches
+    /// [`Self::maybe_start`] (reentry warnings, `[start] ...` status, parser
+    /// diagnostics) would be painted over it. A predecessor image that never
+    /// redirected (a hand-started supervisor built before route ownership
+    /// stopped gating the redirect) hands over the pane TTY as fd2, so the
+    /// replacement must not rely on inheriting an already-redirected fd2.
+    /// Harness-agnostic on purpose: the harness is not resolved yet, and a
+    /// surviving child always owns the pane's screen.
+    pub fn start_for_surviving_child_reexec(project_root: &Path) -> Self {
+        match open_supervisor_stderr_log(project_root)
+            .and_then(|stderr_log| Self::redirect_fd2(&stderr_log))
+        {
+            Ok(guard) => guard,
+            Err(_) => Self::inactive(),
+        }
+    }
+
+    fn redirect_fd2(stderr_log: &SupervisorStderrLog) -> Result<Self> {
+        let saved_fd = agent_doc_supervisor_process::pty::dup_cloexec(libc::STDERR_FILENO)
+            .map_err(|e| anyhow::anyhow!("dup(stderr) failed: {e}"))?;
+        let saved_stderr = unsafe { OwnedFd::from_raw_fd(saved_fd) };
+        let redirected = unsafe { libc::dup2(stderr_log.file().as_raw_fd(), libc::STDERR_FILENO) };
+        if redirected < 0 {
+            anyhow::bail!("dup2(stderr) failed: {}", std::io::Error::last_os_error());
+        }
+        Ok(Self {
+            saved_stderr: Some(saved_stderr),
+        })
+    }
+
     pub fn start(
         project_root: &Path,
         harness: &HarnessConfig,
@@ -268,13 +316,7 @@ impl SupervisorStderrRedirect {
         harness: &HarnessConfig,
         log: &mut dyn SupervisorLaunchLog,
     ) -> Result<Self> {
-        let saved_fd = agent_doc_supervisor_process::pty::dup_cloexec(libc::STDERR_FILENO)
-            .map_err(|e| anyhow::anyhow!("dup(stderr) failed: {e}"))?;
-        let saved_stderr = unsafe { OwnedFd::from_raw_fd(saved_fd) };
-        let redirected = unsafe { libc::dup2(stderr_log.file().as_raw_fd(), libc::STDERR_FILENO) };
-        if redirected < 0 {
-            anyhow::bail!("dup2(stderr) failed: {}", std::io::Error::last_os_error());
-        }
+        let guard = Self::redirect_fd2(&stderr_log)?;
         let fallback = stderr_log
             .fallback_from()
             .map(|path| path.display().to_string())
@@ -286,13 +328,11 @@ impl SupervisorStderrRedirect {
             fallback
         ));
         eprintln!(
-            "[start] stderr redirected to {} for {} route-owned TUI",
+            "[start] stderr redirected to {} for {} TUI",
             stderr_log.path().display(),
             harness.binary
         );
-        Ok(Self {
-            saved_stderr: Some(saved_stderr),
-        })
+        Ok(guard)
     }
 }
 
@@ -325,10 +365,13 @@ impl SupervisorStderrRedirect {
         Self
     }
 
+    pub fn start_for_surviving_child_reexec(_project_root: &Path) -> Self {
+        Self
+    }
+
     pub fn maybe_start(
         project_root: &Path,
         harness: &HarnessConfig,
-        _route_owned: bool,
         log: &mut dyn SupervisorLaunchLog,
     ) -> Self {
         match open_supervisor_stderr_log(project_root) {
@@ -646,10 +689,21 @@ where
     }
 }
 
+#[cfg(all(test, unix))]
+mod pane_bleed_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// fd2 is process-global: tests that may `dup2` over it serialize so one
+    /// test's restore never lands between another's redirect and drop.
+    static FD2_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn fd2_lock() -> std::sync::MutexGuard<'static, ()> {
+        FD2_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     #[derive(Default)]
     struct RecordingLaunchLog {
@@ -841,12 +895,13 @@ mod tests {
 
     #[test]
     fn fresh_project_start_creates_default_supervisor_log_tree() {
+        let _fd2 = fd2_lock();
         let project = TempDir::new().unwrap();
         let harness = HarnessConfig::codex();
         let mut log = RecordingLaunchLog::default();
 
         let guard =
-            SupervisorStderrRedirect::maybe_start(project.path(), &harness, false, &mut log);
+            SupervisorStderrRedirect::maybe_start(project.path(), &harness, &mut log);
         drop(guard);
 
         let path = project.path().join(".agent-doc/logs/supervisor-stderr.log");
@@ -859,6 +914,84 @@ mod tests {
         );
         assert!(log.events[0].contains(&format!("target={}", path.display())));
         assert!(log.events[0].contains("fallback_from=none"));
+    }
+
+    /// `#perfpanebleed`: a hand-started (`agent-doc start <FILE>`, not
+    /// `--route-owned`) Claude supervisor kept fd2 on the pane TTY, so the
+    /// in-process steering/idle poll painted `[perf] find_code_ranges: 2ms`
+    /// over the live composer and the polluted `❯ [perf] ...` row read as an
+    /// operator draft, wedging the idle queue. The redirect no longer takes a
+    /// route-ownership input: a TUI supervisor's fd2 writes must land in the
+    /// supervisor log, and dropping the guard must restore the original fd2.
+    #[cfg(unix)]
+    #[test]
+    fn hand_started_tui_supervisor_moves_fd2_writes_off_the_pane() {
+        let _fd2 = fd2_lock();
+        fn fd2_identity() -> (u64, u64) {
+            let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+            assert_eq!(unsafe { libc::fstat(libc::STDERR_FILENO, &mut stat) }, 0);
+            (stat.st_dev as u64, stat.st_ino as u64)
+        }
+
+        let project = TempDir::new().unwrap();
+        let mut log = RecordingLaunchLog::default();
+        let before = fd2_identity();
+
+        let guard = SupervisorStderrRedirect::maybe_start(
+            project.path(),
+            &HarnessConfig::claude(),
+            &mut log,
+        );
+        let marker = b"[perf] find_code_ranges: 2ms #perfpanebleed-marker\n";
+        let written = unsafe {
+            libc::write(
+                libc::STDERR_FILENO,
+                marker.as_ptr().cast::<libc::c_void>(),
+                marker.len(),
+            )
+        };
+        let during = fd2_identity();
+        drop(guard);
+        let after = fd2_identity();
+
+        assert_eq!(written, marker.len() as isize);
+        assert_ne!(during, before, "fd2 must not stay on the pane TTY");
+        assert_eq!(after, before, "dropping the guard must restore the original fd2");
+        let path = project.path().join(".agent-doc/logs/supervisor-stderr.log");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("#perfpanebleed-marker"),
+            "fd2 diagnostics must land in the supervisor log: {content}"
+        );
+        assert!(
+            log.events
+                .iter()
+                .any(|event| event.starts_with("supervisor_stderr_redirect harness=claude")),
+            "the redirect must be recorded as active, not log-ready only: {:?}",
+            log.events
+        );
+    }
+
+    /// Non-TUI harnesses own no composer and keep inherited stderr.
+    #[cfg(unix)]
+    #[test]
+    fn non_tui_harness_keeps_inherited_stderr() {
+        let _fd2 = fd2_lock();
+        let project = TempDir::new().unwrap();
+        let mut harness = HarnessConfig::claude();
+        harness.binary = "bash".to_string();
+        let mut log = RecordingLaunchLog::default();
+
+        let guard = SupervisorStderrRedirect::maybe_start(project.path(), &harness, &mut log);
+
+        assert!(guard.saved_stderr.is_none());
+        assert!(
+            log.events
+                .iter()
+                .all(|event| event.starts_with("supervisor_stderr_log_ready")),
+            "{:?}",
+            log.events
+        );
     }
 
     #[test]

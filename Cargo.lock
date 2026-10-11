@@ -1762,6 +1762,7 @@ dependencies = [
  "agent-doc-element-queue",
  "agent-doc-frontmatter",
  "agent-doc-fs",
+ "agent-doc-git-io",
  "agent-doc-hash",
  "agent-doc-lease",
  "agent-doc-markdown-ast",

@@ -78,6 +78,36 @@ pub fn walk_file_revisions(
     Ok(visited)
 }
 
+/// `#qheadresiduescope`: the exchange as it stood just before the live
+/// free-text head `head_text` last (re-)entered queue `queue_id` of `file`, or
+/// `None` when every echo counts.
+///
+/// Walks the document's committed versions newest first (at most
+/// [`FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT`]) through
+/// [`agent_doc_queue::queue_head_entry::FreeTextHeadEntryWalk`], which owns
+/// the decisions. Shared by the preflight catch-up residue strike and the
+/// queue-continuation answered-head skip so both scope the exchange to the
+/// same entry point. A document with no history counts every echo (the
+/// behavior before the scoping).
+///
+/// [`FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT`]: agent_doc_queue::queue_head_entry::FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT
+pub fn free_text_head_entry_anchor_exchange(
+    file: &Path,
+    queue_id: &str,
+    head_text: &str,
+) -> Option<String> {
+    use agent_doc_queue::queue_head_entry::{
+        FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT, FreeTextHeadEntryWalk,
+    };
+    let mut walk = FreeTextHeadEntryWalk::new(queue_id, head_text);
+    // A git failure leaves the walk as far as it got; with nothing visited
+    // every echo counts.
+    let _ = walk_file_revisions(file, FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT, |content| {
+        walk.visit(content)
+    });
+    walk.finish(FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT)
+}
+
 pub fn show_head(file: &Path) -> Result<Option<String>> {
     show_rev(file, "HEAD")
 }

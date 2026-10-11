@@ -24,6 +24,7 @@ pub mod queue_convergence;
 pub mod queue_directive;
 pub mod queue_graph;
 pub mod queue_head_annotation;
+pub mod queue_head_entry;
 pub mod queue_heads;
 pub mod queue_inbound;
 pub mod queue_preemption;

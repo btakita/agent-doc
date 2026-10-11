@@ -4,6 +4,23 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+- **A retained-then-converging CLI write is no longer reported as a failure (`#binaryownedcli`).** On
+  2026-10-11 `agent-doc backlog <FILE> add`, `backlog remove --contains`, `queue sync`, and `queue consume
+  --id` on a live-editor document each exited 1 with `visible document write ... is retained by the lazy
+  delivery projection [retained=delivery_projection_pending]` plus a dogfood `projection_failure` fix
+  prompt, although ops.log shows the next delivery edge converging within seconds (e.g. `queue_sync`
+  deferred at `delivery_version=30`, converged at 31) and `agent-doc read` showed the change. The standalone
+  `backlog`/`icebox`/`review`/`queue` commands now install a binary-owned CLI write policy
+  (`agent_doc_write_converge_io::retained_cli_write`): at the shared write-convergence boundary, a refusal
+  carrying the narrow pending token blocks on the delivery-convergence edge (embedded-relay or controller
+  subscription, no polling sleeps; default 30s, `AGENT_DOC_RETAINED_CLI_WRITE_WAIT_MS`) and the command
+  continues with exit 0 once the authority carries the written components. If the bound expires while
+  still retained, the command exits **75** with `[agent-doc] deferred (exit 75):
+  [status=retained_write_deferred] ...` — not an error, no dogfood prompt, do not re-run. Every other
+  refusal (no registered replica, sync pending, rejecting endpoint) still exits 1. No disk write or force is
+  ever attempted; the response/closeout path is unchanged. Regression tests drive each command against a
+  real embedded relay with an editor replica that acknowledges only after the command entered its await.
+
 - **Each checkout's test ceiling always bounds that checkout (`#checktmpdirleak`).** The report that one
   worktree's `make check` "printed another worktree's path" in its nextest `test-isolation` setup line was a
   shared log, not a shared TMPDIR: concurrent subagents redirected `make check` to the same fixed

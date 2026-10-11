@@ -160,9 +160,13 @@ fn converge_awaiting_retained_delivery(
     let Err(err) = write() else {
         return Ok(());
     };
-    if !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&format!(
-        "{err:#}"
-    )) {
+    let rendered = format!("{err:#}");
+    // `#binaryownedcli`: a CLI write that already spent its bounded convergence
+    // wait at the write boundary reports a deferral; waiting a second time here
+    // would only double the latency of the same answer.
+    if !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&rendered)
+        || agent_doc_turn::write_ownership::is_retained_cli_write_deferred(&rendered)
+    {
         return Err(err);
     }
     let started = std::time::Instant::now();

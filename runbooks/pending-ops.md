@@ -333,6 +333,22 @@ token-efficiently instead of reading the whole component:
 Annotate gated items with a token-efficient `[<gate-type|blocked:reason>] <summary>.
 NEXT: (1)… (2)…` so `review list --has-next` surfaces exactly what is actionable.
 
+## Standalone CLI exit status (`#binaryownedcli`)
+
+Standalone `agent-doc backlog|icebox|review <FILE> ...` and `agent-doc queue ...`
+writes on a document with a live editor may be retained while the editor's
+delivery projection converges. The command waits for that convergence itself
+(bounded, default 30s) and then:
+
+- **exit 0** — applied and visible. A `converged after Nms` notice is informational.
+- **exit 75** — `[agent-doc] deferred (exit 75): [status=retained_write_deferred] ...`.
+  The write is durable and becomes visible on its own. This is NOT a failure:
+  do not re-run the command (an `add` would apply twice), do not force disk or
+  `admin recycle`, and do not file a defect; `agent-doc read <FILE>` shows the
+  change once the editor converges.
+- **exit 1** — a real failure (`Error: ...`, and the dogfood fix prompt on an
+  opted-in document). Follow the recovery that error names.
+
 ## Escape hatch
 
 `--allow-replace-pending` (hidden flag, or `AGENT_DOC_ALLOW_REPLACE_PENDING=1`) permits

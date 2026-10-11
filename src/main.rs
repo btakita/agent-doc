@@ -4750,10 +4750,41 @@ fn main() -> ExitCode {
     match try_main() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
+            if let Some(deferral) =
+                agent_doc_write_converge_io::retained_cli_write::retained_cli_write_deferral(&err)
+            {
+                return report_retained_cli_write_deferral(deferral);
+            }
             print_terminal_error_report(&err);
             ExitCode::FAILURE
         }
     }
+}
+
+/// `#binaryownedcli`: a durable, retained CLI write whose delivery did not
+/// converge within the bounded wait. It is reported as a deferral — distinct
+/// exit status, no `Error:` prefix, no dogfood fix prompt — because nothing
+/// failed and nothing must be retried.
+fn report_retained_cli_write_deferral(
+    deferral: &agent_doc_write_converge_io::retained_cli_write::RetainedCliWriteDeferred,
+) -> ExitCode {
+    let mut stderr = std::io::stderr().lock();
+    let _ = write_terminal_error_report(
+        &mut stderr,
+        &render_retained_cli_write_deferral(deferral),
+    );
+    ExitCode::from(
+        agent_doc_write_converge_io::retained_cli_write::RETAINED_CLI_WRITE_DEFERRED_EXIT_CODE,
+    )
+}
+
+fn render_retained_cli_write_deferral(
+    deferral: &agent_doc_write_converge_io::retained_cli_write::RetainedCliWriteDeferred,
+) -> String {
+    format!(
+        "[agent-doc] deferred (exit {}): {deferral}",
+        agent_doc_write_converge_io::retained_cli_write::RETAINED_CLI_WRITE_DEFERRED_EXIT_CODE
+    )
 }
 
 /// A usage error with its own specific remedy (e.g. a `queue claim --item`
@@ -4886,6 +4917,25 @@ fn try_main() -> anyhow::Result<()> {
     }
 
     let config = agent_doc_config::load()?;
+
+    // `#binaryownedcli`: standalone tracked-work and queue mutations are
+    // binary-owned CLI writes. A write the editor authority retained while its
+    // delivery projection converges blocks (bounded, on the convergence edge)
+    // and exits 0, or exits with the distinct deferred status — never as a
+    // failure with a dogfood fix prompt. The response/closeout path keeps its
+    // own retained-capture semantics, so it does not install this policy.
+    let _binary_owned_cli_write = matches!(
+        cli.command,
+        Commands::Backlog { .. }
+            | Commands::Icebox { .. }
+            | Commands::Review { .. }
+            | Commands::Queue { .. }
+    )
+    .then(|| {
+        agent_doc_write_converge_io::retained_cli_write::enter_binary_owned_cli_write(
+            agent_doc_write_converge_io::retained_cli_write::configured_retained_cli_write_wait(),
+        )
+    });
 
     match cli.command {
         Commands::Env { json } => env_cmd::run(json),
@@ -7519,6 +7569,37 @@ mod terminal_error_report_tests {
             "terminal report must not contain bare LF newlines: {rendered:?}"
         );
         assert!(rendered.ends_with("\r\n"));
+    }
+
+    /// `#binaryownedcli`: a retained CLI write deferral is routed out of the
+    /// error report even under command context, and renders as a deferral —
+    /// no `Error:` prefix, no dogfood fix prompt.
+    #[test]
+    fn retained_cli_write_deferral_is_reported_as_a_deferral_not_an_error() {
+        let err = anyhow::Error::new(
+            agent_doc_write_converge_io::retained_cli_write::RetainedCliWriteDeferred {
+                file: "tasks/doc.md".to_string(),
+                source: "queue_sync".to_string(),
+                waited_ms: 30_000,
+                cause: "the bounded convergence wait expired",
+                refusal: "retained [recovery=await_editor_replica_no_disk_write] \
+                          [retained=delivery_projection_pending]"
+                    .to_string(),
+            },
+        )
+        .context("queue sync: failed to write document");
+        let deferral =
+            agent_doc_write_converge_io::retained_cli_write::retained_cli_write_deferral(&err)
+                .expect("main must find the deferral under command context");
+        let rendered = render_retained_cli_write_deferral(deferral);
+        assert!(rendered.starts_with("[agent-doc] deferred (exit 75): "));
+        assert!(!rendered.contains("Error:"));
+        assert!(!rendered.contains("ACTIONABLE_AGENT_DOC_FIX_PROMPT"));
+        assert!(rendered.contains("Do NOT re-run this command"));
+        assert_eq!(
+            agent_doc_write_converge_io::retained_cli_write::RETAINED_CLI_WRITE_DEFERRED_EXIT_CODE,
+            75
+        );
     }
 
     #[test]

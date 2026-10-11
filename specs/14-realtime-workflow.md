@@ -434,6 +434,72 @@ re-decided at a site:
   reading. This is consistent with `#admissionsteeringagree`: admission is
   refused only by a holder that can still change what the next turn reads.
 
+### Binary-owned CLI writes settle a converging retention (`#binaryownedcli`)
+
+Standalone mutation commands — `agent-doc backlog|icebox|review <FILE> ...`
+and every `agent-doc queue ...` action — are binary-owned CLI writes. They
+converge through the same write boundary as a response
+(`agent_doc_write_converge_io::converge_or_disk_write` /
+`converge_document_or_disk`), so with a live editor replica that has not yet
+acknowledged the delivery, the post-write barrier refuses with the narrow
+`retained=delivery_projection_pending` deferral even though the write is
+already accepted by the editor authority and durable. Observed 2026-10-11 on
+`agent-doc-bugs.md`: `queue_sync` deferred at `delivery_version=30`, the next
+delivery edge (`delivery_version=31`, `delivery_converged=true`) followed within
+seconds, but the command had already exited 1 with a dogfood
+`projection_failure` fix prompt — so agents retried (double-applying adds) or
+filed defects for a converging write.
+
+`main` installs the binary-owned CLI write policy
+(`retained_cli_write::enter_binary_owned_cli_write`) for those command families
+only. The response/closeout path (`write`, `respond`, `commit`, compact) keeps
+its own retained-capture ownership rules above. Under the policy, the barrier
+refusal is settled at the write boundary, so the command continues normally
+afterwards (read-back verification such as `backlog add`'s `#addreadback` sees
+the item):
+
+1. Only a refusal carrying the narrow `retained=delivery_projection_pending`
+   token is settled. Every other refusal (an attached editor with no registered
+   replica, editor sync pending, a rejecting endpoint, a guard failure)
+   propagates unchanged and still fails with exit 1.
+2. The command blocks on the delivery-convergence edge
+   (`EditorConvergenceEffects::await_retained_delivery_projection`; at runtime
+   `document_realtime_io::await_retained_delivery_projection`, which parks on
+   the embedded relay's or the controller's delivery-convergence subscription
+   keyed by the last observed delivery version — never a polling sleep) for a
+   bounded wait: 30s by default, `AGENT_DOC_RETAINED_CLI_WRITE_WAIT_MS`
+   overrides it.
+3. Delivery converged and the authority carries every component (and the
+   frontmatter) the write changed → the write returns success and the command
+   exits 0 (ops-log `binary_owned_cli_write_retained_settled outcome=converged`).
+   An unrelated concurrent edit elsewhere in the document does not void the
+   proof.
+4. The bound expired while still retained, the edge became unobservable, or a
+   concurrent edit changed this write's own components → the typed
+   `RetainedCliWriteDeferred` (`outcome=deferred`). It keeps the original
+   refusal text (so token classifiers still recognize it) and carries
+   `status=retained_write_deferred`.
+
+Exit-status contract for these commands:
+
+| Exit | Meaning | Output |
+|------|---------|--------|
+| 0 | Applied; any retained delivery converged and is visible. | Normal output; a converged retention prints one informational `[agent-doc] ... converged after Nms` line. |
+| 75 (`EX_TEMPFAIL`) | **Deferred, not failed.** The write is durable in the editor authority and becomes visible on its own. Do NOT re-run the command (it would apply twice), force disk, or `admin recycle`; `agent-doc read <FILE>` shows it once the editor converges. | `[agent-doc] deferred (exit 75): [status=retained_write_deferred] ...` — no `Error:` prefix, no dogfood `ACTIONABLE_AGENT_DOC_FIX_PROMPT`. |
+| 1 | A real failure. | `Error: ...`, plus the dogfood fix prompt on an opted-in document. |
+
+Because the retention is settled at the write boundary, a command's own
+post-write steps now run after a converged retention: `queue sync`'s baseline
+checkpoint and `queue consume --id`'s snapshot strike advance the snapshot, so
+the next preflight no longer diffs those binary-authored writes as operator
+input (`[user+]`). Standalone `backlog`/`icebox`/`review` mutations have no
+snapshot step on any path (detached or attached) and remain unattributed in
+the next diff; agent-attributing them is a separate snapshot-ownership change.
+
+No step writes disk, requests a delivery, or forces anything; waiting is the
+only effect. A queue-consume write that already spent this bounded wait does
+not start a second `#qconsumedeferwedge` wait for the same answer.
+
 ## Editor Frontend Hot Path
 
 The editor text-change callback is a capture boundary, not a convergence worker. JetBrains `DocumentListener` callbacks, VS Code

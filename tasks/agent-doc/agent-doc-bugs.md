@@ -216,31 +216,17 @@ Still in flight for the next batch: `capturegatedispatched` (done, `436cb0652`) 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#hookstalemsgfile]~~
-- ~~do [#relayhubtestisolation]~~
-- ~~do [#removeobsoleteicebox]~~
-- ~~do [#respondfinalizehard]~~
-- ~~do [#pypireleaseworkflow]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/235~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/236~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
-Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md because a turn is live in pane %127 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md` to intentionally interrupt the turn and clear context.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Run Agent Doc on tools.md was slow to go.~~
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#visiblewriteloadflake]~~
-- ~~do [#idefocusowner]~~
-- ~~#actionable-review~~
-- 🚧 do [#capturegatedispatched]
+- ⏭️ do [#capturegatedispatched]
 - 🚧 Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.
-- do [#visiblewritewallclock]
-- do [#editoropscheckpointfail]
+- 🚧 do [#visiblewritewallclock]
+- 🚧 do [#editoropscheckpointfail]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#visiblewritewallclock] [agent-doc] test_poll_lazily_event_appears_after_delay (agent-doc-write-runtime-io) still assumes the writer finishes within its 5s poll deadline: it fails 7/30 with the test process pinned to one core shared with 96 busy-loops, even after the visiblewriteloadflake fix (30/30 at 56 and 64 busy-loops). Remove the wall-clock assumption by making the poll wait on the writer's receipt event, not on a deadline; do not raise the timeout. Prove it with the pinned-core stress script (scratchpad pinned.sh pattern) at K=96.
-- [ ] [#editoropscheckpointfail] [agent-doc] During the 2026-10-11 03:40Z sdk.md typing burst, editor_ops_record_failed ('append Lazily editor-op checkpoint') fired three times, so the editor-op history had no record of the edits that led to the typingforkdup duplicate. 0.35.487 logs the full error chain. On the next occurrence, find from that chain why the editor-op checkpoint append fails under rapid typing, and fix it so op provenance is never lost.
+- [ ] 🚧 [#visiblewritewallclock] [agent-doc] test_poll_lazily_event_appears_after_delay (agent-doc-write-runtime-io) still assumes the writer finishes within its 5s poll deadline: it fails 7/30 with the test process pinned to one core shared with 96 busy-loops, even after the visiblewriteloadflake fix (30/30 at 56 and 64 busy-loops). Remove the wall-clock assumption by making the poll wait on the writer's receipt event, not on a deadline; do not raise the timeout. Prove it with the pinned-core stress script (scratchpad pinned.sh pattern) at K=96.
+- [ ] 🚧 [#editoropscheckpointfail] [agent-doc] During the 2026-10-11 03:40Z sdk.md typing burst, editor_ops_record_failed ('append Lazily editor-op checkpoint') fired three times, so the editor-op history had no record of the edits that led to the typingforkdup duplicate. 0.35.487 logs the full error chain. On the next occurrence, find from that chain why the editor-op checkpoint append fails under rapid typing, and fix it so op provenance is never lost.
 - [ ] 🚧 [#capturegatedispatched] [agent-doc] The finalize pre-write pending_capture gate ('active prompt requested backlog capture but no backlog mutations were recorded this cycle') fires on cycles whose only backlog-capture preset (for example the actionable-review item preset carried on queue steering) belongs to a head already claimed by or dispatched to a subagent. Coordinator dispatch-only cycles must then add a suppression marker or a filler backlog item. Seen twice on 2026-10-09/10 in agent-doc-bugs.md. Scope the gate to presets whose heads this cycle actually drains: a claimed or dispatched head's capture belongs to the cycle that closes it. Add regression coverage for a dispatch-only coordinator cycle.
 <!-- /agent:backlog -->
 

@@ -124,6 +124,7 @@ Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-
 - 🚧 do [#visiblewriteloadflake]
 - 🚧 do [#idefocusowner]
 - ~~#actionable-review~~
+- do [#capturegatedispatched]
 <!-- /agent:queue -->
 
 ## Backlog

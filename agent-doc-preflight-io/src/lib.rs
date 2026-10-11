@@ -10586,12 +10586,23 @@ mod tests {
         }
         let typed = agent_doc_merge::crdt::replay_editor_ops(&epoch_base, &ops).unwrap();
         assert!(typed.contains("- release + publish\n<!-- /agent:queue -->"));
-        agent_doc_op_capture_io::record_editor_ops(
+        // `#remainingwallclock`: record through the retaining path and wait for
+        // the controller's acknowledgement, bounded only by a hang ceiling. The
+        // strict `record_editor_ops` gives the actor one 250ms reply budget,
+        // which a loaded `make check` (load average ~127) missed in setup.
+        agent_doc_op_capture_io::record_editor_ops_retaining(
             &doc,
             &agent_doc_hash::content_hash(&epoch_base),
             ops,
         )
         .unwrap();
+        assert!(
+            agent_doc_op_capture_io::wait_for_retained_editor_ops(
+                &doc,
+                std::time::Duration::from_secs(60)
+            ),
+            "the operator's typing burst was never acknowledged"
+        );
         std::fs::write(&doc, &typed).unwrap();
 
         let live_release = |doc: &Path| {
@@ -10631,8 +10642,17 @@ mod tests {
 
         // In production the maintenance projection closes the operator's epoch
         // (`editor_op_epoch_closed cause=non_operator_projection`), so the next
-        // pass runs with no active op evidence at all.
-        agent_doc_op_capture_io::clear_op_capture(&doc).unwrap();
+        // pass runs with no active op evidence at all. `#remainingwallclock`:
+        // close it the way finalize does, deciding from state with the
+        // causal-fence budget, not from one 250ms clear reply.
+        let consumed = agent_doc_op_capture_io::consume_replayed_editor_op_epoch(&doc);
+        assert!(
+            matches!(
+                consumed,
+                agent_doc_op_capture_io::ReplayedEpochConsumption::Consumed { .. }
+            ),
+            "the operator's epoch must close: {consumed:?}"
+        );
         let _ = run_queue_maintenance(&doc, None).unwrap();
         assert!(
             live_release(&doc),

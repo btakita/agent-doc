@@ -5187,6 +5187,15 @@ mod tests {
             )
             .unwrap();
         }
+        // `#remainingwallclock`: serve the RPCs below from a warm in-process
+        // actor, started after the legacy facts so it hydrates them. The first
+        // RPC used to `connect_or_launch` a cold detached controller, whose
+        // whole startup was charged to the 2s test-mode response deadline
+        // (`timed out after 2.0s waiting for project controller response` at
+        // load average 60-100). The actor's socket gets a hang-ceiling deadline.
+        let _actor =
+            agent_doc_controller_io::project_controller::start_state_actor_for_tests(dir.path())
+                .unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &PublishedBufferConvergenceEffects {
@@ -5210,6 +5219,12 @@ mod tests {
             patch_id,
         )
         .expect("the explicit editor publication should upgrade the legacy receipt");
+        let ops_log =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            !ops_log.contains("controller_detached_child_launched"),
+            "the warm actor must serve these RPCs, not a cold-launched controller:\n{ops_log}"
+        );
         assert_eq!(
             upgraded.commit_candidate_content.as_deref(),
             Some(candidate)

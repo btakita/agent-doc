@@ -276,6 +276,42 @@ mod visible_write_content_snapshot_tests {
         assert_eq!(recorded.patch_id, "concurrent-client");
     }
 
+    /// `#remainingwallclock`: RPCs to the warm actor's socket wait up to a hang
+    /// ceiling, because that controller is known live; every other socket keeps
+    /// the fast-fail test deadline, and the actor's socket loses the ceiling
+    /// once the actor stops.
+    #[test]
+    fn a_warm_actor_socket_gets_a_hang_ceiling_and_other_sockets_keep_the_fast_fail_deadline() {
+        use agent_doc_controller_io::project_controller::controller_response_timeout_for_tests as deadline;
+        let fast = std::time::Duration::from_secs(2);
+        let other = TempDir::new().unwrap();
+        std::fs::create_dir_all(other.path().join(".agent-doc")).unwrap();
+        let other_sock = other.path().join(".agent-doc").join("controller.sock");
+        assert_eq!(deadline(&other_sock, fast), fast);
+
+        let project = WarmControllerProject::new();
+        let sock = project
+            .tmp
+            .path()
+            .join(".agent-doc")
+            .join("controller.sock");
+        assert!(
+            deadline(&sock, fast) >= std::time::Duration::from_secs(30),
+            "a live warm actor's RPCs must wait up to the hang ceiling"
+        );
+        assert_eq!(
+            deadline(&other_sock, fast),
+            fast,
+            "a socket no warm actor serves keeps the fast-fail deadline"
+        );
+        drop(project);
+        assert_eq!(
+            deadline(&sock, fast),
+            fast,
+            "a stopped actor's socket must lose the ceiling"
+        );
+    }
+
     #[test]
     fn test_lazily_visible_write_event_read() {
         let project = WarmControllerProject::new();
@@ -1423,11 +1459,14 @@ mod visible_write_content_snapshot_tests {
         // and used some multi-second default", not scheduler latency. It was 300ms
         // -- 3x the timeout -- and CI run 35540520917 failed on it while the same
         // commit was green locally: that runner took 1489s for a suite that takes
-        // ~170s here, so a 3x wall-clock bound cannot hold. Generous enough to
-        // survive a loaded runner, tight enough that a wrong timeout constant
-        // (seconds, not millis) still fails.
+        // ~170s here, so a 3x wall-clock bound cannot hold.
+        //
+        // `#remainingwallclock`: 5s still failed a full `make check` at load
+        // average 60-100 (7.9s), so it is now a hang ceiling. 30s is far below
+        // what a wrong unit (100ms read as 100s) or the controller's 120s await
+        // maximum would take, and far above any scheduling delay.
         assert!(
-            elapsed < std::time::Duration::from_secs(5),
+            elapsed < std::time::Duration::from_secs(30),
             "should return on the requested timeout, not a much larger one: {elapsed:?}"
         );
     }

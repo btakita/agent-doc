@@ -60,6 +60,57 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   ever attempted; the response/closeout path is unchanged. Regression tests drive each command against a
   real embedded relay with an editor replica that acknowledges only after the command entered its await.
 
+- **The remaining load-sensitive wall-clock asserts are now ordering proofs or hang ceilings (`#remainingwallclock`).**
+  Follows `#loadbudgettests`; no runtime behavior changes.
+  - Three controller-io tests asserted under 250ms that a call was "not blocked by a blocked effect", against
+    fixtures that slept 750ms: `durable_document_effects_do_not_hold_the_reactive_context` (the
+    `blocking-document-effect` settle), `retained_transition_adapter_does_not_hold_the_reactive_context` (the
+    `blocking-retained-transition.md` adapter) and `document_turn_authority_publisher_does_not_hold_process_scope`.
+    The fixtures now block on a gate the test holds closed (one generic `blocking_effect_gate::Gate`, which also
+    replaces the `blocking-session.md` strike gate). Each test waits until the effect has reached its gate, then
+    requires that the gate has not been passed when the verdict, publish or read returns. A call that waited on the
+    effect could only return after the gate opened at its 30s ceiling. The authority publisher test counts completed
+    publisher calls the same way. `state_plane_subscriber_never_inverts_channel_and_process_scope_locks` waits up to
+    a 30s deadlock ceiling instead of 250ms.
+  - In rpc.rs, "fails at once / woken by the event, not the deadline" bounds of 1-5s against 30s deadlines are now
+    15s, half the deadline they distinguish from. `an_await_on_the_successor_...` waits up to 60s for a command no
+    predecessor forwards, so its 30s ceiling still separates "fail at once" from "wait out the deadline". Liveness
+    waits (2s recv timeouts, the 5s locked-database retry) became 30s ceilings.
+    `run_status_ensure_does_not_hold_idle_controller_stream` runs the status on a helper thread and requires it to
+    complete within 30s while the idle stream is still held. A controller serialized behind that stream never
+    answers, so that regression now fails instead of hanging the suite.
+  - preflight-io debounce: `preflight_mutation_wait_admits_a_pending_delivery_on_the_current_authority` proves
+    "does not spend the settle budget" by its single observation, not a 300ms bound. The settle-slice test bound is
+    now a 30s hang ceiling. The deadline-clamp test requires a return under 15s, half its 30s settle window.
+  - codex-stop-io: `stop_hook_timeout_flushes_response_and_terminates_the_process` uses a 10-minute worker delay and
+    waits for the child process with a 60s ceiling, killing it on overrun, instead of asserting under 4s against a 5s
+    worker.
+  - `src/preflight_hook.rs`: the two `#preflightdeadline` tests drop their elapsed-time asserts. The typed
+    `PreflightAdmissionRefused` already proves the refusal came before the backstop, whose overrun is untyped. The
+    boundary test's phase sleeps exactly to the deadline (a clamped 30s bound) instead of a fixed 1.6s.
+  - A socket served by an in-process test state actor (`start_state_actor_for_tests`) is now registered as known
+    live, and controller RPCs to it use a 30s response hang ceiling instead of the 2s test-mode deadline. The 2s
+    deadline stays for every other socket, so an absent or silent controller still fails fast. A slow answer from a
+    live actor is host load. The visible-write receipt fixtures in write-runtime-io failed a full `make check` at
+    load average 60-100 with `timed out after 2.0s waiting for project controller response`.
+    `already_applied_publish_upgrades_legacy_hash_only_receipt_in_lazily_state` (write-converge-io) used to
+    cold-launch a detached controller on its first RPC. It now starts a warm actor after its legacy facts and asserts
+    that no detached controller was launched. write-converge-io's dev-dependency enables controller-io
+    `test-support`, as workspace runs already did through feature unification. `test_poll_lazily_event_timeout`'s
+    5s bound (7.9s under load) is a 30s hang ceiling. That is still far below the 100s a millis-for-seconds unit
+    error takes.
+  - preflight-io `assert_retyped_head_survives_maintenance` (the two `retyped_head_*` tests) failed in setup at
+    load average ~127. The cause was the 250ms actor reply budget of the strict `record_editor_ops` and
+    `clear_op_capture`. Setup now records through `record_editor_ops_retaining` and waits for the acknowledgement
+    with a 60s ceiling. It closes the epoch through `consume_replayed_editor_op_epoch`, which uses the causal-fence
+    budget and decides from state, as finalize does, and requires `Consumed`. The production 250ms
+    optional-evidence budget is unchanged.
+  - ipc-io: the listener takeover poll and the shutdown-without-wake poll (10s), and the socket-publication wait
+    (2s), are 60s hang ceilings. controller-io `editor_op_append_is_not_blocked_by_a_durable_reload_in_progress`
+    detects its deadlock with a 30s ceiling, not 10s. `detached_controller_exits_when_temp_project_root_is_removed`
+    now waits up to a 60s ceiling instead of 10s.
+  - The test-timing rule in `specs/12-deterministic-simulation.md` now describes the closed-gate pattern and the
+    two allowed hang-ceiling shapes.
 - **Each checkout's test ceiling always bounds that checkout (`#checktmpdirleak`).** The report that one
   worktree's `make check` "printed another worktree's path" in its nextest `test-isolation` setup line was a
   shared log, not a shared TMPDIR: concurrent subagents redirected `make check` to the same fixed

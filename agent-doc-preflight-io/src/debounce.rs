@@ -679,10 +679,13 @@ mod tests {
             "current_pending",
             "authority_unavailable",
         ] {
+            // `#remainingwallclock`: a hang ceiling, not a latency budget. A
+            // slice parks at most `DELIVERY_SETTLE_AWAIT_SLICE` (500ms); the
+            // bound only turns an unbounded park into a failure.
             let started = std::time::Instant::now();
             wait_one_settle_slice(file, state, Duration::from_millis(10));
             assert!(
-                started.elapsed() < Duration::from_secs(5),
+                started.elapsed() < Duration::from_secs(30),
                 "settle slice for {state} must stay bounded when no controller can answer"
             );
         }
@@ -739,7 +742,10 @@ mod tests {
         let signals = RefCell::new(Vec::new());
         let observations = Cell::new(0usize);
 
-        let started = Instant::now();
+        // `#remainingwallclock`: "admission does not spend the settle budget"
+        // is proven by the observation count, not elapsed time. Spending any
+        // of the budget means re-observing the still-pending delivery, so a
+        // waiting admission makes more than one observation.
         let outcome = wait_for_lazily_current_before_mutation_with_effects(
             &doc,
             Duration::from_millis(300),
@@ -760,12 +766,7 @@ mod tests {
         assert_eq!(
             observations.get(),
             1,
-            "admission must not poll the delivery"
-        );
-        assert!(
-            started.elapsed() < Duration::from_millis(300),
-            "admission must not spend the settle budget, took {:?}",
-            started.elapsed()
+            "admission must not poll the delivery or spend the settle budget"
         );
         assert_eq!(
             signals.into_inner(),
@@ -944,6 +945,9 @@ mod tests {
         let doc = dir.path().join("session.md");
         let _deadline = deadline_in(Duration::from_millis(300));
 
+        // `#remainingwallclock`: the ceiling below is half the 30s settle
+        // window, so an unclamped wait (at least one full window) fails it,
+        // while a clamped one (300ms) clears it at any load.
         let started = std::time::Instant::now();
         let outcome = wait_for_lazily_current_before_mutation_with_effects(
             &doc,
@@ -958,7 +962,7 @@ mod tests {
             .unwrap_or_else(|| panic!("the refusal must stay typed: {err:#}"));
         assert_eq!(exhausted.wait, "preflight_visible_mutation_settle");
         assert!(
-            started.elapsed() < Duration::from_secs(5),
+            started.elapsed() < Duration::from_secs(15),
             "the 30s settle window must have been clamped, took {:?}",
             started.elapsed()
         );

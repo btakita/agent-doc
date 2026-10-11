@@ -2943,7 +2943,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
             // holding the Lazily context while the adapter is blocked. The
             // adapter blocks on a gate the test holds closed (`#loadbudgettests`),
             // not on a 750ms sleep the test raced against a 250ms bound.
-            blocking_strike_adapter_gate::pass();
+            blocking_effect_gate::STRIKE_ADAPTER.pass();
         }
         let current = std::fs::read_to_string(&invocation.file)
             .context("project controller test free-text strike: failed to read document")?;
@@ -2960,56 +2960,97 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
 static TEST_RUNTIME_EFFECTS: TestProjectControllerRuntimeEffects =
     TestProjectControllerRuntimeEffects;
 
-/// Gate for the `blocking-session.md` free-text strike adapter fixture.
+/// Gates for the blocking adapter fixtures (`blocking-session.md`,
+/// `blocking-document-effect`, `blocking-retained-transition.md`).
 ///
-/// `#loadbudgettests`: "publishing must not wait for the adapter" is proven by
-/// ordering, not elapsed time. The test closes the gate, publishes, and then
-/// requires that the adapter has NOT passed the gate: a publish that waited on
-/// the adapter could only have returned after the gate opened. The gate opens
-/// itself after [`blocking_strike_adapter_gate::HANG_CEILING`], so that
-/// regression fails the assertion instead of hanging the suite.
+/// `#loadbudgettests` / `#remainingwallclock`: "publishing must not wait for the
+/// adapter" is proven by ordering, not elapsed time. A test closes the gate,
+/// publishes, and then requires that the adapter has NOT passed the gate: a
+/// publish that waited on the adapter could only have returned after the gate
+/// opened. [`blocking_effect_gate::Gate::wait_entered`] proves the adapter is
+/// really in flight (blocked at the gate) when the test reads, so the
+/// assertion is never vacuous. A gate opens itself after
+/// [`blocking_effect_gate::HANG_CEILING`], so that regression fails the
+/// assertion instead of hanging the suite. An open gate (the default) passes
+/// at once, so a fixture is inert in every test that does not close it.
 #[cfg(test)]
-mod blocking_strike_adapter_gate {
+mod blocking_effect_gate {
     use std::time::{Duration, Instant};
 
     pub(super) const HANG_CEILING: Duration = Duration::from_secs(30);
 
-    struct Gate {
+    struct State {
         open: bool,
+        entered: usize,
         passed: usize,
     }
 
-    static GATE: parking_lot::Mutex<Gate> = parking_lot::Mutex::new(Gate {
-        open: true,
-        passed: 0,
-    });
-    static OPENED: parking_lot::Condvar = parking_lot::Condvar::new();
-
-    pub(super) fn close() {
-        let mut gate = GATE.lock();
-        gate.open = false;
-        gate.passed = 0;
+    pub(super) struct Gate {
+        state: parking_lot::Mutex<State>,
+        changed: parking_lot::Condvar,
     }
 
-    pub(super) fn open() {
-        GATE.lock().open = true;
-        OPENED.notify_all();
-    }
-
-    pub(super) fn passed() -> usize {
-        GATE.lock().passed
-    }
-
-    pub(super) fn pass() {
-        let deadline = Instant::now() + HANG_CEILING;
-        let mut gate = GATE.lock();
-        while !gate.open {
-            if OPENED.wait_until(&mut gate, deadline).timed_out() {
-                break;
+    impl Gate {
+        const fn new() -> Self {
+            Self {
+                state: parking_lot::Mutex::new(State {
+                    open: true,
+                    entered: 0,
+                    passed: 0,
+                }),
+                changed: parking_lot::Condvar::new(),
             }
         }
-        gate.passed += 1;
+
+        pub(super) fn close(&self) {
+            let mut state = self.state.lock();
+            state.open = false;
+            state.entered = 0;
+            state.passed = 0;
+        }
+
+        pub(super) fn open(&self) {
+            self.state.lock().open = true;
+            self.changed.notify_all();
+        }
+
+        pub(super) fn passed(&self) -> usize {
+            self.state.lock().passed
+        }
+
+        /// Wait (bounded by the hang ceiling) until an adapter has reached the
+        /// gate; returns how many have.
+        pub(super) fn wait_entered(&self) -> usize {
+            let deadline = Instant::now() + HANG_CEILING;
+            let mut state = self.state.lock();
+            while state.entered == 0 {
+                if self.changed.wait_until(&mut state, deadline).timed_out() {
+                    break;
+                }
+            }
+            state.entered
+        }
+
+        pub(super) fn pass(&self) {
+            let deadline = Instant::now() + HANG_CEILING;
+            let mut state = self.state.lock();
+            state.entered += 1;
+            self.changed.notify_all();
+            while !state.open {
+                if self.changed.wait_until(&mut state, deadline).timed_out() {
+                    break;
+                }
+            }
+            state.passed += 1;
+        }
     }
+
+    /// `blocking-session.md` free-text strike adapter.
+    pub(super) static STRIKE_ADAPTER: Gate = Gate::new();
+    /// `blocking-document-effect` retained-write settlement effect.
+    pub(super) static DOCUMENT_EFFECT: Gate = Gate::new();
+    /// `blocking-retained-transition.md` retained projection adapter.
+    pub(super) static RETAINED_TRANSITION: Gate = Gate::new();
 }
 
 /// `#orchver` — stamp the binary crate's `CARGO_PKG_VERSION` into controller identity.
@@ -4799,7 +4840,9 @@ impl RetainedWriteSettleSink {
     ) -> bool {
         #[cfg(test)]
         if intent_id == "blocking-document-effect" {
-            std::thread::sleep(Duration::from_millis(750));
+            // `#remainingwallclock`: blocks on a gate the test holds closed,
+            // not a 750ms sleep raced against a 250ms bound.
+            blocking_effect_gate::DOCUMENT_EFFECT.pass();
         }
         let Some(runtime) = self.runtime.upgrade() else {
             // The controller is shutting down; the intent stays retained and the
@@ -5063,7 +5106,9 @@ impl RetainedWriteSettleSink {
             // Regression fixture for the controller/editor cycle: retained
             // projection may wait on the editor lane, but never while holding
             // the reactive context that route/layout dispatch also needs.
-            std::thread::sleep(Duration::from_millis(750));
+            // `#remainingwallclock`: blocks on a gate the test holds closed,
+            // not a 750ms sleep raced against a 250ms bound.
+            blocking_effect_gate::RETAINED_TRANSITION.pass();
         }
         let Some(runtime) = self.runtime.upgrade() else {
             return false;
@@ -11954,15 +11999,22 @@ mod tests {
         let document_hash = "authority-blocked-publisher";
         let document_id = "document-authority-blocked-publisher";
         let (started_sender, started_receiver) = std::sync::mpsc::channel();
+        // `#remainingwallclock`: proven by ordering, not a 250ms bound. The
+        // publisher blocks until released (or its hang ceiling), counting each
+        // return; a transition that waited on it would only return after a
+        // publisher call had completed.
         let release = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
         let publisher_release = Arc::clone(&release);
+        let completed = Arc::new(AtomicUsize::new(0));
+        let publisher_completed = Arc::clone(&completed);
         authority_graph.install_publisher(Arc::new(move |command| {
             let _ = started_sender.send(command.epoch);
             let (lock, changed) = &*publisher_release;
-            let mut released = lock.lock().unwrap();
-            while !*released {
-                released = changed.wait(released).unwrap();
-            }
+            let released = lock.lock().unwrap();
+            let _released = changed
+                .wait_timeout_while(released, Duration::from_secs(30), |released| !*released)
+                .unwrap();
+            publisher_completed.fetch_add(1, Ordering::SeqCst);
         }));
 
         authority_graph.acquire_subscription(document_hash, document_id);
@@ -11970,7 +12022,6 @@ mod tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("authority publisher did not receive the initial projection");
 
-        let transition_started = Instant::now();
         actor_graph.set(BTreeMap::from([(
             document_id.to_string(),
             actor_record_for_test(
@@ -11979,8 +12030,9 @@ mod tests {
                 agent_doc_controller::actor::ActorState::Busy,
             ),
         )]));
-        assert!(
-            transition_started.elapsed() < Duration::from_millis(250),
+        assert_eq!(
+            completed.load(Ordering::SeqCst),
+            0,
             "a blocked state-plane publisher held the shared reactive context"
         );
         assert_eq!(
@@ -13035,8 +13087,10 @@ mod tests {
             dependency.project_change();
             let _ = notified_tx.send(());
         });
-        let notification_was_responsive =
-            notified_rx.recv_timeout(Duration::from_millis(250)).is_ok();
+        // `#remainingwallclock`: the notifier either returns while the
+        // effect is still blocked (no lock inversion) or deadlocks until the
+        // release below; the bound is only a hang ceiling for that deadlock.
+        let notification_was_responsive = notified_rx.recv_timeout(Duration::from_secs(30)).is_ok();
 
         release.wait();
         blocker_thread.join().unwrap();
@@ -18952,19 +19006,28 @@ agent:queue\n\
             "target",
         );
 
-        let settlement_started = Instant::now();
+        // `#remainingwallclock`: proven by ordering, not a 250ms bound. The
+        // settle effect blocks on a gate the test holds closed; a verdict or
+        // read that waited on it could only return after the gate opened at
+        // its hang ceiling, so it would see the effect already passed.
+        let gate = &blocking_effect_gate::DOCUMENT_EFFECT;
+        gate.close();
         runtime.document_retained_write_verdict(
             &document_hash,
             &file,
             Some(observation("target")),
             Some(observation("target")),
         );
-        assert!(
-            settlement_started.elapsed() < Duration::from_millis(250),
+        assert_eq!(
+            gate.passed(),
+            0,
             "settlement admission waited for durable state-ledger I/O"
         );
+        assert!(
+            gate.wait_entered() >= 1,
+            "the settlement effect never reached its durable I/O"
+        );
 
-        let reactive_read_started = Instant::now();
         let projection = runtime.document_preflight_projection(
             &document_hash,
             agent_doc_state_backbone::preflight::PreflightReadFacts {
@@ -18976,12 +19039,14 @@ agent:queue\n\
             },
         );
         assert_eq!(projection.diff.as_deref(), Some("+still responsive"));
-        assert!(
-            reactive_read_started.elapsed() < Duration::from_millis(250),
+        assert_eq!(
+            gate.passed(),
+            0,
             "a blocked durable effect held the shared reactive context"
         );
 
-        let deadline = Instant::now() + Duration::from_secs(2);
+        gate.open();
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         while pending_intent_id(&runtime, &document_hash).is_some() {
             assert!(
                 Instant::now() < deadline,
@@ -20976,7 +21041,12 @@ revised operator request
             .document_graphs
             .set_projection(&document_hash, Some(projection));
 
-        let publish_started = Instant::now();
+        // `#remainingwallclock`: proven by ordering, not a 250ms bound. The
+        // retained adapter blocks on a gate the test holds closed; a publish or
+        // read that waited on it could only return after the gate opened at its
+        // hang ceiling, so it would see the adapter already passed.
+        let gate = &blocking_effect_gate::RETAINED_TRANSITION;
+        gate.close();
         runtime
             .document_graphs
             .observe_retained_delivery_with_change(
@@ -20990,22 +21060,28 @@ revised operator request
                     delivery_version: 8,
                 }),
             );
-        assert!(
-            publish_started.elapsed() < Duration::from_millis(250),
+        assert_eq!(
+            gate.passed(),
+            0,
             "publishing an editor delivery must not wait for retained projection I/O"
         );
+        assert!(
+            gate.wait_entered() >= 1,
+            "the retained adapter never reached its editor I/O"
+        );
 
-        let read_started = Instant::now();
         assert!(matches!(
             runtime
                 .document_graphs
                 .current_retained_transition_state(&document_hash),
             RetainedTransitionState::ApplyTarget(_)
         ));
-        assert!(
-            read_started.elapsed() < Duration::from_millis(250),
+        assert_eq!(
+            gate.passed(),
+            0,
             "the retained adapter must release the reactive context while editor I/O is in flight"
         );
+        gate.open();
     }
 
     #[test]
@@ -21462,11 +21538,11 @@ revised operator request
             .document_queue_authority_observe(&document_hash, &canonical, content.clone())
             .unwrap();
 
-        blocking_strike_adapter_gate::close();
+        blocking_effect_gate::STRIKE_ADAPTER.close();
         append_state_event(dir.path(), &captured).unwrap();
         runtime.apply_state_event(&captured).unwrap();
         assert_eq!(
-            blocking_strike_adapter_gate::passed(),
+            blocking_effect_gate::STRIKE_ADAPTER.passed(),
             0,
             "publishing ResponseCaptured must not wait for the actor/editor adapter"
         );
@@ -21492,8 +21568,8 @@ revised operator request
 
         // Release the adapter; the asynchronous worker now applies the strike.
         // The wait below is for that event, bounded only by a hang ceiling.
-        blocking_strike_adapter_gate::open();
-        let deadline = Instant::now() + blocking_strike_adapter_gate::HANG_CEILING;
+        blocking_effect_gate::STRIKE_ADAPTER.open();
+        let deadline = Instant::now() + blocking_effect_gate::HANG_CEILING;
         let projected = loop {
             let projected = std::fs::read_to_string(&canonical).unwrap();
             if projected.contains("auto-struck: answered this cycle (#ftstrike)") {

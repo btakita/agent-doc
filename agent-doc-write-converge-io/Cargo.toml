@@ -63,6 +63,7 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.489", features = ["test-support"] }
 agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.489" }
 fs2 = "0.4"
 tempfile = "3"

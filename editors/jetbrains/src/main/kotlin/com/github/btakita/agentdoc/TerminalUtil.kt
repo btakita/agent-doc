@@ -42,6 +42,11 @@ object TerminalUtil {
         """session_clear queued for (.+?) — a turn is live in pane (\S+)""",
         RegexOption.DOT_MATCHES_ALL,
     )
+    // #clearnoticeverify: the queued notice carries the live-turn evidence, its
+    // age and whether this press re-armed an already-queued clear.
+    private val LIVE_TURN_CLEAR_QUEUED_EVIDENCE_REGEX = Regex("""\bevidence=([^,\s)]+)""")
+    private val LIVE_TURN_CLEAR_QUEUED_AGE_REGEX = Regex("""\bevidence_age_secs=(\d+)""")
+    private val LIVE_TURN_CLEAR_QUEUED_REARMED_REGEX = Regex("""\brearmed=(true|false)\b""")
     private val PROTECTED_CLEAR_REFUSAL_HEADER_REGEX = Regex(
         """session_clear refused for (.+?) because pane (\S+) contains protected prompt input""",
         RegexOption.DOT_MATCHES_ALL,
@@ -202,6 +207,9 @@ object TerminalUtil {
     internal data class LiveTurnQueuedClear(
         val file: String,
         val pane: String,
+        val evidence: String = "",
+        val evidenceAgeSecs: Long? = null,
+        val rearmed: Boolean = false,
     )
 
     internal data class BusySessionRestartRefusal(
@@ -1640,14 +1648,56 @@ object TerminalUtil {
      */
     internal fun parseLiveTurnQueuedClear(output: String): LiveTurnQueuedClear? {
         val match = LIVE_TURN_CLEAR_QUEUED_REGEX.find(output) ?: return null
-        return LiveTurnQueuedClear(file = match.groupValues[1], pane = match.groupValues[2])
+        val detail = output.substring(match.range.last + 1)
+        return LiveTurnQueuedClear(
+            file = match.groupValues[1],
+            pane = match.groupValues[2],
+            evidence = LIVE_TURN_CLEAR_QUEUED_EVIDENCE_REGEX.find(detail)?.groupValues?.get(1).orEmpty(),
+            evidenceAgeSecs = LIVE_TURN_CLEAR_QUEUED_AGE_REGEX.find(detail)?.groupValues?.get(1)?.toLongOrNull(),
+            rearmed = LIVE_TURN_CLEAR_QUEUED_REARMED_REGEX.find(detail)?.groupValues?.get(1) == "true",
+        )
     }
 
+    /**
+     * #clearnoticeverify: the balloon is collapsed to its first lines and expires
+     * after a few seconds, so the first line states the outcome and when the
+     * clear runs. The second line carries what the CLI reports: whether this
+     * press re-armed the one queued clear, and the live-turn evidence and its
+     * age (a stale receipt absorbing presses is then visible to the operator).
+     */
     internal fun buildLiveTurnQueuedClearMessage(relativePath: String, queued: LiveTurnQueuedClear): String =
-        "Clear Session Context queued for $relativePath.\n" +
-            "A turn is running in pane ${queued.pane}, so nothing was typed into it. " +
-            "The clear runs automatically when that turn ends; it is dropped if a new prompt starts first. " +
-            "Use Interrupt and clear to clear immediately instead."
+        buildString {
+            if (queued.rearmed) {
+                append("Clear Session Context re-armed for ")
+                append(relativePath)
+                append(": still one clear, it runs when the turn in pane ")
+            } else {
+                append("Clear Session Context queued for ")
+                append(relativePath)
+                append(": it runs when the turn in pane ")
+            }
+            append(queued.pane)
+            append(" ends.\n")
+            append("Nothing was typed into the running turn")
+            if (queued.evidence.isNotBlank()) {
+                append(" (live-turn evidence: ")
+                append(queued.evidence)
+                queued.evidenceAgeSecs?.let { secs ->
+                    append(", ")
+                    append(formatEvidenceAge(secs))
+                    append(" old")
+                }
+                append(")")
+            }
+            append(". The clear is dropped if a new prompt starts first. ")
+            append("Use Interrupt and clear to clear immediately instead.")
+        }
+
+    internal fun formatEvidenceAge(secs: Long): String = when {
+        secs < 120 -> "${secs}s"
+        secs < 7200 -> "${secs / 60}m ${secs % 60}s"
+        else -> "${secs / 3600}h ${(secs % 3600) / 60}m"
+    }
 
     internal fun parseBusySessionClearRefusal(output: String): BusySessionClearRefusal? {
         val liveTurnMatch = LIVE_TURN_CLEAR_REFUSAL_HEADER_REGEX.find(output)

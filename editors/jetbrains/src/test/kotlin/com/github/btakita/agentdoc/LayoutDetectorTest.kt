@@ -405,4 +405,31 @@ class LayoutDetectorTest {
             ),
         )
     }
+
+    // `#clearnoticeverify` (2026-10-11): a scratch doc opened in a detached editor
+    // frame was counted with the main frame's two splits, measured against the
+    // wrong splitters at (-56,-117), and published first: tmux showed 3 panes for
+    // a 2-split editor. Only the active frame's windows are columns.
+    @Test
+    fun `detached editor frame windows are not columns of the active frame`() {
+        data class Win(val file: String, val owner: String)
+        val main = "main-splitters"
+        val detached = "detached-splitters"
+        val windows = listOf(
+            Win("src/agent-doc/tmp/scratch.md", detached),
+            Win("tasks/software/chromium-bridge.md", main),
+            Win("src/haiven-dev/tasks/frontend.md", main),
+        )
+
+        val mainFrame = LayoutDetector.windowsInActiveFrame(windows, { it.owner }, main)
+        assertEquals(
+            listOf("tasks/software/chromium-bridge.md", "src/haiven-dev/tasks/frontend.md"),
+            mainFrame.map { it.file },
+        )
+        val detachedFrame = LayoutDetector.windowsInActiveFrame(windows, { it.owner }, detached)
+        assertEquals(listOf("src/agent-doc/tmp/scratch.md"), detachedFrame.map { it.file })
+        // An unresolved or unmatched owner never hides the layout.
+        assertEquals(windows, LayoutDetector.windowsInActiveFrame(windows, { it.owner }, null))
+        assertEquals(windows, LayoutDetector.windowsInActiveFrame(windows, { it.owner }, "other"))
+    }
 }

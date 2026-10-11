@@ -299,6 +299,24 @@ Until that fix lands, `agent-doc session interrupt-clear src/haiven-dev/tasks/de
 - **v0.35.487:** the queued `release + publish` ships these.
 
 No new backlog follow-ups this cycle. The item is tracked by its queue claim (`subagent:devclear`).
+
+### Re: GH #236 dispatched — opus-5-5 · 2026-10-10T19:35-04:00
+
+**GH #236 is dispatched** to `subagent:gh236` (worktree `agent-doc-wt/gh236`).
+
+**The bug:** the native-save generation fence only accepts the classic JetBrains package version. On your IntelliJ 2026.3 (build 263), no package can be installed, so the plugin stays at 0.2.508 (#233). Native saves therefore never happen: 58 `generation_deferred` events today. Closeouts also fail with an impossible remedy ("align generations").
+
+**Brief:**
+- Gate on native-save protocol compatibility, a declared capability or the per-IDE-line published versions, instead of an exact classic version match.
+- When no alignment is possible, fall back to the exact-disk path without failing the closeout.
+- Add regression tests for 263/0.2.508, the 262 package, matching classic, and a truly incompatible plugin.
+- The coordinator closes the issue after integration.
+
+**Release status:**
+- **0.35.486** (GH #234 and test isolation): `make release` is still running its gate.
+- **0.35.487** (the queued `release + publish`): ships `#respondfinalizehard`, `#pypireleaseworkflow`, GH #235, the dev.md Codex clear fix, and GH #236 once each is integrated.
+
+No new backlog follow-ups this cycle. The item is tracked by its queue claim.
 <!-- agent:boundary:d2344b01 -->
 <!-- /agent:exchange -->
 
@@ -307,10 +325,11 @@ No new backlog follow-ups this cycle. The item is tracked by its queue claim (`s
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#respondfinalizehard]
+- ⏭️ do [#respondfinalizehard]
 - 🚧 do [#pypireleaseworkflow]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/235
-- fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
+- #gh-fix https://github.com/btakita/agent-doc/issues/236
+- 🚧 fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
 Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md because a turn is live in pane %127 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md` to intentionally interrupt the turn and clear context.
 - 🚧 release + publish
 <!-- /agent:queue -->

@@ -1631,6 +1631,26 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
     )
 }
 
+/// True when every queue block is drained (no live prompt and no actionable
+/// free text) and at least one block carries a struck (`Completed`) head: the
+/// normal end state of a successful drain, as opposed to an active queue that
+/// never held a prompt.
+fn queue_set_is_drained_by_struck_heads(
+    queue_set: &agent_doc_queue::queue_set::QueueSet<'_>,
+) -> bool {
+    let blocks = queue_set.blocks();
+    !blocks.is_empty()
+        && blocks.iter().all(|block| block.is_drained())
+        && blocks.iter().any(|block| {
+            block.entries.iter().any(|entry| {
+                matches!(
+                    entry,
+                    agent_doc_queue::document_queue::QueueEntry::Completed(_)
+                )
+            })
+        })
+}
+
 pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     file: &Path,
     content: &str,
@@ -1653,6 +1673,26 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
 
     let components = element::parse(content)?;
     let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
+    // `#respondfinalizehard` (cycle-1791675315432): a queue set whose every
+    // head is already struck has no selectable block, so `selected()` is `None`
+    // and this used to fail `no prompt to consume` BEFORE the
+    // `#queuedrainednoop` classification below could run. `respond --done <id>`
+    // landed its response and wedged at `write_applied`, and the
+    // `write --commit --done <id>` recovery failed in the tracked-work composer
+    // with the same error. Consuming an already-consumed head is idempotent:
+    // record it as already satisfied and let the closeout commit. A queue that
+    // never held a prompt (no struck heads) still fails closed below.
+    if queue_set.selected().is_none() && queue_set_is_drained_by_struck_heads(&queue_set) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_consume_drained_noop file={} reason=all_heads_struck_no_selectable_queue done_ids={:?} outcome=already_satisfied (#respondfinalizehard)",
+                file.display(),
+                done_ids
+            ),
+        );
+        return Ok(None);
+    }
     let selected_queue = queue_set.selected().ok_or_else(|| {
         if queue_set.blocks().is_empty() {
             anyhow::anyhow!(
@@ -5828,5 +5868,55 @@ Old.
             .unwrap()
             .unwrap();
         assert_eq!(snap, planned, "detached disk prune should update snapshot");
+    }
+
+    /// `#respondfinalizehard`: an all-struck queue is the end state of a drain.
+    /// Re-consuming an already-consumed head (free-text or `--done` id) is an
+    /// already-satisfied no-op, while an active queue that never held a prompt
+    /// still fails closed.
+    #[test]
+    fn plan_consume_on_all_struck_queue_is_idempotent_noop() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let content = concat!(
+            "---\nqueue: go\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~~#gt-fix https://github.com/btakita/agent-doc/issues/234~~\n",
+            "- ~~do [#done1]~~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#done1] Close the loop\n",
+            "<!-- /agent:done -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+
+        for done_ids in [vec![], vec!["done1".to_string()]] {
+            for count in [0, 1] {
+                let plan = plan_queue_prompt_consumption_with_snapshot_and_count(
+                    &doc, content, None, &done_ids, count,
+                )
+                .unwrap_or_else(|err| {
+                    panic!("all-struck queue must not fail (done_ids={done_ids:?}): {err:#}")
+                });
+                assert!(plan.is_none(), "all-struck queue must consume nothing");
+            }
+        }
+    }
+
+    #[test]
+    fn plan_consume_on_active_queue_that_never_held_a_prompt_still_fails_closed() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let content =
+            "---\nqueue_active: true\n---\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        fs::write(&doc, content).unwrap();
+        let err =
+            plan_queue_prompt_consumption_with_snapshot_and_count(&doc, content, None, &[], 1)
+                .err()
+                .expect("an empty active queue is malformed, not drained");
+        assert!(
+            format!("{err:#}").contains("no prompt to consume"),
+            "{err:#}"
+        );
     }
 }

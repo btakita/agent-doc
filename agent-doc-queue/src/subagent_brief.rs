@@ -252,6 +252,26 @@ fn quote(text: &str) -> String {
         .join("\n")
 }
 
+/// The scratch-isolation coordinator rule, as a string literal so other
+/// crates can `concat!` it into their own `&'static str` guidance
+/// (exchange-subagent dispatch has no preamble). Concurrent subagents
+/// dispatched by one coordinator share its scratchpad, and a fixed
+/// message-file path there let one subagent's commit carry a sibling's
+/// message.
+#[macro_export]
+macro_rules! subagent_scratch_isolation_rule {
+    () => {
+        "Scratch isolation: concurrent subagents share one scratchpad, so each subagent passes its \
+         commit message through `git commit -F -` (a stdin heredoc) or a file inside its own \
+         worktree, never a file in a shared scratchpad or /tmp, and puts any other temp file in its \
+         own worktree or a unique `mktemp` path."
+    };
+}
+
+/// The scratch-isolation rule (`subagent_scratch_isolation_rule!`), restated
+/// in every preamble and appended to the exchange-subagent dispatch texts.
+pub const SUBAGENT_SCRATCH_ISOLATION_RULE: &str = subagent_scratch_isolation_rule!();
+
 /// Marker line that opens every preamble.
 pub const SUBAGENT_PREAMBLE_MARKER: &str =
     "[agent-doc] operator authorization for a dispatched queue item (#waypostauthorization)";
@@ -344,8 +364,11 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
          the single `make install` after integrating.\n\
          - Never edit, write, or commit the agent-doc session document or its queue, and never run \
          `agent-doc` write/respond/queue commands against it; the coordinator owns the claim and \
-         closes the item.\n\
-         - Commit and push only your own branch, fast-forward only, never force, and only when the \
+         closes the item.\n",
+    );
+    out.push_str(concat!("- ", subagent_scratch_isolation_rule!(), "\n"));
+    out.push_str(
+        "- Commit and push only your own branch, fast-forward only, never force, and only when the \
          authorization above includes commit/push.\n\
          - Report back: branch, commit SHA, files changed, and exact test results.\n",
     );
@@ -518,5 +541,37 @@ mod tests {
             auth.subagent_prompt_preamble
                 .contains("> review only, no commits")
         );
+    }
+
+    #[test]
+    fn every_status_restates_the_scratch_isolation_rule() {
+        let resolved = doc(
+            PRESETS,
+            "subagents preset=\"#spec-test-build-install-commit-push\"",
+            &["do [#abc]"],
+            &["[ ] [#abc] x"],
+        );
+        let unresolved = doc("", "subagents preset=\"#nosuch\"", &["do [#abc]"], &[]);
+        let item_only = doc("", "subagents", &["look at foo"], &[]);
+        let bullet = format!("- {SUBAGENT_SCRATCH_ISOLATION_RULE}\n");
+        for (content, item) in [
+            (&resolved, "do [#abc]"),
+            (&unresolved, "do [#abc]"),
+            (&item_only, "look at foo"),
+        ] {
+            let p = subagent_authorization("doc.md", content, item).subagent_prompt_preamble;
+            let rule_at = p.find(&bullet).unwrap_or_else(|| panic!("{p}"));
+            // It sits inside the coordinator rules, before the commit/push rule.
+            assert!(p.find("Coordinator rules").unwrap() < rule_at, "{p}");
+            assert!(
+                rule_at < p.find("- Commit and push only your own branch").unwrap(),
+                "{p}"
+            );
+        }
+        assert!(SUBAGENT_SCRATCH_ISOLATION_RULE.contains("`git commit -F -`"));
+        assert!(
+            SUBAGENT_SCRATCH_ISOLATION_RULE.contains("never a file in a shared scratchpad or /tmp")
+        );
+        assert!(SUBAGENT_SCRATCH_ISOLATION_RULE.contains("unique `mktemp` path"));
     }
 }

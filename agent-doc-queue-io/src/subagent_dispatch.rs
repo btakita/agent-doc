@@ -556,6 +556,13 @@ mod tests {
                 .contains(agent_doc_queue::subagent_brief::UNRESOLVED_AUTHORIZATION_MARKER)
         );
         assert!(!brief.subagent_prompt_preamble.contains("commit + push"));
+        // The preflight `queue_subagent_dispatch[].authorization` path and the
+        // fail-closed preamble both carry the shared scratch-isolation rule.
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains(agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE)
+        );
         assert!(subagent_authorization_for_item(&file, "#zzz").is_err());
     }
 }

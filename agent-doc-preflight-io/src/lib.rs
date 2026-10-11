@@ -644,11 +644,15 @@ pub fn exchange_subagent_dispatch_entries(items: &[String]) -> Vec<ExchangeSubag
 }
 
 /// Guidance for a non-empty `exchange_subagent_dispatch`.
-pub const EXCHANGE_SUBAGENT_DISPATCH_GUIDANCE: &str = "The `agent:exchange` marker declares \
+pub const EXCHANGE_SUBAGENT_DISPATCH_GUIDANCE: &str = concat!(
+    "The `agent:exchange` marker declares \
 subagent intent. For EACH listed exchange prompt, dispatch it NOW to its own background subagent \
 (and use a dedicated worktree outside the IDE-watched project if it touches a repository). The \
 parent retains this response cycle: review the worker result, answer the prompt in the exchange, \
-and perform the normal binary-owned closeout. No queue claim/release applies to exchange prompts.";
+and perform the normal binary-owned closeout. No queue claim/release applies to exchange prompts. \
+Exchange prompts have no preamble, so put this rule in each subagent prompt yourself: ",
+    agent_doc_queue::subagent_scratch_isolation_rule!()
+);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightOutput {
@@ -7180,6 +7184,9 @@ mod tests {
             .unwrap();
         assert!(guidance.contains("parent retains this response cycle"));
         assert!(guidance.contains("No queue claim/release"));
+        assert!(
+            guidance.ends_with(agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE)
+        );
     }
 
     // `#qdonestrike-durable`: a not-ready Lazily head used to discard the whole

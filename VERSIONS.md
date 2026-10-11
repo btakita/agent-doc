@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **Concurrent queue subagents can no longer swap commit messages through a shared scratch file.**
+  Forked subagents dispatched by one coordinator share its scratchpad, and one subagent's commit-message file
+  overwrote a sibling's, so a commit carried the wrong message. The `#waypostauthorization` preamble (`agent-doc queue
+  brief` and preflight's `queue_subagent_dispatch[].authorization.subagent_prompt_preamble`) now restates a
+  scratch-isolation coordinator rule: commit messages go through `git commit -F -` (a stdin heredoc) or a file inside
+  the subagent's own worktree, never a file in a shared scratchpad or `/tmp`, and other temp files go in the
+  subagent's own worktree or a unique `mktemp` path. The rule text is one string-literal macro
+  (`subagent_scratch_isolation_rule!`), and the exchange-subagent dispatch texts, which carry no preamble (preflight `exchange_subagent_dispatch_guidance`,
+  the mid-turn hook and closeout steering directive), append the same rule verbatim.
+
 ## 0.35.489
 
 - **A controller memory refresh no longer stalls editor-op appends behind a full ledger reload (`#refreshmemlockstall`).**

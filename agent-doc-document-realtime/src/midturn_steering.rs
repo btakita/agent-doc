@@ -1443,12 +1443,16 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              in your response."
         }
         (SteeringDispatch::Subagent, SteeringSource::Exchange, _, _) => {
-            "subagent intent: dispatch this exchange prompt NOW to a NEW background subagent \
-             (one subagent per prompt). Exchange prompts have no queue claim/release lifecycle. \
-             If it touches a repository, give that subagent its own git worktree outside the \
-             IDE-watched project; never run two subagents against one checkout. Keep working the \
-             current item yourself; review the worker result and answer the exchange prompt in \
-             this response cycle, then perform the normal closeout."
+            concat!(
+                "subagent intent: dispatch this exchange prompt NOW to a NEW background subagent \
+                 (one subagent per prompt). Exchange prompts have no queue claim/release lifecycle. \
+                 If it touches a repository, give that subagent its own git worktree outside the \
+                 IDE-watched project; never run two subagents against one checkout. Keep working the \
+                 current item yourself; review the worker result and answer the exchange prompt in \
+                 this response cycle, then perform the normal closeout. Put this rule in the \
+                 subagent prompt: ",
+                agent_doc_queue::subagent_scratch_isolation_rule!()
+            )
         }
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Deleted, _) => FORWARD_DELETED,
         (SteeringDispatch::ForwardToOwner, _, SteeringChange::Added, _) => FORWARD_ADDED,
@@ -1573,12 +1577,15 @@ pub fn render_closeout_steering_context(
                 brief_command_for(document, &item.verbatim)
             ),
             (SteeringDispatch::Subagent, SteeringSource::Exchange) => {
-                "DISPATCH NOW to a NEW background subagent (one per prompt). Exchange prompts \
-                 have no queue claim/release lifecycle. If it touches a repository, give the \
-                 subagent its own git worktree outside the IDE-watched project. When the worker \
-                 reports back, carry its result into the next response cycle; the current \
-                 response is already committed."
-                    .to_string()
+                concat!(
+                    "DISPATCH NOW to a NEW background subagent (one per prompt). Exchange prompts \
+                     have no queue claim/release lifecycle. If it touches a repository, give the \
+                     subagent its own git worktree outside the IDE-watched project. When the worker \
+                     reports back, carry its result into the next response cycle; the current \
+                     response is already committed. Put this rule in the subagent prompt: ",
+                    agent_doc_queue::subagent_scratch_isolation_rule!()
+                )
+                .to_string()
             }
             (SteeringDispatch::AddressNow, SteeringSource::Exchange) => format!(
                 "a new operator prompt: answer it in the next cycle (`agent-doc {document}`); do \
@@ -2481,11 +2488,17 @@ mod tests {
             explicit: false,
         };
 
+        let item_clone = item.clone();
         let text = render_closeout_steering_context("tasks/bugs.md", &[item], 0).unwrap();
         assert!(text.contains("DISPATCH NOW"), "{text}");
         assert!(text.contains("no queue claim/release lifecycle"), "{text}");
         assert!(!text.contains("agent-doc queue claim"), "{text}");
         assert!(!text.contains("agent-doc queue release"), "{text}");
+        // Exchange subagents get no `queue brief` preamble, so both render
+        // paths carry the shared scratch-isolation rule themselves.
+        let scratch = agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE;
+        assert!(text.contains(scratch), "{text}");
+        assert!(instruction_for(&item_clone).ends_with(scratch));
     }
 
     #[test]

@@ -392,6 +392,16 @@ All eight subagent fixes are merged, verified on the combined code, installed, a
 - **Side note:** a background shell in that session has been stuck for about 4 hours: `grep` is reading stdin because `$f` was empty. It's harmless. Stop it from the Claude shells UI if you like.
 
 The sdkwedge subagent is now fixing both root causes: the save receipt stalling across a build-version skew during install, and the supervisor's Enter resubmit not taking.
+
+### Re: GH #239 dispatched; correction on the sdk.md wedge — opus-5-5 · 2026-10-11T05:35-04:00
+
+**Dispatched (claimed `subagent:gh239`):** GH #239. When you edit a component's opening marker line, agent-doc treats it as replica corruption. The relay restores the old line while you type, and the committed marker ends up with its text twice. The subagent will reproduce each case in the issue through the editor/CRDT relay path, so that a marker edit commits exactly what you typed while real corruption is still detected. Then it closes the issue after integration.
+
+**Correction to my earlier sdk.md diagnosis** (from the sdkwedge subagent's evidence):
+- **The 26-minute stall (08:32–08:58 UTC) was not caused by the v0.35.489 install.** The JetBrains plugin (0.2.531) rejected every native save request for sdk.md, 52 times. About 15 s after each rejection, an unrelated delivery success called `clear_after_proven_delivery`, which wiped the document's transport-health row. So the rejection count always read 1 and never escalated. The install's recycle happened to reset things. Fix on branch `sdk-subagent-turn-wedge`: a success on one transport clears only that transport's rejection run, while an exact native-save receipt still clears everything.
+- **The "unsent trigger" in pane `%180` was Claude Code's dimmed prompt suggestion, not real input**, so my "press Enter" advice was likely wrong. The idle drain treated it as pending and sent a bare Enter, which an empty composer ignores. Fix: dimmed prompt text is masked before matching (the same rule routes already apply). sdk.md recovered on its own when a direct submit at 09:07 ran `/agent-doc sdk.md`.
+
+**In flight (7 subagents):** sdk.md wedge fixes (in `make check`), `#loadbudgettests`, `#qheadresiduestrike`, `#checktmpdirleak`, `#subagentmsgcollide` (re-running `make check` without stopping at the first failure; I'll check which test failed), `#respondcloseoutbacklog` (now also covering the duplicated queue line it created itself), and GH #239. `#drivecapturedsplice` shows ⏳ (the new awaiting-operator marker) until you write `go`.
 <!-- agent:boundary:f6f2f5ef -->
 <!-- /agent:exchange -->
 
@@ -400,27 +410,14 @@ The sdkwedge subagent is now fixing both root causes: the save receipt stalling 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~See `NOTIFY from src/haiven-dev/tasks/sdk.md` in this document.~~
-- ~~Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.~~
-- ~~#gh-fix: https://github.com/btakita/agent-doc/issues/237~~
-- ~~#gh-fix: https://github.com/btakita/agent-doc/issues/238~~
-- ~~do [#refreshmemlockstall]~~
-- ~~#actionable-review~~
-- ~~I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.~~
-- ~~release + publish~~
-- ~~sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.~~
+- #gh-fix: https://github.com/btakita/agent-doc/issues/239
 - ⏳ do [#drivecapturedsplice]
 - 🚧 do [#respondcloseoutbacklog]
-- ~~do [#wallclockbudget]~~
-- ~~do [#queuecatchresidue]~~
-- ~~do [#duringconcurrentcheck]~~
-- ~~do [#forkedsubagentsdispatche]~~
 - 🚧 sdk.md turn with a subagent is wedged. Asking me to restart.
 - 🚧 do [#loadbudgettests]
 - 🚧 do [#qheadresiduestrike]
 - 🚧 do [#checktmpdirleak]
 - 🚧 do [#subagentmsgcollide]
-- ~~Navigating between sdk.md + rpg.md resulted in a tmux focus on rpg.md in the 1:stash tmux window. Please make sure the focus effects always sync with the current Editor document(s).~~
 - 🚧 do [#respondcloseoutbacklog]
 <!-- /agent:queue -->
 

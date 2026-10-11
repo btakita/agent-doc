@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **Editing a component's opening marker line is operator text, not replica corruption (`#markerlineedit`, GH #239).**
+  Retyping `<!-- agent:backlog priority queue -->` one key at a time, changing its attributes, or a stray key inside
+  `<!--` leaves the document briefly unparseable. The relay's structure guard treated that as a stale buffer because it
+  re-counted marker lines by raw text, so a marker changed in place read as lost: it restored the old line under the
+  operator's keystrokes, quarantined the editor's following updates, and the restored line merged with the retyped
+  text into `<!-- agent:backlog priority queue backlog priority queue -->`. The guard now decides from what the update
+  deleted: a marker line counts as removed only when its line-diff hunk has no replacement lines or none of its own
+  characters survive as a run of at least four (the `<!--` frame). An update that deletes a whole marker line is still
+  restored and logged as `crdt_replica_update_corruption_rejected`.
+
 ## 0.35.489
 
 - **A controller memory refresh no longer stalls editor-op appends behind a full ledger reload (`#refreshmemlockstall`).**

@@ -2949,27 +2949,159 @@ fn editor_replica_memberships_for_pid(editor_pid: u32) -> Vec<(String, u64, Stri
     memberships
 }
 
-/// `#typingfencerevert`: whether merging an editor update lost a component
-/// marker line. Markers are counted by raw line text, deliberately blind to code
-/// fences: a fence the operator is still typing hides markers from the parser
-/// but deletes none of them, while a stale or truncated buffer tombstones one.
+/// Bound on the per-hunk character diff in [`update_removed_component_marker`].
+/// Past it `similar` returns a coarser (still exact) edit script with fewer
+/// matched characters, which can only make the guard MORE conservative (a marker
+/// whose characters are no longer matched reads as removed).
+const MARKER_EDIT_DIFF_DEADLINE: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Minimum run of a marker line's own non-whitespace characters, kept
+/// contiguously by an update, that proves the line was edited in place rather
+/// than deleted. Four is the marker frame `<!--`: scattered single-character
+/// matches between a deleted marker and unrelated replacement text are diff
+/// coincidence, not a surviving line.
+const MARKER_EDIT_ANCHOR_CHARS: usize = 4;
+
+/// Whether `line` (already trimmed) is a component marker line.
+fn is_component_marker_line(line: &str) -> bool {
+    (line.starts_with("<!-- agent:") || line.starts_with("<!-- /agent:")) && line.ends_with("-->")
+}
+
+/// `#typingfencerevert` / `#markerlineedit` (GH #239): whether merging an editor
+/// update **deleted** a component marker line, as opposed to editing characters
+/// inside one.
+///
+/// A stale or truncated buffer tombstones whole marker lines. An operator
+/// retyping a component name, adding an attribute, or slipping a key inside
+/// `<!--` changes characters inside a marker line that otherwise stays put —
+/// operator text, the same as a half-typed code fence. Both leave the document
+/// transiently unparseable, so the parse error alone cannot tell them apart;
+/// re-counting marker lines by raw text cannot either, because a marker changed
+/// in place no longer matches its old text and reads as lost.
+///
+/// The discriminator is what the update DELETED:
+///
+/// 1. Markers are counted by raw line text, deliberately blind to code fences (a
+///    fence the operator is still typing hides markers from the parser but
+///    deletes none of them). No marker line lost by count -> not a removal.
+/// 2. Otherwise the change is located with a line diff (identical lines are
+///    exact anchors), and each changed hunk that contains a lost marker line is
+///    diffed by character. The marker line was **removed** when the hunk deletes
+///    it with no replacement lines, or when no contiguous run of at least
+///    [`MARKER_EDIT_ANCHOR_CHARS`] of its non-whitespace characters survives the
+///    hunk's character diff. A marker line that keeps such a run of its own
+///    characters was **edited in place** and is operator text.
+///
+/// Deleting every character of a marker line (selecting the whole line and
+/// typing over it) still reads as a removal; that edit is indistinguishable from
+/// a stale buffer tombstoning the marker.
 fn update_removed_component_marker(before: &str, after: &str) -> bool {
+    use similar::{Algorithm, DiffTag, capture_diff_deadline, capture_diff_slices};
+
     fn marker_counts(doc: &str) -> std::collections::HashMap<&str, usize> {
         let mut counts = std::collections::HashMap::new();
         for line in doc.lines() {
             let line = line.trim();
-            if (line.starts_with("<!-- agent:") || line.starts_with("<!-- /agent:"))
-                && line.ends_with("-->")
-            {
+            if is_component_marker_line(line) {
                 *counts.entry(line).or_insert(0) += 1;
             }
         }
         counts
     }
     let after_counts = marker_counts(after);
-    marker_counts(before)
+    let lost: std::collections::HashSet<&str> = marker_counts(before)
         .into_iter()
-        .any(|(marker, count)| after_counts.get(marker).copied().unwrap_or(0) < count)
+        .filter(|(marker, count)| after_counts.get(marker).copied().unwrap_or(0) < *count)
+        .map(|(marker, _)| marker)
+        .collect();
+    if lost.is_empty() {
+        return false;
+    }
+
+    let before_lines: Vec<&str> = before.split_inclusive('\n').collect();
+    let after_lines: Vec<&str> = after.split_inclusive('\n').collect();
+    // Peel the identical head and tail so Myers only sees the changed region.
+    let mut head = 0usize;
+    while head < before_lines.len().min(after_lines.len())
+        && before_lines[head] == after_lines[head]
+    {
+        head += 1;
+    }
+    let mut tail = 0usize;
+    while tail < before_lines.len() - head
+        && tail < after_lines.len() - head
+        && before_lines[before_lines.len() - 1 - tail] == after_lines[after_lines.len() - 1 - tail]
+    {
+        tail += 1;
+    }
+    let before_middle = &before_lines[head..before_lines.len() - tail];
+    let after_middle = &after_lines[head..after_lines.len() - tail];
+
+    // Merge adjacent non-equal line ops (Myers emits Delete then Insert for a
+    // replacement) into one hunk.
+    let mut hunks: Vec<(std::ops::Range<usize>, std::ops::Range<usize>)> = Vec::new();
+    for op in capture_diff_slices(Algorithm::Myers, before_middle, after_middle) {
+        if op.tag() == DiffTag::Equal {
+            continue;
+        }
+        let (old, new) = (op.old_range(), op.new_range());
+        match hunks.last_mut() {
+            Some((prev_old, prev_new))
+                if prev_old.end == old.start && prev_new.end == new.start =>
+            {
+                prev_old.end = old.end;
+                prev_new.end = new.end;
+            }
+            _ => hunks.push((old, new)),
+        }
+    }
+
+    for (old, new) in hunks {
+        let old_lines = &before_middle[old];
+        let has_lost_marker = old_lines.iter().any(|line| lost.contains(line.trim()));
+        if !has_lost_marker {
+            continue;
+        }
+        if new.is_empty() {
+            // Whole lines deleted with nothing in their place.
+            return true;
+        }
+        let old_chars: Vec<char> = old_lines.concat().chars().collect();
+        let new_chars: Vec<char> = after_middle[new].concat().chars().collect();
+        let kept_runs: Vec<std::ops::Range<usize>> = capture_diff_deadline(
+            Algorithm::Myers,
+            &old_chars,
+            0..old_chars.len(),
+            &new_chars,
+            0..new_chars.len(),
+            Some(std::time::Instant::now() + MARKER_EDIT_DIFF_DEADLINE),
+        )
+        .into_iter()
+        .filter(|op| op.tag() == DiffTag::Equal)
+        .map(|op| op.old_range())
+        .collect();
+        let mut line_start = 0usize;
+        for line in old_lines {
+            let line_end = line_start + line.chars().count();
+            if lost.contains(line.trim()) {
+                let survived = kept_runs.iter().any(|run| {
+                    let start = run.start.max(line_start);
+                    let end = run.end.min(line_end);
+                    end > start
+                        && old_chars[start..end]
+                            .iter()
+                            .filter(|ch| !ch.is_whitespace())
+                            .count()
+                            >= MARKER_EDIT_ANCHOR_CHARS
+                });
+                if !survived {
+                    return true;
+                }
+            }
+            line_start = line_end;
+        }
+    }
+    false
 }
 
 /// Relay a **raw encoded yrs update** from an editor replica through the
@@ -3149,6 +3281,9 @@ pub fn relay_replica_update_for_file(
                 // truncated buffer. An update that kept every marker and still
                 // fails to parse inserted text, e.g. an operator mid-way
                 // through typing a code fence; restoring would erase it.
+                // `#markerlineedit` (GH #239): a marker line edited in place
+                // (retyped name, changed attributes, a slip inside `<!--`) is
+                // not lost either; only a deleted marker line is.
                 && update_removed_component_marker(&before_text, &after_text);
             if introduced_parse_failure
                 && let Some(reason) =
@@ -9874,6 +10009,315 @@ mod tests {
             !ops_log.contains("crdt_replica_update_corruption_rejected"),
             "operator typing must not be audited as corruption:\n{ops_log}"
         );
+    }
+
+    /// GH #239 fixture: a template document whose `backlog` opening marker
+    /// carries attributes, attached to one live editor replica.
+    fn marker_edit_fixture(
+        name: &str,
+        identity: &str,
+    ) -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        u64,
+        agent_doc_merge::crdt_sync::ReplicaState,
+        String,
+    ) {
+        let (dir, doc) = temp_doc(name);
+        let body = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] first item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, body).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap().join(".agent-doc/logs")).unwrap();
+        assert!(
+            agent_doc_element::element::structural_corruption_reason(body).is_none(),
+            "fixture: the starting document must parse"
+        );
+        seed_live_reliable_sync_open(&doc.display().to_string());
+        let (client_id, bootstrap) =
+            register_replica_for_file_with_liveness(&doc, identity, |_| true)
+                .unwrap()
+                .expect("editor replica should attach");
+        let editor =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        assert_eq!(editor.text(), body, "fixture: editor mirrors the canonical");
+        (dir, doc, client_id, editor, body.to_string())
+    }
+
+    /// Apply one editor keystroke (`delete_len` chars at char `offset`, then
+    /// `insert`) and relay exactly that delta, as the plugin does per burst.
+    /// Asserts the relay kept the operator's text: canonical equals the
+    /// editor buffer and the editor was not forced to reproject.
+    fn relay_operator_keystroke(
+        doc: &Path,
+        identity: &str,
+        client_id: u64,
+        editor: &agent_doc_merge::crdt_sync::ReplicaState,
+        offset: u32,
+        delete_len: u32,
+        insert: &str,
+    ) {
+        let frontier = editor.state_vector();
+        editor.apply_local_edit(offset, delete_len, insert);
+        let delta = editor.diff(&frontier).unwrap();
+        relay_replica_update_for_file(doc, identity, &delta)
+            .unwrap()
+            .expect("operator typing is relayed, not a transport error");
+        let typed = editor.text();
+        with_hub(doc, |hub| {
+            assert_eq!(
+                hub.canonical_text(),
+                typed,
+                "the relay must hold exactly what the operator typed"
+            );
+            assert!(
+                !hub.awaits_canonical_projection(client_id),
+                "the typing editor must not be forced to reproject over its buffer:\n{typed}"
+            );
+        })
+        .unwrap();
+    }
+
+    fn char_offset_of_text(doc_text: &str, needle: &str) -> u32 {
+        let byte_off = doc_text
+            .find(needle)
+            .unwrap_or_else(|| panic!("fixture: {needle:?} not found"));
+        doc_text[..byte_off].chars().count() as u32
+    }
+
+    fn assert_no_corruption_rejected(doc: &Path) {
+        let ops_log =
+            std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log"))
+                .unwrap_or_default();
+        assert!(
+            !ops_log.contains("crdt_replica_update_corruption_rejected"),
+            "operator marker edits must not be audited as corruption:\n{ops_log}"
+        );
+    }
+
+    /// GH #239 case 1: the operator deletes the component name and attributes
+    /// out of `<!-- agent:backlog priority queue -->` and retypes them one
+    /// character at a time. Every intermediate state is operator text even
+    /// though several do not parse (`invalid component name: ''`, then a
+    /// closing marker whose opener has a different name). The relay must never
+    /// restore the old line under the keystrokes, and the final marker must hold
+    /// the retyped text exactly once — not `backlog priority queue backlog
+    /// priority queue`.
+    #[test]
+    fn relay_update_retyping_a_component_opening_marker_is_operator_text() {
+        let identity = "intellij:retype-backlog-marker";
+        let (_dir, doc, client_id, editor, body) =
+            marker_edit_fixture("marker-edit-retype.md", identity);
+        let typed = "backlog priority queue";
+        let name_off = char_offset_of_text(&body, "backlog priority queue -->");
+
+        relay_operator_keystroke(
+            &doc,
+            identity,
+            client_id,
+            &editor,
+            name_off,
+            typed.chars().count() as u32,
+            "",
+        );
+        assert!(
+            editor.text().contains("<!-- agent: -->\n"),
+            "fixture: the name and attributes are deleted, the marker's frame kept"
+        );
+        assert!(
+            agent_doc_element::element::structural_corruption_reason(&editor.text())
+                .is_some_and(|reason| reason.starts_with("parse_error:")),
+            "fixture: an empty component name must make the document unparseable"
+        );
+
+        for (index, ch) in typed.chars().enumerate() {
+            relay_operator_keystroke(
+                &doc,
+                identity,
+                client_id,
+                &editor,
+                name_off + index as u32,
+                0,
+                &ch.to_string(),
+            );
+        }
+
+        with_hub(&doc, |hub| {
+            let canonical = hub.canonical_text();
+            assert_eq!(
+                canonical, body,
+                "the retyped marker must equal what was typed"
+            );
+            assert_eq!(
+                canonical.matches("priority queue").count(),
+                1,
+                "the marker text must appear exactly once:\n{canonical}"
+            );
+        })
+        .unwrap();
+        assert_no_corruption_rejected(&doc);
+    }
+
+    /// GH #239 case 1, attribute edit: the operator deletes only the name
+    /// (`backlog` -> empty, leaving the attributes), then changes the attributes
+    /// while the name is still missing, then retypes the name. The committed
+    /// marker carries the new attributes once.
+    #[test]
+    fn relay_update_editing_marker_attributes_mid_rename_is_operator_text() {
+        let identity = "intellij:rename-backlog-marker";
+        let (_dir, doc, client_id, editor, body) =
+            marker_edit_fixture("marker-edit-attrs.md", identity);
+        let name_off = char_offset_of_text(&body, "backlog priority queue -->");
+
+        relay_operator_keystroke(&doc, identity, client_id, &editor, name_off, 7, "");
+        assert!(editor.text().contains("<!-- agent: priority queue -->\n"));
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&editor.text()).as_deref(),
+            Some("parse_error: invalid component name: ''"),
+            "fixture: reproduces the case-1 logged reason"
+        );
+        // Drop ` queue`, one backspace at a time, from the end of the attributes.
+        let attrs_end = char_offset_of_text(&editor.text(), " -->\n- [ ] first item");
+        for step in 1..=" queue".len() as u32 {
+            relay_operator_keystroke(&doc, identity, client_id, &editor, attrs_end - step, 1, "");
+        }
+        for (index, ch) in "backlog".chars().enumerate() {
+            relay_operator_keystroke(
+                &doc,
+                identity,
+                client_id,
+                &editor,
+                name_off + index as u32,
+                0,
+                &ch.to_string(),
+            );
+        }
+
+        let expected = body.replace(
+            "<!-- agent:backlog priority queue -->",
+            "<!-- agent:backlog priority -->",
+        );
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), expected)).unwrap();
+        assert!(agent_doc_element::element::structural_corruption_reason(&expected).is_none());
+        assert_no_corruption_rejected(&doc);
+    }
+
+    /// GH #239 case 2: one stray keystroke inside the opening marker's `<!--`
+    /// (`<!-?-`) makes the closing marker unmatched. It is a one-key operator
+    /// slip, not a stale buffer: the relay keeps it, and the next keystroke that
+    /// deletes it converges back to the original text with no quarantine.
+    #[test]
+    fn relay_update_stray_keystroke_inside_marker_prefix_is_operator_text() {
+        let identity = "intellij:marker-prefix-slip";
+        let (_dir, doc, client_id, editor, body) =
+            marker_edit_fixture("marker-edit-slip.md", identity);
+        let slip_off = char_offset_of_text(&body, "<!-- agent:backlog") + 3;
+
+        relay_operator_keystroke(&doc, identity, client_id, &editor, slip_off, 0, "?");
+        assert!(
+            editor
+                .text()
+                .contains("<!-?- agent:backlog priority queue -->\n")
+        );
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&editor.text()).as_deref(),
+            Some(
+                "parse_error: closing marker for component 'backlog' without matching open marker"
+            ),
+            "fixture: reproduces the case-2 logged reason"
+        );
+        relay_operator_keystroke(&doc, identity, client_id, &editor, slip_off, 1, "");
+
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), body)).unwrap();
+        assert_no_corruption_rejected(&doc);
+    }
+
+    /// GH #239 keeps the stale-buffer guard: an editor update that deletes a
+    /// whole opening marker LINE (text and newline, nothing in its place) is
+    /// still restored and the editor reprojected.
+    #[test]
+    fn relay_update_deleting_a_whole_marker_line_is_still_restored() {
+        let identity = "intellij:stale-buffer-drops-marker-line";
+        let (_dir, doc, client_id, editor, body) =
+            marker_edit_fixture("marker-edit-line-drop.md", identity);
+        let line = "<!-- agent:backlog priority queue -->\n";
+        let frontier = editor.state_vector();
+        editor.apply_local_edit(
+            char_offset_of_text(&body, line),
+            line.chars().count() as u32,
+            "",
+        );
+        assert!(
+            agent_doc_element::element::structural_corruption_reason(&editor.text())
+                .is_some_and(|reason| reason.starts_with("parse_error:"))
+        );
+        let delta = editor.diff(&frontier).unwrap();
+        relay_replica_update_for_file(&doc, identity, &delta)
+            .unwrap()
+            .expect("corrupting relay update is handled, not a transport error");
+
+        with_hub(&doc, |hub| {
+            assert_eq!(
+                hub.canonical_text(),
+                body,
+                "the dropped marker line is restored"
+            );
+            assert!(hub.awaits_canonical_projection(client_id));
+        })
+        .unwrap();
+        let ops_log =
+            std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("crdt_replica_update_corruption_rejected"));
+    }
+
+    /// The `#markerlineedit` discriminator in isolation: what the update deleted
+    /// decides, not whether the old marker text still appears.
+    #[test]
+    fn update_removed_component_marker_keys_on_deleted_lines_not_changed_text() {
+        let before = concat!(
+            "intro text\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        // In-place edits: every one keeps some of the marker line's characters.
+        for edited in [
+            before.replace("agent:backlog priority", "agent: priority"),
+            before.replace("<!-- agent:backlog", "<!-?- agent:backlog"),
+            before.replace("backlog priority queue", ""),
+            before.replace("intro text\n<!--", "intro text<!--"),
+            before.replace(" priority queue -->", "\n priority queue -->"),
+        ] {
+            assert!(
+                !update_removed_component_marker(before, &edited),
+                "an in-place marker edit must not read as a removal:\n{edited}"
+            );
+        }
+        // Removals: the marker line is deleted with nothing in its place, its
+        // characters all tombstoned, or swallowed by a truncation.
+        for removed in [
+            before.replace("<!-- /agent:backlog -->\n", ""),
+            before.replace("<!-- /agent:backlog -->", ""),
+            before.replace("<!-- agent:backlog priority queue -->", "new text"),
+            "intro te".to_string(),
+            before.replace("- [ ] item\n<!-- /agent:backlog -->\n", "- [ ] it"),
+        ] {
+            assert!(
+                update_removed_component_marker(before, &removed),
+                "a deleted marker line must read as a removal:\n{removed}"
+            );
+        }
+        // No marker lost by count: typing elsewhere (e.g. a fence) never counts.
+        assert!(!update_removed_component_marker(
+            before,
+            &before.replace("intro text\n", "intro text\n```\n"),
+        ));
     }
 
     #[test]

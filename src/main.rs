@@ -48,6 +48,7 @@ mod annotate;
 mod audit_docs;
 mod auto_dag;
 mod autoclaim;
+mod cancelled_trigger;
 mod captured_splice_verify;
 mod clean;
 mod cleanup_cmd;

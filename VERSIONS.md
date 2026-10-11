@@ -12,6 +12,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   struck head lets the key enter again. Text and each `--attach` file are secret-redacted first; attachments are
   stored under `.agent-doc/inbound/` and referenced from the head. A running session sees the head through mid-turn
   steering as `dispatch=drain_after_current`.
+- **Cancel Turn withdraws a cancelled trigger that Claude Code restored into the prompt (`#cancelturnprompt`).** A
+  cancel that lands while the routed prompt's preflight hook runs makes Claude Code put `/agent-doc <FILE>` back in the
+  composer, which blocked Clear Session Context and would re-run the turn on the next Enter. Cancel Turn (and the
+  clear guard, with one observation) now removes it with a single `C-u` only when the composer holds exactly this
+  document's trigger, the pane is idle and no route submit is in flight; operator text is never touched. After the
+  withdrawal the abandoned prompt's snapshot retires its turn lease at once (no 20s settle) with an `abandoned_prompt`
+  receipt. A Claude composer that still holds operator text now makes Clear Session Context refuse
+  (`drafted prompt input`) instead of typing `/clear` onto it.
 
 ## 0.35.488
 

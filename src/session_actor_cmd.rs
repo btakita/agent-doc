@@ -1090,11 +1090,32 @@ fn reconcile_idle_projection_before_clear(
     ctx: &SessionContext,
     tmux: &Tmux,
 ) -> Result<ClearPreflightOutcome> {
-    let evidence = resolve_direct_submit_pane(ctx, tmux)
+    let mut evidence = resolve_direct_submit_pane(ctx, tmux)
         .map(|(pane, source)| {
             live_pane_evidence_for_pane(ctx, tmux, pane.pane_id().to_string(), source.as_str())
         })
         .unwrap_or_else(|| live_pane_evidence(ctx, tmux));
+    // `#cancelturnprompt`: a cancelled routed prompt that Claude Code put back
+    // in the composer is agent-doc's own trigger, not operator input. Withdraw
+    // it before classifying, so the clear neither types `/clear` onto it nor
+    // waits on the abandoned prompt's lease for the settle window.
+    if evidence.state == LivePaneState::AliveBusy
+        && let Some(pane) = evidence.pane_id.clone()
+    {
+        let harness = harness_for_evidence(ctx, &evidence);
+        if harness.binary == "claude"
+            && withdraw_cancelled_trigger(
+                ctx,
+                tmux,
+                &pane,
+                &harness,
+                Duration::ZERO,
+                "session_clear",
+            ) == crate::cancelled_trigger::WithdrawOutcome::Withdrawn
+        {
+            evidence = live_pane_evidence_for_pane(ctx, tmux, pane, evidence.source);
+        }
+    }
     let protected_reason = if evidence.state == LivePaneState::AliveBusy {
         protected_clear_input_reason(ctx, tmux, &evidence)
     } else {
@@ -1573,7 +1594,23 @@ fn protected_clear_input_reason(
         .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane))
         .ok()?;
     let harness = harness_for_evidence(ctx, evidence);
-    harness.protected_prompt_input_reason(&captured)
+    if let Some(reason) = harness.protected_prompt_input_reason(&captured) {
+        return Some(reason);
+    }
+    // `#cancelturnprompt`: Claude's composer projection reports operator text
+    // that `protected_prompt_input_reason` (Codex-shaped) does not. Typing
+    // `/clear` onto it would submit one concatenated line, the same hazard the
+    // route refuses as `#concatdraftinject`. agent-doc's own restored trigger
+    // was already withdrawn above, so anything left is the operator's.
+    if harness.binary == "claude" {
+        let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
+        if let agent_doc_harness::PaneComposerProjection::OperatorDraft { .. } =
+            agent_doc_harness::project_pane_composer_at_cursor(&captured, &harness, cursor_y)
+        {
+            return Some("drafted prompt input".to_string());
+        }
+    }
+    None
 }
 
 fn pane_shows_clean_exit_prompt(
@@ -1762,6 +1799,17 @@ pub fn cancel_turn(file: &Path) -> Result<()> {
                     evidence.source
                 ),
             );
+            let harness = harness_for_evidence(&ctx, &evidence);
+            if harness.binary == "claude" {
+                withdraw_cancelled_trigger(
+                    &ctx,
+                    &tmux,
+                    pane,
+                    &harness,
+                    crate::cancelled_trigger::RESTORE_WINDOW,
+                    "session_cancel_turn",
+                );
+            }
             println!(
                 "Cancelled the active turn for {} (interrupted pane {}; context preserved).",
                 ctx.canonical_file.display(),
@@ -1770,6 +1818,71 @@ pub fn cancel_turn(file: &Path) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// `#cancelturnprompt`: Claude Code restores a prompt cancelled before it was
+/// persisted into the composer. When that prompt is exactly this document's
+/// agent-doc trigger, withdraw it (agent-doc typed it; the operator asked to
+/// cancel it) and retire the abandoned prompt's turn-active lease as soon as
+/// its snapshot proves it. Operator text, a busy pane, a route submit in
+/// flight, or an unobservable pane are left untouched.
+fn withdraw_cancelled_trigger(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    pane: &str,
+    harness: &agent_doc_harness::HarnessConfig,
+    window: Duration,
+    source: &'static str,
+) -> crate::cancelled_trigger::WithdrawOutcome {
+    use crate::cancelled_trigger::{
+        SNAPSHOT_WINDOW, TmuxCancelledTriggerPane, WithdrawOutcome, retire_withdrawn_prompt_turn,
+        trigger_candidates, withdraw_restored_trigger,
+    };
+    let triggers = trigger_candidates(harness, &ctx.canonical_file, &ctx.base_dir);
+    let trigger_refs = triggers.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut tmux_pane = TmuxCancelledTriggerPane {
+        tmux,
+        pane,
+        file: &ctx.canonical_file,
+        harness,
+        source: "session.withdraw_cancelled_trigger",
+    };
+    let outcome = withdraw_restored_trigger(&mut tmux_pane, &trigger_refs, window);
+    if window.is_zero() && outcome == WithdrawOutcome::NotRestored {
+        // The clear guard's single look found nothing restored: the common
+        // case, not worth an ops-log line.
+        return outcome;
+    }
+    let detail = match &outcome {
+        WithdrawOutcome::Withdrawn => format!(
+            " {}",
+            retire_withdrawn_prompt_turn(&ctx.canonical_file, pane, SNAPSHOT_WINDOW, &mut |d| {
+                std::thread::sleep(d)
+            })
+        ),
+        WithdrawOutcome::OperatorDraftKept { preview } => format!(" draft_preview={preview:?}"),
+        WithdrawOutcome::SendFailed { error } => format!(" error={error:?}"),
+        _ => String::new(),
+    };
+    agent_doc_ops_log_io::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "cancelled_trigger_composer file={} pane={} source={} outcome={}{} (#cancelturnprompt)",
+            ctx.canonical_file.display(),
+            pane,
+            source,
+            outcome.as_str(),
+            detail,
+        ),
+    );
+    if outcome == WithdrawOutcome::Withdrawn {
+        println!(
+            "Withdrew the cancelled `{}` trigger that Claude Code restored into pane {}'s prompt.",
+            ctx.canonical_file.display(),
+            pane
+        );
+    }
+    outcome
 }
 
 pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {

@@ -515,6 +515,63 @@ foreground turn with its own conversation records, and the queue operation
 keeps an older abandoned snapshot from retiring the lease (fail closed). The
 `Stop` hook then retires the lease normally.
 
+### Cancelled trigger restored into the composer (`#cancelturnprompt`)
+
+When the cancelled prompt was a routed `/agent-doc <FILE>` trigger, Claude
+Code's restore leaves agent-doc's own trigger in the composer. Observed
+2026-10-11 on agent-loop `tasks/agent-doc/agent-doc-bugs.md`, pane %149: Run
+Agent Doc typed the trigger at 05:59:23, and Cancel Turn sent `C-c` at
+05:59:30 while the `UserPromptSubmit` preflight hook was still running (prompt
+snapshot at 05:59:30.674, no prompt record). The composer then held
+`/agent-doc …/agent-doc-bugs.md` as though the operator had typed it. Clear
+Session Context stayed refused (`reason=harness_turn_live_evidence=turn_active_lease`).
+Typing `/clear` onto that text would have submitted one concatenated line, and
+the next Enter would have re-run the cancelled turn. After the operator emptied
+the prompt by hand, the clear stayed refused, because the abandoned prompt's
+lease was still live. The installed binary predated the settle-window rule
+above.
+
+- **Withdrawal policy.** `cancelled_trigger_composer_action` (pure, in
+  `agent-doc-controller::dispatch`) decides from one composer observation. A
+  draft that is *exactly* this document's trigger (absolute or
+  project-relative path, ignoring the prompt sigil and padding) is
+  agent-owned and is withdrawn. Any other draft, including the trigger with
+  operator text around it, belongs to the operator and is never touched. Even
+  an exact trigger is held while a route submit is in flight for the document
+  (it may be a fresh injection waiting for its Enter) or while the pane shows
+  a busy cue (the turn may still be running). An unobservable pane is left
+  alone.
+- **Cancel Turn.** For a Claude pane, after delivering the interrupt,
+  `session cancel-turn` watches the composer for up to 2s for the restore.
+  If the restored trigger shows up, it sends one `C-u` and verifies the
+  composer no longer holds the trigger. It never sends a second key; a key
+  that has no effect is reported as `outcome=unverified`. It logs
+  `cancelled_trigger_composer ... source=session_cancel_turn outcome=<withdrawn|not_restored|operator_draft_kept|held|unobservable|unverified|send_failed> (#cancelturnprompt)`.
+- **Clear Session Context.** The clear guard makes the same withdrawal with a
+  single observation before it classifies the pane (`source=session_clear`),
+  then re-reads the pane. A Claude composer that still holds operator text
+  after that is protected input (`drafted prompt input`): the clear refuses,
+  exactly as the route refuses to append to a foreign draft
+  (`#concatdraftinject`). It does not type `/clear` onto the draft.
+- **Lease.** The settle window waits out one ambiguity: whether a live
+  prompt's record is still about to land. A withdrawal removes it, because the
+  prompt was seen back in the composer (Claude Code restores only an abandoned
+  prompt) and is gone now. After a withdrawal, the abandoned snapshot retires
+  its lease at once (`turn_lease_ended_by_withdrawn_prompt`,
+  `reclaim_withdrawn_prompt_turn_for_pane_*`). The snapshot must still be no
+  older than the lease, and it is polled for up to 2s, since Claude Code may
+  write it shortly after the restore. The retirement records the
+  `abandoned_prompt` receipt and settles the turn's `running` dispatch
+  receipts, the same as the settle-window path. If no qualifying snapshot
+  appears, the log line says `lease=kept reason=no_abandoned_snapshot_for_lease`
+  and the ordinary settle-window rule applies. Transcript evidence alone never
+  uses this rule.
+- **Back-to-back cancels.** A second cancelled prompt adds a second orphaned
+  snapshot. The classifier reports the newest one, because the older snapshot
+  sits between it and the turn boundary and is skipped. A queued input after
+  the snapshots (Claude Code enqueues a trigger typed while it is busy) still
+  fails closed as `Unknown`.
+
 ### Harness turn-end receipts (`#runctrlclaude`)
 
 A cleared lease says only "no turn is known to be live"; it cannot prove that

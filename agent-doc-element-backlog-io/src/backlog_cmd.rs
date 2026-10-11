@@ -559,18 +559,26 @@ fn explicit_add_already_satisfied(
     surface: &str,
     item: &str,
 ) -> bool {
-    let Some(component) = backlog::explicit_add_already_satisfied(full_content, item) else {
-        return false;
-    };
+    satisfied_add(file, full_content, surface, item).is_some()
+}
+
+/// [`explicit_add_already_satisfied`], returning the id the add already landed
+/// under. `#respondcloseoutbacklog`: covers an inferred leading bare `#tag` as
+/// well as `id=` / `[#id]`, so a second application of the same bare-tag add is
+/// a logged no-op instead of a duplicate filed under a coined id.
+fn satisfied_add(file: &Path, full_content: &str, surface: &str, item: &str) -> Option<String> {
+    let satisfied = backlog::add_already_satisfied(full_content, item)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "backlog_add_already_satisfied file={} surface={surface} component={component} item={}",
+            "backlog_add_already_satisfied file={} surface={surface} component={} id=#{} item={}",
             file.display(),
+            satisfied.component,
+            satisfied.id,
             item.replace('\n', " "),
         ),
     );
-    true
+    Some(satisfied.id)
 }
 
 /// Add a new item to the pending component (assigns a stable hash id + `[ ]`
@@ -882,10 +890,8 @@ fn add_at_to_list(
     list: backlog::TrackedWorkList,
 ) -> Result<String> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
-    if explicit_add_already_satisfied(file, &full_content, list.label(), item)
-        && let Some(id) = backlog::explicit_custom_id(item)
-    {
-        return Ok(backlog::normalize_pending_id(&id));
+    if let Some(id) = satisfied_add(file, &full_content, list.label(), item) {
+        return Ok(id);
     }
     backlog::ensure_new_item_explicit_id_available(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];

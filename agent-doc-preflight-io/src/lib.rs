@@ -6416,6 +6416,19 @@ pub fn run_queue_maintenance_with_coin_gate(
     })
 }
 
+/// The document image the same-cycle queue mirror decides against: the live
+/// authority's current text when it answers `Current`, else the disk
+/// projection (detached documents, no controller, or a not-ready head — the
+/// CAS in `persist_queue_maintenance_doc` still fences the write itself).
+fn same_cycle_queue_sync_base(file: &Path) -> Option<String> {
+    if let Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) =
+        current_text_via_preflight_authority(file, "actionable_backlog_sync_base")
+    {
+        return Some(text);
+    }
+    std::fs::read_to_string(file).ok()
+}
+
 /// Closeout-side repair for same-cycle backlog capture.
 ///
 /// Preflight's normal backlog→queue sync runs before `finalize` / `write`
@@ -6441,9 +6454,16 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
         return Ok(Vec::new());
     }
 
-    let content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
-        Err(_) => return Ok(Vec::new()),
+    // `#respondcloseoutbacklog`: decide "already queued" against the live
+    // authority, not the disk projection. A retained closeout's queue head can
+    // sit in the editor/controller model while disk still lags; reading disk
+    // made a second same-cycle sync (the foreground closeout and the
+    // captured-finalize resume each run one) re-add a head the authority
+    // already held, and the queue-maintenance CAS then rebased that insert over
+    // the live head and kept BOTH copies.
+    let content = match same_cycle_queue_sync_base(file) {
+        Some(c) => c,
+        None => return Ok(Vec::new()),
     };
     let components = match agent_doc_element::element::parse(&content) {
         Ok(cs) => cs,
@@ -11525,6 +11545,72 @@ mod tests {
         assert!(
             snap.contains("- do [#fresh]"),
             "snapshot queue region must include the appended closeout head:\n{snap}"
+        );
+    }
+
+    /// `#respondcloseoutbacklog`: the same-cycle queue mirror runs once per
+    /// closeout owner — the foreground closeout AND the captured-finalize
+    /// resume. When the first run's head is already in the live authority but
+    /// the disk projection still lags (a retained delivery), the second run
+    /// must see the head and add nothing. It used to decide from disk, re-add
+    /// the head, and the queue-maintenance CAS then rebased that insert over
+    /// the live head and kept both copies.
+    #[test]
+    fn closeout_sync_decides_already_queued_from_the_live_authority_not_disk() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let disk = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#head] already running\n",
+            "- [ ] [#fresh] same-cycle follow-up\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, disk).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            disk,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(disk), Some(disk)).unwrap();
+        agent_doc_cycle_state_io::record_pending_actionable_ids(&doc, &["fresh".to_string()])
+            .unwrap();
+        // The first owner's mirror already landed in the live authority; its
+        // delivery to disk is still retained.
+        let live = disk.replace("- do [#head]\n", "- do [#fresh]\n- do [#head]\n");
+        let _live_replica = publish_test_live_buffer(&doc, "jetbrains-retained-mirror", &live);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), disk, "precondition");
+
+        let synced = sync_same_cycle_actionable_backlog_into_go_queue(
+            &doc,
+            agent_doc_queue::backlog_sync::FollowUpQueuePlacement::default(),
+        )
+        .unwrap();
+
+        assert!(
+            synced.is_empty(),
+            "the head is already queued in the authority: {synced:?}"
+        );
+        let current = match agent_doc_crdt_relay_io::current_text_for_file(&doc).unwrap() {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+            other => panic!("live authority should stay current: {other:?}"),
+        };
+        assert_eq!(
+            current.matches("do [#fresh]").count(),
+            1,
+            "the second mirror run must not add a second head:\n{current}"
         );
     }
 

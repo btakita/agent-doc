@@ -1404,10 +1404,58 @@ fn replayed_add_text_identity(text: &str) -> String {
 pub fn explicit_add_already_satisfied(full_content: &str, item: &str) -> Option<String> {
     let (custom_id, text) = parse_custom_id_prefix(item).ok()?;
     let id = normalize_pending_id(&custom_id?);
+    active_item_with_id_and_text(full_content, &id, &text)
+}
+
+/// An add the document already shows, and the id it landed under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SatisfiedAdd {
+    pub component: String,
+    pub id: String,
+}
+
+/// Is this add — explicit id OR inferred leading bare `#tag` — already
+/// satisfied by an active item with the same id and the same text?
+///
+/// `#respondcloseoutbacklog`: [`explicit_add_already_satisfied`] covers only
+/// `id=` / `[#id]`. A `--backlog-add "#tag text"` add is promoted to id `tag` by
+/// the add path, so a SECOND application of that very mutation (the retained
+/// foreground write and the captured-finalize resume both applying the same
+/// plan) found `tag` taken and degraded to a generated id with `#tag` left in
+/// the text — the same item filed twice under two ids. The inference is the
+/// mutation's identity on both applications, so it is resolved here exactly as
+/// the add path resolves it.
+///
+/// Same narrowness as the explicit check: the same id carrying different text
+/// is not satisfied (that is the `#baretagidcollide` classification-tag case),
+/// and a `Done` item never satisfies an add.
+pub fn add_already_satisfied(full_content: &str, item: &str) -> Option<SatisfiedAdd> {
+    let (id, text) = requested_add_identity(item)?;
+    let component = active_item_with_id_and_text(full_content, &id, &text)?;
+    Some(SatisfiedAdd { component, id })
+}
+
+/// The `(id, text)` an add resolves to before any collision handling: an
+/// explicit `id=` / `[#id]` prefix, else an inferred leading bare `#tag`.
+/// `None` for an auto-id add (its identity is its text, which the add path's
+/// own text dedup already covers) and for a malformed prefix.
+fn requested_add_identity(item: &str) -> Option<(String, String)> {
+    let (custom_id, text) = parse_custom_id_prefix(item).ok()?;
+    if let Some(custom_id) = custom_id {
+        return Some((normalize_pending_id(&custom_id), text));
+    }
+    let (tag, cleaned) = leading_bare_tag_id(text.trim())?;
+    Some((normalize_pending_id(&tag), cleaned))
+}
+
+/// Same-item witness shared by the explicit and inferred add checks: an
+/// active tracked-work item whose id is `id` and whose text (plus
+/// continuation) matches `text` up to whitespace. Returns its component name.
+fn active_item_with_id_and_text(full_content: &str, id: &str, text: &str) -> Option<String> {
     if id.is_empty() {
         return None;
     }
-    let want = replayed_add_text_identity(&text);
+    let want = replayed_add_text_identity(text);
     if want.is_empty() {
         return None;
     }
@@ -1949,6 +1997,31 @@ fn leading_bare_tag_id(text: &str) -> Option<(String, String)> {
         format!("{state_tags} {rest}")
     };
     Some((token.to_lowercase(), rest))
+}
+
+/// The id of an active item in `body` that a leading bare-`#tag` add already
+/// produced: same inferred id, same text up to whitespace.
+fn replayed_bare_tag_add(body: &str, text: &str) -> Option<String> {
+    let (tag, cleaned) = leading_bare_tag_id(text.trim())?;
+    let id = normalize_pending_id(&tag);
+    let want = replayed_add_text_identity(&cleaned);
+    if id.is_empty() || want.is_empty() {
+        return None;
+    }
+    let (_, items, _) = parse_items(body);
+    items
+        .into_iter()
+        .find(|existing| {
+            let payload = if existing.continuation.is_empty() {
+                existing.text.clone()
+            } else {
+                format!("{}\n{}", existing.text, existing.continuation)
+            };
+            existing.id == id
+                && existing.state != PendingState::Done
+                && replayed_add_text_identity(&payload) == want
+        })
+        .map(|existing| existing.id)
 }
 
 fn custom_id_error(raw_id: &str) -> anyhow::Error {
@@ -4064,6 +4137,21 @@ pub fn op_add_at_with_outcome_reserved(
     }
 
     let mut inline_custom_id = None;
+    if custom_id.is_none()
+        && let Some(existing_id) = replayed_bare_tag_add(body, &text)
+    {
+        // `#respondcloseoutbacklog`: this exact bare-tag add already landed
+        // under its inferred id. A second application of the same mutation
+        // (retained foreground write + captured-finalize resume) is a no-op —
+        // without this it saw the id taken, took the `#baretagidcollide`
+        // degrade path below, and filed the same item again under a coined id.
+        return Ok(PendingAddOutcome {
+            body: body.to_string(),
+            id: existing_id,
+            inserted: false,
+            deduped_key: None,
+        });
+    }
     if custom_id.is_none() {
         // `#baretagidcollide`: the bare-tag id is inferred, not requested, so an
         // id that is already taken means "this was a classification tag, not an
@@ -6902,6 +6990,78 @@ mod tests {
         )
         .unwrap();
         assert_eq!(outcome.id, "panewindowdriftverify");
+    }
+
+    /// `#respondcloseoutbacklog`: applying the SAME bare-tag add a second time
+    /// is the same mutation, not a new item.
+    ///
+    /// Observed live 2026-10-11 on `tasks/agent-doc/agent-doc-bugs.md`: a
+    /// `respond --backlog-add "#loadbudgettests [agent-doc] ..."` closeout was
+    /// applied by the retained foreground write AND by the captured-finalize
+    /// resume. The first application promoted the tag to the id; the second
+    /// saw that id already taken, fell into the `#baretagidcollide` degrade
+    /// path, and filed `[#wallclockbudget] #loadbudgettests [agent-doc] ...` —
+    /// a coined id with the given id left in the text. Four adds became eight
+    /// backlog items and eight queue heads.
+    #[test]
+    fn a_replayed_bare_tag_add_is_a_no_op_not_a_coined_duplicate() {
+        let text = "#loadbudgettests [agent-doc] Wall-clock budget tests fail under load";
+        let first = op_add_with_outcome_reserved("", text, DOC_ID, false, &HashSet::new()).unwrap();
+        assert_eq!(first.id, "loadbudgettests");
+        assert!(first.inserted);
+
+        let doc = format!(
+            "<!-- agent:backlog -->\n{}<!-- /agent:backlog -->\n",
+            first.body
+        );
+        let reserved = document_reserved_identity_ids(&doc);
+        assert!(reserved.contains("loadbudgettests"), "precondition");
+
+        let replay = op_add_with_outcome_reserved(&first.body, text, DOC_ID, false, &reserved)
+            .expect("replaying the same add must not fail");
+        assert!(
+            !replay.inserted,
+            "the replay must not insert: {}",
+            replay.body
+        );
+        assert_eq!(
+            replay.id, "loadbudgettests",
+            "the replay names the given id"
+        );
+        assert_eq!(
+            replay.body, first.body,
+            "the replay leaves the body untouched"
+        );
+
+        // The full-document witness agrees, so the io layer and the resume can
+        // skip the write entirely.
+        let satisfied = add_already_satisfied(&doc, text).expect("inferred add is satisfied");
+        assert_eq!(satisfied.id, "loadbudgettests");
+        assert_eq!(satisfied.component, "backlog");
+        // Line wrapping is the only difference a replay can introduce.
+        assert!(
+            add_already_satisfied(
+                &doc,
+                "#loadbudgettests [agent-doc] Wall-clock budget\n  tests fail under load"
+            )
+            .is_some()
+        );
+    }
+
+    /// The idempotent replay must not weaken `#baretagidcollide`: a taken tag
+    /// carrying DIFFERENT text is still a classification tag, so it keeps its
+    /// tag in the text and takes a generated id.
+    #[test]
+    fn a_taken_bare_tag_with_different_text_still_takes_a_generated_id() {
+        let body = "- [ ] [#agent-doc-bug] the first tagged item\n";
+        let doc = format!("<!-- agent:backlog -->\n{body}<!-- /agent:backlog -->\n");
+        let reserved = document_reserved_identity_ids(&doc);
+        let text = "#agent-doc-bug plan reports an undrainable queue head";
+        assert!(add_already_satisfied(&doc, text).is_none());
+        let outcome = op_add_with_outcome_reserved(body, text, DOC_ID, false, &reserved).unwrap();
+        assert!(outcome.inserted);
+        assert_ne!(outcome.id, "agent-doc-bug");
+        assert!(outcome.body.contains("#agent-doc-bug plan reports"));
     }
 
     /// An EXPLICIT request keeps failing closed — `id=` / `[#id]` really is an

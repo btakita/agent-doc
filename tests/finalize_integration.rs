@@ -1799,6 +1799,101 @@ fn response_and_done_reopen_acquires_fresh_cycle_owner_before_capture() {
     );
 }
 
+/// `#respondcloseoutbacklog`: a bare-tag `--backlog-add` delivered twice
+/// through the `#committedwedge` reopened pending-only cycle is ONE mutation.
+///
+/// Live 2026-10-11 on `tasks/agent-doc/agent-doc-bugs.md`, the same
+/// `--backlog-add "#loadbudgettests [agent-doc] ..."` plan reached the document
+/// through two applications (the retained foreground write and the
+/// captured-finalize resume, both against a cycle reopened by
+/// `baseline_replay_pending_only_reopened`). The second saw `#loadbudgettests`
+/// taken and filed `[#wallclockbudget] #loadbudgettests [agent-doc] ...` beside
+/// the first, and the same-cycle queue mirror then enqueued both ids. Here the
+/// second application is the identical write run again on the reopened
+/// committed cycle: it must leave the backlog and the go queue untouched.
+#[test]
+fn reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue: start\n---\n\n<!-- agent:exchange -->\n❯ do [#head]\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue priority go -->\n- do [#head]\n<!-- /agent:queue -->\n\n<!-- agent:backlog priority queue -->\n- [ ] [#head] current queue head\n<!-- /agent:backlog -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    checkpoint_baseline(tmp.path(), &baseline_content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "head",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nDone.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+    assert_eq!(
+        read_cycle_phase(tmp.path(), &doc).as_deref(),
+        Some("committed")
+    );
+
+    let add = "#loadbudgettests [agent-doc] Wall-clock budget tests fail under concurrent load";
+    for application in 1..=2 {
+        agent_doc()
+            .current_dir(tmp.path())
+            .args([
+                "finalize",
+                doc.to_str().unwrap(),
+                "--force-disk",
+                "--backlog-add",
+                add,
+                "--backlog-queue-placement",
+                "append",
+            ])
+            .write_stdin(format!(
+                "<!-- patch:exchange -->\n### Re: follow-ups ({application}) — gpt-5\nFiled the load-budget follow-up.\n<!-- /patch:exchange -->\n"
+            ))
+            .assert()
+            .success();
+        let head = head_blob(tmp.path());
+        assert_eq!(
+            head.matches("- [ ] [#loadbudgettests] [agent-doc] Wall-clock budget")
+                .count(),
+            1,
+            "application {application}: the add must be filed exactly once under its given id:\n{head}"
+        );
+        assert!(
+            !head.contains("] #loadbudgettests "),
+            "application {application}: the add must never be re-filed under a coined id:\n{head}"
+        );
+        assert_eq!(
+            head.matches("do [#loadbudgettests]").count(),
+            1,
+            "application {application}: the go queue must hold exactly one head for the add:\n{head}"
+        );
+    }
+
+    let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("baseline_replay_pending_only_reopened"),
+        "both applications must go through the reopened pending-only cycle:\n{ops_log}"
+    );
+    assert!(
+        ops_log.contains("backlog_add_already_satisfied")
+            && ops_log.contains("id=#loadbudgettests"),
+        "the second application must be recorded as an already-satisfied add:\n{ops_log}"
+    );
+}
+
 /// The `#committedwedge` escape is scoped to tracked-work mutations: a bare
 /// empty-stdin replay with no mutations is still a no-op and still fails closed.
 #[test]

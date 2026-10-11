@@ -585,6 +585,29 @@ pub fn drop_already_applied_mutations(
     // the backlog no longer lists, keep the reorder for the survivors, and drop
     // the flag entirely when none survive. Any state counts, because
     // `op_reorder` sees `[x]` items that have not been reaped yet.
+    // `#respondcloseoutbacklog`: an add whose explicit OR inferred bare-tag id
+    // already names an active item with the same text is this mutation, already
+    // landed (the retained foreground write absorbed it). Replaying it used to
+    // file the same item again under a coined id. Different text under that id
+    // is kept, so the add path still owns the collision decision.
+    // The descriptor names the landed id, never the item body.
+    for (shape, items) in [
+        ("backlog-add", &mut options.pending_add),
+        ("backlog-add-gated", &mut options.pending_add_gated),
+        ("backlog-add-back", &mut options.pending_add_back),
+        ("icebox-add", &mut options.icebox_add),
+        ("icebox-add-back", &mut options.icebox_add_back),
+    ] {
+        items.retain(|item| {
+            match agent_doc_element_review::add_already_landed(current_content, item) {
+                Some(id) => {
+                    dropped.push(format!("{shape}:#{id}"));
+                    false
+                }
+                None => true,
+            }
+        });
+    }
     if let Some(order) = options.pending_reorder.take() {
         let mut kept: Vec<String> = Vec::new();
         for id in order.split(',').map(str::trim).filter(|id| !id.is_empty()) {

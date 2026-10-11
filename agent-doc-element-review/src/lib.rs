@@ -401,6 +401,18 @@ pub fn review_component_contains_id(content: &str, id: &str) -> bool {
     tracked_work_id_present(content, id, TrackedWorkScope::Review)
 }
 
+/// The id an add already landed under, when the document shows it: an active
+/// tracked-work item with the add's explicit (`id=` / `[#id]`) or inferred
+/// (leading bare `#tag`) id AND the same text.
+///
+/// `#respondcloseoutbacklog`: the replay witness for the add family. A
+/// resume that replays an add the retained foreground write already absorbed
+/// used to file the item a second time under a coined id. `None` keeps the
+/// replay — the add path's own text dedup and collision guard still decide.
+pub fn add_already_landed(content: &str, item: &str) -> Option<String> {
+    backlog::add_already_satisfied(content, item).map(|satisfied| satisfied.id)
+}
+
 /// Whether an item with this id is still gated in `agent:review` *or* the
 /// backlog component.
 ///

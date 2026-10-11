@@ -153,7 +153,19 @@ Read-only status of the sdk.md session:
 The subagent will identify which evidence refused the clear: a turn lease left by the Claude cancel path, background subagents counted as a live turn, or a cooldown that never expires. It will fix that at the root with a replay test, stay fail-closed while a turn can still be running, and record how background subagents count toward a live turn in `specs/15-turn-lifecycle.md`. It will also say whether your current wedge clears by itself after install or needs one exact action.
 
 **v0.35.487:** the authoritative `make check` on the release tree is past nextest and running the editor test suites. The release follows if it passes. This fix goes in the next batch.
-<!-- agent:boundary:8c45a2ce -->
+> **Chat prompt (#chatprompt):** Can I manually run `/clear` in the sdk.md Claude session?
+
+### Re: manual /clear in sdk.md — opus-5.5 · 2026-10-11T00:45-04:00
+
+**On the agent-doc side, yes.** Pane `%180` is idle at an empty prompt; its last turn finished at 12:26 AM. Since 0.35.484, agent-doc reclaims a manually cleared Claude session from the durable turn-end receipt. A manual `/clear` doesn't wedge the document, and it doesn't erase the evidence the `fix/sdkclearwedge` subagent is reading from `ops.log`/`state.db`.
+
+**But wait for its background agents first.** The pane footer shows `← 4 agents` still running. sdk.md has two live queue claims owned by `subagent:recs-and-quirks`: "Do your recommendations." and the conformance/code-generation engine-quirks item. Both expire around 01:38. If you `/clear` now:
+- those agents keep running, but their completion reports land in a fresh context that doesn't know about them;
+- nobody integrates their results or closes those two queue items;
+- the claims hold the items until they expire, about 01:38, and only then does the queue re-dispatch them.
+
+**Recommendation:** let `← 4 agents` drain to zero, then `/clear`. If you need the clear now and are OK with those two items being redone later, `/clear` is safe; it only costs that in-flight work's handoff.
+<!-- agent:boundary:743193a6 -->
 <!-- /agent:exchange -->
 
 <!--

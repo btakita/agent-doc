@@ -175,6 +175,23 @@ Fixed in the same `clearlive` change, and installed. The background-agent row no
 3. **Background agents:** in a real Claude Code pane with a background agent running (`← N agents`) at an idle prompt, it presses Clear and records what happens to that agent: killed, orphaned, or still running into the cleared context.
 
 It will quote each notice verbatim with screenshots, fix any defect it finds on its own branch with tests, and clean up its scratch pane and tab afterwards.
+
+### Re: is #clearnoticeverify verified; 2/3|1/3 layout during the test — opus-5.5 · 2026-10-11T19:12-04:00
+
+> **Queue prompt:** [#clearnoticeverify]: verified?
+
+> **Operator note:** verified?
+
+**Deferred:** not yet verified. The subagent is still in its live test and hasn't reported. I've asked it to report the notice evidence as soon as it has it: the verbatim wording, screenshots, and what happens to background agents. I'll close this item with that evidence.
+
+> **Queue prompt:** The tmux panes are not laid out correctly. 2/3|1/3. There were 3 tmux panes during your [#clearnoticeverify] test.
+
+**Deferred:** this went to the same test subagent (claim `subagent:clearnotice`), since its scratch doc and pane triggered it. Right now window `0:0 agent-doc` holds a single pane, `%186`, likely the scratch doc's pane, and your other doc panes are in `0:1 stash`. The subagent will do three things:
+1. Capture the tmux layout, the IDE's editor split, and the sync/layout ops.log lines from the test window.
+2. Work out why three panes landed at 2/3 | 1/3 instead of matching the editor split, and fix that on its branch if it's an agent-doc defect.
+3. When the test is done, close only its own scratch tab and pane so your layout returns to normal.
+
+If the layout is still off once that tab closes, Sync Tmux Layout in the IDE (or `agent-doc sync`) should restore it.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -183,7 +200,8 @@ It will quote each notice verbatim with screenshots, fix any defect it finds on 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#clearnoticeverify]: Test yourself~~
+- ~~[#clearnoticeverify]: verified?~~ — auto-struck: answered this cycle (#ftstrike)
+- ⏳ The tmux panes are not laid out correctly. 2/3|1/3. There were 3 tmux panes during your [#clearnoticeverify] test.
 - 🚧 frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
 - 🚧 release + publish
 - 🚧 do [#closeoutleaseresume]
@@ -198,7 +216,7 @@ It will quote each notice verbatim with screenshots, fix any defect it finds on 
 - [ ] 🚧 [#closeoutleaseresume] [agent-doc] The controller's captured-finalize resume can fall back to the legacy repair path, which strikes answered queue heads (agent-doc-repair-io/src/lib.rs ~1094) without first acquiring the closeout lease respond holds; the resume's start gate (agent-doc-supervisor/src/idle_watch.rs:37) does not check the lease either. Two closeout drivers can overlap (GH #240 incident). Make the resume acquire the closeout lease before any repair mutation, with a regression test.
 - [ ] 🚧 [#flakyintegrate0494] [agent-doc] A full make check on integrate-0494 (merge of splicectl + gh240, 3fbe838baa) stopped at 1 failure after 101/10205 tests; the rerun on the same commit passed 10205/10205. The first log was deleted before reading, so the test is unknown. Capture it on recurrence (keep nextest junit/output from every authoritative run) and fix the nondeterminism; never rerun to green.
 - [ ] 🚧 [#clearsupersedenotice] [agent-doc] When a newer prompt drops an operator-queued Clear Session Context (idle_queue_watch_deferred_clear_superseded), the operator gets no notice; surface it in the editor like the queued notice.
-- [ ] [#clearnoticeverify] [operator-verify] [agent-doc] Eyeball the queued Clear Session Context notices in IntelliJ after 472ec36906 (queued / re-armed / evidence_age_secs wording) and confirm /clear with running Claude background agents behaves as you expect.
+- [ ] 🚧 [#clearnoticeverify] [operator-verify] [agent-doc] Eyeball the queued Clear Session Context notices in IntelliJ after 472ec36906 (queued / re-armed / evidence_age_secs wording) and confirm /clear with running Claude background agents behaves as you expect.
 <!-- /agent:backlog -->
 
 ## Review

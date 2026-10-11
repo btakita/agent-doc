@@ -2,7 +2,7 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
-## Unreleased
+## 0.35.489
 
 - **A controller memory refresh no longer stalls editor-op appends behind a full ledger reload (`#refreshmemlockstall`).**
   When an apply raced `refresh_memory`'s unlocked ledger load, it re-ran the whole `state.db` replay under the project

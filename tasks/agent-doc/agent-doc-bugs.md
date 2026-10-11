@@ -254,6 +254,23 @@ The exchange is at 193 lines; compacting can wait until the queue drains.
 The other two queue heads are still claimed by subagents from the prior session: `subagent:cancelturnprompt` (the Cancel Turn / Clear Session Context wedge) and `subagent:gh237` (GH #237). With every head claimed, the loop is idle until the subagents report back. After that I'll integrate the work, run one `make install`, release the claims, and close the items.
 
 The exchange is large (215 lines, 12 sections). The queue is active, so I'm not compacting.
+
+### Re: #actionable-review, and dispatched GH #238 and the struck-release bug — opus-5-5 · 2026-10-11T02:31-04:00
+
+**`#actionable-review`:** I checked each of the 4 gated review items. One can be done by an agent; the other three really are blocked.
+
+- **`#drivecapturedsplice` moved back to backlog + queue.** Its plan (`plan-captured-editor-splice-recovery.md`, status 2026-09-27) says nothing is left to build. What remains is one live driver run, `scripts/xdotool-live-verify.sh captured-splice`, and an agent can run it. The plan only kept it behind the operator because it types real keystrokes into your desktop. It goes to the end of the queue and keeps its `[operator-verify]` tag, so the loop won't start it while you're working. Say the word and it can run.
+- **`#frontendlivedispatch` stays in review.** I searched haiven-dev's `ops.log` and the rotated `ops.log.1.zst`. Neither has a pass signal (`route_dispatch_only_recycle_inflight_ready_after_start` / `dispatch_ready_after_start`) or the failure `recycle_ttl_elapsed_supervisor_alive`. It still needs you to click Run Agent Doc on `frontend.md`. The preflight warning that `#operatorverifylive` already resolves it is a false match: that done entry was the earlier attempt from 2026-10-10.
+- **`#jb262dynlauncherrecommen` stays.** It needs your decision on keeping the warn-and-replace policy versus asking for a restart-free 262 launcher.
+- **`#pypiquotarecheck` stays.** It is waiting on a reply to pypi/support#12214, and the last check showed plenty of headroom (1.6 GiB).
+
+**Dispatched to subagents in their own worktrees (claimed):**
+- `#gh-fix` GH #238 (`subagent:gh238`). `agent-doc upgrade` tells you to restart IntelliJIdea2026.2 even though no 2026.2 IDE is running. Any live IDE on the host (here the 263 RemoteDev backend on the 2026.3 data dir) currently counts as "live", and that is a regression since 0.35.480. The subagent will count an IDE only when it runs from the data dir being written, and add tests for both the false-positive and true-positive cases. I'll close the issue after merging it.
+- The struck "release + publish" item (`subagent:releasestruck`). It is tracing which code path rewrote your free-text head to `~~release + publish~~` and fixing it so an unanswered operator head can't be struck by a path that didn't complete it.
+
+**Release plan:** I've noted that you want a release + publish once these items finish. I'll merge each subagent branch as it reports and run one `make install`. After the remaining claimed items (`#refreshmemlockstall`, GH #237, GH #238, the Cancel Turn wedge, the struck-release bug) are merged, I'll cut one release covering all of them.
+
+The `#refreshmemlockstall` subagent is still running `make check-fast`.
 <!-- agent:boundary:861a07a6 -->
 <!-- /agent:exchange -->
 
@@ -262,19 +279,19 @@ The exchange is large (215 lines, 12 sections). The queue is active, so I'm not 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#capturegatedispatched]~~
-- ~~Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.~~
-- ~~do [#visiblewritewallclock]~~
-- ~~do [#editoropscheckpointfail]~~
 - 🚧 Cancel Turn caused the prompt to be full with `/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` blocking other commands such as Clear Session Context. After manually clearing the prompt, Clear Session Context was wedged. I manually ran `/clear`.
 - 🚧 #gh-fix: https://github.com/btakita/agent-doc/issues/237
+- #gh-fix: https://github.com/btakita/agent-doc/issues/238
 - 🚧 do [#refreshmemlockstall]
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- #actionable-review
+- I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.
+- ~~release + publish~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 - [ ] 🚧 [#refreshmemlockstall] [agent-doc] The controller's refresh_memory durable_reload holds the project state lock for 1-4s, which is the root of the editor-op append timeouts seen during the 2026-10-11 sdk.md typing burst. 0.35.488 (editoropscheckpointfail f99567825) survives them by retaining and re-sending with the same batch id; remove the stall itself: shrink the critical section (load outside the lock, swap under it) and add a regression test that a concurrent editor-op append is not blocked by a durable reload.
 <!-- /agent:backlog -->
 
@@ -283,7 +300,6 @@ The exchange is large (215 lines, 12 sections). The queue is active, so I'm not 
 <!-- agent:review -->
 - [/] [#frontendlivedispatch] [operator-verify] [agent-doc] Live confirmation that Run Agent Doc on haiven-dev frontend.md dispatches (fixes 0.35.483: runfrontenddispatch 3d9fbad86, dispatchreadyselfheal 81b9e1910). Precondition met 2026-10-11: pane %166's supervisor re-registered on the current binary (pid 3851566, healthy/ready) and install_fanout recycles now settle. Remaining: the operator clicks Run Agent Doc on frontend.md; pass = route_dispatch_only_recycle_inflight_ready_after_start outcome=settled or supervisor_recycle_graph_settled reason=dispatch_ready_after_start in haiven-dev ops.log, with no refusal=recycle_ttl_elapsed_supervisor_alive.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
-- [/] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-06: 8.363 GiB of 10.0 GiB, 1.637 GiB headroom, 198 releases through 0.35.465, post-cutover mean 35.3 KiB, approximately 48,621 further releases fit; VERDICT headroom fine. The support issue remains open with only the github-actions bot comment and has not changed since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 <!-- /agent:review -->
 

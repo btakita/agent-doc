@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **External tools can hand work to a session with `agent-doc queue add` (`#queueinbound`, GH #237).**
+  `agent-doc queue add <FILE> --source <NAME> [--key <KEY>] [--attach <PATH>]... [--json] [TEXT]...` appends one
+  attributed head, `[from:<source>] <text>`, to the document's selected `agent:queue`. It writes through the
+  binary-owned queue write path, so with an editor open the head lands in the editor's live buffer, never on disk
+  behind it, and unsaved operator text survives. `--key` dedupes against unstruck heads from the same source; a
+  struck head lets the key enter again. Text and each `--attach` file are secret-redacted first; attachments are
+  stored under `.agent-doc/inbound/` and referenced from the head. A running session sees the head through mid-turn
+  steering as `dispatch=drain_after_current`.
+
 ## 0.35.488
 
 - **A prompt cancelled before Claude Code persists it no longer wedges Clear Session Context (`#sdkclearwedge`).** An

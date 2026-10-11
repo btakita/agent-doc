@@ -25,6 +25,7 @@ pub mod queue_directive;
 pub mod queue_graph;
 pub mod queue_head_annotation;
 pub mod queue_heads;
+pub mod queue_inbound;
 pub mod queue_preemption;
 pub mod queue_projection;
 pub mod queue_prompt_drift;

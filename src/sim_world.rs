@@ -13127,6 +13127,202 @@ fn simeditor_save_then_close_falls_back_to_disk_authority() {
     drop(dir);
 }
 
+// -------- #queueinbound (GH #237): `agent-doc queue add` against a live editor --------
+
+fn inbound_queue_doc(queue_body: &str) -> String {
+    template_doc("❯ do #sim-existing.\n").replace(
+        "<!-- agent:icebox -->\n",
+        &format!(
+            "<!-- agent:queue go -->\n{queue_body}<!-- /agent:queue -->\n\n<!-- agent:icebox -->\n"
+        ),
+    )
+}
+
+#[test]
+fn queue_add_lands_in_live_editor_buffer_without_disk_write_and_dedupes_by_key() {
+    // GH #237 acceptance 1+2: an external tool's `queue add` against a document
+    // open in a live editor goes through the binary-owned CRDT write path. The
+    // head reaches the editor replica (alongside the operator's unsaved queue
+    // line, unclobbered), disk is never written behind the editor, the realtime
+    // current document preflight reads lists it, and the same key twice is one head.
+    let disk = inbound_queue_doc("- current task\n");
+    let (dir, doc) = editor_project(&disk);
+    let mut editor = SimEditor::jetbrains(&doc).unwrap();
+    let unsaved = inbound_queue_doc("- current task\n- operator typed this unsaved\n");
+    editor.type_unsaved(&unsaved).unwrap();
+
+    // The live plugin pulls and ACKs peer deliveries on its own schedule while
+    // the CLI waits for visible delivery; model it as a concurrent replica.
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let plugin = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                editor.pull_peer_updates().unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            editor.pull_peer_updates().unwrap();
+            editor
+        })
+    };
+
+    let request = agent_doc_queue_io::queue_add::QueueAddRequest {
+        source: "unity",
+        key: Some("PlayerSpec"),
+        text: "PlayerSpec failed in play mode",
+        attachments: &[],
+    };
+    let outcome = agent_doc_queue_io::queue_add::add_with_effects(
+        &crate::CliQueueCommandEffects,
+        &doc,
+        &request,
+    );
+    let retry = agent_doc_queue_io::queue_add::QueueAddRequest {
+        text: "PlayerSpec failed again",
+        ..request.clone()
+    };
+    let duplicate = agent_doc_queue_io::queue_add::add_with_effects(
+        &crate::CliQueueCommandEffects,
+        &doc,
+        &retry,
+    );
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    let editor = plugin.join().unwrap();
+
+    let head = "[from:unity key=PlayerSpec] PlayerSpec failed in play mode";
+    assert_eq!(
+        outcome.expect("queue add must land through the live editor replica"),
+        agent_doc_queue_io::queue_add::QueueAddOutcome::Added {
+            head: head.to_string(),
+            attachments: Vec::new(),
+        }
+    );
+    assert_eq!(
+        duplicate.unwrap(),
+        agent_doc_queue_io::queue_add::QueueAddOutcome::Duplicate {
+            existing: head.to_string()
+        },
+        "the same key twice must produce one head"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&doc).unwrap(),
+        disk,
+        "queue add must not write disk behind a live editor buffer"
+    );
+    let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log
+            .lines()
+            .any(|line| line.contains("queue_add_writeback")
+                && line.contains("transport=crdt_relay"))
+            && !ops_log.contains("transport=disk_fallback"),
+        "queue add must write through the CRDT relay, never a disk fallback:\n{ops_log}"
+    );
+    assert!(
+        editor.buffer.contains("- operator typed this unsaved\n"),
+        "the operator's unsaved queue line must survive:\n{}",
+        editor.buffer
+    );
+    assert_eq!(
+        editor.buffer.matches(&format!("- {head}\n")).count(),
+        1,
+        "exactly one inbound head reaches the editor buffer:\n{}",
+        editor.buffer
+    );
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        &doc,
+        "queue_add_test",
+    )
+    .unwrap();
+    let prompts = agent_doc_queue::queue_prompt_drift::queue_prompt_texts(
+        &agent_doc_queue::queue_prompt_drift::queue_component_text(&current),
+    );
+    assert_eq!(
+        prompts,
+        vec![
+            "current task".to_string(),
+            "operator typed this unsaved".to_string(),
+            head.to_string(),
+        ],
+        "the realtime current document preflight reads lists the inbound head"
+    );
+    editor.close().unwrap();
+    drop(dir);
+}
+
+#[test]
+fn queue_add_surfaces_to_running_steering_follow_as_drain_after_current() {
+    // GH #237 acceptance 3+4: while a cycle is running, `steering --follow`
+    // (consumer `follow`, the same core the PostToolUse hook uses) reports the
+    // inbound head as passive queue work — `dispatch=drain_after_current`, never
+    // an interruption of the current item — and a secret-looking token in the
+    // head text is redacted before it reaches the document.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let file = dir.path().join("plan.md");
+    let baseline = concat!(
+        "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n",
+        "<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n",
+    );
+    std::fs::write(&file, baseline).unwrap();
+    let cycle =
+        agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline)).unwrap();
+    agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+        &file,
+        &cycle.cycle_id,
+        baseline,
+        Some("current task"),
+        Vec::new(),
+    )
+    .unwrap();
+
+    // Assembled at runtime so the source never carries a token-shaped literal.
+    let token = format!("AKIA{}", "Q".repeat(16));
+    let text = format!("CI job 7 failed; leaked credential {token} in its log");
+    let outcome = agent_doc_queue_io::queue_add::add_with_effects(
+        &crate::CliQueueCommandEffects,
+        &file,
+        &agent_doc_queue_io::queue_add::QueueAddRequest {
+            source: "ci",
+            key: Some("job-7"),
+            text: &text,
+            attachments: &[],
+        },
+    )
+    .unwrap();
+    let agent_doc_queue_io::queue_add::QueueAddOutcome::Added { head, .. } = outcome else {
+        panic!("expected the inbound head to be added: {outcome:?}");
+    };
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        !written.contains(&token),
+        "secret reached the document:\n{written}"
+    );
+    assert!(written.contains("[REDACTED_AWS]"), "{written}");
+
+    let report = agent_doc_session_check_io::midturn_steering::observe(
+        &file,
+        agent_doc_session_check_io::midturn_steering::CONSUMER_FOLLOW,
+        true,
+    )
+    .unwrap()
+    .expect("steering --follow must report the inbound head");
+    assert_eq!(report.items.len(), 1, "{report:?}");
+    let item = &report.items[0];
+    assert_eq!(item.verbatim, head);
+    assert_eq!(
+        item.dispatch,
+        agent_doc_document_realtime::midturn_steering::SteeringDispatch::DrainAfterCurrent,
+        "{item:?}"
+    );
+    let line = serde_json::to_string(&report).unwrap();
+    assert!(
+        line.contains("\"dispatch\":\"drain_after_current\""),
+        "the follow JSON line carries the dispatch: {line}"
+    );
+    drop(dir);
+}
+
 // -------- Slice 2: JB + VS Code protocol parity fixtures --------
 
 #[test]

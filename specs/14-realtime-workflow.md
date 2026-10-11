@@ -843,7 +843,43 @@ Four classifications, each naming itself in `ops.log` as
 | `verbatim_branch_unchanged` | A plane still matches another byte-for-byte. | Proceed, or fast-forward a proven newer durable save. Not logged — it is the every-preflight case. |
 | `transient_markers_only` | The planes differ only by transient markers; a durable branch is unchanged. | Same as above, decided on durable content. |
 | `authority_subsumes_disk` | Three durably distinct revisions, but the live buffer preserves every durable disk line in order. | Proceed on the authority; adopt nothing. Disk is an ancestor, and adopting it would drop the operator's newer steering. |
-| `three_way_split_merged` | Three durably distinct revisions with content on disk the authority never received: two writers genuinely diverged. | First use an exact-base editor-op epoch to remove only disk queue rows proven to be intermediate revisions of the initial authority cut; then three-way merge the remaining disk branch into live authority against the baseline ancestor. Independent disk additions are preserved. The initial operator cut and op epoch remain fixed across the bounded CAS retry. The merge records `admission_three_way_merge … outcome=<adopted\|…>` and its rung diagnostics; an unadoptable merge proceeds on authority. Never refuses. |
+| `three_way_split_merged` | Three durably distinct revisions with content on disk the authority never received: two writers genuinely diverged. | First use an exact-base editor-op epoch to remove only disk queue rows proven to be intermediate revisions of the initial authority cut; then three-way merge the remaining disk branch into live authority against the baseline ancestor. Independent disk additions are preserved. The merge engine itself then projects out revision twins (below) — no op proof needed. Every rung must clear count conservation and twin-pair conservation, both computed against the projected disk. The initial operator cut and op epoch remain fixed across the bounded CAS retry. The merge records `admission_three_way_merge … outcome=<adopted\|…>` and its rung diagnostics (`RevisionTwin=collapsed(N)`, `<Engine>=would_duplicate_items(…)`, `<Engine>=would_duplicate_revision(…)`); an unadoptable merge proceeds on authority. Never refuses. |
+
+**Revision twins (`typingforkdup`).** Every item a merge emits is the image of
+exactly one authored item. An item the operator is typing passes through many
+intermediate texts, and a plane that observes the document mid-burst (a native
+save, a stale snapshot) can carry one of them. When the baseline holds neither
+revision, both sides look like they *added* an item, and the line-based
+`Semantic` rung keeps the two texts as two items. The count guard cannot see this
+because the stale revision is itself growth over the baseline. Live 2026-10-11 on
+`sdk.md`: disk held a 279-byte cut of a new queue item (ending mid-sentence), the
+authority held the 344-byte revision, and the ladder answered
+`Cell=equals_authority Semantic=adopted`. The adopted 53079-byte revision carried
+the item twice. The op-lineage projection could not help: the burst's checkpoint
+appends had failed (`editor_ops_record_failed`), so no op proof existed.
+
+The rule lives in `agent_doc_merge::merge`, the one pure entry every engine runs
+behind, so it holds for every caller and needs no op ledger:
+
+- **Projection.** Before any engine runs, the agent side drops each `queue` or
+  `backlog` item it added since the base that is a prefix of, or equal to, an
+  item the operator added since the base. An in-progress line only grows at its
+  end between two observations of one burst. Each operator addition absorbs at
+  most one twin per copy, and the operator's text is kept. The projected agent
+  text is returned as `MergePlan::merged_agent`. Any additions-based guard must
+  bound against that projected text: an unprojected twin leaves a spare slot that
+  admits an unrelated duplicate.
+- **Twin-pair conservation (admission).** A disk revision *newer* than the
+  operator's is never projected. A streamed agent response legitimately extends
+  its own operator-visible checkpoint, so that direction is unsound. Instead, the
+  ladder refuses any candidate that holds more prefix-related item pairs than the
+  operator authored plus those disk added. Admission then proceeds on the
+  authority, which is the editor's live text.
+
+The textual test assumes an independently authored item is never a prefix of
+an item the operator added in the same window. Prose components are out of
+scope for the same streaming reason. `formal/tla/AdmissionSplitMerge.tla` checks
+both rules with one wedge per rule and two reach obligations.
 
 `authority_subsumes_disk` is what a **blocked commit** looks like. When the
 controller reports `NativeSaveRequired` with `disk_projection_ready=false`, the

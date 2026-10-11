@@ -333,7 +333,34 @@ No new backlog follow-ups this cycle. The item is tracked by its queue claim.
 **Coordination correction:** this pane is a stale coordinator from 2026-10-09; another session has run this document since. Bookkeeping here mistakenly released its `release + publish` claim (`coordinator:release-0487`). I re-claimed it under the same owner immediately, and no other claim was touched. Its in-flight items are `#respondfinalizehard`, `#pypireleaseworkflow`, GH #235, GH #236, dev.md Clear Session Context, and release 0.35.486/0.35.487. They stay with that coordinator.
 
 The one item this pane dispatched, "Run Agent Doc on tools.md was slow to go." (`subagent:toolsslowgo`, branch `fix/run-agent-doc-slow-start`), is still running. I'll hand its result to the active coordinator's next integration batch rather than integrate it from here.
-<!-- agent:boundary:5a0782c6 -->
+> **Chat prompt (#chatprompt):** merge branch into main with the lint error fix + run make install
+
+### Re: tools.md slow start — merged + installed — opus-5.5 · 2026-10-10T21:35-04:00
+
+> **Queue prompt:** Run Agent Doc on tools.md was slow to go.
+
+**Merged to main as `ab6cf0fe7` and installed.**
+- **Branch:** `fix/run-agent-doc-slow-start` (`e975d16f5`) plus a lint fix (`ab6cf0fe7`), on top of v0.35.486 (`3c0680a6e`).
+- **Full `make check`:** exit 0, 9964/9964 nextest passed.
+- **Push:** fast-forward to main.
+- **`make install`:** exit 0. The editor extensions reinstalled.
+
+**Cause of the slow start:** Run Agent Doc on `src/haiven-dev/tasks/tools.md` took 58s instead of about 12s. A `make install` (0.35.485 → .486) landed mid-route. The connecting client replaced the stale-binary controller and SIGTERM'd it within the same second, 1–2s before prompt delivery. The plugin then replayed the whole attempt against the new controller, losing about 45s. The same unsafe kill also happened on the 21:22:39 and 23:34:53 controller handovers. The `Lazily actor within 250ms` preflight refusal lined up with that 00:40:16–19Z handover; that link is inferred from timing.
+
+**Fix (`#drainingpredecessor`):**
+- A client that finds a stable controller on a stale binary now asks it to restart itself (`recycle_force`, reason `stale_binary_client`). That path lets in-flight routes finish. The client waits up to 30s (`HANDOFF_CONNECT_WAIT`) and falls back to direct replacement only on refusal or timeout.
+- The draining controller gets a `state.db` lease with a deadline, so the duplicate-controller cleanup skips it until then.
+- `specs/supervisor.md` documents the behaviour.
+- Tests use an injected clock, and a mutation check confirms the delegation test catches a missing lease write.
+
+**Lint fix:** removed the unused `EnvGuard` test helper in `agent-doc-codex-stop-io/src/lib.rs`, left over after `3d699a6ec`. It was the clippy `dead_code` error that already made `make check-fast` fail on main.
+
+**Not addressed yet:**
+- Pane readiness after a fresh harness start still uses the 4-tick idle fallback, not prompt detection, costing about 2–9s per route.
+- If the old controller completes a route after the editor's status poll has moved to the successor, the successor doesn't know that route and a replay can still happen.
+
+**Advisory:** preflight reports the live JetBrains plugin at 0.2.525 while this binary ships 0.2.527. Reinstall the plugin (`agent-doc plugin install jetbrains`) and restart the IDE to reach parity.
+<!-- agent:boundary:66940815 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -341,13 +368,13 @@ The one item this pane dispatched, "Run Agent Doc on tools.md was slow to go." (
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#respondfinalizehard]
-- 🚧 do [#pypireleaseworkflow]
+- 🚧 do [#respondfinalizehard]
+- ⏭️ do [#pypireleaseworkflow]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/235
-- #gh-fix https://github.com/btakita/agent-doc/issues/236
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/236
 - 🚧 fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
 Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md because a turn is live in pane %127 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md` to intentionally interrupt the turn and clear context.
-- Run Agent Doc on tools.md was slow to go.
+- 🚧 Run Agent Doc on tools.md was slow to go.
 - 🚧 release + publish
 <!-- /agent:queue -->
 

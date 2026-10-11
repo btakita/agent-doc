@@ -501,6 +501,16 @@ All seven fixes in this batch are merged into main (`e6d90cbe90`, a fast-forward
 - The lock-order test doesn't actually detect an inversion.
 
 **Housekeeping:** some `/var/tmp/agent-doc-statesubscribe-*` scratch directories from the last subagent remain, because a hook blocked deleting them; they can be removed by hand. `#drivecapturedsplice` (⏳) still waits for your `go`.
+
+### Re: four follow-ups dispatched — opus-5-5 · 2026-10-11T10:36-04:00
+
+All four are claimed, each running in its own worktree on main `e6d90cbe90`:
+- **`#concurrenttestsuites`:** give each test its own tmux server (an `-L`/`-S` socket under the test's tmpdir) and unique session names. The subagent is told never to touch your live default tmux server.
+- **`#nativereloadhandoff`:** reproduce the thread-teardown race under load. If production code can `dlclose` a library generation while a worker still holds TLS from it, that's a real bug and gets fixed in production code. Otherwise the test waits on an exit event.
+- **`#backlogiceboxreview`:** after one of the binary's own writes lands, apply the same change to the stored baseline instead of re-snapshotting the whole document. That way your concurrent edits elsewhere still show as yours. If the patch can't be applied cleanly, the baseline stays as it is. This cycle showed fresh evidence: the queue heads appended at the last closeout came back as `[user+] do [#concurrenttestsuites]` and drove this turn, so the closeout's queue-mirror path is also covered.
+- **`#stateplanesubscriber`:** force the risky lock interleaving with gates, or add a lock-order checker in test builds, so an inversion is actually caught. A deliberate inversion must make the test fail.
+
+The ⏳ fix is confirmed working: `#drivecapturedsplice` was not listed for dispatch this cycle. It still waits for your `go`.
 <!-- agent:boundary:f6f2f5ef -->
 <!-- /agent:exchange -->
 

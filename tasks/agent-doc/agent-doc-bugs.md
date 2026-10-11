@@ -47,15 +47,15 @@ Compacted content:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏳ do [#clearqueuedliveturn]
-- do [#splicectlcommit]
+- 🚧 do [#clearqueuedliveturn]
+- 🚧 do [#splicectlcommit]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#splicectlcommit] [agent-doc] A strict write --commit on a git-ignored scratch doc under a live editor is routed to the project controller (commit_document_via_controller), which commits against the product repo and refuses the ignored path (commit_skipped_ignored_path + commit_error), so the captured-splice recipe's isolated GIT_DIR never applies. Either give the controller commit an explicit commit-target override or treat an ignored scratch doc as a clean skip instead of commit_error. Evidence: src/agent-doc ops.log doc=xdotool-captured-splice-1791744122 18:42:24Z.
-- [ ] [#clearqueuedliveturn] [operator-verify] [agent-doc] Live-check the queued Clear Session Context (merged 23a5d7c0a4): press Clear while a route-dispatched turn is running; expect an info notice 'queued … runs when that turn ends', exit 0, then exactly one /clear at the idle boundary, and none if a newer prompt starts first. Specifically confirm the turn-ended projection arrives when the turn is proven live only by its dispatch receipt (the pane %149 case).
+- [ ] 🚧 [#splicectlcommit] [agent-doc] A strict write --commit on a git-ignored scratch doc under a live editor is routed to the project controller (commit_document_via_controller), which commits against the product repo and refuses the ignored path (commit_skipped_ignored_path + commit_error), so the captured-splice recipe's isolated GIT_DIR never applies. Either give the controller commit an explicit commit-target override or treat an ignored scratch doc as a clean skip instead of commit_error. Evidence: src/agent-doc ops.log doc=xdotool-captured-splice-1791744122 18:42:24Z.
+- [ ] 🚧 [#clearqueuedliveturn] [operator-verify] [agent-doc] Live-check the queued Clear Session Context (merged 23a5d7c0a4): press Clear while a route-dispatched turn is running; expect an info notice 'queued … runs when that turn ends', exit 0, then exactly one /clear at the idle boundary, and none if a newer prompt starts first. Specifically confirm the turn-ended projection arrives when the turn is proven live only by its dispatch receipt (the pane %149 case).
 <!-- /agent:backlog -->
 
 ## Review

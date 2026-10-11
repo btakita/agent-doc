@@ -24,8 +24,9 @@ use agent_doc_sqlite::state_store::{
 };
 use agent_doc_turn::turn_status::{
     TRANSCRIPT_TAIL_PROBE_BYTES, TranscriptTailEvidence, TurnActiveMarker,
-    classify_transcript_tail, pane_title_for_status, turn_active_expiry_cutoff,
-    turn_active_marker_is_fresh, turn_active_marker_matches_pane, turn_lease_ended_by_interrupt,
+    classify_transcript_tail, pane_title_for_status, transcript_turn_end_reason,
+    turn_active_expiry_cutoff, turn_active_marker_is_fresh, turn_active_marker_matches_pane,
+    turn_lease_ended_by_interrupt,
 };
 use anyhow::Result;
 use std::io::{Read, Seek, SeekFrom};
@@ -212,14 +213,19 @@ fn sweep_expired_turn_active_leases_in_db(conn: &Connection, now: u64) -> Result
 }
 
 /// A turn-active lease the harness transcript proves was interrupted
-/// (`#staleharnessturnlive`).
+/// (`#staleharnessturnlive`) or whose prompt was abandoned before it was
+/// persisted (`#sdkclearwedge`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterruptedTurnLease {
     pub pane: String,
     /// Unix seconds the lease was written (the turn's `UserPromptSubmit`).
     pub written_at: u64,
-    /// Unix seconds of the harness interrupt record.
+    /// Unix seconds of the harness boundary record (the interrupt record, or
+    /// the abandoned prompt's snapshot).
     pub interrupted_at: u64,
+    /// The receipt reason the boundary proves (`interrupt` or
+    /// `abandoned_prompt`).
+    pub reason: &'static str,
     pub transcript: PathBuf,
 }
 
@@ -256,13 +262,16 @@ fn interrupted_turn_lease(
     if !turn_lease_ended_by_interrupt(marker, evidence, now) {
         return None;
     }
-    let TranscriptTailEvidence::Interrupted { at_secs } = evidence else {
+    let (TranscriptTailEvidence::Interrupted { at_secs }
+    | TranscriptTailEvidence::AbandonedPrompt { at_secs }) = evidence
+    else {
         return None;
     };
     Some(InterruptedTurnLease {
         pane: marker.pane.clone(),
         written_at: marker.written_at,
         interrupted_at: at_secs,
+        reason: transcript_turn_end_reason(evidence)?,
         transcript,
     })
 }
@@ -277,13 +286,13 @@ fn retire_interrupted_turn_lease(
     now: u64,
 ) -> Option<InterruptedTurnLease> {
     let interrupted = interrupted_turn_lease(conn, marker, now)?;
-    // `#runctrlclaude`: the interrupt is a harness-authored turn boundary;
-    // keep it after the lease row is gone.
+    // `#runctrlclaude`: the interrupt (or abandoned prompt) is a
+    // harness-authored turn boundary; keep it after the lease row is gone.
     let _ = record_harness_turn_end_in_db(
         conn,
         &marker.pane,
         interrupted.interrupted_at,
-        agent_doc_turn::turn_status::TURN_END_REASON_INTERRUPT,
+        interrupted.reason,
     );
     let _ = clear_coordination_lease_if_heartbeat_at_or_before_in_db(
         conn,
@@ -1054,6 +1063,42 @@ mod tests {
         fn stop_hook(&self) {
             clear_turn_active_marker(&self.base, self.pane).unwrap();
         }
+        /// `#sdkclearwedge`: Claude Code's prompt-admission order. The
+        /// `UserPromptSubmit` hook writes the lease; once the hooks finish the
+        /// harness writes the prompt snapshot and, in the same flush, the
+        /// prompt record (`persist == true`). An operator cancel in between
+        /// drops the prompt back into the composer: snapshot only, no prompt
+        /// record, no interrupt record, no Stop hook (`persist == false`).
+        fn submit_prompt_with_snapshot(&mut self, message_id: &str, hook_secs: u64, persist: bool) {
+            write_turn_active_marker_with_transcript_at(
+                &self.base,
+                self.pane,
+                self.now,
+                Some(&self.transcript),
+            )
+            .unwrap();
+            let submitted = self.stamp();
+            self.tick(hook_secs);
+            self.append(serde_json::json!({
+                "type": "file-history-snapshot", "messageId": message_id,
+                "snapshot": {"messageId": message_id, "trackedFileBackups": {}, "timestamp": self.stamp()},
+                "isSnapshotUpdate": false,
+            }));
+            if persist {
+                self.append(serde_json::json!({
+                    "type": "user", "isSidechain": false, "uuid": message_id, "timestamp": submitted,
+                    "message": {"role": "user", "content": "/agent-doc tasks/sdk.md"},
+                }));
+            }
+        }
+
+        fn finish_turn_without_stop(&self) {
+            self.append(serde_json::json!({
+                "type": "assistant", "isSidechain": false, "timestamp": self.stamp(),
+                "message": {"role": "assistant", "content": [{"type": "text", "text": "done"}]},
+            }));
+            self.append(serde_json::json!({"type": "system", "subtype": "turn_duration", "timestamp": self.stamp()}));
+        }
 
         /// `#devclear`: one Codex rollout record at the virtual clock.
         fn codex_record(&self, kind: &str, payload: serde_json::Value) {
@@ -1256,6 +1301,88 @@ mod tests {
             last_harness_turn_end_for_pane(&world.base, world.pane).expect("interrupt receipt");
         assert_eq!(receipt.ended_at, interrupted_at);
         assert_eq!(receipt.reason, "interrupt");
+    }
+
+    /// `#sdkclearwedge` incident replay (haiven-dev `tasks/sdk.md`, pane %180,
+    /// 2026-10-11): the previous turn ended normally; a dispatched
+    /// `/agent-doc` prompt wrote its lease at 04:30:21, its snapshot landed at
+    /// 04:30:23, and the operator cancelled before the prompt record landed.
+    /// Every Clear Session Context then refused `harness_turn_live
+    /// evidence=turn_active_lease` while the pane sat idle at its prompt. The
+    /// orphaned snapshot is the harness-authored boundary that retires it.
+    #[test]
+    fn sim_cancel_before_prompt_persists_retires_lease_after_settle() {
+        let mut world = TurnSimWorld::new("%180");
+        world.submit_prompt_with_snapshot("prev", 1, true);
+        world.tick(30);
+        world.finish_turn_without_stop();
+        world.stop_hook();
+        world.tick(200);
+
+        world.submit_prompt_with_snapshot("7287902a", 2, false);
+        let snapshot_at = world.now;
+        assert!(
+            world.live(),
+            "an unsettled snapshot may still get its prompt record"
+        );
+        world.tick(agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 1);
+        assert!(world.live());
+        world.tick(1);
+        let retired = reclaim_interrupted_turn_for_pane_at(&world.base, world.pane, world.now)
+            .expect("settled abandoned prompt retires the lease");
+        assert_eq!(retired.reason, "abandoned_prompt");
+        assert_eq!(retired.interrupted_at, snapshot_at);
+        assert_eq!(retired.written_at, snapshot_at - 2);
+        assert!(
+            !world.live(),
+            "the idle owner pane no longer reads as mid-turn"
+        );
+        let receipt =
+            last_harness_turn_end_for_pane(&world.base, world.pane).expect("boundary receipt");
+        assert_eq!(receipt.reason, "abandoned_prompt");
+        assert_eq!(receipt.ended_at, snapshot_at);
+
+        // The re-run after the operator's /clear opens a lease the old
+        // snapshot can never retire.
+        world.tick(5);
+        world.submit_prompt_with_snapshot("next", 2, true);
+        world.tick(600);
+        assert!(world.live());
+    }
+
+    /// `#sdkclearwedge` fail-closed: a live turn whose model is still thinking
+    /// (no record after the prompt for minutes) keeps its lease, in both
+    /// snapshot orders, and a cancelled prompt followed by any turn activity
+    /// is not reclaimed.
+    #[test]
+    fn sim_live_prompt_without_follow_up_records_keeps_its_lease() {
+        let mut world = TurnSimWorld::new("%180");
+        world.submit_prompt_with_snapshot("live", 25, true);
+        world.tick(600);
+        assert!(world.live(), "a persisted prompt is a live turn until Stop");
+
+        let mut world = TurnSimWorld::new("%181");
+        world.submit_prompt("prompt record first");
+        world.append(serde_json::json!({
+            "type": "file-history-snapshot", "messageId": "unrelated-but-after-a-prompt",
+            "snapshot": {"messageId": "unrelated-but-after-a-prompt", "timestamp": world.stamp()},
+            "isSnapshotUpdate": false,
+        }));
+        world.tick(600);
+        assert!(
+            world.live(),
+            "a snapshot NEWER than the turn's own prompt record is not an abandoned prompt"
+        );
+
+        let mut world = TurnSimWorld::new("%182");
+        world.submit_prompt_with_snapshot("cancelled", 2, false);
+        world.tick(1);
+        world.append(serde_json::json!({"type": "queue-operation", "operation": "dequeue", "timestamp": world.stamp()}));
+        world.tick(600);
+        assert!(
+            world.live(),
+            "a dequeued input after the snapshot may have started a turn"
+        );
     }
 
     #[test]

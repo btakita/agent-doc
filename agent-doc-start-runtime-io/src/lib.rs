@@ -376,15 +376,34 @@ fn log_interrupted_turn_lease_retired(
     session_log: &mut Option<SessionLog>,
 ) {
     clear_turn_status_title_for_owned_pane(file, shared);
+    // `#sdkclearwedge`: the retired turn's `running` dispatch receipt would
+    // otherwise keep reading as a live turn until the in-flight horizon.
+    let settled_dispatches =
+        agent_doc_controller_io::project_controller::settle_dispatch_turn_ended_by_harness_for_file(
+            file,
+            interrupted.written_at,
+        )
+        .unwrap_or(0);
     let event = format!(
-        "turn_status_projection_repaired file={} pane={} reason=harness_turn_interrupted lease_written_at={} interrupted_at={} (#staleharnessturnlive)",
+        "turn_status_projection_repaired file={} pane={} reason={} lease_written_at={} interrupted_at={} settled_dispatches={} (#staleharnessturnlive) (#sdkclearwedge)",
         file.display(),
         interrupted.pane,
+        harness_turn_end_repair_reason(interrupted.reason),
         interrupted.written_at,
         interrupted.interrupted_at,
+        settled_dispatches,
     );
     log_event(session_log, &event);
     agent_doc_ops_log_io::log_op(file, &event);
+}
+
+/// Ops-log reason for a lease retired by a harness transcript boundary.
+fn harness_turn_end_repair_reason(receipt_reason: &str) -> &'static str {
+    if receipt_reason == agent_doc_turn::turn_status::TURN_END_REASON_ABANDONED_PROMPT {
+        "harness_prompt_abandoned"
+    } else {
+        "harness_turn_interrupted"
+    }
 }
 
 fn complete_idle_queue_slash_command_head(

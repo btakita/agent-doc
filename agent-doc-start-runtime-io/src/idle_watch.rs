@@ -514,6 +514,23 @@ fn spawn_captured_finalize_resume_worker(
     Ok(CapturedFinalizeResumeWorker { key, result })
 }
 
+/// `#sdkclearwedge`: has the deferred clear's target pane already started an
+/// empty conversation (a `SessionStart` clear/startup receipt) after the clear
+/// was deferred?
+fn deferred_clear_satisfied_by_harness(
+    path: &Path,
+    projection: &agent_doc_state_backbone::QueueContextClearProjection,
+) -> bool {
+    agent_doc_turn_status_io::last_harness_turn_end_for_pane_for_file(path, &projection.target)
+        .is_some_and(|receipt| {
+            agent_doc_turn::turn_status::harness_receipt_satisfies_deferred_clear(
+                &receipt.reason,
+                receipt.ended_at,
+                projection.marked_secs,
+            )
+        })
+}
+
 fn supervisor_background_context_clear_enabled() -> bool {
     false
 }
@@ -4439,6 +4456,29 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     agent_doc_controller_io::project_controller::queue_context_clear_deferred_operator_for_file(&path)
                         .ok()
                         .flatten();
+                // `#sdkclearwedge`: a deferred clear that the harness already
+                // satisfied (the operator typed `/clear`, or the harness
+                // restarted, after the deferral) is retired, never delivered:
+                // delivering it would wipe the newer conversation.
+                let deferred_clear = match deferred_clear {
+                    Some(projection)
+                        if deferred_clear_satisfied_by_harness(&path, &projection) =>
+                    {
+                        let settled = agent_doc_controller_io::project_controller::clear_queue_context_clear_deferred_for_file(&path);
+                        let event = format!(
+                            "idle_queue_watch_deferred_clear_satisfied file={} target={} clear_epoch={} deferred_at={} settled={} (#sdkclearwedge)",
+                            path.display(),
+                            projection.target,
+                            projection.clear_epoch,
+                            projection.marked_secs,
+                            settled.as_ref().map_or_else(|err| format!("error:{err:#}"), |ok| ok.to_string()),
+                        );
+                        log_event(&mut session_log, &event);
+                        agent_doc_ops_log_io::log_op(&path, &event);
+                        None
+                    }
+                    other => other,
+                };
                 match agent_doc_queue::queue_preemption::plan_deferred_clear_step(
                     deferred_clear.is_some(),
                     prompt_visible && !turn_active,
@@ -6242,6 +6282,63 @@ mod tests {
     fn attached_editor_never_allows_disk_queue_authority() {
         assert!(disk_queue_authority_allowed(false));
         assert!(!disk_queue_authority_allowed(true));
+    }
+
+    /// `#sdkclearwedge` replay: sdk.md's operator clear was deferred at 04:30:30
+    /// (`clear_epoch=87`) behind a cancelled turn's stale lease; the operator then
+    /// typed `/clear` by hand (`session_start_clear` receipt at 04:34:25) and
+    /// re-ran. The pending deferral is satisfied and must be retired instead of
+    /// wiping the re-run at its next idle gap.
+    #[test]
+    fn deferred_clear_is_satisfied_only_by_a_newer_fresh_conversation_on_its_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk.md");
+        std::fs::write(&doc, "doc").unwrap();
+        let deferred_at =
+            agent_doc_turn::turn_status::parse_rfc3339_utc_secs("2026-10-11T04:30:30Z").unwrap();
+        let projection = agent_doc_state_backbone::QueueContextClearProjection {
+            phase: agent_doc_state_backbone::QueueContextClearPhase::Deferred,
+            file: doc.display().to_string(),
+            target: "%180".to_string(),
+            harness: "claude-code".to_string(),
+            command: "/clear".to_string(),
+            source: Some(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED.to_string()),
+            head_sha256: None,
+            head_bytes: None,
+            clear_epoch: 87,
+            marked_secs: deferred_at,
+        };
+        assert!(
+            !deferred_clear_satisfied_by_harness(&doc, &projection),
+            "no receipt: the deferred clear is still owed"
+        );
+        // The startup receipt that predates the deferral does not satisfy it.
+        agent_doc_turn_status_io::record_harness_turn_end_at(
+            dir.path(),
+            "%180",
+            deferred_at - 3_600,
+            "session_start_startup",
+        )
+        .unwrap();
+        assert!(!deferred_clear_satisfied_by_harness(&doc, &projection));
+        // A clear on another pane says nothing about this one.
+        agent_doc_turn_status_io::record_harness_turn_end_at(
+            dir.path(),
+            "%181",
+            deferred_at + 235,
+            "session_start_clear",
+        )
+        .unwrap();
+        assert!(!deferred_clear_satisfied_by_harness(&doc, &projection));
+        agent_doc_turn_status_io::record_harness_turn_end_at(
+            dir.path(),
+            "%180",
+            deferred_at + 235,
+            "session_start_clear",
+        )
+        .unwrap();
+        assert!(deferred_clear_satisfied_by_harness(&doc, &projection));
     }
 
     fn context_clear_projection_with_source(

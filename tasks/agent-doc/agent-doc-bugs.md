@@ -140,6 +140,19 @@ The repeated chat lines, "Can I delete the duplicated queue item now?" and "Do t
 - **Now running:** the one authoritative `make check` on that exact tree; nextest has just started 10013 tests.
 - **Next, if it passes:** fast-forward main, `make release` (tmux-ci, tag, GitHub Release + PyPI, `install-full`), verify the published assets and PyPI version, then close every shipped item.
 - **Next batch:** `capturegatedispatched` (`436cb0652`) arrived after this boundary and goes there.
+
+### Re: sdk.md Clear Session Context wedge dispatched — opus-5.5 · 2026-10-11T00:40-04:00
+
+I claimed the new queue head, the sdk.md Clear Session Context wedge after a cancelled Run Agent Doc turn, as `subagent:sdkclearwedge` and dispatched it to branch `fix/sdkclearwedge`.
+
+Read-only status of the sdk.md session:
+- harness `claude-code`, pane `%180`, actor `ready`, pane `alive-idle` with `prompt_ready=true`
+- the footer shows `← 4 agents` and `conversation_holders: 9 live`
+- the last session event is `idle_queue_watch_skipped reason=clear_cooldown`
+
+The subagent will identify which evidence refused the clear: a turn lease left by the Claude cancel path, background subagents counted as a live turn, or a cooldown that never expires. It will fix that at the root with a replay test, stay fail-closed while a turn can still be running, and record how background subagents count toward a live turn in `specs/15-turn-lifecycle.md`. It will also say whether your current wedge clears by itself after install or needs one exact action.
+
+**v0.35.487:** the authoritative `make check` on the release tree is past nextest and running the editor test suites. The release follows if it passes. This fix goes in the next batch.
 <!-- agent:boundary:8c45a2ce -->
 <!-- /agent:exchange -->
 
@@ -149,7 +162,7 @@ The repeated chat lines, "Can I delete the duplicated queue item now?" and "Do t
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ⏭️ do [#hookstalemsgfile]
-- 🚧 do [#relayhubtestisolation]
+- ⏭️ do [#relayhubtestisolation]
 - ~~do [#removeobsoleteicebox]~~
 - ⏭️ do [#respondfinalizehard]
 - ⏭️ do [#pypireleaseworkflow]
@@ -163,6 +176,7 @@ Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-
 - 🚧 do [#idefocusowner]
 - ~~#actionable-review~~
 - 🚧 do [#capturegatedispatched]
+- Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.
 <!-- /agent:queue -->
 
 ## Backlog

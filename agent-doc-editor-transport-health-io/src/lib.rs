@@ -197,9 +197,151 @@ pub fn clear_after_proven_delivery(project_root: &Path, file: &Path, reason: &st
     Ok(())
 }
 
+/// What a transport-local success did to the shared health episode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportSuccessEffect {
+    /// No refusal run was open, or the open run belonged to this same
+    /// transport: the success recovers the episode.
+    Cleared,
+    /// A refusal run recorded by a DIFFERENT transport is still open. This
+    /// success says nothing about that transport, so the run is kept.
+    KeptOtherTransportRefusalRun,
+}
+
+/// Pure decision for [`note_transport_success`].
+///
+/// `#crosstransportclear`: the health row is per document, not per transport.
+/// A replica-notify ACK proves only that the replica endpoint took the update;
+/// it is not visible-delivery proof and it is no evidence at all about the
+/// native-save endpoint. Observed 2026-10-11 on `src/haiven-dev/tasks/sdk.md`:
+/// the editor answered every `persist_current` with `receipt rejected` for 26
+/// minutes, and each refusal was followed ~15s later by a `crdt_replica_rewake
+/// notified=1` that deleted the row, so `consecutive_rejections` read 1 on
+/// every record, never reached the unregister threshold, never degraded, and
+/// the session wedged until an unrelated install recycled the controller.
+pub fn transport_success_effect(
+    open_refusal_run: u64,
+    run_transport: &str,
+    success_transport: &str,
+) -> TransportSuccessEffect {
+    if open_refusal_run > 0 && run_transport != success_transport {
+        TransportSuccessEffect::KeptOtherTransportRefusalRun
+    } else {
+        TransportSuccessEffect::Cleared
+    }
+}
+
+/// A transport-local success (for example a replica-notify ACK). It recovers
+/// its own transport's refusal run and timeout votes, but never erases a
+/// refusal run another transport recorded: only that transport's success, or a
+/// proven delivery via [`clear_after_proven_delivery`], can close it.
+pub fn note_transport_success(
+    project_root: &Path,
+    file: &Path,
+    transport: &str,
+) -> Result<TransportSuccessEffect> {
+    let session_id =
+        agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_else(|| "-".to_string());
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
+    let prior =
+        agent_doc_sqlite::state_store::load_editor_transport_health_from_db(&conn, &document_hash)?
+            .filter(|health| health.session_id == session_id);
+    let effect = prior
+        .as_ref()
+        .map(|health| {
+            transport_success_effect(
+                health.consecutive_rejections,
+                &health.last_transport,
+                transport,
+            )
+        })
+        .unwrap_or(TransportSuccessEffect::Cleared);
+    match effect {
+        TransportSuccessEffect::Cleared => {
+            clear_after_proven_delivery(project_root, file, transport)?
+        }
+        TransportSuccessEffect::KeptOtherTransportRefusalRun => {
+            let health = prior.as_ref().expect("kept effect requires a prior row");
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "editor_transport_refusal_run_kept file={} success_transport={} refusing_transport={} consecutive_rejections={} note=other_transport_success_is_not_delivery_proof (#crosstransportclear)",
+                    file.display(),
+                    transport,
+                    health.last_transport,
+                    health.consecutive_rejections,
+                ),
+            );
+        }
+    }
+    Ok(effect)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn other_transport_success_keeps_an_open_refusal_run() {
+        assert_eq!(
+            transport_success_effect(1, "native_editor_save_request", "crdt_replica_notify"),
+            TransportSuccessEffect::KeptOtherTransportRefusalRun
+        );
+        assert_eq!(
+            transport_success_effect(2, "crdt_replica_notify", "crdt_replica_notify"),
+            TransportSuccessEffect::Cleared
+        );
+        assert_eq!(
+            transport_success_effect(0, "native_editor_save_request", "crdt_replica_notify"),
+            TransportSuccessEffect::Cleared,
+            "with no refusal run open, liveness still clears timeout votes"
+        );
+    }
+
+    /// Replays the 2026-10-11 sdk.md interleaving against the real SQLite
+    /// health row: native save refused, replica notify ACKed, repeated. The
+    /// refusal run must accumulate to the unregister threshold and degrade.
+    #[test]
+    fn interleaved_replica_acks_do_not_reset_native_save_refusals() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\nsession: interleave\n---\n\n# Session\n").unwrap();
+        let threshold = agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD;
+        let mut degraded = false;
+        for attempt in 0..threshold {
+            degraded = record_failure(
+                dir.path(),
+                &file,
+                Some("133762ee"),
+                "native_editor_save_request",
+                SocketDeliveryFailure::Rejected,
+                |count| count >= agent_doc_ipc_protocol::EDITOR_TRANSPORT_DEGRADE_FAILURE_THRESHOLD,
+            )
+            .unwrap();
+            if attempt + 1 < threshold {
+                assert_eq!(
+                    note_transport_success(dir.path(), &file, "crdt_replica_notify").unwrap(),
+                    TransportSuccessEffect::KeptOtherTransportRefusalRun
+                );
+            }
+        }
+        assert!(degraded, "the refusal run must reach the degradation bar");
+        assert!(
+            endpoint_unregistered(dir.path(), &file).unwrap(),
+            "the refusing native-save endpoint must reach the unregister threshold"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("editor_transport_refusal_run_kept"), "{log}");
+
+        // The refusing transport's own success, or a proven delivery, recovers.
+        assert_eq!(
+            note_transport_success(dir.path(), &file, "native_editor_save_request").unwrap(),
+            TransportSuccessEffect::Cleared
+        );
+        assert!(!endpoint_unregistered(dir.path(), &file).unwrap());
+    }
 
     #[test]
     fn transition_is_monotone_through_refusal_thresholds() {

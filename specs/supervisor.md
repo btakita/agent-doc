@@ -659,6 +659,15 @@ harness Enter key once. A capture that instead proves an empty dispatch-ready
 composer may retire only the matching stale prompt-dispatch projection before a
 fresh text+Enter attempt. Prompt-dispatch deduplication is never itself delivery
 proof and cannot cause the queue head to be recorded as dispatched.
+- `#ghostsuggestresubmit` (the idle-drain twin of route's `#routeghostdraft`):
+a prompt row whose body renders dim (SGR 2) is a harness suggestion inside an
+empty composer, never the pending payload, even when its stripped text equals
+the trigger byte for byte. `dispatch_payload_pending_in_current_input` masks
+such rows to their bare prompt glyph before matching, so the drain dispatches a
+fresh text+Enter instead of pressing Enter on an empty composer. Observed
+2026-10-11: Claude Code suggested the previous `/agent-doc <FILE>` dimly, the
+probe read `payload_already_pending=true`, the bare Enter was a no-op, and the
+queue continuation never started.
 - The watcher persists a redacted pane snapshot together with its
 `payload_already_pending`, `dispatch_ready`, and selected-action observation,
 deduped by queue head and capture hash, so a stranded draft can be diagnosed

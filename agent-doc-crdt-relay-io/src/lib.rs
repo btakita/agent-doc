@@ -5334,6 +5334,10 @@ pub struct ReplicaSignalOutcome {
 /// editor transport-health machine. The network loop itself never retries:
 /// this is one bounded effect after the attempt, so health accounting adds no
 /// IPC latency or blocking retry path.
+/// Health label of the native-save transport; its success is the only
+/// replica-side signal that proves the requested revision reached disk.
+const NATIVE_EDITOR_SAVE_TRANSPORT: &str = "native_editor_save_request";
+
 fn record_replica_signal_transport_health(
     file: &Path,
     delivery_id: Option<&str>,
@@ -5342,11 +5346,25 @@ fn record_replica_signal_transport_health(
 ) -> Result<()> {
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(file);
     if outcome.notified > 0 {
-        return agent_doc_editor_transport_health_io::clear_after_proven_delivery(
+        // An exact native-save receipt is visible-delivery proof: the editor
+        // persisted the requested revision, so the whole episode recovers.
+        if transport == NATIVE_EDITOR_SAVE_TRANSPORT {
+            return agent_doc_editor_transport_health_io::clear_after_proven_delivery(
+                &project_root,
+                file,
+                transport,
+            );
+        }
+        // `#crosstransportclear`: any other success (a replica-notify ACK)
+        // recovers only its own transport's refusal run. Deleting the row on
+        // that ACK reset a refusing native-save endpoint's run to 1 on every
+        // retry, so it never degraded and the session wedged.
+        agent_doc_editor_transport_health_io::note_transport_success(
             &project_root,
             file,
             transport,
-        );
+        )?;
+        return Ok(());
     }
     if outcome.definitive_refusals == 0 {
         return Ok(());
@@ -5630,7 +5648,7 @@ pub fn request_native_save_for_current_projection(
     record_replica_signal_transport_health(
         &canonical,
         Some(expected_content_hash),
-        "native_editor_save_request",
+        NATIVE_EDITOR_SAVE_TRANSPORT,
         &outcome,
     )?;
     Ok(outcome)
@@ -11317,5 +11335,75 @@ mod tests {
                 "a proven {transport} success must recover the whole health episode"
             );
         }
+    }
+
+    /// `#crosstransportclear` regression, replaying the 2026-10-11 sdk.md
+    /// wedge through the relay's own health fold: the editor refuses every
+    /// native save while the replica rewake keeps ACKing. Before the fix each
+    /// ACK deleted the row, the refusal run read 1 forever and nothing
+    /// escalated. Now the run accumulates, degrades, and unregisters the
+    /// refusing endpoint; an exact native-save receipt still recovers it.
+    #[test]
+    fn replica_notify_acks_do_not_erase_a_native_save_refusal_run() {
+        let (dir, file) = temp_doc("crosstransport.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::write(&file, "---\nsession: crosstransport\n---\n\n# Session\n").unwrap();
+        let outcome = |notified: usize, definitive_refusals: usize| ReplicaSignalOutcome {
+            found: 1,
+            notified,
+            build_mismatches: Vec::new(),
+            build_mismatch_refusals: Vec::new(),
+            generation_mismatches: 0,
+            definitive_refusals,
+            dead_endpoints: Vec::new(),
+            endpoint_unregistered: false,
+        };
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&file).unwrap();
+        let threshold = agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD;
+        for attempt in 0..threshold {
+            record_replica_signal_transport_health(
+                &file,
+                Some("133762ee"),
+                NATIVE_EDITOR_SAVE_TRANSPORT,
+                &outcome(0, 1),
+            )
+            .unwrap();
+            record_replica_signal_transport_health(
+                &file,
+                Some(&format!("rewake-{attempt}")),
+                "crdt_replica_notify",
+                &outcome(1, 0),
+            )
+            .unwrap();
+            let health =
+                agent_doc_sqlite::state_store::load_editor_transport_health_from_db(&conn, &hash)
+                    .unwrap()
+                    .expect("a replica ACK must not delete an open native-save refusal run");
+            assert_eq!(health.consecutive_rejections, attempt + 1);
+        }
+        let health =
+            agent_doc_sqlite::state_store::load_editor_transport_health_from_db(&conn, &hash)
+                .unwrap()
+                .unwrap();
+        assert!(health.degraded, "the refusing endpoint must degrade");
+        assert!(
+            agent_doc_editor_transport_health_io::endpoint_unregistered(dir.path(), &file).unwrap(),
+            "the refusal run must reach the unregister threshold"
+        );
+
+        record_replica_signal_transport_health(
+            &file,
+            Some("133762ee"),
+            NATIVE_EDITOR_SAVE_TRANSPORT,
+            &outcome(1, 0),
+        )
+        .unwrap();
+        assert!(
+            agent_doc_sqlite::state_store::load_editor_transport_health_from_db(&conn, &hash)
+                .unwrap()
+                .is_none(),
+            "an exact native-save receipt is delivery proof and recovers the episode"
+        );
     }
 }

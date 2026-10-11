@@ -511,6 +511,16 @@ pub fn prompt_candidate_is_dim_placeholder(output: &str, candidate: &str) -> boo
     codex_prompt_line_body_starts_dim(raw_line)
 }
 
+/// Whether one RAW (ANSI-preserving) pane line is a composer prompt whose body
+/// renders dim/faint: a ghost suggestion or placeholder, never typed input.
+///
+/// `#ghostsuggestresubmit`: line-level twin of
+/// [`prompt_candidate_is_dim_placeholder`] for callers that scan raw lines
+/// themselves (the pending-payload probe) rather than one chosen candidate.
+pub fn prompt_line_body_is_dim_placeholder(raw_line: &str) -> bool {
+    codex_prompt_line_body_starts_dim(raw_line)
+}
+
 fn is_safe_codex_placeholder_token(word: &str) -> bool {
     if word == "@filename" {
         return true;
@@ -1023,6 +1033,20 @@ in @filename
         assert!(!prompt_candidate_is_dim_placeholder(
             typed,
             "❯\u{a0}[⧉ In tasks/api.md] continue the prior task"
+        ));
+    }
+
+    #[test]
+    fn claude_ghost_suggestion_line_is_a_dim_placeholder() {
+        // Captured 2026-10-11 from the sdk.md pane: Claude Code's prompt
+        // suggestion repeats the last trigger in SGR-2 inside an EMPTY composer.
+        let ghost = "\x1b[39m❯ \x1b[2m/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md\x1b[0m";
+        assert!(prompt_line_body_is_dim_placeholder(ghost));
+        let typed =
+            "\x1b[39m❯ /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md";
+        assert!(!prompt_line_body_is_dim_placeholder(typed));
+        assert!(!prompt_line_body_is_dim_placeholder(
+            "\x1b[2m  some dim transcript text\x1b[0m"
         ));
     }
 

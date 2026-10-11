@@ -310,6 +310,9 @@ Its claim code overlaps with the sdk.md queue-sync and struck-release subagents.
 **`#drivecapturedsplice` still waits for your `go`.** Its only step types real keystrokes into your desktop.
 
 **In flight (8 subagents):** `#refreshmemlockstall`, GH #237, Cancel Turn, GH #238, struck release, sdk.md queue sync, tmux focus sync, and the sdk.md NOTIFY. Cancel Turn's first full `make check` failed only on the timing test `closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes`: 3.70s against its 3s limit, with load average 70–82 from the sibling test suites. On its own the test takes 0.71s, so the change didn't cause it. That run stopped early, so a rerun is covering the tests it skipped; I won't count a passing rerun as proof. Making that test reliable under load is a follow-up I'll file when I integrate.
+
+> **[NOTIFY from src/haiven-dev/tasks/sdk.md]** (2026-10-11T08:30:33Z)
+> Queue admission dropped operator text (2026-10-11 ~04:27). The operator moved five annotated heads sharing one id into agent:queue: "- [#dxdecisions]: D1: …" through "- [#dxdecisions]: D5: …" (plus one other annotated head). Preflight (UserPromptSubmit hook) kept only D1 in the queue, rewrote D2 into a NEW agent:backlog item "- [ ] [#dxdecisions] : D2: …" (colliding with the existing gated review item #dxdecisions, flagged as preset_item_id_collision), and deleted the D3, D4 and D5 lines from the document. Warning shown: free_text_admission_item_skipped "pending add: custom id already exists: dxdecisions". Expected: multiple annotated heads for the same id stay in the queue verbatim (or are all surfaced as annotations), and nothing is converted to backlog or dropped. Recovered from the preflight diff by the agent. Then the closeout refused ("owned component(s) have not reached the current document authority: notes,queue,review"), and session-check reports authority/disk divergence on queue+review.
 <!-- agent:boundary:861a07a6 -->
 <!-- /agent:exchange -->
 

@@ -131,6 +131,24 @@ Two things combine, and only one is new.
 **Suspected trigger:** I ran `make install` of the clear-fix batch at about 18:10. Install recycles every supervisor onto the new binary at its next idle boundary, and your screenshot is from 18:16. So the prime suspect is that the hot-reloaded supervisor, or the newly expanded `turn-status idle` hook path, ended up with its stderr on the pane. That's not confirmed yet. I sent the location and this lead to the frontend.md subagent. It will fix both layers: no unconditional perf printing in library code, and no process with stderr on the pane. If the stray text is the only problem, a redraw (resizing the pane, or Ctrl+L) clears it for now. If the session still won't accept input, the wedge is separate, and the subagent is checking for that too.
 
 I also dispatched the three new follow-ups to their own subagents: `#closeoutleaseresume` (the resume takes the closeout lease), `#flakyintegrate0494` (keep test output from every run and hunt the nondeterministic failure), and `#clearsupersedenotice` (tell you when a newer prompt drops a queued clear).
+
+### Re: closing the finished GH #240, sdk.md and api.md queue items — opus-5.5 · 2026-10-11T18:31-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/240
+
+`#gh-fix` ("fix then close") is done on both counts:
+- **Fixed:** the approved-head fencing in the consume (`f82ea45372`), on main via `3fbe838baa`, installed.
+- **Closed:** GH #240 closed when the fix landed on main. I posted the root cause, fix and tests as a [comment](https://github.com/btakita/agent-doc/issues/240#issuecomment-6114223605).
+
+The remaining overlap of two closeout drivers is tracked as `#closeoutleaseresume`, which is in progress with a subagent.
+
+> **Queue prompt:** Clear Session Context on sdk.md did not take effect despite me running it twice. Run Agent Doc was sandwiched in between the 2 Clear Session Context calls.
+
+Fixed in `clearlive` (`37bc4add5a`), on main as `472ec36906`, and installed. The details are in the 18:25 response.
+
+> **Queue prompt:** Clear Session Context on api.md is wedged.
+
+Fixed in the same `clearlive` change, and installed. The background-agent row no longer hides the idle prompt.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -139,24 +157,20 @@ I also dispatched the three new follow-ups to their own subagents: `#closeoutlea
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#clearqueuedliveturn]~~
-- ~~do [#splicectlcommit]~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/240
-- 🚧 Clear Session Context on sdk.md did not take effect despite me running it twice. Run Agent Doc was sandwiched in between the 2 Clear Session Context calls.
-- 🚧 Clear Session Context on api.md is wedged.
-- frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
-- release + publish
-- do [#closeoutleaseresume]
-- do [#flakyintegrate0494]
-- do [#clearsupersedenotice]
+- ⏳ do [#clearnoticeverify]
+- 🚧 frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
+- 🚧 release + publish
+- 🚧 do [#closeoutleaseresume]
+- 🚧 do [#flakyintegrate0494]
+- 🚧 do [#clearsupersedenotice]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#closeoutleaseresume] [agent-doc] The controller's captured-finalize resume can fall back to the legacy repair path, which strikes answered queue heads (agent-doc-repair-io/src/lib.rs ~1094) without first acquiring the closeout lease respond holds; the resume's start gate (agent-doc-supervisor/src/idle_watch.rs:37) does not check the lease either. Two closeout drivers can overlap (GH #240 incident). Make the resume acquire the closeout lease before any repair mutation, with a regression test.
-- [ ] [#flakyintegrate0494] [agent-doc] A full make check on integrate-0494 (merge of splicectl + gh240, 3fbe838baa) stopped at 1 failure after 101/10205 tests; the rerun on the same commit passed 10205/10205. The first log was deleted before reading, so the test is unknown. Capture it on recurrence (keep nextest junit/output from every authoritative run) and fix the nondeterminism; never rerun to green.
-- [ ] [#clearsupersedenotice] [agent-doc] When a newer prompt drops an operator-queued Clear Session Context (idle_queue_watch_deferred_clear_superseded), the operator gets no notice; surface it in the editor like the queued notice.
+- [ ] 🚧 [#closeoutleaseresume] [agent-doc] The controller's captured-finalize resume can fall back to the legacy repair path, which strikes answered queue heads (agent-doc-repair-io/src/lib.rs ~1094) without first acquiring the closeout lease respond holds; the resume's start gate (agent-doc-supervisor/src/idle_watch.rs:37) does not check the lease either. Two closeout drivers can overlap (GH #240 incident). Make the resume acquire the closeout lease before any repair mutation, with a regression test.
+- [ ] 🚧 [#flakyintegrate0494] [agent-doc] A full make check on integrate-0494 (merge of splicectl + gh240, 3fbe838baa) stopped at 1 failure after 101/10205 tests; the rerun on the same commit passed 10205/10205. The first log was deleted before reading, so the test is unknown. Capture it on recurrence (keep nextest junit/output from every authoritative run) and fix the nondeterminism; never rerun to green.
+- [ ] 🚧 [#clearsupersedenotice] [agent-doc] When a newer prompt drops an operator-queued Clear Session Context (idle_queue_watch_deferred_clear_superseded), the operator gets no notice; surface it in the editor like the queued notice.
 - [ ] [#clearnoticeverify] [operator-verify] [agent-doc] Eyeball the queued Clear Session Context notices in IntelliJ after 472ec36906 (queued / re-armed / evidence_age_secs wording) and confirm /clear with running Claude background agents behaves as you expect.
 <!-- /agent:backlog -->
 

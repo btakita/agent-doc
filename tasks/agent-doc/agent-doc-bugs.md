@@ -152,6 +152,28 @@ Yes. v0.35.490 is fully published:
 - PyPI's latest version is 0.35.490, and the PyPI workflow's install-and-run check (run 38163374161) passed.
 
 No newer tag exists; v0.35.490 is the latest. The two fixes from this session's subagents are not released yet: `splicevrfy` (the verifier accepting the CRDT-forward recovery) and `clearqueued` (a Clear Session Context pressed during a live turn is now queued). Both are merged in the `integrate-0493` worktree, where the full `make check` is still running. Once it passes, I'll push to main and run `make install`. They then ship in the next tagged release.
+
+### Re: integrated the verifier and queued-clear fixes, pushed and installed — opus-5.5 · 2026-10-11T16:00-04:00
+
+> **Queue prompt:** do [#splicevrfyforward]
+
+Done (subagent branch `splicevrfy`, commit `1ec3202d74`).
+- **Verifier:** `verify-captured-splice-recovery` now accepts a second shape, `crdt_forward`. Its receipts must arrive in order: a retained advance (`crdt_response_cell_add delivery_converged=false`), then an operator capture with `operator_ops>=1`, `shadow_replay=agreed` and a pre-advance `merge_base`, then `crdt_document_op_delta_ingested Applied { changed: true }`, then a `crdt_commit_barrier visible_delivery_projected=true`. The fallback triple is unchanged.
+- **Tests:** each clause has a mutation test that must fail when that clause is broken, and the 18:42 live run is a fixture. Run against the real ops.log, the verifier now passes with `shape=crdt_forward operator_ops=28 merge_base=d232ee81c5ad`.
+- **Side fixes:** the three event names come from `OpsLogEvent` now. Receipt matching uses the exact `doc=` token, so `scratch-2` no longer counts as `scratch`.
+- **Not fixed: the scratch `commit_error`.** The script's GIT_DIR does reach the owner-pane advance. But with an editor attached, `write --commit` hands the commit to the running project controller, which commits against the product repo and refuses the ignored scratch path. The fix is in product code, so I filed it as splicectlcommit. The recipe now names this limit instead of showing a bare error, and I corrected the spec paragraph that claimed otherwise.
+
+> **Queue prompt:** Clear Session Context on agent-doc-bugs.md issue: agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md because a turn is live in pane %149 (harness_turn_live=true evidence=dispatch_turn_running, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` to intentionally interrupt the turn and clear context. [dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class=terminal_failure issue_key=4fc76633465ea41b5b45095f979f41b07bebd824d967142596722502299060a2 Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating a retry as the remedy. Preserve any retained capture and obey no-resubmit/no-recycle guidance in the original diagnostic.
+
+Fixed (subagent branch `clearqueued`, commit `52bc0984d3`). The bug was confirmed: nothing ever queued the clear, even though the outcome named `clear_queued_behind_busy_turn`.
+- **Queued clear:** when a turn is provably live and the document's healthy supervisor owns that pane, `session clear` now records one deferred clear (`operator_live_turn_deferred_clear`), reports `ui_outcome=queued`, and exits 0. The supervisor delivers it at the idle boundary, after the dispatch receipt settles as well. A newer prompt drops it, as do `interrupt-clear` and a session restart.
+- **No supervisor:** the refusal stays, but with an honest unblocker, `wait_for_turn_end_no_supervisor_to_queue_clear`.
+- **Dogfood classifier:** an evidence-backed live-turn refusal is no longer filed as a `terminal_failure` fix prompt.
+- **JetBrains:** shows "queued … runs automatically when that turn ends" (plugins 0.2.537 / 262 0.2.538).
+- **Tests:** SimWorld-style pure-state tests replay the pane %149 sequence (delivered exactly once, at idle) and the newer-prompt drop.
+- **Not yet tested live**, especially a route-dispatched turn proven live only by its dispatch receipt. I filed that as clearqueuedliveturn, which is also the anchor the code and spec comments use.
+
+**Integration:** I merged both branches into `integrate-0493` on top of `origin/main`. `make check` passed (exit 0, 10190 tests run, all passed, 143 skipped). I fast-forwarded `main` to `23a5d7c0a4` and ran `make install` (exit 0). The installed binary still reports 0.35.490, because nothing new is tagged. CI for `23a5d7c0a4` is in progress; I checked it once and didn't wait.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -160,14 +182,16 @@ No newer tag exists; v0.35.490 is the latest. The two fixes from this session's 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- Clear Session Context on agent-doc-bugs.md issue: agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md because a turn is live in pane %149 (harness_turn_live=true evidence=dispatch_turn_running, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` to intentionally interrupt the turn and clear context. [dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class=terminal_failure issue_key=4fc76633465ea41b5b45095f979f41b07bebd824d967142596722502299060a2 Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating a retry as the remedy. Preserve any retained capture and obey no-resubmit/no-recycle guidance in the original diagnostic.
-- do [#splicevrfyforward]
+- ~~Clear Session Context on agent-doc-bugs.md issue: agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md because a turn is live in pane %149 (harness_turn_live=true evidence=dispatch_turn_running, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` to intentionally interrupt the turn and clear context. [dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class=terminal_failure issue_key=4fc76633465ea41b5b45095f979f41b07bebd824d967142596722502299060a2 Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating a retry as the remedy. Preserve any retained capture and obey no-resubmit/no-recycle guidance in the original diagnostic.~~
+- ~~do [#splicevrfyforward]~~
+- do [#splicectlcommit]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#splicevrfyforward] [agent-doc] verify-captured-splice-recovery asserts a MECHANISM (the captured-local-splice-recovery fallback receipt), not the property. The 2026-10-11 live run on 0.35.490 (upstream recipe, retained advance with delivery_converged=false) recovered edit two through ForwardLocal + CRDT delta merge + plugin rebootstrap: the edit was captured on the pre-advance base d232ee81c5ad and the final text holds the advance and both edits, but the verifier FAILs because the fallback never ran. Make the verifier accept a receipt-provable CRDT-forward recovery, keeping the fallback triple as the second accepted shape, without accepting a run where the advance never retained. Add the 2026-10-11 ops.log shape as a fixture. Also: the recipe's scratch advance still hits commit_error (refusing to commit ignored path) despite ensure_captured_splice_commit_repo, so the GIT_DIR export is not reaching the owner-pane advance.
+- [ ] [#splicectlcommit] [agent-doc] A strict write --commit on a git-ignored scratch doc under a live editor is routed to the project controller (commit_document_via_controller), which commits against the product repo and refuses the ignored path (commit_skipped_ignored_path + commit_error), so the captured-splice recipe's isolated GIT_DIR never applies. Either give the controller commit an explicit commit-target override or treat an ignored scratch doc as a clean skip instead of commit_error. Evidence: src/agent-doc ops.log doc=xdotool-captured-splice-1791744122 18:42:24Z.
+- [ ] [#clearqueuedliveturn] [operator-verify] [agent-doc] Live-check the queued Clear Session Context (merged 23a5d7c0a4): press Clear while a route-dispatched turn is running; expect an info notice 'queued … runs when that turn ends', exit 0, then exactly one /clear at the idle boundary, and none if a newer prompt starts first. Specifically confirm the turn-ended projection arrives when the turn is proven live only by its dispatch receipt (the pane %149 case).
 <!-- /agent:backlog -->
 
 ## Review

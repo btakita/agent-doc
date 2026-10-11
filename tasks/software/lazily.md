@@ -768,6 +768,50 @@ So my recommendation is: **announce “Lazily Core public beta” once those gat
 Confidence: **high**, based on repository history, CI/release status, registry availability, conformance manifests/runners, schemas, and public documentation reviewed on 2026-10-10.
 
 Session accretion remains in the warning range; I completed this assessment without compaction because only an explicit operator clear may reset the session.
+
+### Re: separate Lazily Core from capability modules — gpt-5 · 2026-10-10T20:33:39-04:00
+
+> **Queue prompt:**
+>
+> do [#separatecorefamily]
+
+**Yes at the product-contract level; no at the repository-family level.** I recommend making **Lazily Core** the compatibility-managed Beta profile, while keeping one Lazily brand, one shared semantic model, and one primary distribution per language. The rest should be named **Lazily Modules** or **Lazily Capabilities**, with each module carrying its own Beta/Preview/Experimental maturity.
+
+I would avoid the label “Extended family.” The spec already uses **Extended** in a narrower normative sense: optional, non-conforming convenience methods inside a feature family. Reusing it for CRDT, durable, transport, and adapter products would conflate two different boundaries.
+
+I would narrow the earlier Core proposal into these rings:
+
+1. **Lazily Core — Beta contract:** `Context`, `Source`, `Computed`, `Effect`, batching, scopes/disposal, typed contexts, and the supported single-threaded/thread-safe/async execution flavors. This is the small kernel whose API compatibility every promoted binding promises.
+2. **Official portable modules:** keyed collections and materialization, family sync, statecharts, queue/topic/work-queue, and portable stdlib/operators. Each can graduate independently to Beta once its required API allow-list and conformance evidence are truthful; Core Beta does not wait for all of them.
+3. **Platform and distributed capabilities:** wire/interop, CRDT and distributed sync, reliable sync, durable clients/owners/hosts, ingress/egress, codecs, transports, FFI, databases/brokers, and framework adapters. These remain Preview or Experimental until their own gates pass.
+4. **Shared infrastructure:** `lazily-spec`, schemas/conformance, `lazily-formal`, and the interop harness. These govern or verify the product; they are not an “extended library family.”
+
+This boundary solves the Beta problem without causing package explosion:
+
+- Rust already isolates heavier capabilities with opt-in features.
+- Python already uses extras and explicitly documents why lightweight bridges should not become separate distributions.
+- JavaScript already has explicit subpath exports.
+- Kotlin uses feature variants, Go keeps its root dependency-light, and React is already a genuinely independent adapter.
+- Conversely, the current public facades are too broad to treat every exported symbol as one Beta promise, and the flat feature matrix mixes mature kernel behavior with incomplete durable and distributed capabilities.
+
+The packaging rule should therefore be **selective extraction, not symmetry**:
+
+- Keep one implementation repository and umbrella package per language through Beta.
+- Preserve current root imports/re-exports during the migration; publish an exact Core symbol allow-list and add compatibility gates against it.
+- Put modules behind idiomatic namespaces, subpaths, feature flags, or extras. Split a registry artifact only when it has a real external-dependency, security, platform, or independent-release boundary.
+- Enforce `capability/module → Core`; Core must never depend on a module. Modules may not redefine Core semantics.
+- Keep binding package versions independent. Publish a tested release cohort/BOM mapping exact package versions to the spec/conformance revision, rather than renumbering everything in lockstep.
+- Give Core its own `core_api_generation`, distinct from the wire-protocol version. Require explicit compatibility ranges and oldest/latest-Core consumer tests for independently shipped modules.
+
+The first implementation step should be metadata and gates, not file moves: add one machine-readable profile registry with `surface`, `maturity`, per-binding symbol/import mapping, required fixtures, and introduced/deprecated versions; generate separate Core-conformance and module-availability views from it; then add API snapshots/semver checks. This also gives the existing `#lzbetascope` decision a precise target.
+
+So the public message becomes: **“Lazily Core is Beta; Lazily Modules graduate independently.”** That is clearer and more honest than either calling the whole ecosystem Beta or creating a second family of repositories.
+
+Evidence reviewed: the spec’s existing required/optional surface split, cross-language coverage data, Rust features, Python extras, JavaScript subpaths, Kotlin variants, Go integration boundaries, adapter packages, and current release-version relationships. Three independent read-only audits converged on the same contract-first/no-repo-fork recommendation.
+
+Changed paths before closeout: none outside this session document. No source or build surface changed, so no project test suite was required. Confidence: high. Escalation: the final Core-profile approval remains the explicit operator decision in `#lzbetascope`.
+
+Session accretion remains in warning range; I continued draining the active queue without compaction.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -779,7 +823,6 @@ Session accretion remains in the warning range; I completed this assessment with
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#lzbetascope] [operator-decision] Approve a scoped “Lazily Core public beta” and its compatibility-managed surface; after approval, close the Beta entry gate: correct conformance/FFI/wire/schema claims, publish API/deprecation and support policies with API/MSRV/consumer gates, repair Rust Trusted Publishing/Python macOS wheels/Kotlin installation, and require #lzreleasepins green while keeping advanced durability/reliable-sync/lossless-tree/egress/FFI/GDScript experimental.
 <!-- /agent:backlog -->
 
 ## Review
@@ -790,6 +833,7 @@ Session accretion remains in the warning range; I completed this assessment with
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit with counterpart durability classification (commits 667eb4766, 434b32548) lives at src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-27/ and is confirmed the ONLY handoff on disk, so only one basis can be authorized. Run the plan from src/agent-doc with `python3 scripts/purge-actions-artifacts.py`; the destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000` and the 250 default cap otherwise aborts. TWO authorizable options, both re-proved by live dry run: (a) full plan — 2,666 artifacts (43.83 GB), 0 refused, 0 skipped; (b) `--durability durable` — 2,136 artifacts (34.83 GB), refusing exactly the 530 rows whose only counterpart is a PyPI file. Prefer (b): the prune floor is 0.35.113 and v0.35.119, the oldest PyPI-only-backed version, is only the THIRD live release above it, so option (a) additionally accepts that 9.01 GB rests on a thinner margin than version numbering suggests. 2,136 rows rest on GitHub release assets, which have not decayed. 571 artifacts are withheld at audit time and are never deletable. Hard deadline: the 7-day `--max-handoff-age-days` guard aborts the whole run after 2026-10-04T05:56:08Z unless the audit is regenerated or `--allow-stale-handoff` is passed; `make review-gate-status` imports that guard from the purge script and flips this gate to `evidence_stale` 24h BEFORE it expires rather than after. Blocked solely on explicit destructive authorization; no artifact has been deleted.
+- [/] [#lzbetascope] [operator-decision] Approve Lazily Core as the only Beta compatibility profile: Context, Source, Computed, Effect, batching, scopes/disposal, typed contexts, and supported execution flavors. Name the remainder Lazily Modules or Lazily Capabilities with independent maturity; keep one umbrella package/repo per language and split artifacts only at real dependency, security, platform, or release boundaries. After approval, implement the machine-readable profile registry, core_api_generation and symbol compatibility gates; correct conformance/FFI/wire/schema claims; publish API/deprecation/support policies; repair Rust Trusted Publishing and remaining consumer distribution gates; and require #lzreleasepins green.
 <!-- /agent:review -->
 
 ## Icebox

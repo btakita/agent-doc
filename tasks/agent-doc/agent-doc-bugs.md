@@ -451,6 +451,11 @@ All seven fixes in this batch are merged into main (`a186f61e46`, fast-forward f
 - ~~do [#checktmpdirleak]~~
 - ~~do [#subagentmsgcollide]~~
 - ~~do [#respondcloseoutbacklog]~~
+- do [#statesubscriberecords]
+- do [#remainingwallclock]
+- do [#replace120shang]
+- do [#tlafailedonce]
+- do [#continuationheadskip]
 <!-- /agent:queue -->
 
 ## Backlog

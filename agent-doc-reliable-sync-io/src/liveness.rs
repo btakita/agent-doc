@@ -487,6 +487,21 @@ impl LivenessProjection {
             .collect()
     }
 
+    /// Documents `pid` holds open with a registration, **regardless of whether
+    /// `pid` is still alive**. This is the scope of a whole-editor death: the
+    /// documents whose state must be re-derived once `pid` is dead. Unlike
+    /// [`Self::all_live_registrations`] it does not depend on the death not having
+    /// been folded yet, so a death observed through a second path first (a durable
+    /// journal refresh replaying the same `Alive{false}`) still names every
+    /// document the dead editor held.
+    pub fn documents_registered_by_pid(&self, pid: Pid) -> BTreeSet<String> {
+        self.registrations
+            .keys()
+            .filter(|(doc, registered_pid)| *registered_pid == pid && self.is_open(doc, pid))
+            .map(|(doc, _)| doc.clone())
+            .collect()
+    }
+
     /// Live/open registrations across the whole projection.
     pub fn all_live_registrations(&self) -> Vec<EditorRegistration> {
         self.open_docs()
@@ -1120,6 +1135,44 @@ mod tests {
             p.apply(op);
         }
         assert!(p.is_open("docA", 100));
+    }
+
+    /// The documents a dead editor held stay nameable after its death is folded,
+    /// so an exit observed through a second path first still re-derives them.
+    #[test]
+    fn documents_registered_by_pid_survive_the_pid_death() {
+        let mut p = LivenessProjection::new();
+        for doc in ["docA", "docB"] {
+            p.apply(&LivenessOp::Open {
+                document_hash: doc.into(),
+                pid: 100,
+                tag: format!("{doc}-open"),
+            });
+            p.apply(&LivenessOp::Register(registration(doc, 100, "jb-100", 1)));
+        }
+        // Registered but closed: not held.
+        p.apply(&LivenessOp::Register(registration(
+            "docC", 100, "jb-100", 1,
+        )));
+        // Another editor's document.
+        p.apply(&LivenessOp::Open {
+            document_hash: "docD".into(),
+            pid: 200,
+            tag: "docD-open".into(),
+        });
+        p.apply(&LivenessOp::Register(registration(
+            "docD", 200, "jb-200", 1,
+        )));
+        let held = BTreeSet::from(["docA".to_string(), "docB".to_string()]);
+        assert_eq!(p.documents_registered_by_pid(100), held);
+
+        p.apply(&LivenessOp::Alive {
+            pid: 100,
+            value: false,
+            stamp: stamp(10, 1),
+        });
+        assert!(p.all_live_registrations().iter().all(|r| r.pid != 100));
+        assert_eq!(p.documents_registered_by_pid(100), held);
     }
 
     // Conformance scenario `lww_alive_highest_stamp_wins`.

@@ -3749,9 +3749,15 @@ pub fn prune_state_events_to_live_peer_watermark_in_db(
         .iter()
         .map(|(registration_pid, editor_id)| state_event_peer_key(*registration_pid, editor_id))
         .collect::<BTreeSet<_>>();
-    let transaction = conn
-        .unchecked_transaction()
-        .context("begin state-event watermark retention transaction")?;
+    // IMMEDIATE, not DEFERRED: this transaction reads the ack rows and then
+    // deletes. A deferred read snapshot cannot be upgraded to a writer once any
+    // other connection has committed to the WAL since the snapshot began; SQLite
+    // answers that upgrade with SQLITE_BUSY at once, without consulting the busy
+    // timeout. Taking the write lock up front lets the connection's busy timeout
+    // wait out a concurrent writer instead of silently skipping the eviction.
+    let transaction =
+        rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+            .context("begin state-event watermark retention transaction")?;
     let acknowledgements = load_state_event_peer_acks_from_db(&transaction, document_hash)?;
     let mut evicted_peer_rows = 0;
     let mut acked_by_peer = BTreeMap::new();
@@ -7873,6 +7879,71 @@ mod tests {
                 .contains("exceeds document high-water 3"),
             "a peer cannot acknowledge a version the controller never issued"
         );
+        Ok(())
+    }
+
+    /// Retention reads the ack rows and then deletes. Begun DEFERRED, a writer
+    /// that commits after the read snapshot made the delete fail with
+    /// SQLITE_BUSY at once (a stale snapshot cannot be upgraded, so the busy
+    /// timeout is never consulted) and the editor-exit eviction was skipped.
+    /// Begun IMMEDIATE, the retention waits out the writer and evicts.
+    ///
+    /// The interleaving is pinned through the busy handler, not a clock: the
+    /// concurrent writer commits only once retention is observed waiting on it.
+    #[test]
+    fn retention_waits_out_a_writer_that_commits_while_it_is_blocked() -> Result<()> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static RETENTION_WAITING: AtomicBool = AtomicBool::new(false);
+        fn note_waiting(_attempt: i32) -> bool {
+            RETENTION_WAITING.store(true, Ordering::SeqCst);
+            std::thread::yield_now();
+            true
+        }
+
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        insert_state_event_in_db(
+            &conn,
+            &StateEventInsert {
+                event_id: "event-1",
+                document_hash: "docA",
+                domain: "document",
+                fact_type: "write_applied",
+                payload_json: "{}",
+            },
+        )?;
+        record_state_event_peer_ack_in_db(&conn, "docA", 101, "jetbrains-101-dead", 1)?;
+
+        let writer = open_state_db(dir.path())?;
+        writer.execute_batch("BEGIN IMMEDIATE")?;
+        insert_state_event_in_db(
+            &writer,
+            &StateEventInsert {
+                event_id: "event-other",
+                document_hash: "docB",
+                domain: "document",
+                fact_type: "write_applied",
+                payload_json: "{}",
+            },
+        )?;
+
+        conn.busy_handler(Some(note_waiting))?;
+        let retention = std::thread::spawn(move || {
+            // The dead peer is absent from the live set, so its ack is evicted.
+            prune_state_events_to_live_peer_watermark_in_db(&conn, "docA", &[])
+                .map(|outcome| (outcome, conn))
+        });
+        // A retention that fails instead of waiting finishes without ever
+        // reaching the busy handler; stop watching then, so the regression
+        // surfaces as the error below rather than a hang.
+        while !RETENTION_WAITING.load(Ordering::SeqCst) && !retention.is_finished() {
+            std::thread::yield_now();
+        }
+        writer.execute_batch("COMMIT")?;
+
+        let (outcome, conn) = retention.join().expect("retention thread")?;
+        assert_eq!(outcome.evicted_peer_rows, 1);
+        assert!(load_state_event_peer_acks_from_db(&conn, "docA")?.is_empty());
         Ok(())
     }
 

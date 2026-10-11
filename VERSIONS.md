@@ -4,6 +4,25 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## Unreleased
 
+- **An editor exit evicts the dead registration's peer ack whichever path observes the death first.**
+  `state_subscribe_records_only_the_previously_applied_live_peer_cursor` failed under concurrent load
+  because `record_reliable_sync_editor_exit` had two races, both real in production. (1) It writes the
+  durable `Alive{false}` before folding the same op into the process-global liveness plane, and derived the
+  documents to re-retain from the pid's *live* registrations. Any in-process durable-journal reader could fold
+  that row first: in the failing runs another test's in-process controller recovery thread
+  (`spawn_reliable_sync_recovery_effects` -> `project_editor_replica_rebuilds` -> `signal_crdt_replica_event`
+  -> `refresh_durable_liveness`) walked the shared plane, reached this test's registration, and replayed its
+  project's journal, so the exit found the pid already dead, re-derived no document, and kept the ack. The
+  affected set now comes from `LivenessProjection::documents_registered_by_pid`, which does not depend on the
+  alive register. (2) The retention transaction began DEFERRED, read the ack rows, then deleted; a writer
+  committing to the WAL in between made the delete fail at once with `database is locked` (a stale read
+  snapshot cannot be upgraded, so the busy timeout never applies) and the eviction was skipped. It now begins
+  IMMEDIATE and waits out the writer. With both fixes reverted, the new ignored stress test
+  `stress_editor_exit_eviction_against_a_concurrent_journal_refresh` kept the ack in 11 of 4,500 iterations
+  (8 locked, 3 lost the plane race); with them, 0 of 9,000. Deterministic tests:
+  `editor_exit_evicts_the_peer_ack_when_a_journal_refresh_folded_the_death_first` (pre-folds the death),
+  `retention_waits_out_a_writer_that_commits_while_it_is_blocked` (commits the writer from the retention's
+  busy handler), `documents_registered_by_pid_survive_the_pid_death`. Spec: `specs/13-state-backbone.md`.
 - **Each checkout's test ceiling always bounds that checkout (`#checktmpdirleak`).** The report that one
   worktree's `make check` "printed another worktree's path" in its nextest `test-isolation` setup line was a
   shared log, not a shared TMPDIR: concurrent subagents redirected `make check` to the same fixed

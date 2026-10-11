@@ -19905,15 +19905,18 @@ document_hash={} client_id={} identity={} removed={} live_editors_after={}",
             );
         }
     }
+    // The affected set is every document `pid` holds a registration for, read
+    // independently of `pid`'s alive register. The durable `Alive{false}` written
+    // above is already visible to every durable-journal reader in this process
+    // (`agent_doc_crdt_relay_io`'s incremental liveness refresh folds it into this
+    // same global plane before each replica signal), so the death can reach the
+    // plane through that path before this function takes the lock. Deriving the
+    // affected set from *live* registrations made the retention eviction below
+    // depend on winning that race: losing it skipped the eviction entirely and
+    // left the crashed registration's peer ack pinning the retention floor.
     let affected_documents = {
         let mut plane = controller_liveness_plane().lock();
-        let affected_documents = plane
-            .projection()
-            .all_live_registrations()
-            .into_iter()
-            .filter(|registration| registration.pid == pid)
-            .map(|registration| registration.document_hash)
-            .collect::<BTreeSet<_>>();
+        let affected_documents = plane.projection().documents_registered_by_pid(pid);
         plane.apply_local(&op);
         affected_documents
             .into_iter()
@@ -48179,6 +48182,217 @@ mod tests {
 
         *controller_liveness_plane().lock() =
             agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new();
+    }
+
+    #[test]
+    fn editor_exit_evicts_the_peer_ack_when_a_journal_refresh_folded_the_death_first() {
+        // `record_reliable_sync_editor_exit` writes the durable `Alive{false}`
+        // before it folds the same op into the global plane. In between, any
+        // durable-journal reader in the process (`agent_doc_crdt_relay_io`'s
+        // incremental liveness refresh, run on replica-signal threads) may fold
+        // that row first. The exit must still evict the dead registration's
+        // peer ack: which path delivered the death first is a scheduling
+        // accident, not a fact about the editor. This pins the interleaving that
+        // made `state_subscribe_records_only_the_previously_applied_live_peer_cursor`
+        // fail under concurrent load.
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("peer-ack-refresh-first.md");
+        std::fs::write(&file, "# peer ack\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let peer_pid = u64::from(std::process::id());
+        let editor_id = format!("jetbrains-{peer_pid}-refresh-first");
+        let event = realtime_steering_event_for_text(&document_hash, "cycle-1", "", "one");
+        append_state_event(&bootstrap.project_root, &event).unwrap();
+        let runtime = ControllerRuntime::new(bootstrap.clone()).unwrap();
+        {
+            let mut plane = controller_liveness_plane().lock();
+            *plane = agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new();
+            plane.restore_liveness(&[
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                    document_hash: document_hash.clone(),
+                    pid: peer_pid,
+                    tag: "open-refresh-first".to_string(),
+                },
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+                    agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                        document_hash: document_hash.clone(),
+                        pid: peer_pid,
+                        path: file.to_string_lossy().into_owned(),
+                        editor_id: editor_id.clone(),
+                        editor_kind: "jetbrains".to_string(),
+                        editor_version: "test".to_string(),
+                        capabilities: vec![],
+                        timestamp_ms: 1,
+                    },
+                ),
+            ]);
+        }
+        let subscribe = |acked_version| {
+            let mut request = empty_controller_request("state_subscribe");
+            request.file = Some(file.clone());
+            request.generation = Some(0);
+            request.diagnostic_payload = Some(
+                serde_json::json!({
+                    "document_hash": document_hash,
+                    "peer_pid": peer_pid,
+                    "editor_id": editor_id,
+                    "acked_version": acked_version,
+                })
+                .to_string(),
+            );
+            handle_state_subscribe(&runtime, request).unwrap()
+        };
+        let delivered = subscribe(0);
+        assert!(subscribe(delivered.document_version).peer_ack_recorded);
+        let conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root).unwrap();
+        assert_eq!(
+            agent_doc_sqlite::state_store::load_state_event_peer_acks_from_db(
+                &conn,
+                &document_hash,
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+
+        // A journal refresh folds the death into the plane first.
+        controller_liveness_plane().lock().restore_liveness(&[
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Alive {
+                pid: peer_pid,
+                value: false,
+                stamp: lazily::WireStamp {
+                    wall_time: 1,
+                    logical: 0,
+                    peer: 0,
+                },
+            },
+        ]);
+        record_reliable_sync_editor_exit(&bootstrap.project_root, peer_pid);
+
+        assert!(
+            agent_doc_sqlite::state_store::load_state_event_peer_acks_from_db(
+                &conn,
+                &document_hash,
+            )
+            .unwrap()
+            .is_empty(),
+            "the exit evicts the dead registration's ack even though the plane \
+             already knew the pid was dead"
+        );
+
+        *controller_liveness_plane().lock() =
+            agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new();
+    }
+
+    /// Stress reproduction for the editor-exit eviction races: each iteration
+    /// records a live peer ack, then records the editor's exit while a second
+    /// thread drives the production durable-journal refresher
+    /// (`signal_crdt_replica_event` -> `refresh_durable_liveness`) against the
+    /// same project. Before the fix, 11 of 4,500 iterations kept the dead
+    /// registration's ack: the refresher folded the durable death into the
+    /// plane before the exit derived its affected documents, or committed to
+    /// the WAL while the retention transaction was mid-read. Run with
+    /// `--ignored`; `STRESS_ITERS` sets the iteration count (default 500).
+    #[test]
+    #[ignore = "stress reproduction; run with --ignored"]
+    fn stress_editor_exit_eviction_against_a_concurrent_journal_refresh() {
+        let _env = reliable_sync_env_lock();
+        let iterations: usize = std::env::var("STRESS_ITERS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(500);
+        let peer_pid = u64::from(std::process::id());
+        let mut kept = Vec::new();
+        for iteration in 0..iterations {
+            let dir = tempfile::TempDir::new().unwrap();
+            let file = dir.path().join("stress.md");
+            std::fs::write(&file, "# stress\n").unwrap();
+            let bootstrap = test_bootstrap(&dir);
+            let document_hash = agent_doc_hash::document_id_for_path(&file);
+            let editor_id = format!("jetbrains-{peer_pid}-stress-{iteration}");
+            let event = realtime_steering_event_for_text(&document_hash, "cycle-1", "", "one");
+            append_state_event(&bootstrap.project_root, &event).unwrap();
+            let runtime = ControllerRuntime::new(bootstrap.clone()).unwrap();
+            {
+                let mut plane = controller_liveness_plane().lock();
+                *plane = agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new();
+                plane.restore_liveness(&[
+                    agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                        document_hash: document_hash.clone(),
+                        pid: peer_pid,
+                        tag: format!("open-stress-{iteration}"),
+                    },
+                    agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+                        agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                            document_hash: document_hash.clone(),
+                            pid: peer_pid,
+                            path: file.to_string_lossy().into_owned(),
+                            editor_id: editor_id.clone(),
+                            editor_kind: "jetbrains".to_string(),
+                            editor_version: "test".to_string(),
+                            capabilities: vec![],
+                            timestamp_ms: 1,
+                        },
+                    ),
+                ]);
+            }
+            let subscribe = |acked_version| {
+                let mut request = empty_controller_request("state_subscribe");
+                request.file = Some(file.clone());
+                request.generation = Some(0);
+                request.diagnostic_payload = Some(
+                    serde_json::json!({
+                        "document_hash": document_hash,
+                        "peer_pid": peer_pid,
+                        "editor_id": editor_id,
+                        "acked_version": acked_version,
+                    })
+                    .to_string(),
+                );
+                handle_state_subscribe(&runtime, request).unwrap()
+            };
+            let delivered = subscribe(0);
+            assert!(subscribe(delivered.document_version).peer_ack_recorded);
+
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let refresher = {
+                let stop = stop.clone();
+                let file = file.clone();
+                std::thread::spawn(move || {
+                    while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                        let _ = agent_doc_crdt_relay_io::signal_crdt_replica_event(
+                            &file,
+                            agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
+                            1,
+                        );
+                    }
+                })
+            };
+            record_reliable_sync_editor_exit(&bootstrap.project_root, peer_pid);
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            refresher.join().unwrap();
+
+            let conn =
+                agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root).unwrap();
+            if !agent_doc_sqlite::state_store::load_state_event_peer_acks_from_db(
+                &conn,
+                &document_hash,
+            )
+            .unwrap()
+            .is_empty()
+            {
+                kept.push(iteration);
+            }
+        }
+        *controller_liveness_plane().lock() =
+            agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new();
+        assert!(
+            kept.is_empty(),
+            "{} of {iterations} editor exits kept the dead registration's ack: {kept:?}",
+            kept.len()
+        );
     }
 
     #[test]

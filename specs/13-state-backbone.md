@@ -228,7 +228,11 @@ an acknowledgement contributes zero and pins deletion. Ack rows for
 registrations absent from that authoritative live set are evicted atomically
 before the minimum is calculated; the OS-exit watcher and cold-start liveness
 reconciliation therefore prevent a crashed IDE from pinning the watermark
-forever. With no live registrations there is no peer watermark and this path
+forever. The exit path re-derives retention for every document the dead PID
+holds open with a registration, read independently of the PID's alive state:
+the durable `Alive{false}` is visible to in-process journal readers before the
+exit folds it into the liveness plane, so the eviction must not depend on the
+exit being the first path to observe the death. With no live registrations there is no peer watermark and this path
 deletes no events. The row at the minimum is retained as the monotonic
 per-document high-water anchor, and existing fact-specific count caps remain a
 bounded-storage backstop. Eligible rows are deleted in bounded batches inside

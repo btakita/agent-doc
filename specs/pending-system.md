@@ -260,6 +260,17 @@ history is reaped. Invalid archive targets fail closed instead of being ignored.
   one shared predicate rather than each deriving preset names for itself, and a
   hashed key (`'#a-b'`) and an unhashed one (`release-check`) both resolve to
   the tag a response would write. An unregistered id still coins.
+- Commit-message source invariant (`#hookstalemsgfile`): the `PreToolUse`
+  guard scans the message a `git commit` will RECORD, not a proxy for it. The
+  hook runs before the command, so a `-F`/`--file` path the same command writes
+  first (heredoc, here-string, `echo`/`printf` or `tee` redirect, or a pipe into
+  `-F -`) is scanned as that written body, never as the stale file still on
+  disk; a path the command writes with output the guard cannot know is not
+  read at all. Relative message paths resolve against the harness `cwd`, then
+  any preceding literal `cd`, then `git -C`. Segments split quote-aware, so a
+  heredoc body and a multi-line `-m` stay whole. Anything unresolvable (a shell
+  variable, a `cd` to an unknown place) contributes nothing: the guard fails
+  open rather than approximating the message with surrounding command text.
 - Same-write reap invariant (`#reappersistcrosscycle`): a closeout that COMMITS
   archives the items it marks in the SAME write that marks them. It must not
   leave `[x]` with the `agent:done` move owed, and in particular a RETAINED

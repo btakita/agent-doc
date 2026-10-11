@@ -263,8 +263,8 @@ retention is evidence of neither refusal nor acceptance, so it carries the run.
 GH #138 extends that same invariant to the two relay paths whose typed
 `definitive_refusals` outcome previously stopped at the log line. A batch with
 any definitive refusal and no proven delivery records one refusal transition;
-any successful route clears the episode. The fold happens once after the
-bounded send loop and adds no retry or wait.
+a successful route clears the episode under the cross-transport rule below.
+The fold happens once after the bounded send loop and adds no retry or wait.
 
 - A socket ACK is liveness, not delivery proof. With no refusal run open it
   clears the row (timeouts self-heal as before); with a run open it leaves the
@@ -276,6 +276,17 @@ bounded send loop and adds no retry or wait.
   writeback, or a `serialized_atomic_write` whose exact editor projection was
   natively saved. A proven CRDT notification, native editor save, or
   `socket_already_applied` visible response also clears the same episode.
+- `#crosstransportclear`: the row is per document, not per transport, so a
+  success only recovers a refusal run its OWN transport recorded. A
+  `crdt_replica_notify` ACK while a `native_editor_save_request` refusal run is
+  open keeps the row (`editor_transport_refusal_run_kept`,
+  `agent_doc_editor_transport_health_io::note_transport_success`); an exact
+  native-save receipt is delivery proof and still clears the whole episode.
+  Observed 2026-10-11 on a live session: the editor refused every
+  `persist_current` for 26 minutes while the replica rewake ACKed between
+  retries, each ACK deleted the row, the run read 1 forever, nothing degraded or
+  unregistered, and the turn sat on `disk_projection_pending` until an
+  unrelated install recycled the controller.
 - An explicit negative socket receipt also quarantines the exact reliable-sync
   registration generation used by that send. The retained payload is not sent
   to that generation again: its matching CRDT relay members leave the live

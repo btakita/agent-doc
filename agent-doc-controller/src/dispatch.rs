@@ -428,8 +428,44 @@ pub fn dispatch_payload_pending_in_current_input(
             is_dispatch_ready_prompt_line,
         );
     }
-    recent_lines_contain_trigger(content, payload)
-        || route_trigger_visible_in_current_draft(content, payload, is_prompt_line)
+    // `#ghostsuggestresubmit`: Claude Code (and Codex) render a prompt
+    // suggestion — often the last trigger verbatim — dim inside an EMPTY
+    // composer. Stripped of ANSI it is byte-identical to a stranded draft, so
+    // the idle drain answered `payload_already_pending=true` and sent a bare
+    // Enter that an empty composer ignores; the queue head never dispatched.
+    // Observed 2026-10-11 on pane %180 (`src/haiven-dev/tasks/sdk.md`). A dim
+    // composer body is never pending input: blank it to its prompt glyph before
+    // matching, keeping the prompt row itself as "a later prompt line".
+    let content = mask_dim_placeholder_prompt_bodies(content);
+    recent_lines_contain_trigger(&content, payload)
+        || route_trigger_visible_in_current_draft(&content, payload, is_prompt_line)
+}
+
+/// Replace each raw prompt line whose body renders dim (a ghost suggestion or
+/// placeholder) with its bare prompt glyph, leaving every other line as is.
+fn mask_dim_placeholder_prompt_bodies(content: &str) -> std::borrow::Cow<'_, str> {
+    if !content
+        .lines()
+        .any(agent_doc_turn_executor_tmux::prompt::prompt_line_body_is_dim_placeholder)
+    {
+        return std::borrow::Cow::Borrowed(content);
+    }
+    let masked = content
+        .lines()
+        .map(|line| {
+            if agent_doc_turn_executor_tmux::prompt::prompt_line_body_is_dim_placeholder(line) {
+                let glyph = strip_ansi(line)
+                    .chars()
+                    .find(|ch| matches!(ch, '>' | '\u{203a}' | '\u{276f}'))
+                    .unwrap_or('\u{276f}');
+                glyph.to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::borrow::Cow::Owned(masked)
 }
 
 pub fn route_trigger_visible_in_current_draft(
@@ -4336,6 +4372,37 @@ zai/glm-5 - ~/work/btakita/agent-loop - context 0% used
         );
     }
 
+    /// `#ghostsuggestresubmit` regression from the 2026-10-11 sdk.md pane
+    /// capture: a dim prompt suggestion of the trigger is an empty composer,
+    /// so the payload is NOT pending (the drain must dispatch fresh, not press
+    /// Enter on nothing). The same text typed at normal intensity is pending.
+    #[test]
+    fn dim_ghost_suggestion_of_trigger_is_not_pending_payload() {
+        let payload = "/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md";
+        let rule = "\x1b[38;5;244m\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\x1b[39m";
+        let footer = "  \x1b[38;5;211m\u{23f5}\u{23f5} bypass permissions on\x1b[38;5;246m \u{b7} 1 shell\x1b[39m";
+        let frame = |composer: &str| {
+            format!(
+                "  then run /agent-doc tasks/sdk.md, and I'll record everything.\n\n\x1b[38;5;246m\u{273b} Cogitated for 31m 36s\x1b[39m\n\n{rule}\n{composer}\n{rule}\n{footer}\n"
+            )
+        };
+        let is_prompt = |line: &str| {
+            let line = strip_ansi(line);
+            let line = line.trim_start();
+            line.starts_with('\u{276f}') || line.starts_with("\u{23f5}\u{23f5}")
+        };
+        let ghost = frame(&format!("\x1b[39m\u{276f} \x1b[2m{payload}\x1b[0m"));
+        assert!(
+            !dispatch_payload_pending_in_current_input(&ghost, payload, is_prompt, is_prompt),
+            "a dim prompt suggestion is an empty composer, not a stranded draft"
+        );
+        let typed = frame(&format!("\x1b[39m\u{276f} {payload}"));
+        assert!(
+            dispatch_payload_pending_in_current_input(&typed, payload, is_prompt, is_prompt),
+            "the same trigger typed at normal intensity is still pending"
+        );
+    }
+
     #[test]
     fn recent_lines_contain_trigger_matches_claude_trigger() {
         let content = "\
@@ -8219,7 +8286,8 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     /// Claude Code restored `/agent-doc …/agent-doc-bugs.md` into the composer.
     #[test]
     fn cancelled_trigger_composer_action_withdraws_only_an_idle_exact_trigger() {
-        let abs = "/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md";
+        let abs =
+            "/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md";
         let rel = "/agent-doc tasks/agent-doc/agent-doc-bugs.md";
         let triggers = [abs, rel];
         assert_eq!(
@@ -8227,7 +8295,12 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             CancelledTriggerComposerAction::WithdrawRestoredTrigger
         );
         assert_eq!(
-            cancelled_trigger_composer_action(Some(&format!("❯\u{a0}{rel}")), &triggers, false, false),
+            cancelled_trigger_composer_action(
+                Some(&format!("❯\u{a0}{rel}")),
+                &triggers,
+                false,
+                false
+            ),
             CancelledTriggerComposerAction::WithdrawRestoredTrigger,
             "the prompt sigil and padding are not draft text"
         );

@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **A replica-notify ACK no longer erases a refusing native-save endpoint's refusal run (`#crosstransportclear`).**
+  The editor transport-health row is per document, but any transport's success deleted it. While the editor refused
+  every `persist_current` for a retained write, the replica rewake ACKed between retries and reset
+  `consecutive_rejections` to 1 each time, so the endpoint never degraded or unregistered and the session sat on
+  `disk_projection_pending` (session-check `INTERRUPTED: canonical editor authority and disk projection diverge`) until
+  an unrelated recycle. A success now recovers only its own transport's refusal run (`editor_transport_refusal_run_kept`);
+  an exact native-save receipt still clears the whole episode.
+- **The idle queue drain no longer mistakes a dim prompt suggestion for a stranded trigger (`#ghostsuggestresubmit`).**
+  Claude Code can suggest the previous `/agent-doc <FILE>` in faint text inside an empty composer. The supervisor's
+  pending-payload probe stripped ANSI, matched it as the queued payload, and pressed a bare Enter that an empty composer
+  ignores, so the queue continuation never dispatched. Dim prompt bodies are now masked before matching, the same rule
+  route already applied (`#routeghostdraft`).
+
 ## 0.35.489
 
 - **A controller memory refresh no longer stalls editor-op appends behind a full ledger reload (`#refreshmemlockstall`).**

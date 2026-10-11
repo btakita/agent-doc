@@ -284,17 +284,17 @@ These two fixes are not released. Queue `release + publish` to ship them as 0.35
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#respondfinalizehard]
-- do [#pypireleaseworkflow]
-- #gh-fix https://github.com/btakita/agent-doc/issues/235
-- release + publish
+- 🚧 do [#respondfinalizehard]
+- 🚧 do [#pypireleaseworkflow]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/235
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#respondfinalizehard] respond/finalize hard-fails with 'queue consume: no prompt to consume' (then write --commit fails 'failed to compose completed tracked-work target') when the cycle's quoted Queue prompt / --done target was already struck/consumed earlier (all queue heads struck, item already in agent:done). The response write landed and the cycle wedged at write_applied until a bare 'agent-doc write --commit' recovered it as AlreadyApplied. Consuming an already-consumed head must be idempotent. Repro 2026-10-10 cycle-1791675315432.
-- [ ] [#pypireleaseworkflow] PyPI release workflow races the GitHub Release: the PyPI job polls at most 30 minutes for the Release's SHA256SUMS, but v0.35.485's cross-platform builds took about 33 minutes, so publish failed at 21:45:30Z and the Release went up at 21:47:24Z (run 38086853278; a rerun of the failed job published it). Trigger PyPI from the release:published event, or from the Release workflow after its assets upload, instead of a fixed wall-clock poll.
+- [ ] 🚧 [#respondfinalizehard] respond/finalize hard-fails with 'queue consume: no prompt to consume' (then write --commit fails 'failed to compose completed tracked-work target') when the cycle's quoted Queue prompt / --done target was already struck/consumed earlier (all queue heads struck, item already in agent:done). The response write landed and the cycle wedged at write_applied until a bare 'agent-doc write --commit' recovered it as AlreadyApplied. Consuming an already-consumed head must be idempotent. Repro 2026-10-10 cycle-1791675315432.
+- [ ] 🚧 [#pypireleaseworkflow] PyPI release workflow races the GitHub Release: the PyPI job polls at most 30 minutes for the Release's SHA256SUMS, but v0.35.485's cross-platform builds took about 33 minutes, so publish failed at 21:45:30Z and the Release went up at 21:47:24Z (run 38086853278; a rerun of the failed job published it). Trigger PyPI from the release:published event, or from the Release workflow after its assets upload, instead of a fixed wall-clock poll.
 <!-- /agent:backlog -->
 
 ## Review

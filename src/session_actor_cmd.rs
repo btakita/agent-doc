@@ -1311,6 +1311,13 @@ fn reconcile_idle_projection_before_clear(
 ///   document (`#idledispatchstack`), which covers the window between a
 ///   dispatched trigger going busy and the harness hook writing its lease.
 ///
+/// `#sdkclearwedge`: a lease the harness transcript proves ended (an operator
+/// interrupt, or a prompt cancelled before Claude Code persisted it) is retired
+/// first, and the dispatch receipt its preflight promoted to `running` is
+/// settled with it — a route dispatch never moves the actor, so no `Ready` edge
+/// would. Background subagents (`← N agents`) are NOT a live foreground turn:
+/// they write sidechain records and no lease, so they never appear here.
+///
 /// Read-only with respect to actor state: nothing here projects `ready` or
 /// releases the dispatch in-flight marker.
 fn harness_turn_live_evidence(
@@ -1323,6 +1330,9 @@ fn harness_turn_live_evidence(
     ) {
         return None;
     }
+    if let Some(pane) = evidence.pane_id.as_deref() {
+        retire_harness_ended_turn_for_clear(ctx, pane);
+    }
     if let Some(pane) = evidence.pane_id.as_deref()
         && agent_doc_turn_status_io::turn_active_for_pane(&ctx.base_dir, pane)
     {
@@ -1331,6 +1341,35 @@ fn harness_turn_live_evidence(
     agent_doc_controller_io::project_controller::dispatch_turn_running_for_file(&ctx.canonical_file)
         .unwrap_or(false)
         .then_some("dispatch_turn_running")
+}
+
+/// `#sdkclearwedge`: retire `pane`'s turn-active lease when the harness
+/// transcript proves the turn ended, and settle that turn's `running` dispatch
+/// receipt. Logs the repair; a no-op when no boundary is proven.
+fn retire_harness_ended_turn_for_clear(ctx: &SessionContext, pane: &str) {
+    let Some(retired) = agent_doc_turn_status_io::reclaim_interrupted_turn_for_pane_for_file(
+        &ctx.canonical_file,
+        pane,
+    ) else {
+        return;
+    };
+    let settled = agent_doc_controller_io::project_controller::settle_dispatch_turn_ended_by_harness_for_file(
+        &ctx.canonical_file,
+        retired.written_at,
+    )
+    .unwrap_or(0);
+    agent_doc_ops_log_io::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "turn_status_projection_repaired file={} pane={} reason={} source=operator_clear_guard lease_written_at={} interrupted_at={} settled_dispatches={} (#sdkclearwedge)",
+            ctx.canonical_file.display(),
+            retired.pane,
+            retired.reason,
+            retired.written_at,
+            retired.interrupted_at,
+            settled,
+        ),
+    );
 }
 
 fn operator_clear_input_state_for_evidence(
@@ -5491,6 +5530,136 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             agent_doc_sqlite::state_store::has_open_in_flight_dispatch(&conn, &document_id, 7)
                 .unwrap(),
             "the dispatch in-flight marker stays held while the turn runs"
+        );
+    }
+
+    /// `#sdkclearwedge` replay (haiven-dev `tasks/sdk.md`, pane %180,
+    /// 2026-10-11): a route `dispatch_only_reopen` submitted `/agent-doc`, the
+    /// `UserPromptSubmit` hook wrote the lease and preflight promoted the
+    /// receipt to `running`, and the operator cancelled before Claude Code
+    /// persisted the prompt. The pane sat idle at its prompt with `← 4 agents`
+    /// in the footer, and every clear refused `harness_turn_live
+    /// evidence=turn_active_lease`. Once the orphaned snapshot settles, the
+    /// guard retires the lease AND the receipt, and the clear proceeds.
+    #[test]
+    fn clear_guard_allows_clear_after_prompt_cancelled_before_persist() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks/sdk.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-1\n---\n\nBody.\n").unwrap();
+        let mut ctx = test_session_context(
+            test_actor_record(ActorState::Ready),
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            Some("ready"),
+        );
+        ctx.canonical_file = doc.clone();
+        ctx.base_dir = root.clone();
+        let idle = LivePaneEvidence {
+            pane_id: Some("%180".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveIdle,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(true),
+            tail: Some("⏵⏵ bypass permissions on (shift+tab to cycle) · ← 4 agents".to_string()),
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let stamp = agent_doc_turn::turn_status::format_rfc3339_utc_secs;
+        let transcript = root.join("a07856e8.jsonl");
+        let write_incident = |lease_at: u64| {
+            let records = [
+                serde_json::json!({"type": "assistant", "isSidechain": false, "uuid": "prev-a",
+                    "timestamp": stamp(lease_at - 217),
+                    "message": {"role": "assistant", "content": [{"type": "text", "text": "The document write didn't complete."}]}}),
+                serde_json::json!({"type": "system", "subtype": "stop_hook_summary", "timestamp": stamp(lease_at - 217)}),
+                serde_json::json!({"type": "system", "subtype": "turn_duration", "timestamp": stamp(lease_at - 217)}),
+                // A background subagent keeps working after the cancel.
+                serde_json::json!({"type": "assistant", "isSidechain": true, "timestamp": stamp(lease_at + 1)}),
+                serde_json::json!({"type": "file-history-snapshot", "messageId": "7287902a",
+                    "snapshot": {"messageId": "7287902a", "trackedFileBackups": {}, "timestamp": stamp(lease_at + 2)},
+                    "isSnapshotUpdate": false}),
+            ];
+            let body: String = records.iter().map(|r| format!("{r}\n")).collect();
+            std::fs::write(&transcript, body).unwrap();
+            agent_doc_turn_status_io::write_turn_active_marker_with_transcript_at(
+                &root,
+                "%180",
+                lease_at,
+                Some(&transcript),
+            )
+            .unwrap();
+        };
+        let document_id =
+            agent_doc_session_actor_io::canonical_document_id_in(&root, &doc.to_string_lossy());
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        agent_doc_sqlite::state_store::insert_dispatch_attempt_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DispatchAttemptInsert {
+                document_id: &document_id,
+                generation: 69,
+                command_kind: "dispatch_only_reopen",
+                accepted_stage: Some("ready"),
+                failed_stage: None,
+                diagnostic_payload: "{}",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            agent_doc_sqlite::state_store::mark_open_dispatches_turn_started(&conn, &document_id)
+                .unwrap(),
+            1
+        );
+
+        // Seconds after the cancel the snapshot has not settled: fail closed.
+        let lease_at = now - 4;
+        conn.execute(
+            "UPDATE dispatch_attempts SET timestamp = ?1",
+            [i64::try_from(lease_at - 1).unwrap()],
+        )
+        .unwrap();
+        write_incident(lease_at);
+        assert_eq!(
+            harness_turn_live_evidence(&ctx, &idle),
+            Some("turn_active_lease")
+        );
+
+        // Settled: the guard retires the lease and its receipt; clear proceeds.
+        let lease_at = now - agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 10;
+        conn.execute(
+            "UPDATE dispatch_attempts SET timestamp = ?1",
+            [i64::try_from(lease_at - 1).unwrap()],
+        )
+        .unwrap();
+        write_incident(lease_at);
+        assert_eq!(harness_turn_live_evidence(&ctx, &idle), None);
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&idle, false, false, false, false),
+            OperatorClearInputState::IdlePrompt
+        );
+        assert!(
+            !agent_doc_sqlite::state_store::has_running_dispatch_turn_as_of(
+                &conn,
+                &document_id,
+                i64::try_from(now).unwrap()
+            )
+            .unwrap()
+        );
+        let receipt = agent_doc_turn_status_io::last_harness_turn_end_for_pane(&root, "%180")
+            .expect("abandoned prompt receipt");
+        assert_eq!(receipt.reason, "abandoned_prompt");
+        let ops = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("turn_status_projection_repaired")
+                && ops.contains("reason=abandoned_prompt source=operator_clear_guard")
+                && ops.contains("settled_dispatches=1"),
+            "{ops}"
         );
     }
 

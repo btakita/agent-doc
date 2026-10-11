@@ -188,6 +188,25 @@ pub fn harness_turn_end_reason(
     }
 }
 
+/// `#sdkclearwedge`: true when a harness turn-end receipt proves the pane's
+/// conversation was already reset after an operator clear was deferred at
+/// `deferred_at`, so delivering the deferred `/clear` would wipe the newer
+/// conversation instead. Only boundaries that start an empty conversation
+/// qualify (`session_start_clear`, `session_start_startup`); `resume`
+/// restores context and an interrupt / abandoned prompt keeps it. The receipt
+/// must be strictly newer than the deferral: a same-second boundary is
+/// ambiguous and keeps the deferred clear.
+pub fn harness_receipt_satisfies_deferred_clear(
+    receipt_reason: &str,
+    receipt_ended_at: u64,
+    deferred_at: u64,
+) -> bool {
+    matches!(
+        receipt_reason,
+        "session_start_clear" | "session_start_startup"
+    ) && receipt_ended_at > deferred_at
+}
+
 /// Text prefix of the record Claude Code appends to the session transcript
 /// when the operator interrupts a turn. Both observed forms share it:
 /// `[Request interrupted by user]` and `[Request interrupted by user for tool use]`.
@@ -198,6 +217,35 @@ pub const HARNESS_INTERRUPT_MARKER_PREFIX: &str = "[Request interrupted by user"
 /// before its own transcript record lands; the settle window lets that record
 /// appear so a fresh turn is never mistaken for the interrupted one.
 pub const TURN_INTERRUPT_SETTLE_SECS: u64 = 3;
+
+/// `#sdkclearwedge`: seconds an orphaned prompt snapshot must have settled,
+/// with nothing but inert bookkeeping after it, before it retires a lease. A
+/// live prompt's record lands in the same flush as its snapshot (1213 of 1213
+/// matched snapshots in the 2026-10-11 transcript audit); the longest gap seen
+/// before any follow-up record of a resumed session was 12s, so the window
+/// sits well above it.
+pub const ABANDONED_PROMPT_SETTLE_SECS: u64 = 20;
+
+/// Receipt reason for an abandoned-prompt snapshot that retired a lease.
+pub const TURN_END_REASON_ABANDONED_PROMPT: &str = "abandoned_prompt";
+
+/// Transcript record types that carry no turn activity. They may follow an
+/// abandoned prompt snapshot without disproving the abandonment; any other
+/// record type after the snapshot (an attachment, a queue operation, a
+/// snapshot update, a system record, or a type this policy does not know)
+/// keeps the lease live.
+const INERT_TRANSCRIPT_RECORD_TYPES: &[&str] = &[
+    "last-prompt",
+    "ai-title",
+    "custom-title",
+    "summary",
+    "cost-state",
+    "bridge-session",
+    "pr-link",
+    "atis-latch",
+    "mode",
+    "permission-mode",
+];
 
 /// Bytes of transcript tail the interrupt probe reads. Bounded so a large
 /// transcript costs one small read; a record longer than the window is never
@@ -210,6 +258,15 @@ pub enum TranscriptTailEvidence {
     /// The newest conversation record is a harness interrupt record written at
     /// `at_secs` (Unix seconds, UTC).
     Interrupted { at_secs: u64 },
+    /// `#sdkclearwedge`: the newest main-conversation record is a prompt
+    /// snapshot (`file-history-snapshot`, written at `at_secs`) whose prompt
+    /// record never landed. Claude Code writes the snapshot when a submitted
+    /// prompt clears its `UserPromptSubmit` hooks and appends the prompt record
+    /// in the same flush; an operator cancel (Esc) in that window drops the
+    /// prompt back into the composer and persists neither the prompt, an
+    /// interrupt record, nor a `Stop` hook. Nothing but inert bookkeeping (and
+    /// background-subagent sidechain records) follows the snapshot.
+    AbandonedPrompt { at_secs: u64 },
     /// The newest conversation record is ordinary turn activity (a prompt, an
     /// assistant message, a tool result).
     Activity,
@@ -362,11 +419,41 @@ fn classify_codex_event(record: &serde_json::Value) -> Option<TranscriptTailEvid
 /// including a trailing line still being written, yields
 /// [`TranscriptTailEvidence::Unknown`]: the probe never reaches past a record
 /// it cannot read to an older interrupt.
+///
+/// `#sdkclearwedge`: a prompt snapshot (`file-history-snapshot` with
+/// `isSnapshotUpdate: false`) whose `messageId` names no `user` record in the
+/// window, newer than every conversation record and followed only by
+/// [`INERT_TRANSCRIPT_RECORD_TYPES`], is an abandoned prompt
+/// ([`TranscriptTailEvidence::AbandonedPrompt`]). A snapshot whose prompt
+/// record exists (before or after it) is ordinary bookkeeping. Any other
+/// record newer than an orphaned snapshot makes the window
+/// [`TranscriptTailEvidence::Unknown`], and so does an orphaned snapshot whose
+/// preceding conversation never reached a boundary (no `turn_duration` /
+/// `stop_hook_summary` system record and no interrupt record between it and
+/// the newest conversation record): it may belong to input submitted while a
+/// turn was still running.
 pub fn classify_transcript_tail(tail: &str, starts_mid_file: bool) -> TranscriptTailEvidence {
     let mut segments: Vec<&str> = tail.split('\n').collect();
     if starts_mid_file && !segments.is_empty() {
         segments.remove(0);
     }
+    let prompt_record_ids: std::collections::HashSet<String> = segments
+        .iter()
+        .filter_map(|segment| serde_json::from_str::<serde_json::Value>(segment.trim()).ok())
+        .filter(|record| record.get("type").and_then(serde_json::Value::as_str) == Some("user"))
+        .filter_map(|record| {
+            record
+                .get("uuid")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .collect();
+    // Newest first: `active_after_snapshot` records whether a non-inert record
+    // is newer than any orphaned snapshot found later in the scan.
+    let mut active_after_snapshot = false;
+    let mut abandoned_at: Option<u64> = None;
+    let mut disqualified = false;
+    let mut previous_turn_closed = false;
     for segment in segments.iter().rev() {
         let line = segment.trim();
         if line.is_empty() {
@@ -382,7 +469,28 @@ pub fn classify_transcript_tail(tail: &str, starts_mid_file: bool) -> Transcript
         {
             continue;
         }
-        match record.get("type").and_then(serde_json::Value::as_str) {
+        let kind = record.get("type").and_then(serde_json::Value::as_str);
+        match kind {
+            Some("user") | Some("assistant") if disqualified => {
+                return TranscriptTailEvidence::Unknown;
+            }
+            Some("user") | Some("assistant") if abandoned_at.is_some() => {
+                // The conversation the snapshot follows must have reached a
+                // boundary: a completed turn (`turn_duration` /
+                // `stop_hook_summary`) or an interrupt record. A snapshot
+                // newer than a still-open turn proves nothing about it.
+                let interrupted = kind == Some("user")
+                    && record
+                        .get("message")
+                        .and_then(|message| message.get("content"))
+                        .is_some_and(record_text_is_interrupt);
+                return match abandoned_at {
+                    Some(at_secs) if previous_turn_closed || interrupted => {
+                        TranscriptTailEvidence::AbandonedPrompt { at_secs }
+                    }
+                    _ => TranscriptTailEvidence::Unknown,
+                };
+            }
             Some("user") => {
                 let content = record
                     .get("message")
@@ -401,14 +509,76 @@ pub fn classify_transcript_tail(tail: &str, starts_mid_file: bool) -> Transcript
                 Some(evidence) => return evidence,
                 None => continue,
             },
-            _ => continue,
+            Some("system")
+                if abandoned_at.is_some()
+                    && matches!(
+                        record.get("subtype").and_then(serde_json::Value::as_str),
+                        Some("turn_duration" | "stop_hook_summary")
+                    ) =>
+            {
+                previous_turn_closed = true;
+            }
+            _ if abandoned_at.is_some() || disqualified => continue,
+            Some("file-history-snapshot") => {
+                match orphaned_prompt_snapshot_secs(&record, &prompt_record_ids) {
+                    Some(_) if active_after_snapshot => disqualified = true,
+                    Some(at_secs) => abandoned_at = Some(at_secs),
+                    None => {
+                        if record
+                            .get("isSnapshotUpdate")
+                            .and_then(serde_json::Value::as_bool)
+                            != Some(false)
+                        {
+                            active_after_snapshot = true;
+                        }
+                    }
+                }
+            }
+            Some(kind) if INERT_TRANSCRIPT_RECORD_TYPES.contains(&kind) => continue,
+            _ => active_after_snapshot = true,
         }
     }
-    TranscriptTailEvidence::Unknown
+    match abandoned_at {
+        Some(at_secs) if !starts_mid_file && !disqualified => {
+            TranscriptTailEvidence::AbandonedPrompt { at_secs }
+        }
+        _ => TranscriptTailEvidence::Unknown,
+    }
+}
+
+/// The write time of a prompt snapshot whose prompt record never landed:
+/// `isSnapshotUpdate` is explicitly `false`, its `messageId` names no `user`
+/// record in the window, and its own timestamp parses. Anything else is `None`.
+fn orphaned_prompt_snapshot_secs(
+    record: &serde_json::Value,
+    prompt_record_ids: &std::collections::HashSet<String>,
+) -> Option<u64> {
+    if record
+        .get("isSnapshotUpdate")
+        .and_then(serde_json::Value::as_bool)
+        != Some(false)
+    {
+        return None;
+    }
+    let message_id = record
+        .get("messageId")
+        .and_then(serde_json::Value::as_str)?;
+    if message_id.is_empty() || prompt_record_ids.contains(message_id) {
+        return None;
+    }
+    record
+        .get("snapshot")
+        .and_then(|snapshot| snapshot.get("timestamp"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(parse_rfc3339_utc_secs)
 }
 
 /// True when the harness transcript proves the turn that wrote `marker` was
 /// interrupted and has not been followed by any newer conversation activity.
+///
+/// `#sdkclearwedge`: an abandoned prompt snapshot (see
+/// [`TranscriptTailEvidence::AbandonedPrompt`]) ends the lease under the same
+/// rules with [`ABANDONED_PROMPT_SETTLE_SECS`].
 ///
 /// Requires all of: the newest conversation record is an interrupt record; the
 /// interrupt is no older than the lease (an interrupt of an earlier turn says
@@ -425,7 +595,23 @@ pub fn turn_lease_ended_by_interrupt(
             at_secs >= marker.written_at
                 && now.saturating_sub(at_secs) >= TURN_INTERRUPT_SETTLE_SECS
         }
+        // `#sdkclearwedge`: the snapshot is written after the prompt's
+        // `UserPromptSubmit` hooks (which write the lease) finish, so the
+        // abandoned prompt's snapshot is never older than its own lease.
+        TranscriptTailEvidence::AbandonedPrompt { at_secs } => {
+            at_secs >= marker.written_at
+                && now.saturating_sub(at_secs) >= ABANDONED_PROMPT_SETTLE_SECS
+        }
         TranscriptTailEvidence::Activity | TranscriptTailEvidence::Unknown => false,
+    }
+}
+
+/// The turn-end receipt reason a lease-retiring transcript boundary proves.
+pub fn transcript_turn_end_reason(evidence: TranscriptTailEvidence) -> Option<&'static str> {
+    match evidence {
+        TranscriptTailEvidence::Interrupted { .. } => Some(TURN_END_REASON_INTERRUPT),
+        TranscriptTailEvidence::AbandonedPrompt { .. } => Some(TURN_END_REASON_ABANDONED_PROMPT),
+        TranscriptTailEvidence::Activity | TranscriptTailEvidence::Unknown => None,
     }
 }
 
@@ -783,6 +969,17 @@ mod tests {
         .to_string()
     }
 
+    /// A Claude Code prompt snapshot record (`file-history-snapshot`).
+    fn prompt_snapshot_line(message_id: &str, at: &str, update: bool) -> String {
+        serde_json::json!({
+            "type": "file-history-snapshot",
+            "messageId": message_id,
+            "snapshot": {"messageId": message_id, "trackedFileBackups": {}, "timestamp": at},
+            "isSnapshotUpdate": update,
+        })
+        .to_string()
+    }
+
     fn codex_event(at: u64, event: &str) -> String {
         codex_line(at, "event_msg", serde_json::json!({"type": event}))
     }
@@ -886,6 +1083,228 @@ mod tests {
             classify_transcript_tail(&live, false),
             TranscriptTailEvidence::Activity
         );
+    }
+
+    fn prompt_line(uuid: &str, at: &str, text: &str) -> String {
+        serde_json::json!({
+            "type": "user", "isSidechain": false, "uuid": uuid, "timestamp": at,
+            "message": {"role": "user", "content": text},
+        })
+        .to_string()
+    }
+
+    /// `#sdkclearwedge` incident replay: haiven-dev `tasks/sdk.md`, pane %180,
+    /// 2026-10-11. The previous turn ended at 04:26:44; the dispatched prompt's
+    /// `UserPromptSubmit` hook wrote the lease at 04:30:21 and Claude Code wrote
+    /// its snapshot at 04:30:23; the operator cancelled before the prompt
+    /// record landed. Record shapes are trimmed copies of transcript
+    /// `a07856e8-…`.
+    fn sdk_incident_tail() -> String {
+        [
+            r#"{"type":"assistant","isSidechain":false,"uuid":"9c71d297","timestamp":"2026-10-11T04:26:44.284Z","message":{"role":"assistant","content":[{"type":"text","text":"The document write didn't complete."}]}}"#.to_string(),
+            r#"{"type":"system","subtype":"stop_hook_summary","isSidechain":false,"timestamp":"2026-10-11T04:26:44.833Z"}"#.to_string(),
+            r#"{"type":"system","subtype":"turn_duration","isSidechain":false,"durationMs":521371,"timestamp":"2026-10-11T04:26:44.837Z"}"#.to_string(),
+            prompt_snapshot_line("7287902a-3e0f-4b9f-928e-496baf4cf009", "2026-10-11T04:30:23.234Z", false),
+            String::new(),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn sdkclearwedge_incident_tail_is_an_abandoned_prompt() {
+        let at = parse_rfc3339_utc_secs("2026-10-11T04:30:23.234Z").unwrap();
+        assert_eq!(
+            classify_transcript_tail(&sdk_incident_tail(), false),
+            TranscriptTailEvidence::AbandonedPrompt { at_secs: at }
+        );
+        // Inert bookkeeping and background-subagent sidechain records after
+        // the snapshot do not disprove the abandonment.
+        let tail = format!(
+            "{}{}\n{}\n{}\n",
+            sdk_incident_tail(),
+            r#"{"type":"last-prompt","lastPrompt":"/agent-doc tasks/sdk.md"}"#,
+            r#"{"type":"cost-state"}"#,
+            r#"{"type":"assistant","isSidechain":true,"timestamp":"2026-10-11T04:31:00.000Z"}"#,
+        );
+        assert_eq!(
+            classify_transcript_tail(&tail, false),
+            TranscriptTailEvidence::AbandonedPrompt { at_secs: at }
+        );
+    }
+
+    #[test]
+    fn sdkclearwedge_live_prompt_snapshots_are_never_abandoned() {
+        let previous = assistant_line(100);
+        // Snapshot written in the same flush as its prompt record (both orders
+        // Claude Code produces), then the model thinks with no new record.
+        for tail in [
+            [
+                previous.clone(),
+                prompt_snapshot_line("p1", "1970-01-01T00:01:50.000Z", false),
+                prompt_line("p1", "1970-01-01T00:01:20.000Z", "/agent-doc tasks/sdk.md"),
+            ]
+            .join("\n"),
+            [
+                previous.clone(),
+                prompt_line(
+                    "p1",
+                    "1970-01-01T00:01:20.000Z",
+                    "<command-message>agent-doc</command-message>",
+                ),
+                prompt_line(
+                    "p2",
+                    "1970-01-01T00:01:20.000Z",
+                    "Base directory for this skill",
+                ),
+                r#"{"type":"attachment"}"#.to_string(),
+                prompt_snapshot_line("p1", "1970-01-01T00:01:50.000Z", false),
+            ]
+            .join("\n"),
+        ] {
+            assert_eq!(
+                classify_transcript_tail(&tail, false),
+                TranscriptTailEvidence::Activity,
+                "{tail}"
+            );
+        }
+        // Anything but inert bookkeeping after an orphaned snapshot keeps the
+        // lease: an attachment, a queue operation (a queued/dequeued input may
+        // start a turn), a snapshot update (tool activity), a system record.
+        for newer in [
+            r#"{"type":"attachment","timestamp":"2026-10-11T04:30:24.000Z"}"#,
+            r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-10-11T04:30:30.000Z"}"#,
+            r#"{"type":"system","subtype":"stop_hook_summary"}"#,
+            r#"{"type":"some-future-record"}"#,
+        ] {
+            let tail = format!("{}{newer}\n", sdk_incident_tail());
+            assert_eq!(
+                classify_transcript_tail(&tail, false),
+                TranscriptTailEvidence::Unknown,
+                "{newer}"
+            );
+        }
+        let update = prompt_snapshot_line("x", "2026-10-11T04:30:40.000Z", true);
+        let tail = format!("{}{update}\n", sdk_incident_tail());
+        assert_eq!(
+            classify_transcript_tail(&tail, false),
+            TranscriptTailEvidence::Unknown
+        );
+        // A prompt record (even a different, newer prompt) after the orphan
+        // snapshot is conversation activity.
+        let tail = format!(
+            "{}{}\n",
+            sdk_incident_tail(),
+            prompt_line("p9", "2026-10-11T04:30:25.000Z", "/agent-doc tasks/sdk.md")
+        );
+        assert_eq!(
+            classify_transcript_tail(&tail, false),
+            TranscriptTailEvidence::Activity
+        );
+        // An orphaned snapshot after a turn that never reached a boundary
+        // (input submitted while the turn runs) proves nothing; after an
+        // interrupt record it is abandoned like after a completed turn.
+        let open_turn = [
+            prompt_line("p0", "1970-01-01T00:01:00.000Z", "do the thing"),
+            assistant_line(70),
+            prompt_snapshot_line("queued", "1970-01-01T00:01:30.000Z", false),
+        ]
+        .join("\n");
+        assert_eq!(
+            classify_transcript_tail(&open_turn, false),
+            TranscriptTailEvidence::Unknown
+        );
+        let after_interrupt = [
+            interrupt_line(70, "[Request interrupted by user]"),
+            prompt_snapshot_line("p1", "1970-01-01T00:01:30.000Z", false),
+        ]
+        .join("\n");
+        assert_eq!(
+            classify_transcript_tail(&after_interrupt, false),
+            TranscriptTailEvidence::AbandonedPrompt { at_secs: 90 }
+        );
+        // A window starting mid-file with no conversation record proves nothing;
+        // the same snapshot as the whole (fresh) transcript is abandoned.
+        let only = prompt_snapshot_line("p1", "1970-01-01T00:01:40.000Z", false);
+        assert_eq!(
+            classify_transcript_tail(&format!("frag\n{only}\n"), true),
+            TranscriptTailEvidence::Unknown
+        );
+        assert_eq!(
+            classify_transcript_tail(&format!("{only}\n"), false),
+            TranscriptTailEvidence::AbandonedPrompt { at_secs: 100 }
+        );
+    }
+
+    #[test]
+    fn sdkclearwedge_abandoned_prompt_retires_only_its_own_lease_after_settling() {
+        let at = parse_rfc3339_utc_secs("2026-10-11T04:30:23.234Z").unwrap();
+        let lease = TurnActiveMarker {
+            pane: "%180".to_string(),
+            written_at: parse_rfc3339_utc_secs("2026-10-11T04:30:21Z").unwrap(),
+        };
+        let evidence = TranscriptTailEvidence::AbandonedPrompt { at_secs: at };
+        assert!(!turn_lease_ended_by_interrupt(
+            &lease,
+            evidence,
+            at + ABANDONED_PROMPT_SETTLE_SECS - 1
+        ));
+        assert!(turn_lease_ended_by_interrupt(
+            &lease,
+            evidence,
+            at + ABANDONED_PROMPT_SETTLE_SECS
+        ));
+        // A lease written after the snapshot belongs to a newer prompt.
+        let newer = TurnActiveMarker {
+            pane: "%180".to_string(),
+            written_at: at + 1,
+        };
+        assert!(!turn_lease_ended_by_interrupt(&newer, evidence, at + 3_000));
+        assert_eq!(
+            transcript_turn_end_reason(evidence),
+            Some(TURN_END_REASON_ABANDONED_PROMPT)
+        );
+        assert_eq!(
+            transcript_turn_end_reason(TranscriptTailEvidence::Activity),
+            None
+        );
+    }
+
+    /// `#sdkclearwedge`: the operator's deferred clear (04:30:30) was later
+    /// satisfied by a hand-typed `/clear` (`SessionStart` clear receipt at
+    /// 04:34:25); delivering it at the next idle gap would wipe the re-run.
+    #[test]
+    fn sdkclearwedge_only_a_newer_fresh_conversation_satisfies_a_deferred_clear() {
+        let deferred = parse_rfc3339_utc_secs("2026-10-11T04:30:30Z").unwrap();
+        let cleared = parse_rfc3339_utc_secs("2026-10-11T04:34:25Z").unwrap();
+        assert!(harness_receipt_satisfies_deferred_clear(
+            "session_start_clear",
+            cleared,
+            deferred
+        ));
+        assert!(harness_receipt_satisfies_deferred_clear(
+            "session_start_startup",
+            cleared,
+            deferred
+        ));
+        for reason in [
+            "session_start_resume",
+            TURN_END_REASON_INTERRUPT,
+            TURN_END_REASON_ABANDONED_PROMPT,
+        ] {
+            assert!(!harness_receipt_satisfies_deferred_clear(
+                reason, cleared, deferred
+            ));
+        }
+        assert!(!harness_receipt_satisfies_deferred_clear(
+            "session_start_clear",
+            deferred,
+            deferred
+        ));
+        assert!(!harness_receipt_satisfies_deferred_clear(
+            "session_start_clear",
+            deferred - 60,
+            deferred
+        ));
     }
 
     #[test]

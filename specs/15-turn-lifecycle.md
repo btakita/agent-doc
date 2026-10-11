@@ -437,6 +437,84 @@ one-hour TTL. The operator-clear guard reads `turn_active_for_pane`, which
 applies the retirement above, so the Codex interrupt now releases it (and
 leaves an `interrupt` receipt).
 
+### Cancelled-before-persist prompts (`#sdkclearwedge`)
+
+An operator cancel (Esc) that lands after a prompt's `UserPromptSubmit` hooks
+wrote the lease, but before Claude Code persisted the prompt record, leaves no
+interrupt record and runs no `Stop` hook: Claude Code drops the prompt back
+into the composer. The only trace is the prompt's `file-history-snapshot`
+record, which Claude Code writes when the hooks finish and normally follows
+with the prompt record (`uuid` = the snapshot's `messageId`) in the same
+flush. Observed 2026-10-11 on haiven-dev `tasks/sdk.md`, pane %180: lease at
+04:30:21, snapshot at 04:30:23, no prompt record; every Clear Session Context
+refused with `flow_event flow=operator_clear stage=operator_guard
+outcome=blocked reason=harness_turn_live` /
+`session_clear_queue_preempt_already_deferred ...
+reason=harness_turn_live_evidence=turn_active_lease` while the pane sat idle at
+its prompt, until the operator typed `/clear` by hand.
+
+- **Abandoned-prompt evidence.** `classify_transcript_tail` reports
+  `AbandonedPrompt { at_secs }` when the newest main-conversation record is a
+  prompt snapshot (`isSnapshotUpdate: false`) whose `messageId` names no
+  `user` record in the probe window, and all of the following hold:
+  - every record newer than the snapshot is inert bookkeeping (`last-prompt`,
+    `ai-title`, `custom-title`, `summary`, `cost-state`, `bridge-session`,
+    `pr-link`, `atis-latch`, `mode`, `permission-mode`) or a sidechain record.
+    An attachment, a queue operation, a snapshot update, a system record or an
+    unknown type after it reads as `Unknown`, because a dequeued input may
+    have started a turn;
+  - the conversation before the snapshot reached a boundary: a
+    `turn_duration` / `stop_hook_summary` system record, or an interrupt
+    record, sits between the newest conversation record and the snapshot, or
+    the window is the whole transcript and holds no conversation record (a
+    fresh conversation after `/clear`). A snapshot newer than a still-open
+    turn, such as input submitted while the turn runs, reads as `Unknown`.
+- **Retirement.** The lease retires under the interrupt rules above, with
+  `ABANDONED_PROMPT_SETTLE_SECS` (20s) as the settle window: the snapshot must
+  be no older than the lease heartbeat and must have settled 20s. A live
+  prompt's record lands in the same flush as its snapshot. In the 2026-10-11
+  audit, all 1213 snapshots whose prompt record exists had it adjacent, and
+  the longest follow-up gap seen after an orphaned snapshot was 12s. Retirement
+  records a `turn_ended` receipt with reason `abandoned_prompt`, and the
+  supervisor logs `turn_status_projection_repaired
+  reason=harness_prompt_abandoned`.
+- **Dispatch receipt.** A route dispatch (`dispatch_only_reopen`) never moves
+  the actor. Its receipt, which the turn's own preflight promoted to
+  `running`, therefore never meets a `Ready` edge and would keep the
+  `dispatch_turn_running` evidence live for the whole in-flight horizon. When
+  a lease is retired by harness evidence (interrupt or abandoned prompt), both
+  the supervisor probe and the operator-clear guard
+  (`retire_harness_ended_turn_for_clear`) settle the document's `running`
+  receipts dispatched at or before the retired lease heartbeat
+  (`settle_running_dispatch_turns_started_at_or_before`). A newer dispatch
+  belongs to a newer turn and is untouched.
+- **Operator clear.** The clear guard retires a harness-ended turn before it
+  reads `turn_active_lease` / `dispatch_turn_running`. An idle prompt plus a
+  settled cancelled turn therefore classifies as `IdlePrompt` and the clear
+  proceeds. A clear that was already deferred is delivered by the supervisor
+  at the next tick that sees the prompt and no live turn.
+- **Deferred clear already satisfied.** The supervisor retires a pending
+  operator-deferred clear, and does not deliver it, when the target pane holds
+  a `session_start_clear` or `session_start_startup` receipt strictly newer
+  than the deferral (`harness_receipt_satisfies_deferred_clear`). It logs
+  `idle_queue_watch_deferred_clear_satisfied`. Delivering a satisfied clear
+  would wipe the conversation the operator started after clearing by hand.
+  `resume`, `interrupt` and `abandoned_prompt` receipts keep the context, so
+  they never satisfy a clear.
+
+**Background subagents do not count as a live foreground turn.** A Claude
+Code background agent (pane footer `← N agents`) writes its records with
+`isSidechain: true` or to its own subagent transcript, and it never writes a
+turn-active lease. The classifier skips sidechain records, the clear guard
+never reads the footer as a busy cue, and an operator clear with background
+agents running proceeds as soon as the foreground turn is idle. What the
+clear does to those agents is the harness's business. When a background agent
+finishes, its completion reaches the foreground as a queued input
+(`queue-operation`). If that input starts a turn, the turn is a real
+foreground turn with its own conversation records, and the queue operation
+keeps an older abandoned snapshot from retiring the lease (fail closed). The
+`Stop` hook then retires the lease normally.
+
 ### Harness turn-end receipts (`#runctrlclaude`)
 
 A cleared lease says only "no turn is known to be live"; it cannot prove that
@@ -454,6 +532,8 @@ Writes are monotonic: an older boundary never moves a receipt back.
 - **A settled interrupt record** (Claude transcript or Codex `turn_aborted`)
   that retires a lease (above) records
   `interrupt` at the record's own timestamp.
+- **A settled abandoned-prompt snapshot** that retires a lease (above)
+  records `abandoned_prompt` at the snapshot's timestamp (`#sdkclearwedge`).
 - **Not receipts:** `Stop` (a Stop hook may answer `decision: "block"` and the
   harness keeps generating in the same turn), `SessionStart` source `compact`
   (auto-compaction fires mid-turn), and a hook payload that is missing or

@@ -9516,6 +9516,29 @@ pub fn dispatch_turn_running_for_file(file: &Path) -> Result<bool> {
     state_store::has_running_dispatch_turn_as_of(&conn, &document_id, timestamp_secs() as i64)
 }
 
+/// `#sdkclearwedge`: settle this document's `running` dispatch receipts for a
+/// turn the harness proved ended (interrupt / abandoned prompt) at or after
+/// `turn_started_at`. See
+/// [`state_store::settle_running_dispatch_turns_started_at_or_before`].
+pub fn settle_dispatch_turn_ended_by_harness_for_file(
+    file: &Path,
+    turn_started_at: u64,
+) -> Result<usize> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(0);
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
+    let conn = open_state_db(&project_root)?;
+    state_store::settle_running_dispatch_turns_started_at_or_before(
+        &conn,
+        &document_id,
+        i64::try_from(turn_started_at).unwrap_or(i64::MAX),
+    )
+}
+
 pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);

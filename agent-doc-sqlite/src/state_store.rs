@@ -4609,6 +4609,35 @@ pub fn has_running_dispatch_turn_as_of(
     Ok(count > 0)
 }
 
+/// `#sdkclearwedge`: settle the `running` receipts whose turn the harness proved
+/// ended without a `Ready` transition — an operator interrupt or a prompt
+/// abandoned before it was persisted retires the turn-active lease, but a
+/// route dispatch never moves the actor, so its receipt (promoted to `running`
+/// by the turn's own preflight) would otherwise read as a live turn
+/// ([`has_running_dispatch_turn_as_of`]) for the whole in-flight horizon and
+/// keep refusing operator clears. Only receipts dispatched at or before
+/// `turn_started_at` (the retired lease's heartbeat) are settled: a newer
+/// dispatch belongs to a newer turn. Returns the number settled.
+pub fn settle_running_dispatch_turns_started_at_or_before(
+    conn: &Connection,
+    document_id: &str,
+    turn_started_at: i64,
+) -> Result<usize> {
+    let settled = conn.execute(
+        r#"
+        UPDATE dispatch_attempts
+        SET dispatch_start_proven = 1
+        WHERE document_id = ?1
+          AND failed_stage IS NULL
+          AND COALESCE(result_status, '') = 'running'
+          AND dispatch_start_proven = 0
+          AND timestamp <= ?2
+        "#,
+        params![document_id, turn_started_at],
+    )?;
+    Ok(settled)
+}
+
 /// `#qflood`: mark every open in-flight dispatch for this document consumed. Called
 /// when the actor transitions to `Ready`, keeping the open-dispatch set accurate for
 /// the next busy episode's coalescing and for restart recovery. Returns the number of
@@ -6179,6 +6208,54 @@ mod tests {
         assert!(
             !has_running_dispatch_turn_as_of(&conn, "doc", now)?,
             "a Ready-settled turn is no longer running"
+        );
+        Ok(())
+    }
+
+    /// `#sdkclearwedge` replay (haiven-dev `tasks/sdk.md`, receipt 3327): a route
+    /// `dispatch_only_reopen` at 04:30:20 was promoted to `running` by the turn's
+    /// preflight at 04:30:21; the operator cancelled before the prompt persisted
+    /// and the actor never left `Ready`, so no `Ready` edge could settle it. The
+    /// harness-proven turn end settles exactly the receipts dispatched at or
+    /// before the retired lease, never a newer turn's.
+    #[test]
+    fn harness_proven_turn_end_settles_only_its_own_running_receipt() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let dispatched = 1_791_693_020i64;
+        let lease_written = dispatched + 1;
+        insert_open_dispatch(&conn, "doc", dispatched, "accepted")?;
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert!(has_running_dispatch_turn_as_of(
+            &conn,
+            "doc",
+            dispatched + 60
+        )?);
+
+        insert_open_dispatch(&conn, "other-doc", dispatched, "accepted")?;
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "other-doc")?, 1);
+
+        // A lease older than the dispatch belongs to an earlier turn.
+        assert_eq!(
+            settle_running_dispatch_turns_started_at_or_before(&conn, "doc", dispatched - 1)?,
+            0
+        );
+        assert_eq!(
+            settle_running_dispatch_turns_started_at_or_before(&conn, "doc", lease_written)?,
+            1
+        );
+        assert!(!has_running_dispatch_turn_as_of(
+            &conn,
+            "doc",
+            dispatched + 60
+        )?);
+        assert!(
+            has_running_dispatch_turn_as_of(&conn, "other-doc", dispatched + 60)?,
+            "another document's running turn is untouched"
+        );
+        assert_eq!(
+            settle_running_dispatch_turns_started_at_or_before(&conn, "doc", lease_written)?,
+            0,
+            "idempotent"
         );
         Ok(())
     }

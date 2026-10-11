@@ -131,6 +131,21 @@ epoch is consumed when it reads back absent, not when one bounded clear round
 trip beat the clock). Coarse "returns instead of hanging" bounds of a second or
 more remain where no deterministic witness exists yet.
 
+A test that starts a listener in-process waits for the listener's own
+readiness event, not a connect or `status` poll (`#replace120shang`). Both
+servers announce at their serve-ready edge: the socket is bound under its
+final name (after any stale or superseded endpoint is evicted), accept is
+armed, and the accept loop runs next. The Project Controller announces from
+`serve_with_options` right after its `controller_listener_serve_ready` marker
+(tests start it with `serve_announcing_ready`); the editor IPC listener
+announces through `start_listener_with_logger_until_ready`. The announcement
+carries the bound socket path, and a start that returns without serving
+(startup error, a skipped public serve, or the refusal to evict a live
+same-build peer) drops the sender unsent, so the waiter fails at once instead
+of at a deadline. The 120s wait is only a hang ceiling below nextest's 180s
+per-test guard. After the announcement the test makes one request (a
+controller `status`, or an IPC hello round trip) to confirm it was not early.
+
 To replay one seed while reducing a failure, run a focused test with the seed
 mentioned in the panic trace and temporarily promote that schedule into a named
 regression test in `src/sim_world.rs`. To validate the wider budget locally

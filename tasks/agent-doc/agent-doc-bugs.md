@@ -285,6 +285,14 @@ The `#refreshmemlockstall` subagent is still running `make check-fast`.
 - **GH #238** and the **struck "release + publish"** bug: still investigating.
 
 As each branch passes, I'll merge it, run one `make install`, close its items, then cut the release.
+
+### Re: tmux focus out of sync with the editor — dispatched; #drivecapturedsplice waits for your go — opus-5-5 · 2026-10-11T02:46-04:00
+
+**Dispatched (claimed `subagent:focussync`):** switching between `sdk.md` and `rpg.md` left tmux focused on rpg.md's pane in the `1:stash` window. The subagent only reads the ops logs and a tmux pane listing, and won't touch your panes. It will reconstruct the order of focus events around that switch and find why a superseded or stashed target won. Then it makes focus always end up on the editor's current document(s), including split editors: the newest editor selection wins, and older focus requests are dropped or re-checked against the editor before acting. It adds tests that reproduce the sdk → rpg → sdk sequence.
+
+**`#drivecapturedsplice` is still not started.** It reappeared as a new queue line because my earlier `queue sync` write landed after the last snapshot, not because you approved it. Its only step is `scripts/xdotool-live-verify.sh captured-splice`, which types real keystrokes into your desktop. You're actively switching editor tabs right now, so I won't run it unannounced. To approve it, write `go #drivecapturedsplice` in the exchange (ideally when you can step away from the keyboard for a few minutes) and I'll run it in-session.
+
+**Subagents in flight (7):** `#refreshmemlockstall`, GH #237, the Cancel Turn wedge, GH #238, the struck "release + publish" bug, the sdk.md queue sync, and the tmux focus sync. The first three are in their final `make check`. As each one reports, I'll merge it, run one `make install`, close its items, and then cut the release you asked for.
 <!-- agent:boundary:861a07a6 -->
 <!-- /agent:exchange -->
 
@@ -300,8 +308,9 @@ As each branch passes, I'll merge it, run one `make install`, close its items, t
 - ~~#actionable-review~~
 - 🚧 I added another "release + publish" queue item but agent-doc immediately struck it. I'm intending to release + publish the queue items once complete.
 - ~~release + publish~~
-- sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.
+- 🚧 sdk.md queue items are not in sync with the subagent activity. Most of the queue items are complete but the current queue state in sdk.md look like they are unstarted.
 - do [#drivecapturedsplice]
+- Navigating between sdk.md + rpg.md resulted in a tmux focus on rpg.md in the 1:stash tmux window. Please make sure the focus effects always sync with the current Editor document(s).
 <!-- /agent:queue -->
 
 ## Backlog

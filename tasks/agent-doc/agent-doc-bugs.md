@@ -165,6 +165,41 @@ The subagent will identify which evidence refused the clear: a turn lease left b
 - the claims hold the items until they expire, about 01:38, and only then does the queue re-dispatch them.
 
 **Recommendation:** let `← 4 agents` drain to zero, then `/clear`. If you need the clear now and are OK with those two items being redone later, `/clear` is safe; it only costs that in-flight work's handoff.
+
+### Re: v0.35.487 released — opus-5.5 · 2026-10-11T01:30-04:00
+
+> **Queue prompt:** release + publish
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/235
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/236
+
+> **Queue prompt:** fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
+> Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md because a turn is live in pane %127 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md` to intentionally interrupt the turn and clear context.
+
+**v0.35.487 is released and installed.**
+- **Gate:** the authoritative `make check` on the version-projected tree passed: 10013/10013 nextest, 0 `result: FAILED`, plus TLA (incl. the new `AdmissionSplitMerge` twin wedge/output/pair/reach configs).
+- **Release:** `make release` exited 0 with `tag_publish_handoff=complete` and `local_install_full=complete`. Tag `v0.35.487` (`e6d36e647`) was pushed, and `agent-doc --version` reports 0.35.487.
+- **Publishing:** the GitHub Release workflow for the tag was in progress at closeout. The tag-driven pipeline publishes PyPI and Homebrew; I observed CI rather than waited on it.
+
+**Shipped and closed:**
+- `respondfinalizehard`
+- `pypireleaseworkflow`
+- GH #235 (already closed) and GH #236 (closed with a comment)
+- the dev.md Codex interrupt lease fix
+- `idefocusowner`
+- `visiblewriteloadflake`
+- `hookstalemsgfile`
+- `relayhubtestisolation`
+- the earlier backlog-to-queue mirror fix, the tools.md slow-start drain fix and the sdk.md `typingforkdup` duplicate prevention
+
+**New follow-ups** (appended to the queue):
+- `visiblewritewallclock`: one poll test still assumes a 5s writer deadline under extreme single-core load. It should wait on the receipt event, not a longer timeout.
+- `editoropscheckpointfail`: find, from 0.35.487's new full error chain, why editor-op checkpoints failed during the sdk.md typing burst.
+
+**Next batch:** `capturegatedispatched` is ready (`436cb0652`), and the sdk.md Clear Session Context wedge is still with `subagent:sdkclearwedge`.
+
+**Your action:** restart IntelliJ so it loads the 0.35.487 plugin projection. Delete the shorter duplicate line in sdk.md if you haven't already.
 <!-- agent:boundary:743193a6 -->
 <!-- /agent:exchange -->
 
@@ -173,34 +208,32 @@ The subagent will identify which evidence refused the clear: a turn lease left b
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#hookstalemsgfile]
-- ⏭️ do [#relayhubtestisolation]
+- ~~⏭️ do [#hookstalemsgfile]~~
+- ~~⏭️ do [#relayhubtestisolation]~~
 - ~~do [#removeobsoleteicebox]~~
-- ⏭️ do [#respondfinalizehard]
-- ⏭️ do [#pypireleaseworkflow]
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/235
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/236
-- 🚧 fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
-Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md because a turn is live in pane %127 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md` to intentionally interrupt the turn and clear context.
+- ~~⏭️ do [#respondfinalizehard]~~
+- ~~⏭️ do [#pypireleaseworkflow]~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/235~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/236~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~fix: Clear Session Context in dev.md: agent-doc command failed (exit 1):
+Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md because a turn is live in pane %127 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor); no `/clear` was sent. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=clear_queued_behind_busy_turn. Wait for the turn to finish and run Clear Session Context again, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md` to intentionally interrupt the turn and clear context.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Run Agent Doc on tools.md was slow to go.~~
-- 🚧 release + publish
-- 🚧 do [#visiblewriteloadflake]
-- 🚧 do [#idefocusowner]
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#visiblewriteloadflake]~~
+- ~~do [#idefocusowner]~~
 - ~~#actionable-review~~
 - 🚧 do [#capturegatedispatched]
 - Clear Session Context on sdk.md is wedged after I cancelled a Run Agent Doc turn in the Claude terminal.
+- do [#visiblewritewallclock]
+- do [#editoropscheckpointfail]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#visiblewritewallclock] [agent-doc] test_poll_lazily_event_appears_after_delay (agent-doc-write-runtime-io) still assumes the writer finishes within its 5s poll deadline: it fails 7/30 with the test process pinned to one core shared with 96 busy-loops, even after the visiblewriteloadflake fix (30/30 at 56 and 64 busy-loops). Remove the wall-clock assumption by making the poll wait on the writer's receipt event, not on a deadline; do not raise the timeout. Prove it with the pinned-core stress script (scratchpad pinned.sh pattern) at K=96.
+- [ ] [#editoropscheckpointfail] [agent-doc] During the 2026-10-11 03:40Z sdk.md typing burst, editor_ops_record_failed ('append Lazily editor-op checkpoint') fired three times, so the editor-op history had no record of the edits that led to the typingforkdup duplicate. 0.35.487 logs the full error chain. On the next occurrence, find from that chain why the editor-op checkpoint append fails under rapid typing, and fix it so op provenance is never lost.
 - [ ] 🚧 [#capturegatedispatched] [agent-doc] The finalize pre-write pending_capture gate ('active prompt requested backlog capture but no backlog mutations were recorded this cycle') fires on cycles whose only backlog-capture preset (for example the actionable-review item preset carried on queue steering) belongs to a head already claimed by or dispatched to a subagent. Coordinator dispatch-only cycles must then add a suppression marker or a filler backlog item. Seen twice on 2026-10-09/10 in agent-doc-bugs.md. Scope the gate to presets whose heads this cycle actually drains: a claimed or dispatched head's capture belongs to the cycle that closes it. Add regression coverage for a dispatch-only coordinator cycle.
-- [ ] 🚧 [#hookstalemsgfile] [agent-doc] The coined-id PreToolUse hook (agent-doc-hooks-io/src/coined_id_pretooluse.rs, commit_scan_text / message_file_paths) reads a -F message file from disk BEFORE the command runs. So 'cat > msg.txt <<EOF ... EOF && git commit -F msg.txt' is checked against the PREVIOUS commit's message, while the new heredoc body is never scanned (commit_segment splits on newlines). Reproduced 2026-10-10: one subagent was blocked by an id left in a shared scratchpad msg.txt by another. Fix: when the same command writes the -F path (heredoc or > redirect), scan that body instead of the stale file, and resolve relative -F paths against a leading cd / git -C. Add regression tests for the false positive (stale file) and the false negative (unscanned heredoc).
-- [ ] 🚧 [#relayhubtestisolation] [agent-doc] Plain 'cargo test -p agent-doc-crdt-relay-io' fails 9 relay-hub lib tests on origin/main ab6cf0fe7 (for example editor_exit_reap_leaves_another_editor_process_attached, provisional_replacement_preserves_predecessor_until_promoted, concurrent_refresh_registrations_elect_one_logical_successor), while all 121 pass with --test-threads=1 and under nextest (one process per test). The cause is process-global state shared across tests: the OnceLock hub REGISTRY and the PROJECTIONS/QUARANTINES maps (lib.rs around lines 365 and 759-869), DURABLE_LIVENESS_ROWIDS, and reap_exited_editor_replicas(pid), which reaps across every hub in the process. Isolate per-test state (unique document keys, or a scoped/test-local registry) so the suite passes in parallel; do not serialize it.
-- [ ] 🚧 [#visiblewriteloadflake] [agent-doc] Fix flaky agent-doc-write-runtime-io visible_write_content_snapshot_tests (test_lazily_visible_write_event_read, test_poll_lazily_event_*): under host load (load average around 50) they time out with 'timed out after 2.0s waiting for project controller response' at ipc.rs:170 (record_lazily_visible_write_candidate); seen in 2 of about 6 full runs on 2026-10-10. Fix the nondeterminism instead of rerunning: warm the controller before the timed RPC, or charge cold-start launch separately from CONTROLLER_RPC_TIMEOUT, so a busy runner cannot decide the outcome. Prove it under load stress. (Promoted from icebox visiblewriteloadtimeout.)
-- [ ] 🚧 [#idefocusowner] [agent-doc] Two JetBrains IDEs on one project: only the most recently focused IDE drives the shared tmux agent-doc window, which stops the layout from flipping between IDEA and Rider (both installed on this machine). About 1 day. Builds on idearidereditors 9796d8c8a (installation-scoped editor-surface client families). Fully independent per-IDE navigation stays in the icebox as ideriderindependentnav. (Promoted from icebox ideriderstopgap.)
-- [ ] 🚧 [#respondfinalizehard] respond/finalize hard-fails with 'queue consume: no prompt to consume' (then write --commit fails 'failed to compose completed tracked-work target') when the cycle's quoted Queue prompt / --done target was already struck/consumed earlier (all queue heads struck, item already in agent:done). The response write landed and the cycle wedged at write_applied until a bare 'agent-doc write --commit' recovered it as AlreadyApplied. Consuming an already-consumed head must be idempotent. Repro 2026-10-10 cycle-1791675315432.
-- [ ] 🚧 [#pypireleaseworkflow] PyPI release workflow races the GitHub Release: the PyPI job polls at most 30 minutes for the Release's SHA256SUMS, but v0.35.485's cross-platform builds took about 33 minutes, so publish failed at 21:45:30Z and the Release went up at 21:47:24Z (run 38086853278; a rerun of the failed job published it). Trigger PyPI from the release:published event, or from the Release workflow after its assets upload, instead of a fixed wall-clock poll.
 <!-- /agent:backlog -->
 
 ## Review

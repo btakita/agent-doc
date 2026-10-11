@@ -778,10 +778,10 @@ mod tests {
                 if let Some(first) = previous.first().filter(|f| visible.contains(f)) {
                     prop_assert_eq!(ordered.first(), Some(first));
                 }
-                if previous.len() >= 2 {
-                    if let Some(last) = previous.last().filter(|f| visible.contains(f)) {
-                        prop_assert_eq!(ordered.last(), Some(last));
-                    }
+                if previous.len() >= 2
+                    && let Some(last) = previous.last().filter(|f| visible.contains(f))
+                {
+                    prop_assert_eq!(ordered.last(), Some(last));
                 }
 
                 // 5. Added files keep their visible order.
@@ -829,10 +829,10 @@ mod tests {
                     if let Some(first) = previous.first().filter(|f| visible.contains(f)) {
                         prop_assert_eq!(ordered.first(), Some(first));
                     }
-                    if previous.len() >= 2 {
-                        if let Some(last) = previous.last().filter(|f| visible.contains(f)) {
-                            prop_assert_eq!(ordered.last(), Some(last));
-                        }
+                    if previous.len() >= 2
+                        && let Some(last) = previous.last().filter(|f| visible.contains(f))
+                    {
+                        prop_assert_eq!(ordered.last(), Some(last));
                     }
                     previous = ordered;
                 }

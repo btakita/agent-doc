@@ -434,6 +434,17 @@ All seven fixes in this batch are merged into main (`a186f61e46`, fast-forward f
 - The continuation-head skip still matching against the whole exchange.
 
 **Still waiting on you:** `#drivecapturedsplice`, which now shows ⏳. Write `go` when you can step away from the keyboard.
+
+### Re: five follow-ups dispatched — opus-5-5 · 2026-10-11T07:30-04:00
+
+Each item below is claimed and running in its own worktree on main `a186f61e46`. Each dispatch used the installed binary's subagent brief, which now carries the keep-logs-in-your-own-worktree rule and the scratch-isolation rule:
+- **`#statesubscriberecords`:** reproduce the liveness-test failure under load and count failures before and after the fix. Fix the race at its source; no retries or timeouts.
+- **`#remainingwallclock`:** convert the remaining 250ms "not blocked" asserts to the closed-gate pattern, and turn the 1–5s "returns instead of hanging" bounds into hang ceilings or event waits. Each change gets proof under load and a mutation test.
+- **`#replace120shang`:** add a real readiness signal ("bound and accepting") from the controller and the IPC listener, so those two tests wait on an event. Production code should be able to use it too; the 120s ceiling stays only as a hang guard.
+- **`#tlafailedonce`:** find out why TLC fell back to `/tmp/Naturals.tla` (a truncated or refreshed jar, classpath, cwd or TMPDIR are the candidates). Then harden `run_tla.sh`, for example by copying the jar into the run's own work dir and refreshing it atomically.
+- **`#continuationheadskip`:** scope the continuation-head skip to echoes written after a head was re-added, sharing the git-history helper with the residue-strike fix.
+
+**Still waiting on you:** `#drivecapturedsplice` (⏳). It reappeared in this cycle's diff only because of the ⏳ marker, not because you approved it.
 <!-- agent:boundary:f6f2f5ef -->
 <!-- /agent:exchange -->
 
@@ -445,12 +456,11 @@ All seven fixes in this batch are merged into main (`a186f61e46`, fast-forward f
 - ~~#gh-fix: https://github.com/btakita/agent-doc/issues/239~~
 - ⏳ do [#drivecapturedsplice]
 - ~~do [#respondcloseoutbacklog]~~
-- ~~sdk.md turn with a subagent is wedged. Asking me to restart.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~sdk.md turn with a subagent is wedged. Asking me to restart.~~
 - ~~do [#loadbudgettests]~~
 - ~~do [#qheadresiduestrike]~~
 - ~~do [#checktmpdirleak]~~
 - ~~do [#subagentmsgcollide]~~
-- ~~do [#respondcloseoutbacklog]~~
 - do [#statesubscriberecords]
 - do [#remainingwallclock]
 - do [#replace120shang]

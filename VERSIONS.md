@@ -2,6 +2,59 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.493
+
+- **Independent navigation per IDE (opt-in, `#ideriderindependentnav` P1-P4).**
+  Set `editor_navigation = "per_installation"` in `.agent-doc/config.toml` and
+  each IDE installation gets its own tmux lane session (`<pinned session>-<installation>`,
+  marked as agent-doc's), so two IDEs can navigate different documents at once.
+  Each lane syncs and cancels independently. The agent-doc terminal attaches to
+  its lane, and plugin layout publications (including Sync Tmux Layout) land in
+  the requesting IDE's lane. A pane never changes lanes passively. Claim for
+  Tmux Pane or a manual Sync Tmux Layout in the other IDE hands a shared
+  document's pane over explicitly. Sessions agent-doc did not create are never
+  adopted or moved. The default `shared` mode is unchanged.
+- **Codex resume ids are tied to their harness (`#codexresumeid`).** After
+  switching a document from claude to codex, Restart Agent ran `codex resume`
+  with Claude's session id and wedged. The hook ledger now records the harness,
+  and a Codex resume id that is a Claude session starts a fresh Codex session.
+  The stale-id frontmatter clear is bounded to 5s.
+- **No more quadratic CRDT merges (`#sessionactorspin`).** A large deletion was
+  replayed one character at a time, rebuilding the document order on each
+  delete. A 73 KB compaction took over 8 minutes on the session actor thread.
+  It is now one range delete (0.46s on the same inputs).
+- **Codex Stop hook waits only on an observed holder (`#sdkretained`).** It
+  printed the placeholder `unobserved-retained-intent` while actually waiting
+  for a compact projection. It now names the real holder (write intent or
+  compact continuation), continues the queue when there is none, and names a
+  recovery when a pending write cannot converge. `session-check` no longer
+  blames the harness for an operator edit the editor's recorded keystrokes
+  reproduce.
+- **Terse Codex queue continuation (`#codexstopterse`).** The Stop-hook
+  continuation is one short paragraph, keeps MCP guidance for MCP sessions, and
+  logs a suppressed context-reset reason to ops.log only.
+- **Multi-line queue items (`#multilinequeuehead`).** A title line plus a
+  fenced pasted block that follows a `---` separator or another multi-line item
+  is its own queue head. Striking one produces a properly closed `~~~done`
+  fence (the auto-struck note on the closing line previously swallowed the
+  queue's closing marker).
+- **JetBrains typing retry storm fixed (GH #242).** A refused burst is retried
+  only when a new edit event arrives (the modification stamp moves without
+  events on undo/save), and identical refusals are coalesced in the FFI with a
+  count, so they no longer flood ops.log or the Lazily actor.
+- **Parse errors name the marker's line (`#inlinecodemarker`).** Unclosed and
+  mismatched component errors now report the opening (and closing) marker line.
+- **Faster `make check` (build/test turnaround).** Batched test binaries run
+  concurrently, TLA runs 8 checks in parallel and is skipped when its inputs are
+  unchanged, all Rust test steps share one build, dev debug info is line tables
+  only, and the JetBrains gradle build cache is on: about 919s to 504s cold.
+- **`make check` lints the whole workspace (`#clippyworkspacegap`).** Clippy
+  previously covered only the root crate.
+- **Test reliability (`#stopreopenflake`).** Codex stop-hook tests set the
+  session per thread instead of through `CODEX_THREAD_ID`; this exposed and
+  fixed a real case where a proven `agent:done` archive move counted as drift
+  in an active Codex session.
+
 ## 0.35.492
 
 - **Idle supervisors and controllers stop thrashing (`#fixthrashingbackground`).**

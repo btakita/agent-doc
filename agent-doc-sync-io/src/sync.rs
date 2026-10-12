@@ -10726,6 +10726,7 @@ mod tests {
     ///   window (no pane duplicated or lost);
     /// - each lane window shows exactly the documents its lane owns;
     /// - the shared session is untouched.
+    ///
     /// Isolated tmux server only.
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

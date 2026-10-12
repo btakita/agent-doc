@@ -166,11 +166,41 @@ fn latest_codex_session_projection(
     canonical: &Path,
     harness: &agent_doc_harness::HarnessConfig,
 ) -> Option<agent_doc_codex_hook_io::ActiveSessionState> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    latest_codex_session_projection_in_home(canonical, harness, home.as_deref())
+}
+
+/// [`latest_codex_session_projection`] with an explicit home, so tests never
+/// race on the process-wide `HOME`.
+fn latest_codex_session_projection_in_home(
+    canonical: &Path,
+    harness: &agent_doc_harness::HarnessConfig,
+    home: Option<&Path>,
+) -> Option<agent_doc_codex_hook_io::ActiveSessionState> {
     if harness.binary != "codex" {
         return None;
     }
     match agent_doc_codex_hook_io::load_latest_prompt_state_for_file(canonical) {
-        Ok(state) => state,
+        Ok(Some(state)) => {
+            // an untagged legacy row may still carry a Claude
+            // Code session id recorded before the document switched to codex.
+            let foreign_owner = home.and_then(|home| {
+                let project_root = agent_doc_project_root_io::project_root_containing(canonical)?;
+                resume_id_foreign_harness_owner(home, &project_root, harness, &state.session_id)
+            });
+            if let Some(owner) = foreign_owner {
+                agent_doc_ops_log_io::log_op(
+                    canonical,
+                    &format!(
+                        "start_codex_session_projection_rejected id={} reason=foreign_harness_transcript owner={owner}",
+                        state.session_id
+                    ),
+                );
+                return None;
+            }
+            Some(state)
+        }
+        Ok(None) => None,
         Err(err) => {
             agent_doc_ops_log_io::log_op(
                 canonical,
@@ -184,8 +214,41 @@ fn latest_codex_session_projection(
     }
 }
 
+/// The other harness that provably owns conversation `id`, if any.
+///
+/// Claude Code and Codex conversation ids are both UUIDs, so a
+/// document whose `agent:` switched from claude to codex could hand its Claude
+/// session id to `codex resume <id>`, which hard-fails with "No saved session
+/// found with ID" and wedged Restart Agent. Only Claude's transcript layout is
+/// verified, so the only provable foreign owner is Claude: an id with a
+/// `<home>/.claude/projects/<cwd>/<id>.jsonl` transcript is never another
+/// harness's thread.
+fn resume_id_foreign_harness_owner(
+    home: &Path,
+    project_root: &Path,
+    harness: &agent_doc_harness::HarnessConfig,
+    id: &str,
+) -> Option<&'static str> {
+    if harness.session_transcript_layout
+        == agent_doc_harness::SessionTranscriptLayout::ClaudeProjects
+    {
+        return None;
+    }
+    let cwd = project_root.to_string_lossy();
+    let dir = agent_doc_harness::session_transcript_dir(
+        &agent_doc_harness::SessionTranscriptLayout::ClaudeProjects,
+        home,
+        &cwd,
+    );
+    (agent_doc_harness::resume_id_transcript_exists(dir.as_deref(), id) == Some(true))
+        .then_some("claude")
+}
+
 /// Degrade a resolved `--resume <id>` to fresh when its transcript is verifiably
 /// gone, instead of launching a harness that will hard-exit.
+///
+/// Also degrades an id that provably belongs to a different harness
+/// (see [`resume_id_foreign_harness_owner`]).
 ///
 /// `#resumestale`: verified against the real CLI — `claude --resume <bad-id>`
 /// exits 1 with "No conversation found", it does not fall back to fresh on its
@@ -200,15 +263,63 @@ fn degrade_resume_if_transcript_missing(
     session_log: &mut Option<SessionLog>,
     route_owned: bool,
 ) -> Option<agent_doc_harness::ResumeRequest> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    degrade_resume_in_home(
+        canonical,
+        project_root,
+        harness,
+        resume,
+        session_log,
+        route_owned,
+        home.as_deref(),
+    )
+}
+
+/// [`degrade_resume_if_transcript_missing`] with an explicit home, so tests
+/// never race on the process-wide `HOME`.
+fn degrade_resume_in_home(
+    canonical: &Path,
+    project_root: &Path,
+    harness: &agent_doc_harness::HarnessConfig,
+    resume: Option<agent_doc_harness::ResumeRequest>,
+    session_log: &mut Option<SessionLog>,
+    route_owned: bool,
+    home: Option<&Path>,
+) -> Option<agent_doc_harness::ResumeRequest> {
     let Some(agent_doc_harness::ResumeRequest::Id(id)) = &resume else {
         return resume;
     };
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+    let Some(home) = home else {
         return resume;
     };
+    if let Some(owner) = resume_id_foreign_harness_owner(home, project_root, harness, id) {
+        start_console_status(
+            session_log,
+            route_owned,
+            format!(
+                "[start] warning: conversation id {id} belongs to {owner}, not {}; starting a fresh {} conversation instead of a resume that would fail",
+                harness.binary, harness.binary
+            ),
+        );
+        log_event(
+            session_log,
+            &format!(
+                "start_resume_foreign_harness id={id} harness={} owner={owner}",
+                harness.binary
+            ),
+        );
+        agent_doc_ops_log_io::log_op(
+            canonical,
+            &format!(
+                "start_resume_foreign_harness id={id} harness={} owner={owner}",
+                harness.binary
+            ),
+        );
+        return None;
+    }
     let cwd = project_root.to_string_lossy().to_string();
     let dir =
-        agent_doc_harness::session_transcript_dir(&harness.session_transcript_layout, &home, &cwd);
+        agent_doc_harness::session_transcript_dir(&harness.session_transcript_layout, home, &cwd);
     match agent_doc_harness::resume_id_transcript_exists(dir.as_deref(), id) {
         Some(false) => {
             start_console_status(
@@ -509,6 +620,31 @@ fn clear_document_resume_id_if_matches(file: &Path, harness: &str, id: &str) -> 
         "start_stale_resume_clear",
     )?;
     Ok(true)
+}
+
+/// Upper bound on the foreground stale-resume frontmatter writeback before a
+/// Codex relaunch.
+const STALE_RESUME_CLEAR_BUDGET: Duration = Duration::from_secs(5);
+
+/// Run `job` on a helper thread and wait at most `budget` for its result.
+///
+/// `None` means the budget elapsed; the job keeps running detached and its late
+/// result is discarded. Only for best-effort side effects whose caller already
+/// proceeds correctly without them.
+fn run_bounded<T: Send + 'static>(
+    budget: Duration,
+    job: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let spawned = std::thread::Builder::new()
+        .name("bounded-writeback".into())
+        .spawn(move || {
+            let _ = tx.send(job());
+        });
+    if spawned.is_err() {
+        return None;
+    }
+    rx.recv_timeout(budget).ok()
 }
 
 /// Codex cannot currently be preflighted through a verified transcript layout,
@@ -2207,13 +2343,34 @@ pub fn run_with_reap_policy_resume_and_harness(
         }
 
         if let Some((stale_id, recovery_reason)) = codex_resume_recovery {
-            let cleared = match clear_document_resume_id_if_matches(
-                &canonical,
-                &harness.binary,
-                &stale_id,
-            ) {
-                Ok(cleared) => cleared,
-                Err(err) => {
+            // the frontmatter writeback goes through the
+            // document's serialized write queue, which can stall behind a
+            // concurrent compaction projection. Observed on tasks/tools.md
+            // (2026-10-12): the write never returned, so the supervisor sat on
+            // Codex's "No saved session found" screen forever. The relaunch
+            // below forces resume off regardless, so bound the wait and let a
+            // late writeback finish in the background.
+            let clear_result = {
+                let canonical = canonical.clone();
+                let harness_binary = harness.binary.clone();
+                let stale_id = stale_id.clone();
+                run_bounded(STALE_RESUME_CLEAR_BUDGET, move || {
+                    clear_document_resume_id_if_matches(&canonical, &harness_binary, &stale_id)
+                })
+            };
+            let cleared = match clear_result {
+                None => {
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "codex_stale_resume_clear_deferred id={stale_id} reason=writeback_budget_exceeded budget_ms={} action=relaunch_fresh",
+                            STALE_RESUME_CLEAR_BUDGET.as_millis()
+                        ),
+                    );
+                    false
+                }
+                Some(Ok(cleared)) => cleared,
+                Some(Err(err)) => {
                     eprintln!(
                         "[start] warning: failed to clear stale Codex resume id {stale_id} from {}: {err:#}",
                         canonical.display()
@@ -3040,6 +3197,159 @@ mod tests {
                 "orchard-thread".into()
             ))
         );
+    }
+
+    /// tasks/tools.md (2026-10-12) switched `agent:` from
+    /// claude to codex and Restart Agent ran `codex resume <claude-session-id>`,
+    /// which Codex refused with "No saved session found with ID". The Claude
+    /// hook had recorded that id in the shared hook ledger. A Claude-tagged row
+    /// must never be a Codex projection, and an untagged legacy row whose id
+    /// owns a Claude transcript must be rejected too.
+    #[test]
+    fn codex_projection_never_adopts_a_claude_session_id() {
+        let dir = TempDir::new().unwrap();
+        let project_root = dir.path().join("proj");
+        std::fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
+        let project_root = project_root.canonicalize().unwrap();
+        let doc = project_root.join("tools.md");
+        std::fs::write(&doc, "---\nagent: codex\n---\n").unwrap();
+        let home = dir.path().join("home");
+        let claude_dir =
+            home.join(".claude")
+                .join("projects")
+                .join(agent_doc_harness::claude_project_dir_name(
+                    &project_root.to_string_lossy(),
+                ));
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        let project = |doc: &Path, harness| {
+            latest_codex_session_projection_in_home(doc, harness, Some(home.as_path()))
+        };
+        let prompt = |session: &str, turn: &str| agent_doc_codex_hook_io::UserPromptSubmitInput {
+            session_id: session.into(),
+            turn_id: turn.into(),
+            cwd: project_root.display().to_string(),
+            prompt: format!("agent-doc {}", doc.display()),
+        };
+        let codex = agent_doc_harness::HarnessConfig::codex();
+
+        // 1. A Claude-tagged binding is invisible to the Codex projection.
+        agent_doc_codex_hook_io::apply_user_prompt_submit_for_harness(
+            &prompt("claude-session", ""),
+            agent_doc_codex_hook_io::HookHarness::Claude,
+        )
+        .unwrap();
+        assert_eq!(project(&doc, &codex), None);
+
+        // 2. An untagged legacy row is rejected when the id owns a Claude
+        //    transcript, and adopted when it does not.
+        let root = agent_doc_project_root_io::project_root_containing(&doc).unwrap();
+        let legacy = agent_doc_codex_hook_io::SessionState {
+            session_id: "legacy-claude".into(),
+            identity_origin: agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook,
+            harness: None,
+            doc_path: doc.display().to_string(),
+            last_turn_id: String::new(),
+            last_prompt: format!("agent-doc {}", doc.display()),
+            last_auto_queue_head: None,
+            last_context_clear_at: None,
+            last_prompt_cycle: None,
+            preflight_admitted: None,
+            updated_at: 4_000_000_000,
+        };
+        agent_doc_codex_hook_io::save_state(&root, &legacy).unwrap();
+        std::fs::write(claude_dir.join("legacy-claude.jsonl"), b"{}").unwrap();
+        assert_eq!(project(&doc, &codex), None);
+        std::fs::remove_file(claude_dir.join("legacy-claude.jsonl")).unwrap();
+        assert_eq!(
+            project(&doc, &codex).map(|state| state.session_id),
+            Some("legacy-claude".to_string()),
+            "an unproven legacy row keeps its historical Codex meaning"
+        );
+
+        // 3. A Codex-tagged binding is projected.
+        agent_doc_codex_hook_io::clear_session_state_for_file(&doc, "legacy-claude").unwrap();
+        agent_doc_codex_hook_io::apply_user_prompt_submit(&prompt("codex-thread", "turn-1"))
+            .unwrap();
+        assert_eq!(
+            project(&doc, &codex).map(|state| state.session_id),
+            Some("codex-thread".to_string())
+        );
+    }
+
+    /// a frontmatter `resume.codex` that already holds a
+    /// Claude session id (projected before the fix) degrades to a fresh Codex
+    /// launch instead of `codex resume <claude-id>`. Claude keeps its own id.
+    #[test]
+    fn resume_id_owned_by_claude_degrades_codex_to_fresh() {
+        let dir = TempDir::new().unwrap();
+        let project_root = dir.path().join("proj");
+        std::fs::create_dir_all(&project_root).unwrap();
+        let doc = project_root.join("tools.md");
+        let home = dir.path().join("home");
+        let claude_dir =
+            home.join(".claude")
+                .join("projects")
+                .join(agent_doc_harness::claude_project_dir_name(
+                    &project_root.to_string_lossy(),
+                ));
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        std::fs::write(claude_dir.join("claude-id.jsonl"), b"{}").unwrap();
+
+        let codex = agent_doc_harness::HarnessConfig::codex();
+        let claude = agent_doc_harness::HarnessConfig::claude();
+        assert_eq!(
+            resume_id_foreign_harness_owner(&home, &project_root, &codex, "claude-id"),
+            Some("claude")
+        );
+        assert_eq!(
+            resume_id_foreign_harness_owner(&home, &project_root, &codex, "codex-id"),
+            None
+        );
+        assert_eq!(
+            resume_id_foreign_harness_owner(&home, &project_root, &claude, "claude-id"),
+            None,
+            "an id is never foreign to the harness that owns it"
+        );
+
+        let mut log: Option<SessionLog> = None;
+        assert_eq!(
+            degrade_resume_in_home(
+                &doc,
+                &project_root,
+                &codex,
+                Some(agent_doc_harness::ResumeRequest::Id("claude-id".into())),
+                &mut log,
+                false,
+                Some(home.as_path()),
+            ),
+            None
+        );
+        assert_eq!(
+            degrade_resume_in_home(
+                &doc,
+                &project_root,
+                &claude,
+                Some(agent_doc_harness::ResumeRequest::Id("claude-id".into())),
+                &mut log,
+                false,
+                Some(home.as_path()),
+            ),
+            Some(agent_doc_harness::ResumeRequest::Id("claude-id".into()))
+        );
+    }
+
+    /// the stale-resume frontmatter writeback must not hold
+    /// the Codex relaunch hostage when the document write queue stalls.
+    #[test]
+    fn bounded_writeback_returns_when_the_job_never_finishes() {
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let started = Instant::now();
+        let outcome = run_bounded(Duration::from_millis(50), move || blocked.recv().is_ok());
+        assert_eq!(outcome, None);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        drop(release);
+
+        assert_eq!(run_bounded(Duration::from_secs(5), || 7), Some(7));
     }
 
     /// `#preflightprojpass`: the claim scan walks every document in `state.db`

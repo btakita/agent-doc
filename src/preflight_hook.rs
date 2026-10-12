@@ -908,7 +908,12 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
     // Claude's Stop hook needs the same exact-session document binding as
     // Codex. Persist it before admission so a cycle is never opened without a
     // Stop boundary capable of finding the document again.
-    if let Err(err) = agent_doc_codex_hook_io::apply_user_prompt_submit(&input) {
+    // Tagged `Claude` so a later `agent: codex` switch can never project this
+    // Claude Code session id as a Codex resume id.
+    if let Err(err) = agent_doc_codex_hook_io::apply_user_prompt_submit_for_harness(
+        &input,
+        agent_doc_codex_hook_io::HookHarness::Claude,
+    ) {
         eprintln!("[agent-doc] Claude session tracking failed: {err:#}");
         if tracking_recognized_trigger(&input.prompt) {
             emit_admission_failure(&input.cwd, &err.context("Claude session tracking failed"));

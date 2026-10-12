@@ -11,6 +11,16 @@ override a Codex resume ID. Legacy external clear rows without a turn ID are
 excluded from thread recovery. Explicit hook provenance permits genuine hooks
 whose payload omits a turn ID.
 
+The hook ledger is shared by Claude Code and Codex, so every binding records the
+harness whose `UserPromptSubmit` hook wrote it (`harness: claude|codex`). Codex
+resume recovery ignores rows tagged with another harness, and rejects any
+candidate id — from an untagged legacy row or from frontmatter `resume.codex` —
+that owns a Claude transcript (`~/.claude/projects/<cwd>/<id>.jsonl`), logging
+`start_resume_foreign_harness` / `start_codex_session_projection_rejected` and
+launching a fresh Codex session instead. Switching a document's `agent:` from
+claude to codex therefore never runs `codex resume <claude-session-id>`
+.
+
 Supervisor compilation does not imply an unsafe injection boundary. Recycle
 `InFlight` is published at the actual replacement boundary and settled by the
 fresh watch loop. A reopen awaiting that transition uses the complete controller

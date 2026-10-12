@@ -9610,6 +9610,7 @@ fn pure_codex_thread_does_not_inherit_orchard_agent_doc_work() {
         project.path(),
         &SessionState {
             identity_origin: Default::default(),
+            harness: None,
             session_id: "orchard-agent-thread".into(),
             doc_path: document.display().to_string(),
             last_turn_id: "turn-a".into(),

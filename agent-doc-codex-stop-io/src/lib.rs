@@ -4456,6 +4456,7 @@ Done.\n\
         let root = project_root_for(dir.path()).unwrap();
         let state = SessionState {
             identity_origin: Default::default(),
+            harness: None,
             session_id: "codex-session".to_string(),
             doc_path: doc.display().to_string(),
             last_turn_id: "turn-child".to_string(),
@@ -7187,6 +7188,7 @@ Reviewed the gated items.\n\
             &root,
             &SessionState {
                 identity_origin: Default::default(),
+                harness: None,
                 session_id: "codex-session".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
@@ -7310,6 +7312,7 @@ Reviewed the gated items.\n\
             &root,
             &SessionState {
                 identity_origin: Default::default(),
+                harness: None,
                 session_id: "codex-session".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
@@ -7362,6 +7365,7 @@ Reviewed the gated items.\n\
             &root,
             &SessionState {
                 identity_origin: Default::default(),
+                harness: None,
                 session_id: "codex-session".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
@@ -7410,6 +7414,7 @@ Reviewed the gated items.\n\
             &root,
             &SessionState {
                 identity_origin: Default::default(),
+                harness: None,
                 session_id: "codex-session".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),

@@ -1767,6 +1767,7 @@ mod tests {
             &agent_doc_codex_hook_io::SessionState {
                 session_id: "sess-1".into(),
                 identity_origin: agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook,
+                harness: None,
                 doc_path: file.display().to_string(),
                 last_turn_id: String::new(),
                 last_prompt: "agent-doc plan.md".into(),
@@ -2153,6 +2154,7 @@ mod tests {
             &agent_doc_codex_hook_io::SessionState {
                 session_id: session_id.to_string(),
                 identity_origin: agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook,
+                harness: None,
                 doc_path: file.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
                 last_prompt: format!("/agent-doc {}", file.display()),

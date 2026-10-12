@@ -78,6 +78,15 @@ pub struct SessionState {
     pub session_id: String,
     #[serde(default)]
     pub identity_origin: SessionIdentityOrigin,
+    /// Harness whose `UserPromptSubmit` hook recorded this binding.
+    ///
+    /// Claude Code and Codex share this ledger, and both
+    /// supply a `session_id`, but only a Codex thread id may ever reach
+    /// `codex resume <id>`. `None` is a row written before the tag existed (or
+    /// an external prompt); readers that launch a harness must treat it as
+    /// unproven rather than as the caller's harness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<HookHarness>,
     pub doc_path: String,
     pub last_turn_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -100,6 +109,23 @@ pub struct SessionState {
     pub updated_at: u64,
 }
 
+/// Harness that delivered a `UserPromptSubmit` hook payload.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HookHarness {
+    Claude,
+    Codex,
+}
+
+impl HookHarness {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
+    }
+}
+
 /// Control prompts are keyed by document session, not by a Codex thread.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -111,6 +137,11 @@ pub enum SessionIdentityOrigin {
 }
 
 impl SessionState {
+    /// Whether a Codex resume may consider this row.
+    pub fn recorded_by_codex_or_legacy(&self) -> bool {
+        matches!(self.harness, None | Some(HookHarness::Codex))
+    }
+
     fn has_harness_identity(&self) -> bool {
         match self.identity_origin {
             SessionIdentityOrigin::HarnessHook => true,
@@ -166,6 +197,7 @@ pub fn parked_session_state(state: &SessionState, updated_at: u64) -> SessionSta
     SessionState {
         session_id: state.session_id.clone(),
         identity_origin: state.identity_origin,
+        harness: state.harness,
         doc_path: state.doc_path.clone(),
         last_turn_id: String::new(),
         last_prompt: String::new(),
@@ -280,7 +312,19 @@ pub fn handle_user_prompt_submit() -> Result<()> {
     apply_user_prompt_submit(&input)
 }
 
+/// Record a Codex `UserPromptSubmit` binding. Use
+/// [`apply_user_prompt_submit_for_harness`] from any other harness's hook.
 pub fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
+    apply_user_prompt_submit_for_harness(input, HookHarness::Codex)
+}
+
+/// Record the exact-session document binding, tagged with the harness whose
+/// hook delivered it so a Claude Code session id can never be projected as a
+/// Codex resume id after the document's `agent:` switches.
+pub fn apply_user_prompt_submit_for_harness(
+    input: &UserPromptSubmitInput,
+    harness: HookHarness,
+) -> Result<()> {
     let cwd = PathBuf::from(&input.cwd);
     let roots_for_cwd = project_roots_for(&cwd);
     let previous_state = load_state_any(&roots_for_cwd, &input.session_id)?.map(|(_, state)| state);
@@ -314,6 +358,7 @@ pub fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
     let state = SessionState {
         session_id: input.session_id.clone(),
         identity_origin: SessionIdentityOrigin::HarnessHook,
+        harness: Some(harness),
         doc_path: doc_path.display().to_string(),
         last_turn_id: input.turn_id.clone(),
         last_prompt: input.prompt.clone(),
@@ -768,8 +813,17 @@ pub fn load_latest_prompt_for_file(file: &Path) -> Result<Option<String>> {
 /// Load the newest file-scoped state for explicit cold resume/route recovery.
 ///
 /// Ambient hooks must instead use their exact payload `session_id`.
+///
+/// Every caller resumes or proves a *Codex* thread, so a row another harness's
+/// hook recorded (a Claude Code session on the same document before its
+/// `agent:` switched to codex) is never a candidate: `codex resume <claude-id>`
+/// hard-fails with "No saved session found". Untagged legacy
+/// rows remain candidates; the start runtime additionally rejects an id that
+/// owns a Claude transcript.
 pub fn load_latest_prompt_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>> {
-    load_latest_state_for_file(file)
+    load_latest_file_state_matching(file, |state| {
+        state.has_harness_identity() && state.recorded_by_codex_or_legacy()
+    })
 }
 
 pub fn prompt_requests_clear(prompt: &str) -> bool {
@@ -940,6 +994,7 @@ pub fn record_external_prompt_for_file(file: &Path, session_id: &str, prompt: &s
     let state = SessionState {
         session_id: session_id.to_string(),
         identity_origin: SessionIdentityOrigin::ExternalPrompt,
+        harness: None,
         doc_path: canonical.display().to_string(),
         last_turn_id: String::new(),
         last_prompt: prompt.to_string(),
@@ -1540,6 +1595,7 @@ mod tests {
             &SessionState {
                 session_id: "codex-session".to_string(),
                 identity_origin: SessionIdentityOrigin::HarnessHook,
+                harness: None,
                 doc_path: dir.path().join("session-check").display().to_string(),
                 last_turn_id: "turn-1".to_string(),
                 last_prompt: "agent-doc session-check tasks/frontend.md".to_string(),
@@ -1760,6 +1816,7 @@ agent-doc {}\n",
             &root,
             &SessionState {
                 identity_origin: Default::default(),
+                harness: None,
                 session_id: "codex-session-old".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
@@ -1776,6 +1833,7 @@ agent-doc {}\n",
             &root,
             &SessionState {
                 identity_origin: Default::default(),
+                harness: None,
                 session_id: "codex-session-new".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-2".to_string(),
@@ -1805,6 +1863,7 @@ agent-doc {}\n",
             &root,
             &SessionState {
                 identity_origin: Default::default(),
+                harness: None,
                 session_id: "shared-codex-session".to_string(),
                 doc_path: owner.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
@@ -1833,6 +1892,7 @@ agent-doc {}\n",
             &root,
             &SessionState {
                 identity_origin: Default::default(),
+                harness: None,
                 session_id: "owned-codex-session".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
@@ -1870,6 +1930,7 @@ agent-doc {}\n",
             &root,
             &SessionState {
                 identity_origin: Default::default(),
+                harness: None,
                 session_id: "codex-session-good".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
@@ -1923,6 +1984,62 @@ agent-doc {}\n",
                 .session_id,
             "codex-session"
         );
+    }
+
+    /// Claude Code and Codex share this ledger. A row the
+    /// Claude hook wrote must never be the Codex resume projection, even when it
+    /// is the newest binding for the document; the tag survives parking and a
+    /// legacy row without the field still parses.
+    #[test]
+    fn codex_resume_projection_skips_claude_tagged_bindings() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        track_doc(&dir, &doc, "turn-1");
+        let codex = load_state(dir.path(), "codex-session").unwrap().unwrap();
+        assert_eq!(codex.harness, Some(HookHarness::Codex));
+
+        apply_user_prompt_submit_for_harness(
+            &UserPromptSubmitInput {
+                session_id: "claude-session".into(),
+                turn_id: String::new(),
+                cwd: dir.path().display().to_string(),
+                prompt: format!("agent-doc {}", doc.display()),
+            },
+            HookHarness::Claude,
+        )
+        .unwrap();
+        let mut claude = load_state(dir.path(), "claude-session").unwrap().unwrap();
+        assert_eq!(claude.harness, Some(HookHarness::Claude));
+        claude.updated_at = codex.updated_at + 10;
+        save_state(dir.path(), &claude).unwrap();
+        assert_eq!(
+            parked_session_state(&claude, claude.updated_at).harness,
+            Some(HookHarness::Claude)
+        );
+
+        assert_eq!(
+            load_latest_prompt_state_for_file(&doc)
+                .unwrap()
+                .unwrap()
+                .session_id,
+            "codex-session",
+            "the newer Claude binding must not become a Codex resume id"
+        );
+        // Ownership lookups still see every harness's binding.
+        assert_eq!(
+            load_latest_state_for_file(&doc)
+                .unwrap()
+                .unwrap()
+                .session_id,
+            "claude-session"
+        );
+
+        let mut legacy = serde_json::to_value(&codex).unwrap();
+        legacy.as_object_mut().unwrap().remove("harness");
+        let legacy: SessionState = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.harness, None);
+        assert!(legacy.recorded_by_codex_or_legacy());
+        assert!(!claude.recorded_by_codex_or_legacy());
     }
 
     #[test]

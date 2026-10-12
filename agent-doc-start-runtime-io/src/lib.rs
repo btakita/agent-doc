@@ -64,6 +64,9 @@
 //!   The same fresh recovery occurs when document authority shows that the
 //!   operator already removed the pointer while the supervisor was running, so
 //!   cached launch arguments cannot keep resurrecting an obsolete resume id.
+//!   That writeback is bounded so a stalled document write queue cannot hold
+//!   the relaunch on Codex's error screen, and an id that owns a Claude
+//!   transcript is never resumed under Codex.
 //! - Prints the truncated session UUID and pane ID to stderr on registration.
 //! - Opens a persistent session log at `.agent-doc/logs/<session-uuid>.log`,
 //!   appending timestamped events for session start, claude start/restart/exit,

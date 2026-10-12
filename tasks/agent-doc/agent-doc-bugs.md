@@ -467,7 +467,7 @@ Details are in the 05:45 response. The review list is unchanged at 3 gated items
 - 🚧 sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/241
 - 🚧 do [#ideriderindependentnav]
-- 🚧 #actionable-review
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog

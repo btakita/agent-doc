@@ -500,6 +500,23 @@ I'll file P2–P5 as backlog ids when I merge `ridernav`, so they queue behind i
 - The v0.35.492 release is still in its checks; nothing is tagged yet.
 - The subagents for `#fpeseverityparse`, `idleclear` and build/test turnaround are still working.
 - `gh241` and now `ridernav` are waiting for the next merge batch.
+
+### Re: tools.md Codex restart, batch status — opus-5-5 · 2026-10-12T06:40-04:00
+
+**New queue item, tools.md:** you switched the agent from claude to codex, then pressed Restart Agent, and the restart wedged on "No saved session found with ID 915c25bf…". I claimed it and handed it to a subagent working on branch `codexresumeid` in its own worktree. It will only read tools.md and its pane, never edit or restart them.
+
+The likely cause is that agent-doc stores one resume id per document, regardless of harness. After the switch it passed Claude's session id to `codex resume`. The fix covers two things:
+- key the stored resume id by harness, so an id recorded under the other harness is ignored;
+- treat Codex's "No saved session found" error as a stale id and start a fresh session instead of wedging.
+
+**Batch status:** five fixed branches are merged together, and `make check` plus `make tmux-ci` are running on the result:
+- `idleclear`: an idle Clear types `/clear` instead of restarting the agent. It also fixes the red tmux test on `main`.
+- `gh241`
+- `ridernav`: phase 1 of IDE-independent navigation.
+- `codexclearwedge`: the lazily.md wedge where Clear was stuck behind Codex Ctrl+C.
+- `fpeparse`: the duplicated and joined queue lines in infra.md.
+
+If both checks pass, I'll push to `main`, install, and re-cut v0.35.492. The first attempt stopped before tagging, so nothing was published. The build/test turnaround subagent is still working, and it will go in a later batch.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -514,7 +531,8 @@ I'll file P2–P5 as backlog ids when I merge `ridernav`, so they queue behind i
 - 🚧 sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/241
 - 🚧 do [#ideriderindependentnav]
-- lazily.md issue: Run Agent Doc then Ctrl+c in the Codex terminal then Clear Session Context: Clear Session Context is wedged
+- 🚧 lazily.md issue: Run Agent Doc then Ctrl+c in the Codex terminal then Clear Session Context: Clear Session Context is wedged
+- tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.
 - 🚧 release + publish
 <!-- /agent:queue -->
 

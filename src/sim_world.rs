@@ -1416,16 +1416,30 @@ mod multi_tmux_session_model {
 ///   every document keeps exactly one pane (none duplicated or lost); and the
 ///   lane that lost the pane is republished, so no lane window ever shows a
 ///   document whose pane lives in another lane;
+/// - P5: the project switches `editor_navigation` both ways and `agent-doc gc`
+///   runs the production lane reconcile (`plan_navigation_lane_reconcile`).
+///   Enabling moves no pane; a gc closes only empty, unused lane sessions
+///   agent-doc created, never a session that only carries a lane's name and
+///   never a lane a live installation still navigates; disabling folds every
+///   lane document pane back into the project session (none lost or
+///   duplicated) before its lane closes; in shared mode the project sync may
+///   adopt a lane pane into the project session, never the reverse;
 /// - every mutation below is detected.
 mod two_ide_navigation_model {
     use agent_doc_editor_surface::{
-        InstallationFocus, LaneClaim, LayoutOwnerKey, NavigationLane, NavigationMode,
-        SurfaceAuthority, editor_installation, partition_lane_layout_columns_for_claim,
+        InstallationFocus, LaneClaim, LanePaneObservation, LaneReconcileAction,
+        LaneSessionObservation, LayoutOwnerKey, NavigationLane, NavigationMode, SurfaceAuthority,
+        editor_installation, is_lane_session_of, partition_lane_layout_columns_for_claim,
+        plan_navigation_lane_reconcile,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
     const ROOT: &str = "/project";
     const PROJECT_SESSION: &str = "proj";
+    /// A session that only carries an installation lane's name; agent-doc did
+    /// not create it. It holds only the operator's idle shell, so the lane
+    /// mark is the only thing that keeps a gc from closing it.
+    const FOREIGN_SESSION: &str = "proj-XX-55667788";
     const CLIENTS: [(&str, &str); 3] = [
         (
             "jetbrains@IU.0a1b2c3d-pid:41",
@@ -1467,6 +1481,15 @@ mod two_ide_navigation_model {
         LoseOnHandoff,
         /// The lane that lost a pane is not republished (P4).
         NoRepublish,
+        /// Enabling lanes moves the shared session's panes into a lane (P5).
+        MoveOnEnable,
+        /// The gc reaps lane-named sessions without checking the mark (P5).
+        GcIgnoresMark,
+        /// The gc treats document panes as bare shells, so a disable closes
+        /// a lane without folding its panes back (P5).
+        GcIgnoresOwnedPanes,
+        /// The gc ignores a live installation's lane (P5).
+        GcIgnoresLiveSurface,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1476,6 +1499,10 @@ mod two_ide_navigation_model {
         /// An explicit claim: `Sync Tmux Layout` or `Claim for Tmux Pane`.
         Claim(usize),
         Retire(usize),
+        /// The project switches `editor_navigation` (P5).
+        SetMode(NavigationMode),
+        /// `agent-doc gc` runs the lane reconcile (P5).
+        Gc,
     }
 
     #[derive(Default)]
@@ -1500,6 +1527,17 @@ mod two_ide_navigation_model {
         projected: BTreeMap<String, BTreeSet<String>>,
         /// session -> the client whose layout it last projected.
         last_layout: BTreeMap<String, usize>,
+        /// Installation lane sessions agent-doc created (marked) and that are
+        /// still alive (P5).
+        lane_sessions: BTreeSet<String>,
+        /// The foreign lane-named session is still alive (P5).
+        foreign_alive: bool,
+        /// Lane sessions a gc closed while a live installation navigated them.
+        closed_live: Vec<String>,
+        /// `(document, from)` for every pane a gc folded back (P5).
+        folded: Vec<(String, String)>,
+        /// A disable's gc left a document pane in a lane session.
+        unfolded_after_disable: Vec<(String, String)>,
     }
 
     struct Sim {
@@ -1515,6 +1553,7 @@ mod two_ide_navigation_model {
                 mutation,
                 world: World {
                     live: (0..CLIENTS.len()).collect(),
+                    foreign_alive: true,
                     ..World::default()
                 },
             }
@@ -1598,6 +1637,8 @@ mod two_ide_navigation_model {
                         }
                     }
                 }
+                Event::SetMode(mode) => self.set_mode(mode),
+                Event::Gc => self.gc(),
                 Event::Retire(client) => {
                     if !self.world.live.remove(&client) {
                         return;
@@ -1617,6 +1658,147 @@ mod two_ide_navigation_model {
                             *fold = next;
                             self.world.writers_since_handoff.clear();
                         }
+                    }
+                }
+            }
+        }
+
+        /// Switch `editor_navigation` (a config change the controller reads on
+        /// its next start). Per-mode bookkeeping restarts; panes stay where
+        /// they are (enable moves nothing).
+        fn set_mode(&mut self, mode: NavigationMode) {
+            if mode == self.mode {
+                return;
+            }
+            let enabling = mode == NavigationMode::PerInstallation;
+            self.mode = mode;
+            self.world.writers.clear();
+            self.world.writers_since_handoff.clear();
+            self.world.deferred = 0;
+            // The controller reads the mode at start, so the switch restarts
+            // it: no retained layout survives to be republished, and every
+            // window shows only the panes physically in it.
+            self.world.projected.clear();
+            self.world.last_layout.clear();
+            if enabling && self.mutation == Mutation::MoveOnEnable {
+                let lane = self.lane(0).tmux_session_name(PROJECT_SESSION);
+                self.world.lane_sessions.insert(lane.clone());
+                for (document, session) in self.world.pane_session.iter_mut() {
+                    if session == PROJECT_SESSION {
+                        self.world
+                            .moved
+                            .push((document.clone(), session.clone(), lane.clone()));
+                        *session = lane.clone();
+                    }
+                }
+            }
+        }
+
+        /// The installation lane session a live installation navigates, when
+        /// the project is in per-installation mode (its IDE terminal attaches
+        /// there).
+        fn live_lane_sessions(&self) -> BTreeSet<String> {
+            if self.mode != NavigationMode::PerInstallation {
+                return BTreeSet::new();
+            }
+            self.world
+                .live
+                .iter()
+                .map(|client| self.lane(*client))
+                .filter(|lane| !lane.is_shared())
+                .map(|lane| lane.tmux_session_name(PROJECT_SESSION))
+                .collect()
+        }
+
+        /// `agent-doc gc`: the production lane reconcile over this world.
+        fn gc(&mut self) {
+            let live = self.live_lane_sessions();
+            let mut observed = self
+                .world
+                .lane_sessions
+                .iter()
+                .map(|session| LaneSessionObservation {
+                    session: session.clone(),
+                    marked: true,
+                    live_surface: live.contains(session),
+                    panes: self
+                        .world
+                        .pane_session
+                        .iter()
+                        .filter(|(_, pane_session)| *pane_session == session)
+                        .map(|(document, _)| LanePaneObservation {
+                            pane: document.clone(),
+                            document_owned: true,
+                            busy: true,
+                        })
+                        .collect(),
+                })
+                .collect::<Vec<_>>();
+            if self.world.foreign_alive {
+                observed.push(LaneSessionObservation {
+                    session: FOREIGN_SESSION.to_string(),
+                    marked: false,
+                    live_surface: false,
+                    panes: vec![LanePaneObservation {
+                        pane: "operator".to_string(),
+                        document_owned: false,
+                        busy: false,
+                    }],
+                });
+            }
+            for lane in &mut observed {
+                match self.mutation {
+                    Mutation::GcIgnoresMark => lane.marked = true,
+                    Mutation::GcIgnoresOwnedPanes => {
+                        for pane in &mut lane.panes {
+                            pane.document_owned = false;
+                            pane.busy = false;
+                        }
+                    }
+                    Mutation::GcIgnoresLiveSurface => lane.live_surface = false,
+                    _ => {}
+                }
+            }
+            let plan = plan_navigation_lane_reconcile(self.mode, PROJECT_SESSION, true, &observed);
+            for action in plan {
+                match action {
+                    LaneReconcileAction::FoldPane { session, pane } => {
+                        if self.world.pane_session.get(&pane) == Some(&session) {
+                            self.world
+                                .pane_session
+                                .insert(pane.clone(), PROJECT_SESSION.to_string());
+                            self.world.folded.push((pane, session));
+                        }
+                    }
+                    LaneReconcileAction::Close { session } => {
+                        if session == FOREIGN_SESSION {
+                            self.world.foreign_alive = false;
+                            continue;
+                        }
+                        if live.contains(&session) {
+                            self.world.closed_live.push(session.clone());
+                        }
+                        // Every pane still in it dies with it.
+                        for (document, pane_session) in &self.world.pane_session {
+                            if pane_session == &session {
+                                self.world.pane_count.insert(document.clone(), 0);
+                            }
+                        }
+                        self.world.lane_sessions.remove(&session);
+                        self.world.projected.remove(&session);
+                        self.world.last_layout.remove(&session);
+                    }
+                    LaneReconcileAction::Retain { .. } => {}
+                }
+            }
+            if self.mode == NavigationMode::Shared {
+                for (document, session) in &self.world.pane_session {
+                    if self.world.lane_sessions.contains(session)
+                        && self.world.pane_count.get(document).copied().unwrap_or(0) > 0
+                    {
+                        self.world
+                            .unfolded_after_disable
+                            .push((document.clone(), session.clone()));
                     }
                 }
             }
@@ -1696,6 +1878,10 @@ mod two_ide_navigation_model {
             } else {
                 columns
             };
+            if session != PROJECT_SESSION {
+                // The lane's first driving layout provisions its session.
+                self.world.lane_sessions.insert(session.to_string());
+            }
             let mut shown = BTreeSet::new();
             for document in kept {
                 match self.world.pane_session.get(&document).cloned() {
@@ -1704,6 +1890,18 @@ mod two_ide_navigation_model {
                             .pane_session
                             .insert(document.clone(), session.to_string());
                         *self.world.pane_count.entry(document.clone()).or_default() += 1;
+                    }
+                    Some(from)
+                        if from != session
+                            && self.mode == NavigationMode::Shared
+                            && session == PROJECT_SESSION
+                            && is_lane_session_of(PROJECT_SESSION, &from) =>
+                    {
+                        // Disabled lanes: the project sync adopts a pane left
+                        // in a lane session before gc folded it.
+                        self.world
+                            .pane_session
+                            .insert(document.clone(), session.to_string());
                     }
                     Some(from) if from != session => {
                         self.world
@@ -1724,6 +1922,19 @@ mod two_ide_navigation_model {
 
         /// The invariant this mode promises, or the violation.
         fn check(&self) -> Result<(), String> {
+            if !self.world.foreign_alive {
+                return Err(format!(
+                    "gc closed {FOREIGN_SESSION}, which agent-doc never created"
+                ));
+            }
+            if let Some(session) = self.world.closed_live.first() {
+                return Err(format!(
+                    "gc closed {session} while its installation is live"
+                ));
+            }
+            if let Some((document, session)) = self.world.unfolded_after_disable.first() {
+                return Err(format!("disable left {document} in lane {session}"));
+            }
             if let Some((document, from, to)) = self.world.moved.first() {
                 return Err(format!(
                     "pane of {document} moved across sessions {from} -> {to}"
@@ -1805,6 +2016,11 @@ mod two_ide_navigation_model {
                     Event::Retire(client),
                 ]
             })
+            .chain([
+                Event::SetMode(NavigationMode::Shared),
+                Event::SetMode(NavigationMode::PerInstallation),
+                Event::Gc,
+            ])
             .collect()
     }
 
@@ -1922,6 +2138,94 @@ mod two_ide_navigation_model {
         )
         .expect("the old lane keeps showing a pane it lost");
         assert!(violation.contains("still shows"), "{violation}");
+    }
+
+    #[test]
+    fn moving_panes_on_enable_is_detected() {
+        let violation = explore(NavigationMode::Shared, Mutation::MoveOnEnable, DEPTH)
+            .expect("enabling must leave the shared session's panes in place");
+        assert!(violation.contains("moved across sessions"), "{violation}");
+    }
+
+    #[test]
+    fn a_gc_reaping_an_unmarked_session_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::GcIgnoresMark,
+            DEPTH,
+        )
+        .expect("an unmarked lane-named session must never be reaped");
+        assert!(violation.contains("never created"), "{violation}");
+    }
+
+    #[test]
+    fn a_disable_that_closes_lanes_without_folding_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::GcIgnoresOwnedPanes,
+            DEPTH,
+        )
+        .expect("closing a lane that still holds a document pane loses it");
+        assert!(violation.contains("lost"), "{violation}");
+    }
+
+    #[test]
+    fn a_gc_closing_a_live_lane_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::GcIgnoresLiveSurface,
+            DEPTH,
+        )
+        .expect("an empty lane of a live installation must be kept");
+        assert!(
+            violation.contains("while its installation is live"),
+            "{violation}"
+        );
+    }
+
+    #[test]
+    fn enable_then_disable_round_trips_every_pane_through_gc() {
+        let idea = "proj-IU-0a1b2c3d".to_string();
+        let rider = "proj-RD-9f8e7d6c".to_string();
+        let mut sim = Sim::new(NavigationMode::Shared, Mutation::None);
+        // The shared window predates the switch.
+        sim.step(Event::Focus(0));
+        sim.step(Event::Layout(0));
+        assert_eq!(sim.world.pane_session["/project/a.md"], PROJECT_SESSION);
+        sim.step(Event::SetMode(NavigationMode::PerInstallation));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(
+            sim.world.pane_session["/project/a.md"], PROJECT_SESSION,
+            "enable moves no pane"
+        );
+        // Rider's lane starts `c` itself; IDEA claims `a` explicitly.
+        sim.step(Event::Layout(1));
+        sim.step(Event::Claim(0));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.pane_session["/project/c.md"], rider);
+        assert_eq!(sim.world.pane_session["/project/a.md"], idea);
+        // Rider retires; a gc keeps IDEA's live lane and Rider's occupied one.
+        sim.step(Event::Retire(1));
+        sim.step(Event::Gc);
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(
+            sim.world.lane_sessions,
+            BTreeSet::from([idea.clone(), rider.clone()])
+        );
+        // Disable: gc folds every lane pane back, then closes the lanes.
+        sim.step(Event::SetMode(NavigationMode::Shared));
+        sim.step(Event::Gc);
+        assert_eq!(sim.check(), Ok(()));
+        assert!(sim.world.lane_sessions.is_empty());
+        assert!(
+            sim.world
+                .pane_session
+                .values()
+                .all(|session| session == PROJECT_SESSION)
+        );
+        assert!(sim.world.pane_count.values().all(|count| *count == 1));
+        assert_eq!(sim.world.folded.len(), 3);
+        assert!(sim.world.foreign_alive);
     }
 
     #[test]

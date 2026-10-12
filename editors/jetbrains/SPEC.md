@@ -266,6 +266,11 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   contended document's pane from another IDE's lane into this IDE's lane before arranging it. Passive
   publications (`automatic` heartbeats, `resync`) never move a pane. No plugin change was needed:
   the plugin already sent `caller_kind` and `client_id` on every publication.
+- Per-installation lanes are available (`#ideriderindependentnav` P5): switching
+  `editor_navigation` either way needs no plugin action. Enabling moves no pane; after switching
+  back to `shared`, `agent-doc gc` folds every lane's document panes into the shared session and
+  closes the lane sessions. A closed lane is provisioned again by this IDE's next terminal attach
+  or layout sync, and gc never closes a lane session a terminal is still attached to.
 - An observation with no detected columns is structurally `unknown`, not a one-column layout.
   It may select the focused document's existing pane, but it cannot add, stash, reorder, or
   provision panes. A proven local single editor window publishes one column. The presence of

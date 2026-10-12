@@ -1047,3 +1047,219 @@ fn native_plugin_harnesses_peer_through_real_agent_doc_controller() {
     jetbrains.shutdown().unwrap();
     vscode.shutdown().unwrap();
 }
+
+/// `#ideriderindependentnav` P5: two simulated JetBrains installations (IDEA
+/// and Rider) on one project, end to end on an isolated tmux server, through
+/// the enable/disable migration and lane cleanup that `agent-doc gc` runs.
+///
+/// - Enabling `per_installation` on a project with an existing shared window
+///   moves no pane: the shared document stays in the project session, and each
+///   installation's lane session starts empty (provisioned exactly as the IDE
+///   terminal attach does for that editor client).
+/// - Cleanup closes only an empty lane session agent-doc created with no live
+///   surface; a lane holding a document pane or a live installation is kept,
+///   and a session that only carries a lane's name is never touched.
+/// - Disabling (`shared`) folds every lane document pane back into the project
+///   session (same pane ids, each exactly once, none lost), then closes the
+///   lanes; a second pass is a no-op.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn two_ide_navigation_lanes_migrate_and_clean_up_end_to_end() {
+    use agent_doc_editor_surface::{LaneReconcileAction, LaneRetainReason};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    const IDEA: &str = "jetbrains@IU.0a1b2c3d-pid:41";
+    const RIDER: &str = "jetbrains@RD.9f8e7d6c-pid:42";
+    const CLION: &str = "jetbrains@CL.11223344-pid:43";
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+    std::fs::create_dir_all(root.join("tasks")).unwrap();
+    let configure = |mode: &str| {
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            format!("tmux_session = \"proj\"\neditor_navigation = \"{mode}\"\n"),
+        )
+        .unwrap();
+    };
+    configure("shared");
+    let iso = agent_doc_tmux_io::isolated_test_tmux("navlane-p5-e2e");
+
+    let register = |name: &str, pane: &str| {
+        let file = root.join(format!("tasks/{name}.md"));
+        std::fs::write(&file, format!("# {name}\n")).unwrap();
+        let pid: u32 = iso
+            .raw_cmd(&["display-message", "-p", "-t", pane, "#{pane_pid}"])
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let window = iso.pane_window(pane).unwrap();
+        agent_doc_session_registry_io::registration::register_full_with_cwd_in(
+            &root,
+            name,
+            pane,
+            &file.to_string_lossy(),
+            pid,
+            &window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+    };
+    let sessions = || -> BTreeSet<String> {
+        iso.raw_cmd(&["list-sessions", "-F", "#{session_name}"])
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    };
+    let panes_by_session = || -> BTreeMap<String, String> {
+        iso.raw_cmd(&["list-panes", "-a", "-F", "#{pane_id} #{session_name}"])
+            .unwrap()
+            .lines()
+            .filter_map(|line| {
+                let (pane, session) = line.split_once(' ')?;
+                Some((pane.to_string(), session.to_string()))
+            })
+            .collect()
+    };
+
+    // The project's existing shared window, with one document pane.
+    let shared_pane = iso.new_session("proj", &root).unwrap();
+    iso.raw_cmd(&["rename-window", "-t", &shared_pane, "agent-doc"])
+        .unwrap();
+    let shared_doc = iso.new_window("proj", &root).unwrap();
+    register("shared-doc", &shared_doc);
+    // A session that only carries a lane's name: never agent-doc's.
+    let foreign = iso.new_session("proj-XX-55667788", &root).unwrap();
+    let before_enable = panes_by_session();
+
+    // Enable. Each IDE's terminal attach provisions its own lane session.
+    configure("per_installation");
+    let lane = |client: &str| {
+        agent_doc_controller_io::project_controller::navigation_lane_session_for_client(
+            &iso, &root, client,
+        )
+        .unwrap()
+        .expect("an installation lane")
+        .session
+    };
+    let (idea, rider, clion) = (lane(IDEA), lane(RIDER), lane(CLION));
+    assert_eq!(
+        (idea.as_str(), rider.as_str(), clion.as_str()),
+        ("proj-IU-0a1b2c3d", "proj-RD-9f8e7d6c", "proj-CL-11223344")
+    );
+    let after_enable = panes_by_session();
+    for (pane, session) in &before_enable {
+        assert_eq!(
+            after_enable.get(pane),
+            Some(session),
+            "enable moved no pane ({pane})"
+        );
+    }
+    // IDEA starts a document in its own lane; Rider's lane stays empty while
+    // Rider is live; CLion's lane is empty and CLion is gone.
+    let idea_doc = iso.new_window(&idea, &root).unwrap();
+    register("idea-doc", &idea_doc);
+
+    let live = BTreeSet::from(["RD.9f8e7d6c".to_string()]);
+    let reconcile = |live: &BTreeSet<String>, dry_run: bool| {
+        agent_doc_controller_io::project_controller::reconcile_navigation_lane_sessions(
+            &iso, &root, live, dry_run,
+        )
+    };
+    let dry = reconcile(&live, true);
+    assert!(dry.closed.is_empty() && dry.folded.is_empty());
+    assert!(sessions().contains(&clion), "a dry run changes nothing");
+    let cleanup = reconcile(&live, false);
+    let mut actions = cleanup.actions.clone();
+    actions.sort_by_key(|action| format!("{action:?}"));
+    let mut expected = vec![
+        LaneReconcileAction::Close {
+            session: clion.clone(),
+        },
+        LaneReconcileAction::Retain {
+            session: idea.clone(),
+            reason: LaneRetainReason::OwnedPanes,
+        },
+        LaneReconcileAction::Retain {
+            session: rider.clone(),
+            reason: LaneRetainReason::LiveSurface,
+        },
+        LaneReconcileAction::Retain {
+            session: "proj-XX-55667788".to_string(),
+            reason: LaneRetainReason::NotMarked,
+        },
+    ];
+    expected.sort_by_key(|action| format!("{action:?}"));
+    assert_eq!(actions, expected);
+    assert_eq!(cleanup.closed, vec![clion.clone()]);
+    assert!(cleanup.failures.is_empty(), "{:?}", cleanup.failures);
+    let live_sessions = sessions();
+    assert!(!live_sessions.contains(&clion));
+    for kept in [
+        &idea,
+        &rider,
+        &"proj".to_string(),
+        &"proj-XX-55667788".to_string(),
+    ] {
+        assert!(live_sessions.contains(kept), "{kept} kept");
+    }
+    assert_eq!(panes_by_session()[&shared_doc], "proj");
+    assert_eq!(panes_by_session()[&idea_doc], idea);
+
+    // Rider places a document in its lane too, then the project disables lanes.
+    let rider_doc = iso.new_window(&rider, &root).unwrap();
+    register("rider-doc", &rider_doc);
+    configure("shared");
+    let disable = reconcile(&BTreeSet::new(), false);
+    assert!(disable.failures.is_empty(), "{:?}", disable.failures);
+    let mut folded = disable.folded.clone();
+    folded.sort();
+    let mut expected_folded = vec![
+        (idea.clone(), idea_doc.clone()),
+        (rider.clone(), rider_doc.clone()),
+    ];
+    expected_folded.sort();
+    assert_eq!(folded, expected_folded);
+    let mut closed = disable.closed.clone();
+    closed.sort();
+    let mut expected_closed = vec![idea.clone(), rider.clone()];
+    expected_closed.sort();
+    assert_eq!(closed, expected_closed);
+    let after_disable = panes_by_session();
+    for document_pane in [&shared_doc, &idea_doc, &rider_doc] {
+        assert_eq!(
+            after_disable.get(document_pane).map(String::as_str),
+            Some("proj"),
+            "{document_pane} lives in the project session exactly once"
+        );
+    }
+    assert_eq!(
+        iso.raw_cmd(&["display-message", "-p", "-t", &idea_doc, "#{window_name}"])
+            .unwrap()
+            .trim(),
+        "stash",
+        "a folded pane lands in the project session's stash"
+    );
+    assert_eq!(
+        after_disable.get(&foreign).map(String::as_str),
+        Some("proj-XX-55667788")
+    );
+    assert_eq!(
+        sessions(),
+        BTreeSet::from(["proj".to_string(), "proj-XX-55667788".to_string()])
+    );
+
+    // Idempotent: nothing left to fold or close.
+    let again = reconcile(&BTreeSet::new(), false);
+    assert!(again.folded.is_empty() && again.closed.is_empty());
+    assert_eq!(
+        again.actions,
+        vec![LaneReconcileAction::Retain {
+            session: "proj-XX-55667788".to_string(),
+            reason: LaneRetainReason::NotMarked,
+        }]
+    );
+}

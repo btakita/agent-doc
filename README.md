@@ -119,6 +119,18 @@ keeps `shared`. Each JetBrains IDE's agent-doc terminal attaches to its own lane
 session, its manual Sync Tmux Layout arranges that lane, and tmux-to-editor focus
 mirroring reads only that lane ([plan](docs/plan-ide-independent-nav.md)).
 
+Switching the mode is safe on a project that already has a shared window.
+Turning `per_installation` on moves no pane: existing panes stay in the shared
+session, and each IDE's lane starts empty and gains panes from its own layouts
+and explicit claims. Turning it back to `shared` and running `agent-doc gc`
+moves every document pane in a lane session back into the shared session's
+`stash` window (the same pane, nothing restarted), from where the shared layout
+places it. `agent-doc gc` also closes lane sessions that are empty: no document
+pane, no running program, no attached terminal, and, after a switch back to
+`shared`, nothing left to move. It only ever touches sessions agent-doc created
+for this project (marked `@agent_doc_navigation_lane`), never a session that
+just has a lane-like name. `agent-doc gc --dry-run` shows what it would do.
+
 ## Feature Taxonomy
 
 agent-doc has a broad feature surface because the README doubles as a user guide and capability ledger. The reader-facing overview is grouped by workflow layer here; the exhaustive feature catalog is kept near the bottom so installation, architecture, editor setup, and security stay easy to scan.

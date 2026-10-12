@@ -5183,7 +5183,7 @@ fn try_main() -> anyhow::Result<()> {
                     result.deleted, result.skipped
                 );
             }
-            Ok(())
+            tmux_cmd::gc_navigation_lanes(root.as_deref(), dry_run)
         }
         Commands::Start {
             file,

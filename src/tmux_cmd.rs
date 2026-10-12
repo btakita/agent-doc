@@ -51,3 +51,52 @@ pub fn ensure(
     }
     Ok(())
 }
+
+/// `agent-doc gc`'s navigation-lane pass (`#ideriderindependentnav` P5): fold
+/// lane panes back after `editor_navigation` is switched to `shared`, and close
+/// empty lane sessions agent-doc created. Never touches an unmarked session.
+pub fn gc_navigation_lanes(root: Option<&Path>, dry_run: bool) -> Result<()> {
+    use agent_doc_editor_surface::LaneReconcileAction;
+    let project_root = match root {
+        Some(root) => root.to_path_buf(),
+        None => agent_doc_project_root_io::project_root_from_cwd()?,
+    };
+    let tmux = tmux_router::Tmux::default_server();
+    let report = agent_doc_controller_io::project_controller::reconcile_navigation_lane_sessions(
+        &tmux,
+        &project_root,
+        &Default::default(),
+        dry_run,
+    );
+    if report.actions.is_empty() {
+        return Ok(());
+    }
+    let verb = if dry_run { "would " } else { "" };
+    for action in &report.actions {
+        match action {
+            LaneReconcileAction::FoldPane { session, pane } => {
+                eprintln!(
+                    "[gc] navigation lane {session}: {verb}fold pane {pane} back into the project session"
+                );
+            }
+            LaneReconcileAction::Close { session } => {
+                eprintln!("[gc] navigation lane {session}: {verb}close (empty)");
+            }
+            LaneReconcileAction::Retain { session, reason } => {
+                eprintln!("[gc] navigation lane {session}: kept ({})", reason.as_str());
+            }
+        }
+    }
+    if !dry_run {
+        eprintln!(
+            "[gc] navigation lanes ({}): {} pane(s) folded, {} session(s) closed",
+            report.mode.as_str(),
+            report.folded.len(),
+            report.closed.len()
+        );
+        for failure in &report.failures {
+            eprintln!("[gc] navigation lane warning: {failure}");
+        }
+    }
+    Ok(())
+}

@@ -192,6 +192,60 @@ It will quote each notice verbatim with screenshots, fix any defect it finds on 
 3. When the test is done, close only its own scratch tab and pane so your layout returns to normal.
 
 If the layout is still off once that tab closes, Sync Tmux Layout in the IDE (or `agent-doc sync`) should restore it.
+
+### Re: v0.35.491 released — pane bleed, queued clears, lease, layout — opus-5.5 · 2026-10-11T20:52-04:00
+
+> **Queue prompt:** frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
+
+Fixed in `frontendwedge` (`c7515155fb`) and released in v0.35.491.
+- **The source:** the `frontend.md` supervisor had been started by hand, so it never redirected its stderr. The redirect only ran for supervisors agent-doc's routing had started. Its 17-second steering check printed `[perf] find_code_ranges` into the pane each time.
+- **Why it wedged:** the text left in the empty input box read as a draft you hadn't sent, so the queue refused to dispatch anything. It wasn't a separate hang.
+- **The fix:**
+  - Every TUI supervisor now sends stderr to its log, and does so again first thing when a `make install` makes it re-launch itself.
+  - The `[perf]` line is gone.
+  - Tests on a separate tmux server fail if any byte reaches the pane.
+- **This pane:** the `frontend.md` supervisor fixes its own stderr at its next automatic reload. It may print its reload line into the pane one last time. After that, zoom the pane in and out once (prefix + `z` twice) to clear the text left on screen.
+
+> **Queue prompt:** I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted. ![img_5.png](img_5.png)
+
+Diagnosed and fixed together with the item above. They aren't tabs but a staircase. Claude Code runs its terminal in raw mode, so a plain line break moves the cursor down a row without returning to column 0, and each stray line starts where the last one ended. The stray bytes also throw off Claude Code's idea of where its cursor is, so its own redraws land shifted. img_5 showed the supervisor's own hot-reload messages leaking alongside the `[perf]` lines. To recover a garbled pane, zoom it in and out or resize it. `tmux refresh-client` doesn't help, because tmux's copy of the screen still holds the stray text.
+
+> **Queue prompt:** The tmux panes are not laid out correctly. 2/3|1/3. There were 3 tmux panes during your [#clearnoticeverify] test.
+
+Fixed in `clearnotice` (`b38af9cd70`) and released. The test's scratch doc opened in a separate IntelliJ window. The plugin counted editors from every IDE window, so it mirrored a phantom third column. It now mirrors only the window you're looking at. The scratch pane is closed, and `0:0` matches your editor again.
+
+> **Queue prompt:** do [#closeoutleaseresume]
+
+Done (`leaseresume`, `6cbf7f51f7`, released). The captured-finalize resume now takes the closeout lease before its legacy repair path changes anything. If another closeout holds the lease, it retries when that lease is released. The test that reproduced the GH #240 overlap fails without the fix.
+
+> **Queue prompt:** do [#clearsupersedenotice]
+
+Done (`supnotice`, `698f36c11d`, released). When a newer prompt drops a queued Clear, IntelliJ and VS Code show a "Queued clear not sent" notice with a Clear Session Context button, once per dropped clear. The notice is pushed to the editor; nothing polls for it.
+
+> **Queue prompt:** do [#flakyintegrate0494]
+
+**Deferred:** the fix is done on branch `flaky0494` (`9dda7abd8d`, `make check` exit 0), but it isn't in v0.35.491; I'll merge it next batch.
+- **The lost failure can't be recovered:** the disk sweep had already cleaned that worktree's build output.
+- **Two causes of this kind of failure fixed:**
+  - `build.rs` watched the workspace root, including `target/`, so every cargo command relinked the test programs. A second cargo command could delete them under a running test run: 65 failures before the fix, none after.
+  - Four `already_applied_*` tests waited on a controller started from scratch and ignored a missing receipt. They failed 5 of 5 under heavy load before the fix and passed 5 of 5 after.
+- **Results are now kept:** every `make check` and `make test` keeps its output and test report in `tmp/test-runs/`.
+- **Still open:** one slow test hitting the 3-minute limit under very heavy load, and three more test helpers that ignore receipt errors, filed as flakyreceipthelpers.
+
+> **Queue prompt:** release + publish
+
+Released v0.35.491.
+- **Verification:** the release gate's `make check` passed (10225/10225) and `make tmux-ci` passed. The tag `v0.35.491` is pushed (`06fda54e10`), and main contains it.
+- **Local install:** `install-full` is complete; agent-doc is 0.35.491, the JetBrains plugin 0.2.541 (262: 0.2.542), and the VS Code extension 0.2.81.
+- **CI:** the GitHub Release run is in progress; I checked it once and didn't wait. PyPI follows from it.
+- **Two release slip-ups on my side, both caught before tagging:** the release needed an editor parity row, which I added. And I had written the release log inside the worktree, which changed its fingerprint and made the gate refuse; I moved it out.
+- **Also in this release:** the queued-clear work, GH #240, the scratch-doc closeout, and the verifier's CRDT-forward shape.
+
+**From the #clearnoticeverify live test, two things for you, filed:**
+- **idleclearrestart:** Clear at an idle prompt doesn't type `/clear`. It restarts Claude, which killed a running background agent at 12 of 40 ticks, with no report. Do you want idle Clear to type `/clear` like the queued path?
+- **idlecleartriggerinject:** after each idle Clear, the supervisor sent an unrequested `/agent-doc <file>` turn (~13s each). Filed as a bug.
+
+I also filed annotateddeferstrike: a deferred queue line carrying your note was struck twice today, because the required `> **Operator note:**` quote sits between the echo and `**Deferred:**`.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -201,22 +255,23 @@ If the layout is still off once that tab closes, Sync Tmux Layout in the IDE (or
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#clearnoticeverify]: verified?~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 The tmux panes are not laid out correctly. 2/3|1/3. There were 3 tmux panes during your [#clearnoticeverify] test.
+- ~~The tmux panes are not laid out correctly. 2/3|1/3. There were 3 tmux panes during your [#clearnoticeverify] test.~~
 - 🚧 frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
 - 🚧 release + publish
-- 🚧 do [#closeoutleaseresume]
+- ~~do [#closeoutleaseresume]~~
 - 🚧 do [#flakyintegrate0494]
-- 🚧 do [#clearsupersedenotice]
+- ~~do [#clearsupersedenotice]~~
 - 🚧 I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted. ![img_5.png](img_5.png)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#closeoutleaseresume] [agent-doc] The controller's captured-finalize resume can fall back to the legacy repair path, which strikes answered queue heads (agent-doc-repair-io/src/lib.rs ~1094) without first acquiring the closeout lease respond holds; the resume's start gate (agent-doc-supervisor/src/idle_watch.rs:37) does not check the lease either. Two closeout drivers can overlap (GH #240 incident). Make the resume acquire the closeout lease before any repair mutation, with a regression test.
+- [ ] [#idlecleartriggerinject] [agent-doc] After Clear Session Context at an idle prompt (delivery=supervisor_restart_fresh), the supervisor injects an unrequested /agent-doc <file> turn (auto_trigger_inject), a no-op costing ~13s of model time each time; seen twice in the 2026-10-11 clearnotice live test (evidence: agent-doc-wt/clearnotice/tmp/evidence). Do not auto-dispatch after an operator Clear unless queue work is actually pending.
+- [ ] [#annotateddeferstrike] [agent-doc] A deferred annotated queue head is struck anyway: for an annotated head the closeout requires the operator-note answer quote, which then sits between the queue-prompt echo and the deferral paragraph, so the deferral is not recognized, the head is consumed and its claim released (2026-10-11, twice on the clearnoticeverify heads). Recognize a deferral paragraph that follows the operator-note answer, with a regression test.
+- [ ] [#flakyreceipthelpers] [agent-doc] Follow-up from flaky0494: simulated-editor socket listeners in agent-doc-test-support/src/lib.rs:781, agent-doc-write-converge-io/src/convergence_fixture_tests.rs:170 and agent-doc-commit-io/tests/git.rs:104 drop receipt errors the way the fixed already_applied_* tests did (may flake under load); and finalize_integration reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once hits the 180s nextest limit under load ~80 (performance, do not raise the limit). Integrate branch flaky0494 first.
+- [ ] [#idleclearrestart] [operator-verify] [agent-doc] Decide: Clear Session Context at an idle prompt restarts the Claude process (supervisor_restart_fresh) instead of typing /clear, killing running Claude background agents/shells with no report (2026-10-11 live test: agent stopped at 12/40 ticks). Queued clears type /clear. Should idle Clear type /clear too?
 - [ ] 🚧 [#flakyintegrate0494] [agent-doc] A full make check on integrate-0494 (merge of splicectl + gh240, 3fbe838baa) stopped at 1 failure after 101/10205 tests; the rerun on the same commit passed 10205/10205. The first log was deleted before reading, so the test is unknown. Capture it on recurrence (keep nextest junit/output from every authoritative run) and fix the nondeterminism; never rerun to green.
-- [ ] 🚧 [#clearsupersedenotice] [agent-doc] When a newer prompt drops an operator-queued Clear Session Context (idle_queue_watch_deferred_clear_superseded), the operator gets no notice; surface it in the editor like the queued notice.
-- [ ] 🚧 [#clearnoticeverify] [operator-verify] [agent-doc] Eyeball the queued Clear Session Context notices in IntelliJ after 472ec36906 (queued / re-armed / evidence_age_secs wording) and confirm /clear with running Claude background agents behaves as you expect.
 <!-- /agent:backlog -->
 
 ## Review

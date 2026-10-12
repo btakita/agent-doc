@@ -850,6 +850,20 @@ Done (`6d8f498bb3`). It is on `main` and installed: `make check` passed 10,348 t
 Your queued Clear on infra.md (epoch 79) should have gone through when that turn ended.
 
 Also filed: `steeringeditmisalign`. When you delete struck queue lines, steering reports untouched items as "edited", with "previous" text taken from a removed item. It pairs queue lines by position instead of by item, which is the noise you've been seeing.
+
+### Re: steering misreport fixed; another flaky test — opus-5-5 · 2026-10-12T13:55-04:00
+
+`steeringeditmisalign` is fixed (`b4544973ef`, `make check` passed) and will merge with the next batch.
+
+**The cause.** Steering paired the old and new queue lines by text similarity alone. Once the struck lines were deleted, a removed `do [#ridernavp4]` paired with the untouched `do [#ridernavp6route]`, so an unchanged claimed item was reported as edited. The bogus edit also woke the coordinator.
+
+**The fix.** Lines now pair by item identity first: the tracked id, or for an untracked line its text with markers stripped. Similarity is only a fallback between untracked lines. A tracked id never pairs with a different item.
+
+**The constant "operator is still typing N more item(s)" message was the same bug.** Each new line re-paired the items and restarted their settle timers, so nothing ever settled while the document kept changing. Three of the four new regression tests fail on the old code.
+
+**Another flaky test, filed as `laneplaneflake`.** The P3 controller test `plugin_publications_project_into_the_publishing_clients_navigation_lane` failed under parallel load and passed 3 of 3 alone. A subagent is taking it, to fix the cause rather than rerun it until it passes.
+
+**Batch 10 (`lanegcflake` + `ridernavp6republish`)** is in `make check` / `make tmux-ci`. `ridernavp6route` is being merged with it by its own subagent to resolve conflicts.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -858,6 +872,7 @@ Also filed: `steeringeditmisalign`. When you delete struck queue lines, steering
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#laneplaneflake]
 - ~~do [#infraclearsession]~~
 - 🚧 do [#ridernavp6route]
 - 🚧 do [#ridernavp6republish]
@@ -872,6 +887,7 @@ Also filed: `steeringeditmisalign`. When you delete struck queue lines, steering
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#laneplaneflake] [agent-doc] agent-doc-controller-io test project_controller::rpc::tests::plugin_publications_project_into_the_publishing_clients_navigation_lane (ridernavp3) failed under make check-fast parallel load with 'the shared lane's plane catch-up counts lane frames as seen' and passed 3 of 3 alone (2026-10-12, steeringeditmisalign subagent). Find the timing or shared-state dependency and fix it; never rerun to green or lengthen a timeout.
 - [ ] [#steeringeditmisalign] [agent-doc] After the operator deletes struck queue lines, mid-turn steering reports unchanged claimed items as change=edited with a previous text taken from a different, removed item (2026-10-12 agent-doc-bugs.md: previous do [#bgclearpolicy] verbatim do [#infraclearsession]; previous do [#ridernavp4] verbatim do [#ridernavp6route]; previous do [#ridernavp3] verbatim do [#ridernavp6gc]). The queue steering diff pairs nodes by position instead of by item identity. Pair queue nodes by stable identity (tracked id or free-text key) so removals stay removals and untouched items produce no steering, with a regression test.
 - [ ] [#lanegcflake] [agent-doc] tests/cross_editor_simworld.rs two_ide_navigation_lanes_migrate_and_clean_up_end_to_end (P5, on main since d6da68546a) is nondeterministic: in make tmux-ci it kept an empty lane as a busy unowned pane instead of closing it, and failed 1 of 3 runs alone (2026-10-12, ridernavp6route subagent). Suspected cause, unverified: the fresh lane shell is still running zsh startup when gc reads pane activity. Find and fix the nondeterminism in the test or the gc busy-pane classification; never rerun to green or lengthen a timeout.
 - [ ] [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.

@@ -41,6 +41,7 @@ use agent_doc_document::queue_projection::{
     strip_in_progress_marker, strip_in_progress_marker_for_display, strip_priority_markers,
 };
 use agent_doc_element_queue::QueueItemLifecycle;
+use agent_doc_markdown_ast::overlay::{queue_bare_fence_close, queue_fenced_title_block};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -321,6 +322,29 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
             continue;
         }
 
+        // `#multilinequeuehead`: a bullet-less title line plus a fenced pasted
+        // block, introduced by a `---` separator or pasted directly beneath
+        // another multi-line item, is its own head. The grammar is shared with
+        // the Markdown-AST overlay (`queue_fenced_title_block`) so both
+        // enumerators segment alike.
+        let after_multiline_item = matches!(
+            entries.last(),
+            Some((QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt), _)) if prompt.multiline
+        );
+        if let Some(block) = queue_fenced_title_block(&lines, i, after_multiline_item) {
+            entries.push((
+                QueueEntry::Prompt(QueuePrompt {
+                    text: lines[i..=block.last_text_line].join("\n"),
+                    multiline: true,
+                    indent: 0,
+                    ordered_marker: None,
+                }),
+                span(start_i, block.last_line + 1),
+            ));
+            i = block.last_line + 1;
+            continue;
+        }
+
         // A recovered prose + fenced-evidence task can follow already-completed
         // queue rows. Re-run the narrow recovery against the remaining suffix
         // before parsing any list-looking lines inside the evidence fence.
@@ -531,7 +555,9 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
             // A bare `---` is a fence only when a closing `---` follows;
             // otherwise it is a stray separator preserved as `Freeform` so the
             // remaining lines (presets, real `do [#id]` items) still parse.
-            if let Some(close_idx) = (i + 1..lines.len()).find(|&j| lines[j].trim() == "---") {
+            // A `---` inside a pasted code fence never closes it
+            // (`#multilinequeuehead`).
+            if let Some(close_idx) = queue_bare_fence_close(&lines, i) {
                 let text = lines[i + 1..close_idx].join("\n");
                 if !text.trim().is_empty() {
                     entries.push((
@@ -545,6 +571,22 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     ));
                 }
                 i = close_idx + 1;
+                continue;
+            }
+            // `#multilinequeuehead`: an unclosed `---` directly above a
+            // title-plus-fence head is that head's leading separator, not a
+            // stray line that a later `---` could pair with.
+            if let Some(block) = queue_fenced_title_block(&lines, i + 1, true) {
+                entries.push((
+                    QueueEntry::Prompt(QueuePrompt {
+                        text: lines[i + 1..=block.last_text_line].join("\n"),
+                        multiline: true,
+                        indent: 0,
+                        ordered_marker: None,
+                    }),
+                    span(start_i, block.last_line + 1),
+                ));
+                i = block.last_line + 1;
                 continue;
             }
             entries.push((
@@ -7935,4 +7977,214 @@ mod tests {
             assert_eq!(node.item.end_byte - body_start, range.end);
         }
     }
+
+    use super::multiline_pasted_fixture::{ALPHA_HEAD, BETA_HEAD, QUEUE_BODY};
+
+    fn prompt_texts(body: &str) -> Vec<String> {
+        prompts(&parse(body).unwrap())
+            .into_iter()
+            .map(|prompt| prompt.text.clone())
+            .collect()
+    }
+
+    /// `#multilinequeuehead` (live, agent-doc-bugs.md 2026-10-12): two pasted
+    /// reports, each a title line plus a fenced log behind a `---` separator.
+    /// The `---` pair wrapped the first report; the second report, with no
+    /// closing `---`, was inert `Freeform`, so it never became a head and
+    /// `queue claim` / `queue brief` rejected it.
+    #[test]
+    fn multilinequeuehead_each_pasted_block_is_its_own_head() {
+        assert_eq!(
+            prompt_texts(QUEUE_BODY),
+            vec![
+                "🚧 do [#open1]".to_string(),
+                ALPHA_HEAD.to_string(),
+                BETA_HEAD.to_string(),
+                "do [#open2]".to_string(),
+            ]
+        );
+        // Render normalizes both heads to the canonical `---` wrapper, and the
+        // rendered queue segments into the same heads (no fold on re-parse).
+        let rendered = render(&parse(QUEUE_BODY).unwrap());
+        assert_eq!(prompt_texts(&rendered), prompt_texts(QUEUE_BODY));
+    }
+
+    /// `#multilinequeuehead`: the Markdown-AST overlay is the node model that
+    /// strike / claim / consume address; it must enumerate the same heads.
+    #[test]
+    fn multilinequeuehead_overlay_enumerates_the_same_heads() {
+        let doc = format!("<!-- agent:queue -->\n{QUEUE_BODY}<!-- /agent:queue -->\n");
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
+        let live: Vec<String> = nodes
+            .iter()
+            .filter(|node| !node.item.struck)
+            .map(|node| node.item.text.trim().to_string())
+            .collect();
+        assert_eq!(live, prompt_texts(QUEUE_BODY));
+        let beta = nodes
+            .iter()
+            .find(|node| node.item.text.starts_with("beta.md issue"))
+            .unwrap();
+        assert_eq!(
+            &doc[beta.item.start_byte..beta.item.end_byte],
+            format!("{BETA_HEAD}\n")
+        );
+        // The pasted log quotes `do [#nextitem]`; only a head's first line can
+        // name its id, so the report stays a free-text node.
+        let alpha = nodes
+            .iter()
+            .find(|node| node.item.text.contains("alpha.md issue"))
+            .unwrap();
+        assert!(!alpha.item.explicit_id, "{alpha:?}");
+        assert_ne!(alpha.item.id, "nextitem");
+    }
+
+    /// A report pasted directly beneath another multi-line item, with no
+    /// separator at all, is still its own head, both after a live head behind
+    /// an unpaired leading `---` and after a completed `~~~done` fence.
+    #[test]
+    fn multilinequeuehead_block_pasted_directly_beneath_is_not_folded() {
+        let unpaired = concat!(
+            "- do [#x]\n",
+            "---\n",
+            "alpha.md issue\n",
+            "```\n",
+            "log a\n",
+            "```\n",
+            "beta.md issue\n",
+            "```\n",
+            "log b\n",
+            "```\n",
+        );
+        assert_eq!(
+            prompt_texts(unpaired),
+            vec![
+                "do [#x]",
+                "alpha.md issue\n```\nlog a\n```",
+                "beta.md issue\n```\nlog b\n```",
+            ]
+        );
+        let entries = parse(unpaired).unwrap();
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| matches!(entry, QueueEntry::Freeform(_))),
+            "the leading `---` belongs to the head it introduces: {entries:?}"
+        );
+
+        let after_done = concat!(
+            "~~~done\n",
+            "alpha.md issue\n",
+            "```\n",
+            "log a\n",
+            "```\n",
+            "~~~\n",
+            "beta.md issue\n",
+            "```\n",
+            "log b\n",
+            "```\n",
+            "- do [#x]\n",
+        );
+        let entries = parse(after_done).unwrap();
+        assert!(matches!(&entries[0], QueueEntry::Completed(p) if p.multiline));
+        assert_eq!(
+            prompt_texts(after_done),
+            vec!["beta.md issue\n```\nlog b\n```", "do [#x]"]
+        );
+    }
+
+    /// A `---` line inside a pasted log never closes a bare `---` fence.
+    #[test]
+    fn multilinequeuehead_separator_inside_pasted_log_does_not_close_fence() {
+        let body = concat!(
+            "---\n",
+            "alpha.md issue\n",
+            "```\n",
+            "log a\n",
+            "---\n",
+            "log b\n",
+            "```\n",
+            "---\n",
+            "- do [#x]\n",
+        );
+        assert_eq!(
+            prompt_texts(body),
+            vec!["alpha.md issue\n```\nlog a\n---\nlog b\n```", "do [#x]"]
+        );
+    }
+
+    /// The head boundary needs an introduction and a clean end: trailing prose
+    /// after the fence keeps the legacy shapes (`#qfreetext-sep`) in charge.
+    #[test]
+    fn multilinequeuehead_trailing_prose_keeps_the_qfreetext_sep_shape() {
+        let body = concat!(
+            "~~~done\n",
+            "old report\n",
+            "~~~\n",
+            "alpha.md issue\n",
+            "```\n",
+            "log a\n",
+            "```\n",
+            "please look at this\n",
+            "---\n",
+        );
+        assert_eq!(
+            prompt_texts(body),
+            vec!["alpha.md issue\n```\nlog a\n```\nplease look at this"]
+        );
+    }
+}
+
+/// Redacted fixture for `#multilinequeuehead`: the queue shape of the live
+/// agent-doc-bugs.md report (2026-10-12) with private names and paths removed.
+#[cfg(test)]
+pub(crate) mod multiline_pasted_fixture {
+    pub(crate) const ALPHA_HEAD: &str = concat!(
+        "🚧 alpha.md issue\n",
+        "```\n",
+        "• Blocked by hook\n",
+        "  └ Queue continuation, not an error: agent-doc kept the active `agent:queue auto` moving.\n",
+        "The next queue prompt is \"do [#nextitem]\". Continue THIS turn in-pane and\n",
+        "do not send the final answer yet.\n",
+        "```",
+    );
+
+    pub(crate) const BETA_HEAD: &str = concat!(
+        "beta.md issue\n",
+        "```\n",
+        "• Blocked by hook\n",
+        "  └ agent-doc Stop hook kept `agent:queue auto` paused because the prior\n",
+        "binary-owned editor write is still converging.\n",
+        "\n",
+        "• Failed (exit 1) agent-doc session-check 'beta.md'\n",
+        "  └ [session-check] INTERRUPTED: cycle is `committed` (commit_success)\n",
+        "    + 2 lines (^t to expand)\n",
+        "```",
+    );
+
+    pub(crate) const QUEUE_BODY: &str = concat!(
+        "- ~~do [#done1]~~\n",
+        "- 🚧 do [#open1]\n",
+        "---\n",
+        "🚧 alpha.md issue\n",
+        "```\n",
+        "• Blocked by hook\n",
+        "  └ Queue continuation, not an error: agent-doc kept the active `agent:queue auto` moving.\n",
+        "The next queue prompt is \"do [#nextitem]\". Continue THIS turn in-pane and\n",
+        "do not send the final answer yet.\n",
+        "```\n",
+        "---\n",
+        "beta.md issue\n",
+        "```\n",
+        "• Blocked by hook\n",
+        "  └ agent-doc Stop hook kept `agent:queue auto` paused because the prior\n",
+        "binary-owned editor write is still converging.\n",
+        "\n",
+        "• Failed (exit 1) agent-doc session-check 'beta.md'\n",
+        "  └ [session-check] INTERRUPTED: cycle is `committed` (commit_success)\n",
+        "    + 2 lines (^t to expand)\n",
+        "```\n",
+        "- ~~do [#done2]~~\n",
+        "- do [#open2]\n",
+    );
 }

@@ -850,6 +850,35 @@ pub fn resolve_claim_target(item: &str, live_heads: &[String]) -> Result<String,
     {
         return Ok(head.clone());
     }
+    // `#multilinequeuehead`: a multi-line head (a title line plus a pasted
+    // fenced block) is named by its title line. The item resolves only when
+    // exactly one live multi-line head has that first line; several heads with
+    // the same title are ambiguous and must be named by their full text.
+    if !item.trim().contains('\n') {
+        let by_title: Vec<String> = live_heads
+            .iter()
+            .filter(|head| {
+                let head = head.trim();
+                head.contains('\n')
+                    && head
+                        .lines()
+                        .next()
+                        .is_some_and(|title| claim_identity(title) == identity)
+            })
+            .cloned()
+            .collect();
+        match by_title.len() {
+            1 => return Ok(by_title[0].clone()),
+            0 => {}
+            _ => {
+                return Err(QueueClaimMiss {
+                    item: item.trim().to_string(),
+                    live_heads: live_heads.to_vec(),
+                    ambiguous: by_title,
+                });
+            }
+        }
+    }
     // `#claimfollowsedit`: the item names a head the operator has since
     // annotated; resolve to the single head that continues it.
     let continuing: Vec<&String> = live_heads
@@ -1613,5 +1642,32 @@ mod tests {
             resolve_claim_target("#gh-fix https://x.test/issues/126", &heads).unwrap(),
             heads[0]
         );
+    }
+
+    /// `#multilinequeuehead`: `queue claim` / `queue brief --item` name a
+    /// multi-line head by its title line, unambiguously.
+    #[test]
+    fn multilinequeuehead_title_line_resolves_the_multiline_head() {
+        use crate::document_queue::multiline_pasted_fixture::{BETA_HEAD, QUEUE_BODY};
+        let doc = format!("<!-- agent:queue -->\n{QUEUE_BODY}<!-- /agent:queue -->\n");
+        let heads = crate::queue_heads::active_queue_heads(&doc);
+        assert_eq!(
+            resolve_claim_target("beta.md issue", &heads).unwrap(),
+            BETA_HEAD
+        );
+        assert!(
+            resolve_claim_target("alpha.md issue", &heads)
+                .unwrap()
+                .contains("alpha.md issue\n```")
+        );
+        // The full head text still resolves to itself.
+        assert_eq!(resolve_claim_target(BETA_HEAD, &heads).unwrap(), BETA_HEAD);
+
+        let twin = vec![
+            "bug\n```\nlog a\n```".to_string(),
+            "bug\n```\nlog b\n```".to_string(),
+        ];
+        let miss = resolve_claim_target("bug", &twin).unwrap_err();
+        assert_eq!(miss.ambiguous, twin);
     }
 }

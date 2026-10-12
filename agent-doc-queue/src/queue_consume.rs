@@ -1575,7 +1575,13 @@ fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
     let body = queue.content(content);
     let needle_with_space = format!("~~{} ", IN_PROGRESS_MARKER);
     let needle_bare = format!("~~{}", IN_PROGRESS_MARKER);
+    // `#multilinequeuehead`: a multi-line head struck into a `~~~done` fence
+    // keeps its in-progress marker on the first body line, not after `~~`.
+    let fence_with_space = format!("~~~done\n{} ", IN_PROGRESS_MARKER);
+    let fence_bare = format!("~~~done\n{}", IN_PROGRESS_MARKER);
     let updated_body = body
+        .replace(&fence_with_space, "~~~done\n")
+        .replace(&fence_bare, "~~~done\n")
         .replace(&needle_with_space, "~~")
         .replace(&needle_bare, "~~");
     if updated_body == body {
@@ -1788,6 +1794,15 @@ pub fn annotate_struck_free_text_line(line: &str) -> String {
     };
     let trimmed_end = core.trim_end();
     let trailing_ws = &core[trimmed_end.len()..];
+    // `#multilinequeuehead`: a multi-line item struck as a `~~~done` fence is
+    // already explicitly completed by its fence. Appending the note to the
+    // closing `~~~` line turned it into an info-string line that no longer
+    // closes the fence, so the fence swallowed `<!-- /agent:queue -->` and every
+    // projection over the result failed with `unclosed component`. Only a
+    // single-line `~~text~~` strike carries the note.
+    if core.contains('\n') || trimmed_end.trim_start().starts_with("~~~") {
+        return line.to_string();
+    }
     if trimmed_end.contains(agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR) {
         return line.to_string();
     }
@@ -1849,6 +1864,11 @@ pub fn annotate_newly_struck_free_text_heads(before: &str, after: &str) -> anyho
     let mut edits: Vec<(usize, usize)> = Vec::new();
     for node in &nodes {
         if !node.item.struck {
+            continue;
+        }
+        // `#multilinequeuehead`: a `~~~done` fence is its own completion
+        // marker; see [`annotate_struck_free_text_line`].
+        if node.item.surface == agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt {
             continue;
         }
         let text = node.item.text.trim();
@@ -3744,5 +3764,85 @@ Old.
             quote_only_then_other_echo,
             "first answered head here"
         ));
+    }
+
+    /// `#multilinequeuehead` (live, agent-doc-bugs.md 2026-10-12): the response
+    /// quoted a multi-line head (title line + pasted fenced log) as its
+    /// `> **Queue prompt:**` echo. Matching worked, but the strike appended the
+    /// `#ftstrike` note to the `~~~done` fence's closing `~~~` line. A closing
+    /// fence line cannot carry text, so the fence never closed, swallowed
+    /// `<!-- /agent:queue -->`, and the projection failed with `unclosed
+    /// component`. Closeout committed with the head live and session-check
+    /// INTERRUPTED on completed free-text residue.
+    #[test]
+    fn multilinequeuehead_echo_strikes_a_multiline_head_into_a_closed_done_fence() {
+        use crate::document_queue::multiline_pasted_fixture::{BETA_HEAD, QUEUE_BODY};
+        let response = concat!(
+            "### Re: batch landed\n\n",
+            "> **Queue prompt:** alpha.md issue\n",
+            "> ```\n",
+            "> • Blocked by hook\n",
+            ">   └ Queue continuation, not an error: agent-doc kept the active `agent:queue auto` moving.\n",
+            "> The next queue prompt is \"do [#nextitem]\". Continue THIS turn in-pane and\n",
+            "> do not send the final answer yet.\n",
+            "> ```\n\n",
+            "Fixed. The continuation message is now one short paragraph.\n",
+        );
+        let content = doc_with_queue_and_exchange(QUEUE_BODY, response);
+        let alpha = crate::queue_heads::active_free_text_queue_heads(&content)
+            .into_iter()
+            .find(|head| head.contains("alpha.md issue"))
+            .expect("alpha head is live");
+        assert!(
+            crate::queue_heads::free_text_queue_head_is_completed_residue(
+                &content, response, &alpha
+            )
+        );
+
+        let projection = project_answered_free_text_strike(&content, response, Some(&content))
+            .expect("strike projection must not fail on a multi-line head")
+            .expect("the echoed multi-line head is struck");
+        let target = &projection.target_content;
+        let components = element::parse(target).expect("struck document stays well-formed");
+        let queue = components.iter().find(|c| c.name == "queue").unwrap();
+        let body = queue.content(target);
+        assert!(
+            body.contains("~~~done\nalpha.md issue\n```\n"),
+            "struck as a `~~~done` fence without the in-progress marker:\n{body}"
+        );
+        assert!(
+            !body.contains(agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR),
+            "the fence is its own completion marker:\n{body}"
+        );
+        assert!(body.contains("```\n~~~\nbeta.md issue\n"), "{body}");
+        assert_eq!(
+            crate::queue_heads::active_free_text_queue_heads(target),
+            vec![BETA_HEAD.to_string()]
+        );
+        // Strike and residue agree: nothing answered remains, and the
+        // projection is a fixed point.
+        assert!(
+            !crate::queue_heads::free_text_queue_head_is_completed_residue(
+                target, response, &alpha
+            )
+        );
+        assert!(
+            answered_free_text_head_node_keys(target, response, Some(target))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn multilinequeuehead_annotation_never_touches_a_done_fence() {
+        let fence = "~~~done\nalpha.md issue\n```\nlog\n```\n~~~\n";
+        assert_eq!(annotate_struck_free_text_line(fence), fence);
+        assert_eq!(annotate_struck_free_text_line("~~~\n"), "~~~\n");
+        let before = queue_doc("---\nalpha.md issue\n```\nlog\n```\n---\n");
+        let after = queue_doc(fence);
+        assert_eq!(
+            annotate_newly_struck_free_text_heads(&before, &after).unwrap(),
+            after
+        );
     }
 }

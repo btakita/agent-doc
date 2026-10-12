@@ -3,7 +3,7 @@ name = "agent-doc-merge"
 version = "0.35.495"
 edition = "2024"
 description = "Pure merge policy functions for agent-doc documents"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 

@@ -3,7 +3,7 @@ name = "agent-doc-ffi"
 version = "0.35.495"
 edition = "2024"
 description = "C/JNA FFI exports for agent-doc editor integrations"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 

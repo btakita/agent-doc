@@ -7,7 +7,7 @@ name = "agent-doc"
 version = "0.35.495"
 description = "Interactive document sessions with AI agents"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.8"  # also the syntax floor for every tracked *.py; enforced by `make python-compat-check`
 classifiers = [
     "Development Status :: 3 - Alpha",

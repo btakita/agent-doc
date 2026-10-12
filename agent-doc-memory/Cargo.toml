@@ -3,7 +3,7 @@ name = "agent-doc-memory"
 version = "0.35.495"
 edition = "2024"
 description = "Pure semantic memory ranking and event-shaping helpers for agent-doc"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 

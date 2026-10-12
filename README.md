@@ -1,24 +1,73 @@
 # agent-doc
 
-Interactive document sessions with AI agents.
+**Your markdown document is the conversation.**
 
-Grok Build is supported through `agent: grok`, including managed interactive
-sessions and headless runs. Install its shared skill and MCP connection with
-`agent-doc skill install --harness grok`. See [Grok Build setup](docs/guide/agent-backends.md#grok-build).
+agent-doc turns an ordinary markdown file into a live session with an AI coding
+agent. You write in the document, press a hotkey (or just keep typing), and the
+agent reads what you changed and writes its answer back into the same file.
+Nothing scrolls away: you can reorganize, annotate, and prune the conversation
+like any other document, and every turn is committed to git.
 
-Edit a markdown file, press a hotkey, and the tool diffs your changes, sends them to an AI agent, and writes the response back into the document. The document is the UI.
+> **Alpha software.** Actively developed; commands and frontmatter may change
+> between versions. **Single-user only**: use a private git repository (see
+> [Security](#security)).
 
-> **Alpha Software** — actively developed; APIs and frontmatter format may change between versions.
+## Why a document?
 
-Supervisor freshness warnings are pane-local and refresh on binary-state changes,
-including child-preserving upgrades, without changing the child's turn title.
-Automatic editor layout sync retains proof of outgoing pane assignments across
-tab switches; layout-reuse invalidation does not erase controller ownership.
-Renaming a managed document preserves its live pane when the session identity
-has one unambiguous old-path owner, and editor routes await newer layout state
-that still covers the routed document instead of racing it with republication.
+Terminal chats are ephemeral. A document is a workspace you curate:
 
-> **Single-user only.** agent-doc operates on the local filesystem with no access control. Use a private git repository. See the [Security](#security) section for details.
+- **Edits are the prompt.** agent-doc diffs the document against the last turn,
+  so the agent sees exactly what you added, changed, or deleted, including
+  inline notes on its own earlier answers.
+- **Work queues up.** Drop several requests into an `agent:queue` section and
+  the agent drains them one by one; track follow-ups in `agent:backlog`.
+- **You can keep typing.** Edits made while the agent works merge safely with
+  its writes in real time, inside your editor, without clobbering your cursor
+  or undo history.
+- **History is real history.** Every turn is a git commit you can diff, revert,
+  or squash.
+
+## How it works
+
+1. You edit a session document (a markdown file with agent-doc frontmatter).
+2. A hotkey, your editor plugin, or your agent harness triggers a turn.
+3. agent-doc computes the diff since the last turn and hands it to the agent,
+   which runs in its own tmux pane.
+4. The agent's response is written back into the document (appended, or patched
+   into named sections like `agent:exchange`), and the cycle is committed.
+
+The Rust binary owns every deterministic step (diffing, merging, routing, git);
+the bundled skill instructions tell the agent how to take part. See
+[Architecture](docs/reference/architecture.md) for the full picture.
+
+## Works with
+
+**Editors**
+
+| Editor | Integration |
+|--------|-------------|
+| JetBrains IDEs (IntelliJ IDEA, Rider, PyCharm, and other IntelliJ-platform IDEs) | Plugin: `agent-doc plugin install jetbrains`, or the JetBrains Marketplace |
+| VS Code | Extension: `agent-doc plugin install vscode`, or the VS Code Marketplace |
+| Zed | Dev extension in [`editors/zed`](editors/zed/README.md) |
+| No editor plugin | Drive sessions directly from your agent harness, or bind `agent-doc run <file>` to a hotkey in any editor (Vim/Neovim included) |
+
+The plugins add realtime sync, tmux layout mirroring (one pane per visible
+document), and highlighting for agent-doc structures. See
+[Editor Integration](docs/guide/editor-integration.md).
+
+**Agent harnesses**
+
+| Harness | How you start a turn |
+|---------|---------------------|
+| Claude Code | `/agent-doc <file>` |
+| Codex | `agent-doc <file>` as a normal message |
+| Grok Build | `agent-doc <file>` as a normal message (uses the installed MCP server) |
+| OpenCode | `/agent-doc <file>` |
+
+`agent-doc skill install --harness <claude|codex|grok|opencode>` installs the
+matching instructions (or `--all` for every harness; Cursor rules and a generic
+target are also available). To pick which agent a document's pane runs, set
+`agent:` in its frontmatter (`claude`, `codex`, `grok`, or `opencode`). See [Agent Backends](docs/guide/agent-backends.md).
 
 ## Install
 
@@ -26,490 +75,79 @@ that still covers the routed document instead of racing it with republication.
 curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh
 ```
 
-**Alternatives:**
+Or `pip install agent-doc`, `brew install btakita/tap/agent-doc`, or a prebuilt
+binary from [GitHub Releases](https://github.com/btakita/agent-doc/releases).
+Then add your editor plugin and harness instructions:
 
 ```sh
-# From PyPI
-pip install agent-doc
-
-# From Homebrew (Linux; macOS once the release's Darwin archives are uploaded)
-brew install btakita/tap/agent-doc
-
-# From a local source checkout
-cargo install --path src/agent-doc --force
-
-# Or from inside src/agent-doc
-cargo install --path . --force
+agent-doc plugin install jetbrains        # or: vscode
+agent-doc skill install --harness claude  # or: codex, grok, opencode, --all
 ```
 
-The PyPI package is a small, platform-independent bootstrap. On its first run it
-downloads the executable and FFI library for that exact package version from the
-matching GitHub Release, verifies the release's `SHA256SUMS`, and caches the two
-files under the user cache directory. Later runs work from that versioned cache.
-On Linux, an explicit libc result from Python selects the matching GNU or musl
-asset; an installed musl compatibility loader cannot override a detected glibc
-host.
+agent-doc's managed sessions run agents in tmux, so install `tmux` too.
+Source builds, PyPI bootstrap details, Windows, and upgrades are covered in
+[Installation](docs/getting-started/installation.md).
 
-`agent-doc upgrade --auto` captures its original executable and installer type
-before the first replacement. Later polls keep upgrading that exact path even
-when the watcher's process image is shown as `(deleted)`, and standalone release
-installs never fall back to `pip`.
-
-The Rust workspace is an implementation detail: every agent-doc Cargo package is
-marked `publish = false`. New releases ship through GitHub Releases and PyPI;
-older crates.io uploads remain as immutable historical artifacts.
-
-## Quick Start
+## Your first session
 
 ```sh
-# 1. Initialize project (creates .agent-doc/ and installs SKILL.md)
-agent-doc init
-
-# 2. Scaffold a session document
-agent-doc init session.md "My Topic"
-
-# 3. Claim the document to the current tmux pane
-agent-doc claim session.md
-
-# Or provision a distinct pane in this project's current tmux session
-agent-doc claim another-session.md --new-pane
-
-# Or name the document agent-doc.md and start it without a file argument
-agent-doc init agent-doc.md "My Topic"
-agent-doc start
-
-# 4. Route hotkey triggers to the correct tmux pane
-agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60 session.md
-
-# 5. Run: diff, send to agent, write response back
-agent-doc run session.md
+cd your-project
+agent-doc init                       # set up .agent-doc/ for this project
+agent-doc init notes.md "My Topic"   # scaffold a session document
 ```
 
-The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60 <file>` via a hotkey, and agent-doc dispatches the plain `agent-doc <file>` reopen into the right pane. Route observes Lazily current/typing state before it admits document work, and editor-triggered routing gives slow-starting supervisors a longer readiness window before surfacing a startup error. During that readiness window, route owns the pane input window, so supervisor queue drains and context-reset `/clear` / `/new` recovery wait instead of interleaving into the composer. That editor path always stays a bounded reopen send; it does not restart Codex just because the previous prompt was `/clear`.
+Open `notes.md`, write a request, and start a turn:
 
-For Coder, JetBrains Gateway, and VS Code Remote SSH setup, including terminal
-host precedence and headless failure behavior, see the
-[Coder workspace terminal runbook](runbooks/coder-workspace.md).
+- **From an editor plugin:** run **Run Agent Doc** (JetBrains) or
+  **Agent Doc: Run (Submit)** (VS Code) on the file. agent-doc starts (or
+  reuses) the document's agent pane and sends the turn.
+- **From your harness:** type `/agent-doc notes.md` in Claude Code or OpenCode,
+  or `agent-doc notes.md` in Codex or Grok Build.
+- **From a terminal:** `agent-doc start notes.md` opens a managed agent pane for
+  the document, and `agent-doc run notes.md` runs a single headless turn.
 
-To manage panes across several tmux sessions from one editor (a session per
-topic or project), list them in `tmux_sessions` and bind documents with
-`tmux_session:` frontmatter; see the
-[multi-session tmux runbook](runbooks/multi-tmux-sessions.md).
+The response lands in `notes.md`. Keep writing below it and run again. For a
+guided tour, see the [Quick Start](docs/getting-started/quick-start.md); for
+multi-pane tmux setups, remote workspaces, and running two IDEs on one project,
+see [Tmux Routing and Navigation Lanes](docs/guide/tmux-routing.md).
 
-When IntelliJ IDEA and Rider (or two installs of one IDE) are open on the same
-project, they share one tmux `agent-doc` window by default, driven by whichever
-IDE was focused last. To let each IDE navigate tmux on its own, opt in:
+## Learn more
 
-```toml
-# .agent-doc/config.toml
-tmux_session = "agent-loop"
-editor_navigation = "per_installation"   # default: "shared"
-```
-
-Each installation then gets its own lane session `<tmux_session>-<installation>`
-(for example `agent-loop-IU-0a1b2c3d`), created on that IDE's first layout sync
-with `agent-doc` and `stash` windows. A document's pane stays in the lane that
-started it: another IDE's layout heartbeats drop it (`cross_lane_layout_dropped` in
-`ops.log`) and its focus is refused (`owned_by_other_lane`) instead of moving the
-pane. To move it, run **Sync Tmux Layout** or **Claim for Tmux Pane** in the other
-IDE: that explicit request hands the pane over to the requesting IDE's lane
-(`navigation_lane_handoff`) and the IDE that lost it re-arranges without it. VS Code and older JetBrains plugins stay on the shared session. The mode is
-read when the project controller starts; an unknown value logs a warning and
-keeps `shared`. Each JetBrains IDE's agent-doc terminal attaches to its own lane
-session, its manual Sync Tmux Layout arranges that lane, and tmux-to-editor focus
-mirroring reads only that lane ([plan](docs/plan-ide-independent-nav.md)). A new
-pane started from an IDE lands in that IDE's lane too: **Run Agent Doc** arranges
-the requesting IDE's lane and starts a missing pane there, and the Claim actions
-pass the IDE's client id (`agent-doc claim --client-id <id>`; `agent-doc route` and
-`agent-doc start` accept the same flag). An existing pane is always used where it
-lives; only an explicit Claim or Sync Tmux Layout moves it. **Run Agent Doc** on a
-document whose pane lives in another IDE's lane runs it in that pane, leaves this
-IDE's tmux layout as it was, and shows a notice naming the lane the pane is in
-(`owned_by_other_lane`); use Claim for Tmux Pane to bring it over. When a supervisor
-that a layout pass left out restarts, each IDE's lane that left it out re-applies
-its own last layout in its own session; that re-arrangement never takes a pane
-from another IDE's lane.
-
-Switching the mode is safe on a project that already has a shared window.
-Turning `per_installation` on moves no pane: existing panes stay in the shared
-session, and each IDE's lane starts empty and gains panes from its own layouts
-and explicit claims. Turning it back to `shared` and running `agent-doc gc`
-moves every document pane in a lane session back into the shared session's
-`stash` window (the same pane, nothing restarted), from where the shared layout
-places it. Before you run `agent-doc gc`, the shared layout already works: a
-document it shows whose pane is still in a lane session is brought into the shared
-session (the same pane, never a second one), and the shared layout never arranges a
-lane session, even when that pane or your terminal is still there. A document it
-does not show waits in its lane until gc moves it. `agent-doc gc` also closes lane sessions that are empty: no document
-pane, no running program, no attached terminal, and, after a switch back to
-`shared`, nothing left to move. It only ever touches sessions agent-doc created
-for this project (marked `@agent_doc_navigation_lane`), never a session that
-just has a lane-like name. `agent-doc gc --dry-run` shows what it would do.
-
-You rarely need to run it: the project controller does the same cleanup on its
-own. When an IDE quits, its empty lane session closes; when the controller
-starts under `shared`, it moves the lanes' panes back and closes the lanes
-(`navigation_lane_reconcile_triggered` in `ops.log`). The controller only closes
-the lane of an IDE it saw quit, so a lane left over from an IDE that was closed
-while no controller ran waits for `agent-doc gc`.
-
-## Feature Taxonomy
-
-agent-doc has a broad feature surface because the README doubles as a user guide and capability ledger. The reader-facing overview is grouped by workflow layer here; the exhaustive feature catalog is kept near the bottom so installation, architecture, editor setup, and security stay easy to scan.
-
-- **Document model** — template components, backlog archival, exchange boundaries, snapshots, durable captures, and component-aware baseline guards.
-- **Write and merge pipeline** — state-machine intents applied to Lazily current state, typed PID-scoped editor delivery, template patching, exact response replay, strict closeout, and selective git commits.
-- **Agent orchestration** — harness-specific routing for Claude, Codex, and OpenCode, prompt contracts, model attribution, direct-run dispatch, sequential/parallel/DAG orchestration, per-item enqueue markers, and lower-agent job packets with target write scopes plus tsift context/graph acceptance sidecars.
-- **Session memory** — `agent-doc memory index/search` records backlog, review, done, icebox, and exchange history in `.tsift/memory.db` through the shared `tsift-memory` library for local dedupe and resolved-before checks.
-- **Tmux and editor coordination** — route/sync/start/claim, project-controller actor state, session drift repair, startup-miss handling, fast mixed-root exact-visible pane projection, passive sync, stash/rescue, and editor plugins.
-- **Mid-turn steering** — operator edits to `agent:queue` and the exchange reach a running turn as they settle: a `PostToolUse` hook (`agent-doc hook steering-post-tool-use`, Claude Code and Codex) injects them verbatim after each tool call, each with a typed `dispatch` (`address_now` for exchange prompts, edits to the current item, and ordinary queue work explicitly sent with Run Agent Doc; `drain_after_current` for passively observed queue work that runs in order after the current item; `subagent` for `#subagents`-tagged work). `agent-doc steering <FILE> [--json] [--peek] [--follow]` exposes the same surface to other harnesses and monitors. Every settle/delivery decision the typing-completion gate makes is logged with its features to `state.db` and labelled premature / late / on-time from what the operator does next (`#steergatelog`); `agent-doc steering dataset --json` exports it. An online-learned gate (`#steergateperceptron`, logistic regression over those features, weights per operator in `state.db`) answers first: send at p >= 0.8, hold at p <= 0.3, the deterministic tier in between. Its seed decides exactly like the deterministic gate, unbalanced delimiters always hold, and the max-hold always delivers; `agent-doc steering --explain` prints the weights and each feature's contribution to the latest decision, and `agent_doc_steering_learned_gate = false` in `.agent-doc/config.toml` turns it off. Each logged decision also keeps the last 280 characters of the item text it judged (`text_tail`, local `state.db` only), so `scripts/steergate-model-eval --dataset` can score a pretrained end-of-turn text model (Namo, turnsense) against the logged rules+perceptron on the real pause points before any model ships (`#steergatenamo`); without `--dataset` it bounds the same comparison on a proxy corpus of the operator's own submitted prompts.
-- **Operational safety** — preflight recovery, session-check guards, hooks, Codex stop-hook recovery, required-SSH/network capability proofs, accretion context, and explicit manual-repair rules.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  user["User edits session document"]
-  editor["Editor plugin or CLI"]
-  route["route / sync / start / claim"]
-  controller["Project controller\nactor + lease state"]
-  tmux["tmux supervisor pane"]
-  harness["Agent harness\nClaude / Codex / OpenCode"]
-
-  preflight["preflight / plan\nrecover, diff, classify"]
-  response["Agent response\npatch blocks"]
-  finalize["finalize / write --commit\nstrict closeout"]
-sessionCheck["session-check\ninternal closeout guard / explicit diagnostic"]
-
-  subgraph DocumentState["Document state"]
-    doc["Markdown session document\nfrontmatter + components"]
-    baseline["Snapshots + baselines"]
-    capture["Durable captures"]
-    cycle["Cycle state"]
-  end
-
-  subgraph BinaryCore["Rust binary core"]
-    diff["diff + prompt contract"]
-    template["template patch engine"]
-    merge["CRDT / 3-way merge"]
-    ipc["IPC-first editor patches"]
-    git["selective git commit"]
-    hooks["hooks + ops log"]
-  end
-
-  user --> editor --> route --> controller --> tmux --> harness
-  editor --> preflight
-  preflight --> diff --> harness
-  harness --> response --> finalize
-  finalize --> template --> merge --> ipc --> doc
-  finalize --> git --> sessionCheck
-  sessionCheck --> hooks
-
-  doc <--> baseline
-  preflight --> cycle
-  response --> capture
-  diff --> doc
-  template --> doc
-  git --> baseline
-```
-
-The binary owns all deterministic behavior: component parsing, patch application, CRDT merge, snapshot management, git operations, tmux routing, and IPC writes. The bundled skill / AGENTS instructions are the non-deterministic orchestrator layer — they read the diff, generate responses, and decide what to write.
-
-For how concurrent agent writes and live editor keystrokes merge without splicing content across unrelated regions of the document, see [Document Node-Merge Architecture](docs/reference/node-merge-architecture.md).
-
-**Binary vs. Agent Responsibility:**
-
-| Responsibility | Owner | Why |
-|---------------|-------|-----|
-| Component parsing, patch application, mode resolution | **Binary** (Rust) | Deterministic, testable, consistent across agents |
-| CRDT merge, snapshot management, atomic writes | **Binary** (Rust) | Concurrency safety requires flock + atomic rename |
-| Diff computation, comment stripping, truncation detection | **Binary** (Rust) | Reproducible baseline comparison |
-| Git operations (commit, history, clean) | **Binary** (Rust) | Direct `std::process::Command` calls; selective commit can self-heal narrow missed agent-owned drift and normalize boundary cleanup without absorbing free-form user prompts |
-| Tmux routing, session registry, pane management | **Binary** (Rust) | Process-level coordination |
-| Pre-response snapshots, undo, extract, transfer | **Binary** (Rust) | File-level atomicity |
-| Boundary marker lifecycle (insert, reposition, cleanup) | **Binary** (Rust) | Deterministic, all write paths need it |
-| Reading diff, interpreting user intent | **Skill** (SKILL.md) | Requires LLM reasoning, including treating imperative document edits as executable directives rather than meta-only discussion topics |
-| Generating response content | **Skill** (SKILL.md) | Non-deterministic |
-| Deciding what to write to which component | **Skill** (SKILL.md) | Context-dependent, including the shared Claude/Codex/OpenCode manual-repair rule to use `agent-doc write --commit <file>` when the prompt already exists |
-| Enforcing response-cycle completion for the normal happy path | **Binary** (Rust) | `agent-doc finalize` fails closed unless the write reaches a terminal committed cycle state |
-| Console progress, final-response timing | **Skill** (SKILL.md) | Partial output stays outside the document |
-| Pending item management (parse, populate, process) | **Skill** (SKILL.md) | Semantic understanding of prompts |
-
-See [CLAUDE.md](CLAUDE.md) for the full module layout, stream mode details, and release process.
-
-Large specs now split behind stable entrypoint files instead of growing indefinitely. For command behavior, start at [`specs/07-commands.md`](specs/07-commands.md), which indexes the focused sibling specs for core commands, tmux/session behavior, closeout, and orchestration. For the authoring rule behind that split, see [`runbooks/split-spec-files.md`](runbooks/split-spec-files.md). That runbook applies across agent-doc-managed harness instruction surfaces, while custom root instruction files stay opt-in unless they still match the generated baseline.
-
-## Supported Editors
-
-**JetBrains (IntelliJ, PyCharm, etc.)**
-
-```sh
-agent-doc plugin install jetbrains
-```
-
-When multiple JetBrains IDE data roots exist, select the target explicitly for automation:
-
-```sh
-agent-doc plugin install jetbrains --plugins-dir ~/.local/share/JetBrains/IdeaIC2026.1/plugins
-```
-
-The target must remain under a versioned JetBrains IDE data root so agent-doc can
-prove its platform build. Builds 242–261 receive the classic package; build 262
-receives the separately ranged modular package. An unprovable or unsupported
-target is refused instead of guessing an artifact.
-
-Or install from JetBrains Marketplace. Configure an External Tool: Program=`agent-doc`, Args=`run $FilePath$`, Working dir=`$ProjectFileDir$`. Assign a keyboard shortcut.
-
-**VS Code**
-
-```sh
-agent-doc plugin install vscode
-```
-
-Or install from the VS Code Marketplace. Add a task with `"command": "agent-doc run ${file}"` and bind it to a keybinding.
-
-**Zed**
-
-Install `editors/zed` as a Zed dev extension. It starts the supplemental
-`agent-doc zed-lsp` server alongside Zed's normal Markdown support. Only buffers
-with valid, non-empty `agent_doc_session` frontmatter enter agent-doc mode;
-ordinary Markdown buffers are a strict no-op. See
-[`editors/zed/README.md`](editors/zed/README.md).
-
-**Vim/Neovim**
-
-```vim
-nnoremap <leader>as :!agent-doc run %<CR>:e<CR>
-```
-
-## Domain Ontology
-
-agent-doc extends the [existence kernel vocabulary](https://github.com/btakita/existence-lang) with domain-specific terms.
-
-### Document Lifecycle
-
-| Term | Definition |
-|------|-----------|
-| **Session** | A persistent conversation between a user and an agent, identified by UUID. Stored in frontmatter as `agent_doc_session`. |
-| **Document** | A markdown file that serves as the UI for a session. Contains frontmatter, components, and user/agent content. |
-| **Snapshot** | A baseline copy of the document at a known state. Used for diff computation and CRDT merge. |
-| **Component** | A named region in a template document (`<!-- agent:name -->...<!-- /agent:name -->`). Targeted by patch blocks. |
-| **Boundary** | A marker (`<!-- agent:boundary:hash -->`) that separates committed content from uncommitted user edits. |
-| **Exchange** | The shared conversation surface where user and agent write inline. A component with `patch=append`. |
-
-### Pane Lifecycle
-
-| Term | Definition |
-|------|-----------|
-| **Binding** | The document→pane association stored transactionally in the controller actor store. Created by `claim` (explicit) or `auto_start` (automatic). One active document owns a pane; if a stale cross-document alias exists, the incoming owner closes and clears the displaced binding. |
-| **Reconciliation** | The process of matching editor layout to tmux layout. Performed by `sync`. Stashes unwanted panes, provisions missing ones. |
-| **Provisioning** | Creating a new tmux pane and starting the configured agent harness for a document. Performed by `route::auto_start`. The normal path for new documents — sync triggers provisioning when it finds a session UUID with no registered pane. |
-| **Initialization** | Assigning a session UUID, creating a snapshot, and committing to git. Performed by `ensure_initialized()`. Called from claim, preflight, and sync's resolve_file. |
-
-Layout-owned provisioning stages new panes off-screen until the current layout
-places them. A late startup cannot add a third visible pane to a two-editor
-layout or select its intermediate window; existing sessions remain alive.
-
-### Integration Layer
-
-Codex Stop recovery uses the shared queue eligibility policy. A deferred review
-item cannot reopen a committed response merely because its queue line remains;
-eligible manual prompts still require document writeback.
-
-| Term | Definition |
-|------|-----------|
-| **Route** | Resolve which tmux pane handles a file. Creates panes if needed (provisioning). |
-| **Sync** | Reconcile editor layout with tmux layout. The primary entrypoint from the JB plugin on every tab switch. |
-| **Claim** | Bind a document to a specific existing pane. Used for manual pane assignment; not needed in normal editor workflow (sync + auto_start handles it). |
-
-### Interaction Model
-
-| Term | Definition |
-|------|-----------|
-| **Directive** | A signal that authorizes and requests action. User inputs like "do", "go", "yes" are directives. Classified as `DiffType::Approval` in preflight. The directive's brevity is independent of the expected execution thoroughness — quality processes always apply in full. |
-| **Cycle** | One round-trip: user edits -> preflight -> agent response -> write-back -> commit. Logged in `.agent-doc/logs/cycles.jsonl` for diagnostics, while the authoritative phase and exact captured response live transactionally in `.agent-doc/state.db`. Recovery projections may be rebuilt from proven ledger state but are never read as hot-path authority. |
-| **Layout check** | Pre-agent tmux health inspection (`check_layout()`). Detects: missing window 0, non-idle stash panes, and session drift (registered panes spanning multiple tmux sessions). Preflight immediately attempts the narrow base-index repair when window 0 is missing, then reports remaining issues as `layout_issues[]` in preflight JSON. Full manual sync also repairs window order to `0:agent-doc`, `1:stash`, then overflow `N:stash` before reconciliation. |
-| **Session drift** | Condition where registered document panes span more than one tmux session. Detected by preflight's `check_layout()`. Fixed by `agent-doc session set <N>` to consolidate panes into the target session. |
-| **Diff** | The user's changes since the last snapshot. Classified by `classify_diff()` into a `DiffType` for skill routing. Comment-stripped before comparison. |
-| **Annotation** | A user edit to agent-written content (inline modification, colon-append). Classified as `DiffType::Annotation`. |
+- [Documentation home](docs/README.md) (also built as an mdBook)
+- [Document Format](docs/guide/document-format.md) and
+  [Components](docs/guide/components.md): frontmatter, `agent:` sections, queue
+  and backlog
+- [Commands](docs/guide/commands.md) and [Configuration](docs/getting-started/configuration.md)
+- [Feature Catalog](docs/reference/features.md): the detailed capability ledger
+- [Architecture](docs/reference/architecture.md): binary vs. skill
+  responsibilities and the domain ontology
+- [SPEC.md](SPEC.md) and [`specs/`](specs/07-commands.md): the functional
+  specification
 
 ## Security
 
-agent-doc is designed for **single-user, local operation**. All session data (documents, snapshots, exchange history) is stored on the local filesystem and committed to a git repository.
+agent-doc is designed for **single-user, local operation**. Documents,
+snapshots, and exchange history live on your filesystem and are committed to a
+git repository.
 
-**Current security model:**
-- **Single user only.** There is no multi-user access control, authentication, or session isolation.
-- **Private repo recommended.** Session documents may contain sensitive content (correspondence, research, credentials in context). Use a private git repository.
-- **Prompt injection risk.** Content pasted into documents from external sources (emails, web pages, chat logs) could contain prompt injection attempts. The agent processes all document content as user input with no injection scanning.
-- **`--dangerously-skip-permissions` exposure.** When running with this flag (common in agent-doc sessions), the agent has full filesystem access. Injected prompts could read files or execute commands if not sandboxed.
-- **Shared-doc guard is explicit, not full auth.** Documents may opt into `agent_doc_collaboration: shared`; in that mode, cross-document `extract` / `transfer` and plan-backed `do #id` work that references another `.md` file fail closed unless the document also carries `agent_doc_security_review: <review-id>`. This is an audit marker for cross-document access, not a replacement for real authentication or session isolation.
+- **Single user only.** There is no multi-user access control, authentication,
+  or session isolation.
+- **Use a private repo.** Session documents may contain sensitive content
+  (correspondence, research, credentials in context).
+- **Prompt injection risk.** Content pasted from emails, web pages, or chat logs
+  could contain prompt injection. The agent treats all document content as user
+  input, with no injection scanning.
+- **`--dangerously-skip-permissions` exposure.** With this flag (common in
+  agent-doc sessions) the agent has full filesystem access, so injected prompts
+  could read files or run commands if not sandboxed.
+- **The shared-doc guard is an audit marker, not auth.** Documents may opt into
+  `agent_doc_collaboration: shared`; then cross-document `extract` / `transfer`
+  and plan-backed `do #id` work that references another `.md` file fail closed
+  unless the document also carries `agent_doc_security_review: <review-id>`.
 
-**Planned:** Collaborative security for web/networked deployments (multi-user access control, session isolation, content scanning, compartmented access patterns).
-
-## Key Features
-
-This catalog is intentionally detailed. It records user-visible capabilities and workflow invariants that are useful for operators, release notes, and implementation audits, but it is no longer part of the first-screen README overview.
-
-- **Template mode** — named component regions (`<!-- agent:name -->`) updated independently; inline attrs (`patch=`, `max_lines=`) > `components.toml` > built-in defaults
-- **Completed backlog archive** — reaped tracked work is stored in canonical `agent:done`, or in an explicit repo-relative `.done.md` file via `agent:done archive=...`; `agent-doc migrate` rewrites old `agent:backlog-done` and `agent:pending-done` tags
-- **Review-pending tracked work** — `agent:review` holds code-complete `[/]` items awaiting human review. `--pending-gate` moves backlog items into review, `--pending-ungate` moves them back, `--done` accepts review items, and optional `review_done_guard` can warn or fail when a project requires review before done.
-- **Session memory retrieval** — `agent-doc memory index/search` stores current backlog/review/done/icebox items and exchange response summaries in `.tsift/memory.db`, enabling deterministic local checks for already-tracked or already-resolved work without embedding tsift's heavy codebase index.
-- **CRDT merge** — yrs-based conflict-free merge for concurrent edits between agent writes and user edits; the markdown AST layer also defines a structured `.yrs` overlay schema and node-keyed component mutations so queue/backlog items can be consumed, deduped, reordered, and enqueued by semantic node identity instead of text lines
-- **Lazily-first writes** — every edit is a durable named intent applied by compare-and-swap to Lazily current state, then delivered through the registered PID-scoped editor socket. Component patches carry explicit `op`/`node_id` metadata and target-node source proof, so unrelated operator edits survive rebase while cursor position and undo history remain intact.
-- **Tmux routing** — persistent per-document agent sessions; `route` dispatches to the correct pane or auto-starts one using the active harness's trigger shape (`/agent-doc` for Claude Code, plain `agent-doc` for Codex); reconciler always runs (no early exits) handling 0/1/2+ panes uniformly
-- **Frontmatter harness changes hand off live** — changing `agent:` from Claude to Codex, OpenCode, or back is accepted as a safe-boundary handoff. Route never sends the pending prompt into the old harness; the supervisor preserves any active turn, replaces the child at the next idle boundary, and auto-triggers the document on the new harness. Queue pause holds the handoff until resume without requiring a supervisor restart.
-- **Controller-backed admin controls** — `agent-doc admin inspect`, `admin queue pause|resume|drain`, `admin reap`, `admin handoff`, and `admin repair-projection` run through the project controller instead of editing sidecars directly. `admin inspect` joins live editor endpoints with actual CRDT memberships as `editor_replica`, so a ready/fresh actor with a missing or flapping replica is visibly unhealthy and includes a remedy. Document-scoped mutations require the observed actor generation; stale requests produce typed rejected receipts. `admin reap --all-stale --idle-for 5d` additionally reclaims actors whose document and actor transition have both been idle for five days, including parked live panes. Queue pause/drain state is stored in `.agent-doc/state.db`, and dispatch reports durable `queue_paused` or `actor_busy_draining` backpressure receipts before any tmux/supervisor input is sent. An accepted `admin queue pause` suppresses the unattended supervisor idle-queue watch auto-injection on a `go`-mode queue (`#qpausego`): the idle-watch stops injecting triggers while the pause is active, and `preflight` surfaces `queue_paused: true`, `queue_pause_reason`, and pause-aware `queue_continuation_guidance`. It does NOT stop the attended in-session `/loop` (which keeps draining real queue work) — use `queue: pause` frontmatter / `--- stop` fences for that; `admin queue resume` clears the pause flag and reason.
-- **Route-owned panes close after successful idle cycles** — fresh panes created by `route` run `agent-doc start --route-owned`, so the supervisor stops and reaps the pane after the first new document cycle commits once the supervisor has stable `ready` prompt state or direct pane output shows the harness is back at an idle prompt, and the document has no live backlog, queue, dirty edits, or unresolved exchange-tail prompt. Explicit blocking prompt states still keep the pane alive. If the fresh route never starts a cycle, the startup-miss marker is still recorded, but the just-created idle pane is killed instead of becoming a stranded registered owner.
-- **Ready/busy owned panes reconcile instead of stalling forever** — when the actor record, supervisor actor state, and controller lease all say `ready` but a stale Codex renderer cue still reports the pane as `alive-busy`/`prompt_ready=false` from a queued-draft footer, route-owned completion and the idle-queue watch debounce the conflict for the same short window used by stale-busy idle repair, log `owned_pane_ready_busy_conflict`, and let queued work continue. Genuine active turns, permission prompts, shell search, hook-review prompts, help screens, and clean-exit prompts remain protected. `agent-doc session status` prints the conflict and points to bounded reconcile/clear recovery rather than pane restart.
-- **Managed reroutes keep one tmux submit boundary** — once a Claude/Codex session is running under `agent-doc start`, route keeps the managed acceptance/queue paths on supervisor IPC, but dispatch-only editor reroutes and file-scoped `/clear` now submit through the live pane's tmux input path instead of mixing direct PTY writes and supervisor-only reopen delivery. Tmux-bound command injects are normalized once and submitted once through the centralized submit profile: Codex, Claude, OpenCode, and default harnesses use normalized text plus a named `Enter` key in one tmux `send-keys -t <pane> <text> Enter` operation. Literal `\r`/`\n` submit bytes are reserved for raw child-PTY fallback writes, not tmux.
-- **Queued editor reruns preempt the auto-loop** — a dispatch-only editor rerun queued behind a busy actor in `agent:queue` is inserted **ahead of pending active-loop items** (priority preempt, `#jb-run-preempt-autoloop-priority`): a manual `Run Agent Doc` jumps the queue rather than landing at the tail. Route-owned queue writes are canonical plain `agent:queue` writes: they never add `auto`, and they strip a legacy `auto` attribute from any queue tag they touch. The priority insert lands after any leading queue directive (preset / start fence) and never supersedes a lone active-loop prompt, so the pending item is **preserved** (the manual prompt runs first, then the pending item) instead of being replaced. If an explicit `Run Agent Doc` finds a busy authoritative actor and the document already has an explicitly startable inactive queue head (marker-side `go`/`start`, a start fence, or legacy `auto`), route promotes that head to `queue_active: true` and syncs the snapshot instead of failing as a silent no-op; unattended continuation after closeout still requires `go` mode, never `queue_active: true` alone. Slash-only queue heads such as `/clear`, ignoring surrounding whitespace, are treated as command handoffs for the supervisor rather than assistant prompts, so preflight/plan/run do not open an exchange response cycle for them. A non-interrupting `session clear` on a busy active auto-loop records one deferred queue context-clear projection for the next proven idle boundary; repeated clears before delivery report the existing deferred clear and do not inject another `/clear`.
-- **Owned PTY output has a real screen model** — managed supervisors feed filtered child output into an `alacritty_terminal` viewport, and prompt/help/protected-input checks prefer that owned screen state before falling back to the raw byte ring. Cursor rewrites and line clears are interpreted like a terminal instead of tmux scrollback text.
-- **Fresh reroutes keep the new pane authoritative** — after route creates a fresh pane for a document, later same-session registry churn cannot hand the reopen back to an older pane and make the new pane disappear from the `agent-doc` window
-- **Late associated-pane proof still fails closed before auto-start** — if stale registered-pane cleanup exposes a live legacy associated pane later in the same route pass, the normal route path now stops with explicit inspect/claim guidance instead of silently cold-starting around ambiguous ownership
-- **Codex forwarded `Ctrl+C` and EOF/Ctrl-D now always hand control back to the operator** — after a stdin-forwarded `Ctrl+C` that terminates the child, or a forwarded stdin EOF/Ctrl-D, agent-doc returns to an explicit canonical `Enter`/`q` prompt mode even when the parent harness keeps stdin in raw-ish mode. Ctrl+D + Enter resumes the document's exact conversation; Ctrl+C + Enter remains an explicit fresh restart.
-- **Missing Codex resume sessions recover fresh** — when Codex definitively reports that the requested saved-session ID does not exist, agent-doc removes only that matching `resume` pointer and immediately starts a fresh session. Safe replica-refresh suffix duplication is normalized in the same authority CAS as pointer removal, so malformed binary scaffolding cannot retain the dead ID and repeat the error on later restarts. If the operator already removed the pointer, the running supervisor notices and discards its cached resume arguments too. Ctrl+C also stops the supervisor during crash backoff instead of being swallowed by raw terminal mode
-- **Only genuinely promptless clean exits auto-recover** — if a fresh/fresh-restart Codex child clean-exits before it ever surfaces an idle prompt and no operator `Ctrl+D` was forwarded, agent-doc still treats that as failed startup provenance and restarts fresh automatically instead of stopping for the quit prompt
-- **Starting actor reroutes promote only dispatch-ready panes** — when the controller still reports the authoritative actor as `starting`, route polls the current actor generation until the live pane shows a harness-specific dispatch-ready prompt, promotes that same actor to `ready`, and then uses the normal managed or dispatch-only send path. If the pane never becomes dispatch-ready, both route modes fail closed before sending tmux or supervisor input and persist one typed diagnostic with elapsed time, pane id, generation, actor state, supervisor health/runtime state, prompt-ready status, and last lifecycle transition. Repeated reroutes for the same stuck pane/generation coalesce behind that saved timeout instead of writing duplicate `route_authoritative_actor_starting_not_ready` records. Because that saved timeout is sticky, a reroute that finds a blocked-by-starting-timeout actor polls that same pane/generation for a dispatch-ready prompt up to the harness recovery budget before failing closed — so a healthy but slow-starting harness (for example a heavy Codex model that takes seconds to present its idle composer after a supervisor restart) recovers within the same reroute instead of dead-ending on a single capture. A busy pane never satisfies that proof, so the bounded poll preserves the promote-only-proven-idle rule; when the proof appears, route clears the saved timeout, promotes the actor to `ready`, and continues through the prompt-gated submit path. If the supervisor refreshes the actor to `closed` or `blocked` during that wait, route stops immediately and reports that terminal state instead of timing out against stale `starting` state.
-- **Dispatch-only reroutes keep editor runs on proven live sessions** — after `agent-doc session clear <file>` or when a Codex session lacks a fresh capability-proof log event, the next editor-triggered `agent-doc route --dispatch-only --plain-trigger <file>` still sends the plain `agent-doc <FILE>` reopen through that same live pane's tmux input path when supervisor/runtime state remains healthy. If the authoritative actor's supervisor is unreachable or missing runtime actor state but the actor pane is still the current registered/live owner, dispatch-only keeps that pane as the recovery target, logs `route_dispatch_only_authoritative_degraded_direct_pane`, and only submits after the normal direct-pane readiness checks pass.
-- **Clear Session Context during a running turn is queued, not refused** — when the clear guard proves a harness turn live (`harness_turn_live=true`) and the document's supervisor owns that pane, `agent-doc session clear <file>` types nothing into the turn, queues one clear, and exits 0 with `session_clear queued for ... ui_outcome=queued`; the supervisor delivers it when the turn ends, and drops it if a newer prompt starts first, the session restarts, or `interrupt-clear` runs (`#clearqueuedliveturn`). Without an owning supervisor the refusal names `unblocker=wait_for_turn_end_no_supervisor_to_queue_clear` and is not filed as a dogfood fix prompt.
-- **Dispatch-only reroutes trust shared Enter delivery across harnesses** — if a live Claude Code, Codex, or OpenCode pane accepts `agent-doc route --dispatch-only <file>` through the shared tmux text+`Enter` path but no stronger dispatch-start proof arrives inside the proof window, route completes with `proof=accepted proof_scope=accepted_only` instead of returning a hard IDE failure. Codex hook proof and OpenCode pane-state proof are still logged as stronger `dispatch_start` evidence when available.
-- **Direct pane submit telemetry separates input acceptance from dispatch proof** — `route_latency phase=direct_pane_submit` records whether tmux input acceptance was observed, while `route_latency phase=dispatch_start_proof` records harness proof. Empty first captures must stay stable before acceptance so a delayed Codex composer draft can still be seen. If Codex hook tracking later proves the prompt was consumed or submitted, an unobserved direct-pane acceptance is labeled `acceptance_unobserved_dispatch_proven` and uses the tmux/control-mode acceptance budget instead of reporting a false submit timeout. If Codex later has only accepted-without-dispatch-start proof but the same prompt is visibly drafted, route sends one late `Enter` retry and logs `route_submit_late_resubmit`. Before appending a new direct-pane trigger, route also detects the same trigger already drafted in a Codex/Claude composer and sends bounded bare `Enter` retries instead of stacking another copy; stale scrollback is ignored when an idle prompt appears below the trigger.
-- **Run Agent Doc cannot overtake closeout** — every routed trigger, including the plain dispatch-only editor action, drains any prior open cycle through the controller projection before tmux submission. An unresolved response or retained component write fails closed, while a settled plain trigger keeps its single-submit transport behavior.
-- **Plain dispatch-only reopens fail closed on a busy actor instead of silently focusing** — an editor `Run Agent Doc` reopen (no prompt-bearing work) against a `busy` authoritative actor focuses the pane but must not return focus-only success, which would report a routed run even though nothing was submitted (`#jb-run-agent-doc-command-route-miss`). Route fails closed with the busy-not-ready diagnostic (`route_dispatch_only_authoritative_actor_busy_focus_only_not_dispatched`) carrying the `the authoritative actor is busy did not return to a dispatch-ready prompt` message, and the JetBrains plugin surfaces that as a "session still running" notification immediately rather than after silently re-waiting the ready timeout once per retry. The narrow exception is an explicitly startable inactive queue head; route may activate it, but unattended continuation after closeout still requires `go` mode. Only a still-booting `starting` pane is silently retried.
-- **Dispatch-only proof scope is explicit** — route ops logs include both `proof` and `proof_scope`; Claude Code dispatch-only routes remain `accepted_only`, hook-backed Codex can report consumed/submitted `dispatch_start` proof, and OpenCode can report `proof=pane_state_changed proof_scope=dispatch_start` after its pane leaves idle chrome
-- **Claude artifact state is shape-classified, not label-classified** — a completed artifact attached to an idle composer renders as a generic `⧉ <session-owned label>` chip and is skipped while locating the real `❯`/permissions prompt. The active picker remains blocked only by its `Enter to open` plus `claude.ai/code/artifact/...` evidence, so arbitrary artifact names never become routing heuristics.
-- **Dispatch-only reroutes now absorb same-file restart handoffs before surfacing a boot-window refusal** — if the first starting-pane ready probe times out but the supervisor immediately restarts the same session in-place or hands it to a new pane for the same file, route follows that newer run instead of pinning the stale pane and surfacing a false `still booting` error to the editor. OpenCode uses a longer harness-specific redraw budget for this startup-window prompt gate so JetBrains reruns do not fail just after the idle splash becomes visible.
-- **Dispatch-only reroutes now fail closed on cross-file pane reuse before any rebind lands** — if the candidate pane is still registered to another document, route refuses the reopen instead of transiently superseding that other file's pane and then repairing the registry afterward
-- **Optimistic fresh-restart retries stay traceable** — if a routed Codex fresh restart never gets back to a dispatch-ready prompt, agent-doc records a `startup_miss` on the original routed pane with the canonical absolute document path instead of silently redirecting the retry through a replacement pane
-- **Stale startup-miss markers clear from the document's current owner** — if a later pane/session is now the registered owner for the same file, `start`, `route`, `sync`, and `session-check` treat the older pane's `startup_miss` marker as stale once the current owner logs a newer `session_start`, even if that handoff rolled the session id
-- **Managed Codex capability proof is explicit and fast-path optimized** —
-  Codex documents opt in with frontmatter `managed_proof: true`; omitted or
-  false keeps the gate `not_required` even when launch args include network,
-  SSH, or extra writable roots. Enabled proof children are ephemeral, skip
-  project rules, use low reasoning effort, and combine simultaneous network and
-  writable-root checks in one `codex exec --json` invocation. OpenCode proof
-  selection and the existing contract fingerprints, retry gate, timings, and
-  status reporting are unchanged.
-- **OpenCode prompt labels stay user-facing** — `agent-doc prompt --all` reports `Permission required` for horizontal OpenCode permission controls when no explicit `← ...` question line is present, so external prompt consumers never display earlier shell command text or ANSI-literal prompt fixtures as the question. First-party JetBrains and VS Code plugins no longer poll this surface.
-- **Codex hook-review startup chrome blocks dispatch** — if Codex starts with a `hook needs review` / `Open /hooks to review it` warning, route/start readiness treats that as an operator-action blocker and refuses to inject routed input, even when a later managed capability-proof line says `status=proven`.
-- **Required SSH preflight probes no longer touch shared multiplexing state** — when a document declares `required_ssh_targets`, the pre-launch `ssh ... true` capability checks now force isolated probe flags (`ControlMaster=no`, `ControlPath=none`, `ClearAllForwardings=yes`, `PermitLocalCommand=no`) so proving SSH for a managed session cannot create or reuse shared control sockets that might affect later operator shells
-- **Required SSH drift detection now covers bare socket EPERM too** — when a document declares `required_ssh_targets`, resumed Codex recovery treats `command_execution` output like `socket: Operation not permitted` as required-SSH capability drift when the same event proves SSH command context for one of those targets; localhost/CDP EPERM remains on the separate browser-capability retry path
-- **Resumed required-SSH streams now drop stale prelude text before fresh retry** — when a resumed Codex turn for an SSH-gated document emits assistant prelude text before the failing SSH command, agent-doc buffers those early resumed-session chunks until required SSH is proven safe or the turn completes, so a required-SSH fresh retry can discard the poisoned prelude instead of leaking it into the committed response
-- **Passive mixed-root sync stays fail-safe** — when `sync --no-autostart` leaves any visible file blocked, agent-doc preserves the current visible `agent-doc` window layout and warns instead of collapsing the remaining foreign pane set into a new authoritative layout; if the newly focused file is already visible in that preserved window, sync still reselects its pane
-- **Passive stale-column gating preserves the whole editor surface** — when a safe-passive exact-visible pass temporarily excludes any requested column because its supervisor is stale, agent-doc keeps the current tmux layout instead of realizing the admitted subset. The recycle-settled generation retries the complete surface; explicit full/manual sync may still realize a non-empty admitted remainder as part of operator repair
-- **JetBrains mixed-root editor surfaces have one controller authority** — after the plugin successfully republishes a visible surface through a different Project Controller root, it forgets the prior root so two retained layout projections cannot compete for the same tmux window. On plugin restart it recovers candidate roots from the open markdown set and retires projections retained by the previous plugin process. IntelliJ split restoration waits until every editor window has selected a file before publishing, and component focus uses only the targeted pane-selection lane
-- **Fresh controller routes preserve live multi-pane layouts** — when a restarted controller has no retained layout and the project has no `tmux_session` pin, a one-column editor `ensure` route resolves the real tmux session from its registered supervisors and merges over every live in-project pane. `controller_editor_route_merge_basis` reports both the session source and any explicit fall-through reason, so an unobserved layout cannot silently masquerade as a valid one-column basis
-- **Manual Sync Tmux Layout uses the doctor repair path first** — full `agent-doc sync` delegates focused session-document repair to `session doctor --repair` logic before reconciling editor panes, so it can close recoverable crash-left commit boundaries where the visible document and snapshot already contain a response that `HEAD` lacks, recreate `0:agent-doc` from a currently selected or explicitly supplied `stash` window, and normalize adjacent `N:stash` overflow; passive `--no-autostart` editor sync keeps that repair step explicit
-- **Layout repair re-fits agent-doc windows a manual size pin holds small** (GH #244) — tmux's `resize-window -A` (often bound to a "fit window" key) leaves a per-window `window-size manual`, so a later terminal resize leaves the window small and dot-padded. Layout repair now releases that pin on agent-doc's own `agent-doc`/`stash` windows when the window is smaller than every attached client, logging `layout_repair_window_size_pin_released`; your own windows, inherited `manual` policies and sessions with no attached client are left alone
-- **Manual Sync Tmux Layout creates and routes missing panes atomically** — when the requested document has no live pane, the full sync path creates and registers one in the resolved tmux session, waits for its harness composer, and submits the document route before its controller command becomes terminal; JetBrains waits for that outcome and displays pane/start/route failures directly
-- **Dispatch-only startup submits are prompt-gated** — editor reroutes no longer type a bare reopen into a startup-window pane until it shows harness-specific idle evidence; a Codex/OpenCode model/context footer is dispatch-ready only when busy cues and protected prompt input are absent. While route owns that pane-input window, it records `RouteSubmitStarted` / `RouteSubmitSettled` / `RouteSubmitBlocked` through the project-controller route projection instead of marker files, so supervisor idle-queue context resets and visible `/clear` / `/new` drafts yield until the submit window settles.
-- **Queue context-clear gates are controller projections** — explicit operator clears and queued slash-command clears publish `QueueContextClearStarted` / `QueueContextClearSettled` facts instead of `.agent-doc/context-clear-in-flight` marker files. Busy-loop operator clears publish `QueueContextClearDeferred` instead of `.agent-doc/deferred-clears` marker files until idle-watch can submit the clear and promote the projection to `Started`. Plain manual clear cooldowns use the same context-clear projection source instead of `.agent-doc/queue-cooldowns` marker files. The supervisor idle watch reads the lazily-backed queue projection to avoid stacking another clear or draining an agent-doc trigger into the same composer, and it settles that projection after the cleared pane has been idle for the cooldown window.
-- **Queue drain-stall detection uses controller projections** — clean closeouts that still require queue continuation publish `QueueDrainStallContinuationRecorded` through the project controller instead of writing `.agent-doc/drain-stall` marker files. The next preflight reconciles and clears that lazily-backed projection, while supervisor-driven drain progress clears it before it can false-fire `queue_stall_detected`.
-- **Queue auto-clear between items** (`#bgclearpolicy`) — an active `agent:queue` runs each item in a fresh agent context by default. After an item's proven closeout, the in-session drain (Claude `/loop`, the Codex Stop hook, OpenCode's in-turn drain) hands the boundary to the document's ready supervisor, which resets the context once — `/clear` typed into the live Claude Code process and `/new` into OpenCode, so background agents and shells survive; a fresh restart for Codex, whose `/clear` exits the process — and dispatches the next head to the fresh agent. It never clears mid-turn, over an unsent composer draft, with operator steering unanswered, or while a subagent claim is in flight; with no ready supervisor the drain simply continues in the same context. `<!-- agent:queue disable-auto-clear -->` turns it off, and preflight reports `queue_auto_clear`. A clear does not shrink the document: session-accretion `block` measures the exchange size, which only compaction reduces.
-- **Codex Stop continuations own active auto-queue handoff** — Codex's Stop protocol names every same-turn continuation `Blocked by hook`. Healthy auto-queue handoffs therefore lead with `Queue continuation, not an error:`, name the next queue prompt, and give one terse same-turn persistence instruction; suppressed background context-reset reasons go to `ops.log` only, never into the operator-visible payload (`#codexstopterse`). When queue auto-clear hands the boundary to a ready supervisor, the hook allows the stop instead of continuing in-pane. While that auto queue and Codex turn are active, a dispatch-only editor reopen coalesces behind the Stop hook instead of typing a competing trigger into the composer.
-- **Preflight observes the live document model before surfacing editor-authority failures** — when a live editor owns a document but the CRDT relay model is absent or not converged, current-document resolution observes the retained Lazily projection and live relay until they reach a fixed point. It emits no editor republish or re-registration request. A bounded failure is reported as document-model startup/reconciliation guidance while disk remains non-authoritative.
-- **Controller restarts repair editor replicas even when transport stays up** — the controller sends one targeted rebuild signal for every stranded registration, including peer-pull-capable JetBrains editors whose reconnect hook may not run after a transparent restart. The idle watcher adds one bounded missing-replica observation before its 30-second backoff, while high-frequency liveness reconciliation no longer floods `ops.log`.
-- **Editor document switches focus immediately, then reconcile in the background** — automatic editor sync first submits a latest-wins Project Controller focus command without waiting on debounce, sync-lock acquisition, prune cleanup, or tmux-router reconciliation; a real selection event still runs the guarded `sync --no-autostart --exact-visible` pass afterward so the selected tab can replace the old pane on that editor side
-- **Automatic focus recovery shares the route crash circuit breaker** — a missing selected-document pane may provision one bounded replacement, but Project Controller `ProvisionOnly` recovery first records its typed missing-pane observation, then consumes the same persisted recent pane-loss projection as normal routing and fails closed instead of repeatedly rebinding a crashing session; explicit supervisor recovery remains available
-- **JetBrains socket patches compute native results off the EDT** — patch delivery captures an immutable document proof on the event thread, performs native replay/component/normalization work on the listener worker, then re-enters the EDT only for the generation-fenced minimal edit before publishing the content receipt
-- **JetBrains Remote Dev retains split memory off the EDT** — the zero-backend-window layout path snapshots remote client editor evidence on the event thread, then runs the GH #134 native retained-split fold on the generation-fenced surface worker instead of tripping the native EDT guard and falling back to the memoryless rule
-- **Controller-local actor proof keeps passive tab sync live** — the controller-owned exact-visible sync reads its authoritative SQLite actor row locally and swaps an already-running hidden pane into view; standalone passive sync still avoids a nested Project Controller actor-binding RPC
-- **Exact visible editor snapshots do not resurrect stale siblings** — automatic editor syncs pass `--exact-visible` with `--no-autostart` when they have the full visible markdown projection, so a one-file editor state remains a one-pane tmux projection instead of expanding from remembered column memory
-- **Passive editor sync skips stash scans before reconcile** — `sync --no-autostart` still prunes stale registry rows and retained dead non-stash panes, but it skips stash-window and stash-pane cleanup so tmux-router can detach extra visible panes immediately after a document switch instead of waiting on orphaned stash scans
-- **Passive sync proceeds around open closeouts** — when `sync --no-autostart` needs to attach a newly requested pane while an already-visible unwanted pane owns an open `preflight_started` / `response_captured` / `write_applied` cycle, agent-doc keeps that closeout pane alive but still allows DETACH to stash it, so the requested document can attach/focus without temporary visible pane growth
-- **Editor sync lock contention is bounded and self-healing** — if an older sync process is stuck, later selection/layout sync commands wait only for the contention budget. Safe-passive sync may already have applied the pre-lock pane handoff, then logs the retry marker and returns without further auto-start, tmux reconciliation, or post-lock hidden-pane focus changes; editor plugins treat that marker as deferred and retry only the newest superseding selection instead of marking stale state applied. Lock acquisition blocks in the kernel on `flock(2)` (no userspace polling) and is released automatically when the holding process exits, so a dead or orphaned owner can never wedge the lock — autosync/manual layout sync recovers without `/proc` orphan reaping or operator process cleanup
-- **Open closeout panes stay alive during sync reconcile** — if an unwanted pane still owns a document with an open `preflight_started`, `response_captured`, or `write_applied` cycle, sync logs that state but lets tmux-router stash the pane; stashing is non-destructive, so closeout can continue without forcing a third visible pane into a two-document editor projection
-- **Cross-document child routes preserve the editor surface** — a no-layout route launched from explicit live process context inside another document's managed pane may dispatch only to the target's proven existing pane; it never rescues that pane from stash, changes focus, lazily adopts a pane, or cold-starts one, so background closeout/queue work cannot append a third pane after a two-pane editor projection has converged
-- **Closeout drift noise is narrower** — session-check no longer treats plain content-edit drift as an unstarted response cycle, and `content_ours` prompt-prefix fallback preserves unprefixed agent response lines already committed in `HEAD` instead of creating a follow-up normalize commit
-- **Sync now refuses editor-provided non-`agent-doc` tmux windows** — if the editor passes a tmux window target that is not actually an `agent-doc` window and the target session has no discoverable `agent-doc` window by name, sync fails closed and preserves layout instead of reconciling remembered docs onto the wrong window
-- **Current tmux session resolution is pane-owned** — route, sync, preflight, and parallel dispatch resolve the current session from `TMUX_PANE` when available, so another attached client's selected session cannot pull the active agent-doc window into the wrong tmux session
-- **Route-owned panes start where a client is watching** (GH #243) — with no `TMUX_PANE` (the project controller) and no `tmux_session` pin, tmux's ambient session is used only when a client is attached to it; a client-less session yields to the session the most recently active attached client shows. A route that still starts or dispatches into a pane no client displays appends a `[route] pane-not-visible:` notice with the `tmux attach-session -t <session>` command (JetBrains shows it as a warning instead of a silent success), and `agent-doc start --force` retires the superseded agent-doc supervisor and its harness instead of leaving them running beside the new one. A foreground route likewise retires any duplicate supervisor pane for the document beside its authoritative actor pane, so one document never has two live harness panes (a bare harness agent-doc did not start is never touched)
-- **Normal route/start/sync never re-elect owners from pane heuristics** — the normal path asks the project controller for the authoritative actor binding. Session-log owners, historical rebind events, and generic same-file process-tree matches remain repair diagnostics, not owner-election inputs.
-- **Project controller IPC is bounded against stalled clients** — controller clients time out instead of blocking forever waiting for a response, the server handles accepted clients independently so one idle socket cannot monopolize `.agent-doc/controller.sock`, and readiness checks release their socket before issuing follow-up RPCs.
-- **Supervisor lifecycle reports now go through the project controller** — `agent-doc start` lazy-launches the project controller, records the starting actor generation and supervisor lease, and reports prompt-ready, busy dispatch, waiting-input, blocked, and closed transitions through controller IPC with stale session/pane/generation rejection. A newer register/heartbeat from the same supervisor lease can replace a `Closed` actor for the same pane, which lets a reopened Codex/OpenCode child in the same route-owned supervisor become authoritative immediately instead of replaying the closed session. `session status` / `doctor` also refresh the controller lease heartbeat from a live supervisor only when the IPC state proves the same actor session, pane, and generation. `session status <FILE>` additionally prints direct live-pane evidence (`alive-idle`, `alive-busy`, `closed-clean`, or `projection-stale`) from tmux current-command and recent output so projected controller state cannot hide a still-running pane; when direct evidence is idle but projections remain busy, status/clear reconcile the actor and controller lease back to ready. File-scoped restart refuses `alive-busy` panes. Every turn stage independently detects a proven-stale supervisor and writes the same idempotent, CRDT-checkpointed recycle request; the controller waits for a safe idle boundary before replacing the process, and no stale marker is inserted into the document. This integrity recovery applies even when proactive recycle polling is opted out. File-scoped clear is an explicit operator action: it does not refuse solely because `pane_current_command` is `agent-doc`, but it still refuses protected prompt input and explicit busy cues such as an active Codex turn, hook-review prompt, or help screen. `session interrupt-clear <FILE>` is the explicit discard path that interrupts the owning pane, waits for idle/closed evidence, then retries clear. Interrupt-clear timeouts include the final blocking state, evidence source, prompt-ready value, current command, and recent pane tail in both ops logs and user-facing errors.
-- **Supervisor recycle gates are controller projections** — route/direct/dispatch-only callers no longer poll recycle-in-flight marker files before injecting work. Recycle starts and settles are recorded as lazily-backed `SupervisorRecycleStarted` / `SupervisorRecycleSettled` facts in the project controller; prompt injection waits on the controller projection so a trigger cannot disappear during supervisor `execve`. Self-driving loop yield for `stale_binary_drain` and `state_flush_drain` uses the same projection, so preflight/session-check/queue continuation report `queue_recycle_yield=true` while the supervisor is recycling and then continue once the projection settles.
-- **Native upgrades use an explicit safe-adapter policy** — `agent-doc lib-install` (and `make install`) sends `reload_library` through PID-scoped endpoints only to adapters explicitly known to support safe hot reload. The same successful install enumerates every live `agent-doc start` process, resolves relative document arguments against that process's `/proc/<pid>/cwd`, and requests one safe-boundary recycle for every open supervisor before recycling controllers. VS Code reloads and re-registers its open replicas. On Linux, JetBrains marshals JNA invocations onto a bounded generation-owned worker pool; document replicas retain FIFO ordering through per-document Kotlin workers and per-replica Rust locks, so one large document cannot head-of-line block every other replica. A queued call timeout cancels only that call, while a native invocation that actually runs beyond its lease still poisons the generation. Reload stops and joins CRDT/listener workers, drains calls, quiesces native replicas, terminates all owner threads so Rust TLS destructors run, closes the JNA handle, and proves the old `/proc/self/maps` entry is gone before loading and publishing the replacement shadow. Controller launch from the cdylib goes through a short-lived external helper, so no controller-lifetime child-reaper thread can pin the mapping. Durable reliable-sync SQLite outboxes live only in the project controller; the reloadable cdylib is a thin RPC client and retains no `state.db` connection. Any failed drain/unmap/ABI proof fails closed without loading a second generation; unsupported hosts and unknown adapters remain restart-required. JetBrains Kotlin packages are dynamically unloadable on compatible builds: their application-service disposal releases plugin-owned project registries, while local byte-identical installs preserve the live files and inodes. On builds that retire plugin classloaders asynchronously, agent-doc deliberately stages every package upgrade and requires an IDE restart; compatible builds may still use JetBrains' dynamic classloader replacement, with an explicit unload-failure prompt treated as a defect. No broadcast file or watcher exists. `agent-doc admin reload-lib` repeats the policy-aware fan-out and reports projects, endpoints, deliveries, restart requirements, and failures.
-- **Controller upgrades recycle safely mid-turn; supervisors preserve the live child** (`#recycle-no-boundaries`, `#midturn-controller-recycle`) — `agent-doc admin recycle <FILE>` and install fan-out immediately start a private replacement even while durable harness dispatches or controller RPCs remain open. After the replacement hydrates, socket promotion redirects new RPCs; the predecessor drains already-accepted RPCs before retiring. Each open supervisor owns its Claude/Codex/OpenCode child, so the turn and pane continue untouched. Routine supervisor image replacement remains turn-boundary/checkpoint gated because that is the process capable of affecting pane continuity. `--force` only skips the controller debounce; when no live controller answers and the command escalates through `session restart-supervisor`, it additionally permits interrupting a busy pane. A non-stable handoff remains the strict replacement gate. A bare project-root / `--project-root` form with no live controller has no document to cold-start and still prints a one-step remedy. `--json` adds `forced` (and `escalated_cold_start` on the single-project arm).
-- **Route re-checks associated-pane evidence immediately before cold-start** — stale registered-pane cleanup does not relax the ownership guard. If a legacy associated pane becomes provable only after the earlier recovery branches run, route still fails closed instead of treating auto-start as a safe tie-breaker.
-- **Passive sync now fails closed on legacy associated panes instead of reclaiming them implicitly** — when `sync --no-autostart` sees only session-log/process-tree/`registry_rebind` evidence for a pane, it blocks that file and requires an explicit claim/repair instead of silently re-registering the pane or cold-starting around ambiguous ownership.
-- **Route readiness is binary-owned** — prompt detection / trigger acceptance lives in `route.rs`, must tolerate shell startup noise, and keys off the actual harness prompt shapes rather than generic shell `>` echoes; the skill should not try to infer pane readiness from echoed command text
-- **Route progress logging is UTF-8 safe** — live reroute diagnostics trim captured tmux lines on char boundaries, so Unicode prompt/status glyphs such as `…` or `·` cannot panic the binary while route is waiting for readiness
-- **Harness-specific arg aliases** — `agent_args` is the generic override; `claude_args`, `codex_args`, and `opencode_args` are harness-specific aliases used only by their matching backends; submodule-hosted Claude/Codex documents also auto-add the superproject working tree plus any external git metadata directories they need (`.git/modules/...` plus the superproject `.git`) so workspace-write sessions can patch parent-repo docs and still complete the normal git lifecycle
-- **Streaming** — recovery-only partial checkpoints followed by one final CRDT write (`agent-doc stream`), with optional chain-of-thought routing
-- **Task orchestration** — `agent-doc orchestrate --mode sequential|parallel|dag` gives one surface for stepwise fresh-agent execution, worktree fan-out, and dependency-aware DAG scheduling; sequential injects each prompt into `exchange`, buffers backend streaming outside the document, and publishes one complete response through strict `finalize` (including its binary-owned session check) without spawning a redundant companion command; parallel preserves the existing worktree backend, DAG mode honors dependencies in deterministic topological order, and `--mode dag --from-queue` persists an auto-DAG schedule plus schedule-backed job packets for active queue batches
-- **Auto-DAG queue scheduling** — active `agent:queue` batches can be expanded into `agent-doc-auto-dag-schedule-v1` nodes with dependency batches, node state, attempt counts, replay/repair commands, tsift graph/ownership gates, and ops-log guard decisions before child work launches; `--resume-schedule <ID>` resumes the durable schedule without relaunching complete or failed/gated nodes
-- **Fleet work board** — `agent-doc board [ROOT] [--json] [--dag] [--all] [--no-submodules]` shows the queue + backlog of every session document across a superproject and its submodules, one section per project, ordered worst-first by state (`BLOCKED` / `STALLED` / `OPERATOR` / `DRAINING` / `READY` / `CLEAR`) with the per-document auto-DAG lane rollup. The load-bearing signal is `STALLED`: a drainable queue head with no live actor draining it. `admin dashboard` shows which controllers are alive; `board` shows where the work is and what is not moving
-- **Agent Doc dashboard** — `agent-doc dashboard [ROOT] [--json] [--write [PATH]] [--watch]` composes the fleet work board with controller/supervisor liveness in one markdown view. `--write` keeps a live projection at `.agent-doc/dashboard.md` that the project controller re-renders (debounced) whenever session, queue, or controller state changes; the editor **Dashboard** action opens it. The projection is never a session document
-- **tsift graph-backed planning** — when a materialized `.tsift/graph.db` works, `plan` and `orchestrate` attach `graph-db evidence` handles plus `conflict-matrix` ownership summaries to queued `do #id` work and pass bounded `<tsift_graph_evidence>` context to child/job prompts without writing that context into the session document; if tsift is stale, unavailable, times out, or violates the graph contract, agent-doc warns and continues without graph evidence/manual packets instead of failing the whole turn
-- **Editor plugins** — JetBrains and VS Code plugins for hotkey integration and IPC writes
-- **Watch daemon** — auto-submit on file change with debounce and reactive mode for stream documents; watched markdown sessions also emit node-keyed `document_node_events` batches for AST insert/remove/replace/move/strike/unstrike changes
-- **Linked resources** — `links` frontmatter field for local files and URLs; URL content fetched, converted HTML→markdown via `htmd`, cached, and diffed on each preflight
-- **Session logging** — persistent logs at `.agent-doc/logs/<session-uuid>.log` for debugging session crashes and restarts
-- **Preflight gate** — `agent-doc preflight` auto-recovers open `response_captured` / `write_applied` cycles, treats `staged snapshot already matches HEAD` as an already-committed no-op closeout instead of `commit_failed`, repairs stale `preflight_started` locks when the recorded snapshot/file hashes still match exactly, otherwise still requires a real pending/capture replay before auto-closing `preflight_started`, fails closed when an empty `preflight_started` cycle has unresolved prompt-bearing drift and no response capture to replay, fails closed on unrecoverable `preflight_started` drift instead of snapshot-committing over newer live content, also fails closed on hidden uncommitted closeout drift (`snapshot != HEAD` / visible bypassed `### Re:` with no recoverable cycle) before diffing, preserves ordinary post-exchange HTML comments as user scratch content, does not auto-compact exchanges during preflight, emits `warnings[]` such as `harness_mismatch` when frontmatter `agent:` differs from the detected active harness and `stale_install` when installed/built `agent-doc` artifacts predate the latest source commit (`#install-stale-guard`, dogfood/dev only), and emits `effective_tier`, `required_tier`, `suggested_tier`, `model_switch(_tier)`, `agent_model`, plus bounded `session_accretion` warnings when exchange/log heuristics show churn-heavy growth
-- **Bounded recent-context packs** — when resumed prompt targets land in a warn/block accretion session, `run` / `stream` / `orchestrate` keep the full document on disk but replace the full exchange tail in the agent prompt with a bounded pack containing prompt targets, session summary, backlog head, a lightweight live+archive response TOC, and the `### Re:` turns anchored to those prompt positions in `exchange` (the enclosing response for inline edits, or the immediately previous response for tail prompts), plus a reminder to ask for older turns or use `agent-doc response-fetch` when no clean anchor exists or more neighboring history is required
-- **Accretion advisory** — `session_accretion` still summarizes exchange growth, closeout churn, and restart-heavy reopen signals so prompts can choose bounded recent-context packs or suggest compaction/restart when useful. These signals remain advisory: `agent-doc plan` must not turn exchange-size accretion or repeated no-op closeout churn into a `compact` handoff unless the prompt or document explicitly requests compaction. Claude skill auto-update uses restart by default; `/compact` reload is allowed only with explicit `agent_doc_auto_compact` frontmatter or project `.agent-doc/config.toml` opt-in. A Codex skill-version mismatch installs without a reload request, re-reads the installed skill completely, and continues the active turn in place (`#codex-skill-reload-in-place`).
-- **Durable response capture** — every final response is persisted in the `state.db` state-machine ledger before canonical application, so interrupted cycles resume the same intent instead of regenerating it. Streaming may emit cold recovery checkpoints, but those projections never become normal read authority.
-- **Backbone closeout facts** — accepted cycle-state transitions append typed Lazily state-backbone facts (`PreflightStarted`, `ResponseCaptured`, `WriteApplied`, `CommitObserved`, `CycleAbandoned`) using stable event ids. Lifecycle re-entry, `session-check`, and preflight read the `state.db` projection exclusively; there is no JSON cycle-state compatibility authority.
-- **Git-owned commit proof** — real commits and already-current no-op closeouts append an exact `HEAD` SHA `CommitObserved` fact into the closeout projection, superseding the cycle-state bridge's compatibility content-hash observation when git proof is available
-- **Bidirectional transport proof** — maintained editor plugins publish lazily transport receipt facts (`EditorPatchApplied` / `EditorPatchRejected`) alongside binary write intent / expected response hash and visible-buffer hash facts; ACK-only plugins are incompatible and closeout reads the lazily projection instead of treating whole-buffer sidecars as snapshot authority
-- **Template exchange guard** — template writes fail closed when prompt/response content escapes either below `<!-- /agent:exchange -->` or into the gap before later agent components such as backlog; explicit repair/compaction still normalize the safe escaped-conversation shapes, while comment-only notes without escaped conversation headings stay outside and ambiguous mixed structure is rejected
-- **Boundary singleton guard** — outside fenced examples, a session document may contain exactly one `agent:boundary` marker and it must occupy its own tail line; ordinary write/finalize paths reject inline or duplicate markers before mutation, while explicit legacy repair collapses them after preserving complete exchanges
-- **IPC timeout ordering guard** — timeout fallbacks and `repair` now normalize stale-boundary response placement so multi-paragraph prompt text stays before the assistant response and the boundary closes the completed turn; if that order cannot be proven, closeout fails closed instead of committing a split prompt
-- **Backlog prompt cleanup** — when a template/CRDT closeout answers prompt-target text typed directly inside `agent:backlog` / legacy `agent:pending`, the write path removes those resolved raw prompt lines after merging the exchange response while preserving ordinary backlog edits and pending state changes
-- **Operator-authoritative backlog deletion** — deleting an open backlog row in the visible document no longer wedges the next preflight/session-check when the deletion is proven by captured editor operations or by an idle command-entry cut that is still present in committed history; unexplained open-cycle or committed loss remains fail-closed
-- **Prompt presets** — frontmatter `prompt_presets:` (or its shorter alias `presets:`) defines reusable prompts that `#name` / `preset name` references expand; binary frontmatter writes keep whichever spelling the operator used, and a document spelling both merges them with `prompt_presets` winning a name collision
-- **Cross-document backlog capture** — prompt presets or user instructions that name another backlog file must close through `--pending-add-to <target-file> "<item>"`, so the item is added to the named document instead of the current session. The write path fails closed when the target is missing or lacks an `agent:backlog` / `agent:pending` component.
-- **Respect manual cleanup** — if a user deletes that escaped conversation tail by hand in a template doc, `agent-doc repair` now discards the stale captured response and advances the snapshot to the repaired file instead of failing on a capture-baseline mismatch or reapplying the removed tail
-- **`repair` closes git-backed recovery immediately** — direct `agent-doc repair` (legacy alias: `recover`) now runs the normal commit boundary after replaying or deduping a pending response in git, instead of leaving repaired assistant content uncommitted until a later `preflight`
-- **Hard response commit boundary** — every appended response should cross a commit boundary unless the operator explicitly wants it left open; the normal happy path is `agent-doc finalize <file>`, while missed-patchback repair uses `agent-doc write --commit <file>`
-- **Explicit no-followup closeout** — pass `--no-followups` (alias `--no-pending-capture`) on the first `finalize` attempt when the response intentionally creates no actionable follow-up work. The runtime records that intent as transient pending-capture evidence for retry/pre-commit checks and removes it from the visible and committed document; agents do not need to search for or inject the internal guard marker.
-- **Manual repo commit ordering keeps the session doc on the finalize path** — when an `agent-doc` turn includes ordinary repo `commit + push`, manual git commits should stage only the intended non-session repo files, stop immediately on any stage failure, verify the staged diff still matches that intended path set, and commit only that validated set. The session document itself still closes through `agent-doc finalize <file>` or `agent-doc write --commit <file>`, and the push happens after that closeout commit lands so the response commit is included
-- **Harness-native entrypoints are binary-owned workflow starts** — `/agent-doc <file>` in Claude Code, `agent-doc <file>` in Codex/OpenCode/direct-exec, and equivalent harness-native entry forms must be treated as the start of the binary-managed response cycle, not as permission to patch the document manually and later say "not committed"
-- **Session-document `write --commit` is strict** — when `write --commit` is used to patch back a response into a real session document (`agent_doc_session` / legacy `session`), it now requires git before mutation and only succeeds once the cycle reaches `committed`; best-effort `--commit` remains only for non-session docs and `--pending-only` maintenance
-- **Mode-aware bare/run entrypoint** — `agent-doc <file>` and `agent-doc run <file>` now share the same document-mode-aware path: template docs use template patchback, append docs use inline blocks, and missing format defaults to template
-- **Direct run dispatch is bounded and foreground-safe** — after `run` opens its fresh `preflight_started` cycle, the agent child has a bounded wait (`AGENT_DOC_RUN_AGENT_TIMEOUT_SECS`, default 1800s). Timeout or recursive Codex-in-owning-pane invocation records a recoverable `preflight_started` timeout event with cycle/pane/actor diagnostics instead of leaving the CLI silent after `Submitting to codex...`. When `run` is invoked with terminal stderr inside a tmux pane owned by a Codex/OpenCode parent harness, routine run/diff/commit stderr is redirected to `.agent-doc/logs/run-stderr.log` unless verbose input diagnostics are enabled, so progress output cannot paint over the foreground TUI after a restart
-- **Owner-pane self-invocation preserves the unresolved prompt (`#codex-owned-pane-prompt-miss`)** — when a Codex-owned pane re-invokes `agent-doc <file>` for the document it already owns and an unresolved exchange prompt is still pending, `run` now fails closed *before* pre-commit and before opening a cycle. The diagnostic names the unresolved prompt and the in-pane recovery path (answer it in this owner pane's turn, then persist with `agent-doc finalize` / `write --commit`) and tells the operator not to re-run the same direct command from the same pane. Because the early guard bails before pre-commit, the prompt stays uncommitted and executable instead of being baselined into `HEAD` by the older late recursive-deadlock guard (which still abandons the empty cycle for the no-prompt / queue-only case). `session-check` is the backstop: an abandoned `recursive_direct_invocation_blocked` cycle with an unresolved exchange prompt still remaining is reported as a missed-prompt recovery, not accepted as terminal closeout
-- **Direct run never dispatches an already-committed repair diff** — if pre-commit repair proves the only diff was an already-committed missed patchback and no new response body exists, `run` rechecks the diff, stops before invoking the child agent, and points the operator to `agent-doc write --commit <file>`
-- **Run closeout is durable before commit** — once `run` has written the final response (and any `resume` update), it records `write_applied` before the post-write commit so interrupted runs can be finished deterministically by `preflight`; git-backed `run` now shares the same strict post-write closeout helper as `finalize`, `write --commit`, `repair`, and the Codex Stop-hook, so success also requires the snapshot/`HEAD` proof plus `session-check`
-- **Binary-owned finalize path** — `agent-doc finalize <file>` is the strict happy-path response command: it reuses the normal write pipeline but requires the document to live in git and fails unless the cycle reaches a terminal committed state
-- **FlowCore closeout diagnostics** — strict pre-write/pre-commit guard blocks, document-mutation patchback parse outcomes, repair recovery boundaries, committed-cycle late fallback rejection, and commit completion now emit typed `flow_event` records so `agent-doc ops summary` can group closeout failures by stage instead of relying on ad hoc proof strings
-- **Ops bug clusters** — `agent-doc ops summary` ranks closeout/captured-response drift, route/start replay gaps, Codex manifest warning storms, SQLite correlation counts, cross-harness markers, session-review guardrails, and working-tree drift with example lines plus file/session/cycle/thread correlation keys
-- **Direct-exec post-write guard** — the direct-exec Codex and OpenCode instruction path runs `agent-doc session-check <file>` after `finalize` or manual `write --commit`, and a nonzero check blocks success reporting until recovery finishes; it flags likely direct response patchbacks (`### Re:` / `## Assistant`) that bypassed `agent-doc`, names the exact recovery path without attributing ambient worktree dirt to the current cycle, directs invalid pending captures through `agent-doc repair` rather than a forbidden response write, fails closed when committed-cycle exchange drift appends a prompt+response pair or other response content, fails closed when prompt-bearing user edits exist with no newer cycle start or when the live exchange tail is still prompt-only with no assistant response, and still self-heals already-committed historical response drift when `HEAD` proves the response is no longer out-of-band, including committed prompt+response pairs that precede newer local drift as long as that later drift did not add another assistant patchback
-- **Managed closeout is turn-reactive (`#sessioncheckturnreactive`)** — connected clients consume the successful `agent_doc_finalize` result as the terminal closeout report, including any next queue continuation, and do not invoke a second `agent_doc_session_check`. Managed orchestration likewise stops at strict `finalize`. The next turn's admit/preflight resolves the current document and applies the same open-cycle, prompt-only-tail, and bypassed-patchback guards before opening work. Opening a newer cycle clears the older cycle's closeout owner immediately, so an outstanding diagnostic for turn N is superseded by turn N+1 instead of holding a lease until a clock expires. The explicit session-check command remains for direct-exec distrust checks and operator debugging.
-- **Closeout followers observe lease expiry without polling** — a follower still wakes immediately on terminal-cycle and explicit owner-release facts, and now schedules the incumbent lease boundary as well. The timer only publishes that clock edge into a keyed controller-owned Lazily source; the shared Computed closeout gate decides whether the owner remains blocking. That eventless stopgap can no longer turn a short retained recovery into a full 30-second wait followed by another manual status retry.
-- **Codex empty cursor is not an operator draft** — dispatch-only reroutes recognize Codex's exact idle `› |` composer rendering as empty and may submit into it, while populated composer text remains protected.
-- **Repeated Run Agent Doc coalesces its own Codex queued input** — when Codex's queued-input surface already contains exactly the reopen trigger requested by a dispatch-only route, the route reports successful existing acceptance without typing or submitting again. Different queued input, including the trigger plus operator text, remains protected and fails closed.
-- **No hot-path sidecar authority** — cycle, capture, queue deletion, continuation, turn scope, editor operation capture, transport health, and controller cooldown state are transactional `state.db` facts. Snapshot/CRDT files are recovery projections only and cannot override Lazily current state or the ledger.
-- **Codex admission, Stop-hook, and repair replay guard** — `agent-doc skill install` for Codex writes the consequential lifecycle hooks once into user-level `$CODEX_HOME/hooks.json`, retires only agent-doc's duplicate commands from project hook files, enables `features.hooks = true`, and sets `[mcp_servers.agent-doc] default_tools_approval_mode = "approve"`. The single user-level owner remains visible across nested submodules and worktrees without double-running preflight when a project hook also loads. The installed `UserPromptSubmit` command atomically makes active-document tracking durable and runs binary preflight for a valid `agent-doc <FILE>` trigger—even when injected AGENTS/instruction preambles precede it—then emits the cycle contract, trailing success marker, and an explicit in-pane no-shell-reinvocation directive as Codex turn context. Tracking or preflight failures emit no success marker and therefore fail admission closed. A refused admission receipt fences `Stop` before it can capture the refusal explanation or continue an older queue; Stop retires that denied binding, and ordinary later prompts cannot inherit another pane's open cycle as writeback debt. Only a new explicit `agent-doc <FILE>` trigger attempts admission again. For an admitted turn, `Stop` first tries to finish the response cycle deterministically from `last_assistant_message` only when that payload validates as a single assistant closeout; tracked state survives nested `.agent-doc` root / CWD drift and later-stop turn drift within the same Codex session, while transcript-shaped or full-document payloads are kept as diagnostics and blocked instead of being replayed. The shared pending-response adapter applies the same replay-shape guard before every capture source, so direct-run and hook adapters cannot bypass it. Guard comments such as `<!-- no-pending-capture -->` may wrap an otherwise valid patch response, and plain progress commentary before the first patch is stripped before replay. Direct template writes use the same guard when unmatched text surrounds an exchange patch, so progress prose is not appended into `agent:exchange`. If `last_assistant_message` is empty because Codex stopped after a tool-only/authentication step such as an MCP OAuth / `authenticate` flow, the hook still fails closed, saves a diagnostic record with the tracked prompt, and forces the turn back through the normal `finalize` / `session-check` recovery boundary. `agent-doc repair` quarantines and retires legacy transcript-shaped captures and abandons their poisoned cycle, preserving the prompt for a fresh response instead of replaying the dump or leaving admission permanently refused.
-- **Bounded Codex lifecycle hooks** — installed Codex `UserPromptSubmit` and `Stop` entries carry explicit outer timeouts. Stop performs at most one opportunistic captured-closeout resume and returns a valid fail-closed response within its shorter binary budget; the route-owned supervisor, not the hook, owns continued retries. After strict repair replay, Stop and repair reuse the terminal closeout proof only for the same committed cycle/capture and unchanged live, snapshot, and Git content; later edits or missing proof require full closeout.
-- **Single-flight Compact Exchange outcomes** — controller RPCs distinguish `committed` from `retained_pending` and `already_pending`. A retained target never produces the “now in HEAD” note: the initiating `retained_pending` result is an accepted asynchronous success (exit 0) that says editor delivery will commit automatically and must not be rerun, while a repeated action receives nonzero `already_pending` with the bounded-timeout rerun guidance and reuses the existing continuation without composing another compact write.
-- **`skill-harness` integration is downstream-owned** — `agent-doc-skill-harness` implements `SkillHarnessPlugin` without a dependency on the deleted `agent-doc-core`. Register it with `register_agent_doc_plugin(&mut registry)`, or use `registry_with_agent_doc()`. A supervised `AGENT_DOC_SESSION` takes priority over nested Claude/Codex/OpenCode detection and resolves skills to `.agent-doc/plugins/<name>/SKILL.md`; Agent Doc's own harness bootstrap skill remains at `.claude/skills/agent-doc`, `.codex/skills/agent-doc`, or `.opencode/skills/agent-doc`.
-- **Malformed patchback guard** — template write paths reject responses that contain patch/replace markers but no closed patch blocks parsed, logging marker counts, patch counts, unmatched length, response hash, and source before failing. Socket IPC attempts also log payload shape and lazily visible-write receipt hashes/lengths so live corruption reports can identify whether the fault was malformed parsing, editor projection drift, or a stale fallback writer.
-- **Normal maintenance covers stale starting actors** — `preflight`, `start`, and `sync` close stale `starting` controller actors older than one hour unless a live supervisor PID still has a fresh heartbeat for that generation. A live but non-heartbeating `agent-doc start` process does not keep a record in `starting` forever. The heavier orphan-file GC and old diagnostic pruning remain on a daily throttle stored in `.agent-doc/state.db`.
-- **MCP auth is a sub-step, not a closeout boundary** — bundled harness instructions now state explicitly that browser/authenticate pauses inside an `agent-doc` turn do not satisfy the response boundary; after the auth step, the same turn must still close through connected `agent_doc_finalize` (or `finalize` / `write --commit` plus `session-check` on direct exec), or fail closed.
-- **Explicit repair no longer false-passes blocked post-commit drift** — when `agent-doc repair <file>` finds no pending artifact but `session-check` would still interrupt the document, the command now surfaces that interruption instead of printing `No pending response found`. That keeps the committed-historical-patchback-plus-later-prompt shape fail-closed until a real new cycle starts.
-- **Stale empty preflight cycles preserve unresolved prompts** — if a prior pane died after `preflight_started` with no response capture, `repair` abandons the stale empty cycle after the timeout instead of writing a placeholder response. The unresolved prompt stays in the document and the next preflight starts a fresh cycle for it; recent empty cycles still fail closed to protect live work.
-- **Response persistence is the close-out boundary** — the instruction surface now requires requested implementation / verification / build-install work to finish before `finalize` or `write --commit`; after that point only a required direct-exec distrust check, recovery, and final reporting remain
-- **Imperative document edits execute work** — bundled Claude/Codex/OpenCode instructions now explicitly treat document-local directives like `do #id`, `run tests`, `build + install`, `commit + push`, and pending-item task text that starts with an imperative verb (for example `[#id] Fix the cross-repo ...`) as authorization to perform that repo work from the session document itself; the agent should execute the work or stop on a concrete blocker, not append false-progress status prose. The binary now rejects status-only/meta-only `run` / `finalize` responses for those directive diffs unless they include concrete execution evidence or a blocker.
-- **Harness-owned tiered verification** — `make check-fast` validates the affected package/reverse-dependency scope during iteration; release validation runs cheap version/editor-parity checks first, then independently reuses matching full-suite and tmux-CI receipts keyed only by repository bytes and toolchains
-- **Tmux CI review for test turns** — when an agent turn runs or changes tests, it should inspect the latest CI tmux leg with `gh run list --workflow CI --limit 1`; failures after runner startup should be reproduced locally with `make tmux-ci`, while queued/in-progress runs should be recorded without blocking the turn for CI completion. Empty-step/no-log jobs that GitHub never started, such as billing/spending-limit exhaustion, are external CI-start blockers to record alongside local verification evidence
-- **Model-attributed response headers** — `### Re:` headings should carry the resolved model short name (`gpt-5`, `opus-4-7`), not the harness label (`codex`, `claude`). For Claude Code, the `opus` alias resolves to the current concrete Claude Code opus id before attribution. The agent authors the attribution and local timestamp from preflight; strict closeout preserves the complete heading on the production write path.
-- **Git integration** — auto-commit each run; squash history with `agent-doc clean`
-- **Commit self-heal** — `agent-doc commit` can absorb a narrowly-scoped missed agent patchback (`status`, `### Re:` response-block insertion, pending-ID superset) into the snapshot before staging, while still leaving plain user prompts uncommitted; when the snapshot lags behind an already-committed response in `HEAD`, `commit` now repairs the snapshot up to that committed `HEAD` state before later local drift can no-op closeout, as long as the later drift did not add another assistant patchback, so stale snapshots cannot rewind the document; when the snapshot already matches `HEAD` but the working tree has later local edits, `commit` now classifies that as post-commit local drift and explains that those edits remain uncommitted instead of vaguely implying a missed patchback, and the follow-up case records `post_commit_user_follow_up` instead of missed-response or out-of-band-write markers; a `HEAD`-current staged snapshot still closes the cycle as an explicit no-op instead of a false `commit_failed`
-- **Zero-live-editor capture recovery terminates** — when an explicitly rejected editor endpoint has been unregistered and controller authority has zero live replicas, `session-check` names `agent-doc commit` as the stranded-write recovery. Commit now adopts the exact response-bearing authoritative cut only when the durable capture matches and no newer unanswered prompt or unproved typed-component edit would be consumed. Otherwise it fails closed with the same-capture resume remedy instead of prescribing `commit` again; it never requires response resubmission or a forced disk write.
-- **Extreme-drift guard stays conservative** — if a tracked document's snapshot is badly stale, `commit` warns but does not re-sync the snapshot from the live file wholesale; bootstrap scaffold auto-resync is limited to files with no `HEAD` entry yet so unanswered prompts cannot be swallowed into a commit
-- **Clean post-commit cleanup** — commit strips transient `(HEAD)` markers from the staged snapshot so the committed blob stays clean, and post-commit cleanup now collapses snapshot/editor state back to the same clean boundary shape instead of leaving marker-only working-tree churn behind
-- **Manual repair guidance is explicit across harnesses** — bundled skill/runbook content now distinguishes missing-user-prompt insertion from missed-response repair for both Claude Code and Codex: once the prompt is already present, the default documented repair path is `agent-doc write --commit <file>`, not direct file patching or a bare write-back that stops before commit
-- **Generated harness instructions stay aligned** — installed Claude/Codex/OpenCode hot-path instructions are rendered from one shared source surface and parity-tested so completion-boundary guidance cannot silently drift between `.claude/skills/agent-doc/SKILL.md`, `.codex/skills/agent-doc/SKILL.md`, and `.opencode/skills/agent-doc/SKILL.md`; bundled runbooks and OKF concept files are installed beside those surfaces as dynamic context resources; `audit-docs` fails generated managed skill surfaces that no longer match the running binary and rejects retired generated root `AGENTS.md` / `.codex/AGENTS.md` surfaces while preserving custom root instructions, audits installed runbook bundles the same way (a stale or missing runbook, unbundled Markdown in a harness runbook directory, a surviving retired `.codex/runbooks/` mirror, and drift in a `skill_runbook_mirrors` project mirror all block), audits both the superproject install root and the submodule checkout by default from submodule checkouts (bare root resolution prefers the superproject, so submodule-local copies are otherwise only ever version-stamped and never content-checked), still honors explicit `--root DIR`, and reports broad mtime freshness only as an advisory
-- **Bulk resync** — validates session state and fixes stale/orphaned panes in 2 subprocess calls instead of ~20-40; `--fix --session <name>` relocates WrongSession panes via join-pane instead of killing them
-- **Column memory** — project `state.db` remembers column→agent-doc mapping; preserves a 2-pane tmux layout when one editor column switches to a non-agent file, without a file sidecar
-- **Stash + rescue** — replaced panes are stashed (alive in background); stash rescue brings them back when the user switches to that document again
-- **Startup lock** — `.agent-doc/starting/<hash>.lock` with 5s TTL prevents double-spawn when sync fires twice in quick succession
-- **Component-aware baseline guard** — detects stale baselines by comparing append-mode components only; user edits to replace-mode components (status, pending) don't trigger false positives
-- **Hook system** — cross-session event coordination via `agent-doc hook fire/poll/listen/gc`; `post_write` / `post_commit` events now include `capture_id` and `response_sha256` when a durable capture exists, the system integrates with Claude Code hooks via `PostToolUse`, and Codex installs one user-level `UserPromptSubmit` / `Stop` bridge through `$CODEX_HOME/hooks.json`
-- **Slash command dispatch** — `preflight` extracts slash commands from user-added diff lines (`parse_slash_commands`); the SKILL executes them before responding; guards exclude code fences, blockquotes, and non-added lines. In routed editor sessions, a bare exchange slash-command line such as `/clear` is prompt-bearing even without a `❯` prefix and is queued for the idle supervisor instead of being answered as a normal agent-doc turn.
-- **No filesystem delivery inbox** — editor delivery uses PID-scoped sockets and Lazily receipts; startup has no alternate payload source to rediscover or replay.
+**Planned:** collaborative security for web/networked deployments (multi-user
+access control, session isolation, content scanning, compartmented access).
 
 ## License
 
-Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option.
+Licensed under the [Apache License, Version 2.0](LICENSE) (`Apache-2.0`).

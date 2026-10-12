@@ -41,7 +41,7 @@ from typing import Dict, List, Optional, Tuple
 REPO = "btakita/agent-doc"
 HOMEPAGE = "https://github.com/" + REPO
 DESC = "Interactive document sessions with AI agents"
-LICENSE = "MIT"
+LICENSE = "Apache-2.0"
 
 # Rust target triple -> (Homebrew OS block, Homebrew arch block). The musl and
 # Windows archives are deliberately absent: Homebrew on Linux provides glibc, and

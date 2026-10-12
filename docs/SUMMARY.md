@@ -17,6 +17,7 @@
 - [Dashboard-as-Document](guide/dashboard.md)
 - [Run Flow](guide/submit-flow.md)
 - [Editor Integration](guide/editor-integration.md)
+- [Tmux Routing and Navigation Lanes](guide/tmux-routing.md)
 - [Agent Backends](guide/agent-backends.md)
 
 # Development
@@ -27,6 +28,8 @@
 
 # Reference
 
+- [Feature Catalog](reference/features.md)
+- [Architecture](reference/architecture.md)
 - [Specification](reference/specs.md)
 - [State Backbone](../specs/13-state-backbone.md)
 - [Flow Map](reference/flow-map.md)

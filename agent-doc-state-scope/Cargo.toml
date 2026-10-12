@@ -3,7 +3,7 @@ name = "agent-doc-state-scope"
 version = "0.35.495"
 edition = "2024"
 description = "Lifetime-typed lazily scopes (#stategraphjoin) shared across agent-doc crates"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 

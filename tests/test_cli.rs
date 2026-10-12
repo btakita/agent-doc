@@ -33336,6 +33336,8 @@ fn docs_do_not_reintroduce_content_ours_snapshot_authority() {
     let docs = [
         "AGENTS.md",
         "README.md",
+        "docs/reference/features.md",
+        "docs/reference/architecture.md",
         "SPEC.md",
         "specs/06-config.md",
         "specs/07-closeout-commands.md",

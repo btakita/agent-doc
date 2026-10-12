@@ -3,7 +3,7 @@ name = "agent-doc-reliable-sync-io"
 version = "0.35.495"
 edition = "2024"
 description = "Unix-domain-socket carrier for Lazily reliable-sync intent and visibility receipts"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 

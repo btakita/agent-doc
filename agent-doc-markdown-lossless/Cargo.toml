@@ -2,7 +2,7 @@
 name = "agent-doc-markdown-lossless"
 version = "0.35.495"
 edition = "2024"
-license = "MIT"
+license = "Apache-2.0"
 description = "Phase 0 lossless-tree adapter for agent-doc markdown session documents (#lzlosstree): parses a document into a lazily LosslessTreeCrdt whose leaves own every byte, so render(parse(doc)) == doc. Shadow projection only — not an authority path."
 repository = "https://github.com/btakita/agent-doc"
 publish = false

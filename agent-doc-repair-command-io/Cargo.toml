@@ -3,7 +3,7 @@ name = "agent-doc-repair-command-io"
 version = "0.35.495"
 edition = "2024"
 description = "Default repair command runtime bridge for agent-doc"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 

@@ -10,6 +10,12 @@ publish = false
 [lib]
 name = "agent_doc_ipc_io"
 
+[features]
+default = []
+# Test fixtures only: lets an in-process simulated editor mark its endpoint as
+# known-live (`#flakyreceipthelpers`). Never enabled by a production build.
+test-support = []
+
 [dependencies]
 # `#relaylockpoison`: locks here are parking_lot, not `std::sync` — the workspace
 # keeps `panic=unwind` so the cdylib's `catch_unwind` guards survive a panic in a

@@ -433,6 +433,7 @@ dependencies = [
  "agent-doc-session-check-io",
  "agent-doc-snapshot-io",
  "agent-doc-template",
+ "agent-doc-test-support",
  "agent-doc-turn",
  "agent-doc-turn-scope-io",
  "agent-doc-workflow",

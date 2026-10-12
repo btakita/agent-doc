@@ -1125,6 +1125,53 @@ pub fn controller_response_timeout_for_tests(socket: &Path, timeout: Duration) -
     controller_response_timeout(socket, timeout)
 }
 
+/// Wait up to `timeout` for a client to be pending on a nonblocking
+/// controller `listener` (`#flakyreceipthelpers` accept wake).
+///
+/// The serve loops accept nonblockingly so their idle tick can run maintenance,
+/// and used to `sleep(CONNECT_POLL)` after every `WouldBlock`. A client that
+/// connected during that sleep waited for it to end, so every controller RPC
+/// paid up to 50ms of accept latency -- twice, since `connect_or_launch` probes
+/// `status` on its own connection before the request. A short-lived CLI issues
+/// hundreds of RPCs: a four-invocation `finalize_integration` test spent most of
+/// its 64s in these waits (closeout phases measured as exact multiples of
+/// ~100ms). Polling the listener fd keeps the tick's cadence while returning as
+/// soon as a client is pending. A listener in an error state (or a platform
+/// without `poll`) falls back to the plain sleep, so this can never spin.
+fn wait_for_pending_controller_client(
+    listener: &interprocess::local_socket::Listener,
+    timeout: Duration,
+) {
+    #[cfg(unix)]
+    {
+        use std::os::fd::{AsFd, AsRawFd};
+        let interprocess::local_socket::Listener::UdSocket(inner) = listener;
+        let mut pollfd = libc::pollfd {
+            fd: inner.as_fd().as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let timeout_ms = i32::try_from(timeout.as_millis()).unwrap_or(i32::MAX);
+        // SAFETY: one valid, initialized pollfd for a descriptor `listener`
+        // keeps open for the duration of the call.
+        let ready = unsafe { libc::poll(&mut pollfd, 1, timeout_ms) };
+        let failed = pollfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0;
+        if ready >= 0 && !failed {
+            return;
+        }
+    }
+    std::thread::sleep(timeout);
+}
+
+/// How long until the serve loop's idle maintenance is due again
+/// (`#flakyreceipthelpers` accept wake): `None` when it is due now. Waking on a pending
+/// client must not make maintenance run once per connection under a burst, so
+/// it keeps the fixed `CONNECT_POLL` cadence the sleep used to give it.
+fn controller_idle_tick_remaining(last_tick: Option<Instant>, now: Instant) -> Option<Duration> {
+    let elapsed = now.duration_since(last_tick?);
+    (elapsed < CONNECT_POLL).then(|| CONNECT_POLL - elapsed)
+}
+
 /// Sockets currently served by an in-process test state actor.
 #[cfg(feature = "test-support")]
 mod warm_test_actor_sockets {
@@ -15699,8 +15746,19 @@ fn state_actors_for_tests() -> &'static Mutex<BTreeMap<PathBuf, StateActorTestHa
     ACTORS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+/// Ensure this process hosts the warm in-process state actor for
+/// `project_root`, starting it once and sharing it with every later caller.
+///
+/// Test fixtures that record controller facts from inside the test process
+/// (a simulated editor's visible-write receipt, `#flakyreceipthelpers`) call
+/// this before their first RPC. Without it, that RPC `connect_or_launch`es a
+/// cold detached `agent-doc controller serve` whose startup is charged to the
+/// caller's test-mode deadline, and under load the fact silently goes missing.
+/// The actor is shared through one process-wide map, so a fixture and the
+/// code under test (for example a closeout owner claim) never start two actors
+/// that would steal each other's socket; it stops once its root is deleted.
 #[cfg(feature = "test-support")]
-fn ensure_state_actor_for_tests(project_root: &Path) -> Result<()> {
+pub fn ensure_state_actor_for_tests(project_root: &Path) -> Result<()> {
     let canonical = project_root
         .canonicalize()
         .unwrap_or_else(|_| project_root.to_path_buf());
@@ -15823,7 +15881,7 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
                     }));
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    std::thread::sleep(CONNECT_POLL);
+                    wait_for_pending_controller_client(&listener, CONNECT_POLL);
                 }
                 Err(_) => break,
             }
@@ -16215,6 +16273,8 @@ pub(crate) fn serve_with_options(
     // variant that bounds self-handoff retries.
     use agent_doc_controller::recycle::IDLE_CONTROLLER_RETIRE_PROBE_INTERVAL;
     let mut idle_retire_probe_last: Option<Instant> = None;
+    // `#flakyreceipthelpers` accept wake: when the idle tick last ran its maintenance.
+    let mut idle_tick_last: Option<Instant> = None;
     let recycle_retry_backoff = Arc::new(Mutex::new(
         agent_doc_controller::recycle::HandoffRetryBackoff::default(),
     ));
@@ -16235,6 +16295,13 @@ pub(crate) fn serve_with_options(
                 });
             }
             Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                if let Some(remaining) =
+                    controller_idle_tick_remaining(idle_tick_last, Instant::now())
+                {
+                    wait_for_pending_controller_client(&listener, remaining);
+                    continue;
+                }
+                idle_tick_last = Some(Instant::now());
                 // The path can be recreated by a concurrent cleanup/bootstrap after
                 // its original directory is removed. Existence alone would let this
                 // detached controller attach itself to that new project incarnation.
@@ -16626,7 +16693,7 @@ pub(crate) fn serve_with_options(
                     // cannot help — those with no supervisor to revive.
                     controller_orphan_drain_tick(&runtime);
                 }
-                std::thread::sleep(CONNECT_POLL);
+                wait_for_pending_controller_client(&listener, CONNECT_POLL);
             }
             Err(err) => return Err(err).context("failed to accept project controller client"),
         }
@@ -50364,5 +50431,76 @@ mod supthrash_idle_root_tests {
             IDLE_CONTROLLER_RETIRE_QUIET,
             || panic!("evidence must not be probed while a client is active"),
         ));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod controller_accept_wake_tests {
+    //! `#flakyreceipthelpers` accept wake: a pending client wakes the serve loop's idle
+    //! wait instead of waiting out the `CONNECT_POLL` tick.
+    use super::*;
+
+    fn nonblocking_listener(sock: &Path) -> interprocess::local_socket::Listener {
+        let name = sock.to_path_buf().to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        listener
+            .set_nonblocking(ListenerNonblockingMode::Accept)
+            .unwrap();
+        listener
+    }
+
+    #[test]
+    fn pending_client_ends_the_idle_wait() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sock = dir.path().join("controller.sock");
+        let listener = nonblocking_listener(&sock);
+        let _client = connect_path(&sock).unwrap();
+
+        // A ceiling far above any scheduling delay: if the wait were a plain
+        // sleep it would take all of it.
+        let ceiling = Duration::from_secs(20);
+        let started = Instant::now();
+        wait_for_pending_controller_client(&listener, ceiling);
+        assert!(
+            started.elapsed() < ceiling / 2,
+            "a pending client must end the idle wait, took {:?}",
+            started.elapsed()
+        );
+        assert!(
+            listener.accept().is_ok(),
+            "the client that ended the wait is accepted"
+        );
+    }
+
+    #[test]
+    fn idle_wait_without_a_client_keeps_the_tick() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let listener = nonblocking_listener(&dir.path().join("controller.sock"));
+        let started = Instant::now();
+        wait_for_pending_controller_client(&listener, Duration::from_millis(120));
+        assert!(
+            started.elapsed() >= Duration::from_millis(100),
+            "with no client the wait lasts its timeout, so the loop cannot spin: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn idle_maintenance_keeps_its_cadence_under_a_connection_burst() {
+        let now = Instant::now();
+        assert_eq!(controller_idle_tick_remaining(None, now), None);
+        assert_eq!(
+            controller_idle_tick_remaining(Some(now), now),
+            Some(CONNECT_POLL)
+        );
+        let half = CONNECT_POLL / 2;
+        assert_eq!(
+            controller_idle_tick_remaining(Some(now), now + half),
+            Some(CONNECT_POLL - half)
+        );
+        assert_eq!(
+            controller_idle_tick_remaining(Some(now), now + CONNECT_POLL),
+            None
+        );
     }
 }

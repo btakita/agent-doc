@@ -574,6 +574,33 @@ Invariants:
   for every Linux pid and generation < 36⁴ is no longer than `controller.sock`.
   `agent-doc gc` reaps both forms by embedded pid.
 
+- **L6 — a pending client is served without waiting out the idle tick
+  (`#flakyreceipthelpers` accept wake).** The serve loop accepts nonblockingly so its idle
+  tick can run maintenance at a fixed `CONNECT_POLL` (50 ms) cadence, but the
+  wait between ticks polls the listener fd and returns as soon as a client is
+  pending; a listener in an error state falls back to the plain sleep, so the
+  loop cannot spin. Maintenance keeps its cadence under a connection burst: a
+  wake that arrives before the next tick is due serves the client and waits out
+  only the tick's remainder. Violated before: the wait was an unconditional
+  `sleep(CONNECT_POLL)`, so every RPC paid up to 50 ms of accept latency twice
+  (`connect_or_launch`'s `status` probe opens its own connection), closeout
+  phases measured as exact multiples of ~100 ms, and a four-invocation
+  `finalize_integration` test took 64 s unloaded (6.8 s after) and approached
+  the 180 s nextest ceiling under load. The in-process test actor
+  (`start_state_actor_for_tests`) uses the same wait.
+- **L7 — a cross-project sweep never initializes another project's ledger
+  (`#flakyreceipthelpers` foreign bootstrap read).** `reap_orphaned_preparing_controllers_all_projects`
+  (every preflight's auto-gc) reads each foreign root's controller bootstrap
+  through a read-only open (`read_foreign_bootstrap` /
+  `load_controller_bootstrap_json_read_only`) that never creates, migrates, or
+  runs retention on that root's `state.db`; a missing database or bootstrap
+  table reads as no bootstrap. Only an actual reap may touch the foreign root.
+  Violated before: the sweep used `open_state_db`, whose first open in each
+  process runs the full `state_events` retention pass, so every short-lived CLI
+  in any project ran retention over every root that had a `preparing`
+  controller (one ledger was 380 MB), and a test project's CLI wrote the
+  operator's real ledgers.
+
 Known open hazard (not changed by `#supthrash`): a route-owned supervisor on a
 superseded binary defers its re-exec until a turn boundary
 (`supervisor_binary_stale_recycle_deferred reason=await_turn_boundary`). If the

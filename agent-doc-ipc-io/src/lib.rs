@@ -671,6 +671,68 @@ pub fn abandoned_connect_thread_count() -> usize {
     ABANDONED_CONNECT_THREADS.lock().len()
 }
 
+/// Project roots whose editor endpoint is an in-process simulated editor that
+/// always answers (`#flakyreceipthelpers`).
+///
+/// This is `#remainingwallclock` for editor IPC. The receipt deadline exists so
+/// an absent or wedged editor fails fast; a test fixture's simulated editor is
+/// known to be live, so a slow receipt from it is host load, not absence, and
+/// the deadline is only a hang ceiling. Without this, a simulated editor that
+/// records its visible-write receipt through the warm in-process controller
+/// still missed the 6s receipt deadline when its core was shared with 64
+/// spinners: every thread handoff in the record (connect, accept, the
+/// controller's per-client thread, the reply) waits a full scheduling round,
+/// so the wall-clock cost scales with run-queue length, not with work (the
+/// record's own CPU cost stayed ~50ms while its wall time reached 3-4s). Only
+/// `agent_doc_test_support::SimulatedEditorListener` registers a root; a
+/// fixture that must exercise the timeout path keeps an unregistered listener.
+#[cfg(feature = "test-support")]
+pub mod known_live_test_editors {
+    use parking_lot::Mutex;
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    /// The receipt deadline for a registered endpoint: a hang ceiling only.
+    pub const RECEIPT_HANG_CEILING: Duration = Duration::from_secs(30);
+
+    static ROOTS: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+    fn key(project_root: &Path) -> PathBuf {
+        project_root
+            .canonicalize()
+            .unwrap_or_else(|_| project_root.to_path_buf())
+    }
+
+    /// Mark `project_root`'s editor endpoint as an always-answering simulated
+    /// editor. Returns the key to pass to [`unregister`].
+    pub fn register(project_root: &Path) -> PathBuf {
+        let key = key(project_root);
+        ROOTS.lock().insert(key.clone());
+        key
+    }
+
+    pub fn unregister(key: &Path) {
+        ROOTS.lock().remove(key);
+    }
+
+    /// Whether `project_root` is registered (fixture self-checks).
+    pub fn serves(project_root: &Path) -> bool {
+        let roots = ROOTS.lock();
+        !roots.is_empty() && roots.contains(&key(project_root))
+    }
+}
+
+/// The receipt deadline for one editor IPC send to `project_root`.
+fn editor_receipt_timeout(project_root: &Path, receipt_timeout: Duration) -> Duration {
+    #[cfg(feature = "test-support")]
+    if known_live_test_editors::serves(project_root) {
+        return receipt_timeout.max(known_live_test_editors::RECEIPT_HANG_CEILING);
+    }
+    let _ = project_root;
+    receipt_timeout
+}
+
 /// Send a JSON message to the plugin via socket IPC.
 /// Returns Ok(response) if the plugin returns a terminal receipt, Err if socket unavailable.
 pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<Option<String>> {
@@ -759,6 +821,7 @@ fn send_message_with_timeout_inner_with_identity(
     pending_mode: PendingReceiptMode,
     client_identity: &IpcPeerIdentity,
 ) -> Result<Option<String>> {
+    let receipt_timeout = editor_receipt_timeout(project_root, receipt_timeout);
     let stream = match target_pid {
         Some(pid) => try_connect_for_pid(project_root, pid)?,
         None => try_connect(project_root)?,

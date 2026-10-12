@@ -9461,6 +9461,18 @@ pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>
         .transpose()
 }
 
+/// [`read_bootstrap`] for a project root this process does not own: a
+/// read-only open that never initializes, migrates, or runs retention on that
+/// project's ledger (`#flakyreceipthelpers` foreign bootstrap read).
+pub fn read_foreign_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>> {
+    state_store::load_controller_bootstrap_json_read_only(project_root, CONTROLLER_BOOTSTRAP_SCOPE)?
+        .map(|json| {
+            serde_json::from_str::<ControllerBootstrap>(&json)
+                .context("failed to parse controller bootstrap from state.db")
+        })
+        .transpose()
+}
+
 pub fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
     let path = current_agent_doc_binary()?;
     binary_identity_at_running_version(&path)
@@ -10897,16 +10909,21 @@ fn active_handoff_is_fresh(bootstrap: &ControllerBootstrap, stale_after: Duratio
 }
 
 fn bootstrap_owns_controller_pid(project_root: &Path, pid: u32) -> Result<bool> {
-    let Some(bootstrap) = read_bootstrap(project_root)? else {
-        return Ok(false);
-    };
-    if bootstrap.pid != pid {
-        return Ok(false);
-    }
-    if !is_same_project_controller_pid(project_root, pid) {
-        return Ok(false);
-    }
-    Ok(true)
+    let bootstrap = read_bootstrap(project_root)?;
+    Ok(bootstrap_record_owns_controller_pid(
+        project_root,
+        bootstrap.as_ref(),
+        pid,
+    ))
+}
+
+fn bootstrap_record_owns_controller_pid(
+    project_root: &Path,
+    bootstrap: Option<&ControllerBootstrap>,
+    pid: u32,
+) -> bool {
+    bootstrap.is_some_and(|bootstrap| bootstrap.pid == pid)
+        && is_same_project_controller_pid(project_root, pid)
 }
 
 /// gc/self-heal entry point for the orphaned-preparing process-scan reaper. See
@@ -11025,10 +11042,12 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
         if !crate::process::cmdline_has_preparing_handoff(pid) {
             continue;
         }
-        if bootstrap_owns_controller_pid(&root, pid)? {
+        // `#flakyreceipthelpers` foreign bootstrap read: `root` usually belongs to another
+        // project. Read its bootstrap without initializing its ledger.
+        let bootstrap = read_foreign_bootstrap(&root)?;
+        if bootstrap_record_owns_controller_pid(&root, bootstrap.as_ref(), pid) {
             continue;
         }
-        let bootstrap = read_bootstrap(&root)?;
         if bootstrap
             .as_ref()
             .is_some_and(|bootstrap| active_handoff_is_fresh(bootstrap, stale_after))

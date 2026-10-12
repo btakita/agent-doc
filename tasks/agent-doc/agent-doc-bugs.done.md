@@ -431,3 +431,14 @@
 - 2026-10-11 [#annotateddeferstrike] [agent-doc] A deferred annotated queue head is struck anyway: for an annotated head the closeout requires the operator-note answer quote, which then sits between the queue-prompt echo and the deferral paragraph, so the deferral is not recognized, the head is consumed and its claim released (2026-10-11, twice on the clearnoticeverify heads). Recognize a deferral paragraph that follows the operator-note answer, with a regression test.
 - 2026-10-11 [#fixthrashingbackground] Fix agent-doc thrashing in the background
 - 2026-10-11 [#flakyreceipthelpers] [agent-doc] Follow-up from flaky0494: simulated-editor socket listeners in agent-doc-test-support/src/lib.rs:781, agent-doc-write-converge-io/src/convergence_fixture_tests.rs:170 and agent-doc-commit-io/tests/git.rs:104 drop receipt errors the way the fixed already_applied_* tests did (may flake under load); and finalize_integration reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once hits the 180s nextest limit under load ~80 (performance, do not raise the limit). Integrate branch flaky0494 first.
+- 2026-10-12 [#idleclearrestart] [operator-verify] [agent-doc] Decide: Clear Session Context at an idle prompt restarts the Claude process (supervisor_restart_fresh) instead of typing /clear, killing running Claude background agents/shells with no report (2026-10-11 live test: agent stopped at 12/40 ticks). Queued clears type /clear. Should idle Clear type /clear too?
+- 2026-10-12 [#fpeseverityparse] Run Agent Doc + editing during the turn in infra.md resulted in duplication + corruption of the queue items:
+  ```
+  - 🚧 do - do - [from:actionable-review key=stggrafanaowner] do [#stggrafanaowner]
+  [#sbxdeeplevers]
+  - do [#stgrefreshonly]
+  - do [#stggrafanaowner]do [#sbxdeeplevers]
+  - do [#stgrefreshonly]
+  - do [#stggrafanaowner]
+  ```
+- 2026-10-12 [#ideriderindependentnav] [recommended] [agent-doc] Fully independent navigation per JetBrains installation: one tmux window or session per IDE installation. The installation identity becomes part of the layout-ownership key, tmux-to-editor focus mirroring goes only to the IDE that owns the window, tmux_focus_state and pane ownership are split per window, and specs plus a two-IDE SimWorld are added. Several days.

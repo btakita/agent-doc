@@ -517,6 +517,48 @@ The likely cause is that agent-doc stores one resume id per document, regardless
 - `fpeparse`: the duplicated and joined queue lines in infra.md.
 
 If both checks pass, I'll push to `main`, install, and re-cut v0.35.492. The first attempt stopped before tagging, so nothing was published. The build/test turnaround subagent is still working, and it will go in a later batch.
+
+### Re: batch merged and installed — opus-5-5 · 2026-10-12T07:20-04:00
+
+Five branches are merged to `main` as `c2f516d914`. `make check` passed (10266 tests), `make tmux-ci` passed, and `make install` has run. The tmux test that was failing CI on `main` passes again.
+
+> **Queue prompt:** do [#idleclearrestart]: Yes, Idle clear should type `/clear`.
+
+> **Operator note:** Yes, Idle clear should type `/clear`.
+
+Done (`582b6fea1e`). Clear Session Context at an idle prompt now types `/clear` into the running Claude process (`/new` for OpenCode), so background agents and shells keep running. It still restarts in three cases, and the reply and ops log name which one applied:
+- no child process is alive;
+- the supervisor's restart/quit prompt or a permission prompt owns the input;
+- the harness is Codex, because Codex's `/clear` exits the process.
+
+The live test also exposed a related bug: a queued Clear could wait forever on a quiet pane. That's fixed too. A queued Clear now sends the idle watch a per-document wake signal.
+
+> **Queue prompt:** sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
+
+I checked the logs, and the clear was not wrongly marked done:
+- Claude Code dropped your 09:07:10 Run Agent Doc prompt before saving it.
+- Both Clear presses landed inside the 20-second wait before a dropped prompt is given up on, so they were queued.
+- You typed `/clear` by hand about 3 seconds before the queue would have sent it.
+
+The missing wake signal (fixed above) could have held it even longer. A regression test now replays this sequence. Why Claude Code dropped that prompt is still unproven: an extra Enter that agent-doc sent at 09:07:11 correlates with the drop, but the logs don't show it caused it.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/241
+
+Fix then close: fixed in `15650ff081`, and GH #241 is now closed with a comment. When one of two editors for an open document is removed, the JetBrains plugin no longer deregisters the replica the remaining editor still uses. Plugin versions are JetBrains 0.2.547 and 262 0.2.548.
+
+> **Queue prompt:** do [#ideriderindependentnav]
+
+Phase 1 is done (`50039bc7af`) and changes no behavior yet. Focus ownership is now tracked per project and per navigation lane. Each IDE will get its own tmux session, because tmux shows the same current window to every terminal attached to a session. The plan is in `docs/plan-ide-independent-nav.md`, and I filed the remaining phases as `ridernavp2a`, `ridernavp2b`, `ridernavp3`, `ridernavp4` and `ridernavp5`. They depend on each other in that order, so I'll run them one at a time rather than in parallel.
+
+> **Queue prompt:** do [#fpeseverityparse]
+
+Done (`52c9398612`). When merging concurrent edits, agent-doc identified a `queue add` line by the first `[#id]` in its text. So it collided with your own line for the same id, which produced the `do - do -` prefixes, joined lines and duplicated tail. Inbound lines are now identified by their `[from:...]` attribution. A regression test replays the infra.md interleaving through the real write path. infra.md's queue still has the corrupted lines from that turn; the fix doesn't rewrite them.
+
+> **Queue prompt:** lazily.md issue: Run Agent Doc then Ctrl+c in the Codex terminal then Clear Session Context: Clear Session Context is wedged
+
+Done (`c2149c15f9`). Clear was stuck for about 2 minutes. Codex runs preflight at its first tool call, so a Ctrl+C one second in left the dispatch record half-open, and the earlier Claude-side fix only closed records that preflight had already started. An ended turn now closes that half-open record too. One remaining edge case: a Codex turn that ends normally without ever running preflight would still hit the wait, which I judged rare.
+
+**Release:** v0.35.492 is re-cut on this tree with an updated VERSIONS.md entry, and `make release` is running. Still in flight: the tools.md Codex resume-id wedge and the build/test speed-up.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -525,30 +567,30 @@ If both checks pass, I'll push to `main`, install, and re-cut v0.35.492. The fir
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fpeseverityparse]
-- 🚧 do [#idleclearrestart]: Yes, Idle clear should type `/clear`.
+- ~~do [#fpeseverityparse]~~
+- ~~do [#idleclearrestart]: Yes, Idle clear should type `/clear`.~~
 - 🚧 How can we optimize the agent-doc build process + test process to reduce the turnaround time?
 - 🚧 sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/241
-- 🚧 do [#ideriderindependentnav]
+- ~~do [#ideriderindependentnav]~~
 - 🚧 lazily.md issue: Run Agent Doc then Ctrl+c in the Codex terminal then Clear Session Context: Clear Session Context is wedged
 - 🚧 tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.
 - 🚧 release + publish
+- do [#ridernavp2a]
+- do [#ridernavp2b]
+- do [#ridernavp3]
+- do [#ridernavp4]
+- do [#ridernavp5]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#fpeseverityparse] Run Agent Doc + editing during the turn in infra.md resulted in duplication + corruption of the queue items:
-  ```
-  - 🚧 do - do - [from:actionable-review key=stggrafanaowner] do [#stggrafanaowner]
-  [#sbxdeeplevers]
-  - do [#stgrefreshonly]
-  - do [#stggrafanaowner]do [#sbxdeeplevers]
-  - do [#stgrefreshonly]
-  - do [#stggrafanaowner]
-  ```
-- [ ] 🚧 [#idleclearrestart] [operator-verify] [agent-doc] Decide: Clear Session Context at an idle prompt restarts the Claude process (supervisor_restart_fresh) instead of typing /clear, killing running Claude background agents/shells with no report (2026-10-11 live test: agent stopped at 12/40 ticks). Queued clears type /clear. Should idle Clear type /clear too?
+- [ ] [#ridernavp2a] [agent-doc] IDE navigation lanes P2a (docs/plan-ide-independent-nav.md): move the single per-project pane-layout graph behind a per-lane map with no behavior change. Do this first: P2b, P3, P4 and P5 build on it in order.
+- [ ] [#ridernavp2b] [agent-doc] IDE navigation lanes P2b (docs/plan-ide-independent-nav.md), after ridernavp2a: opt-in editor_navigation = shared or per_installation in .agent-doc/config.toml; per-lane layout sync routing, lane-aware layout check and target-window fallback, lane session creation on first sync, cross_lane_layout_dropped and owned_by_other_lane refusals, per-lane sync cancellation instead of the process-global cancel.
+- [ ] [#ridernavp3] [agent-doc] IDE navigation lanes P3 (docs/plan-ide-independent-nav.md), after ridernavp2b: FFI agent_doc_tmux_focus_state_for_client_json; agent-doc terminal attaches to its lane session; JetBrains sends its client id with tmux_focus_state and TmuxPaneFocusSync ignores other-lane focus; plugin version bump by the coordinator.
+- [ ] [#ridernavp4] [agent-doc] IDE navigation lanes P4 (docs/plan-ide-independent-nav.md), after ridernavp3: a document open in both IDEs stays in its owning lane; Claim for Tmux Pane or Sync Tmux Layout in the other IDE hands it over; SimWorld plus isolated-tmux handoff tests.
+- [ ] [#ridernavp5] [agent-doc] IDE navigation lanes P5 (docs/plan-ide-independent-nav.md), after ridernavp4: enable/disable migration for a project with an existing shared window, cleanup of empty lane sessions agent-doc created (never foreign ones), README and SPEC, two-IDE end-to-end test in tests/cross_editor_simworld.rs.
 <!-- /agent:backlog -->
 
 ## Review
@@ -560,7 +602,6 @@ If both checks pass, I'll push to `main`, install, and re-cut v0.35.492. The fir
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
-- [ ] 🚧 [#ideriderindependentnav] [recommended] [agent-doc] Fully independent navigation per JetBrains installation: one tmux window or session per IDE installation. The installation identity becomes part of the layout-ownership key, tmux-to-editor focus mirroring goes only to the IDE that owns the window, tmux_focus_state and pane ownership are split per window, and specs plus a two-IDE SimWorld are added. Several days.
 - [ ] [#ghrecvpolicy] [agent-doc] Recipient-side [receive] auto_create_components policy for multi-user workspaces (GH #40, https://github.com/btakita/agent-doc/issues/40). Parked until multi-user workspace support exists.
 <!-- /agent:icebox -->
 

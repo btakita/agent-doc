@@ -1494,11 +1494,15 @@ fn retire_harness_ended_turn_for_clear(ctx: &SessionContext, pane: &str) {
     ) else {
         return;
     };
-    let settled = agent_doc_controller_io::project_controller::settle_dispatch_turn_ended_by_harness_for_file(
-        &ctx.canonical_file,
-        retired.written_at,
-    )
-    .unwrap_or(0);
+    // `#infraclearsession`: the retirement already settled the pane's receipt;
+    // this file-scoped settle covers a document with no `documents.pane_id`
+    // row yet and is otherwise a no-op.
+    let settled = retired.settled_dispatches
+        + agent_doc_controller_io::project_controller::settle_dispatch_turn_ended_by_harness_for_file(
+            &ctx.canonical_file,
+            retired.written_at,
+        )
+        .unwrap_or(0);
     agent_doc_ops_log_io::log_op(
         &ctx.canonical_file,
         &format!(

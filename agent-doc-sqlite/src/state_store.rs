@@ -4872,6 +4872,39 @@ pub fn settle_running_dispatch_turns_for_pane_started_at_or_before(
     Ok(settled)
 }
 
+/// `#infraclearsession`: [`settle_harness_ended_dispatch_turn_at_or_before`] for
+/// every document whose actor runs in `pane_id` (`documents.pane_id`).
+///
+/// The turn-end edges that know only a pane — the turn-active lease retirement
+/// (whichever reader observes the harness interrupt record first) and the
+/// `turn-status idle` hook — settle the ended turn's dispatch receipt here.
+/// Settling only `running` receipts on those edges left a Codex turn
+/// interrupted before its preflight (which a Codex turn runs from its first
+/// tool call) with its receipt still `accepted`: live 2026-10-12, haiven-dev
+/// `tasks/infra.md` pane %152, receipt 3486 accepted 15:05:59, Codex
+/// `turn_aborted` 15:06:03, lease retired silently by a non-clear reader, and
+/// every Clear press until the next dispatch re-queued on
+/// `evidence=dispatch_turn_pending`. Per document: the `running` receipts
+/// first, else exactly one — the oldest open non-operator receipt accepted at
+/// or before `turn_started_at` (`#dispatchreceiptperturn`). Returns the number
+/// settled.
+pub fn settle_harness_ended_dispatch_turn_for_pane_at_or_before(
+    conn: &Connection,
+    pane_id: &str,
+    turn_started_at: i64,
+) -> Result<usize> {
+    let document_ids: Vec<String> = conn
+        .prepare("SELECT document_id FROM documents WHERE pane_id = ?1")?
+        .query_map(params![pane_id], |row| row.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    let mut settled = 0;
+    for document_id in document_ids {
+        settled +=
+            settle_harness_ended_dispatch_turn_at_or_before(conn, &document_id, turn_started_at)?;
+    }
+    Ok(settled)
+}
+
 /// `#qflood`: mark every open in-flight dispatch for this document consumed. Called
 /// when the actor transitions to `Ready`, keeping the open-dispatch set accurate for
 /// the next busy episode's coalescing and for restart recovery. Returns the number of
@@ -6943,6 +6976,58 @@ mod tests {
                 "%404",
                 turn_started_at
             )?,
+            0,
+            "a pane no actor owns settles nothing"
+        );
+        Ok(())
+    }
+
+    /// `#infraclearsession`: the pane-scoped harness-ended settle takes, per
+    /// document whose actor runs in that pane, the `running` receipts first,
+    /// else exactly the oldest unpromoted non-operator receipt at or before the
+    /// ended turn's lease — never a newer turn's, an operator command's, or
+    /// another pane's.
+    #[test]
+    fn a_pane_harness_ended_turn_settles_one_receipt_per_document() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE documents (document_id TEXT PRIMARY KEY, pane_id TEXT NOT NULL);
+            INSERT INTO documents (document_id, pane_id) VALUES ('doc', '%152'), ('other', '%7');
+            "#,
+        )?;
+        let lease = 1_791_817_559i64;
+        insert_open_dispatch(&conn, "doc", lease - 1, "accepted")?; // 1: this turn's, unpromoted
+        insert_open_dispatch(&conn, "doc", lease, "accepted")?; // 2: stacked behind it
+        insert_open_dispatch(&conn, "doc", lease + 40, "accepted")?; // 3: a newer turn
+        insert_open_dispatch(&conn, "other", lease - 1, "accepted")?; // 4: other pane
+        conn.execute(
+            "INSERT INTO dispatch_attempts \
+             (document_id, generation, command_kind, result_status, dispatch_start_proven, timestamp) \
+             VALUES ('doc', 1, 'session_clear', 'accepted', 0, ?1)",
+            params![lease - 2],
+        )?; // 5: an operator command
+
+        assert_eq!(
+            settle_harness_ended_dispatch_turn_for_pane_at_or_before(&conn, "%152", lease)?,
+            1
+        );
+        assert!(receipt_proven(&conn, 1)?);
+        assert!(!receipt_proven(&conn, 2)?, "one turn settles one receipt");
+        assert!(!receipt_proven(&conn, 3)?, "a newer turn's receipt stays");
+        assert!(!receipt_proven(&conn, 4)?, "another pane's turn did not end");
+        assert!(!receipt_proven(&conn, 5)?, "an operator command is no dispatch");
+
+        // A promoted receipt is the turn's; no pending one is taken with it.
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert_eq!(
+            settle_harness_ended_dispatch_turn_for_pane_at_or_before(&conn, "%152", lease)?,
+            1
+        );
+        assert!(receipt_proven(&conn, 2)?);
+        assert!(!receipt_proven(&conn, 3)?);
+        assert_eq!(
+            settle_harness_ended_dispatch_turn_for_pane_at_or_before(&conn, "%404", lease)?,
             0,
             "a pane no actor owns settles nothing"
         );

@@ -774,6 +774,31 @@ Fix then close: fixed (`3feec687db`), shipped in 0.35.493, and GH #242 is closed
 - **Fix:** retries now happen only on a new edit event, and identical refusals are logged once with a count.
 
 The earlier parse refusal on this document was not caused by line 690. The `inlinecodemarker` investigation found that the document parses with both main and 0.35.492. The most likely cause was a half-edited queue in your editor buffer at that moment. Parse errors now name the marker's line.
+
+### Re: v0.35.493 published — opus-5-5 · 2026-10-12T12:05-04:00
+
+> **Queue prompt:** release + publish
+
+v0.35.493 is published:
+- **GitHub Release:** the release workflow succeeded. It published Linux (gnu, musl, aarch64), Windows and macOS archives, the JetBrains plugins 0.2.551 and 262 0.2.552, and VS Code 0.2.81.
+- **PyPI:** the workflow succeeded, and `pypi.org/pypi/agent-doc/0.35.493/json` serves `agent_doc-0.35.493-py3-none-any.whl`. PyPI's cached simple index still lists 0.35.492 as the newest, which is a CDN delay only.
+- **Locally:** installed.
+
+What's in it:
+- independent IDE navigation lanes P1–P4 (opt-in `editor_navigation = "per_installation"`);
+- harness-keyed Codex resume ids;
+- the linear CRDT range delete;
+- the Stop hook naming its real holder;
+- the terse Codex continuation;
+- multi-line queue heads;
+- the JetBrains typing-retry fix (GH #242);
+- line-numbered parse errors;
+- a faster `make check` with workspace-wide clippy;
+- codex-stop test isolation.
+
+Auto-clear between queue items (`bgclearpolicy`) and lane migration/cleanup (P5) landed on `main` after the tag. Both are installed locally and ship in the next release.
+
+`ridernavp6status` is done (`5355e01c79`): each lane now publishes its own pane-layout status, and shared mode is unchanged. It merges with `ridernavp6republish`, which is now being built on top of it. `ridernavp6route` is in progress in parallel, and `ridernavp6gc` and `ridernavp6switchback` follow.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -789,7 +814,7 @@ The earlier parse refusal on this document was not caused by line 690. The `inli
 - ~~do [#stopreopenflake]~~
 - ~~do [#multilinequeuehead]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/242~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 release + publish
+- ~~release + publish~~
 - do [#ridernavp6route]
 - do [#ridernavp6republish]
 - do [#ridernavp6status]

@@ -952,69 +952,106 @@ fn queue_alignment(
         });
     };
 
-    for op in similar::capture_diff_slices(similar::Algorithm::Myers, &old_keys, &new_keys) {
-        match op {
+    // `#steeringeditmisalign`: pair by item identity first. Myers over the
+    // identity keys aligns the untouched run; an item whose identity survives
+    // outside that run (a moved line) still pairs with itself. Only lines
+    // with no identity partner left are offered to the similarity pairing,
+    // so deleting struck lines above claimed items can never turn a removed
+    // `do [#a]` into the "previous" text of an untouched `do [#b]`.
+    let ops = similar::capture_diff_slices(similar::Algorithm::Myers, &old_keys, &new_keys);
+    let mut pair_of_new: Vec<Option<(usize, bool)>> = vec![None; new.len()];
+    let mut old_paired = vec![false; old.len()];
+    for op in &ops {
+        if let similar::DiffOp::Equal {
+            old_index,
+            new_index,
+            len,
+        } = *op
+        {
+            for offset in 0..len {
+                pair_of_new[new_index + offset] = Some((old_index + offset, false));
+                old_paired[old_index + offset] = true;
+            }
+        }
+    }
+    for n in 0..new.len() {
+        if pair_of_new[n].is_some() {
+            continue;
+        }
+        if let Some(o) = (0..old.len()).find(|&o| !old_paired[o] && old_keys[o] == new_keys[n]) {
+            pair_of_new[n] = Some((o, false));
+            old_paired[o] = true;
+        }
+    }
+    for op in &ops {
+        let similar::DiffOp::Replace {
+            old_index,
+            old_len,
+            new_index,
+            new_len,
+        } = *op
+        else {
+            continue;
+        };
+        // Pair a replaced line with its edit only when the texts are
+        // plausibly the same item; positional pairing misread a consumed head
+        // followed by an operator addition as two edits.
+        let olds: Vec<usize> = (old_index..old_index + old_len)
+            .filter(|&o| !old_paired[o])
+            .collect();
+        let news: Vec<usize> = (new_index..new_index + new_len)
+            .filter(|&n| pair_of_new[n].is_none())
+            .collect();
+        let old_texts: Vec<String> = olds.iter().map(|&o| old[o].clone()).collect();
+        let new_items: Vec<QueueItem> = news.iter().map(|&n| new[n].clone()).collect();
+        for (po, pn) in pair_replaced_lines(&old_texts, &new_items) {
+            pair_of_new[news[pn]] = Some((olds[po], true));
+            old_paired[olds[po]] = true;
+        }
+    }
+
+    let emit_new = |alignment: &mut QueueAlignment, n: usize| match pair_of_new[n] {
+        Some((o, true)) if binary_owned_line(&new[n].norm, binary_owned_ids) => {
+            delete(alignment, o);
+            alignment.events.push(QueueEvent::Keep(new[n].norm.clone()));
+        }
+        Some((o, _)) if old[o] == new[n].norm => {
+            alignment.events.push(QueueEvent::Keep(old[o].clone()));
+        }
+        // Same identity with different text, or a similarity-paired edit.
+        Some((o, _)) => edit(alignment, o, n),
+        None => insert(alignment, n),
+    };
+    for op in ops {
+        let (old_range, new_range) = match op {
             similar::DiffOp::Equal {
                 old_index,
                 new_index,
                 len,
-            } => {
-                for offset in 0..len {
-                    let (o, n) = (old_index + offset, new_index + offset);
-                    if old[o] == new[n].norm {
-                        alignment.events.push(QueueEvent::Keep(old[o].clone()));
-                    } else {
-                        // Same id-backed identity, different text.
-                        edit(&mut alignment, o, n);
-                    }
-                }
-            }
+            } => (old_index..old_index, new_index..new_index + len),
             similar::DiffOp::Delete {
                 old_index, old_len, ..
-            } => {
-                for o in old_index..old_index + old_len {
-                    delete(&mut alignment, o);
-                }
-            }
+            } => (old_index..old_index + old_len, 0..0),
             similar::DiffOp::Insert {
                 new_index, new_len, ..
-            } => {
-                for n in new_index..new_index + new_len {
-                    insert(&mut alignment, n);
-                }
-            }
+            } => (0..0, new_index..new_index + new_len),
             similar::DiffOp::Replace {
                 old_index,
                 old_len,
                 new_index,
                 new_len,
-            } => {
-                // Pair a replaced line with its edit only when the texts are
-                // plausibly the same item; positional pairing misread a
-                // consumed head followed by an operator addition as two edits.
-                let pairs = pair_replaced_lines(
-                    &old[old_index..old_index + old_len],
-                    &new[new_index..new_index + new_len],
-                );
-                for o in 0..old_len {
-                    if !pairs.iter().any(|(po, _)| *po == o) {
-                        delete(&mut alignment, old_index + o);
-                    }
-                }
-                for n in 0..new_len {
-                    let n_abs = new_index + n;
-                    match pairs.iter().find(|(_, pn)| *pn == n) {
-                        Some((o, _)) if binary_owned_line(&new[n_abs].norm, binary_owned_ids) => {
-                            delete(&mut alignment, old_index + o);
-                            alignment
-                                .events
-                                .push(QueueEvent::Keep(new[n_abs].norm.clone()));
-                        }
-                        Some((o, _)) => edit(&mut alignment, old_index + o, n_abs),
-                        None => insert(&mut alignment, n_abs),
-                    }
-                }
+            } => (
+                old_index..old_index + old_len,
+                new_index..new_index + new_len,
+            ),
+        };
+        for o in old_range {
+            if !old_paired[o] {
+                delete(&mut alignment, o);
             }
+        }
+        for n in new_range {
+            emit_new(&mut alignment, n);
         }
     }
     alignment
@@ -1026,8 +1063,19 @@ fn queue_alignment(
 fn pair_replaced_lines(old: &[String], new: &[QueueItem]) -> Vec<(usize, usize)> {
     let mut scored: Vec<(f32, usize, usize)> = Vec::new();
     for (o, old_text) in old.iter().enumerate() {
+        let old_identity = agent_doc_element_queue::queue_head_identity(old_text);
         for (n, new_item) in new.iter().enumerate() {
             let new_text = new_item.norm.as_str();
+            // A tracked id IS the item's identity: two different ids are two
+            // different items however alike their text (`do [#ridernavp4]`
+            // vs `do [#ridernavp6route]`), and neither is the same item as a
+            // free-text line. Only free text, whose identity is its text, can
+            // be edited into a different key.
+            if old_identity.is_id_backed()
+                || agent_doc_element_queue::queue_head_identity(new_text).is_id_backed()
+            {
+                continue;
+            }
             let score = if new_text.contains(old_text.as_str()) || old_text.contains(new_text) {
                 1.0
             } else {
@@ -2398,6 +2446,235 @@ mod tests {
             observe(&second.next, &v2, &quiet_ctx(&owned))
                 .ready
                 .is_empty()
+        );
+    }
+
+    /// `#steeringeditmisalign`, replayed from the 2026-10-12
+    /// `agent-doc-bugs.md` session: the acknowledged queue still held the
+    /// eight claimed items the agent had since struck, the operator added the
+    /// `ridernavp6*` items, and every hook paired a removed `do [#a]` with an
+    /// untouched `do [#b]` by text similarity (`previous: do [#ridernavp4]`
+    /// / `verbatim: do [#ridernavp6route]`). Distinct tracked ids are distinct
+    /// items: the removals stay silent and the new ids are additions.
+    #[test]
+    fn distinct_tracked_ids_never_pair_as_an_edit() {
+        let owned = BTreeSet::new();
+        let claimed = "- 🚧 do [#bgclearpolicy]: Do you have enough direction for this? The hourglass is still visible in the queue.\n\
+                       - 🚧 do [#ridernavp3]\n- 🚧 do [#ridernavp4]\n- 🚧 do [#ridernavp5]\n\
+                       - 🚧 do [#stopreopenflake]\n- 🚧 do [#multilinequeuehead]\n\
+                       - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/242\n- 🚧 release + publish\n";
+        let struck = "- ~~do [#bgclearpolicy]: Do you have enough direction for this? The hourglass is still visible in the queue.~~\n\
+                      - ~~do [#ridernavp3]~~\n- ~~do [#ridernavp4]~~\n- ~~do [#ridernavp5]~~\n\
+                      - ~~do [#stopreopenflake]~~\n- ~~do [#multilinequeuehead]~~\n\
+                      - ~~#gh-fix https://github.com/btakita/agent-doc/issues/242~~\n- ~~release + publish~~\n";
+        let added = "- do [#ridernavp6route]\n- do [#ridernavp6republish]\n- do [#ridernavp6status]\n\
+                     - do [#ridernavp6gc]\n- do [#ridernavp6switchback]\n";
+        let wm = seeded(&doc(claimed, EX), None);
+        let current = doc(&format!("{struck}{added}"), EX);
+        let obs = observe(&wm, &current, &quiet_ctx(&owned));
+        let changes: Vec<_> = obs
+            .ready
+            .iter()
+            .map(|item| {
+                (
+                    item.change,
+                    item.verbatim.as_str(),
+                    item.previous.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            changes,
+            vec![
+                (SteeringChange::Added, "do [#ridernavp6route]", None),
+                (SteeringChange::Added, "do [#ridernavp6republish]", None),
+                (SteeringChange::Added, "do [#ridernavp6status]", None),
+                (SteeringChange::Added, "do [#ridernavp6gc]", None),
+                (SteeringChange::Added, "do [#ridernavp6switchback]", None),
+            ],
+        );
+        assert_eq!(obs.pending, 0);
+    }
+
+    /// `#steeringeditmisalign`: the operator deleting struck lines above
+    /// claimed, untouched items is no steering at all, and a claim marker
+    /// (`🚧`) on those items is not an edit either.
+    #[test]
+    fn deleting_struck_lines_above_claimed_items_is_not_steering() {
+        let owned = BTreeSet::new();
+        let before = doc(
+            "- do [#infraclearsession]\n\
+             - ~~do [#bgclearpolicy]: Do you have enough direction for this?~~\n\
+             - ~~do [#ridernavp3]~~\n- ~~do [#ridernavp4]~~\n- ~~release + publish~~\n\
+             - 🚧 do [#ridernavp6route]\n- 🚧 do [#ridernavp6republish]\n\
+             - 🚧 do [#ridernavp6status]\n- 🚧 do [#ridernavp6gc]\n",
+            EX,
+        );
+        let after = doc(
+            "- 🚧 do [#infraclearsession]\n- 🚧 do [#ridernavp6route]\n\
+             - 🚧 do [#ridernavp6republish]\n- 🚧 do [#ridernavp6status]\n\
+             - 🚧 do [#ridernavp6gc]\n",
+            EX,
+        );
+        let wm = seeded(&before, None);
+        let obs = observe(&wm, &after, &quiet_ctx(&owned));
+        assert!(obs.ready.is_empty(), "{:?}", obs.ready);
+        assert_eq!(obs.pending, 0);
+        // The same deletion while a removed item is the claimed one is still
+        // a removal of THAT item, never an edit of a neighbour.
+        let wm = seeded(
+            &doc("- do [#ridernavp4]\n- do [#ridernavp6route]\n", EX),
+            Some("do [#ridernavp4]"),
+        );
+        let obs = observe(
+            &wm,
+            &doc("- 🚧 do [#ridernavp6route]\n", EX),
+            &quiet_ctx(&owned),
+        );
+        let changes: Vec<_> = obs
+            .ready
+            .iter()
+            .map(|item| (item.change, item.verbatim.as_str(), item.current_item))
+            .collect();
+        assert_eq!(
+            changes,
+            vec![(SteeringChange::Deleted, "do [#ridernavp4]", true)]
+        );
+    }
+
+    /// `#steeringeditmisalign`: the typing-gate count ("The operator is still
+    /// typing N more item(s)") was these misaligned pairs. Each new line or
+    /// claim re-paired the block, the candidate key changed, and the settle
+    /// gate restarted, so nothing settled while the document kept changing.
+    /// Identity-keyed candidates keep their key across claims and unrelated
+    /// insertions and settle on their own stability.
+    #[test]
+    fn identity_keyed_candidates_settle_while_the_document_keeps_changing() {
+        let owned = BTreeSet::new();
+        let ctx = |now_ms| ObserveContext {
+            now_ms,
+            // The document changed at this very instant every time.
+            document_changed_ms: Some(now_ms),
+            ..quiet_ctx(&owned)
+        };
+        let wm = seeded(
+            &doc(
+                "- 🚧 do [#ridernavp3]\n- 🚧 do [#ridernavp4]\n- 🚧 release + publish\n",
+                EX,
+            ),
+            None,
+        );
+        let v1 = doc(
+            "- ~~do [#ridernavp3]~~\n- ~~do [#ridernavp4]~~\n- ~~release + publish~~\n\
+             - do [#ridernavp6route]\n- do [#ridernavp6gc]\n",
+            EX,
+        );
+        let first = observe(&wm, &v1, &ctx(10_000));
+        assert!(first.ready.is_empty(), "{:?}", first.ready);
+        assert_eq!(first.pending, 2);
+        // The workers claim both items and the operator adds one above them.
+        let v2 = doc(
+            "- do [#infraclearsession]\n- ~~do [#ridernavp3]~~\n- ~~do [#ridernavp4]~~\n\
+             - ~~release + publish~~\n- 🚧 do [#ridernavp6route]\n- 🚧 do [#ridernavp6gc]\n",
+            EX,
+        );
+        let second = observe(&first.next, &v2, &ctx(12_000));
+        let ready: Vec<_> = second
+            .ready
+            .iter()
+            .map(|item| (item.change, item.verbatim.as_str()))
+            .collect();
+        assert_eq!(
+            ready,
+            vec![
+                (SteeringChange::Added, "🚧 do [#ridernavp6route]"),
+                (SteeringChange::Added, "🚧 do [#ridernavp6gc]"),
+            ]
+        );
+        // Only the genuinely new line is still held.
+        assert_eq!(second.pending, 1);
+        let third = observe(&second.next, &v2, &ctx(14_000));
+        assert_eq!(third.ready.len(), 1, "{:?}", third.ready);
+        assert_eq!(third.ready[0].verbatim, "do [#infraclearsession]");
+        assert_eq!(third.pending, 0);
+    }
+
+    /// `#steeringeditmisalign`: real edits still surface with the right
+    /// `previous`, even next to a removal, and a moved item is untouched.
+    #[test]
+    fn identity_pairing_keeps_real_edits_and_moves() {
+        let owned = BTreeSet::new();
+        // Same tracked id, new text: an edit of that item.
+        let wm = seeded(&doc("- do [#alpha]\n- do [#beta]\n", EX), None);
+        let obs = observe(
+            &wm,
+            &doc("- do [#beta]\n- do [#alpha] and add docs\n", EX),
+            &quiet_ctx(&owned),
+        );
+        let changes: Vec<_> = obs
+            .ready
+            .iter()
+            .map(|item| {
+                (
+                    item.change,
+                    item.verbatim.as_str(),
+                    item.previous.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            changes,
+            vec![(
+                SteeringChange::Edited,
+                "do [#alpha] and add docs",
+                Some("do [#alpha]")
+            )]
+        );
+        // Free-text edit beside a removed line: the edit keeps its own
+        // previous text; the removal stays silent.
+        let wm = seeded(&doc("- do [#gone]\n- later work\n- other work\n", EX), None);
+        let obs = observe(
+            &wm,
+            &doc("- later work, but also docs\n- other work\n", EX),
+            &quiet_ctx(&owned),
+        );
+        let changes: Vec<_> = obs
+            .ready
+            .iter()
+            .map(|item| {
+                (
+                    item.change,
+                    item.verbatim.as_str(),
+                    item.previous.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            changes,
+            vec![(
+                SteeringChange::Edited,
+                "later work, but also docs",
+                Some("later work")
+            )]
+        );
+        // Reordering untouched items is not steering.
+        let wm = seeded(
+            &doc("- do [#alpha]\n- free text item\n- do [#beta]\n", EX),
+            None,
+        );
+        let obs = observe(
+            &wm,
+            &doc("- 🚧 do [#beta]\n- do [#alpha]\n- free text item\n", EX),
+            &quiet_ctx(&owned),
+        );
+        assert!(obs.ready.is_empty(), "{:?}", obs.ready);
+        assert_eq!(
+            obs.next.acknowledged_queue,
+            vec![
+                "do [#beta]".to_string(),
+                "do [#alpha]".to_string(),
+                "free text item".to_string()
+            ]
         );
     }
 

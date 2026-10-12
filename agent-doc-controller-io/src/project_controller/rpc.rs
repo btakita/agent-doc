@@ -20810,6 +20810,25 @@ impl agent_doc_reliable_sync_io::push::LivenessPushTransport
     }
 }
 
+type ReliableSyncOutboxChannelLocks =
+    BTreeMap<(PathBuf, String), std::sync::Arc<parking_lot::Mutex<()>>>;
+
+/// Per-channel serialization for [`handle_reliable_sync_outbox`]
+/// (`#runfrontendissue`). Keyed by project root and document hash so one
+/// channel's long backlog flush never blocks another channel.
+fn reliable_sync_outbox_channel_lock(
+    project_root: &Path,
+    document_hash: &str,
+) -> std::sync::Arc<parking_lot::Mutex<()>> {
+    static LOCKS: std::sync::LazyLock<parking_lot::Mutex<ReliableSyncOutboxChannelLocks>> =
+        std::sync::LazyLock::new(|| parking_lot::Mutex::new(BTreeMap::new()));
+    LOCKS
+        .lock()
+        .entry((project_root.to_path_buf(), document_hash.to_string()))
+        .or_default()
+        .clone()
+}
+
 fn handle_reliable_sync_outbox(
     project_root: &Path,
     request: ControllerRequest,
@@ -20821,15 +20840,28 @@ fn handle_reliable_sync_outbox(
             .context("reliable_sync_outbox request missing diagnostic_payload")?,
     )
     .context("parse reliable_sync_outbox payload")?;
-    let outbox = lazily::SqliteOutbox::open(
-        &agent_doc_sqlite::state_store::state_db_path(project_root),
-        payload.document_hash.clone(),
-    )?;
+    // `#runfrontendissue`: epoch allocation reads durable state and then
+    // appends with `INSERT OR REPLACE`, so two concurrent requests for one
+    // channel could allocate (and overwrite) the same epoch. Serialize the
+    // read-allocate-append-flush sequence per channel.
+    let channel_lock = reliable_sync_outbox_channel_lock(project_root, &payload.document_hash);
+    let _channel_guard = channel_lock.lock();
+    let database_path = agent_doc_sqlite::state_store::state_db_path(project_root);
+    let outbox = lazily::SqliteOutbox::open(&database_path, payload.document_hash.clone())?;
     let acked_through = outbox.acked_through();
+    // The receiver journal shares this database. Allocate strictly above every
+    // epoch it has observed, not just above the sender's own ACK cursor: a lost
+    // ACK leaves the sender cursor behind a frame the receiver already holds,
+    // and re-using that epoch for a new batch is what wedged
+    // haiven-dev `frontend.md`'s liveness channel (`#runfrontendissue`).
+    let receiver_frontier = agent_doc_sqlite::reliable_sync_inbox::receiver_epoch_frontier(
+        &database_path,
+        &payload.document_hash,
+    )?;
     let mut endpoint = agent_doc_reliable_sync_io::push::FramePushEndpoint::resuming(
         payload.document_hash.clone(),
         outbox,
-        acked_through,
+        acked_through.max(receiver_frontier),
     );
     if let Some(frame) = payload.frame {
         endpoint.enqueue_frame(frame);
@@ -20953,12 +20985,26 @@ fn handle_reliable_sync(
         .as_ref()
         .map(serde_json::to_string)
         .transpose()?;
-    let ack_through = agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+    let receipt = agent_doc_sqlite::reliable_sync_inbox::record_remote_frame_reconciling(
         &agent_doc_sqlite::state_store::state_db_path(project_root),
         &document_hash,
         epoch,
         liveness_ops_json.as_deref(),
     )?;
+    let ack_through = receipt.ack_through;
+    if let Some(reconciled_key) = receipt.epoch_reuse_reconciled.as_deref() {
+        // `#runfrontendissue`: the sender re-used an epoch the receiver had
+        // already journaled with a different batch. Refusing it blocked the
+        // channel forever; both CRDT batches are now journaled and folded.
+        let message = format!(
+            "reliable_sync_epoch_reuse_reconciled document_hash={document_hash} epoch={epoch} \
+journal_key={reconciled_key} ack_through={ack_through} (#runfrontendissue)"
+        );
+        match request.file.as_deref() {
+            Some(file) => agent_doc_ops_log_io::log_op(file, &message),
+            None => agent_doc_ops_log_io::log_op(project_root, &message),
+        }
+    }
     let folded_liveness = liveness_ops.is_some();
     if folded_liveness {
         note_liveness_journal_append(project_root);
@@ -54953,6 +54999,193 @@ body
         .unwrap();
         assert!(outbox.retained_epochs().is_empty());
         assert_eq!(outbox.acked_through(), 1);
+    }
+
+    /// `#runfrontendissue`: haiven-dev `frontend.md` (2026-10-12). The receiver
+    /// journaled a liveness `Close` at epoch E while the sender's ACK cursor
+    /// stayed at E-1, the sender re-used E for a later batch, and the strict
+    /// receiver refused that frame on every flush. 4,424 later frames —
+    /// including the live editor's `Open`/`Register` advertising
+    /// `operator_text_authority_v1` — never reached the controller, so every
+    /// preflight refused with `editor_capability_missing editor_id=unknown`.
+    #[test]
+    fn controller_outbox_recovers_a_channel_wedged_by_sender_epoch_reuse() {
+        use agent_doc_reliable_sync_io::liveness::{
+            EditorRegistration, LivenessOp, encode_liveness_frame,
+        };
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let database_path = agent_doc_sqlite::state_store::state_db_path(dir.path());
+        let document_hash = "runfrontendissue-epoch-reuse";
+        let old_pid = 4_100_001u64;
+        // The test process is a live OS pid, so concurrent controller hydration
+        // that reconciles open pids against OS liveness keeps it alive.
+        let live_pid = u64::from(std::process::id());
+        let registration = |pid: u64, timestamp_ms: u64| EditorRegistration {
+            document_hash: document_hash.to_string(),
+            pid,
+            path: "/tmp/runfrontendissue/frontend.md".to_string(),
+            editor_id: format!("jetbrains-{pid}"),
+            editor_kind: "jetbrains".to_string(),
+            editor_version: "0.2.557".to_string(),
+            capabilities: vec![
+                agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+                    .to_string(),
+                agent_doc_document_realtime::editor_contract::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
+                    .to_string(),
+            ],
+            timestamp_ms,
+        };
+        let request = |frame: Option<lazily::IpcMessage>, flush: bool| ControllerRequest {
+            command: "reliable_sync_outbox".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("test".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::to_string(&ControllerReliableSyncOutboxPayload {
+                    document_hash: document_hash.to_string(),
+                    frame,
+                    flush,
+                })
+                .unwrap(),
+            ),
+            sequence: None,
+        };
+
+        // Epoch 1 is delivered and ACKed normally.
+        let opened = encode_liveness_frame(&[
+            LivenessOp::Open {
+                document_hash: document_hash.to_string(),
+                pid: old_pid,
+                tag: "old-open".to_string(),
+            },
+            LivenessOp::Register(registration(old_pid, 1)),
+        ])
+        .unwrap();
+        assert_eq!(
+            handle_reliable_sync_outbox(dir.path(), request(Some(opened), true))
+                .unwrap()
+                .ack_through,
+            1
+        );
+        // Epoch 2 reached the receiver journal but its ACK never reached the
+        // sender cursor (the frontend.md shape: journal 32339, cursors 32338).
+        let closed = vec![LivenessOp::Close {
+            document_hash: document_hash.to_string(),
+            pid: old_pid,
+            observed_tags: vec!["old-open".to_string()],
+        }];
+        agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
+            &database_path,
+            document_hash,
+            2,
+            &serde_json::to_string(&closed).unwrap(),
+        )
+        .unwrap();
+
+        // Recovery: a channel that ALREADY re-used the journaled epoch (written
+        // by an older binary) must drain instead of refusing forever.
+        let mut outbox =
+            lazily::SqliteOutbox::open(&database_path, document_hash.to_string()).unwrap();
+        lazily::DurableOutbox::append(
+            &mut outbox,
+            2,
+            encode_liveness_frame(&[LivenessOp::Register(registration(old_pid, 2))]).unwrap(),
+        );
+        lazily::DurableOutbox::append(
+            &mut outbox,
+            3,
+            encode_liveness_frame(&[
+                LivenessOp::Open {
+                    document_hash: document_hash.to_string(),
+                    pid: live_pid,
+                    tag: "live-open".to_string(),
+                },
+                LivenessOp::Register(registration(live_pid, 3)),
+            ])
+            .unwrap(),
+        );
+        drop(outbox);
+        let flushed = handle_reliable_sync_outbox(dir.path(), request(None, true))
+            .expect("a re-used epoch must not wedge the channel");
+        assert_eq!(flushed.ack_through, 3);
+        let outbox = lazily::SqliteOutbox::open(&database_path, document_hash.to_string()).unwrap();
+        assert!(
+            outbox.retained_epochs().is_empty(),
+            "every frame behind the re-used epoch is delivered"
+        );
+        drop(outbox);
+
+        // Prevention: after another lost ACK (receiver journal at 4, sender
+        // cursor at 3), a new frame is allocated ABOVE the receiver frontier.
+        agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
+            &database_path,
+            document_hash,
+            4,
+            &serde_json::to_string(&closed).unwrap(),
+        )
+        .unwrap();
+        let reopened = encode_liveness_frame(&[LivenessOp::Open {
+            document_hash: document_hash.to_string(),
+            pid: old_pid,
+            tag: "old-reopen".to_string(),
+        }])
+        .unwrap();
+        handle_reliable_sync_outbox(dir.path(), request(Some(reopened), false)).unwrap();
+        let outbox = lazily::SqliteOutbox::open(&database_path, document_hash.to_string()).unwrap();
+        assert_eq!(
+            outbox.retained_epochs(),
+            vec![5],
+            "sender must not re-use an epoch the receiver already journaled"
+        );
+        drop(outbox);
+        assert_eq!(
+            handle_reliable_sync_outbox(dir.path(), request(None, true))
+                .unwrap()
+                .ack_through,
+            5
+        );
+
+        // The live editor's registration — with operator_text_authority_v1 —
+        // is now in the controller plane, durably, and survives a recycle.
+        let live = controller_liveness_plane()
+            .lock()
+            .projection()
+            .live_registrations(document_hash)
+            .into_iter()
+            .filter(|registration| registration.pid == live_pid)
+            .collect::<Vec<_>>();
+        assert_eq!(live.len(), 1);
+        assert!(live[0].capabilities.iter().any(|capability| capability
+            == agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY));
+        let snapshot = agent_doc_sqlite::reliable_sync_inbox::load(&database_path).unwrap();
+        let mut recycled = agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::recycle();
+        for record in &snapshot.liveness {
+            let ops: Vec<LivenessOp> = serde_json::from_str(&record.ops_json).unwrap();
+            recycled.restore_liveness(&ops);
+        }
+        assert!(
+            recycled
+                .projection()
+                .live_registrations(document_hash)
+                .iter()
+                .any(|registration| registration.pid == live_pid)
+        );
+        assert!(
+            snapshot
+                .liveness
+                .iter()
+                .any(|record| record.source_key.contains("#epoch-reuse:2:")),
+            "the conflicting batch is preserved, not dropped"
+        );
     }
 
     #[test]

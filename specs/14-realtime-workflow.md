@@ -1745,6 +1745,25 @@ applies to normal writeback, compact exchange, repair redelivery, socket deliver
 and file-IPC fallback. Reloading/updating the frontend publishes a newer monotone
 registration; direct disk overwrite remains an explicit operator escape hatch.
 
+That registration reaches the controller only through the document's
+reliable-sync liveness channel, so the channel must never wedge
+(`#runfrontendissue`). The controller-owned sender allocates each new epoch
+strictly above both its own ACK cursor and the receiver frontier in the shared
+`state.db` (the receive cursor joined with the newest journaled liveness epoch
+for that channel), and serializes allocate-append-flush per channel; a lost ACK
+therefore never leads to a re-used epoch. A receiver that nevertheless sees a
+different liveness batch at an already-journaled epoch (a channel written by an
+older binary) must not refuse it: refusing is a permanent head-of-line block
+that strands every later `Open`/`Register` — on 2026-10-12 haiven-dev
+`frontend.md` held 4,425 undelivered frames behind one re-used epoch, the
+controller never learned the live editor's `operator_text_authority_v1`
+registration, and every preflight refused with `editor_capability_missing
+editor_id=unknown`. Liveness ops are state-based CRDT facts (OR-set membership,
+LWW registers), so the receiver journals the conflicting batch under a
+deterministic `{channel}#epoch-reuse:{epoch}:{digest}` key, folds it, advances
+the cursor, and logs `reliable_sync_epoch_reuse_reconciled`; nothing already
+journaled is overwritten. The operator-authority guard itself is unchanged.
+
 Snapshots never create a realtime state. A snapshot can contribute a candidate
 delta to `AgentDeltaReady`; it cannot move a document to `MergePlanned`,
 `ApplyInFlight`, or `AppliedVerified` by itself.

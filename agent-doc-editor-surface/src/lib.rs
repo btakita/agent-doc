@@ -56,7 +56,7 @@ pub use navigation_lane::{
     RequesterPanePlacement, is_lane_session_of, lane_label_for_session, lane_owning_session,
     partition_lane_layout_columns, partition_lane_layout_columns_for_claim,
     plan_navigation_lane_reconcile, requester_navigation_lane, requester_pane_placement,
-    tmux_session_name_component,
+    shared_sync_target_session, tmux_session_name_component,
 };
 pub use remote_layout::{
     RemoteClientEditors, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,

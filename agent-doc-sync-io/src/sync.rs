@@ -2422,6 +2422,51 @@ pub fn drop_columns_bound_to_other_sessions(
     (kept, dropped)
 }
 
+/// `#ridernavp6switchback`: in `shared` navigation mode, retarget a sync whose
+/// resolved session is an installation lane session agent-doc created (marked
+/// for this root) to the project session.
+///
+/// After `editor_navigation` switches back to `shared`, lane sessions survive
+/// until `agent-doc gc` folds them. Without this, a sync with no explicit
+/// window follows the focused document's pane (or the tmux client's current
+/// session) into the stale lane and joins the project session's panes into it.
+/// Returns the project session when the target was retargeted, else `None`.
+/// The decision is the pure [`agent_doc_editor_surface::shared_sync_target_session`].
+pub fn shared_mode_stale_lane_target(
+    tmux: &Tmux,
+    project_root: &Path,
+    resolved_session: &str,
+) -> Option<String> {
+    let config = agent_doc_project_config_io::load_project_from(
+        &project_root.join(".agent-doc").join("config.toml"),
+    );
+    let (mode, _) = agent_doc_project_config_io::editor_navigation_mode(&config);
+    let project_session = config
+        .tmux_session
+        .as_deref()
+        .map(str::trim)
+        .filter(|session| !session.is_empty())?;
+    if mode != agent_doc_editor_surface::NavigationMode::Shared
+        || resolved_session == project_session
+        || !agent_doc_editor_surface::is_lane_session_of(project_session, resolved_session)
+    {
+        return None;
+    }
+    let marked = agent_doc_controller_io::project_controller::navigation_lane_session_marked(
+        tmux,
+        project_root,
+        resolved_session,
+    );
+    let target = agent_doc_editor_surface::shared_sync_target_session(
+        mode,
+        project_session,
+        resolved_session,
+        marked,
+        tmux.session_alive(project_session),
+    );
+    (target != resolved_session).then(|| target.to_string())
+}
+
 /// Per-installation navigation lanes (`#ideriderindependentnav` P2b): drop
 /// layout columns whose document already has a live pane in another lane of
 /// this project (the project session or a sibling installation lane session)
@@ -2455,6 +2500,26 @@ pub fn drop_columns_owned_by_other_navigation_lanes(
     {
         return (col_args, Vec::new());
     }
+    let partition = agent_doc_editor_surface::partition_lane_layout_columns(
+        &col_args,
+        project_session,
+        target_session,
+        |file| {
+            let pane = layout_document_live_pane(tmux, project_root, file, actor_bindings)?;
+            tmux.pane_session(&pane).ok()
+        },
+    );
+    (partition.kept, partition.dropped)
+}
+
+/// The live pane of one layout document: its actor binding, else its session
+/// registry entry.
+fn layout_document_live_pane(
+    tmux: &Tmux,
+    project_root: &Path,
+    file: &str,
+    actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+) -> Option<String> {
     let canonical = |file: &str| {
         let path = Path::new(file.trim());
         let path = if path.is_absolute() {
@@ -2464,27 +2529,116 @@ pub fn drop_columns_owned_by_other_navigation_lanes(
         };
         path.canonicalize().unwrap_or(path)
     };
-    let partition = agent_doc_editor_surface::partition_lane_layout_columns(
-        &col_args,
-        project_session,
-        target_session,
-        |file| {
-            let document = canonical(file);
-            let pane = actor_bindings
-                .iter()
-                .find(|binding| canonical(&binding.document_path) == document)
-                .map(|binding| binding.pane_id.clone())
-                .or_else(|| {
-                    agent_doc_session_registry_io::lookup_file_entry_in(project_root, &document)
-                        .ok()
-                        .flatten()
-                        .map(|entry| entry.pane)
-                })
-                .filter(|pane| !pane.is_empty() && tmux.pane_alive(pane))?;
-            tmux.pane_session(&pane).ok()
-        },
+    let document = canonical(file);
+    actor_bindings
+        .iter()
+        .find(|binding| canonical(&binding.document_path) == document)
+        .map(|binding| binding.pane_id.clone())
+        .or_else(|| {
+            agent_doc_session_registry_io::lookup_file_entry_in(project_root, &document)
+                .ok()
+                .flatten()
+                .map(|entry| entry.pane)
+        })
+        .filter(|pane| !pane.is_empty() && tmux.pane_alive(pane))
+}
+
+/// One layout document a shared-mode sync adopted from a stale navigation lane
+/// (`#ridernavp6switchback`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StaleLaneAdoption {
+    pub document: String,
+    pub pane: String,
+    pub from_session: String,
+    /// `Ok` when the pane now lives in the project session's `stash` window
+    /// (or already lived in the project session), else the refusal reason.
+    pub outcome: std::result::Result<(), String>,
+}
+
+/// `#ridernavp6switchback`: in `shared` navigation mode, move the pane of each
+/// layout document that still lives in an installation lane session agent-doc
+/// created (marked for this root) into the project session's `stash` window
+/// before the reconcile, with the P4 handoff mechanics
+/// (`hand_over_navigation_lane_pane`: same pane id and actor binding, an empty
+/// shell left behind when it was the lane window's last pane). The reconcile
+/// then places it from the project session like any stashed pane, so a lane
+/// pane is never swapped against a project pane across sessions (which would
+/// push the project pane into the lane) and never started a second time.
+///
+/// Identity unless the project is in shared mode, has a `tmux_session` pin,
+/// and `target_session` is that pin. A session that only carries a lane's name
+/// is never touched (`#bare-foreign-session-guard`).
+pub fn adopt_stale_navigation_lane_panes(
+    tmux: &Tmux,
+    project_root: &Path,
+    col_args: &[String],
+    target_session: &str,
+    actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+) -> Vec<StaleLaneAdoption> {
+    let config = agent_doc_project_config_io::load_project_from(
+        &project_root.join(".agent-doc").join("config.toml"),
     );
-    (partition.kept, partition.dropped)
+    let (mode, _) = agent_doc_project_config_io::editor_navigation_mode(&config);
+    if mode != agent_doc_editor_surface::NavigationMode::Shared {
+        return Vec::new();
+    }
+    let Some(project_session) = config
+        .tmux_session
+        .as_deref()
+        .map(str::trim)
+        .filter(|session| !session.is_empty())
+    else {
+        return Vec::new();
+    };
+    if target_session != project_session {
+        return Vec::new();
+    }
+    // Liveness and session are read fresh: an earlier phase of this pass may
+    // have cached a pane snapshot of another tmux server.
+    tmux_router::invalidate_pane_snapshot();
+    let mut adoptions = Vec::new();
+    for file in col_args
+        .iter()
+        .flat_map(|column| column.split(','))
+        .map(str::trim)
+        .filter(|file| !file.is_empty())
+    {
+        let Some(pane) = layout_document_live_pane(tmux, project_root, file, actor_bindings) else {
+            continue;
+        };
+        let Ok(from_session) = tmux.pane_session(&pane) else {
+            continue;
+        };
+        if from_session == project_session
+            || !agent_doc_editor_surface::is_lane_session_of(project_session, &from_session)
+            || !agent_doc_controller_io::project_controller::navigation_lane_session_marked(
+                tmux,
+                project_root,
+                &from_session,
+            )
+        {
+            continue;
+        }
+        let outcome = agent_doc_controller_io::project_controller::hand_over_navigation_lane_pane(
+            tmux,
+            project_root,
+            project_session,
+            project_session,
+            &agent_doc_controller_io::project_controller::NavigationLaneHandoff {
+                document: file.to_string(),
+                pane: pane.clone(),
+                from_session: from_session.clone(),
+            },
+        )
+        .map(|_| ());
+        adoptions.push(StaleLaneAdoption {
+            document: file.to_string(),
+            pane,
+            from_session,
+            outcome,
+        });
+    }
+    adoptions
 }
 
 pub fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
@@ -3302,6 +3456,21 @@ fn run_with_options_internal_at_root(
         reactive_actor_bindings,
         &tmux_session_policy,
     )?;
+    // `#ridernavp6switchback`: a stale lane session (shared mode, before gc)
+    // is never a shared sync's target; arrange the project session instead.
+    let (target_session, window) = match target_session.as_deref().and_then(|resolved| {
+        shared_mode_stale_lane_target(tmux, &sync_project_root, resolved)
+            .map(|project| (resolved.to_string(), project))
+    }) {
+        Some((stale, project)) => {
+            sync_log(&format!(
+                "navigation_lane_stale_target_retargeted stale_session={stale} target_session={project} explicit_window={}",
+                window.unwrap_or("-")
+            ));
+            (Some(project), None)
+        }
+        None => (target_session, window),
+    };
     if let Some(session) = target_session.as_deref() {
         let (kept, dropped) =
             drop_columns_bound_to_other_sessions(&tmux_session_policy, col_args, session);
@@ -3326,6 +3495,26 @@ fn run_with_options_internal_at_root(
             sync_log(&format!(
                 "cross_lane_layout_dropped document={file} owner_session={owner_session} target_session={session}"
             ));
+        }
+        for adoption in adopt_stale_navigation_lane_panes(
+            tmux,
+            &sync_project_root,
+            &col_args,
+            session,
+            reactive_actor_bindings,
+        ) {
+            let line = match &adoption.outcome {
+                Ok(()) => format!(
+                    "navigation_lane_stale_pane_adopted document={} pane={} from_session={} target_session={session}",
+                    adoption.document, adoption.pane, adoption.from_session
+                ),
+                Err(reason) => format!(
+                    "navigation_lane_stale_pane_adopt_refused document={} pane={} from_session={} target_session={session} reason={reason}",
+                    adoption.document, adoption.pane, adoption.from_session
+                ),
+            };
+            sync_log(&line);
+            agent_doc_ops_log_io::log_op(&sync_project_root, &line);
         }
     }
     log_sync_latency(
@@ -10909,6 +11098,263 @@ mod tests {
         sync(rider_layout(), &rider_window, &doc_r);
         check("after IDEA's claim", vec![&pane_a, &pane_b], vec![&pane_r]);
         assert_eq!(iso.pane_session(&pane_a).unwrap(), idea);
+    }
+
+    /// `#ridernavp6switchback`: `editor_navigation` switches from
+    /// `per_installation` back to `shared` while an installation lane session
+    /// still holds document panes, and the shared sync runs before
+    /// `agent-doc gc` migrates them. Through the real sync body:
+    /// - a shared sync never arranges the stale lane session, even when the
+    ///   focused document's pane (or the tmux client) is still there or the
+    ///   caller passes the lane's own `agent-doc` window: it arranges the
+    ///   project session (`navigation_lane_stale_target_retargeted`), so no
+    ///   shared pane is ever joined into the lane;
+    /// - a lane document in the shared layout is adopted into the project
+    ///   session: the same pane is joined across sessions, passive or manual,
+    ///   never started a second time (no autostart duplicate) and never lost;
+    /// - a lane document outside the shared layout stays in its lane, and
+    ///   `agent-doc gc` folds it and closes the lane afterwards.
+    ///
+    /// Isolated tmux server only.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_guard_switch_back_to_shared_adopts_lane_panes_before_gc() {
+        use agent_doc_controller_io::project_controller::{
+            navigation_lane_session_for_client, reconcile_navigation_lane_sessions,
+        };
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let config = root.join(".agent-doc/config.toml");
+        std::fs::write(
+            &config,
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let _cwd = ScopedCurrentDir::set(&root);
+        let iso = agent_doc_tmux_io::isolated_test_tmux("lane-switch-back-e2e");
+
+        let shared_pane = iso.new_session("proj", &root).unwrap();
+        let shared_window = iso.pane_window(&shared_pane).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &shared_window, "agent-doc"])
+            .unwrap();
+        let idea = navigation_lane_session_for_client(&iso, &root, "jetbrains@IU.0a1b2c3d-pid:41")
+            .unwrap()
+            .expect("an installation lane")
+            .session;
+        let agent_doc_window = |session: &str| {
+            iso.raw_cmd(&[
+                "list-windows",
+                "-t",
+                &format!("{session}:"),
+                "-F",
+                "#{window_id} #{window_name}",
+            ])
+            .unwrap()
+            .lines()
+            .find_map(|line| {
+                let (id, name) = line.split_once(' ')?;
+                (name == "agent-doc").then(|| id.to_string())
+            })
+            .expect("agent-doc window")
+        };
+        let idea_window = agent_doc_window(&idea);
+        let document = |name: &str, session: &str| {
+            let path = root.join(format!("tasks/{name}.md"));
+            std::fs::write(
+                &path,
+                format!("---\nagent_doc_session: {name}\n---\n\n# {name}\n"),
+            )
+            .unwrap();
+            let pane = iso.new_window(session, &root).unwrap();
+            let window = iso.pane_window(&pane).unwrap();
+            let file = path.to_string_lossy().into_owned();
+            sessions::register_full_with_cwd_in(
+                &root,
+                name,
+                &pane,
+                &file,
+                pane_pid_from_tmux(&iso, &pane).unwrap(),
+                &window,
+                &root.to_string_lossy(),
+            )
+            .unwrap();
+            (file, pane)
+        };
+        let (doc_s, pane_s) = document("shared-s", "proj");
+        let (doc_a, pane_a) = document("lane-a", &idea);
+        let (doc_b, pane_b) = document("lane-b", &idea);
+        // The controller passes its actor bindings; a standalone sync has
+        // only the session registry.
+        let bindings = std::cell::RefCell::new(Vec::new());
+        let sync =
+            |columns: Vec<String>, window: Option<&str>, focus: &str, mode: AutoStartMode| {
+                run_with_options_internal_at_root(
+                    &root,
+                    &columns,
+                    window,
+                    Some(focus),
+                    mode,
+                    false,
+                    false,
+                    &bindings.borrow(),
+                    &MainLayoutEligibility::default(),
+                    &iso,
+                )
+                .unwrap();
+            };
+        let session_of = |pane: &str| iso.pane_session(pane).unwrap();
+        // Every document keeps its one pane: alive, and no other pane of the
+        // server runs in the document's place (no autostart duplicate).
+        let all_panes = || {
+            iso.raw_cmd(&["list-panes", "-a", "-F", "#{pane_id}"])
+                .unwrap()
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+
+        // Per-installation mode: `s` in the shared session, `a` and `b` in
+        // IDEA's lane window.
+        sync(
+            vec![doc_s.clone()],
+            Some(&shared_window),
+            &doc_s,
+            AutoStartMode::SafePassive,
+        );
+        sync(
+            vec![doc_a.clone(), doc_b.clone()],
+            Some(&idea_window),
+            &doc_a,
+            AutoStartMode::SafePassive,
+        );
+        assert_eq!(
+            iso.list_panes_ordered(&idea_window).unwrap(),
+            vec![pane_a.clone(), pane_b.clone()]
+        );
+        assert_eq!(session_of(&pane_s), "proj");
+        let panes_before_switch = all_panes();
+
+        // Switch back to shared (the controller reads it on its next start);
+        // no gc has run, so IDEA's lane still holds `a` and `b`.
+        std::fs::write(
+            &config,
+            "tmux_session = \"proj\"\neditor_navigation = \"shared\"\n",
+        )
+        .unwrap();
+        // The tmux client's current session is the lane too.
+        iso.raw_cmd(&["switch-client", "-t", &format!("{idea}:")])
+            .ok();
+
+        // A passive shared heartbeat with no explicit window, focused on `a`
+        // whose pane is in the lane: it arranges the project session and
+        // adopts `a`'s pane into it; `s` never enters the lane.
+        sync(
+            vec![doc_s.clone(), doc_a.clone()],
+            None,
+            &doc_a,
+            AutoStartMode::SafePassive,
+        );
+        assert_eq!(
+            iso.list_panes_ordered(&shared_window).unwrap(),
+            vec![pane_s.clone(), pane_a.clone()],
+            "the shared window adopts a's pane next to s"
+        );
+        assert_eq!(session_of(&pane_s), "proj", "s never moves into the lane");
+        assert_eq!(session_of(&pane_a), "proj", "a is adopted, same pane id");
+        assert_eq!(
+            session_of(&pane_b),
+            idea,
+            "b is not in the layout: it stays"
+        );
+        assert!(iso.session_alive(&idea), "only gc closes the lane");
+
+        // A passive heartbeat focused on `b` (still in the lane) that does
+        // not show `b`: nothing crosses into or out of the lane.
+        sync(
+            vec![doc_s.clone(), doc_a.clone()],
+            None,
+            &doc_b,
+            AutoStartMode::SafePassive,
+        );
+        assert_eq!(
+            iso.list_panes_ordered(&shared_window).unwrap(),
+            vec![pane_s.clone(), pane_a.clone()]
+        );
+        assert_eq!(session_of(&pane_b), idea);
+
+        // A sync carrying the controller's actor bindings and naming the
+        // stale lane's own `agent-doc` window (a caller that still holds it):
+        // it is retargeted to the project session and adopts `b` there. The
+        // retarget and the adoption run before any mode-specific phase, so a
+        // manual (full) sync takes the same path; full mode is not driven
+        // here because its dead-pane actor sweep reads the default tmux
+        // server, not this isolated one.
+        *bindings.borrow_mut() = [(&doc_s, &pane_s), (&doc_a, &pane_a), (&doc_b, &pane_b)]
+            .into_iter()
+            .map(|(document, pane)| {
+                agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                    document_path: document.clone(),
+                    session_id: String::new(),
+                    pane_id: pane.clone(),
+                    generation: 1,
+                }
+            })
+            .collect();
+        sync(
+            vec![doc_s.clone(), doc_b.clone()],
+            Some(&idea_window),
+            &doc_b,
+            AutoStartMode::SafePassive,
+        );
+        assert_eq!(
+            iso.list_panes_ordered(&shared_window).unwrap(),
+            vec![pane_s.clone(), pane_b.clone()],
+            "the explicit stale lane window is replaced by the project window"
+        );
+        for pane in [&pane_s, &pane_a, &pane_b] {
+            assert!(iso.pane_alive(pane), "{pane} is never lost");
+            assert_eq!(
+                session_of(pane),
+                "proj",
+                "{pane} lives in the project session"
+            );
+        }
+        // No document was started a second time: each registry entry still
+        // names its original pane, and every pane that appeared since the
+        // switch is a bare shell outside the project's layout window (the
+        // project's new `stash` window and the shell a handoff leaves in the
+        // lane's emptied `agent-doc` window).
+        for (file, pane) in [(&doc_s, &pane_s), (&doc_a, &pane_a), (&doc_b, &pane_b)] {
+            let entry = agent_doc_session_registry_io::lookup_file_entry_in(&root, Path::new(file))
+                .unwrap()
+                .expect("registered document");
+            assert_eq!(&entry.pane, pane, "{file} keeps its one pane");
+        }
+        let shared_layout = iso.list_window_panes(&shared_window).unwrap();
+        for pane in all_panes()
+            .into_iter()
+            .filter(|pane| !panes_before_switch.contains(pane))
+        {
+            assert!(!shared_layout.contains(&pane), "{pane} entered the layout");
+            let window = iso.pane_window(&pane).unwrap();
+            let name = window_name_for_window_id(&iso, &window).unwrap_or_default();
+            let session = session_of(&pane);
+            assert!(
+                (session == "proj" && name == "stash") || (session == idea && name == "agent-doc"),
+                "{pane} is a bare shell in {session}:{name}"
+            );
+        }
+
+        // gc: the lane holds no document pane any more, so it closes.
+        let report = reconcile_navigation_lane_sessions(&iso, &root, &Default::default(), false);
+        assert!(report.folded.is_empty(), "{report:?}");
+        assert_eq!(report.closed, vec![idea.clone()], "{report:?}");
+        assert!(!iso.session_alive(&idea));
+        for pane in [&pane_s, &pane_a, &pane_b] {
+            assert!(iso.pane_alive(pane), "{pane} survives the gc");
+        }
     }
 
     #[test]

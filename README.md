@@ -133,7 +133,11 @@ session, and each IDE's lane starts empty and gains panes from its own layouts
 and explicit claims. Turning it back to `shared` and running `agent-doc gc`
 moves every document pane in a lane session back into the shared session's
 `stash` window (the same pane, nothing restarted), from where the shared layout
-places it. `agent-doc gc` also closes lane sessions that are empty: no document
+places it. Before you run `agent-doc gc`, the shared layout already works: a
+document it shows whose pane is still in a lane session is brought into the shared
+session (the same pane, never a second one), and the shared layout never arranges a
+lane session, even when that pane or your terminal is still there. A document it
+does not show waits in its lane until gc moves it. `agent-doc gc` also closes lane sessions that are empty: no document
 pane, no running program, no attached terminal, and, after a switch back to
 `shared`, nothing left to move. It only ever touches sessions agent-doc created
 for this project (marked `@agent_doc_navigation_lane`), never a session that

@@ -244,11 +244,15 @@ pub(crate) fn retire_withdrawn_prompt_turn(
         if let Some(retired) =
             agent_doc_turn_status_io::reclaim_withdrawn_prompt_turn_for_pane_for_file(file, pane)
         {
-            let settled = agent_doc_controller_io::project_controller::settle_dispatch_turn_ended_by_harness_for_file(
-                file,
-                retired.written_at,
-            )
-            .unwrap_or(0);
+            // `#infraclearsession`: the retirement already settled the pane's
+            // receipt; this file-scoped settle covers a document with no
+            // `documents.pane_id` row yet and is otherwise a no-op.
+            let settled = retired.settled_dispatches
+                + agent_doc_controller_io::project_controller::settle_dispatch_turn_ended_by_harness_for_file(
+                    file,
+                    retired.written_at,
+                )
+                .unwrap_or(0);
             return format!(
                 "lease=retired reason={} lease_written_at={} snapshot_at={} settled_dispatches={}",
                 retired.reason, retired.written_at, retired.interrupted_at, settled

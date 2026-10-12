@@ -299,6 +299,39 @@ pub struct LaneLayoutPartition {
     pub handoffs: Vec<(String, String)>,
 }
 
+/// The session a sync of the shared navigation lane arranges, given the session
+/// the sync body resolved (`#ridernavp6switchback`).
+///
+/// After `editor_navigation` switches from `per_installation` back to `shared`,
+/// installation lane sessions agent-doc created stay alive until `agent-doc gc`
+/// folds their panes back. Until then the sync body can resolve one of them as
+/// its target: the focused document's pane, or the tmux client's current
+/// session, may still be there. In shared mode no editor navigates a lane, so
+/// the shared sync arranges the project session instead, and a document whose
+/// pane is still in the lane is adopted into it (same pane, joined across
+/// sessions), never started a second time. Every other case keeps `resolved`:
+/// per-installation mode (lanes are live), a session that only carries a lane's
+/// name (`lane_marked` false: agent-doc did not create it, so the pre-lane
+/// rules apply), and a dead project session (nothing to arrange instead).
+pub fn shared_sync_target_session<'a>(
+    mode: NavigationMode,
+    project_session: &'a str,
+    resolved: &'a str,
+    lane_marked: bool,
+    project_session_alive: bool,
+) -> &'a str {
+    if mode == NavigationMode::Shared
+        && lane_marked
+        && project_session_alive
+        && resolved != project_session
+        && is_lane_session_of(project_session, resolved)
+    {
+        project_session
+    } else {
+        resolved
+    }
+}
+
 /// The lane among `lanes` whose session is `session`, for a project whose
 /// configured session is `project_session`. Used to republish the lane a
 /// handoff took a pane from.
@@ -632,6 +665,38 @@ impl LayoutOwnerKey {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn shared_sync_retargets_only_a_marked_lane_of_the_project_in_shared_mode() {
+        let lane = "proj-IU-0a1b2c3d";
+        assert_eq!(
+            shared_sync_target_session(NavigationMode::Shared, "proj", lane, true, true),
+            "proj",
+            "a stale marked lane is replaced by the project session"
+        );
+        assert_eq!(
+            shared_sync_target_session(NavigationMode::PerInstallation, "proj", lane, true, true),
+            lane,
+            "per-installation lanes stay live targets"
+        );
+        assert_eq!(
+            shared_sync_target_session(NavigationMode::Shared, "proj", lane, false, true),
+            lane,
+            "an unmarked lane-named session keeps the pre-lane rules"
+        );
+        assert_eq!(
+            shared_sync_target_session(NavigationMode::Shared, "proj", lane, true, false),
+            lane,
+            "a dead project session has nothing to arrange instead"
+        );
+        for other in ["proj", "scratch", "proj-", "other-IU-1"] {
+            assert_eq!(
+                shared_sync_target_session(NavigationMode::Shared, "proj", other, true, true),
+                other,
+                "{other} is not a lane of proj"
+            );
+        }
+    }
 
     const IDEA: &str = "jetbrains@IU.0a1b2c3d-pid:41";
     const IDEA_FOCUS: &str = "jetbrains-focus@IU.0a1b2c3d-pid:41";

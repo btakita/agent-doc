@@ -8264,8 +8264,9 @@ impl ControllerRuntime {
             .latest_plane_version(PANE_LAYOUT_DESIRED_STATE_CHANNEL)
     }
 
-    /// An installation lane projected plane version `version` into its own
-    /// graph; the shared lane's plane catch-up counts it as seen.
+    /// Plane version `version` was dispatched to an installation lane's own
+    /// graph and never reaches the shared one; the shared lane's plane
+    /// catch-up counts it as seen from dispatch (`#laneplaneflake`).
     fn note_pane_layout_plane_seen_in_other_lane(&self, version: u64) {
         self.pane_layout_graph().note_plane_seen(version);
     }

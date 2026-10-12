@@ -895,6 +895,17 @@ I moved `#lzcorefacades` to review pending explicit commit/integration authority
 Phase 4 cannot start truthfully until the Phase 1 allow-list and Phase 3 public entrypoints are integrated and stable. The audit found no current native Core API snapshot gate across the nine bindings, no structured earliest-removal metadata, and missing oldest-supported-Core endpoint tests for React and R3. It also identified the appropriate native checker matrix for each binding.
 
 I moved `#lzcorecompat` to review, blocked on integration of `#lzcoreprofile` and `#lzcorefacades` plus explicit commit authority. No snapshots were invented, no files changed, and no completion was claimed.
+
+### Re: #lzcoreconsumers — gpt-5 · 2026-10-12T06:30:00-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcoreconsumers]
+
+
+Phase 5's central artifact-consumer contract is implemented in `/home/brian/worktrees/lazily-spec-lzcoreconsumers-20261012`: the schema and nine-binding contract, fail-closed support-policy generator/orchestrator, generated matrix, Make targets, documentation corrections, seven Node tests, and four schema tests. Seven Node tests and 388 Python tests passed.
+
+I moved `#lzcoreconsumers` to review. Integration requires explicit commit authority and the Phase 1/3 changes; the final release gate also remains intentionally red until every binding implements `core-artifact-consumer-check` and passes the supported-toolchain consumer matrix.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -905,7 +916,7 @@ I moved `#lzcorecompat` to review, blocked on integration of `#lzcoreprofile` an
 - ~~do [#lzcoreclaims]~~
 - ~~do [#lzcorefacades]~~
 - ~~do [#lzcorecompat]~~
-- do [#lzcoreconsumers]
+- ~~do [#lzcoreconsumers]~~
 - do [#lzcorecohort]
 - do [#lzcorebeta1]
 <!-- /agent:queue -->
@@ -913,7 +924,6 @@ I moved `#lzcorecompat` to review, blocked on integration of `#lzcoreprofile` an
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [ ] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
 - [ ] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 <!-- /agent:backlog -->
@@ -921,6 +931,7 @@ I moved `#lzcorecompat` to review, blocked on integration of `#lzcoreprofile` an
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [/] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
 - [/] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
 - [/] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.

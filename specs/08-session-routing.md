@@ -523,9 +523,12 @@ The `sync_tmux_layout` controller command naming a `client_id` publishes into
 that client's lane, and a supervisor's recycle settle republishes each lane's
 own retained layout into that lane (passively under `per_installation`, so it
 never hands a pane over); see `specs/07-session-tmux-commands.md` (P6).
-Route, start, and claim themselves still provision into the shared lane; a pane
-they start there reaches an installation lane through that lane's next explicit
-claim.
+Route, start, and claim acting for an installation client (`--client-id`, the
+editor route's `client_id`) start a missing pane in that client's lane and use an
+existing pane where it lives (P6). An editor route on a document whose pane
+lives in another lane publishes no layout and dispatches into that pane in
+place, reporting `owned_by_other_lane` with the owning lane
+(`#ridernavp6routecontended`, `specs/07-session-tmux-commands.md`).
 After a switch back to `shared`, until `agent-doc gc` folds the lanes, a shared
 sync never targets a lane session agent-doc created (it arranges the pin
 instead, `navigation_lane_stale_target_retargeted`) and adopts a laid-out

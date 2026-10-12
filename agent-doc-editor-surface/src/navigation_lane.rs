@@ -472,6 +472,80 @@ pub fn requester_pane_placement(
     }
 }
 
+/// What an editor route (Run Agent Doc, `editor_route`) from a requester's
+/// lane does with its layout (`#ridernavp6routecontended`).
+///
+/// A route is a passive lane claim ([`LaneClaim::for_caller_kind`] of
+/// `editor_route`), so the requester's lane drops a document whose pane lives
+/// in another lane from every frame it projects (`cross_lane_layout_dropped`).
+/// Publishing the route's layout for such a document therefore waits on a
+/// frame that can never show it. Instead the route publishes nothing and
+/// dispatches into the document's existing pane where it lives: that pane is
+/// the document's single live owner, so no second harness starts, and the
+/// pane is not moved (only an explicit claim hands it over, P4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequesterRouteLayout {
+    /// Publish the route's layout into the requester's lane and await the
+    /// frame that shows the document: every `shared`-mode route, a document
+    /// without a live pane, a pane already in the requester's lane, and a pane
+    /// in a session that is no lane of this project.
+    Publish,
+    /// The document's pane lives in `owner_session`, another lane of this
+    /// project: publish no layout, dispatch into that pane, and tell the
+    /// requester where it is ([`ROUTE_OWNED_BY_OTHER_LANE_REASON`]).
+    DispatchInOtherLane { owner_session: String },
+}
+
+/// The reason an editor route reports when it dispatched into a pane that
+/// lives in another navigation lane (`#ridernavp6routecontended`). It is the
+/// same reason a lane's editor focus refusal reports for that pane.
+pub const ROUTE_OWNED_BY_OTHER_LANE_REASON: &str = "owned_by_other_lane";
+
+/// The prefix of the notice line an editor route appends to its output when
+/// it dispatched into another lane's pane ([`route_owned_by_other_lane_notice`]).
+/// Editor plugins match it to tell the operator where the document runs.
+pub const ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX: &str = "[agent-doc] owned_by_other_lane:";
+
+/// Decide what an editor route from `lane` does with its layout for a document
+/// whose live pane (if any) lives in `pane_session`.
+///
+/// Only `per_installation` mode has lanes; `shared` mode always publishes, so
+/// its route is the pre-lane one byte for byte.
+pub fn requester_route_layout(
+    mode: NavigationMode,
+    project_session: &str,
+    lane: &NavigationLane,
+    pane_session: Option<&str>,
+) -> RequesterRouteLayout {
+    if mode != NavigationMode::PerInstallation || project_session.trim().is_empty() {
+        return RequesterRouteLayout::Publish;
+    }
+    match LanePaneMembership::classify(
+        project_session,
+        &lane.tmux_session_name(project_session),
+        pane_session,
+    ) {
+        LanePaneMembership::OtherLane { owner_session } => {
+            RequesterRouteLayout::DispatchInOtherLane { owner_session }
+        }
+        _ => RequesterRouteLayout::Publish,
+    }
+}
+
+/// The operator-facing notice of a route that dispatched `document` into
+/// `pane`, which lives in `owner_session`, another lane of `project_session`.
+pub fn route_owned_by_other_lane_notice(
+    document: &str,
+    pane: &str,
+    project_session: &str,
+    owner_session: &str,
+) -> String {
+    format!(
+        "{ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX} {document} runs in pane {pane} of navigation lane {} (tmux session {owner_session}); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim for Tmux Pane to move the pane into this IDE's lane.",
+        lane_label_for_session(project_session, owner_session),
+    )
+}
+
 /// One pane of an installation lane session, as the lane reconcile sees it
 /// (`#ideriderindependentnav` P5).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1132,6 +1206,91 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_route_from_another_lane_dispatches_in_place_without_publishing() {
+        let idea = NavigationLane::for_client(NavigationMode::PerInstallation, IDEA);
+        let rider = NavigationLane::for_client(NavigationMode::PerInstallation, RIDER);
+        let route = |lane: &NavigationLane, pane: Option<&str>| {
+            requester_route_layout(NavigationMode::PerInstallation, "p", lane, pane)
+        };
+        // Rider routes a document whose pane lives in IDEA's lane, or in the
+        // shared project session: dispatch there, publish nothing.
+        for owner in ["p-IU-0a1b2c3d", "p"] {
+            assert_eq!(
+                route(&rider, Some(owner)),
+                RequesterRouteLayout::DispatchInOtherLane {
+                    owner_session: owner.to_string()
+                }
+            );
+        }
+        // The shared lane (VS Code) in per-installation mode: a pane in an
+        // installation lane is another lane's too.
+        assert_eq!(
+            route(&NavigationLane::Shared, Some("p-IU-0a1b2c3d")),
+            RequesterRouteLayout::DispatchInOtherLane {
+                owner_session: "p-IU-0a1b2c3d".to_string()
+            }
+        );
+        // No pane, a pane in the requester's own lane, or a foreign session:
+        // the route publishes and awaits its layout as before.
+        for pane in [None, Some(" "), Some("p-IU-0a1b2c3d"), Some("elsewhere")] {
+            assert_eq!(
+                route(&idea, pane),
+                RequesterRouteLayout::Publish,
+                "{pane:?}"
+            );
+        }
+        // Shared mode, or no project session to derive lanes from, is the
+        // pre-lane route for every pane.
+        for (mode, session) in [
+            (NavigationMode::Shared, "p"),
+            (NavigationMode::PerInstallation, " "),
+        ] {
+            for pane in [Some("p"), Some("p-IU-0a1b2c3d"), Some("p-RD-9f8e7d6c")] {
+                assert_eq!(
+                    requester_route_layout(mode, session, &rider, pane),
+                    RequesterRouteLayout::Publish
+                );
+            }
+        }
+    }
+
+    /// The JetBrains plugin matches the notice by this prefix.
+    #[test]
+    fn the_jetbrains_plugin_matches_the_route_notice_prefix() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
+        ))
+        .unwrap();
+        assert!(
+            source.contains(&format!(
+                "ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX = \"{ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX}\""
+            )),
+            "TerminalUtil.kt must match the route notice prefix"
+        );
+    }
+
+    #[test]
+    fn the_route_notice_names_the_owning_lane_and_the_claim() {
+        let notice = route_owned_by_other_lane_notice("plan.md", "%7", "p", "p-IU-0a1b2c3d");
+        assert!(
+            notice.starts_with(ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX),
+            "{notice}"
+        );
+        assert!(
+            notice.contains("pane %7 of navigation lane IU-0a1b2c3d"),
+            "{notice}"
+        );
+        assert!(notice.contains("tmux session p-IU-0a1b2c3d"), "{notice}");
+        assert!(notice.contains("Claim for Tmux Pane"), "{notice}");
+        assert!(!notice.contains('\n'));
+        assert!(
+            route_owned_by_other_lane_notice("plan.md", "%7", "p", "p")
+                .contains("navigation lane shared")
+        );
+    }
+
     proptest! {
         #[test]
         fn requester_placement_never_moves_and_starts_only_in_the_requester_lane(
@@ -1156,6 +1315,46 @@ mod tests {
                     prop_assert_eq!(lane.is_shared(), !per_installation);
                 }
                 _ => prop_assert!(false, "{existing:?} -> {placement:?}"),
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn a_route_never_publishes_a_frame_its_lane_must_drop(
+            requester in proptest::option::of("[A-Z]{2}\\.[0-9a-f]{8}"),
+            per_installation in any::<bool>(),
+            pane in proptest::option::of("p(-[A-Z]{2}-[0-9a-f]{8})?|elsewhere"),
+        ) {
+            let mode = if per_installation {
+                NavigationMode::PerInstallation
+            } else {
+                NavigationMode::Shared
+            };
+            let lane = requester
+                .as_deref()
+                .map_or(NavigationLane::Shared, |installation| {
+                    NavigationLane::for_client(mode, &format!("jetbrains@{installation}-pid:1"))
+                });
+            let lane_session = lane.tmux_session_name("p");
+            let decision = requester_route_layout(mode, "p", &lane, pane.as_deref());
+            // A published route frame keeps the document under the passive
+            // partition its lane applies, so the route's wait can converge.
+            let partition = partition_lane_layout_columns(
+                &["plan.md".to_string()],
+                "p",
+                &lane_session,
+                |_| pane.clone(),
+            );
+            match &decision {
+                RequesterRouteLayout::Publish => {
+                    prop_assert!(!per_installation || partition.dropped.is_empty());
+                }
+                RequesterRouteLayout::DispatchInOtherLane { owner_session } => {
+                    prop_assert!(per_installation);
+                    prop_assert_eq!(Some(owner_session), pane.as_ref());
+                    prop_assert_eq!(partition.dropped.len(), 1);
+                }
             }
         }
     }

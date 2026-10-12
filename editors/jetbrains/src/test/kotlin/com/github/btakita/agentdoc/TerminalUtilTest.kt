@@ -486,6 +486,19 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `route into another lane's pane surfaces the owning lane notice`() {
+        val output = """
+            [route] Pane %7 is alive, sending command
+            [agent-doc] owned_by_other_lane: plan.md runs in pane %7 of navigation lane IU-0a1b2c3d (tmux session proj-IU-0a1b2c3d); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim for Tmux Pane to move the pane into this IDE's lane.
+        """.trimIndent()
+        val notice = TerminalUtil.routeOwnedByOtherLaneNotice(output)
+        assertTrue(notice!!.startsWith("plan.md runs in pane %7 of navigation lane IU-0a1b2c3d"))
+        assertTrue(notice.contains("Claim for Tmux Pane"))
+        assertNull(TerminalUtil.routeOwnedByOtherLaneNotice("[route] Pane %7 is alive, sending command"))
+        assertNull(TerminalUtil.routeOwnedByOtherLaneNotice(TerminalUtil.ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX))
+    }
+
+    @Test
     fun `queued route success is reported as queued not silent success`() {
         val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
         val output = """

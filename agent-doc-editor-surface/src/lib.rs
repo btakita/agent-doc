@@ -53,10 +53,12 @@ pub use navigation_lane::{
     LANE_HANDOFF_CALLER_KIND, LaneClaim, LaneLayoutPartition, LaneLiveness, LanePaneMembership,
     LanePaneObservation, LaneReconcileAction, LaneReconcileTrigger, LaneRetainReason,
     LaneSessionObservation, LayoutOwnerKey, NavigationLane, NavigationMode,
-    RECYCLE_SETTLED_CALLER_KIND, RequesterPanePlacement, derive_lane_reconcile_trigger,
-    is_lane_session_of, lane_label_for_session, lane_owning_session, partition_lane_layout_columns,
-    partition_lane_layout_columns_for_claim, plan_navigation_lane_reconcile,
-    requester_navigation_lane, requester_pane_placement, shared_sync_target_session,
+    RECYCLE_SETTLED_CALLER_KIND, ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX,
+    ROUTE_OWNED_BY_OTHER_LANE_REASON, RequesterPanePlacement, RequesterRouteLayout,
+    derive_lane_reconcile_trigger, is_lane_session_of, lane_label_for_session, lane_owning_session,
+    partition_lane_layout_columns, partition_lane_layout_columns_for_claim,
+    plan_navigation_lane_reconcile, requester_navigation_lane, requester_pane_placement,
+    requester_route_layout, route_owned_by_other_lane_notice, shared_sync_target_session,
     tmux_session_name_component,
 };
 pub use remote_layout::{

@@ -1429,15 +1429,23 @@ mod multi_tmux_session_model {
 ///   focused document's pane is still in a lane
 ///   (`shared_sync_target_session`), and it adopts a laid-out lane document's
 ///   pane, passive or explicit, without starting a second one or losing it;
+/// - contended route (`#ridernavp6routecontended`): Run Agent Doc from a lane
+///   on a document whose pane lives in another lane publishes no layout
+///   (`requester_route_layout`), so no route ever waits on a frame its own
+///   lane's passive partition strips; it dispatches into the existing pane
+///   where it lives (no second pane, no move) and tells the requester the
+///   owning lane;
 /// - every mutation below is detected.
 mod two_ide_navigation_model {
     use agent_doc_editor_surface::{
-        InstallationFocus, LANE_HANDOFF_CALLER_KIND, LaneClaim, LaneLiveness, LanePaneObservation,
-        LaneReconcileAction, LaneReconcileTrigger, LaneSessionObservation, LayoutOwnerKey,
-        NavigationLane, NavigationMode, RECYCLE_SETTLED_CALLER_KIND, RequesterPanePlacement,
-        SurfaceAuthority, derive_lane_reconcile_trigger, editor_installation, is_lane_session_of,
-        partition_lane_layout_columns_for_claim, plan_navigation_lane_reconcile,
-        requester_pane_placement, shared_sync_target_session,
+        InstallationFocus, LANE_HANDOFF_CALLER_KIND, LaneClaim, LaneLiveness, LanePaneMembership,
+        LanePaneObservation, LaneReconcileAction, LaneReconcileTrigger, LaneSessionObservation,
+        LayoutOwnerKey, NavigationLane, NavigationMode, RECYCLE_SETTLED_CALLER_KIND,
+        RequesterPanePlacement, RequesterRouteLayout, SurfaceAuthority,
+        derive_lane_reconcile_trigger, editor_installation, is_lane_session_of,
+        partition_lane_layout_columns, partition_lane_layout_columns_for_claim,
+        plan_navigation_lane_reconcile, requester_pane_placement, requester_route_layout,
+        shared_sync_target_session,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -1535,6 +1543,16 @@ mod two_ide_navigation_model {
         DuplicateOnAdopt,
         /// The shared sync drops a stale lane's pane instead of adopting it.
         LoseOnAdopt,
+        /// A route from a lane publishes its layout for a document whose pane
+        /// lives in another lane, the pre-`#ridernavp6routecontended` route:
+        /// its lane strips the document, so the wait has no frame to converge on.
+        RouteWaitsOnOtherLaneFrame,
+        /// A route refuses (drops the trigger) for a document whose pane lives
+        /// in another lane instead of dispatching there.
+        RouteDropsOtherLaneTrigger,
+        /// A route dispatches into another lane's pane without telling the
+        /// requester where the document runs.
+        RouteSilentInOtherLane,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1625,6 +1643,17 @@ mod two_ide_navigation_model {
         adopted: Vec<(String, String, bool)>,
         /// Lane sessions a sync arranged while the project was in shared mode.
         shared_mode_lane_targets: Vec<String>,
+        /// `(document, client)` for every route whose published frame its own
+        /// lane strips, so its layout wait can never converge
+        /// (`#ridernavp6routecontended`).
+        unconvergeable_route_waits: Vec<(String, usize)>,
+        /// `(document, client, pane session)` for every route of a document
+        /// that already had a pane, and whether it was dispatched there.
+        route_existing: Vec<(String, usize, String, bool)>,
+        /// `(document, client, owner session, owner is the pane's session and
+        /// another lane's, told the requester)` for every route that
+        /// dispatched into another lane's pane, judged when it ran.
+        route_other_lane: Vec<(String, usize, String, bool, bool)>,
     }
 
     struct Sim {
@@ -1888,6 +1917,64 @@ mod two_ide_navigation_model {
             let existing = (self.world.pane_count.get(&document).copied().unwrap_or(0) > 0)
                 .then(|| self.world.pane_session.get(&document).cloned())
                 .flatten();
+            // `#ridernavp6routecontended`: the route's layout, decided before
+            // dispatch by the production rule.
+            let decision = match self.mutation {
+                Mutation::RouteWaitsOnOtherLaneFrame => RequesterRouteLayout::Publish,
+                _ => requester_route_layout(
+                    self.mode,
+                    PROJECT_SESSION,
+                    &self.lane(client),
+                    existing.as_deref(),
+                ),
+            };
+            let other_lane = match &decision {
+                RequesterRouteLayout::Publish => {
+                    // The route's frame lands in its own lane graph, whose
+                    // worker applies the passive lane partition (per-installation
+                    // mode only); the wait converges only on a frame that still
+                    // shows the document.
+                    if self.mode == NavigationMode::PerInstallation {
+                        let partition = partition_lane_layout_columns(
+                            std::slice::from_ref(&document),
+                            PROJECT_SESSION,
+                            &own_lane,
+                            |_| existing.clone(),
+                        );
+                        if !partition.dropped.is_empty() {
+                            self.world
+                                .unconvergeable_route_waits
+                                .push((document.clone(), client));
+                        }
+                    }
+                    None
+                }
+                RequesterRouteLayout::DispatchInOtherLane { owner_session } => {
+                    Some(owner_session.clone())
+                }
+            };
+            if let Some(session) = existing.clone() {
+                let dropped =
+                    other_lane.is_some() && self.mutation == Mutation::RouteDropsOtherLaneTrigger;
+                self.world.route_existing.push((
+                    document.clone(),
+                    client,
+                    session.clone(),
+                    !dropped,
+                ));
+                if let Some(owner) = other_lane.filter(|_| !dropped) {
+                    let owner_is_other_lane = owner == session
+                        && LanePaneMembership::classify(PROJECT_SESSION, &own_lane, Some(&owner))
+                            .owned_by_other_lane();
+                    self.world.route_other_lane.push((
+                        document.clone(),
+                        client,
+                        owner,
+                        owner_is_other_lane,
+                        self.mutation != Mutation::RouteSilentInOtherLane,
+                    ));
+                }
+            }
             match requester_pane_placement(
                 self.mode,
                 PROJECT_SESSION,
@@ -2301,6 +2388,31 @@ mod two_ide_navigation_model {
                     ));
                 }
             }
+            if let Some((document, client)) = self.world.unconvergeable_route_waits.first() {
+                return Err(format!(
+                    "client {client}'s route of {document} waits on a lane frame that can never show it"
+                ));
+            }
+            for (document, client, session, dispatched) in &self.world.route_existing {
+                if !dispatched {
+                    return Err(format!(
+                        "client {client}'s route of {document} was never dispatched to its pane in {session}"
+                    ));
+                }
+            }
+            for (document, client, owner, owner_is_other_lane, told) in &self.world.route_other_lane
+            {
+                if !owner_is_other_lane {
+                    return Err(format!(
+                        "client {client}'s route of {document} reported {owner} as another lane"
+                    ));
+                }
+                if !told {
+                    return Err(format!(
+                        "client {client}'s route of {document} ran in {owner} without telling it"
+                    ));
+                }
+            }
             if let Some(session) = self.world.shared_mode_lane_targets.first() {
                 return Err(format!(
                     "a shared-mode sync arranged the stale lane session {session}"
@@ -2632,6 +2744,66 @@ mod two_ide_navigation_model {
                 .all(|session| session == PROJECT_SESSION)
         );
         assert!(shared.world.lane_sessions.is_empty());
+    }
+
+    #[test]
+    fn a_contended_route_publishing_dropping_or_silent_is_detected() {
+        let waits = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RouteWaitsOnOtherLaneFrame,
+            DEPTH,
+        )
+        .expect("publishing another lane's document gives the route no frame to wait on");
+        assert!(waits.contains("can never show it"), "{waits}");
+        let dropped = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RouteDropsOtherLaneTrigger,
+            DEPTH,
+        )
+        .expect("the operator's explicit run must reach the document's pane");
+        assert!(dropped.contains("never dispatched"), "{dropped}");
+        let silent = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RouteSilentInOtherLane,
+            DEPTH,
+        )
+        .expect("the requester must learn where the document runs");
+        assert!(silent.contains("without telling"), "{silent}");
+    }
+
+    /// `#ridernavp6routecontended`: VS Code's layout starts `c` in the shared
+    /// session; Rider shows `c` too, and its Run Agent Doc on it dispatches
+    /// into that pane: no second pane, no move, the owner reported, no wait.
+    #[test]
+    fn a_route_from_the_non_owning_lane_dispatches_into_the_owners_pane() {
+        let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        sim.step(Event::Layout(2));
+        assert_eq!(sim.world.pane_session["/project/c.md"], PROJECT_SESSION);
+        sim.step(Event::Route(1));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(
+            sim.world.pane_session["/project/c.md"], PROJECT_SESSION,
+            "the pane stays in the lane that owns it"
+        );
+        assert_eq!(sim.world.pane_count["/project/c.md"], 1, "no second pane");
+        assert_eq!(
+            sim.world.route_other_lane,
+            vec![(
+                "/project/c.md".to_string(),
+                1,
+                PROJECT_SESSION.to_string(),
+                true,
+                true
+            )]
+        );
+        assert!(sim.world.unconvergeable_route_waits.is_empty());
+        // Shared mode: the same sequence publishes and never reports a lane.
+        let mut shared = Sim::new(NavigationMode::Shared, Mutation::None);
+        for event in [Event::Layout(2), Event::Route(1)] {
+            shared.step(event);
+        }
+        assert_eq!(shared.check(), Ok(()));
+        assert!(shared.world.route_other_lane.is_empty());
     }
 
     #[test]

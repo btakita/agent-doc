@@ -6,7 +6,8 @@ branch `ridernavp2b`; P3 landed on branch `ridernavp3`; P4's explicit handoff la
 `ridernavp5`; the lane awareness carried over from P3/P4 is still open (listed under P5).
 P6's lane-aware `sync_tmux_layout` command and recycle republish landed on branch
 `ridernavp6republish`; the switch-back-before-gc behavior of the shared sync landed on branch
-`ridernavp6switchback`; the controller-side reconcile trigger landed on branch `ridernavp6gc`.
+`ridernavp6switchback`; the controller-side reconcile trigger landed on branch `ridernavp6gc`;
+Run Agent Doc on a document owned by another lane landed on branch `ridernavp6routecontended`.
 
 ## Problem
 
@@ -529,12 +530,60 @@ Landed on branch `ridernavp6route` (`#ridernavp6route`, open item (a) of P5).
   real CLI: IDEA's and Rider's `claim --new-pane --client-id` start panes in their own lanes
   (staged), no client and VS Code start in the shared session, the shared window is untouched,
   IDEA may claim a pane in its own lane while Rider is refused, and shared mode ignores the id.
-- Not done: Run Agent Doc remains a passive lane claim, so a document whose pane lives in another
-  lane is dropped from the requester's route layout, as it was dropped from the shared lane's
-  route layout before P6 (the route's layout-convergence behavior for that case is not covered by
-  a test); the Claim actions hand the pane over. The
+- Run Agent Doc remains a passive lane claim; its contended-document behavior is defined in
+  P6 (contended route) below. The Claim actions hand the pane over. The
   `sync_tmux_layout` command, the recycle republish, and the per-lane `pane_layout_status` channel
   landed separately (above).
+
+### P6 (contended route): Run Agent Doc on another lane's document (LANDED)
+
+Landed on branch `ridernavp6routecontended` (`#ridernavp6routecontended`).
+
+The question: Run Agent Doc from IDE B on a document whose pane lives in IDE A's lane
+(`per_installation`). The route is a passive lane claim, so B's lane worker strips the document
+from every frame it projects (`cross_lane_layout_dropped`); publishing the route's layout put a
+frame on B's lane graph that could never show the document and left the route's layout wait
+reading a projection the lane had rewritten. No test covered it, and B was never told anything.
+
+Options: (1) wait for the frame: it can never contain the document, so this only spends the
+`--wait-for-ready` budget; (2) refuse with `owned_by_other_lane`: the operator explicitly ran the
+document, and its pane is alive and owned, so refusing drops a valid request; (3) hand the pane
+over: that makes a passive request move panes, the P4 violation. Chosen: (4) dispatch the trigger
+to the document's existing pane where it lives and tell B where it is. The pane is the document's
+single live owner, so no second harness can start, and nothing moves; an explicit Claim or Sync
+Tmux Layout still hands it over (P4).
+
+- Pure (editor-surface): `requester_route_layout(mode, project_session, lane, pane_session)` →
+  `Publish` or `DispatchInOtherLane { owner_session }` (per `LanePaneMembership::classify`; only
+  `per_installation` has lanes). `route_owned_by_other_lane_notice` formats the operator line
+  (prefix `ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX`).
+- Controller: `editor_route_other_lane_pane` reads the routed document's actor pane and its tmux
+  session (shared mode reads neither). For `DispatchInOtherLane` the `editor_route` handler skips
+  the layout publication and its wait (`controller_editor_route_owned_by_other_lane ...
+  outcome=dispatched_in_other_lane layout=unpublished`), dispatches as before (the route resolves
+  the existing pane from the actor binding and never rescues a pane from another session's
+  stash), appends the notice to the output, and sets `owned_by_other_lane { pane, owner_lane,
+  owner_session }` on the result (omitted otherwise, so other routes' wire is unchanged). The
+  requester's lane graph receives nothing, so its retained layout is unchanged. The shared lane in
+  `per_installation` mode (VS Code) follows the same rule for a pane in an installation lane.
+- JetBrains: `TerminalUtil.routeOwnedByOtherLaneNotice` matches the notice on a successful route
+  and shows it as an information notification. No plugin version bump.
+- Verification: editor-surface unit tests and a proptest (a published route frame is never one its
+  lane's passive partition drops; `DispatchInOtherLane` exactly when it would); a source pin that
+  the plugin matches the Rust prefix; controller tests for the decision (owner lane, own lane,
+  foreign session, no pane, no pin, shared mode with no pane-session read) and that the lane worker
+  strips such a route frame; an isolated-tmux test
+  (`navigation_lane_session_route_from_another_lane_dispatches_in_place`, `make tmux-ci`) through
+  the real handler: Rider's route of a document in IDEA's lane returns well inside a 2s budget, no
+  lane graph gets a frame, the pane stays in IDEA's session, Rider's lane gains no pane, and the
+  result and `ops.log` name `IU-0a1b2c3d`; IDEA's own route still publishes into IDEA's lane.
+  SimWorld `two_ide_navigation_model` routes through `requester_route_layout`: no route waits on a
+  frame its lane strips, every route of a placed document dispatches to its pane's session, and
+  every other-lane dispatch is reported; mutations `RouteWaitsOnOtherLaneFrame`,
+  `RouteDropsOtherLaneTrigger`, and `RouteSilentInOtherLane` are detected.
+- Open: if the owning pane dies between the decision and dispatch, the route starts a pane in the
+  requester's lane (P6 placement) with no layout publication, so it stays staged in that lane's
+  `stash` until the lane's next layout pass places it.
 
 ### P6 (switch back): shared sync before `agent-doc gc` migrates lane panes (LANDED)
 

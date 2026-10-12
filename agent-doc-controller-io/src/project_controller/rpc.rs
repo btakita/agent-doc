@@ -20822,6 +20822,22 @@ fn store_actor_record_for_runtime(
     Ok(write.record)
 }
 
+/// `#queuedclearflake`: [`store_actor_record_for_runtime`] for a lifecycle
+/// transition. A `Ready` record releases its turn's dispatch receipt in the
+/// same transaction that projects `ready`; returns the record and the number
+/// of receipts released.
+fn store_lifecycle_actor_record_for_runtime(
+    project_root: &Path,
+    expected_prior_generation: Option<u64>,
+    record: &agent_doc_controller::actor::ActorRecord,
+    runtime: Option<&ControllerRuntime>,
+) -> Result<(agent_doc_controller::actor::ActorRecord, usize)> {
+    let (write, released) =
+        store_actor_lifecycle_record_write(project_root, expected_prior_generation, record)?;
+    publish_runtime_after_actor_write(runtime, &write);
+    Ok((write.record, released))
+}
+
 pub(crate) fn request_file(request: &ControllerRequest) -> Result<PathBuf> {
     request
         .file
@@ -23730,7 +23746,9 @@ pub(crate) fn handle_mark_lifecycle(
         prior_generation: current.generation,
         new_generation: current.generation,
     };
-    let record = store_actor_record_for_runtime(
+    // `#queuedclearflake`: a `Ready` edge releases its turn's dispatch receipt
+    // in the same transaction that projects `ready` (see the release below).
+    let (record, released_dispatches) = store_lifecycle_actor_record_for_runtime(
         &bootstrap.project_root,
         Some(current.generation),
         &record,
@@ -23803,22 +23821,25 @@ pub(crate) fn handle_mark_lifecycle(
     // recovery. A Ready projection alone is not sufficient to bypass an open receipt;
     // only this controller-owned lifecycle boundary consumes it. `#idledispatchstack`:
     // and only for a receipt whose turn was observed, or one past the pre-turn grace.
-    if matches!(state, agent_doc_controller::actor::ActorState::Ready) {
-        match open_state_db(&bootstrap.project_root)
-            .and_then(|conn| state_store::mark_open_dispatches_consumed(&conn, &document_id))
-        {
-            Ok(released) if released > 0 => agent_doc_ops_log_io::log_op(
-                &file,
-                &format!(
-                    "dispatch_in_flight_released document_id={} count={} reason=actor_ready",
-                    document_id, released
-                ),
+    // `#queuedclearflake`: the release ran inside the store transaction above, so no
+    // reader can see `ready` before it. As a separate later commit it raced the next
+    // turn: a route dispatch started on the observed `ready` promoted its own receipt
+    // to `running`, this edge then released THAT receipt, and a Clear pressed in the
+    // new turn read no live turn and typed `/clear` into it. A `Ready` onto an actor
+    // that was already `Ready` ended no turn and only sweeps past the pre-turn grace.
+    if released_dispatches > 0 {
+        let reason = if current.state == agent_doc_controller::actor::ActorState::Ready {
+            "pre_turn_grace_sweep"
+        } else {
+            "actor_ready"
+        };
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "dispatch_in_flight_released document_id={} count={} reason={}",
+                document_id, released_dispatches, reason
             ),
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("[controller] #qflood in-flight release on Ready failed (non-fatal): {e}")
-            }
-        }
+        );
     }
     upsert_supervisor_lease(
         &bootstrap.project_root,

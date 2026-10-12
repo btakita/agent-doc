@@ -10405,6 +10405,27 @@ fn store_actor_record_write(
     )
 }
 
+/// `#queuedclearflake`: [`store_actor_record_write`] for a lifecycle
+/// transition; a `Ready` record releases its turn's dispatch receipt in the
+/// same transaction ([`state_store::store_actor_lifecycle_record_tx`]).
+/// Returns the write and the number of receipts released.
+fn store_actor_lifecycle_record_write(
+    project_root: &Path,
+    expected_prior_generation: Option<u64>,
+    record: &agent_doc_controller::actor::ActorRecord,
+) -> Result<(agent_doc_controller::actor::ActorStoreWrite, usize)> {
+    let mut conn = open_state_db(project_root)?;
+    let (launch_mode, controller_epoch) = actor_document_bootstrap_columns(project_root)?;
+    state_store::store_actor_lifecycle_record_tx(
+        &mut conn,
+        expected_prior_generation,
+        record,
+        launch_mode,
+        controller_epoch,
+        timestamp_secs() as i64,
+    )
+}
+
 /// Default staleness window for the cross-document supervisor-lease guard
 /// (`#xdocsuper0`). Matches the 60s heartbeat freshness window used by
 /// `reconcile_supervisor_leases_after_restart` and the GC's stale-actor sweep.

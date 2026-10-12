@@ -4950,12 +4950,27 @@ pub fn mark_open_dispatches_consumed_as_of(
         "#,
         params![document_id],
     )?;
-    // The pre-turn grace is a leak bound, not a turn settlement: a trigger that never
-    // started is lost, not pending, and every such row is swept together so one cannot
-    // wedge the per-generation coalescing gate (which has no staleness horizon of its
-    // own). The settle above already marked its row proven, so it cannot be counted
-    // twice here.
-    let swept = conn.execute(
+    // The settle above already marked its row proven, so it cannot be counted twice
+    // by the sweep.
+    let swept = sweep_open_dispatches_past_pre_turn_grace_as_of(conn, document_id, now_secs)?;
+    Ok(settled + swept)
+}
+
+/// The leak-bound half of [`mark_open_dispatches_consumed_as_of`], with no turn
+/// settlement: release every open receipt older than
+/// [`DISPATCH_PRE_TURN_GRACE_SECS`].
+///
+/// The pre-turn grace is a leak bound, not a turn settlement: a trigger that never
+/// started is lost, not pending, and every such row is swept together so one cannot
+/// wedge the per-generation coalescing gate (which has no staleness horizon of its
+/// own). `#queuedclearflake`: a `Ready` lifecycle write onto an actor that was
+/// already `Ready` ended no turn, so it runs only this sweep.
+pub fn sweep_open_dispatches_past_pre_turn_grace_as_of(
+    conn: &Connection,
+    document_id: &str,
+    now_secs: i64,
+) -> Result<usize> {
+    Ok(conn.execute(
         r#"
         UPDATE dispatch_attempts
         SET dispatch_start_proven = 1
@@ -4966,8 +4981,7 @@ pub fn mark_open_dispatches_consumed_as_of(
           AND timestamp <= ?2
         "#,
         params![document_id, now_secs - DISPATCH_PRE_TURN_GRACE_SECS],
-    )?;
-    Ok(settled + swept)
+    )?)
 }
 
 /// How long an applied dispatch request key is remembered. Far beyond any
@@ -5202,6 +5216,63 @@ pub fn store_actor_record_tx(
     launch_mode: Option<String>,
     controller_epoch: Option<i64>,
 ) -> Result<ActorStoreWrite> {
+    store_actor_record_in_tx(
+        conn,
+        expected_prior_generation,
+        record,
+        launch_mode,
+        controller_epoch,
+        None,
+    )
+    .map(|(write, _)| write)
+}
+
+/// `#queuedclearflake`: [`store_actor_record_tx`] for a controller lifecycle
+/// transition. A `Ready` record also releases the dispatch receipt that turn
+/// consumed ([`mark_open_dispatches_consumed_as_of`]) in the SAME transaction
+/// that projects `actor_state = 'ready'`, and returns how many were released.
+///
+/// The two used to be separate commits: the `documents` row read `ready` while
+/// the release was still pending. Anything that observed `ready` and then
+/// started the next turn — a route dispatch, whose preflight promotes its own
+/// receipt to `running` without moving the actor — had that NEW receipt
+/// released by the old `Ready` edge, so a Clear pressed in the new turn found
+/// no live-turn evidence and typed `/clear` into the running turn. With one
+/// transaction, every reader that sees `ready` also sees the release, and a
+/// receipt promoted after it belongs to the next turn and stays `running`.
+///
+/// Only a transition INTO `Ready` ends a turn. A `Ready` written onto an actor
+/// that is already `Ready` releases only receipts past the pre-turn grace
+/// ([`sweep_open_dispatches_past_pre_turn_grace_as_of`]): a route-dispatched turn
+/// runs with the actor `Ready` throughout, so a repeated `Ready` during it (a
+/// supervisor `idle_pane_reconcile` racing its own slow startup `prompt_ready`)
+/// would otherwise release the running turn's receipt.
+pub fn store_actor_lifecycle_record_tx(
+    conn: &mut Connection,
+    expected_prior_generation: Option<u64>,
+    record: &ActorRecord,
+    launch_mode: Option<String>,
+    controller_epoch: Option<i64>,
+    now_secs: i64,
+) -> Result<(ActorStoreWrite, usize)> {
+    store_actor_record_in_tx(
+        conn,
+        expected_prior_generation,
+        record,
+        launch_mode,
+        controller_epoch,
+        (record.state == ActorState::Ready).then_some(now_secs),
+    )
+}
+
+fn store_actor_record_in_tx(
+    conn: &mut Connection,
+    expected_prior_generation: Option<u64>,
+    record: &ActorRecord,
+    launch_mode: Option<String>,
+    controller_epoch: Option<i64>,
+    release_ready_dispatches_as_of: Option<i64>,
+) -> Result<(ActorStoreWrite, usize)> {
     // This transaction reads the current actor generation before writing the
     // replacement record. A deferred SQLite transaction can let two starters
     // acquire read snapshots and then fail one read-to-write upgrade with
@@ -5247,11 +5318,29 @@ pub fn store_actor_record_tx(
     };
     let transition_id = insert_actor_transition(&tx, previous.as_ref(), record)?;
     upsert_actor_document(&tx, record, transition_id, launch_mode, controller_epoch)?;
+    // `#queuedclearflake`: only a transition INTO `Ready` ends a turn. A `Ready`
+    // re-asserted onto a `Ready` actor (a supervisor `idle_pane_reconcile` racing
+    // its own slow startup `prompt_ready`, or any repeat) ended nothing: the actor
+    // never left `Ready`, which is also exactly the state a route-dispatched turn
+    // runs in. Settling there released that running turn's receipt. It keeps the
+    // pre-turn-grace leak sweep only.
+    let released_dispatches = match (release_ready_dispatches_as_of, previous.as_ref()) {
+        (None, _) => 0,
+        (Some(now_secs), Some(prior)) if prior.state == ActorState::Ready => {
+            sweep_open_dispatches_past_pre_turn_grace_as_of(&tx, &record.document_id, now_secs)?
+        }
+        (Some(now_secs), _) => {
+            mark_open_dispatches_consumed_as_of(&tx, &record.document_id, now_secs)?
+        }
+    };
     tx.commit()?;
-    Ok(ActorStoreWrite {
-        record: record.clone(),
-        evicted_document_ids,
-    })
+    Ok((
+        ActorStoreWrite {
+            record: record.clone(),
+            evicted_document_ids,
+        },
+        released_dispatches,
+    ))
 }
 
 /// `#actorprune`: hard-delete a dead actor record and its history/lease rows.
@@ -7516,6 +7605,106 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("/project/tasks/new.md"),
         );
+        Ok(())
+    }
+
+    /// `#queuedclearflake`: a `Ready` lifecycle write releases the observed
+    /// turn's dispatch receipt inside the transaction that projects `ready`, and
+    /// a receipt promoted after it belongs to the next turn and stays `running`.
+    /// Other state writes (and the plain [`store_actor_record_tx`]) release
+    /// nothing.
+    #[test]
+    fn ready_lifecycle_write_releases_its_turns_receipt_in_the_same_transaction() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let mut conn = open_state_db(dir.path())?;
+        let mut record = ActorRecord {
+            document_id: "tasks/clear.md".to_string(),
+            session_id: "session-clear".to_string(),
+            generation: 1,
+            pane_id: "%0".to_string(),
+            window_id: "@1".to_string(),
+            harness: "claude".to_string(),
+            state: ActorState::Busy,
+            last_transition: ActorLastTransition {
+                caller: "supervisor".to_string(),
+                reason: "test".to_string(),
+                timestamp: timestamp_secs(),
+                prior_generation: 1,
+                new_generation: 1,
+            },
+        };
+        let now = timestamp_secs() as i64;
+        let dispatch = |conn: &Connection| -> Result<()> {
+            insert_dispatch_attempt_in_db(
+                conn,
+                &DispatchAttemptInsert {
+                    document_id: "tasks/clear.md",
+                    generation: 1,
+                    command_kind: "dispatch_only_reopen",
+                    accepted_stage: Some("ready"),
+                    failed_stage: None,
+                    diagnostic_payload: "route dispatch",
+                    result_status: "accepted",
+                    proof_scope: "accepted_only",
+                    dispatch_start_proven: false,
+                },
+            )?;
+            assert_eq!(
+                mark_open_dispatches_turn_started(conn, "tasks/clear.md")?,
+                1
+            );
+            Ok(())
+        };
+
+        // Turn A runs; a Busy write releases nothing.
+        dispatch(&conn)?;
+        let (_, released) =
+            store_actor_lifecycle_record_tx(&mut conn, None, &record, None, None, now)?;
+        assert_eq!(released, 0, "a Busy write releases nothing");
+        assert!(has_running_dispatch_turn_as_of(
+            &conn,
+            "tasks/clear.md",
+            now
+        )?);
+
+        // Turn A ends: the Ready write releases its receipt before it commits.
+        record.state = ActorState::Ready;
+        let (write, released) =
+            store_actor_lifecycle_record_tx(&mut conn, Some(1), &record, None, None, now)?;
+        assert_eq!(write.record.state, ActorState::Ready);
+        assert_eq!(
+            released, 1,
+            "the Ready edge releases the ended turn's receipt"
+        );
+        assert!(!has_running_dispatch_turn_as_of(
+            &conn,
+            "tasks/clear.md",
+            now
+        )?);
+
+        // Turn B (a route dispatch: the actor stays `Ready`) starts on the
+        // observed `ready`: nothing of A's edge is left to release B's receipt,
+        // and a plain actor write never releases one.
+        dispatch(&conn)?;
+        store_actor_record_tx(&mut conn, Some(1), &record, None, None)?;
+        assert!(
+            has_running_dispatch_turn_as_of(&conn, "tasks/clear.md", now)?,
+            "the next turn's receipt stays running"
+        );
+        // A repeated `Ready` (Ready -> Ready) ended no turn: B stays running.
+        let (_, released) =
+            store_actor_lifecycle_record_tx(&mut conn, Some(1), &record, None, None, now)?;
+        assert_eq!(released, 0, "a repeated Ready ends no turn");
+        assert!(has_running_dispatch_turn_as_of(
+            &conn,
+            "tasks/clear.md",
+            now
+        )?);
+        // ... but it still sweeps receipts past the pre-turn grace (leak bound).
+        let past_grace = now + DISPATCH_PRE_TURN_GRACE_SECS + 1;
+        let (_, released) =
+            store_actor_lifecycle_record_tx(&mut conn, Some(1), &record, None, None, past_grace)?;
+        assert_eq!(released, 1, "the pre-turn-grace sweep still runs");
         Ok(())
     }
 

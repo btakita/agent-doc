@@ -502,6 +502,22 @@ its prompt, until the operator typed `/clear` by hand.
   (`#dispatchreceiptperturn`). When a `running` receipt was settled, no
   pending one is taken with it; a stacked trigger behind it, or a dispatch
   accepted after the lease, stays pending.
+  `#queuedclearflake`: the controller's `Ready` release
+  (`mark_open_dispatches_consumed`, `#qflood` / `#idledispatchstack`) runs in
+  the SAME SQLite transaction that projects `documents.actor_state = 'ready'`
+  (`store_actor_lifecycle_record_tx`), so no reader can observe `ready`
+  before the release. It used to be a later commit, and a route dispatch
+  started on the observed `ready` (its preflight promotes its own receipt to
+  `running`) had that NEW receipt released by the old edge; the next Clear
+  then read no live turn and typed `/clear` into the running turn. Only a
+  transition INTO `Ready` ends a turn: a `Ready` written onto an actor that
+  is already `Ready` (a supervisor `idle_pane_reconcile` racing its own slow
+  startup `prompt_ready`, or any repeat) settles no `running` receipt, since
+  a route-dispatched turn runs with the actor `Ready` throughout. It still
+  runs the pre-turn-grace leak sweep
+  (`sweep_open_dispatches_past_pre_turn_grace_as_of`), logged as
+  `dispatch_in_flight_released ... reason=pre_turn_grace_sweep` (a real
+  transition logs `reason=actor_ready`).
   `#infraclearsession`: the settle happens ON the retirement edge
   (`retire_harness_ended_turn_lease`), not only in the callers that log it.
   Every lease read retires an interrupted lease as a side effect

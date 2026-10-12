@@ -16863,23 +16863,53 @@ fn test_dispatch_turn_start_is_recorded_on_the_busy_transition() {
         manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
     )
     .unwrap();
-    for (state, call) in [
-        ("Busy", "state_store::mark_open_dispatches_turn_started("),
-        ("Ready", "state_store::mark_open_dispatches_consumed("),
-    ] {
-        let call_at = rpc
-            .find(call)
-            .unwrap_or_else(|| panic!("controller lifecycle must call {call}"));
-        let guard = format!("matches!(state, agent_doc_controller::actor::ActorState::{state})");
-        let guard_at = rpc[..call_at].rfind(&guard).unwrap_or_else(|| {
-            panic!("{call} must be guarded by the {state} lifecycle transition")
-        });
-        // The guard is the branch this call sits in, not some earlier unrelated match.
-        assert!(
-            call_at - guard_at < 600,
-            "{call} drifted away from its {state} guard; the lifecycle edge is no longer paired"
-        );
-    }
+    let call = "state_store::mark_open_dispatches_turn_started(";
+    let call_at = rpc
+        .find(call)
+        .unwrap_or_else(|| panic!("controller lifecycle must call {call}"));
+    let guard = "matches!(state, agent_doc_controller::actor::ActorState::Busy)";
+    let guard_at = rpc[..call_at]
+        .rfind(guard)
+        .unwrap_or_else(|| panic!("{call} must be guarded by the Busy lifecycle transition"));
+    // The guard is the branch this call sits in, not some earlier unrelated match.
+    assert!(
+        call_at - guard_at < 600,
+        "{call} drifted away from its Busy guard; the lifecycle edge is no longer paired"
+    );
+
+    // `#queuedclearflake`: the `Ready` release runs INSIDE the transaction that
+    // projects `ready` (`store_actor_lifecycle_record_tx`), never as a later
+    // commit: as a separate commit, a turn started on the observed `ready` had its
+    // own new receipt released by the old edge. Pin both halves: the release sits
+    // before the lifecycle transaction's commit, guarded by `Ready`, and the
+    // lifecycle handler stores through it with no separate release call.
+    let lifecycle_tx_at = state_store
+        .find("fn store_actor_record_in_tx(")
+        .expect("agent-doc-sqlite must own the lifecycle actor write transaction");
+    let lifecycle_tx = &state_store[lifecycle_tx_at..];
+    let lifecycle_tx = &lifecycle_tx[..lifecycle_tx.find("\n}\n").unwrap()];
+    let release_at = lifecycle_tx
+        .find("mark_open_dispatches_consumed_as_of(&tx,")
+        .expect("the Ready release must run on the lifecycle write's own transaction");
+    assert!(
+        release_at < lifecycle_tx.find("tx.commit()").unwrap(),
+        "the Ready release must commit with the `ready` projection, not after it"
+    );
+    assert!(
+        state_store.contains("(record.state == ActorState::Ready).then_some(now_secs)"),
+        "only a Ready lifecycle write releases dispatch receipts"
+    );
+    let handler_at = rpc.find("pub(crate) fn handle_mark_lifecycle(").unwrap();
+    let handler = &rpc[handler_at..];
+    let handler = &handler[..handler.find("\n}\n").unwrap()];
+    assert!(
+        handler.contains("store_lifecycle_actor_record_for_runtime("),
+        "the lifecycle handler must store through the releasing transaction"
+    );
+    assert!(
+        !handler.contains("mark_open_dispatches_consumed("),
+        "a separate Ready release commit reopens the #queuedclearflake race"
+    );
 
     // `#dispatchturnstartreceipt`: the `caller = "dispatch"` edge above fires on only
     // two paths, both supervisor-side (`auto_trigger_inject_command`,

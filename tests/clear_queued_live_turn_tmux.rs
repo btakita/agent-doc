@@ -256,6 +256,12 @@ impl LiveClearScenario {
             path_env,
             ceiling,
         };
+        // `#queuedclearflake`: `actor_state = 'ready'` is a sound readiness
+        // signal only because the controller releases the startup `Ready`
+        // edge's dispatch receipts in the same transaction that projects it.
+        // When the release was a later commit, a route dispatch started right
+        // here had its own `running` receipt released by that edge, and the
+        // next Clear went straight into the turn (`make tmux-ci`, 2026-10-12).
         scenario.wait_until(
             "the supervisor launched the fake harness and went ready",
             || scenario.fake.join("started").exists() && scenario.actor_ready(),
@@ -336,6 +342,24 @@ impl LiveClearScenario {
             self.inputs(),
         );
         output
+    }
+
+    /// Assert a Clear press was QUEUED behind the live turn. On failure, show
+    /// why it was not: a bare stderr is empty when the clear went straight
+    /// through (`#queuedclearflake`), so include the pane, the inputs the
+    /// harness received, and the ops.log tail (the guard's `flow=operator_clear`
+    /// verdict and any `dispatch_in_flight_released` that took the receipt).
+    fn assert_clear_queued(&self, pressed: &Output) {
+        assert!(
+            stderr(pressed).contains("ui_outcome=queued"),
+            "the clear was not queued behind the live turn\n--- stderr ---\n{}\n--- stdout ---\n{}\n--- pane {} ---\n{}\n--- inputs ---\n{:?}\n--- ops.log tail ---\n{}",
+            stderr(pressed),
+            String::from_utf8_lossy(&pressed.stdout),
+            self.pane,
+            self.tmux.capture_pane(&self.pane, None).unwrap_or_default(),
+            self.inputs(),
+            self.ops_log_tail(),
+        );
     }
 
     /// The real harness turn hook (`UserPromptSubmit` → `active`,
@@ -616,7 +640,7 @@ fn queued_clear_lands_once_when_a_dispatch_receipt_only_turn_ends() {
         first_stderr.contains("evidence=dispatch_turn_running"),
         "{first_stderr}"
     );
-    assert!(first_stderr.contains("ui_outcome=queued"), "{first_stderr}");
+    scenario.assert_clear_queued(&first);
     assert!(
         first_stderr.contains("evidence_age_secs="),
         "the notice cites how old its evidence is: {first_stderr}"
@@ -681,11 +705,7 @@ fn queued_clear_is_dropped_when_a_newer_prompt_starts_first() {
 
     let pressed = scenario.press_clear();
     assert!(pressed.status.success(), "{}", stderr(&pressed));
-    assert!(
-        stderr(&pressed).contains("ui_outcome=queued"),
-        "{}",
-        stderr(&pressed)
-    );
+    scenario.assert_clear_queued(&pressed);
 
     // The dispatched turn's lease, adopted by the watch as the clear's turn.
     scenario.hook(true, "UserPromptSubmit");
@@ -821,11 +841,7 @@ fn a_repeat_press_rearms_the_queued_clear_behind_the_run_started_before_it() {
     scenario.route_dispatch_turn();
     scenario.hook(true, "UserPromptSubmit");
     let first = scenario.press_clear();
-    assert!(
-        stderr(&first).contains("ui_outcome=queued"),
-        "{}",
-        stderr(&first)
-    );
+    scenario.assert_clear_queued(&first);
     std::thread::sleep(Duration::from_secs(2));
 
     scenario.accept_dispatch();

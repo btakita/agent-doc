@@ -1583,7 +1583,7 @@ mod two_ide_navigation_model {
         RecycleSettle,
     }
 
-    #[derive(Default)]
+    #[derive(Clone, Default, PartialEq, Eq, Hash)]
     struct World {
         owners: BTreeMap<LayoutOwnerKey, InstallationFocus>,
         live: BTreeSet<usize>,
@@ -2515,28 +2515,176 @@ mod two_ide_navigation_model {
             .collect()
     }
 
-    /// Run every event sequence of length `depth`; return the first violation.
+    impl World {
+        /// The world with every append-only violation log emptied
+        /// (`#simworldcitimeout`).
+        ///
+        /// `explore` checks after every step, so a world it keeps exploring
+        /// passed `Sim::check`. Each log below is only appended to, never read
+        /// by `Sim::step`, and every entry's verdict is fixed when it is
+        /// pushed: an entry of `moved`, `closed_live`, `stale_folds`,
+        /// `unfolded_after_disable`, `shared_mode_lane_targets` or
+        /// `unconvergeable_route_waits` is a violation on its own; an entry of
+        /// `handoffs`, `route_starts`, `route_existing` or `route_other_lane`
+        /// carries its own verdict; `folded`, `adopted` and `auto_reconciles`
+        /// are never checked. `writers` is judged against the writer's lane in
+        /// the current mode, and a mode switch clears it, so a passed entry
+        /// stays passed. `deferred` is a violation in per-installation mode,
+        /// is never read in shared mode, and a mode switch resets it. So a
+        /// passed world and its normalized form pass and fail every later
+        /// check alike: deduplicating normalized worlds explores exactly the
+        /// violations the unnormalized search would.
+        fn normalized(mut self) -> Self {
+            self.writers.clear();
+            self.deferred = 0;
+            self.moved.clear();
+            self.handoffs.clear();
+            self.closed_live.clear();
+            self.folded.clear();
+            self.unfolded_after_disable.clear();
+            self.auto_reconciles = 0;
+            self.stale_folds.clear();
+            self.route_starts.clear();
+            self.adopted.clear();
+            self.shared_mode_lane_targets.clear();
+            self.unconvergeable_route_waits.clear();
+            self.route_existing.clear();
+            self.route_other_lane.clear();
+            self
+        }
+    }
+
+    /// Check every event sequence of up to `depth` events; return the first
+    /// violation, with a shortest trace that reaches it.
+    ///
+    /// `#simworldcitimeout`: a breadth-first search over distinct
+    /// `(mode, normalized world)` states instead of replaying all
+    /// `events().len().pow(depth)` sequences from scratch (3.2M sequences at
+    /// depth 5, about 90s on two cores). `Sim::step` and `Sim::check` read
+    /// only the mode and the world (the mutation is fixed per search), so two
+    /// sequences that reach the same state have the same futures; a state
+    /// first reached at level `k` is expanded from level `k`, the shallowest,
+    /// so every state reachable within `depth` events is checked, the same
+    /// set the sequence enumeration visits. See [`World::normalized`] for why
+    /// dropping the passed violation logs keeps that set exact.
     fn explore(mode: NavigationMode, mutation: Mutation, depth: u32) -> Option<String> {
+        search(mode, mutation, depth, World::normalized)
+    }
+
+    /// The breadth-first search behind [`explore`], deduplicating worlds by
+    /// `canonical` (the identity keeps every log, for the normalization
+    /// cross-check).
+    fn search(
+        mode: NavigationMode,
+        mutation: Mutation,
+        depth: u32,
+        canonical: fn(World) -> World,
+    ) -> Option<String> {
+        use std::collections::HashSet;
+        use std::rc::Rc;
+
         let events = events();
-        let total = (events.len() as u64).pow(depth);
-        for index in 0..total {
-            let mut sim = Sim::new(mode, mutation);
-            let mut cursor = index;
-            let mut trace = Vec::new();
-            for _ in 0..depth {
-                let event = events[(cursor % events.len() as u64) as usize];
-                cursor /= events.len() as u64;
-                trace.push(event);
-                sim.step(event);
-                if let Err(violation) = sim.check() {
-                    return Some(format!("{violation} after {trace:?}"));
+        let initial = Sim::new(mode, mutation);
+        let initial_world = canonical(initial.world);
+        let mut visited: HashSet<(NavigationMode, World)> = HashSet::new();
+        visited.insert((initial.mode, initial_world.clone()));
+        // Each frontier state carries its trace as a shared parent chain.
+        struct Link {
+            event: Event,
+            parent: Trace,
+        }
+        type Trace = Option<Rc<Link>>;
+        let mut frontier: Vec<(NavigationMode, World, Trace)> =
+            vec![(initial.mode, initial_world, None)];
+        for _ in 0..depth {
+            let mut next_frontier = Vec::new();
+            for (mode, world, trace) in &frontier {
+                for event in &events {
+                    let mut sim = Sim {
+                        mode: *mode,
+                        mutation,
+                        world: world.clone(),
+                    };
+                    sim.step(*event);
+                    let trace = Some(Rc::new(Link {
+                        event: *event,
+                        parent: trace.clone(),
+                    }));
+                    if let Err(violation) = sim.check() {
+                        let mut events = Vec::new();
+                        let mut cursor = &trace;
+                        while let Some(link) = cursor {
+                            events.push(link.event);
+                            cursor = &link.parent;
+                        }
+                        events.reverse();
+                        return Some(format!("{violation} after {events:?}"));
+                    }
+                    let world = canonical(sim.world);
+                    if visited.insert((sim.mode, world.clone())) {
+                        next_frontier.push((sim.mode, world, trace));
+                    }
                 }
             }
+            frontier = next_frontier;
         }
         None
     }
 
     const DEPTH: u32 = 5;
+
+    const MUTATIONS: [Mutation; 28] = [
+        Mutation::None,
+        Mutation::RootKeyedOwner,
+        Mutation::SharedSessionTarget,
+        Mutation::IgnoreAuthority,
+        Mutation::MoveAcrossLanes,
+        Mutation::HandoffOnPassive,
+        Mutation::DuplicateOnHandoff,
+        Mutation::LoseOnHandoff,
+        Mutation::NoRepublish,
+        Mutation::MoveOnEnable,
+        Mutation::GcIgnoresMark,
+        Mutation::GcIgnoresOwnedPanes,
+        Mutation::GcIgnoresLiveSurface,
+        Mutation::TriggerIgnoresLiveness,
+        Mutation::TriggerIgnoresMark,
+        Mutation::ReconcileActsOnStalePlan,
+        Mutation::RouteIntoSharedSession,
+        Mutation::RouteMovesExistingPane,
+        Mutation::RouteDuplicatesPane,
+        Mutation::RecycleSharedOnly,
+        Mutation::RecycleIntoSharedSession,
+        Mutation::RecycleClaimsExplicitly,
+        Mutation::SharedSyncFollowsStaleLane,
+        Mutation::DuplicateOnAdopt,
+        Mutation::LoseOnAdopt,
+        Mutation::RouteWaitsOnOtherLaneFrame,
+        Mutation::RouteDropsOtherLaneTrigger,
+        Mutation::RouteSilentInOtherLane,
+    ];
+
+    /// `#simworldcitimeout`: dropping the passed violation logs never changes
+    /// a verdict. For every mutation and both modes, the normalized search
+    /// finds a violation at exactly the same (shortest) depth as a search
+    /// that keeps every log in its state, or neither finds one (depth 3: the
+    /// unnormalized state space grows too fast to cross-check deeper in CI).
+    #[test]
+    fn normalizing_passed_violation_logs_preserves_every_verdict() {
+        fn verdict(trace: Option<String>) -> Option<usize> {
+            trace.map(|trace| {
+                let (_, events) = trace.split_once(" after [").unwrap();
+                events.matches(", ").count() + 1
+            })
+        }
+        for mode in [NavigationMode::Shared, NavigationMode::PerInstallation] {
+            for mutation in MUTATIONS {
+                let full = search(mode, mutation, 3, |world| world);
+                let normalized = search(mode, mutation, 3, World::normalized);
+                assert_eq!(verdict(full), verdict(normalized), "{mode:?} {mutation:?}");
+            }
+        }
+    }
 
     #[test]
     fn shared_mode_lets_only_the_focus_owner_reshape_the_shared_session() {

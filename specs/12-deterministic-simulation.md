@@ -220,6 +220,27 @@ covered by the fixed fast corpus if it is cheap enough. If the fix needs a
 larger generated range, adjust the corpus constants and this budget section in
 the same change.
 
+**Exhaustive model budget (`#simworldcitimeout`).** An exhaustive model
+(every event sequence up to a fixed depth) must finish well under nextest's
+180s per-test guard on a 2-core CI runner; a model that outgrows it is made
+cheaper, never given a longer timeout, an `#[ignore]`, or a CI-only shallower
+depth. Enumerating `events.pow(depth)` sequences and replaying each from the
+initial world grows with every event a lane phase adds:
+`two_ide_navigation_model` reached 20 events at depth 5 (3.2M sequences,
+about 90s on two cores, past 180s on the GitHub runner). It now searches
+breadth-first over distinct `(mode, world)` states: `step` and `check` read
+only those, so two sequences reaching one state share every future, and a
+state first reached at the shallowest level covers every sequence through it,
+the same reachable set the enumeration checks, with a shortest trace for each
+violation. The world drops its append-only violation logs once a check passed
+(`World::normalized`): each entry's verdict is fixed when it is pushed, `step`
+never reads them, and a mode switch clears the mode-relative ones (`writers`,
+`deferred`), so normalization changes no later verdict;
+`normalizing_passed_violation_logs_preserves_every_verdict` cross-checks every
+mutation in both modes against an unnormalized search. Depth 5 now visits
+about 19k distinct states (under 7s on two cores) and every mutation test is
+unchanged.
+
 The closeout simulator also supports named Phase 3 fault points:
 
 - `SnapshotSave`

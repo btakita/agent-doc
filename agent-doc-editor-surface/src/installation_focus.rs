@@ -74,7 +74,7 @@ pub struct FocusOwner {
 }
 
 /// Pure ownership fold for one project root.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct InstallationFocus {
     /// installation -> the epoch of its most recent focus claim.
     claims: BTreeMap<String, u64>,

@@ -608,7 +608,7 @@ impl LaneRetainReason {
 }
 
 /// One step of the lane reconcile (`#ideriderindependentnav` P5).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LaneReconcileAction {
     /// Disable migration: move a document pane out of an installation lane
     /// session into the project session's `stash` window, from where the
@@ -717,7 +717,7 @@ pub fn plan_navigation_lane_reconcile(
 ///
 /// An attached tmux client and a busy pane keep a lane in every case; this is
 /// only the editor-liveness half of [`LaneSessionObservation::live_surface`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LaneLiveness {
     /// `agent-doc gc`: exactly these installations are live, every other
     /// installation is not. The CLI knows no editor, so it passes an empty set
@@ -753,7 +753,7 @@ impl LaneLiveness {
 /// editor installations it has seen live; its `Effect` runs the reconcile each
 /// time the derived request changes, so neither an IDE that quits nor a
 /// `per_installation` → `shared` switch waits for `agent-doc gc`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LaneReconcileTrigger {
     pub mode: NavigationMode,
     /// Installations this controller saw live whose every surface has since

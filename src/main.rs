@@ -308,7 +308,8 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         let _ = agent_doc_route_io::invocation::take_route_deferral();
         let _ = agent_doc_route_io::invocation::take_route_steering_delivery();
         let _ = agent_doc_route_io::invocation::take_route_live_owner_turn();
-        match agent_doc_route_io::invocation::run_with_force_disk_and_prune(
+        let _ = agent_doc_route_io::invocation::take_route_pane_not_visible();
+        let result = match agent_doc_route_io::invocation::run_with_force_disk_and_prune(
             &invocation.file,
             invocation.pane.as_deref(),
             500,
@@ -355,7 +356,19 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                     output: format!("{err:#}"),
                 },
             ),
-        }
+        };
+        // GH #243: a delivery into a pane no tmux client shows still succeeded,
+        // but "dispatched" alone tells the operator nothing is wrong. Carry the
+        // not-visible notice (with its attach command) to the editor.
+        let pane_not_visible = agent_doc_route_io::invocation::take_route_pane_not_visible();
+        result.map(|mut result| {
+            if result.exit_code == 0
+                && let Some(notice) = pane_not_visible
+            {
+                result.output = format!("{}\n{notice}", result.output);
+            }
+            result
+        })
     }
 
     fn sync_tmux_layout(

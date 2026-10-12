@@ -3,9 +3,16 @@
 //! This crate owns subprocess effects for tmux commands. It does not own
 //! document authority, merge behavior, queue projection, or turn commits.
 
+pub mod client_visibility;
 pub mod editor_view;
 pub mod isolated_test_server;
 pub mod observation_cache;
+
+pub use client_visibility::{
+    AmbientSession, AmbientSessionResolution, AttachedTmuxClient, PANE_NOT_VISIBLE_MARKER,
+    UnwatchedPane, ambient_current_session, ambient_current_session_for_process, attached_clients,
+    choose_ambient_session, pane_not_visible_notice, session_attached_client_count, unwatched_pane,
+};
 
 pub use isolated_test_server::{
     IsolatedTestTmux, isolated_test_tmux, isolated_tmux_socket_path, unique_isolated_tmux_socket,

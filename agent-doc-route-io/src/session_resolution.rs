@@ -7,8 +7,13 @@ use std::path::Path;
 use tmux_router::Tmux;
 
 /// Get the tmux session that owns the caller pane.
+///
+/// Outside a pane (the project controller, an IDE helper) this is tmux's
+/// ambient session, except that a client-less ambient session yields to the
+/// session an attached client shows (GH #243): a route-owned start must not
+/// land on a session no screen displays.
 pub fn current_tmux_session(tmux: &Tmux) -> Option<String> {
-    tmux.current_session()
+    agent_doc_tmux_io::ambient_current_session_for_process(tmux).map(|ambient| ambient.session)
 }
 
 pub fn current_agent_doc_session(tmux: &Tmux) -> Option<String> {

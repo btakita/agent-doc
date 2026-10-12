@@ -965,6 +965,14 @@ pub fn auto_start_in_session_with_lock_mode(
             skip_wait,
         ),
     );
+    // GH #243: a route-owned start into a session no client is attached to
+    // runs its harness on no screen. Surface it rather than starting silently.
+    crate::invocation::report_pane_if_not_visible(
+        tmux,
+        file,
+        &new_pane,
+        "route_owned_start_target_not_visible",
+    );
     agent_doc_tmux_io::input_diag::log_text_submit(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
         "route.auto_start",

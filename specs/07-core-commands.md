@@ -199,6 +199,14 @@ banner.
   no active or newly accepted clients. The classifier is deliberately narrow;
   persistent project roots and live clients are never reaped by this idle rule.
 - Prunes accumulated pre-mutation recovery tags (`#x8aw`): keeps the newest `KEEP_RECOVERY_TAGS` (20) `agent-doc/<doc>/pre-auto-run-N` and `pre-compact-N` tags **per `<doc>/<slug>` series**, deleting older ones. One tag is created per queue auto-run / compaction, so without pruning they grow unbounded over a document's life. Best-effort: a non-git root or git failure is a no-op. `--dry-run` reports the deletions without applying them.
+- Reconciles per-installation navigation lane sessions with the project's `editor_navigation`
+  (`#ideriderindependentnav` P5; see [Session tmux commands](07-session-tmux-commands.md)): under
+  `shared` it folds each document pane of a lane session agent-doc created back into the project
+  session's `stash` window and closes the emptied lane; under either mode it closes a lane
+  session with no document pane, no busy pane, and no attached client. Sessions without the
+  `@agent_doc_navigation_lane` mark for this root are never touched. Prints
+  `[gc] navigation lane <session>: ...` per planned action; `--dry-run` changes nothing. A
+  project without a `tmux_session` pin skips this step without reading tmux.
 - `preflight` runs the full orphan-file GC automatically at most once per day via a coordination throttle in `.agent-doc/state.db`; `preflight`, `start`, and `sync` still run the lightweight stale-`starting` actor cleanup every cycle.
 
 ## checkpoint

@@ -2,7 +2,8 @@
 
 Status: P1 landed on branch `ridernav`; P2a landed on branch `ridernavp2a`; P2b landed on
 branch `ridernavp2b`; P3 landed on branch `ridernavp3`; P4's explicit handoff landed on branch
-`ridernavp4`. P5 (plus the P4 remainders listed there) is open.
+`ridernavp4`. P5's migration, lane cleanup, docs, and two-IDE end-to-end test landed on branch
+`ridernavp5`; the lane awareness carried over from P3/P4 is still open (listed under P5).
 
 ## Problem
 
@@ -298,7 +299,51 @@ Original scope:
 - Verification: SimWorld covers contended handoff, including the invariant that one
   pane belongs to exactly one lane. An isolated tmux test covers `join-pane`.
 
-### P5: rollout, GC, and migration
+### P5: rollout, GC, and migration (PARTLY LANDED)
+
+What landed (the original scope follows below):
+- Pure (editor-surface): `plan_navigation_lane_reconcile(mode, project_session,
+  project_session_alive, lanes)` over `LaneSessionObservation` (session, lane mark, live surface,
+  panes with `document_owned` / `busy`), returning `FoldPane` / `Close` / `Retain { reason }`
+  (`not_marked`, `live_surface`, `owned_panes`, `busy_unowned_pane`, `project_session_missing`).
+  Only sessions named as installation lanes of the pin are planned; the project session never is.
+- Where existing panes go: enabling `per_installation` moves nothing (shared panes stay in the
+  project session, which stays the lane of unscoped clients; installation lanes start empty).
+  Disabling folds each document pane of each marked lane session into the project session's
+  `stash` window (same pane id and actor binding), from where the shared sync places it, then
+  closes the lane unless a busy unowned pane or an attached client keeps it; with no live project
+  session nothing moves.
+- Cleanup: a marked lane with no document pane, no busy pane, and no live surface (an attached
+  tmux client, or an installation the caller reports live) is closed with `kill-session`, after a
+  re-observation confirms the plan. Unmarked sessions are retained and never read
+  (`#bare-foreign-session-guard`). A registry read failure observes nothing.
+- IO: `project_controller::reconcile_navigation_lane_sessions(tmux, root, live_installations,
+  dry_run)`; `agent-doc gc` runs it after its file GC (CLI passes no live installations, so an
+  attached terminal is its liveness proof) and prints each planned action; `--dry-run` changes
+  nothing. ops.log: `navigation_lane_pane_folded`, `navigation_lane_session_closed`.
+- Verification: unit tests and a proptest of the planner (no fold under `per_installation`; a
+  closed lane never held a busy unowned or unfolded document pane; unmarked never touched).
+  SimWorld `two_ide_navigation_model` gains `SetMode` (a controller restart, so no retained layout
+  survives) and `Gc` events driving the production planner, a foreign idle lane-named session, and
+  lane-session provisioning, exhaustive to depth 5 over 15 events; new invariants (foreign session
+  never closed, a live installation's lane never closed, a disable's gc leaves no document pane in
+  a lane, plus the existing no-loss/no-duplicate/no-cross-lane checks across mode switches) and
+  mutations `MoveOnEnable`, `GcIgnoresMark`, `GcIgnoresOwnedPanes`, `GcIgnoresLiveSurface`, all
+  detected. `tests/cross_editor_simworld.rs`
+  `two_ide_navigation_lanes_migrate_and_clean_up_end_to_end` (`make tmux-ci`, isolated server):
+  IDEA, Rider, and a retired CLion client; enable moves no pane; gc closes only CLion's empty lane,
+  keeps IDEA's (document pane) and Rider's (live) lanes and a foreign lane-named session; disable
+  folds both lanes' document panes into the shared stash (same ids, once each), closes both lanes,
+  and a second pass is a no-op.
+- Docs: README, `specs/07-session-tmux-commands.md`, `specs/07-core-commands.md` (gc), and
+  `editors/jetbrains/SPEC.md`.
+- Still open: (a) route, start, and `agent-doc claim --client-id` creating panes in the
+  requester's lane; (b) the `sync_tmux_layout` command and the recycle republish publishing into
+  the right lane(s); (c) a per-lane `pane_layout_status` channel; a controller-side trigger that
+  passes its live installations to the reconcile (today only `agent-doc gc` runs it). The optional
+  focus-driven handoff is not planned.
+
+Original scope:
 
 Carried over from P3/P4: lane awareness of route, start, `agent-doc claim` (a `--client-id`
 so a new pane starts in the requesting lane), the `sync_tmux_layout` command and the recycle

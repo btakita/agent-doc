@@ -28535,6 +28535,250 @@ pub fn hand_over_navigation_lane_pane(
     }
 }
 
+/// What the navigation-lane reconcile did for one project
+/// (`#ideriderindependentnav` P5).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NavigationLaneReconcileReport {
+    /// The project's navigation mode the plan was made for.
+    pub mode: agent_doc_editor_surface::NavigationMode,
+    /// The planned actions (all of them, also under `dry_run`).
+    pub actions: Vec<agent_doc_editor_surface::LaneReconcileAction>,
+    /// `(lane session, pane)` folded back into the project session.
+    pub folded: Vec<(String, String)>,
+    /// Lane sessions closed.
+    pub closed: Vec<String>,
+    /// Actions that were planned but refused or failed when applied.
+    pub failures: Vec<String>,
+}
+
+/// Observe every installation lane session of `project_session` on `tmux`.
+fn observe_navigation_lane_sessions(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    project_session: &str,
+    live_lane_sessions: &BTreeSet<String>,
+) -> Vec<agent_doc_editor_surface::LaneSessionObservation> {
+    let Ok(sessions) = tmux.raw_cmd(&[
+        "list-sessions",
+        "-F",
+        "#{session_name}\t#{session_attached}",
+    ]) else {
+        return Vec::new();
+    };
+    // Without the registry no pane can be proven unowned, so observe nothing
+    // (nothing is folded or closed) rather than mistake a document for a shell.
+    let Ok(registry) = agent_doc_session_registry_io::load_in(project_root) else {
+        return Vec::new();
+    };
+    let owned_panes = registry
+        .values()
+        .map(|entry| entry.pane.trim().to_string())
+        .filter(|pane| !pane.is_empty())
+        .collect::<BTreeSet<_>>();
+    sessions
+        .lines()
+        .filter_map(|line| {
+            let (session, attached) = line.split_once('\t')?;
+            agent_doc_editor_surface::is_lane_session_of(project_session, session)
+                .then(|| (session.to_string(), attached.trim().parse::<usize>().unwrap_or(1)))
+        })
+        .map(|(session, attached)| {
+            let marked = navigation_lane_session_marked(tmux, project_root, &session);
+            let panes = if marked {
+                tmux.raw_cmd(&[
+                    "list-panes",
+                    "-s",
+                    "-t",
+                    &format!("={session}:"),
+                    "-F",
+                    "#{pane_id}\t#{pane_current_command}",
+                ])
+                .map(|panes| {
+                    panes
+                        .lines()
+                        .filter_map(|line| {
+                            let (pane, command) = line.split_once('\t').unwrap_or((line, ""));
+                            let pane = pane.trim();
+                            (!pane.is_empty()).then(|| agent_doc_editor_surface::LanePaneObservation {
+                                pane: pane.to_string(),
+                                document_owned: owned_panes.contains(pane),
+                                busy: agent_doc_supervisor_process::session_liveness::pane_owns_live_agent_from_signals(
+                                    true,
+                                    Some(command),
+                                ),
+                            })
+                        })
+                        .collect()
+                })
+                // A session whose panes cannot be read is treated as busy, so
+                // it is never closed on a failed read.
+                .unwrap_or_else(|_| {
+                    vec![agent_doc_editor_surface::LanePaneObservation {
+                        pane: String::new(),
+                        document_owned: false,
+                        busy: true,
+                    }]
+                })
+            } else {
+                Vec::new()
+            };
+            agent_doc_editor_surface::LaneSessionObservation {
+                live_surface: attached > 0 || live_lane_sessions.contains(&session),
+                session,
+                marked,
+                panes,
+            }
+        })
+        .collect()
+}
+
+/// Reconcile a project's installation lane sessions with its configured
+/// `editor_navigation` (`#ideriderindependentnav` P5): the enable/disable
+/// migration and the cleanup of empty lane sessions agent-doc created.
+///
+/// `agent-doc gc` runs this. The plan is
+/// [`agent_doc_editor_surface::plan_navigation_lane_reconcile`]:
+/// - `per_installation` (enable): no pane moves; a lane session agent-doc
+///   created is closed only when no document pane, busy pane, attached tmux
+///   client, or live installation (`live_installations`, from a running
+///   controller; empty from the CLI) uses it.
+/// - `shared` (disable): each document pane of each lane folds back into the
+///   project session's `stash` window (same pane, same actor binding), then
+///   the lane closes unless a busy unowned pane or a live surface keeps it.
+///
+/// A session that only carries a lane's name, without the
+/// `@agent_doc_navigation_lane` mark for this root, is never touched
+/// (`#bare-foreign-session-guard`). Before closing, the session is observed
+/// again and closed only if the fresh plan still closes it. A project without
+/// a `tmux_session` pin has no lanes, so this is a no-op.
+pub fn reconcile_navigation_lane_sessions(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    live_installations: &BTreeSet<String>,
+    dry_run: bool,
+) -> NavigationLaneReconcileReport {
+    use agent_doc_editor_surface::{LaneReconcileAction, NavigationLane};
+    let (mode, _) = agent_doc_project_config_io::editor_navigation_mode_for_root(project_root);
+    let mut report = NavigationLaneReconcileReport {
+        mode,
+        ..NavigationLaneReconcileReport::default()
+    };
+    let Some(project_session) = configured_tmux_session_for_project(project_root) else {
+        return report;
+    };
+    let project_session = project_session.trim().to_string();
+    let live_lane_sessions = live_installations
+        .iter()
+        .map(|installation| {
+            NavigationLane::Installation(installation.clone()).tmux_session_name(&project_session)
+        })
+        .collect::<BTreeSet<_>>();
+    tmux_router::invalidate_pane_snapshot();
+    let observed =
+        observe_navigation_lane_sessions(tmux, project_root, &project_session, &live_lane_sessions);
+    report.actions = agent_doc_editor_surface::plan_navigation_lane_reconcile(
+        mode,
+        &project_session,
+        tmux.session_alive(&project_session),
+        &observed,
+    );
+    if dry_run {
+        return report;
+    }
+    for action in report.actions.clone() {
+        match action {
+            LaneReconcileAction::FoldPane { session, pane } => {
+                tmux_router::invalidate_pane_snapshot();
+                match tmux.pane_session(&pane) {
+                    Ok(current) if current == session => {}
+                    Ok(current) => {
+                        report
+                            .failures
+                            .push(format!("fold_pane_moved:{pane}:{session}:{current}"));
+                        continue;
+                    }
+                    Err(_) => {
+                        report
+                            .failures
+                            .push(format!("fold_pane_missing:{pane}:{session}"));
+                        continue;
+                    }
+                }
+                let moved = tmux.stash_pane(&pane, &project_session);
+                tmux_router::invalidate_pane_snapshot();
+                match tmux.pane_session(&pane) {
+                    Ok(current) if current == project_session => {
+                        agent_doc_ops_log_io::log_op(
+                            project_root,
+                            &format!(
+                                "navigation_lane_pane_folded pane={pane} from_session={session} to_session={project_session}"
+                            ),
+                        );
+                        report.folded.push((session, pane));
+                    }
+                    _ => report.failures.push(format!(
+                        "fold_pane_failed:{pane}:{session}:{}",
+                        moved
+                            .err()
+                            .map(|error| format!("{error:#}"))
+                            .unwrap_or_default()
+                    )),
+                }
+            }
+            LaneReconcileAction::Close { session } => {
+                tmux_router::invalidate_pane_snapshot();
+                if !tmux.session_alive(&session) {
+                    // Folding its last pane already ended it.
+                    report.closed.push(session);
+                    continue;
+                }
+                let fresh = observe_navigation_lane_sessions(
+                    tmux,
+                    project_root,
+                    &project_session,
+                    &live_lane_sessions,
+                )
+                .into_iter()
+                .filter(|lane| lane.session == session)
+                .collect::<Vec<_>>();
+                let still_closes = agent_doc_editor_surface::plan_navigation_lane_reconcile(
+                    mode,
+                    &project_session,
+                    tmux.session_alive(&project_session),
+                    &fresh,
+                )
+                .iter()
+                .any(|action| matches!(action, LaneReconcileAction::Close { session: closing } if closing == &session))
+                    && fresh.iter().all(|lane| lane.panes.iter().all(|pane| !pane.document_owned && !pane.busy));
+                if !still_closes {
+                    report
+                        .failures
+                        .push(format!("close_refused_on_reobserve:{session}"));
+                    continue;
+                }
+                match tmux.raw_cmd(&["kill-session", "-t", &format!("={session}")]) {
+                    Ok(_) => {
+                        agent_doc_ops_log_io::log_op(
+                            project_root,
+                            &format!(
+                                "navigation_lane_session_closed session={session} mode={}",
+                                mode.as_str()
+                            ),
+                        );
+                        report.closed.push(session);
+                    }
+                    Err(error) => report
+                        .failures
+                        .push(format!("close_failed:{session}:{error:#}")),
+                }
+            }
+            LaneReconcileAction::Retain { .. } => {}
+        }
+    }
+    tmux_router::invalidate_pane_snapshot();
+    report
+}
+
 /// Republish the lane an explicit handoff took a pane from, so it re-projects
 /// without that document (`#ideriderindependentnav` P4).
 ///

@@ -313,6 +313,36 @@ loses desktop focus.
   heartbeats, focus escalations, `editor_route`, `resync`, recycle republishes) is passive and
   never moves a pane. A handoff retried by the same generation is a no-op (`AlreadyInLane`).
   Shared navigation mode never resolves lane sessions, so it never hands over.
+- Lane migration and cleanup (P5, `agent-doc gc`;
+  `project_controller::reconcile_navigation_lane_sessions`, planned by the pure
+  `plan_navigation_lane_reconcile`). The reconcile observes every session whose name is an
+  installation lane of the `tmux_session` pin (a project without a pin has no lanes and is a
+  no-op): whether it carries `@agent_doc_navigation_lane` = this root, whether a tmux client is
+  attached or the caller reports its installation live (the CLI reports none), and each pane's
+  ownership (a session-registry entry of this project names it) and foreground command (anything
+  but a known bare shell is busy). A session without the mark is retained (`not_marked`) and
+  nothing in it is read, moved, or closed (`#bare-foreign-session-guard`); a registry that cannot
+  be read observes nothing.
+  - `per_installation` (enable migration): no pane ever moves. Panes that lived in the project
+    session before the switch stay there, and each installation lane starts empty and acquires
+    panes through its own layouts and explicit claims. A lane session is closed only when it holds
+    no document pane (`owned_panes`), no busy unowned pane (`busy_unowned_pane`), and no live
+    surface (`live_surface`); an installation that retired keeps its lane until then. A closed lane
+    is provisioned again by its next driving layout or IDE terminal attach.
+  - `shared` (disable migration): every lane is retired. Each document pane of a lane session
+    moves into the project session's `stash` window (`navigation_lane_pane_folded pane=..
+    from_session=.. to_session=..`; same pane id, so its actor binding stays valid; nothing is
+    restarted or duplicated), from where the shared lane's sync places it. When the project
+    session is not alive nothing moves or closes (`project_session_missing`). After the folds the
+    lane closes unless a busy unowned pane or an attached client keeps it. Before gc runs, the shared
+    lane's sync applies no lane guard, so a lane pane falls under the ordinary session policy like
+    a pane in any other session; shared mode never targets a lane session, so no pane moves into
+    one.
+  - A close re-observes the session first and closes it only when the fresh plan still closes it
+    and it holds no document or busy pane (`close_refused_on_reobserve` otherwise), then runs
+    `kill-session -t =<session>` (`navigation_lane_session_closed session=.. mode=..`), which
+    takes only bare shells (the session's initial pane, its stash shell, a handoff placeholder).
+    `--dry-run` reports the plan and changes nothing.
 - The `tmux_focus_state` read projection is per lane: the request's `caller` is the editor client
   id, and the projection reports the active pane of that client's lane session (shared lane: the
   configured session). A lane reports a document only while its own session's current window is

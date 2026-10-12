@@ -352,6 +352,169 @@ pub fn partition_lane_layout_columns_for_claim(
     partition
 }
 
+/// One pane of an installation lane session, as the lane reconcile sees it
+/// (`#ideriderindependentnav` P5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanePaneObservation {
+    pub pane: String,
+    /// The pane is a document pane agent-doc owns (a session-registry or
+    /// actor binding of this project names it).
+    pub document_owned: bool,
+    /// The pane's foreground command is not a known bare shell. An unknown
+    /// command counts as busy (false-alive over false-dead).
+    pub busy: bool,
+}
+
+/// One tmux session whose name is an installation lane of the project's
+/// session, as the lane reconcile sees it (`#ideriderindependentnav` P5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaneSessionObservation {
+    pub session: String,
+    /// The session carries `@agent_doc_navigation_lane` = this project root,
+    /// i.e. agent-doc created it. An unmarked session is never touched
+    /// (`#bare-foreign-session-guard`).
+    pub marked: bool,
+    /// A live surface still uses the lane: a tmux client (an IDE terminal) is
+    /// attached to it, or the controller reports its installation live.
+    pub live_surface: bool,
+    pub panes: Vec<LanePaneObservation>,
+}
+
+/// Why the lane reconcile keeps a lane session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LaneRetainReason {
+    /// Agent-doc did not create it (no lane mark for this root).
+    NotMarked,
+    /// An IDE terminal or a live editor installation still uses it.
+    LiveSurface,
+    /// A document pane agent-doc owns still lives in it (per-installation
+    /// mode keeps it; shared mode folds it first).
+    OwnedPanes,
+    /// A pane runs something other than a bare shell and no document owns it:
+    /// the operator's work, which agent-doc never moves or kills.
+    BusyUnownedPane,
+    /// Shared mode would fold its document panes back, but the project
+    /// session to fold them into is not alive.
+    ProjectSessionMissing,
+}
+
+impl LaneRetainReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotMarked => "not_marked",
+            Self::LiveSurface => "live_surface",
+            Self::OwnedPanes => "owned_panes",
+            Self::BusyUnownedPane => "busy_unowned_pane",
+            Self::ProjectSessionMissing => "project_session_missing",
+        }
+    }
+}
+
+/// One step of the lane reconcile (`#ideriderindependentnav` P5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaneReconcileAction {
+    /// Disable migration: move a document pane out of an installation lane
+    /// session into the project session's `stash` window, from where the
+    /// shared lane's sync places it. The pane id (and its actor binding) is
+    /// unchanged; nothing is restarted.
+    FoldPane { session: String, pane: String },
+    /// Close an empty lane session agent-doc created: no document pane, no
+    /// busy pane, no live surface. Only bare shells (its initial pane, its
+    /// stash shell, a handoff placeholder) die with it, and a lane that is
+    /// needed again is provisioned again on its next driving layout.
+    Close { session: String },
+    /// Keep the session.
+    Retain {
+        session: String,
+        reason: LaneRetainReason,
+    },
+}
+
+/// Plan the lane reconcile for one project (`agent-doc gc`).
+///
+/// `lanes` are the sessions whose names are installation lanes of
+/// `project_session` ([`is_lane_session_of`]); any other session is ignored,
+/// so the project session itself and unrelated sessions are never planned.
+///
+/// - Every mode: an unmarked session is retained (`NotMarked`) and nothing in
+///   it is moved; a session in use by a live surface is never closed.
+/// - [`NavigationMode::PerInstallation`] (enable migration): no pane is ever
+///   moved. Panes that lived in the shared session before the switch stay
+///   there; an installation lane acquires panes only through its own layouts
+///   and explicit claims. A lane is closed only when it is empty and unused.
+/// - [`NavigationMode::Shared`] (disable migration): every lane is retired.
+///   Each document pane folds back into the project session (when that session
+///   is alive), then the lane closes unless a busy unowned pane or a live
+///   surface keeps it. No pane is duplicated or lost: a fold moves the same
+///   pane, and a close only ever takes bare shells.
+pub fn plan_navigation_lane_reconcile(
+    mode: NavigationMode,
+    project_session: &str,
+    project_session_alive: bool,
+    lanes: &[LaneSessionObservation],
+) -> Vec<LaneReconcileAction> {
+    let mut actions = Vec::new();
+    for lane in lanes {
+        if !is_lane_session_of(project_session, &lane.session) {
+            continue;
+        }
+        let retain = |reason| LaneReconcileAction::Retain {
+            session: lane.session.clone(),
+            reason,
+        };
+        if !lane.marked {
+            actions.push(retain(LaneRetainReason::NotMarked));
+            continue;
+        }
+        let owned = lane
+            .panes
+            .iter()
+            .filter(|pane| pane.document_owned)
+            .collect::<Vec<_>>();
+        let busy_unowned = lane
+            .panes
+            .iter()
+            .any(|pane| pane.busy && !pane.document_owned);
+        match mode {
+            NavigationMode::PerInstallation => {
+                if lane.live_surface {
+                    actions.push(retain(LaneRetainReason::LiveSurface));
+                } else if !owned.is_empty() {
+                    actions.push(retain(LaneRetainReason::OwnedPanes));
+                } else if busy_unowned {
+                    actions.push(retain(LaneRetainReason::BusyUnownedPane));
+                } else {
+                    actions.push(LaneReconcileAction::Close {
+                        session: lane.session.clone(),
+                    });
+                }
+            }
+            NavigationMode::Shared => {
+                if !owned.is_empty() && !project_session_alive {
+                    actions.push(retain(LaneRetainReason::ProjectSessionMissing));
+                    continue;
+                }
+                for pane in owned {
+                    actions.push(LaneReconcileAction::FoldPane {
+                        session: lane.session.clone(),
+                        pane: pane.pane.clone(),
+                    });
+                }
+                if busy_unowned {
+                    actions.push(retain(LaneRetainReason::BusyUnownedPane));
+                } else if lane.live_surface {
+                    actions.push(retain(LaneRetainReason::LiveSurface));
+                } else {
+                    actions.push(LaneReconcileAction::Close {
+                        session: lane.session.clone(),
+                    });
+                }
+            }
+        }
+    }
+    actions
+}
+
 /// The key every layout-ownership decision is made under: one project root's
 /// one navigation lane. In shared mode every client of a root maps to the same
 /// key, so keying by it is identical to the historical per-root keying.
@@ -621,6 +784,147 @@ mod tests {
         assert_eq!(lane_owning_session(&lanes[..1], "p", "p-IU-0a"), None);
     }
 
+    fn lane(
+        session: &str,
+        marked: bool,
+        live: bool,
+        panes: &[(&str, bool, bool)],
+    ) -> LaneSessionObservation {
+        LaneSessionObservation {
+            session: session.to_string(),
+            marked,
+            live_surface: live,
+            panes: panes
+                .iter()
+                .map(|(pane, document_owned, busy)| LanePaneObservation {
+                    pane: pane.to_string(),
+                    document_owned: *document_owned,
+                    busy: *busy,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn enabling_lanes_never_moves_a_pane_and_closes_only_empty_unused_lanes() {
+        let lanes = [
+            lane(
+                "p-IU-0a",
+                true,
+                false,
+                &[("%1", false, false), ("%2", false, false)],
+            ),
+            lane("p-RD-9f", true, false, &[("%3", true, true)]),
+            lane("p-CL-11", true, true, &[("%4", false, false)]),
+            lane("p-PY-22", true, false, &[("%5", false, true)]),
+            lane("p-XX-33", false, false, &[]),
+            lane("p", true, false, &[("%9", true, true)]),
+            lane("other", true, false, &[]),
+        ];
+        let plan =
+            plan_navigation_lane_reconcile(NavigationMode::PerInstallation, "p", true, &lanes);
+        assert_eq!(
+            plan,
+            vec![
+                LaneReconcileAction::Close {
+                    session: "p-IU-0a".to_string()
+                },
+                LaneReconcileAction::Retain {
+                    session: "p-RD-9f".to_string(),
+                    reason: LaneRetainReason::OwnedPanes
+                },
+                LaneReconcileAction::Retain {
+                    session: "p-CL-11".to_string(),
+                    reason: LaneRetainReason::LiveSurface
+                },
+                LaneReconcileAction::Retain {
+                    session: "p-PY-22".to_string(),
+                    reason: LaneRetainReason::BusyUnownedPane
+                },
+                LaneReconcileAction::Retain {
+                    session: "p-XX-33".to_string(),
+                    reason: LaneRetainReason::NotMarked
+                },
+            ],
+            "the project session and unrelated sessions are never planned"
+        );
+    }
+
+    #[test]
+    fn disabling_lanes_folds_document_panes_back_then_closes_the_lane() {
+        let lanes = [
+            lane(
+                "p-IU-0a",
+                true,
+                false,
+                &[
+                    ("%1", true, true),
+                    ("%2", false, false),
+                    ("%3", true, false),
+                ],
+            ),
+            lane("p-RD-9f", true, true, &[("%4", true, true)]),
+            lane(
+                "p-CL-11",
+                true,
+                false,
+                &[("%5", true, true), ("%6", false, true)],
+            ),
+            lane("p-XX-33", false, false, &[("%7", true, true)]),
+        ];
+        let plan = plan_navigation_lane_reconcile(NavigationMode::Shared, "p", true, &lanes);
+        let fold = |session: &str, pane: &str| LaneReconcileAction::FoldPane {
+            session: session.to_string(),
+            pane: pane.to_string(),
+        };
+        assert_eq!(
+            plan,
+            vec![
+                fold("p-IU-0a", "%1"),
+                fold("p-IU-0a", "%3"),
+                LaneReconcileAction::Close {
+                    session: "p-IU-0a".to_string()
+                },
+                fold("p-RD-9f", "%4"),
+                LaneReconcileAction::Retain {
+                    session: "p-RD-9f".to_string(),
+                    reason: LaneRetainReason::LiveSurface
+                },
+                fold("p-CL-11", "%5"),
+                LaneReconcileAction::Retain {
+                    session: "p-CL-11".to_string(),
+                    reason: LaneRetainReason::BusyUnownedPane
+                },
+                LaneReconcileAction::Retain {
+                    session: "p-XX-33".to_string(),
+                    reason: LaneRetainReason::NotMarked
+                },
+            ]
+        );
+        let missing =
+            plan_navigation_lane_reconcile(NavigationMode::Shared, "p", false, &lanes[..1]);
+        assert_eq!(
+            missing,
+            vec![LaneReconcileAction::Retain {
+                session: "p-IU-0a".to_string(),
+                reason: LaneRetainReason::ProjectSessionMissing
+            }],
+            "with no project session to fold into, nothing moves and nothing closes"
+        );
+        let empty = plan_navigation_lane_reconcile(
+            NavigationMode::Shared,
+            "p",
+            false,
+            &[lane("p-IU-0a", true, false, &[("%1", false, false)])],
+        );
+        assert_eq!(
+            empty,
+            vec![LaneReconcileAction::Close {
+                session: "p-IU-0a".to_string()
+            }]
+        );
+    }
+
     use std::collections::BTreeMap;
 
     proptest! {
@@ -678,6 +982,63 @@ mod tests {
             }
             let other_lane = placements.iter().filter(|p| **p == 2 || **p == 3).count();
             prop_assert_eq!(partition.handoffs.len(), other_lane);
+        }
+
+        #[test]
+        fn the_lane_reconcile_never_loses_a_document_pane_or_touches_foreign_sessions(
+            shape in proptest::collection::vec(
+                (any::<bool>(), any::<bool>(), proptest::collection::vec((any::<bool>(), any::<bool>()), 0..4)),
+                0..4,
+            ),
+            shared in any::<bool>(),
+            project_alive in any::<bool>(),
+        ) {
+            let lanes = shape
+                .iter()
+                .enumerate()
+                .map(|(index, (marked, live, panes))| LaneSessionObservation {
+                    session: format!("p-L{index}"),
+                    marked: *marked,
+                    live_surface: *live,
+                    panes: panes
+                        .iter()
+                        .enumerate()
+                        .map(|(pane, (document_owned, busy))| LanePaneObservation {
+                            pane: format!("%{index}{pane}"),
+                            document_owned: *document_owned,
+                            busy: *busy,
+                        })
+                        .collect(),
+                })
+                .collect::<Vec<_>>();
+            let mode = if shared { NavigationMode::Shared } else { NavigationMode::PerInstallation };
+            let plan = plan_navigation_lane_reconcile(mode, "p", project_alive, &lanes);
+            for lane in &lanes {
+                let folded = plan
+                    .iter()
+                    .filter_map(|action| match action {
+                        LaneReconcileAction::FoldPane { session, pane } if session == &lane.session => Some(pane.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let closed = plan.iter().any(|action| matches!(action, LaneReconcileAction::Close { session } if session == &lane.session));
+                if !lane.marked {
+                    prop_assert!(folded.is_empty() && !closed);
+                }
+                if mode == NavigationMode::PerInstallation {
+                    prop_assert!(folded.is_empty(), "enable never moves a pane");
+                }
+                if closed {
+                    prop_assert!(!lane.live_surface);
+                    for pane in &lane.panes {
+                        prop_assert!(!pane.busy || pane.document_owned);
+                        prop_assert!(!pane.document_owned || folded.contains(&pane.pane));
+                    }
+                }
+                if !folded.is_empty() {
+                    prop_assert!(project_alive);
+                }
+            }
         }
 
         #[test]

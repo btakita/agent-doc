@@ -37,6 +37,33 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `route success into a client-less tmux session surfaces the not-visible notice`() {
+        val notice = "[route] pane-not-visible: tasks/a.md runs in pane %2 of tmux session '0', " +
+            "which has no attached client (attached client(s) show session(s) '1'); its harness " +
+            "output is not on any screen. Attach with: tmux attach-session -t 0"
+        assertEquals(
+            notice,
+            TerminalUtil.routePaneNotVisibleNotice(
+                "[route] dispatched via controller editor_route for tasks/a.md\n$notice",
+            ),
+        )
+        assertNull(
+            TerminalUtil.routePaneNotVisibleNotice(
+                "[route] dispatched via controller editor_route for tasks/a.md",
+            ),
+        )
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
+        ).toFile().readText()
+        val success = source.substringAfter("LOG.warn(\"[route] SUCCESS: \$output\")")
+            .substringBefore("finalStage = \"route_success\"")
+        assertTrue(
+            "a successful route must warn when its pane is on no screen (GH #243)",
+            success.contains("routePaneNotVisibleNotice(output)") && success.contains("notifyWarning("),
+        )
+    }
+
+    @Test
     fun `native generation fails fast instead of waiting on the IDEA event thread`() {
         val source = Paths.get(
             "src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt"

@@ -39,6 +39,53 @@ pub fn existing_session_pane_action(
     Some(ExistingSessionPaneAction::Refuse(registry_pane.to_string()))
 }
 
+/// What happens to a live pane that no longer owns its document (GH #243):
+/// the owner `agent-doc start --force` bypasses, or a duplicate supervisor pane
+/// a route finds beside the document's authoritative actor pane.
+///
+/// One document must have one live supervisor pane. `--force` used to leave
+/// the bypassed owner running, so one document had two live harness processes.
+/// A pane is retired only when its process tree *proves* it is agent-doc's
+/// supervisor for this document (`#bare-foreign-session-guard`: ownership is
+/// proven, never assumed).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SupersededOwnerAction {
+    /// The pane runs `agent-doc` as the owner of this document: retire it.
+    Retire {
+        pane: String,
+        supervisor_pid: String,
+    },
+    /// The pane runs a bare harness agent-doc did not start: leave it alone.
+    LeaveForeignHarness { pane: String },
+    /// Nothing in the pane proves agent-doc owns this document there (a stale
+    /// registry row, a shell): leave it alone; `--force` only bypasses it.
+    LeaveUnproven { pane: String },
+}
+
+/// Facts about the bypassed owner pane's process tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SupersededOwnerFacts<'a> {
+    pub pane: &'a str,
+    /// The tree is a harness session agent-doc did not launch.
+    pub runs_unmanaged_harness: bool,
+    /// Pid of the tree's `agent-doc` process bound to this document, if any.
+    pub agent_doc_owner_pid: Option<&'a str>,
+}
+
+pub fn superseded_owner_action(facts: SupersededOwnerFacts<'_>) -> SupersededOwnerAction {
+    let pane = facts.pane.to_string();
+    if facts.runs_unmanaged_harness {
+        return SupersededOwnerAction::LeaveForeignHarness { pane };
+    }
+    match facts.agent_doc_owner_pid {
+        Some(pid) if !pid.trim().is_empty() => SupersededOwnerAction::Retire {
+            pane,
+            supervisor_pid: pid.trim().to_string(),
+        },
+        _ => SupersededOwnerAction::LeaveUnproven { pane },
+    }
+}
+
 pub fn format_existing_pane_conflict_error(facts: &ExistingPaneConflictFacts<'_>) -> String {
     terminal_error_lines([
         format!("refusing to start {}", facts.document),
@@ -105,6 +152,45 @@ mod tests {
             existing_session_pane_action("%1", Some("%2"), true, None),
             Some(ExistingSessionPaneAction::Refuse("%2".to_string()))
         );
+    }
+
+    #[test]
+    fn force_start_retires_only_a_proven_agent_doc_owner() {
+        assert_eq!(
+            superseded_owner_action(SupersededOwnerFacts {
+                pane: "%2",
+                runs_unmanaged_harness: false,
+                agent_doc_owner_pid: Some("41630"),
+            }),
+            SupersededOwnerAction::Retire {
+                pane: "%2".to_string(),
+                supervisor_pid: "41630".to_string(),
+            }
+        );
+        // `#bare-foreign-session-guard`: an operator's own harness is never ours.
+        assert_eq!(
+            superseded_owner_action(SupersededOwnerFacts {
+                pane: "%2",
+                runs_unmanaged_harness: true,
+                agent_doc_owner_pid: Some("41630"),
+            }),
+            SupersededOwnerAction::LeaveForeignHarness {
+                pane: "%2".to_string()
+            }
+        );
+        // No proof (stale registry row, idle shell): bypass, never kill.
+        for pid in [None, Some(""), Some("  ")] {
+            assert_eq!(
+                superseded_owner_action(SupersededOwnerFacts {
+                    pane: "%2",
+                    runs_unmanaged_harness: false,
+                    agent_doc_owner_pid: pid,
+                }),
+                SupersededOwnerAction::LeaveUnproven {
+                    pane: "%2".to_string()
+                }
+            );
+        }
     }
 
     #[test]

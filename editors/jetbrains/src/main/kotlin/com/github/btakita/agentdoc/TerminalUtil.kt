@@ -616,6 +616,11 @@ object TerminalUtil {
                         LOG.warn("[route] SUCCESS: $output")
                         routeOwnedByOtherLaneNotice(output)?.let { notifyRunAgentDocOwnedByOtherLane(project, it) }
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
+                        // GH #243: the delivery landed in a pane no tmux client
+                        // shows. Tell the operator instead of a silent success.
+                        routePaneNotVisibleNotice(output)?.let { notice ->
+                            notifyWarning(project, notice)
+                        }
                         StateProjectionBridge.recordRouteDispatchProven(
                             documentPath,
                             routeGeneration,
@@ -667,6 +672,14 @@ object TerminalUtil {
             notifyError(project, "Failed to send Run Agent Doc through CP: ${e.message}")
         }
     }
+
+    /** GH #243: the route's `[route] pane-not-visible:` notice, if it reported one. */
+    internal fun routePaneNotVisibleNotice(output: String): String? =
+        output.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.startsWith(ROUTE_PANE_NOT_VISIBLE_MARKER) }
+
+    internal const val ROUTE_PANE_NOT_VISIBLE_MARKER = "[route] pane-not-visible:"
 
     private fun routeAttemptError(
         exitCode: Int,

@@ -984,6 +984,24 @@ pub fn dispatch_only_send_reopen(
     }
 
     drop(pre_dispatch_route_guard.take());
+    // GH #243 follow-up: one document, one live supervisor pane. When this
+    // route targets the document's authoritative actor pane, every other
+    // proven agent-doc supervisor pane for the same document is a superseded
+    // owner (its writes are already refused): retire it rather than leave a
+    // second harness running, possibly in the very pane the operator watches.
+    // Background and cross-document routes stay topology-neutral.
+    if !crate::invocation::background_existing_pane_only()
+        && !crate::invocation::cross_document_existing_pane_only()
+        && agent_doc_sync_io::sync::authoritative_actor_pane_for_document(tmux, file, session_id)
+            .as_deref()
+            == Some(dispatch_pane.as_str())
+    {
+        agent_doc_sync_io::superseded_owner::retire_duplicate_owner_panes(
+            tmux,
+            file,
+            &dispatch_pane,
+        );
+    }
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
     let direct_pane_submit_policy = classify_direct_pane_submit_policy(options.intent);
     let await_start_proof = direct_pane_submit_policy
@@ -1058,6 +1076,15 @@ pub fn dispatch_only_send_reopen(
             delivery,
             dispatch_start
         )
+    );
+    // GH #243: `transport_submitted` proves the keys reached the pane, not
+    // that anyone can see it. A pane in a client-less session answers on no
+    // screen, so the route says so instead of reporting plain success.
+    crate::invocation::report_pane_if_not_visible(
+        tmux,
+        file,
+        &dispatch_pane,
+        "route_dispatch_target_not_visible",
     );
     Ok(dispatch_pane)
 }

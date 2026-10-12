@@ -2224,8 +2224,10 @@ fn destructive_repair_throttle_at(
     Ok((false, last))
 }
 
+/// The caller pane's session, or tmux's ambient session preferring one a
+/// client is attached to (GH #243; see `agent_doc_tmux_io::client_visibility`).
 fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
-    tmux.current_session()
+    agent_doc_tmux_io::ambient_current_session_for_process(tmux).map(|ambient| ambient.session)
 }
 
 fn current_agent_doc_session_name(tmux: &Tmux) -> Option<String> {

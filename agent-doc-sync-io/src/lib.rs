@@ -11,6 +11,7 @@ use std::time::Duration;
 
 pub mod layout_column_audit;
 pub mod resync;
+pub mod superseded_owner;
 pub mod sync;
 
 #[derive(Debug)]

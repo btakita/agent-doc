@@ -58,6 +58,48 @@ static ROUTE_LIVE_OWNER_TURN: RefCell<Option<String>> = const { RefCell::new(Non
 /// requester). In `per_installation` mode an installation-scoped client's new
 /// pane starts in its own navigation lane session.
 static NAVIGATION_CLIENT: RefCell<Option<String>> = const { RefCell::new(None) };
+/// GH #243: this route started or dispatched into a pane whose tmux session
+/// has no attached client. The delivery stands (exit 0), but the editor must
+/// tell the operator the pane is on no screen instead of reporting plain
+/// success.
+static ROUTE_PANE_NOT_VISIBLE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Record that this route's target pane is on no screen (GH #243).
+pub fn record_route_pane_not_visible(notice: String) {
+    ROUTE_PANE_NOT_VISIBLE.with(|cell| *cell.borrow_mut() = Some(notice));
+}
+
+/// Take (and clear) the not-visible notice recorded by this thread's route.
+pub fn take_route_pane_not_visible() -> Option<String> {
+    ROUTE_PANE_NOT_VISIBLE.with(|cell| cell.borrow_mut().take())
+}
+
+/// GH #243: when `pane` lives in a tmux session no client is attached to, log
+/// `event`, print the operator notice, and record it for the editor route's
+/// result. Returns the notice. A visible pane (or an unreadable one) records
+/// nothing.
+pub fn report_pane_if_not_visible(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    event: &str,
+) -> Option<String> {
+    let target = agent_doc_tmux_io::unwatched_pane(tmux, pane)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{event} file={} pane={} session={} clients=0 watched_sessions=[{}]",
+            file.display(),
+            target.pane,
+            target.session,
+            target.watched_sessions.join(","),
+        ),
+    );
+    let notice = agent_doc_tmux_io::pane_not_visible_notice(file, &target);
+    eprintln!("{notice}");
+    record_route_pane_not_visible(notice.clone());
+    Some(notice)
 }
 
 /// The editor surface client this route acts for, if any (P6).
@@ -482,5 +524,67 @@ mod tests {
             assert!(layout_owned_by_controller());
         }
         assert!(!layout_owned_by_controller());
+    }
+
+    /// GH #243: a dispatch into a pane whose session no client is attached to
+    /// is reported (ops log + recorded notice for the editor route); once a
+    /// client shows that session, nothing is reported.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn dispatch_into_a_client_less_session_reports_the_pane_not_visible() {
+        use super::{report_pane_if_not_visible, take_route_pane_not_visible};
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("doc-a.md");
+        std::fs::write(&doc, "# a\n").unwrap();
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("gh243-route-not-visible");
+        let pane = tmux.new_session("0", dir.path()).unwrap();
+        let _watched = tmux.new_session("1", dir.path()).unwrap();
+        let _client = tmux.attach_control_mode(Some("1")).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while agent_doc_tmux_io::session_attached_client_count(&tmux, "1") == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "client never attached"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        let _ = take_route_pane_not_visible();
+
+        let notice =
+            report_pane_if_not_visible(&tmux, &doc, &pane, "route_dispatch_target_not_visible")
+                .expect("client-less session must be reported");
+        assert!(notice.starts_with(agent_doc_tmux_io::PANE_NOT_VISIBLE_MARKER));
+        assert!(
+            notice.contains(&format!("pane {pane} of tmux session '0'")),
+            "{notice}"
+        );
+        assert!(notice.contains("attach-session -t 0"), "{notice}");
+        assert_eq!(
+            take_route_pane_not_visible().as_deref(),
+            Some(notice.as_str())
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains(&format!(
+                "route_dispatch_target_not_visible file={} pane={pane} session=0 clients=0 watched_sessions=[1]",
+                doc.display()
+            )),
+            "{ops}"
+        );
+
+        let _client0 = tmux.attach_control_mode(Some("0")).unwrap();
+        while agent_doc_tmux_io::session_attached_client_count(&tmux, "0") == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "client never attached"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert_eq!(
+            report_pane_if_not_visible(&tmux, &doc, &pane, "route_dispatch_target_not_visible"),
+            None
+        );
+        assert_eq!(take_route_pane_not_visible(), None);
     }
 }

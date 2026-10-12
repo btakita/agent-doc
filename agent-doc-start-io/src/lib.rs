@@ -1741,6 +1741,18 @@ fn prepare_start_runtime_with_admission(
                 file.display()
             ),
         );
+        // GH #243: the bypassed owner must not keep running beside this one.
+        if let Some(ExistingSessionPaneAction::Refuse(superseded_pane)) =
+            existing_session_pane_action(&tmux, &session_id, file, &pane_id)?
+        {
+            agent_doc_sync_io::superseded_owner::retire_superseded_owner_pane(
+                &tmux,
+                file,
+                &superseded_pane,
+                agent_doc_sync_io::superseded_owner::SUPERSEDED_OWNER_EXIT_GRACE,
+                "start_force_superseded_owner",
+            )?;
+        }
     }
 
     // Single-session default: the project pin is the expected session and a

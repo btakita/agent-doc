@@ -980,6 +980,29 @@ All three are fixed. The test file passed 24 of 24 runs, including runs under he
 - **A choice for you:** the route does not move the winning pane into the session you are watching. Pane placement belongs to the layout code. In your scenario, `%2` would exit and you would get the attach command for session `1`. If you would rather the visible pane win, or have the route move the winner, say so.
 
 **CI is red on `main` at v0.35.494.** `reaper_terminates_only_controllers_rooted_under_its_root` fails on the GitHub runner but passed in every local `make check`. It is filed as `reaperciflake`, and a subagent is finding the environment dependency to fix it at the source.
+Fix lazily.md Codex hook issue:
+```
+• Cycle cycle-1791827706347 converged and committed successfully. No queue work is drainable.
+
+• Hook stopped
+  └ agent-doc Stop hook failed closed: post-commit Stop payload is already materialized in HEAD; refusing to capture it
+under the terminal cycle
+```
+
+### Re: lazily.md Codex Stop hook; GH #244 ready — opus-5-5 · 2026-10-12T17:45-04:00
+
+> **Queue prompt:** do [#fixlazilycodex]
+
+**Deferred:** this is with a subagent on branch `fixlazilycodex`. The cycle had already committed and nothing was left to drain, but Codex's Stop hook still tried to capture the Stop payload as a new response. It found that text already in HEAD and failed closed. After a proven committed closeout whose payload is already in HEAD, the Stop hook should allow the stop silently; only a payload that was never recorded should still fail closed. The subagent will find why it entered the capture path, fix that, and add a regression test plus a negative control. It reads lazily.md and its pane but does not edit or restart them.
+
+**GH #244** is fixed (`92baf48a1a`), and both `make check` and `make tmux-ci` passed.
+- **The fix:** layout repair now releases a `window-size manual` pin on agent-doc's own `agent-doc` and `stash` windows when the window is smaller than every client attached to its session. It reports `Repaired` instead of `already_converged`.
+- **What it leaves alone:** your own windows, inherited policies, and sessions with no attached client.
+- **Tests:** they attach a real pty client, run `resize-window -A`, grow the client, and check that the window re-fits.
+
+It merges in the next batch.
+
+**Batch 15** (GH #243, plugins 0.2.559 / 0.2.560) is in `make check` / `make tmux-ci`. `reaperciflake`, the CI-only red test on `main`, is still in progress. The v0.35.494 GitHub Release is still building, and PyPI publishes after it.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -988,20 +1011,27 @@ All three are fixed. The test file passed 24 of 24 runs, including runs under he
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#reaperciflake]
-- ~~do [#queuedclearflake]~~
+- do [#fixlazilycodex]
+- 🚧 do [#reaperciflake]
 - 🚧 do [#ridernavp6routecontended]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243#issuecomment-6129952007
 - 🚧 do [#claimeddrainwarn]
-- #gh-fix https://github.com/btakita/agent-doc/issues/244
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/244
 - 🚧 #release
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#reaperciflake] [agent-doc] CI is red on main at v0.35.494 (8af04b806a, run 38291750666): agent-doc-test-support project_controller_reaper_tests::reaper_terminates_only_controllers_rooted_under_its_root fails on the GitHub runner with an assertion at agent-doc-test-support/src/lib.rs:1129 while passing in every local make check. Find the environment dependency (process scan, /proc visibility, PID namespace, cwd/root resolution, timing) and fix it at the source; never skip it on CI or rerun to green.
+- [ ] [#fixlazilycodex] Fix lazily.md Codex hook issue:
+  ```
+  • Cycle cycle-1791827706347 converged and committed successfully. No queue work is drainable.
+  • Hook stopped
+  └ agent-doc Stop hook failed closed: post-commit Stop payload is already materialized in HEAD; refusing to capture it
+  under the terminal cycle
+  ```
+- [ ] 🚧 [#reaperciflake] [agent-doc] CI is red on main at v0.35.494 (8af04b806a, run 38291750666): agent-doc-test-support project_controller_reaper_tests::reaper_terminates_only_controllers_rooted_under_its_root fails on the GitHub runner with an assertion at agent-doc-test-support/src/lib.rs:1129 while passing in every local make check. Find the environment dependency (process scan, /proc visibility, PID namespace, cwd/root resolution, timing) and fix it at the source; never skip it on CI or rerun to green.
 - [ ] 🚧 [#claimeddrainwarn] [agent-doc] preflight warns supervisor_drain_handoff_undrained (the [focused-cycle] head was handed to the supervisor N min ago and is still undrained; recycle the supervisor) for over 30 minutes on agent-doc-bugs.md (2026-10-12) while every remaining queue head is claimed by a subagent or coordinator, so the supervisor correctly has nothing to drain. Likely interplay with the new auto-clear item-boundary yield (queue_auto_clear_yield) recording a handoff that claims then make undrainable. Exclude claimed heads from the handoff and the warning, and do not tell the operator to recycle a healthy supervisor; regression test.
 - [ ] 🚧 [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
 <!-- /agent:backlog -->

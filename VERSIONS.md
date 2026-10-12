@@ -2,6 +2,41 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.495
+
+- **A wedged editor liveness channel drains itself (`#runfrontendissue`).** A
+  document's editor-to-controller liveness stream could stall forever when the
+  sender reused an epoch the receiver had already recorded with different ops:
+  every retry was rejected and everything queued behind it (including the IDE's
+  registration, so its `operator_text_authority_v1`) never arrived, and preflight
+  refused admission. The receiver now keeps a reused epoch under its own derived
+  key and advances; the sender allocates above the receiver's high-water mark and
+  serializes per document. On haiven-dev this drained 4,425 stuck messages for
+  frontend.md and a second document.
+- **One live supervisor pane per document; panes land where you can see them
+  (GH #243).** With no `tmux_session` pin, route and layout sync prefer a session
+  a client is attached to; a dispatch into an unwatched pane returns a
+  `pane-not-visible` notice with the attach command (a JetBrains warning);
+  `start --force` retires the agent-doc supervisor pane it bypasses, and a
+  foreground route retires duplicate supervisor panes for the same document.
+- **Layout repair releases a manual window-size pin (GH #244)** on agent-doc's own
+  windows when the window is smaller than every attached client.
+- **Contended-lane route (`#ridernavp6routecontended`).** Run Agent Doc on a
+  document whose pane lives in another IDE's lane dispatches there in place,
+  skips the impossible layout wait, and shows an `owned_by_other_lane` notice.
+- **Codex Stop hook after a committed cycle (`#fixlazilycodex`).** Claimed queue
+  heads no longer count as unanswered prompt work, and a Stop payload already in
+  HEAD is a no-op instead of a fail-closed capture loop.
+- **No false "supervisor undrained" warning for claimed heads
+  (`#claimeddrainwarn`).**
+- **Controller fork images (`#controllerforkimage`, `#reaperciflake`).** An
+  un-execed spawn or dash fork child that shows the controller's command line is
+  treated as its parent when counting or targeting controllers, so the duplicate
+  reaper no longer signals the live controller's own child.
+- **Faster exhaustive SimWorld model (`#simworldcitimeout`)**: a breadth-first
+  search over distinct normalized states instead of every event sequence (87s to
+  under 7s on 2 cores at the same depth, every mutation still caught).
+
 ## 0.35.494
 
 - **Auto-clear between queue items, on by default (`#bgclearpolicy`).** After an

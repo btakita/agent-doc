@@ -27717,6 +27717,18 @@ impl ControllerStatePlaneSink for PaneLayoutDesiredStatePlaneSink {
             .map(|runtime| runtime.editor_surface_graph.navigation_mode())
             .unwrap_or_default();
         let lane = pane_layout_state_frame_lane(navigation_mode, &frame);
+        if !lane.is_shared()
+            && let Some(runtime) = self.runtime.upgrade()
+        {
+            // `#laneplaneflake`: an installation lane's frame never reaches the
+            // shared graph, so the shared lane's plane catch-up counts it as
+            // seen here, at dispatch, not after the lane's projector thread
+            // applies it. Noting it there left a window where the lane's
+            // projection was observable but the shared route still waited, and
+            // a lane projector retrying a failed publication held every shared
+            // route for its full catch-up budget.
+            runtime.note_pane_layout_plane_seen_in_other_lane(frame.plane_version);
+        }
         self.projector(lane).project(frame);
     }
 }
@@ -27857,9 +27869,6 @@ fn pane_layout_desired_projection_worker(
                 publication,
                 PaneLayoutPublisher::PluginPublication,
             )?;
-            if !lane.is_shared() {
-                runtime.note_pane_layout_plane_seen_in_other_lane(frame.plane_version);
-            }
             Ok(bootstrap)
         });
         match result {
@@ -38729,16 +38738,18 @@ mod tests {
             Some("jetbrains@RD.9f8e7d6c-pid:42"),
         );
         assert!(rider_frame.plane_version > idea_frame.plane_version);
+        // `#laneplaneflake`: counted as seen at dispatch, before either lane's
+        // projector thread runs, so this holds with no wait at all.
+        assert!(
+            runtime.await_pane_layout_plane_seen(rider_frame.plane_version, Duration::ZERO),
+            "the shared lane's plane catch-up counts lane frames as seen"
+        );
         wait_for(&idea, std::slice::from_ref(&idea_doc));
         wait_for(&rider, std::slice::from_ref(&rider_doc));
         assert_eq!(
             desired_columns(&NavigationLane::Shared),
             None,
             "an installation lane's publication never reaches the shared lane"
-        );
-        assert!(
-            runtime.await_pane_layout_plane_seen(rider_frame.plane_version, Duration::ZERO),
-            "the shared lane's plane catch-up counts lane frames as seen"
         );
 
         publish(std::slice::from_ref(&shared_doc), None);
@@ -38747,12 +38758,25 @@ mod tests {
             desired_columns(&idea).as_deref(),
             Some(std::slice::from_ref(&idea_doc))
         );
-        let ops =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
-        assert!(
-            ops.contains("navigation_lane=IU.0a1b2c3d"),
-            "a lane projection is attributed to its lane: {ops}"
-        );
+        // `#laneplaneflake`: the projector logs its attribution line after the
+        // lane's desired generation is already observable, so the line itself
+        // is the receipt to wait for, not something `wait_for` implies.
+        let ops_log = dir.path().join(".agent-doc/logs/ops.log");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let ops = std::fs::read_to_string(&ops_log).unwrap_or_default();
+            if ops.lines().any(|line| {
+                line.contains("pane_layout_desired_projected")
+                    && line.contains("navigation_lane=IU.0a1b2c3d")
+            }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "a lane projection is attributed to its lane: {ops}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn pane_layout_statuses_from_frames(

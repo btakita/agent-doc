@@ -788,7 +788,7 @@ The earlier parse refusal on this document was not caused by line 690. The `inli
 - ~~do [#ridernavp5]~~
 - ~~do [#stopreopenflake]~~
 - ~~do [#multilinequeuehead]~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/242
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/242~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 release + publish
 - do [#ridernavp6route]
 - do [#ridernavp6republish]

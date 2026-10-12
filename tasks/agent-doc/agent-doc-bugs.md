@@ -1081,6 +1081,23 @@ It is a capability flag that an editor plugin (JetBrains or VS Code) declares wh
 The `runfrontendissue` subagent is establishing which case applies and adding a self-heal (re-publish and retry once). Overwriting the file on disk is the one documented escape hatch, and I do not recommend it while the editor holds your text.
 
 **GH #243 landed and is closed.** It merged to `main` as `c94cec1e36` and is installed. `make check` passed 10,398 tests, and `make tmux-ci` passed. The JetBrains plugins are 0.2.559 / 0.2.560.
+
+### Re: unwedging frontend.md — opus-5-5 · 2026-10-12T19:42-04:00
+
+> **Chat prompt (#chatprompt):** Can we unwedge frontend.md or do you need it wedged for more analysis?
+
+Yes, go ahead and unwedge it. I saved a read-only copy of the evidence first, in the `runfrontendissue` worktree under `tmp/evidence-1940/`:
+- a SQLite backup of haiven-dev's `state.db`;
+- the last 4,000 frontend.md lines of `ops.log`;
+- `supervisor-stderr.log`.
+
+The key signal is `pending_maintenance_writeback ... transport=blocked reason=editor_capability_missing capability=operator_text_authority_v1`, repeating from 19:19Z. The subagent knows the live state is about to change. After you unwedge, it will check whether that action re-registered the editor with the capability, because that tells us whether re-registration is the right self-heal.
+
+To unwedge, start with the least disruptive option:
+1. Close the frontend.md tab in the IDE and reopen it. This re-registers that document's editor and should publish the authority again.
+2. If Run Agent Doc still refuses, run the JetBrains "Reload agent-doc library" action, or run `agent-doc admin reload-lib` in the haiven-dev project. Note that reload-lib reloads every live editor registration, not just frontend.md.
+
+Once admission passes, frontend.md's queued `#actionable-review` drains normally.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 

@@ -677,12 +677,13 @@ Also filed: `stopreopenflake`, a Codex stop-hook test that fails when run in par
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ⏳ do [#bgclearpolicy]
 - ~~do [#ridernavp2b]~~
 - 🚧 do [#ridernavp3]
 - 🚧 do [#ridernavp4]
 - 🚧 do [#ridernavp5]
----
-🚧 lazily.md issue
+~~~done
+lazily.md issue
 ```
 • Blocked by hook
   └ Queue continuation, not an error: agent-doc kept the active `agent:queue auto` moving for /home/brian/work/btakita/
@@ -696,7 +697,7 @@ do not send the final answer yet. A background context reset was requested becau
 (exchange_lines=924, response_sections=31, recent_committed_cycles=2, recent_noop_closeouts=0), but automatic context
 clearing is disabled; only an explicit operator clear may reset the session.
 ```
----
+~~~
 sdk.md issue
 ```
 • Blocked by hook

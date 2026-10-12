@@ -623,16 +623,12 @@ Still in progress: the lazily.md Codex continuation fix, and `ridernavp2b`. The 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~How can we optimize the agent-doc build process + test process to reduce the turnaround time?~~
-- ~~tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#ridernavp2a]~~
 - 🚧 do [#ridernavp2b]
 - 🚧 do [#ridernavp3]
 - 🚧 do [#ridernavp4]
 - 🚧 do [#ridernavp5]
 ---
-lazily.md issue
+🚧 lazily.md issue
 ```
 • Blocked by hook
   └ Queue continuation, not an error: agent-doc kept the active `agent:queue auto` moving for /home/brian/work/btakita/
@@ -664,15 +660,15 @@ for the existing controller state edge unless it explicitly reports `needs_opera
     [session-check] INTERRUPTED: cycle `cycle-1791805221920` is `committed` (commit_success), but the active harness s…
     + 2 lines (^t to expand)
 ```
-- do [#clippyworkspacegap]
-- do [#sessionactorspin]
+- 🚧 do [#clippyworkspacegap]
+- 🚧 do [#sessionactorspin]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#clippyworkspacegap] [agent-doc] make check runs cargo clippy --all-targets --all-features without --workspace, and the workspace has no default-members, so it lints only the root agent-doc crate; the other 143 crates are linted only by check-fast and only when affected. Make the authoritative check lint the whole workspace and fix whatever it surfaces.
-- [ ] [#sessionactorspin] [agent-doc] The tools.md supervisor (pid 2155812, 2026-10-12) had its session-actor thread at about 80% CPU while the stale Codex resume-id frontmatter clear stalled behind a compaction. codexresumeid bounded the wait to 5s but did not stop the spin. Find and fix the busy loop, with a regression test.
+- [ ] 🚧 [#clippyworkspacegap] [agent-doc] make check runs cargo clippy --all-targets --all-features without --workspace, and the workspace has no default-members, so it lints only the root agent-doc crate; the other 143 crates are linted only by check-fast and only when affected. Make the authoritative check lint the whole workspace and fix whatever it surfaces.
+- [ ] 🚧 [#sessionactorspin] [agent-doc] The tools.md supervisor (pid 2155812, 2026-10-12) had its session-actor thread at about 80% CPU while the stale Codex resume-id frontmatter clear stalled behind a compaction. codexresumeid bounded the wait to 5s but did not stop the spin. Find and fix the busy loop, with a regression test.
 - [ ] 🚧 [#ridernavp2b] [agent-doc] IDE navigation lanes P2b (docs/plan-ide-independent-nav.md), after ridernavp2a: opt-in editor_navigation = shared or per_installation in .agent-doc/config.toml; per-lane layout sync routing, lane-aware layout check and target-window fallback, lane session creation on first sync, cross_lane_layout_dropped and owned_by_other_lane refusals, per-lane sync cancellation instead of the process-global cancel.
 - [ ] 🚧 [#ridernavp3] [agent-doc] IDE navigation lanes P3 (docs/plan-ide-independent-nav.md), after ridernavp2b: FFI agent_doc_tmux_focus_state_for_client_json; agent-doc terminal attaches to its lane session; JetBrains sends its client id with tmux_focus_state and TmuxPaneFocusSync ignores other-lane focus; plugin version bump by the coordinator.
 - [ ] 🚧 [#ridernavp4] [agent-doc] IDE navigation lanes P4 (docs/plan-ide-independent-nav.md), after ridernavp3: a document open in both IDEs stays in its owning lane; Claim for Tmux Pane or Sync Tmux Layout in the other IDE hands it over; SimWorld plus isolated-tmux handoff tests.

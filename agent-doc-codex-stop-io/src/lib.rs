@@ -442,7 +442,7 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopContinu
 fn supervisor_handoff_overdue(file: &Path) -> bool {
     match current_document_content(file, "claude_stop_supervisor_handoff_check") {
         Ok(content) => {
-            agent_doc_controller_io::project_controller::undrained_supervisor_drain_handoff_age(
+            agent_doc_queue_io::queue_auto_clear::undrained_supervisor_drain_handoff_age(
                 file, &content,
             )
             .is_some()
@@ -1847,7 +1847,7 @@ fn codex_stop_auto_clear_yield_with(
         true,
         || drain_readiness(file),
         || {
-            agent_doc_controller_io::project_controller::undrained_supervisor_drain_handoff_age(
+            agent_doc_queue_io::queue_auto_clear::undrained_supervisor_drain_handoff_age(
                 file, &content,
             )
             .is_some()
@@ -1868,12 +1868,7 @@ fn codex_stop_auto_clear_yield_with(
         }
         return None;
     }
-    if let Some(head) = agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-        &content,
-        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-    ) {
-        agent_doc_controller_io::project_controller::record_supervisor_drain_handoff(file, &head);
-    }
+    agent_doc_queue_io::queue_auto_clear::record_supervisor_drain_handoff(file, &content);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(

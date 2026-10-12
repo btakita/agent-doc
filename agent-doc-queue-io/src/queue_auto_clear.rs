@@ -52,12 +52,30 @@ pub fn in_session_auto_clear_yield(
         content,
         continuation_required,
         || agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc(file),
-        || {
-            agent_doc_controller_io::project_controller::undrained_supervisor_drain_handoff_age(
-                file, content,
-            )
-            .is_some()
-        },
+        || undrained_supervisor_drain_handoff_age(file, content).is_some(),
+    )
+}
+
+/// `#supdrainyieldfalsifiable` age of an undrained supervisor hand-off, judged
+/// against the head the supervisor would actually dispatch: claimed and
+/// subagent-held heads are skipped exactly as the supervisor's idle drain skips
+/// them (`#claimeddrainwarn`). A head a worker owns is never overdue.
+pub fn undrained_supervisor_drain_handoff_age(file: &Path, content: &str) -> Option<u64> {
+    agent_doc_controller_io::project_controller::undrained_supervisor_drain_handoff_age(
+        file,
+        content,
+        &crate::queue_claim::claimed_items_for_content(file, content),
+    )
+}
+
+/// Record the hand-off of `content`'s next supervisor-drainable, unclaimed head
+/// (`#claimeddrainwarn`); clears any earlier record when every such head is
+/// claimed, so an all-claimed queue never accrues a hand-off age.
+pub fn record_supervisor_drain_handoff(file: &Path, content: &str) -> Option<String> {
+    agent_doc_controller_io::project_controller::record_supervisor_drain_handoff_for_content(
+        file,
+        content,
+        &crate::queue_claim::claimed_items_for_content(file, content),
     )
 }
 
@@ -135,6 +153,90 @@ mod tests {
         let overdue = in_session_auto_clear_yield_with(QUEUE, true, || READY, || true);
         assert!(overdue.handoff_overdue);
         assert!(!overdue.yields);
+    }
+
+    /// Push the recorded supervisor hand-off for `head` 35 minutes into the past.
+    fn backdate_handoff(root: &Path, file: &Path, head: &str) {
+        let canonical = file.canonicalize().unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+        let backdated = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 35 * 60;
+        agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+                document_hash: agent_doc_hash::document_id_for_path(&canonical),
+                state_kind: "supervisor_drain_handoff".to_string(),
+                canonical_path: canonical.to_string_lossy().into_owned(),
+                payload_json: format!(
+                    "{{\"head_sha256\":\"{}\",\"handed_off_secs\":{backdated}}}",
+                    agent_doc_hash::content_hash(head)
+                ),
+                updated_at_ms: backdated * 1_000,
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn auto_clear_yield_then_all_heads_claimed_reports_no_undrained_handoff() {
+        // `#claimeddrainwarn` replay against the real claim ledger: the
+        // auto-clear yield hands the boundary to the supervisor, then every
+        // remaining head is claimed by a subagent or the coordinator. The
+        // supervisor (which skips claimed heads) has nothing to drain, so the
+        // hand-off must not be reported undrained — no preflight warning, and
+        // the next boundary is not forced back in-session.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(
+            &file,
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Queue\n\n<!-- agent:queue go -->\n- fix issue 1 now\n- fix issue 2 now\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let content = std::fs::read_to_string(&file).unwrap();
+
+        // Head 1 is already with a subagent when the boundary yields: the
+        // recorded hand-off is the head the supervisor will dispatch.
+        crate::queue_claim::claim(&file, "fix issue 1 now", "subagent:one", 3_600).unwrap();
+        assert_eq!(
+            record_supervisor_drain_handoff(&file, &content).as_deref(),
+            Some("fix issue 2 now")
+        );
+
+        // The pre-fix record (the claimed head 1), now 35 minutes old.
+        backdate_handoff(dir.path(), &file, "fix issue 1 now");
+        // The coordinator claims the remaining head: every head is claimed.
+        crate::queue_claim::claim(&file, "fix issue 2 now", "coordinator", 3_600).unwrap();
+        assert_eq!(
+            undrained_supervisor_drain_handoff_age(&file, &content),
+            None,
+            "an all-claimed queue gives the supervisor nothing to drain"
+        );
+        let decision = in_session_auto_clear_yield_with(
+            &content,
+            true,
+            || READY,
+            || undrained_supervisor_drain_handoff_age(&file, &content).is_some(),
+        );
+        assert!(!decision.handoff_overdue);
+
+        // An all-claimed yield records nothing, and a later release of a
+        // claim does not revive the settled hand-off's age.
+        assert_eq!(record_supervisor_drain_handoff(&file, &content), None);
+        crate::queue_claim::release(&file, "fix issue 2 now").unwrap();
+        assert_eq!(
+            undrained_supervisor_drain_handoff_age(&file, &content),
+            None
+        );
+
+        // Control: an unclaimed head the supervisor genuinely owes past the
+        // window is still reported.
+        backdate_handoff(dir.path(), &file, "fix issue 2 now");
+        assert!(undrained_supervisor_drain_handoff_age(&file, &content).is_some());
     }
 
     #[test]

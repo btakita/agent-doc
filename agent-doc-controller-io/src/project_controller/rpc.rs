@@ -5275,10 +5275,18 @@ struct SupervisorDrainHandoffRecord {
     handed_off_secs: u64,
 }
 
-fn supervisor_drain_head_sha256(content: &str) -> Option<String> {
-    agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+/// The supervisor head the idle supervisor would actually dispatch: the first
+/// supervisor-drainable head that no worker claims (`#claimeddrainwarn`). The
+/// supervisor's idle drain skips claimed heads, so a claimed head is never a
+/// promise the supervisor owes.
+fn supervisor_drain_head_sha256(
+    content: &str,
+    claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+) -> Option<String> {
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
         content,
         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        claimed,
     )
     .map(|head| agent_doc_hash::content_hash(&head))
 }
@@ -5330,10 +5338,69 @@ pub fn record_supervisor_drain_handoff(file: &Path, head: &str) {
     }
 }
 
+/// `#claimeddrainwarn`: forget a recorded supervisor hand-off. Fail-open:
+/// storage errors are logged.
+pub fn clear_supervisor_drain_handoff(file: &Path) {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return;
+    };
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let cleared = open_state_db(&project_root).and_then(|conn| {
+        agent_doc_sqlite::state_store::clear_document_runtime_state_in_db(
+            &conn,
+            &document_hash,
+            SUPERVISOR_DRAIN_HANDOFF_STATE_KIND,
+        )
+    });
+    if let Err(err) = cleared {
+        eprintln!(
+            "[agent-doc] warning: failed to clear supervisor drain hand-off for {}: {err:#}",
+            file.display()
+        );
+    }
+}
+
+/// `#claimeddrainwarn`: record the hand-off of the head the supervisor will
+/// actually dispatch from `content` — the first supervisor-drainable head no
+/// worker `claimed`. When every such head is claimed (or none is drainable)
+/// the supervisor owes nothing, so any earlier record is cleared instead of
+/// recording a promise the supervisor can never keep. Returns the recorded head.
+pub fn record_supervisor_drain_handoff_for_content(
+    file: &Path,
+    content: &str,
+    claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+) -> Option<String> {
+    match agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+        content,
+        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        claimed,
+    ) {
+        Some(head) => {
+            record_supervisor_drain_handoff(file, &head);
+            Some(head)
+        }
+        None => {
+            clear_supervisor_drain_handoff(file);
+            None
+        }
+    }
+}
+
 /// `#supdrainyieldfalsifiable`: seconds since the current supervisor head was
 /// handed off, when it is still that same head past the bound — i.e. the
 /// promised supervisor drain did not happen. Fail-open to `None`.
-pub fn undrained_supervisor_drain_handoff_age(file: &Path, content: &str) -> Option<u64> {
+///
+/// `#claimeddrainwarn`: the current supervisor head skips heads `claimed` by a
+/// worker, exactly as the supervisor's idle drain does. When the recorded head
+/// is no longer the supervisor's next head — it drained, a worker claimed it,
+/// or nothing supervisor-drainable remains — the hand-off is settled and the
+/// record is cleared, so a claim released later never revives a stale age.
+pub fn undrained_supervisor_drain_handoff_age(
+    file: &Path,
+    content: &str,
+    claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+) -> Option<u64> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)?;
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
@@ -5348,10 +5415,24 @@ pub fn undrained_supervisor_drain_handoff_age(file: &Path, content: &str) -> Opt
     .and_then(|state| {
         serde_json::from_str::<SupervisorDrainHandoffRecord>(&state.payload_json).ok()
     })?;
+    let current = supervisor_drain_head_sha256(content, claimed);
+    if current.as_deref() != Some(record.head_sha256.as_str()) {
+        if let Err(err) = agent_doc_sqlite::state_store::clear_document_runtime_state_in_db(
+            &conn,
+            &document_hash,
+            SUPERVISOR_DRAIN_HANDOFF_STATE_KIND,
+        ) {
+            eprintln!(
+                "[agent-doc] warning: failed to clear settled supervisor drain hand-off for {}: {err:#}",
+                file.display()
+            );
+        }
+        return None;
+    }
     status::undrained_supervisor_handoff_age(
         Some(&record.head_sha256),
         Some(record.handed_off_secs),
-        supervisor_drain_head_sha256(content).as_deref(),
+        current.as_deref(),
         timestamp_secs(),
         status::SUPERVISOR_DRAIN_HANDOFF_UNDRAINED_AFTER,
     )
@@ -52053,16 +52134,17 @@ mod tests {
             )
         };
         let head = "[focused-cycle] fix queue identity loss";
+        let unclaimed = agent_doc_queue::queue_claim::ClaimedQueueItems::none();
         let content = doc(head);
         std::fs::write(&file, &content).unwrap();
         assert!(
-            supervisor_drain_head_sha256(&content).is_some(),
+            supervisor_drain_head_sha256(&content, &unclaimed).is_some(),
             "fixture must have a supervisor head"
         );
 
         record_supervisor_drain_handoff(&file, head);
         assert_eq!(
-            undrained_supervisor_drain_handoff_age(&file, &content),
+            undrained_supervisor_drain_handoff_age(&file, &content, &unclaimed),
             None,
             "inside window"
         );
@@ -52087,14 +52169,126 @@ mod tests {
         )
         .unwrap();
         record_supervisor_drain_handoff(&file, head);
-        let age = undrained_supervisor_drain_handoff_age(&file, &content).expect("undrained");
+        let age =
+            undrained_supervisor_drain_handoff_age(&file, &content, &unclaimed).expect("undrained");
         assert!(age >= status::SUPERVISOR_DRAIN_HANDOFF_UNDRAINED_AFTER.as_secs());
 
         // The head drained (a different head is first): the promise was kept.
         let drained = doc("[focused-cycle] a different head");
         assert_eq!(
-            undrained_supervisor_drain_handoff_age(&file, &drained),
+            undrained_supervisor_drain_handoff_age(&file, &drained, &unclaimed),
             None
+        );
+    }
+
+    /// Backdate the recorded hand-off of `head` past the undrained window.
+    fn backdate_supervisor_drain_handoff(dir: &Path, file: &Path, head: &str) {
+        let canonical = file.canonicalize().unwrap();
+        let conn = open_state_db(dir).unwrap();
+        let backdated =
+            timestamp_secs() - status::SUPERVISOR_DRAIN_HANDOFF_UNDRAINED_AFTER.as_secs() - 1_800;
+        agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+                document_hash: agent_doc_hash::document_id_for_path(&canonical),
+                state_kind: SUPERVISOR_DRAIN_HANDOFF_STATE_KIND.to_string(),
+                canonical_path: canonical.to_string_lossy().into_owned(),
+                payload_json: format!(
+                    "{{\"head_sha256\":\"{}\",\"handed_off_secs\":{backdated}}}",
+                    agent_doc_hash::content_hash(head)
+                ),
+                updated_at_ms: backdated * 1_000,
+            },
+        )
+        .unwrap();
+    }
+
+    fn has_supervisor_drain_handoff_record(dir: &Path, file: &Path) -> bool {
+        let canonical = file.canonicalize().unwrap();
+        let conn = open_state_db(dir).unwrap();
+        agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
+            &conn,
+            &agent_doc_hash::document_id_for_path(&canonical),
+            SUPERVISOR_DRAIN_HANDOFF_STATE_KIND,
+        )
+        .unwrap()
+        .is_some()
+    }
+
+    #[test]
+    fn claimed_heads_never_record_or_report_an_undrained_supervisor_handoff() {
+        // `#claimeddrainwarn`: the auto-clear yield recorded the FIRST
+        // supervisor head ignoring claims; once every head was claimed by a
+        // subagent/coordinator the supervisor (which skips claimed heads)
+        // correctly had nothing to drain, yet preflight warned for 30+ minutes
+        // and told the operator to recycle a healthy supervisor.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n\
+## Queue\n\n<!-- agent:queue auto go -->\n- fix claimed thing one\n- fix free thing two\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, content).unwrap();
+        let none = agent_doc_queue::queue_claim::ClaimedQueueItems::none();
+        let first = "fix claimed thing one".to_string();
+        let second = "fix free thing two".to_string();
+        let first_claimed =
+            agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads([&first]);
+        let all_claimed =
+            agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads([&first, &second]);
+        assert!(supervisor_drain_head_sha256(content, &none).is_some());
+        assert_eq!(
+            supervisor_drain_head_sha256(content, &all_claimed),
+            None,
+            "an all-claimed queue has no supervisor head"
+        );
+
+        // Recording skips the claimed head and records the one the supervisor
+        // will actually dispatch.
+        assert_eq!(
+            record_supervisor_drain_handoff_for_content(&file, content, &first_claimed).as_deref(),
+            Some(second.as_str())
+        );
+
+        // Replay the bug: a hand-off recorded for the head that is now
+        // claimed, 35 min old. Every head is claimed: no warning, and the
+        // settled record is cleared.
+        backdate_supervisor_drain_handoff(dir.path(), &file, &first);
+        assert_eq!(
+            undrained_supervisor_drain_handoff_age(&file, content, &all_claimed),
+            None,
+            "an all-claimed queue must never report an undrained hand-off"
+        );
+        assert!(!has_supervisor_drain_handoff_record(dir.path(), &file));
+
+        // The claim is released before the item closes: the stale age must
+        // not revive.
+        assert_eq!(
+            undrained_supervisor_drain_handoff_age(&file, content, &none),
+            None,
+            "a released claim must not revive a settled hand-off's age"
+        );
+
+        // Only the claimed head ahead of an unclaimed one: the warning judges
+        // the unclaimed head, not the claimed first one.
+        backdate_supervisor_drain_handoff(dir.path(), &file, &first);
+        assert_eq!(
+            undrained_supervisor_drain_handoff_age(&file, content, &first_claimed),
+            None
+        );
+
+        // An all-claimed yield clears any earlier record instead of recording.
+        backdate_supervisor_drain_handoff(dir.path(), &file, &second);
+        assert_eq!(
+            record_supervisor_drain_handoff_for_content(&file, content, &all_claimed),
+            None
+        );
+        assert!(!has_supervisor_drain_handoff_record(dir.path(), &file));
+
+        // Control: a genuinely undrained unclaimed head is still reported.
+        backdate_supervisor_drain_handoff(dir.path(), &file, &second);
+        assert!(
+            undrained_supervisor_drain_handoff_age(&file, content, &first_claimed).is_some(),
+            "an unclaimed head the supervisor owes stays falsifiable"
         );
     }
 

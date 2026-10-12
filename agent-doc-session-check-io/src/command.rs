@@ -2339,13 +2339,10 @@ fn report_queue_auto_clear_yield(
     }) {
         agent_doc_queue_io::drain_owner::clear_drain_owner_lease(&file_str);
     }
-    if let Ok(content) = crate::resolve_current_document_content(file, "queue_auto_clear_yield")
-        && let Some(head) = agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-            &content,
-            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-        )
-    {
-        agent_doc_controller_io::project_controller::record_supervisor_drain_handoff(file, &head);
+    if let Ok(content) = crate::resolve_current_document_content(file, "queue_auto_clear_yield") {
+        // #claimeddrainwarn: record only the head the supervisor will dispatch
+        // (claimed heads skipped); an all-claimed queue clears the record.
+        agent_doc_queue_io::queue_auto_clear::record_supervisor_drain_handoff(file, &content);
     }
     agent_doc_ops_log_io::log_op(
         file,

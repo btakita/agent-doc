@@ -1047,6 +1047,46 @@ I returned `#lzcorefacades` to review because the implementation is complete but
 New continuation changes: `src/lazily-zig/src/root.zig` and `patches/lazily-zig.patch`. No commit, push, install, release, or publication occurred. Confidence: high. Escalation: integrate corrected Phase 1 first, provide commit/integration authority, and make Zig 0.15.2/0.16.0 available for the remaining formatter gate.
 
 Session accretion remains above the warning threshold; I continued the active queue without compaction.
+
+### Re: #lzcorecompat — gpt-5 · 2026-10-12T12:39-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcorecompat]
+
+Phase 4 is implementation-complete across isolated worktrees for every candidate binding and the React/R3 module endpoints.
+
+**Complete:**
+
+- Rust, Go, JavaScript, Python, Kotlin, C++, C#, Dart, and Zig now have deterministic Core API snapshots, native compatibility gates, mutation-based negative self-tests, and lifecycle/deprecation metadata.
+- React and Lazily.R3 have oldest/current supported-Core compatibility coverage with deliberate negative validation. React's truthful peer range is `>=0.34.0 <0.36.0`; Core 0.33 lacks the required durable-client subpath.
+- Same-artifact module cases explicitly record compatibility as not applicable rather than implying an external package boundary.
+- Go, JavaScript, React, Python, C++, C#/R3, and Dart passed their full checks. Kotlin's API checks, tests, conformance, interop, and spec Lean checks passed. The latest inspected upstream CI was green for JavaScript, React, and Zig.
+- The validation-only `/home/brian/worktrees/lazily-spec` symlink was removed after the checks.
+
+**Preserved implementations:**
+
+- `/home/brian/worktrees/lzcorecompat-rust-20261012`
+- `/home/brian/worktrees/lzcorecompat-go-20261012`
+- `/home/brian/worktrees/lzcorecompat-js-20261012`
+- `/home/brian/worktrees/lzcorecompat-react-20261012`
+- `/home/brian/worktrees/lzcorecompat-py-20261012`
+- `/home/brian/worktrees/lzcorecompat-kt-20261012`
+- `/home/brian/worktrees/lzcorecompat-cpp-20261012`
+- `/home/brian/worktrees/lzcorecompat-cs-20261012`
+- `/home/brian/worktrees/lzcorecompat-dart-20261012`
+- `/home/brian/worktrees/lzcorecompat-zig-20261012`
+
+**Remaining gates:**
+
+- Rust's focused compatibility tests pass, while the full check reaches the unrelated corrected-profile divergence `AsyncContext/churn_returns_to_baseline.json#2:dependents_of.topic — got 0, want 8`.
+- Zig's dedicated Core test and current-nightly formatting pass; the required 0.15.2/0.16.0 formatter binaries are unavailable, and its broad suite reaches the pre-existing codec fixture failures.
+- Kotlin's local formal target is blocked only because the sibling `../lazily-formal` checkout is absent.
+- C++'s generated `build-corecompat/` directory is not an integration artifact and must be excluded or removed during integration.
+
+I returned `#lzcorecompat` to review because Phase 1 and Phase 3 must integrate first and the queue-wide `#spec-test-commit-push` preset is undefined. No worker had authority to commit, integrate, push, install, release, or publish. No additional actionable backlog item is needed: the complete worktrees are preserved, and the review item states the exact authorization, toolchain, and upstream validation conditions that clear the gate.
+
+Confidence: high. Escalation: integrate Phases 1 and 3, provide explicit commit/integration authority or define `#spec-test-commit-push`, make the older Zig formatters available, and resolve or accept the Rust corrected-profile divergence.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -1055,7 +1095,7 @@ Session accretion remains above the warning threshold; I continued the active qu
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzcoreclaims]~~
 - ~~do [#lzcorefacades]~~
-- do [#lzcorecompat]
+- ~~do [#lzcorecompat]~~
 - do [#lzcoreconsumers]
 - do [#lzreleasepins]
 - do [#lzcorecohort]
@@ -1065,7 +1105,6 @@ Session accretion remains above the warning threshold; I continued the active qu
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
 - [ ] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [ ] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 - [ ] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
@@ -1075,6 +1114,7 @@ Session accretion remains above the warning threshold; I continued the active qu
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md: Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and module compatibility tests are complete in the listed isolated worktrees; blocked until Phase 1/3 are integrated first, explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, Zig 0.15.2/0.16.0 formatters are available, and the Rust corrected-profile divergence is resolved and validated.
 - [/] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md: additive idiomatic Core facades and package-content/identity checks are complete for all candidate bindings in /home/brian/worktrees/agent-loop-lzcorefacades-20261012, with Kotlin/Go/C# correctly retaining canonical package locations; blocked until corrected Phase 1 is integrated first, explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, and the unavailable Zig 0.15.2/0.16.0 formatting gate can be run.
 - [/] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md: the spec evidence contract and all nine binding declarations/report generators are complete and pass the aggregate --require-all gate in isolated worktrees; blocked until explicit commit/integration authorization is supplied or the queue-wide #spec-test-commit-push preset is defined.
 - [/] [#lzgenericreadmeincident] [operator-verify] Inspect accidental generated README rollup changes in /home/brian/worktrees/lazily-rs and /home/brian/worktrees/lazily-kt. Prior README cleanliness is unknown; restore only README.md if the two generated rollup changes were unintended, and preserve all unrelated dirty/untracked files.

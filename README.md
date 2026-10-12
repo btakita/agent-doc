@@ -117,7 +117,15 @@ IDE: that explicit request hands the pane over to the requesting IDE's lane
 read when the project controller starts; an unknown value logs a warning and
 keeps `shared`. Each JetBrains IDE's agent-doc terminal attaches to its own lane
 session, its manual Sync Tmux Layout arranges that lane, and tmux-to-editor focus
-mirroring reads only that lane ([plan](docs/plan-ide-independent-nav.md)).
+mirroring reads only that lane ([plan](docs/plan-ide-independent-nav.md)). A new
+pane started from an IDE lands in that IDE's lane too: **Run Agent Doc** arranges
+the requesting IDE's lane and starts a missing pane there, and the Claim actions
+pass the IDE's client id (`agent-doc claim --client-id <id>`; `agent-doc route` and
+`agent-doc start` accept the same flag). An existing pane is always used where it
+lives; only an explicit Claim or Sync Tmux Layout moves it. When a supervisor
+that a layout pass left out restarts, each IDE's lane that left it out re-applies
+its own last layout in its own session; that re-arrangement never takes a pane
+from another IDE's lane.
 
 Switching the mode is safe on a project that already has a shared window.
 Turning `per_installation` on moves no pane: existing panes stay in the shared
@@ -125,7 +133,11 @@ session, and each IDE's lane starts empty and gains panes from its own layouts
 and explicit claims. Turning it back to `shared` and running `agent-doc gc`
 moves every document pane in a lane session back into the shared session's
 `stash` window (the same pane, nothing restarted), from where the shared layout
-places it. `agent-doc gc` also closes lane sessions that are empty: no document
+places it. Before you run `agent-doc gc`, the shared layout already works: a
+document it shows whose pane is still in a lane session is brought into the shared
+session (the same pane, never a second one), and the shared layout never arranges a
+lane session, even when that pane or your terminal is still there. A document it
+does not show waits in its lane until gc moves it. `agent-doc gc` also closes lane sessions that are empty: no document
 pane, no running program, no attached terminal, and, after a switch back to
 `shared`, nothing left to move. It only ever touches sessions agent-doc created
 for this project (marked `@agent_doc_navigation_lane`), never a session that

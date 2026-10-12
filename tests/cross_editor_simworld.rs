@@ -548,10 +548,7 @@ fn splice(
     }
 }
 
-fn apply_splices(
-    base: &str,
-    edits: &[agent_doc_merge::captured_splice::CapturedSplice],
-) -> String {
+fn apply_splices(base: &str, edits: &[agent_doc_merge::captured_splice::CapturedSplice]) -> String {
     let mut chars: Vec<char> = base.chars().collect();
     for edit in edits {
         let end = edit.offset_code_points + edit.delete_code_points;
@@ -831,13 +828,18 @@ fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independen
     // Canonical advances independently while that burst is still retained.
     let response = "### Re: the thing — simworld\n";
     let response_offset = code_point_offset(&captured_base, "<!-- /agent:exchange -->");
-    vscode.edit_without_pulling(response_offset, response).unwrap();
+    vscode
+        .edit_without_pulling(response_offset, response)
+        .unwrap();
     vscode.pull_and_project().unwrap();
 
     // 1. Observe the controller cut.
     let canonical = controller_canonical_text(project_root, &file).unwrap();
     assert!(canonical.contains(response), "canonical cut: {canonical:?}");
-    assert!(canonical.contains("- fix bug\n"), "canonical cut: {canonical:?}");
+    assert!(
+        canonical.contains("- fix bug\n"),
+        "canonical cut: {canonical:?}"
+    );
     assert_ne!(canonical, captured_base);
 
     // 2. Plan the bounded splices BEFORE replacing membership.
@@ -850,7 +852,10 @@ fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independen
             .iter()
             .map(|edit| edit.offset_code_points)
             .collect::<Vec<_>>(),
-        vec![bug_offset + shift, bug_offset + "queue ".chars().count() + shift],
+        vec![
+            bug_offset + shift,
+            bug_offset + "queue ".chars().count() + shift
+        ],
         "each captured offset must translate through the independent response insertion"
     );
     let expected = canonical.replacen("- fix bug\n", "- fix queue retrieval\n", 1);
@@ -1262,4 +1267,166 @@ fn two_ide_navigation_lanes_migrate_and_clean_up_end_to_end() {
             reason: LaneRetainReason::NotMarked,
         }]
     );
+}
+
+/// `#ideriderindependentnav` P6, end to end through the real CLI on an isolated
+/// tmux server: in `per_installation` mode, `agent-doc claim --new-pane
+/// --client-id <id>` (what each IDE's Claim actions run) starts the document's
+/// pane in the requesting IDE's own lane session, provisioned on first use, and
+/// stages it in that lane's `stash` (the lane's layout places it; the lane's
+/// idle placeholder never blocks it). A claim without a client, or from an
+/// unscoped client, starts in the shared project session; the shared window
+/// is never touched by a lane request. A pane already in the requester's lane
+/// passes the cross-session check for that requester only; another IDE's
+/// claim of it is still refused. In `shared` mode a client id changes nothing.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end() {
+    const IDEA: &str = "jetbrains@IU.0a1b2c3d-pid:41";
+    const RIDER: &str = "jetbrains@RD.9f8e7d6c-pid:42";
+    const IDEA_LANE: &str = "proj-IU-0a1b2c3d";
+    const RIDER_LANE: &str = "proj-RD-9f8e7d6c";
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+    let configure = |mode: &str| {
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            format!("tmux_session = \"proj\"\neditor_navigation = \"{mode}\"\n"),
+        )
+        .unwrap();
+    };
+    configure("per_installation");
+    let iso = agent_doc_tmux_io::isolated_test_tmux("navlane-p6-e2e");
+    let socket = iso.server_socket.clone().expect("isolated socket");
+
+    // The operator's shared window.
+    let shared_pane = iso.new_session("proj", &root).unwrap();
+    iso.raw_cmd(&["rename-window", "-t", &shared_pane, "agent-doc"])
+        .unwrap();
+    let shared_window_panes = || iso.list_window_panes("proj:agent-doc").unwrap();
+    let shared_before = shared_window_panes();
+
+    let document = |name: &str| {
+        let file = root.join(format!("{name}.md"));
+        std::fs::write(
+            &file,
+            format!("---\nagent: claude\nclaude_args: --version\n---\n# {name}\n"),
+        )
+        .unwrap();
+        file
+    };
+    let claim = |file: &Path, extra: &[&str], client: Option<&str>| {
+        let mut command = agent_doc();
+        command
+            .current_dir(&root)
+            .arg("claim")
+            .arg(file)
+            .args(extra)
+            .env("AGENT_DOC_TMUX_SOCKET", &socket)
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE");
+        if let Some(client) = client {
+            command.args(["--client-id", client]);
+        }
+        command.output().unwrap()
+    };
+    let all_panes = || -> std::collections::BTreeSet<String> {
+        iso.raw_cmd(&["list-panes", "-a", "-F", "#{pane_id}"])
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    };
+    // Run a provisioning claim and return the document pane it started (a
+    // lane's first use also creates the lane's own placeholder panes).
+    let provision = |file: &Path, client: Option<&str>| {
+        let before = all_panes();
+        let output = claim(file, &["--new-pane"], client);
+        assert!(output.status.success(), "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let pane = stderr
+            .lines()
+            .find(|line| line.starts_with("[route] Started "))
+            .and_then(|line| line.split(" in pane ").nth(1))
+            .and_then(|rest| rest.split_whitespace().next())
+            .unwrap_or_else(|| panic!("no started pane: {stderr}"))
+            .to_string();
+        assert!(!before.contains(&pane), "a new pane: {stderr}");
+        let staged_in_lane = stderr.contains(&format!(
+            "[route] staged pane {pane} in navigation lane session"
+        ));
+        (pane, staged_in_lane)
+    };
+    let session_of = |pane: &str| iso.pane_session(pane).unwrap();
+
+    // IDEA and Rider each start a document in their own lane.
+    // The claim stages the pane in the lane's stash for the lane's layout (it
+    // never splits into the lane window); asserted from what the claim did,
+    // since the started processes may later arrange their own lane.
+    let (idea_pane, staged) = provision(&document("idea"), Some(IDEA));
+    assert_eq!(session_of(&idea_pane), IDEA_LANE);
+    assert!(staged, "the lane pane is staged for the lane's layout");
+    let (rider_pane, staged) = provision(&document("rider"), Some(RIDER));
+    assert_eq!(session_of(&rider_pane), RIDER_LANE);
+    assert!(staged);
+
+    // No client, and an unscoped client: the shared session, placed by the
+    // shared path (never staged as a lane start).
+    let (plain_pane, staged) = provision(&document("plain"), None);
+    assert_eq!(session_of(&plain_pane), "proj");
+    assert!(!staged);
+    let (vscode_pane, staged) = provision(&document("vscode"), Some("vscode-pid:9"));
+    assert_eq!(session_of(&vscode_pane), "proj");
+    assert!(!staged);
+    // Each lane pane's `agent-doc start` reaches its session check and keeps
+    // the pane in its lane; it never relocates it into the project session.
+    let ops_log = root.join(".agent-doc/logs/ops.log");
+    for pane in [&idea_pane, &rider_pane] {
+        let kept = format!("start_navigation_lane_pane_kept pane={pane} ");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !std::fs::read_to_string(&ops_log)
+            .unwrap_or_default()
+            .contains(&kept)
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the start in {pane} never reached its session check"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    assert_eq!(session_of(&idea_pane), IDEA_LANE);
+    assert_eq!(session_of(&rider_pane), RIDER_LANE);
+    for pane in shared_window_panes() {
+        assert!(
+            shared_before.contains(&pane) || pane == plain_pane || pane == vscode_pane,
+            "a lane request reached the shared agent-doc window: {pane}"
+        );
+    }
+
+    // An unowned pane in IDEA's lane: IDEA may claim it; Rider may not.
+    let spare = iso.new_window(IDEA_LANE, &root).unwrap();
+    let bound_doc = document("bound");
+    let refused = claim(&bound_doc, &["--pane", &spare], Some(RIDER));
+    assert!(!refused.status.success(), "{refused:?}");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("project session is 'proj'"),
+        "{refused:?}"
+    );
+    let panes_before_bind = all_panes();
+    let output = claim(&bound_doc, &["--pane", &spare], Some(IDEA));
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        all_panes(),
+        panes_before_bind,
+        "the claim bound the existing lane pane instead of provisioning"
+    );
+
+    // Shared mode: a client id is ignored.
+    configure("shared");
+    let (shared_mode_pane, staged) = provision(&document("shared-mode"), Some(IDEA));
+    assert_eq!(session_of(&shared_mode_pane), "proj");
+    assert!(!staged);
 }

@@ -299,6 +299,11 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             agent_doc_route_io::invocation::LayoutOwnedByControllerGuard::set(
                 invocation.layout_owned_by_controller,
             );
+        // `#ideriderindependentnav` P6: a pane this route starts lives in the
+        // requesting client's navigation lane.
+        let _navigation_client = agent_doc_route_io::invocation::NavigationClientGuard::set(
+            invocation.navigation_client_id.as_deref(),
+        );
         // GH 91: clear any deferral a previous route on this worker left behind.
         let _ = agent_doc_route_io::invocation::take_route_deferral();
         let _ = agent_doc_route_io::invocation::take_route_steering_delivery();
@@ -2401,6 +2406,12 @@ enum Commands {
             default_value_t = agent_doc_supervisor::route_owned::RouteOwnedStartPurpose::Dispatch,
         )]
         route_owned_start_purpose: agent_doc_supervisor::route_owned::RouteOwnedStartPurpose,
+        /// Editor surface client id (`<family>@<installation>-pid:<pid>`). With
+        /// `editor_navigation = "per_installation"`, an installation-scoped
+        /// client's start pane (outside tmux) lives in that installation's own
+        /// navigation lane session.
+        #[arg(long)]
+        client_id: Option<String>,
     },
     /// Route agent-doc command to the correct tmux pane
     Route {
@@ -2443,6 +2454,12 @@ enum Commands {
         /// directly to disk. Intended for headless/no-listener invocations.
         #[arg(long)]
         force_disk: bool,
+        /// Editor surface client id (`<family>@<installation>-pid:<pid>`). With
+        /// `editor_navigation = "per_installation"`, a pane this route starts
+        /// for an installation-scoped client lives in that installation's own
+        /// navigation lane session; an existing pane is used where it lives.
+        #[arg(long)]
+        client_id: Option<String>,
     },
     /// Detect permission prompts from a Claude Code or OpenCode session
     Prompt {
@@ -2500,6 +2517,13 @@ enum Commands {
             conflicts_with_all = ["position", "pane", "window", "force", "isolate"]
         )]
         new_pane: bool,
+        /// Editor surface client id (`<family>@<installation>-pid:<pid>`). With
+        /// `editor_navigation = "per_installation"`, a pane this claim
+        /// provisions for an installation-scoped client lives in that
+        /// installation's own navigation lane session, and a pane already in
+        /// that lane passes the cross-session check.
+        #[arg(long)]
+        client_id: Option<String>,
     },
     /// Claim (or release) the drain-owner lease for a self-driving harness loop
     /// (#kp5z / #qflood). The Claude Code `/loop` auto-loop refreshes this lease
@@ -5194,6 +5218,7 @@ fn try_main() -> anyhow::Result<()> {
             route_owned,
             route_owned_reap_policy,
             route_owned_start_purpose,
+            client_id,
         } => {
             // Default is resume-if-recorded, matching `restart-supervisor`'s
             // continue-mode default: with no flags at all, still attempt the
@@ -5213,7 +5238,7 @@ fn try_main() -> anyhow::Result<()> {
                     }),
                 )
             };
-            if agent_doc_start_io::bootstrap_start_inside_tmux_if_needed_with_purpose(
+            if agent_doc_start_io::bootstrap_start_inside_tmux_for_client(
                 &file,
                 force,
                 route_owned,
@@ -5221,6 +5246,7 @@ fn try_main() -> anyhow::Result<()> {
                 route_owned_start_purpose,
                 resume.as_ref(),
                 harness.as_deref(),
+                client_id.as_deref(),
             )?
             .is_some()
             {
@@ -5247,7 +5273,11 @@ fn try_main() -> anyhow::Result<()> {
             debounce,
             wait_for_ready,
             force_disk,
+            client_id,
         } => {
+            // `#ideriderindependentnav` P6: the requester's navigation lane.
+            let _navigation_client =
+                agent_doc_route_io::invocation::NavigationClientGuard::set(client_id.as_deref());
             // NOTE: agent_doc_sync_io::sync::run_layout_only was previously called here after route when
             // --col args were provided. Removed because the JB plugin calls `agent-doc sync`
             // separately with the correct --window arg. Running sync from both route AND
@@ -5347,6 +5377,7 @@ fn try_main() -> anyhow::Result<()> {
             force,
             isolate,
             new_pane,
+            client_id,
         } => agent_doc_claim_io::run(
             &file,
             ClaimOptions {
@@ -5356,6 +5387,7 @@ fn try_main() -> anyhow::Result<()> {
                 force,
                 isolate,
                 new_pane,
+                client_id: client_id.as_deref(),
             },
             &CliClaimRuntimeEffects,
         ),
@@ -7851,8 +7883,10 @@ mod recycle_force_tests {
                 pane,
                 window,
                 isolate,
+                client_id,
             } => {
                 assert_eq!(file, PathBuf::from("plan.md"));
+                assert!(client_id.is_none());
                 assert!(new_pane);
                 assert!(!force);
                 assert!(!isolate);

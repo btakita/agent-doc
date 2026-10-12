@@ -381,8 +381,11 @@ fn log_interrupted_turn_lease_retired(
     clear_turn_status_title_for_owned_pane(file, shared);
     // `#sdkclearwedge`: the retired turn's `running` dispatch receipt would
     // otherwise keep reading as a live turn until the in-flight horizon.
-    let settled_dispatches =
-        agent_doc_controller_io::project_controller::settle_dispatch_turn_ended_by_harness_for_file(
+    // `#infraclearsession`: the retirement already settled the pane's receipt;
+    // this file-scoped settle covers a document with no `documents.pane_id`
+    // row yet and is otherwise a no-op.
+    let settled_dispatches = interrupted.settled_dispatches
+        + agent_doc_controller_io::project_controller::settle_dispatch_turn_ended_by_harness_for_file(
             file,
             interrupted.written_at,
         )

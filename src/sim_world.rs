@@ -1424,14 +1424,20 @@ mod multi_tmux_session_model {
 ///   lane document pane back into the project session (none lost or
 ///   duplicated) before its lane closes; in shared mode the project sync may
 ///   adopt a lane pane into the project session, never the reverse;
+/// - switch-back before gc (`#ridernavp6switchback`): after a switch to
+///   `shared`, a sync arranges only the project session, even when the
+///   focused document's pane is still in a lane
+///   (`shared_sync_target_session`), and it adopts a laid-out lane document's
+///   pane, passive or explicit, without starting a second one or losing it;
 /// - every mutation below is detected.
 mod two_ide_navigation_model {
     use agent_doc_editor_surface::{
-        InstallationFocus, LaneClaim, LaneLiveness, LanePaneObservation, LaneReconcileAction,
-        LaneReconcileTrigger, LaneSessionObservation, LayoutOwnerKey, NavigationLane,
-        NavigationMode, SurfaceAuthority, derive_lane_reconcile_trigger, editor_installation,
-        is_lane_session_of, partition_lane_layout_columns_for_claim,
-        plan_navigation_lane_reconcile,
+        InstallationFocus, LANE_HANDOFF_CALLER_KIND, LaneClaim, LaneLiveness, LanePaneObservation,
+        LaneReconcileAction, LaneReconcileTrigger, LaneSessionObservation, LayoutOwnerKey,
+        NavigationLane, NavigationMode, RECYCLE_SETTLED_CALLER_KIND, RequesterPanePlacement,
+        SurfaceAuthority, derive_lane_reconcile_trigger, editor_installation, is_lane_session_of,
+        partition_lane_layout_columns_for_claim, plan_navigation_lane_reconcile,
+        requester_pane_placement, shared_sync_target_session,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -1498,6 +1504,37 @@ mod two_ide_navigation_model {
         /// The controller's own reconcile reaps lane-named sessions without
         /// checking the mark (`#ridernavp6gc`).
         TriggerIgnoresMark,
+        /// The controller's reconcile applies the plan it derived when its
+        /// trigger fired, without re-observing under the sync lock, so it
+        /// folds a pane a shared sync already adopted (`#ridernavp6gc`).
+        ReconcileActsOnStalePlan,
+        /// A route/start/claim from a lane client starts its pane in the
+        /// shared session (the pre-P6 behavior).
+        RouteIntoSharedSession,
+        /// A route from a lane client pulls the document's existing pane into
+        /// its own lane (P6).
+        RouteMovesExistingPane,
+        /// A route starts a second pane for a document that already has one
+        /// in another lane (P6).
+        RouteDuplicatesPane,
+        /// A recycle settle republishes only the shared lane, the pre-P6
+        /// behavior (P6).
+        RecycleSharedOnly,
+        /// A recycle settle republishes every lane's layout into the shared
+        /// session (P6).
+        RecycleIntoSharedSession,
+        /// A recycle settle republishes as an explicit claim (`manual`)
+        /// instead of the passive `recycle_settled` (P6).
+        RecycleClaimsExplicitly,
+        /// After a switch back to `shared`, a sync follows the focused
+        /// document's pane into the stale lane session it still lives in
+        /// (`#ridernavp6switchback`).
+        SharedSyncFollowsStaleLane,
+        /// The shared sync starts a second pane for a document whose pane is
+        /// still in a stale lane instead of adopting it.
+        DuplicateOnAdopt,
+        /// The shared sync drops a stale lane's pane instead of adopting it.
+        LoseOnAdopt,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1514,6 +1551,18 @@ mod two_ide_navigation_model {
         /// (`#ridernavp6gc`); that is not an event, it follows `Retire` and
         /// `SetMode`.
         Gc,
+        /// Run Agent Doc / `agent-doc route|start|claim --client-id` from this
+        /// client for the second document of its layout (P6).
+        Route(usize),
+        /// The controller's reconcile worker runs the request its trigger
+        /// derived (`#ridernavp6gc`). The trigger fires on `Retire` and
+        /// `SetMode` (a controller start); the run is asynchronous, so syncs
+        /// interleave between the two.
+        ControllerReconcile,
+        /// A supervisor settles after a recycle and every lane whose last pass
+        /// gated its document republishes its own retained layout (P6). The
+        /// model takes the worst case: every lane gated it.
+        RecycleSettle,
     }
 
     #[derive(Default)]
@@ -1538,6 +1587,11 @@ mod two_ide_navigation_model {
         projected: BTreeMap<String, BTreeSet<String>>,
         /// session -> the client whose layout it last projected.
         last_layout: BTreeMap<String, usize>,
+        /// session -> the `caller_kind` of its last projection, the retained
+        /// invocation a recycle settle republishes (P6).
+        retained_kind: BTreeMap<String, &'static str>,
+        /// Lane sessions a recycle settle owed a republish that never ran.
+        recycle_pending: BTreeSet<String>,
         /// Installation lane sessions agent-doc created (marked) and that are
         /// still alive (P5).
         lane_sessions: BTreeSet<String>,
@@ -1556,6 +1610,21 @@ mod two_ide_navigation_model {
         dispatched: Option<LaneReconcileTrigger>,
         /// How many reconciles the controller ran on its own.
         auto_reconciles: usize,
+        /// The request the controller's worker has not run yet: its liveness,
+        /// whether the mark is ignored (mutation), and the plan as observed
+        /// when the trigger fired.
+        pending_reconcile: Option<(LaneLiveness, bool, Vec<LaneReconcileAction>)>,
+        /// `(document, its session)` for every pane a reconcile folded although
+        /// it no longer lived in the lane.
+        stale_folds: Vec<(String, String)>,
+        /// `(document, client, started in, requester's lane session)` for
+        /// every pane a route/start/claim started (P6).
+        route_starts: Vec<(String, usize, String, String)>,
+        /// `(document, from, explicit)` for every pane a shared sync adopted
+        /// from a stale lane session (`#ridernavp6switchback`).
+        adopted: Vec<(String, String, bool)>,
+        /// Lane sessions a sync arranged while the project was in shared mode.
+        shared_mode_lane_targets: Vec<String>,
     }
 
     struct Sim {
@@ -1606,12 +1675,31 @@ mod two_ide_navigation_model {
                 return;
             }
             self.world.dispatched = Some(trigger.clone());
-            self.world.auto_reconciles += 1;
             let liveness = match self.mutation {
                 Mutation::TriggerIgnoresLiveness => LaneLiveness::Live(BTreeSet::new()),
                 _ => trigger.liveness(),
             };
-            self.reconcile(&liveness, self.mutation == Mutation::TriggerIgnoresMark);
+            let ignore_mark = self.mutation == Mutation::TriggerIgnoresMark;
+            let snapshot = self.plan_reconcile(&liveness, ignore_mark);
+            self.world.pending_reconcile = Some((liveness, ignore_mark, snapshot));
+        }
+
+        /// The controller's worker runs its pending request. Production
+        /// observes and applies under the project's sync lock, so a shared
+        /// sync's stale-lane adoption and a fold never interleave: whichever
+        /// runs first moves the pane, the other finds it home.
+        fn run_controller_reconcile(&mut self) {
+            let Some((liveness, ignore_mark, snapshot)) = self.world.pending_reconcile.take()
+            else {
+                return;
+            };
+            self.world.auto_reconciles += 1;
+            if self.mutation == Mutation::ReconcileActsOnStalePlan {
+                self.apply_reconcile(snapshot, true);
+            } else {
+                let plan = self.plan_reconcile(&liveness, ignore_mark);
+                self.apply_reconcile(plan, false);
+            }
         }
 
         fn lane(&self, client: usize) -> NavigationLane {
@@ -1626,10 +1714,27 @@ mod two_ide_navigation_model {
         }
 
         fn target_session(&self, client: usize) -> String {
-            match self.mutation {
-                Mutation::SharedSessionTarget => PROJECT_SESSION.to_string(),
-                _ => self.lane(client).tmux_session_name(PROJECT_SESSION),
+            if self.mutation == Mutation::SharedSessionTarget {
+                return PROJECT_SESSION.to_string();
             }
+            let lane_session = self.lane(client).tmux_session_name(PROJECT_SESSION);
+            if self.mode != NavigationMode::Shared {
+                return lane_session;
+            }
+            // The sync body has no explicit window here and follows the
+            // focused document's pane, which may still be in a lane session
+            // a switch back to `shared` left behind until gc.
+            let focused = LAYOUTS[client][0];
+            let resolved = match self.world.pane_session.get(focused) {
+                Some(session) if is_lane_session_of(PROJECT_SESSION, session) => session.clone(),
+                _ => lane_session,
+            };
+            if self.mutation == Mutation::SharedSyncFollowsStaleLane {
+                return resolved;
+            }
+            let marked = self.world.lane_sessions.contains(&resolved);
+            shared_sync_target_session(self.mode, PROJECT_SESSION, &resolved, marked, true)
+                .to_string()
         }
 
         fn authority(&self, client: usize) -> SurfaceAuthority {
@@ -1679,12 +1784,19 @@ mod two_ide_navigation_model {
                         return;
                     }
                     let session = self.target_session(client);
+                    if self.mode == NavigationMode::Shared && session != PROJECT_SESSION {
+                        self.world.shared_mode_lane_targets.push(session.clone());
+                    }
                     let claim = if explicit || self.mutation == Mutation::HandoffOnPassive {
                         LaneClaim::Explicit
                     } else {
                         LaneClaim::Passive
                     };
                     let from = self.sync_panes(client, &session, claim, explicit);
+                    self.world.retained_kind.insert(
+                        session.clone(),
+                        if explicit { "manual" } else { "automatic" },
+                    );
                     self.record_writer(client, &session);
                     if self.mutation != Mutation::NoRepublish {
                         for from in from {
@@ -1697,6 +1809,13 @@ mod two_ide_navigation_model {
                     self.controller_reconcile();
                 }
                 Event::Gc => self.gc(),
+                Event::ControllerReconcile => self.run_controller_reconcile(),
+                Event::Route(client) => {
+                    if self.world.live.contains(&client) {
+                        self.route(client);
+                    }
+                }
+                Event::RecycleSettle => self.recycle_settle(),
                 Event::Retire(client) => {
                     if !self.world.live.remove(&client) {
                         return;
@@ -1735,6 +1854,9 @@ mod two_ide_navigation_model {
             // reconnect to it.
             self.world.seen = self.world.live.clone();
             self.world.dispatched = None;
+            // The old controller's unrun request dies with it (production: a
+            // worker whose mode no longer matches the config skips its run).
+            self.world.pending_reconcile = None;
             self.world.writers.clear();
             self.world.writers_since_handoff.clear();
             self.world.deferred = 0;
@@ -1743,6 +1865,7 @@ mod two_ide_navigation_model {
             // window shows only the panes physically in it.
             self.world.projected.clear();
             self.world.last_layout.clear();
+            self.world.retained_kind.clear();
             if enabling && self.mutation == Mutation::MoveOnEnable {
                 let lane = self.lane(0).tmux_session_name(PROJECT_SESSION);
                 self.world.lane_sessions.insert(lane.clone());
@@ -1753,6 +1876,56 @@ mod two_ide_navigation_model {
                             .push((document.clone(), session.clone(), lane.clone()));
                         *session = lane.clone();
                     }
+                }
+            }
+        }
+
+        /// A route/start/claim from `client` for its layout's second document,
+        /// placed by the production [`requester_pane_placement`] (P6).
+        fn route(&mut self, client: usize) {
+            let document = LAYOUTS[client][1].to_string();
+            let own_lane = self.lane(client).tmux_session_name(PROJECT_SESSION);
+            let existing = (self.world.pane_count.get(&document).copied().unwrap_or(0) > 0)
+                .then(|| self.world.pane_session.get(&document).cloned())
+                .flatten();
+            match requester_pane_placement(
+                self.mode,
+                PROJECT_SESSION,
+                Some(CLIENTS[client].0),
+                existing.as_deref(),
+            ) {
+                RequesterPanePlacement::Existing { session } => match self.mutation {
+                    Mutation::RouteMovesExistingPane if session != own_lane => {
+                        self.world
+                            .moved
+                            .push((document.clone(), session, own_lane.clone()));
+                        self.world.pane_session.insert(document, own_lane.clone());
+                        if own_lane != PROJECT_SESSION {
+                            self.world.lane_sessions.insert(own_lane);
+                        }
+                    }
+                    Mutation::RouteDuplicatesPane if session != own_lane => {
+                        *self.world.pane_count.entry(document).or_default() += 1;
+                    }
+                    _ => {}
+                },
+                RequesterPanePlacement::Start { session, .. } => {
+                    let session = if self.mutation == Mutation::RouteIntoSharedSession {
+                        PROJECT_SESSION.to_string()
+                    } else {
+                        session
+                    };
+                    if session != PROJECT_SESSION {
+                        // The requester's lane session is provisioned on first use.
+                        self.world.lane_sessions.insert(session.clone());
+                    }
+                    self.world
+                        .pane_session
+                        .insert(document.clone(), session.clone());
+                    self.world.pane_count.insert(document.clone(), 1);
+                    self.world
+                        .route_starts
+                        .push((document, client, session, own_lane));
                 }
             }
         }
@@ -1788,7 +1961,16 @@ mod two_ide_navigation_model {
         /// The production lane reconcile over this world, with the given
         /// installation liveness.
         fn reconcile(&mut self, liveness: &LaneLiveness, ignore_mark: bool) {
-            let live = self.live_lane_sessions();
+            let plan = self.plan_reconcile(liveness, ignore_mark);
+            self.apply_reconcile(plan, false);
+        }
+
+        /// Observe the lanes and plan with the production planner.
+        fn plan_reconcile(
+            &self,
+            liveness: &LaneLiveness,
+            ignore_mark: bool,
+        ) -> Vec<LaneReconcileAction> {
             let mut observed = self
                 .world
                 .lane_sessions
@@ -1838,15 +2020,31 @@ mod two_ide_navigation_model {
                     lane.marked = true;
                 }
             }
-            let plan = plan_navigation_lane_reconcile(self.mode, PROJECT_SESSION, true, &observed);
+            plan_navigation_lane_reconcile(self.mode, PROJECT_SESSION, true, &observed)
+        }
+
+        /// Apply a reconcile plan. A fold re-checks that the pane still lives
+        /// in the lane (production: `pane_session` before `stash_pane`), unless
+        /// `stale` (a mutation) applies the plan as observed earlier.
+        fn apply_reconcile(&mut self, plan: Vec<LaneReconcileAction>, stale: bool) {
+            let live = self.live_lane_sessions();
             for action in plan {
                 match action {
                     LaneReconcileAction::FoldPane { session, pane } => {
-                        if self.world.pane_session.get(&pane) == Some(&session) {
-                            self.world
-                                .pane_session
-                                .insert(pane.clone(), PROJECT_SESSION.to_string());
-                            self.world.folded.push((pane, session));
+                        match self.world.pane_session.get(&pane).cloned() {
+                            Some(current) if current == session => {
+                                self.world
+                                    .pane_session
+                                    .insert(pane.clone(), PROJECT_SESSION.to_string());
+                                self.world.folded.push((pane, session));
+                            }
+                            Some(current) if stale => {
+                                self.world.stale_folds.push((pane.clone(), current));
+                                self.world
+                                    .pane_session
+                                    .insert(pane, PROJECT_SESSION.to_string());
+                            }
+                            _ => {}
                         }
                     }
                     LaneReconcileAction::Close { session } => {
@@ -1866,6 +2064,7 @@ mod two_ide_navigation_model {
                         self.world.lane_sessions.remove(&session);
                         self.world.projected.remove(&session);
                         self.world.last_layout.remove(&session);
+                        self.world.retained_kind.remove(&session);
                     }
                     LaneReconcileAction::Retain { .. } => {}
                 }
@@ -1904,7 +2103,68 @@ mod two_ide_navigation_model {
                 return;
             };
             self.sync_panes(client, session, LaneClaim::Passive, false);
+            self.world
+                .retained_kind
+                .insert(session.to_string(), LANE_HANDOFF_CALLER_KIND);
             self.record_writer(client, session);
+        }
+
+        /// A recycle settle (`pane_layout_recycle_settled_republished`): each
+        /// lane with a retained layout republishes it into its own session.
+        /// Under `per_installation` the republish is passive, so it never hands
+        /// a pane over; in `shared` mode it is the retained invocation as is.
+        fn recycle_settle(&mut self) {
+            let retained = self
+                .world
+                .last_layout
+                .iter()
+                .map(|(session, client)| (session.clone(), *client))
+                .collect::<Vec<_>>();
+            self.world.recycle_pending = retained
+                .iter()
+                .map(|(session, _)| session.clone())
+                .collect();
+            for (session, client) in retained {
+                if self.mutation == Mutation::RecycleSharedOnly && session != PROJECT_SESSION {
+                    continue;
+                }
+                let kept = self
+                    .world
+                    .retained_kind
+                    .get(&session)
+                    .copied()
+                    .unwrap_or("automatic");
+                let kind = if self.mutation == Mutation::RecycleClaimsExplicitly {
+                    "manual"
+                } else if self.mode == NavigationMode::PerInstallation
+                    && LaneClaim::for_caller_kind(kept).is_explicit()
+                {
+                    RECYCLE_SETTLED_CALLER_KIND
+                } else {
+                    kept
+                };
+                let target = if self.mutation == Mutation::RecycleIntoSharedSession {
+                    PROJECT_SESSION.to_string()
+                } else {
+                    session
+                };
+                let from =
+                    self.sync_panes(client, &target, LaneClaim::for_caller_kind(kind), false);
+                self.world.retained_kind.insert(target.clone(), kind);
+                // The republish re-applies the lane's retained layout; it is
+                // not a heartbeat of an installation driving the lane, so it
+                // counts toward which lane a client reshaped, not toward the
+                // shared-mode focus-owner flip (the retained layout is the
+                // pre-lane republish there, byte for byte).
+                self.world
+                    .writers
+                    .entry(target.clone())
+                    .or_default()
+                    .insert(client);
+                for from in from {
+                    self.republish(&from);
+                }
+            }
         }
 
         /// The structural sync of `client`'s layout into `session`, using the
@@ -1977,7 +2237,21 @@ mod two_ide_navigation_model {
                             && is_lane_session_of(PROJECT_SESSION, &from) =>
                     {
                         // Disabled lanes: the project sync adopts a pane left
-                        // in a lane session before gc folded it.
+                        // in a lane session before gc folded it (the P4
+                        // handoff mechanics: same pane, moved into the project
+                        // session's stash, then placed).
+                        self.world
+                            .adopted
+                            .push((document.clone(), from.clone(), explicit));
+                        match self.mutation {
+                            Mutation::DuplicateOnAdopt => {
+                                *self.world.pane_count.entry(document.clone()).or_default() += 1;
+                            }
+                            Mutation::LoseOnAdopt => {
+                                self.world.pane_count.insert(document.clone(), 0);
+                            }
+                            _ => {}
+                        }
                         self.world
                             .pane_session
                             .insert(document.clone(), session.to_string());
@@ -1996,6 +2270,7 @@ mod two_ide_navigation_model {
             }
             self.world.projected.insert(session.to_string(), shown);
             self.world.last_layout.insert(session.to_string(), client);
+            self.world.recycle_pending.remove(session);
             taken_from
         }
 
@@ -2006,6 +2281,11 @@ mod two_ide_navigation_model {
                     "gc closed {FOREIGN_SESSION}, which agent-doc never created"
                 ));
             }
+            if let Some((document, current)) = self.world.stale_folds.first() {
+                return Err(format!(
+                    "a reconcile folded {document} again after a sync had already moved it to {current}"
+                ));
+            }
             if let Some(session) = self.world.closed_live.first() {
                 return Err(format!(
                     "gc closed {session} while its installation is live"
@@ -2013,6 +2293,23 @@ mod two_ide_navigation_model {
             }
             if let Some((document, session)) = self.world.unfolded_after_disable.first() {
                 return Err(format!("disable left {document} in lane {session}"));
+            }
+            for (document, client, started, own_lane) in &self.world.route_starts {
+                if started != own_lane {
+                    return Err(format!(
+                        "client {client} started {document} in {started}, not its lane {own_lane}"
+                    ));
+                }
+            }
+            if let Some(session) = self.world.shared_mode_lane_targets.first() {
+                return Err(format!(
+                    "a shared-mode sync arranged the stale lane session {session}"
+                ));
+            }
+            if let Some(session) = self.world.recycle_pending.first() {
+                return Err(format!(
+                    "recycle settle never republished {session}'s retained layout"
+                ));
             }
             if let Some((document, from, to)) = self.world.moved.first() {
                 return Err(format!(
@@ -2093,12 +2390,15 @@ mod two_ide_navigation_model {
                     Event::Layout(client),
                     Event::Claim(client),
                     Event::Retire(client),
+                    Event::Route(client),
                 ]
             })
             .chain([
                 Event::SetMode(NavigationMode::Shared),
                 Event::SetMode(NavigationMode::PerInstallation),
                 Event::Gc,
+                Event::ControllerReconcile,
+                Event::RecycleSettle,
             ])
             .collect()
     }
@@ -2263,6 +2563,254 @@ mod two_ide_navigation_model {
     }
 
     #[test]
+    fn a_lane_route_starting_in_the_shared_session_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RouteIntoSharedSession,
+            DEPTH,
+        )
+        .expect("a lane client's route must start its pane in its own lane");
+        assert!(violation.contains("not its lane"), "{violation}");
+    }
+
+    #[test]
+    fn a_route_moving_or_duplicating_an_existing_pane_is_detected() {
+        let moved = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RouteMovesExistingPane,
+            DEPTH,
+        )
+        .expect("a route must use another lane's pane where it lives");
+        assert!(moved.contains("moved across sessions"), "{moved}");
+        let duplicated = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RouteDuplicatesPane,
+            DEPTH,
+        )
+        .expect("a route must not start a second pane for a placed document");
+        assert!(duplicated.contains("duplicated"), "{duplicated}");
+    }
+
+    #[test]
+    fn routes_start_panes_in_the_requesting_lane_and_reuse_placed_ones() {
+        let idea = "proj-IU-0a1b2c3d".to_string();
+        let rider = "proj-RD-9f8e7d6c".to_string();
+        let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        // Rider routes `c` (its second document): a new pane in Rider's lane.
+        sim.step(Event::Route(1));
+        // IDEA routes `b`: a new pane in IDEA's lane.
+        sim.step(Event::Route(0));
+        // VS Code (unscoped) routes `a`: the shared session.
+        sim.step(Event::Route(2));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.pane_session["/project/c.md"], rider);
+        assert_eq!(sim.world.pane_session["/project/b.md"], idea);
+        assert_eq!(sim.world.pane_session["/project/a.md"], PROJECT_SESSION);
+        assert_eq!(
+            sim.world.lane_sessions,
+            BTreeSet::from([idea.clone(), rider.clone()])
+        );
+        // IDEA's layout shows `a` and `b`: `b` is in its lane, `a` (shared)
+        // is dropped passively; routing again reuses every placed pane.
+        sim.step(Event::Layout(0));
+        sim.step(Event::Route(0));
+        sim.step(Event::Route(1));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.route_starts.len(), 3);
+        assert!(sim.world.pane_count.values().all(|count| *count == 1));
+        // Shared mode: every route starts in the project session.
+        let mut shared = Sim::new(NavigationMode::Shared, Mutation::None);
+        for client in 0..CLIENTS.len() {
+            shared.step(Event::Route(client));
+        }
+        assert_eq!(shared.check(), Ok(()));
+        assert!(
+            shared
+                .world
+                .pane_session
+                .values()
+                .all(|session| session == PROJECT_SESSION)
+        );
+        assert!(shared.world.lane_sessions.is_empty());
+    }
+
+    #[test]
+    fn a_recycle_settle_that_skips_installation_lanes_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RecycleSharedOnly,
+            DEPTH,
+        )
+        .expect("an installation lane's retained layout must be republished too");
+        assert!(violation.contains("never republished"), "{violation}");
+    }
+
+    #[test]
+    fn a_recycle_settle_into_the_shared_session_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RecycleIntoSharedSession,
+            DEPTH,
+        )
+        .expect("a lane's republish must land in its own session");
+        assert!(
+            violation.contains("not its lane") || violation.contains("never republished"),
+            "{violation}"
+        );
+    }
+
+    #[test]
+    fn an_explicit_recycle_republish_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RecycleClaimsExplicitly,
+            DEPTH,
+        )
+        .expect("an explicit recycle republish takes a contended pane");
+        assert!(violation.contains("passive sync handed"), "{violation}");
+    }
+
+    #[test]
+    fn a_shared_sync_following_a_stale_lane_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::SharedSyncFollowsStaleLane,
+            DEPTH,
+        )
+        .expect("a shared sync focused on a lane document must not arrange the lane");
+        assert!(violation.contains("stale lane session"), "{violation}");
+    }
+
+    #[test]
+    fn a_duplicated_or_lost_pane_on_switch_back_is_detected() {
+        let duplicated = explore(
+            NavigationMode::PerInstallation,
+            Mutation::DuplicateOnAdopt,
+            DEPTH,
+        )
+        .expect("starting a second pane for a stale lane document duplicates it");
+        assert!(duplicated.contains("duplicated"), "{duplicated}");
+        let lost = explore(
+            NavigationMode::PerInstallation,
+            Mutation::LoseOnAdopt,
+            DEPTH,
+        )
+        .expect("dropping a stale lane pane loses the document");
+        assert!(lost.contains("lost"), "{lost}");
+    }
+
+    /// `#ridernavp6switchback`: two lanes hold panes, the project switches
+    /// back to `shared`, and syncs run before `agent-doc gc`. A passive sync
+    /// focused on a lane document arranges the project session and adopts the
+    /// laid-out lane panes (same pane, once); a lane document outside the
+    /// shared layout stays in its lane until an explicit sync shows it or gc
+    /// folds it; nothing is started twice, lost, or arranged in a lane.
+    #[test]
+    fn switching_back_to_shared_adopts_lane_panes_before_gc() {
+        let idea = "proj-IU-0a1b2c3d".to_string();
+        let rider = "proj-RD-9f8e7d6c".to_string();
+        let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        // IDEA's lane holds `a` and `b`; Rider claims `b` and starts `c`.
+        sim.step(Event::Claim(0));
+        sim.step(Event::Claim(1));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.pane_session["/project/a.md"], idea);
+        assert_eq!(sim.world.pane_session["/project/b.md"], rider);
+        assert_eq!(sim.world.pane_session["/project/c.md"], rider);
+
+        sim.step(Event::SetMode(NavigationMode::Shared));
+        // The unscoped editor's passive heartbeat shows `c` (focused, its
+        // pane is in Rider's stale lane) and `a` (in IDEA's).
+        sim.step(Event::Layout(2));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(
+            sim.world.adopted,
+            vec![
+                ("/project/c.md".to_string(), rider.clone(), false),
+                ("/project/a.md".to_string(), idea.clone(), false),
+            ],
+            "a passive shared sync adopts both laid-out lane panes"
+        );
+        assert_eq!(sim.world.pane_session["/project/a.md"], PROJECT_SESSION);
+        assert_eq!(sim.world.pane_session["/project/c.md"], PROJECT_SESSION);
+        assert_eq!(
+            sim.world.pane_session["/project/b.md"], rider,
+            "b is not laid out: it waits in its lane"
+        );
+        assert_eq!(
+            sim.world.lane_sessions,
+            BTreeSet::from([idea.clone(), rider.clone()]),
+            "only gc closes lanes"
+        );
+        // Rider's explicit claim (now on the shared lane) shows `b`, focused,
+        // while its pane is still in Rider's lane: it arranges the project
+        // session and adopts it.
+        sim.step(Event::Claim(1));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(
+            sim.world.adopted.last(),
+            Some(&("/project/b.md".to_string(), rider.clone(), true))
+        );
+        assert!(sim.world.shared_mode_lane_targets.is_empty());
+        assert!(sim.world.pane_count.values().all(|count| *count == 1));
+        // gc has nothing to fold and closes both lanes.
+        sim.step(Event::Gc);
+        assert_eq!(sim.check(), Ok(()));
+        assert!(sim.world.folded.is_empty());
+        assert!(sim.world.lane_sessions.is_empty());
+        assert!(
+            sim.world
+                .pane_session
+                .values()
+                .all(|session| session == PROJECT_SESSION)
+        );
+    }
+
+    /// `#ideriderindependentnav` P6: IDEA's explicit claim is retained, Rider
+    /// then claims the contended document, and a recycle settle republishes
+    /// both lanes from their retained layouts: each lane re-projects only its
+    /// own panes, and no pane is moved, duplicated, or lost.
+    #[test]
+    fn a_recycle_settle_republishes_every_lane_in_place() {
+        let idea = "proj-IU-0a1b2c3d".to_string();
+        let rider = "proj-RD-9f8e7d6c".to_string();
+        let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        sim.step(Event::Claim(0));
+        sim.step(Event::Layout(1));
+        sim.step(Event::Layout(2));
+        assert_eq!(sim.check(), Ok(()));
+        let placement = sim.world.pane_session.clone();
+        let handoffs = sim.world.handoffs.len();
+        sim.step(Event::RecycleSettle);
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.pane_session, placement, "no pane changes session");
+        assert_eq!(sim.world.handoffs.len(), handoffs, "no handoff");
+        assert!(sim.world.pane_count.values().all(|count| *count == 1));
+        assert_eq!(
+            sim.world.projected[&idea],
+            BTreeSet::from(["/project/a.md".to_string(), "/project/b.md".to_string()])
+        );
+        assert_eq!(
+            sim.world.projected[&rider],
+            BTreeSet::from(["/project/c.md".to_string()])
+        );
+        assert_eq!(
+            sim.world.retained_kind[&idea], RECYCLE_SETTLED_CALLER_KIND,
+            "IDEA's retained explicit claim is republished passively"
+        );
+        // Rider's explicit claim takes `b`; IDEA is republished without it, and
+        // a later settle never takes it back.
+        sim.step(Event::Claim(1));
+        sim.step(Event::RecycleSettle);
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.pane_session["/project/b.md"], rider);
+        assert_eq!(
+            sim.world.projected[&idea],
+            BTreeSet::from(["/project/a.md".to_string()])
+        );
+    }
+
+    #[test]
     fn a_controller_reconcile_closing_a_live_lane_is_detected() {
         let violation = explore(
             NavigationMode::PerInstallation,
@@ -2308,9 +2856,11 @@ mod two_ide_navigation_model {
             sim.world.pane_session
         );
         assert_eq!(sim.world.auto_reconciles, 0, "joins reconcile nothing");
+        assert!(sim.world.pending_reconcile.is_none());
         assert!(sim.world.lane_sessions.contains(&idea));
         // Rider quits: its lane still holds documents, IDEA's is live.
         sim.step(Event::Retire(1));
+        sim.step(Event::ControllerReconcile);
         assert_eq!(sim.check(), Ok(()));
         assert_eq!(sim.world.auto_reconciles, 1);
         assert_eq!(
@@ -2320,6 +2870,7 @@ mod two_ide_navigation_model {
         // IDEA quits: its empty lane closes with no gc; Rider's keeps its
         // documents.
         sim.step(Event::Retire(0));
+        sim.step(Event::ControllerReconcile);
         assert_eq!(sim.check(), Ok(()));
         assert_eq!(sim.world.auto_reconciles, 2);
         assert_eq!(sim.world.lane_sessions, BTreeSet::from([rider]));
@@ -2333,6 +2884,7 @@ mod two_ide_navigation_model {
         sim.step(Event::Layout(1));
         assert_eq!(sim.world.lane_sessions.len(), 2);
         sim.step(Event::SetMode(NavigationMode::Shared));
+        sim.step(Event::ControllerReconcile);
         assert_eq!(sim.check(), Ok(()));
         assert!(sim.world.lane_sessions.is_empty());
         assert!(
@@ -2343,6 +2895,62 @@ mod two_ide_navigation_model {
         );
         assert!(sim.world.pane_count.values().all(|count| *count == 1));
         assert!(sim.world.foreign_alive);
+    }
+
+    #[test]
+    fn a_controller_reconcile_on_a_stale_plan_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::ReconcileActsOnStalePlan,
+            DEPTH,
+        )
+        .expect("a fold planned before a shared sync adopted the pane must not move it again");
+        assert!(violation.contains("already moved it"), "{violation}");
+    }
+
+    /// `#ridernavp6gc` x `#ridernavp6switchback`: after a switch back to
+    /// `shared`, the controller's start reconcile and the shared sync's
+    /// stale-lane adoption both move lane panes home. The sync owns the panes
+    /// its layout shows; the reconcile owns the rest and closes the lanes;
+    /// each re-checks where a pane lives under the sync lock, so no pane is
+    /// moved twice, in either order.
+    #[test]
+    fn the_shared_sync_and_the_controller_reconcile_never_move_a_pane_twice() {
+        let setup = || {
+            let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+            sim.step(Event::Claim(0));
+            sim.step(Event::Claim(1));
+            sim.step(Event::SetMode(NavigationMode::Shared));
+            assert!(sim.world.pending_reconcile.is_some());
+            sim
+        };
+        // Sync first: it adopts `c` and `a`; the reconcile folds only `b`.
+        let mut sync_first = setup();
+        sync_first.step(Event::Layout(2));
+        sync_first.step(Event::ControllerReconcile);
+        assert_eq!(sync_first.check(), Ok(()));
+        assert_eq!(sync_first.world.adopted.len(), 2);
+        assert_eq!(
+            sync_first.world.folded,
+            vec![("/project/b.md".to_string(), "proj-RD-9f8e7d6c".to_string())]
+        );
+        // Reconcile first: it folds all three; the sync adopts nothing.
+        let mut reconcile_first = setup();
+        reconcile_first.step(Event::ControllerReconcile);
+        reconcile_first.step(Event::Layout(2));
+        assert_eq!(reconcile_first.check(), Ok(()));
+        assert!(reconcile_first.world.adopted.is_empty());
+        assert_eq!(reconcile_first.world.folded.len(), 3);
+        for sim in [&sync_first, &reconcile_first] {
+            assert!(sim.world.lane_sessions.is_empty());
+            assert!(sim.world.pane_count.values().all(|count| *count == 1));
+            assert!(
+                sim.world
+                    .pane_session
+                    .values()
+                    .all(|session| session == PROJECT_SESSION)
+            );
+        }
     }
 
     #[test]

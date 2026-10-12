@@ -100,6 +100,45 @@ class ClaimActionTest {
     }
 
     @Test
+    fun `claim names the requesting IDE's navigation client`() {
+        val idea = "jetbrains@IU.0a1b2c3d-pid:41"
+        assertEquals(
+            listOf("agent-doc", "claim", "plan.md", "--new-pane", "--client-id", idea),
+            ClaimAction.buildClaimCommand(
+                "agent-doc",
+                "plan.md",
+                null,
+                force = false,
+                newPane = true,
+                clientId = idea,
+            ),
+        )
+        assertEquals(
+            listOf("agent-doc", "claim", "plan.md", "--force", "--position", "left", "--client-id", idea),
+            ClaimAction.buildClaimCommand(
+                "agent-doc",
+                "plan.md",
+                "left",
+                force = true,
+                newPane = false,
+                clientId = idea,
+            ),
+        )
+        assertEquals(
+            "a blank client id is not sent",
+            listOf("agent-doc", "claim", "plan.md"),
+            ClaimAction.buildClaimCommand(
+                "agent-doc",
+                "plan.md",
+                null,
+                force = false,
+                newPane = false,
+                clientId = " ",
+            ),
+        )
+    }
+
+    @Test
     fun `normal claim preserves positional targeting`() {
         assertEquals(
             listOf("agent-doc", "claim", "plan.md", "--position", "right"),

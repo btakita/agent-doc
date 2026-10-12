@@ -502,12 +502,37 @@ its prompt, until the operator typed `/clear` by hand.
   (`#dispatchreceiptperturn`). When a `running` receipt was settled, no
   pending one is taken with it; a stacked trigger behind it, or a dispatch
   accepted after the lease, stays pending.
+  `#infraclearsession`: the settle happens ON the retirement edge
+  (`retire_harness_ended_turn_lease`), not only in the callers that log it.
+  Every lease read retires an interrupted lease as a side effect
+  (`read_turn_active_marker_for_pane_at`, `turn_active_for_pane`, ...), so the
+  first reader past `TURN_INTERRUPT_SETTLE_SECS` is often neither the clear
+  guard nor the supervisor probe. Before this, such a reader retired the lease
+  silently (a `turn_ended reason=interrupt` receipt, no
+  `turn_status_projection_repaired` line) and the guard's later settle found
+  no lease to bound it. Live 2026-10-12, haiven-dev `tasks/infra.md` pane
+  %152 (Codex): receipt 3486 was accepted 15:05:59, the turn's preflight
+  started 15:06:00, Esc landed at 15:06:03 before it promoted the receipt, the
+  first Clear (15:06:05) queued on `turn_active_lease` inside the settle
+  window, and every later press (15:06:14, :21, :27) re-queued on
+  `dispatch_turn_pending` until the next Run Agent Doc, whose preflight then
+  promoted the stale receipt instead of its own. The retirement now settles,
+  in the same state DB connection, the receipt of every document whose actor
+  runs in the pane (`documents.pane_id`) under the rule above
+  (`settle_harness_ended_dispatch_turn_for_pane_at_or_before`), and reports
+  the count in `InterruptedTurnLease.settled_dispatches`. Which process
+  retires the lease no longer matters: CLI, supervisor, or a supervisor
+  mid-recycle/handoff. The callers' file-scoped settle remains for a document
+  with no `documents` row and is otherwise a no-op.
   A NORMAL turn end settles it too (`#clearqueuedliveturn`): `turn-status
   idle` (Claude `Stop` / `SessionStart`, Codex `Stop`, OpenCode
   `session.idle`) reads the pane's lease heartbeat before clearing the lease,
-  then settles the `running` receipts of every document whose actor runs in
-  that pane (`documents.pane_id`) dispatched at or before that heartbeat
-  (`settle_running_dispatch_turns_for_pane_started_at_or_before`). Without a
+  then settles the receipts of every document whose actor runs in that pane
+  (`documents.pane_id`) dispatched at or before that heartbeat under the same
+  rule (`settle_harness_ended_dispatch_turn_for_pane_at_or_before`): the
+  `running` receipts first, else (`#infraclearsession`) the one oldest
+  unpromoted receipt, because a turn that ended before its preflight ran
+  still consumed its dispatch. Without a
   lease there is no turn identity to bound the settle, so nothing is settled
   and the in-flight horizon stays the bound. Before this, a route-dispatched
   turn that ended normally read as live (`dispatch_turn_running`) for the

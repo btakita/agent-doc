@@ -92,7 +92,11 @@ fail-closed; socket-only adoption applies only while status is not yet ready.
 - The first domain is pane layout:
   `agent-doc/pane-layout/desired/v1` carries the editor's desired columns/window/
   focus and `agent-doc/pane-layout/status/v1` carries the controller's derived
-  desired/observed/effect state. Tmux reconciliation is a retained Lazily effect:
+  desired/observed/effect state of the shared navigation lane. In
+  `per_installation` navigation, each installation lane publishes its own status
+  on `agent-doc/pane-layout/status/v1/lane/<installation>`, and a
+  `state_plane_subscribe` naming its `client_id` reads its own lane's channel
+  (see `specs/07-session-tmux-commands.md`). Tmux reconciliation is a retained Lazily effect:
   desired generation and actor bindings form the exact input key. Drift or an
   effect failure derives stable `retry_pending` and retires the worker until a
   desired-layout or actor-binding projection changes. The controller does not

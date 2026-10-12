@@ -148,6 +148,10 @@ pub struct ControllerEditorRouteInvocation {
     /// route's layout, so the layout plane owns tmux topology for the rest of
     /// the route. Route must not raw-join a stashed pane back into view.
     pub layout_owned_by_controller: bool,
+    /// `#ideriderindependentnav` P6: the requesting editor surface client when
+    /// the route acts for an installation navigation lane. A pane the route
+    /// starts lives in that lane's session; `None` keeps the shared target.
+    pub navigation_client_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -243,6 +247,15 @@ pub struct ControllerTmuxLayoutSyncInvocation {
     /// projection immediately before crossing the tmux boundary.
     #[serde(skip)]
     pub actor_bindings: Vec<ControllerTmuxActorBinding>,
+    /// The editor surface client that requested this sync
+    /// (`#ideriderindependentnav` P6). An explicit `sync_tmux_layout` command
+    /// naming its client id publishes into that client's navigation lane; no
+    /// client id (and every client in `shared` mode or unscoped) is the shared
+    /// lane. Consumed when the command is routed, so it never reaches a lane
+    /// graph's retained invocation, and omitted from the wire when unset, so a
+    /// pre-lane caller's payload is byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -418,6 +431,12 @@ pub struct ControllerStatePlaneSubscribeInvocation {
     pub after_version: u64,
     #[serde(default)]
     pub timeout_ms: u64,
+    /// The subscribing editor surface client id (`#ideriderindependentnav`
+    /// P6). A subscription to a per-lane channel (pane-layout status) reads
+    /// that client's navigation lane's channel. Omitted, or for an unscoped
+    /// client or shared mode, it reads the shared lane: the pre-lane channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1453,6 +1472,21 @@ struct ControllerPaneLayoutGraph {
     width_memory: Mutex<PaneLayoutWidthMemory>,
     waiters: Condvar,
     wait_lock: Mutex<()>,
+    /// The navigation lane this graph belongs to. Its status is published on
+    /// that lane's own channel ([`pane_layout_status_channel`]).
+    lane: agent_doc_editor_surface::NavigationLane,
+    /// The producer epoch of this lane's pane-layout status channel. Each lane
+    /// channel is its own producer stream, so one lane's publications never
+    /// advance (or skip) another lane's epochs.
+    status_epoch: AtomicU64,
+}
+
+/// The state-plane channel carrying `lane`'s pane-layout status
+/// (`#ideriderindependentnav` P6). The shared lane is
+/// [`PANE_LAYOUT_STATUS_STATE_CHANNEL`] itself (the pre-lane wire); an
+/// installation lane has its own `<channel>/lane/<installation>` channel.
+pub fn pane_layout_status_channel(lane: &agent_doc_editor_surface::NavigationLane) -> String {
+    lane.state_channel(PANE_LAYOUT_STATUS_STATE_CHANNEL)
 }
 
 /// Process-scoped derivative of the durable document-to-view binding
@@ -1572,7 +1606,11 @@ impl ControllerPaneLayoutGraph {
         scope: &agent_doc_state_scope::ProcessScope,
         live_actor_bindings: Computed<ControllerActorStore>,
     ) -> Self {
-        Self::new_in_process_ctx(scope.ctx().clone(), live_actor_bindings)
+        Self::new_in_process_ctx(
+            scope.ctx().clone(),
+            live_actor_bindings,
+            agent_doc_editor_surface::NavigationLane::Shared,
+        )
     }
 
     /// Build a graph in an existing controller `ProcessScope` graph.
@@ -1585,6 +1623,7 @@ impl ControllerPaneLayoutGraph {
     fn new_in_process_ctx(
         ctx: ThreadSafeContext,
         live_actor_bindings: Computed<ControllerActorStore>,
+        lane: agent_doc_editor_surface::NavigationLane,
     ) -> Self {
         let desired = ctx.source(None::<PaneLayoutDesired>);
         let structural_receipt = ctx.source(None);
@@ -1684,7 +1723,19 @@ impl ControllerPaneLayoutGraph {
             width_memory: Mutex::new(PaneLayoutWidthMemory::default()),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
+            lane,
+            status_epoch: AtomicU64::new(1),
         }
+    }
+
+    /// This lane's pane-layout status channel.
+    fn status_channel(&self) -> String {
+        pane_layout_status_channel(&self.lane)
+    }
+
+    /// The next producer epoch of this lane's status channel.
+    fn next_status_epoch(&self) -> u64 {
+        self.status_epoch.fetch_add(1, Ordering::SeqCst)
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -2347,6 +2398,7 @@ impl ControllerPaneLayoutLanes {
         let shared = Arc::new(ControllerPaneLayoutGraph::new_in_process_ctx(
             ctx.clone(),
             live_actor_bindings,
+            agent_doc_editor_surface::NavigationLane::Shared,
         ));
         let lanes = BTreeMap::from([(
             agent_doc_editor_surface::NavigationLane::Shared,
@@ -2396,6 +2448,7 @@ impl ControllerPaneLayoutLanes {
         let graph = Arc::new(ControllerPaneLayoutGraph::new_in_process_ctx(
             self.ctx.clone(),
             self.live_actor_bindings,
+            lane.clone(),
         ));
         if let Some(factory) = self.sink_factory.lock().as_ref() {
             graph.install_sink(factory(lane));
@@ -3094,8 +3147,13 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         Ok(ControllerEditorRouteRuntimeResult {
             exit_code: 0,
             output: format!(
-                "test editor route accepted for {}",
-                invocation.relative_path
+                "test editor route accepted for {}{}",
+                invocation.relative_path,
+                invocation
+                    .navigation_client_id
+                    .as_deref()
+                    .map(|client| format!(" navigation_client={client}"))
+                    .unwrap_or_default(),
             ),
         })
     }
@@ -8217,12 +8275,6 @@ impl ControllerRuntime {
         )
     }
 
-    /// Publications the layout arbiter displaced or refused since the last
-    /// drain (`layoutpublisherarbiter`).
-    fn drain_pane_layout_supersessions(&self) -> Vec<PaneLayoutSupersession> {
-        self.pane_layout_graph().drain_supersessions()
-    }
-
     /// The newest `pane_layout_desired` frame version on the editor state
     /// plane, whether or not it has been projected yet.
     fn pane_layout_plane_head(&self) -> Option<u64> {
@@ -8230,8 +8282,9 @@ impl ControllerRuntime {
             .latest_plane_version(PANE_LAYOUT_DESIRED_STATE_CHANNEL)
     }
 
-    /// An installation lane projected plane version `version` into its own
-    /// graph; the shared lane's plane catch-up counts it as seen.
+    /// Plane version `version` was dispatched to an installation lane's own
+    /// graph and never reaches the shared one; the shared lane's plane
+    /// catch-up counts it as seen from dispatch (`#laneplaneflake`).
     fn note_pane_layout_plane_seen_in_other_lane(&self, version: u64) {
         self.pane_layout_graph().note_plane_seen(version);
     }
@@ -8260,23 +8313,9 @@ impl ControllerRuntime {
             .record_gated(generation, gated_documents);
     }
 
-    /// GH #136 follow-up (d): claim a recycle-settle republish (see
-    /// [`agent_doc_controller::pane_layout::recycle_settle_republishes_layout`]).
-    pub(crate) fn claim_pane_layout_recycle_republish(
-        &self,
-        settled_document_was_gated: &dyn Fn(&[String]) -> bool,
-    ) -> bool {
-        self.pane_layout_graph()
-            .claim_recycle_republish(settled_document_was_gated)
-    }
-
-    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    #[cfg(test)]
     fn pane_layout_projection(&self) -> PaneLayoutProjection {
         self.pane_layout_graph().projection()
-    }
-
-    fn pane_layout_state_projection(&self) -> Option<ControllerPaneLayoutStateProjection> {
-        self.pane_layout_graph().state_projection()
     }
 
     fn record_pane_layout_observation(&self, observation: PaneLayoutObservation) {
@@ -8296,42 +8335,6 @@ impl ControllerRuntime {
         self.pane_layout_graph()
             .ctx
             .get(&self.pane_layout_graph().owned_assignments)
-    }
-
-    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-    fn await_pane_layout_generation(
-        &self,
-        generation: u64,
-        timeout: Duration,
-    ) -> PaneLayoutProjection {
-        self.pane_layout_graph()
-            .await_generation(generation, timeout)
-    }
-
-    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-    fn await_pane_layout_route_document(
-        &self,
-        document: &str,
-        timeout: Duration,
-    ) -> PaneLayoutProjection {
-        self.pane_layout_graph()
-            .await_route_document(document, timeout)
-    }
-
-    /// GH #110: await a change from `observed` for at most `timeout`. See
-    /// [`ControllerPaneLayoutGraph::await_projection_change`].
-    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-    fn await_pane_layout_projection_change(
-        &self,
-        observed: &PaneLayoutProjection,
-        timeout: Duration,
-    ) -> PaneLayoutProjection {
-        self.pane_layout_graph()
-            .await_projection_change(observed, timeout)
-    }
-
-    fn release_pane_layout_route_lease(&self, generation: u64) -> Option<PaneLayoutDesired> {
-        self.pane_layout_graph().release_route_lease(generation)
     }
 
     fn try_claim_coordination(&self, scopes: &[String], owner_token: &str, owner_pid: u32) -> bool {
@@ -11757,6 +11760,7 @@ mod tests {
                 caller_kind: caller_kind.to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             };
 
         assert!(invocation("manual", false).routes_created_panes());
@@ -11778,6 +11782,7 @@ mod tests {
                 caller_kind: "projection".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             provenance: PaneLayoutProvenance::default(),
         }
@@ -12078,6 +12083,7 @@ mod tests {
                 caller_kind: "automatic".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             None,
         );
@@ -12158,6 +12164,7 @@ mod tests {
                     caller_kind: "automatic".to_string(),
                     column_order: Default::default(),
                     actor_bindings: Vec::new(),
+                    client_id: None,
                 },
                 source_plane_version: None,
                 provenance: PaneLayoutProvenance::default(),
@@ -12255,6 +12262,7 @@ mod tests {
                 caller_kind: "automatic".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             None,
         );
@@ -12286,6 +12294,7 @@ mod tests {
                 caller_kind: "automatic".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             None,
         );
@@ -22659,6 +22668,7 @@ revised operator request
                 caller_kind: "automatic".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             source_plane_version: None,
             provenance: PaneLayoutProvenance::default(),

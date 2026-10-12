@@ -49,7 +49,7 @@ may republish the retained intent, but remains subject to the same rule.
 
 ## start
 
-`agent-doc start <FILE> [--force]`
+`agent-doc start <FILE> [--force] [--client-id ID]`
 
 - Server identity observation represents an absent server or empty bootstrap
   reply explicitly and leaves the prior identity/registry untouched. The first
@@ -70,10 +70,24 @@ may republish the retained intent, but remains subject to the same rule.
 - `--force` is the only supported escape hatch for intentionally rebinding the current pane during repair work, and the registry rebind must still record supersession provenance in the session log.
 - When a fresh start falls back to a new session binding because the configured session is dead, `.agent-doc/config.toml` must be updated to the new live session.
 - Harness launches must auto-add writable roots for parent-repo patchback and nested submodule git metadata when needed.
+- Navigation lanes (`#ideriderindependentnav` P6): `--client-id` names the requesting editor
+  surface client. From outside tmux, with `editor_navigation = "per_installation"`, a
+  `tmux_session` pin, and an installation-scoped client, the start pane is created in that
+  client's own lane session (provisioned on first use; a new lane's idle placeholder pane becomes
+  the start pane and loses its `@agent_doc_navigation_lane_placeholder` mark, so the lane gc
+  judges it by its foreground command), logged `start_navigation_lane_target`. A document that already has a live
+  pane anywhere is reused where it lives, never started again in the lane. Inside tmux the start
+  binds the current pane and the flag changes nothing. Shared mode and unscoped clients keep the
+  shared session. In `per_installation` mode a start whose pane lives in one of the project's own
+  navigation lane sessions (marked `@agent_doc_navigation_lane` = root) is never auto-relocated
+  into the project session (`start_navigation_lane_pane_kept`): before this, every lane-started
+  pane (route, claim, or a lane layout's provisioning) was moved into the shared session when its
+  `agent-doc start` ran. In `shared` mode a lane session is stale, so the pre-lane relocation
+  still applies, alongside the shared sync's adoption of stale lane panes.
 
 ## route
 
-`agent-doc route <FILE> [--pane P] [--debounce MS]`
+`agent-doc route <FILE> [--pane P] [--debounce MS] [--client-id ID]`
 
 - Routes a harness-native reopen command into the authoritative pane for the document.
 - Unless explicitly disabled with `--debounce 0`, route first waits for both filesystem mtime and the shared editor typing indicator to be idle for the debounce window (default 500ms). If the combined proof does not settle within the bounded wait, route fails before inserting frontmatter, cleaning duplicate answered prompt tails, or submitting pane input.
@@ -148,7 +162,7 @@ may republish the retained intent, but remains subject to the same rule.
 - When any busy-pane dispatch-only path finds the pane still busy after auto-fix, route must attempt interrupt recovery for OpenCode as well as Codex. For OpenCode, the interrupt sequence sends Escape twice and then waits for an idle prompt. This handles the post-`Clear Session Context` scenario where the agent-doc child process is still running and OpenCode is showing a progress bar.
 - File-scoped `agent-doc session clear <FILE>` must resolve a direct-pane submit target in the same order that routed reopen prefers an existing live session binding: authoritative actor pane first, then a current live-owner pane for the same file, then the registry pane. Only when none of those panes is directly addressable on the default tmux server may clear fall back to supervisor IPC inject.
 - File-scoped `agent-doc session clear <FILE>` must not run the starting-actor readiness guard, but its operator guard is owned by FlowCore `operator_clear`: clear may submit `/clear` after an idle prompt, clean-exit proof, no live pane evidence, or an otherwise unclassified busy projection with no protected input and no explicit busy cue. A live `agent-doc`/harness wrapper process is not blocking evidence by itself. Protected prompt input such as a permission prompt, queued draft, shell history search, or drafted user text remains a distinct refusal reason; explicit busy cues such as an active Codex turn, hook-review prompt, or help/usage screen fail closed with typed UX data and a pointer to `agent-doc session interrupt-clear <FILE>`. Operators use `interrupt-clear` for intentional destructive discard.
-- The `operator_clear` guard consults the supervisor's live-turn evidence (`harness_turn_live`) BEFORE any input is sent, and that evidence outranks a rendered prompt and the unclassified-busy fallback (GH #232). The evidence is the same read the supervisor's empty-preflight reclaim probe makes: the harness-authored turn-active lease for the evidence pane (with its `#staleharnessturnlive` interrupted-transcript retirement, its `#sdkclearwedge` abandoned-prompt retirement, and TTL expiry), or an observed, unsettled `running` dispatch receipt for the document (`#idledispatchstack`) inside the in-flight horizon, which covers the gap between a dispatched trigger going busy and the hook writing its lease. A lease that the harness transcript proves ended (an interrupt, or a prompt cancelled before Claude Code persisted it) is retired before either read, and the `running` receipts dispatched at or before it are settled with it. When the turn ended before its preflight promoted any receipt (Run Agent Doc, then Ctrl+C in a Codex pane, whose preflight runs from the model's first tool call rather than inside `UserPromptSubmit`), the oldest still-`accepted` dispatch receipt at or before the lease is settled instead (`#codexclearwedge`), so the ended turn no longer reads as `dispatch_turn_pending` for the 120s pre-turn grace. The guard logs `turn_status_projection_repaired source=operator_clear_guard`, so an idle prompt after a cancelled turn clears (`specs/15-turn-lifecycle.md` § Cancelled-before-persist prompts). Background subagents (`← N agents`) are not live-turn evidence. While it holds, the guard records `flow=operator_clear stage=operator_guard outcome=blocked reason=harness_turn_live`, never `reason=idle_prompt`; an active auto-queue loop takes the existing pause-and-defer path. Otherwise, when the document's supervisor is healthy and reachable and owns the evidence pane, the clear is QUEUED behind the turn (`#clearqueuedliveturn`): the command records one deferred context-clear projection with source `operator_live_turn_deferred_clear`, logs `session_clear_live_turn_deferred ... ui_outcome=queued`, prints `session_clear queued for <file> — a turn is live in pane <pane> (harness_turn_live=true evidence=<kind>, source=<source>) ... ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none`, types nothing into the pane, and exits 0. The notice cites the evidence and its age (`evidence=<kind> evidence_age_secs=<n>`, the lease's `UserPromptSubmit` second or the oldest open dispatch receipt), so a receipt that outlived its turn is visible instead of silently absorbing presses. Live-turn evidence also includes `dispatch_turn_pending`: a dispatch accepted for the document (Run Agent Doc) whose turn has not started, inside the pre-turn grace (`DISPATCH_PRE_TURN_GRACE_SECS`, 120s); a clear typed then would race the trigger into the composer, so it is queued behind that turn. Operator command receipts (`session_*`, including the clear's own) are never dispatches: they are not pending evidence and a turn's preflight never promotes one to `running`. A repeat press while a live-turn clear is pending RE-ARMS the one queued clear (a new clear epoch whose `marked_secs` is the latest press; `rearmed=true` in the notice and in `session_clear_live_turn_deferred`) instead of absorbing it; an auto-loop deferral is still reported as `session_clear already deferred`. Only when no supervisor owns the pane — so nothing would ever deliver a queued clear — does clear refuse, with `ui_outcome=blocked_with_exact_unblocker next_action=wait_for_turn_or_interrupt_then_retry unblocker=wait_for_turn_end_no_supervisor_to_queue_clear`, stating that no `/clear` was sent or queued. That refusal must not name `clear_queued_behind_busy_turn`, which is reserved for the post-delivery verdict where the harness itself queued a typed `/clear` in its composer (`harness_queued_input`). Neither the queued outcome nor this evidence-backed refusal (nor a protected-input refusal) is a dogfood `ACTIONABLE_AGENT_DOC_FIX_PROMPT`: they are the guard working, with an exact operator unblocker, and are not a turn that failed to complete.
+- The `operator_clear` guard consults the supervisor's live-turn evidence (`harness_turn_live`) BEFORE any input is sent, and that evidence outranks a rendered prompt and the unclassified-busy fallback (GH #232). The evidence is the same read the supervisor's empty-preflight reclaim probe makes: the harness-authored turn-active lease for the evidence pane (with its `#staleharnessturnlive` interrupted-transcript retirement, its `#sdkclearwedge` abandoned-prompt retirement, and TTL expiry), or an observed, unsettled `running` dispatch receipt for the document (`#idledispatchstack`) inside the in-flight horizon, which covers the gap between a dispatched trigger going busy and the hook writing its lease. A lease that the harness transcript proves ended (an interrupt, or a prompt cancelled before Claude Code persisted it) is retired before either read, and the `running` receipts dispatched at or before it are settled with it. When the turn ended before its preflight promoted any receipt (Run Agent Doc, then Ctrl+C in a Codex pane, whose preflight runs from the model's first tool call rather than inside `UserPromptSubmit`), the oldest still-`accepted` dispatch receipt at or before the lease is settled instead (`#codexclearwedge`), so the ended turn no longer reads as `dispatch_turn_pending` for the 120s pre-turn grace. That settle runs on the lease-retirement edge itself (`#infraclearsession`), so it also holds when another reader retired the interrupted lease before the guard looked. The guard logs `turn_status_projection_repaired source=operator_clear_guard`, so an idle prompt after a cancelled turn clears (`specs/15-turn-lifecycle.md` § Cancelled-before-persist prompts). Background subagents (`← N agents`) are not live-turn evidence. While it holds, the guard records `flow=operator_clear stage=operator_guard outcome=blocked reason=harness_turn_live`, never `reason=idle_prompt`; an active auto-queue loop takes the existing pause-and-defer path. Otherwise, when the document's supervisor is healthy and reachable and owns the evidence pane, the clear is QUEUED behind the turn (`#clearqueuedliveturn`): the command records one deferred context-clear projection with source `operator_live_turn_deferred_clear`, logs `session_clear_live_turn_deferred ... ui_outcome=queued`, prints `session_clear queued for <file> — a turn is live in pane <pane> (harness_turn_live=true evidence=<kind>, source=<source>) ... ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none`, types nothing into the pane, and exits 0. The notice cites the evidence and its age (`evidence=<kind> evidence_age_secs=<n>`, the lease's `UserPromptSubmit` second or the oldest open dispatch receipt), so a receipt that outlived its turn is visible instead of silently absorbing presses. Live-turn evidence also includes `dispatch_turn_pending`: a dispatch accepted for the document (Run Agent Doc) whose turn has not started, inside the pre-turn grace (`DISPATCH_PRE_TURN_GRACE_SECS`, 120s); a clear typed then would race the trigger into the composer, so it is queued behind that turn. Operator command receipts (`session_*`, including the clear's own) are never dispatches: they are not pending evidence and a turn's preflight never promotes one to `running`. A repeat press while a live-turn clear is pending RE-ARMS the one queued clear (a new clear epoch whose `marked_secs` is the latest press; `rearmed=true` in the notice and in `session_clear_live_turn_deferred`) instead of absorbing it; an auto-loop deferral is still reported as `session_clear already deferred`. Only when no supervisor owns the pane — so nothing would ever deliver a queued clear — does clear refuse, with `ui_outcome=blocked_with_exact_unblocker next_action=wait_for_turn_or_interrupt_then_retry unblocker=wait_for_turn_end_no_supervisor_to_queue_clear`, stating that no `/clear` was sent or queued. That refusal must not name `clear_queued_behind_busy_turn`, which is reserved for the post-delivery verdict where the harness itself queued a typed `/clear` in its composer (`harness_queued_input`). Neither the queued outcome nor this evidence-backed refusal (nor a protected-input refusal) is a dogfood `ACTIONABLE_AGENT_DOC_FIX_PROMPT`: they are the guard working, with an exact operator unblocker, and are not a turn that failed to complete.
 - A deferred operator clear dropped for a newer prompt is surfaced to the operator, not silent (`#clearsupersedenotice`). The watch retires it through `retire_superseded_queue_context_clear_deferred_for_file(file, "newer_prompt")`, whose `queue_context_clear_settled` RPC carries `retired_reason=newer_prompt`; the controller folds that `QueueContextClearSettled { retired_reason }` fact, when it settles a still-`Deferred` clear, into `QueueContextClearProjection.superseded` (`clear_epoch`, `target`, `source`, `reason`, `deferred_at`, `superseded_at`) and logs `queue_context_clear_projection_settled ... retired_reason=newer_prompt superseded_epoch=<n>`. A settle without a reason (delivery, `interrupt-clear`, the `#sdkclearwedge` harness-satisfied retirement) or of a clear that was not deferred records no notice, and the next deferred or started clear clears it. The document-turn authority Computed projects it as `TurnProjection.deferred_clear_superseded` (`clear_epoch`, `pane`, `reason`, `superseded_at`), a reactive edge of the document projection on the existing `document_turn_authority_stream`, independent of the turn phase (the newer prompt's turn is usually still running). The supersession happens asynchronously inside the supervisor, long after `session clear` exited with `ui_outcome=queued`, so this stream — not the command's exit — is the only path to the editor. Editors render it per `editors/SPEC.md` § Clear Session Context.
 - The supervisor idle-queue watch delivers a live-turn-queued clear exactly like an auto-loop deferral: at an idle boundary (dispatch-ready prompt, no turn-active lease for its pane), it submits the harness clear and promotes the projection to in-flight. Recording the deferral is itself a watch edge (`#idleclearrestart`): the controller publishes a document-scoped `agent-doc/operator-clear-wake/v1/<document>` state-plane frame for every deferral (each re-arm included), and the watch parks on it. A Ready, quiescent watch otherwise re-derives nothing until a document revision, editor delivery, or actor edge, and a deferred clear produces none of those; a clear queued behind a route-dispatched turn (the actor never moves) or an abandoned prompt waited for an unrelated document edit. A failed wake publish is logged (`queue_context_clear_wake_publish_failed`) and never fails the deferral. A live-turn deferral additionally waits while the document has an unsettled `running` dispatch receipt, because that turn may have been proven live by the receipt alone and a composer redrawn between tool calls is not an idle boundary (GH #232); an unreadable receipt store fails closed (keeps waiting). The receipt settles at the turn end: the harness turn-end hook (`turn-status idle`) settles the `running` receipts of its pane's documents dispatched at or before the ended turn's lease heartbeat (`specs/15-turn-lifecycle.md` § Cancelled-before-persist prompts, Dispatch receipt), because a route dispatch never moves the actor and so never meets a `Ready` edge. `tests/clear_queued_live_turn_tmux.rs` (`make tmux-ci`) runs this end to end against the real supervisor with a fake harness: a clear pressed while a route-dispatched turn is proven live only by its receipt exits 0 with `ui_outcome=queued`, a repeat press reports the queued clear, exactly one `/clear` reaches the pane after the `Stop` hook, and a newer prompt before the turn end delivers none. It also covers Clear → Run → Clear after a normally ended route turn with Claude background agents running (the clear at the idle prompt is immediate; the second waits behind the run and lands after it) and a repeat press re-arming the clear behind a run started before it. It also asserts an idle-prompt Clear types `/clear` into the SAME fake harness process (PID unchanged, no restart, no follow-up document trigger) while a background job that process owns keeps running (`#idleclearrestart`). Once a deferral is observed, every watch tick reaches this decision until it is delivered or retired, so delivery follows the turn end instead of the quiescent-maintenance cadence. A deferred clear (either source) never fires after it is superseded: an explicit `interrupt-clear` settles it before running; a harness `SessionStart` `clear`/`startup` receipt newer than the deferral retires it (`#sdkclearwedge`; this also covers the session restarting or the document's session closing and starting again); and a NEWER prompt on the pane — a turn-active lease whose `UserPromptSubmit` second is later than the first lease the watch observed for that deferral — retires it with `idle_queue_watch_deferred_clear_superseded reason=newer_prompt`, because the operator continued the conversation. Exception: when the document has an open dispatch accepted after the deferral's own turn started and at or before its latest press (`marked_secs`) — Run Agent Doc pressed BEFORE Clear — the newer lease is that dispatched turn, so the watch adopts it as the clear's turn (`idle_queue_watch_deferred_clear_adopted_turn reason=dispatched_before_press`) and delivers after it. Clear → Run Agent Doc → Clear therefore ends with the clears in press order, never with zero (haiven-dev `tasks/sdk.md` pane %180, 2026-10-11). The baseline is the first lease observed, not the lease at deferral time, so a clear queued on `dispatch_turn_running` evidence before the hook wrote its lease adopts that late lease as its own turn. The baseline is supervisor-local: a supervisor re-exec while a deferral is pending re-baselines on the turn it then observes. Protected input and clean-exit proof keep their own reasons. The guard is read-only with respect to actor state: an idle-looking composer under live-turn evidence never projects `state=ready reason=live_pane_idle` and never releases the dispatch in-flight marker; every operator idle-projection reconcile skips with `session_operator_idle_projection_reconcile_skipped reason=harness_turn_live`.
 - After a successful clear delivery, `agent-doc session clear <FILE>` must reclaim any orphaned open preflight cycle the cleared turn left behind so a following `Run Agent Doc` is not wedged by a stale open cycle (`#clear-stops-running-process`). It reuses the same reclaim semantics as explicit run-cancel (`#cancel-orphans-preflight-cycle`): an empty `preflight_started` cycle is abandoned, while a cycle that already captured a response is protected and left intact. The reclaim is best-effort — a failure is logged as a warning and never fails the clear, which already delivered — and records a `session_clear_cycle_reclaim` ops-log diagnostic with the reclaim outcome.
@@ -171,9 +185,29 @@ may republish the retained intent, but remains subject to the same rule.
 - Claude Code, Codex, and OpenCode dispatch-only routes label accepted pane delivery as accepted-only when no dispatch-start proof is available. OpenCode pane-state transition proof, when observed, is recorded as stronger dispatch-start proof (`proof=pane_state_changed proof_scope=dispatch_start`).
 - Frontmatter-only metadata churn must not count as prompt-bearing work that blocks or requires a routed admission projection.
 
+- Navigation lanes (`#ideriderindependentnav` P6): a route acts for a requesting editor client,
+  `--client-id` on the CLI or the controller `editor_route` payload's `client_id` (JetBrains sends
+  its surface client id). With `editor_navigation = "per_installation"`, an installation-scoped
+  client, and a resolved target that is the `tmux_session` pin, the route's target session becomes
+  that client's lane session, provisioned on first use (an unmarked same-named session fails
+  closed), logged `route_navigation_lane_target`. Only a pane the route starts lands there: an
+  existing pane is resolved from the actor binding and registry and dispatched where it lives, in
+  any lane (`requester_pane_placement`); a stash rescue applies only to a pane already in the lane.
+  A start into an installation lane session (any session marked `@agent_doc_navigation_lane` for
+  this root) is staged in the lane's `stash` window (`route_startup_navigation_lane_staged`) for
+  the lane's layout to place: the lane's idle placeholder shell never blocks it as an unowned
+  anchor, and route runs no raw post-start window sync there. The controller `editor_route` from
+  such a client merges over, publishes into, and awaits that client's own lane graph
+  (`controller_editor_route_navigation_lane`), never the shared lane's, and skips the cross-root
+  main-window delegation (an installation lane is this root's own session); the lane's layout
+  provisions the routed document's pane in the lane. The route stays a passive lane claim, so a
+  document whose pane lives in another lane is dropped from the requester's layout as before; the
+  Claim actions hand it over. Shared mode, a route without a client, an unscoped client, and a
+  multi-session document binding other than the pin keep the shared target byte for byte.
+
 ## claim
 
-`agent-doc claim <FILE> [--position left|right|top|bottom] [--window W] [--pane P] [--new-pane]`
+`agent-doc claim <FILE> [--position left|right|top|bottom] [--window W] [--pane P] [--new-pane] [--client-id ID]`
 
 - After pane/session admission, claim persists any generated document UUID before
   every provisioning branch, including occupied-pane and cross-root fallbacks.
@@ -188,6 +222,16 @@ may republish the retained intent, but remains subject to the same rule.
 - Pane validation runs **before** any file mutation (`#claim-validate-before-scaffold`). `claim` resolves the pane and applies the cross-session guard before the empty-file auto-scaffold writes/commits the document. A rejected cross-session claim must leave the target file byte-identical (no scaffold, no `agent-doc(<doc>)` commit) — earlier the auto-scaffold ran first, so an empty `.md` opened in a pane on the wrong tmux session was scaffolded and committed and *then* the claim failed with "pane %N is in tmux session '1' but project session is '0'", converting a file the operator never opted into.
 - Explicit claim performs only file-scoped stale-binding validation. It must not invoke global resync/prune work or wait on unrelated panes before mutating the requested document.
 - For new template documents, `claim` scaffolds the default `status` and `exchange` components and saves a baseline snapshot with empty exchange content.
+
+- Navigation lanes (`#ideriderindependentnav` P6): `--client-id` names the requesting editor
+  surface client (the JetBrains Claim for Tmux Pane, Force Claim, and New Pane actions pass it).
+  With `editor_navigation = "per_installation"`, an installation-scoped client, and the pin as the
+  claim's authoritative session, every pane the claim provisions (`--new-pane`, no pane evidence,
+  an occupied or foreign-owned pane) starts in that client's own lane session, provisioned on
+  first use (`claim_navigation_lane_target`) and staged in its `stash` for the lane's layout to
+  place. A pane that already lives in that client's own marked lane session passes the
+  cross-session check (`claim_navigation_lane_pane_accepted`); a pane in another IDE's lane is
+  still refused without `--force`. Shared mode and unscoped clients are unchanged.
 
 ## focus
 
@@ -256,17 +300,56 @@ loses desktop focus.
   session. The controller keeps one pane-layout graph per lane (its own desired layout,
   observation, receipt, structural assignments, width memory, and published generation, all in the
   controller process scope and derived from the one actor store); the shared lane's graph is the
-  one every non-lane caller uses (route, recycle republish, the `sync_tmux_layout` command), and
-  installation lanes' graphs are created on first use.
+  one every non-lane caller uses (a route without an installation-lane client, and a
+  `sync_tmux_layout` command without a client id), and installation lanes' graphs are created on
+  first use. An editor route from an installation lane's client uses that lane's graph (P6, see
+  `route`).
 - Plugin layout publications are lane-routed (P3): a `pane_layout_desired` state-plane frame
   carries its publisher's surface `client_id`, and the controller projects it into that client's
   lane graph (a frame without one, and every frame in shared mode, is the shared lane). Each lane
   has its own latest-wins projector, so one installation's newer frame never coalesces away
   another's. The manual Sync Tmux Layout action publishes this way, so it arranges the requesting
-  IDE's own lane. A lane frame counts as seen for the shared lane's route plane catch-up.
+  IDE's own lane. A lane frame counts as seen for the shared lane's route plane catch-up from
+  the moment it is dispatched to its lane, before (and regardless of whether) the lane's
+  projector applies it, so a shared-lane route never waits on another lane's projector.
+- The `sync_tmux_layout` controller command is lane-routed (P6): its invocation may carry the
+  requesting editor surface's `client_id` (FFI `agent_doc_sync_tmux_layout_for_client_json`; the
+  command-plane payload `agent-doc.sync_tmux_layout.v1` carries the same optional field, omitted
+  from the wire when unset). The controller consumes the field and publishes the command, as the
+  `command` publisher, into that client's lane graph (`NavigationLane::for_client`), logging
+  `sync_tmux_layout_lane_routed navigation_lane=.. client_id=.. generation=..`; the receipt is that
+  lane graph's projection of the published generation. An installation lane's command never writes
+  the shared durable column memory or the shared status channel. A command without a client id, an
+  unscoped client, and every client in `shared` mode publish into the shared lane exactly as before
+  (the legacy FFI `agent_doc_sync_tmux_layout_json` is the client-scoped entry with no client).
+  A `manual` command is an explicit claim in its own lane (P4).
+- The recycle-settle republish is per lane (P6). When a supervisor reports a settled recycle, every
+  lane graph the controller holds (shared first) claims the republish against its own last pass's
+  gated documents (GH #136 (d)) and, when that lane gated the settled document, republishes its own
+  retained layout as a fresh `recycle_settled` generation into its own lane only
+  (`pane_layout_recycle_settled_republished document=.. navigation_lane=..`; the shared lane's line
+  has no `navigation_lane`). A lane that did not gate the document, or holds no retained layout, is
+  not republished, and one lane's settle never re-projects another lane. Under `per_installation`
+  every lane's republish is passive: a retained explicit claim (`manual`) is republished with
+  `caller_kind = recycle_settled` (`RECYCLE_SETTLED_CALLER_KIND`), so the republish can only drop a
+  document whose pane has since moved to another lane (`cross_lane_layout_dropped`), never hand a
+  pane over; columns, focus, window, and `no_autostart` are the retained ones, so it starts nothing
+  the retained layout would not. In `shared` mode the republish is the retained invocation
+  unchanged, byte for byte as before lanes.
 - Each lane graph has its own effect sink and latest-wins worker, and its structural-effect
   cancellation is bound to that lane's published generation, so a newer layout in one lane never
   supersedes or cancels another lane's sync body.
+- Pane-layout status is per lane (P6): each lane graph publishes its own derived status (phase,
+  reason code, attempt, columns, observation) on its own state-plane channel, with its own producer
+  epoch. The shared lane's channel is `agent-doc/pane-layout/status/v1`, unchanged from before
+  lanes; an installation lane's channel is `agent-doc/pane-layout/status/v1/lane/<installation>`
+  (`NavigationLane::state_channel`). A `state_plane_subscribe` to the status channel may carry the
+  subscriber's surface `client_id`; the controller then reads that client's lane channel
+  (`NavigationLane::for_client`), so an installation lane's sync progress or failure never shows
+  to another lane's subscriber and never displaces the shared channel's retained snapshot. A
+  subscribe without `client_id`, an unscoped client (VS Code), and every client in `shared` mode
+  read the shared channel exactly as before, and the field is omitted from the wire when unset.
+  Other channels ignore `client_id`.
 - Lane routing (`per_installation` only; shared mode is the identity and reads no extra tmux
   state): an editor surface `Sync` publishes into the observing client's lane graph. An
   installation lane's desired layout never writes the shared lane's durable column memory and
@@ -310,8 +393,8 @@ loses desktop focus.
   generation of that layout with `caller_kind = lane_handoff`, `no_autostart`, and publisher
   `lane_handoff` (`navigation_lane_handoff_republished`), so it re-projects without the document
   and can never take the pane back or start a new one. Every other `caller_kind` (`automatic`
-  heartbeats, focus escalations, `editor_route`, `resync`, recycle republishes) is passive and
-  never moves a pane. A handoff retried by the same generation is a no-op (`AlreadyInLane`).
+  heartbeats, focus escalations, `editor_route`, `resync`, `recycle_settled` republishes) is
+  passive and never moves a pane. A handoff retried by the same generation is a no-op (`AlreadyInLane`).
   Shared navigation mode never resolves lane sessions, so it never hands over.
 - Lane migration and cleanup (P5, `agent-doc gc` and the project controller;
   `project_controller::reconcile_navigation_lane_sessions`, planned by the pure
@@ -344,10 +427,27 @@ loses desktop focus.
     from_session=.. to_session=..`; same pane id, so its actor binding stays valid; nothing is
     restarted or duplicated), from where the shared lane's sync places it. When the project
     session is not alive nothing moves or closes (`project_session_missing`). After the folds the
-    lane closes unless a busy unowned pane or an attached client keeps it. Before gc runs, the shared
-    lane's sync applies no lane guard, so a lane pane falls under the ordinary session policy like
-    a pane in any other session; shared mode never targets a lane session, so no pane moves into
-    one.
+    lane closes unless a busy unowned pane or an attached client keeps it.
+  - Switch back before gc (`#ridernavp6switchback`): after the switch to `shared` and before
+    `agent-doc gc` runs, lane sessions still hold document panes. The shared lane's sync then
+    (a) never arranges a lane session: when the session it resolves is a lane of the pin marked
+    for this root (the focused document's pane, or the tmux client's current session, is still
+    there, or the caller names the lane's own `agent-doc` window), it arranges the live project
+    session instead and drops the explicit window (`navigation_lane_stale_target_retargeted
+    stale_session=.. target_session=.. explicit_window=..`, decided by the pure
+    `shared_sync_target_session`), so no project pane is ever joined or swapped into a lane;
+    and (b) adopts each laid-out document whose pane is still in such a lane before the
+    reconcile, with the P4 handoff mechanics (`hand_over_navigation_lane_pane` into the project
+    session's `stash`, an empty shell left when it was the lane window's last pane;
+    `navigation_lane_stale_pane_adopted` / `navigation_lane_stale_pane_adopt_refused`), so the
+    reconcile places the same pane from the project session. This applies to every shared sync,
+    passive heartbeat and manual Sync Tmux Layout alike: in shared mode no IDE navigates a lane,
+    so adopting is the migration gc would do, not a cross-lane move. The pane id and actor
+    binding are unchanged and the pane is alive and registered, so nothing autostarts a second
+    pane; a document outside the shared layout stays in its lane until a sync shows it or gc
+    folds it, and gc then closes the lane. A session that only carries a lane's name (no mark)
+    keeps the pre-lane rules (`#bare-foreign-session-guard`); a dead project session leaves the
+    resolved target unchanged.
   - A close re-observes the session first and closes it only when the fresh plan still closes it
     and it holds no document or busy pane (`close_refused_on_reobserve` otherwise), then runs
     `kill-session -t =<session>` (`navigation_lane_session_closed session=.. mode=..`), which
@@ -376,6 +476,17 @@ loses desktop focus.
     unreadable registry observes nothing, re-observe before close) applies unchanged.
     `agent-doc gc` keeps running the reconcile with `LaneLiveness::Live` of the installations it
     is given (none from the CLI).
+  - Ownership against the shared sync's stale-lane adoption (`#ridernavp6switchback`): after a
+    switch back to `shared`, a sync adopts the lane panes its layout shows, and the controller's
+    start reconcile folds every lane pane and closes the lanes. Every non-dry-run reconcile
+    (controller or `gc`) observes and applies while holding the project's
+    `.agent-doc/sync.lock`, the flock every sync body holds, so the two never interleave: the
+    first to run moves a pane and the other observes it already in the project session (a fold
+    whose pane is already home is skipped, not a failure). An unobtainable lock fails closed
+    (`sync_lock_unavailable`, nothing moved). The controller's worker also runs only while the
+    configured `editor_navigation` still equals the mode its request was derived under
+    (`mode_changed:<from>-><to>` otherwise), so a controller handing off to a successor started
+    under the other mode never folds or closes lanes the successor routes into.
 - The `tmux_focus_state` read projection is per lane: the request's `caller` is the editor client
   id, and the projection reports the active pane of that client's lane session (shared lane: the
   configured session). A lane reports a document only while its own session's current window is

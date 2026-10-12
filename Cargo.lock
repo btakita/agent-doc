@@ -571,6 +571,7 @@ dependencies = [
  "agent-doc-turn-executor",
  "anyhow",
  "base64 0.22.1",
+ "fs2",
  "interprocess",
  "lazily 0.57.1",
  "libc",

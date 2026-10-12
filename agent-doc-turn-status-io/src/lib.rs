@@ -273,6 +273,9 @@ pub struct InterruptedTurnLease {
     /// `abandoned_prompt`).
     pub reason: &'static str,
     pub transcript: PathBuf,
+    /// Dispatch receipts the retirement settled (`#infraclearsession`): the
+    /// ended turn's receipt, settled on the same edge that retires its lease.
+    pub settled_dispatches: usize,
 }
 
 /// Read at most [`TRANSCRIPT_TAIL_PROBE_BYTES`] from the end of `path`.
@@ -330,6 +333,7 @@ fn harness_ended_turn_lease(
         interrupted_at: at_secs,
         reason: transcript_turn_end_reason(evidence)?,
         transcript,
+        settled_dispatches: 0,
     })
 }
 
@@ -349,7 +353,7 @@ fn retire_interrupted_turn_lease(
 fn retire_harness_ended_turn_lease(
     conn: &Connection,
     marker: &TurnActiveMarker,
-    interrupted: InterruptedTurnLease,
+    mut interrupted: InterruptedTurnLease,
 ) -> Option<InterruptedTurnLease> {
     // `#runctrlclaude`: the interrupt (or abandoned prompt) is a
     // harness-authored turn boundary; keep it after the lease row is gone.
@@ -377,6 +381,21 @@ fn retire_harness_ended_turn_lease(
         PROJECT_SCOPE_ID,
         &marker.pane,
     );
+    // `#infraclearsession`: the lease retirement IS the turn-end edge, and any
+    // reader can be the one that observes it (a lease read retires an
+    // interrupted lease as a side effect). Settle the ended turn's dispatch
+    // receipt on this edge, so a retirement by a reader that is not the clear
+    // guard or the supervisor probe cannot strand it `accepted`/`running`
+    // (`dispatch_turn_pending` / `dispatch_turn_running`) with no lease left to
+    // bound a later settle. Best-effort: the pre-turn grace and in-flight
+    // horizon still bound an unsettled receipt.
+    interrupted.settled_dispatches =
+        agent_doc_sqlite::state_store::settle_harness_ended_dispatch_turn_for_pane_at_or_before(
+            conn,
+            &marker.pane,
+            i64::try_from(marker.written_at).unwrap_or(i64::MAX),
+        )
+        .unwrap_or(0);
     Some(interrupted)
 }
 
@@ -815,6 +834,9 @@ fn pane_turn_active_lease_heartbeat(base: &Path, pane: &str) -> Option<u64> {
 /// holding a queued operator clear (and refusing/queuing every fresh one) for
 /// up to 30 minutes. Settle the receipts of the pane's documents dispatched at
 /// or before the ended turn started; a newer turn's receipt is untouched.
+/// `#infraclearsession`: when the turn ended before its preflight promoted any
+/// receipt, the oldest still-`accepted` one at or before the lease is the
+/// turn's and is settled instead (one receipt per turn).
 /// Without a lease there is no turn identity to bound the settle, so nothing is
 /// settled (the in-flight horizon remains the bound). Returns the count.
 pub fn settle_dispatch_turns_ended_on_pane(
@@ -823,7 +845,10 @@ pub fn settle_dispatch_turns_ended_on_pane(
     turn_started_at: u64,
 ) -> Result<usize> {
     let conn = open_state_db(base)?;
-    agent_doc_sqlite::state_store::settle_running_dispatch_turns_for_pane_started_at_or_before(
+    // `#infraclearsession`: a turn that ended before its preflight promoted its
+    // receipt (a Codex turn runs preflight from its first tool call) still
+    // consumed that receipt; settle it too, one receipt per turn.
+    agent_doc_sqlite::state_store::settle_harness_ended_dispatch_turn_for_pane_at_or_before(
         &conn,
         pane,
         i64::try_from(turn_started_at).unwrap_or(i64::MAX),
@@ -1844,6 +1869,151 @@ mod tests {
         );
         world.tick(30);
         assert!(world.live());
+    }
+
+    /// `#infraclearsession`: register `document_id` as the actor running in
+    /// the world's pane and accept one route dispatch for it at the virtual
+    /// clock (Run Agent Doc). Returns the receipt id.
+    fn sim_accept_route_dispatch(world: &TurnSimWorld, document_id: &str) -> u64 {
+        let conn = open_state_db(&world.base).unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO documents \
+             (document_id, canonical_path, session_id, generation, pane_id, window_id, harness_id, actor_state) \
+             VALUES (?1, ?1, 'session-1', 153, ?2, '@1', 'codex', 'ready')",
+            (document_id, world.pane),
+        )
+        .unwrap();
+        let id = agent_doc_sqlite::state_store::insert_dispatch_attempt_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DispatchAttemptInsert {
+                document_id,
+                generation: 153,
+                command_kind: "dispatch_only_reopen",
+                accepted_stage: Some("ready"),
+                failed_stage: None,
+                diagnostic_payload: "{}",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE dispatch_attempts SET timestamp = ?1 WHERE id = ?2",
+            (
+                i64::try_from(world.now).unwrap(),
+                i64::try_from(id).unwrap(),
+            ),
+        )
+        .unwrap();
+        id
+    }
+
+    fn sim_receipt(world: &TurnSimWorld, id: u64) -> (String, bool) {
+        let conn = open_state_db(&world.base).unwrap();
+        conn.query_row(
+            "SELECT COALESCE(result_status, ''), dispatch_start_proven FROM dispatch_attempts WHERE id = ?1",
+            [i64::try_from(id).unwrap()],
+            |row| Ok((row.get(0)?, row.get::<_, i64>(1)? == 1)),
+        )
+        .unwrap()
+    }
+
+    fn sim_dispatch_pending(world: &TurnSimWorld, document_id: &str) -> bool {
+        let conn = open_state_db(&world.base).unwrap();
+        agent_doc_sqlite::state_store::has_pending_dispatch_turn_as_of(
+            &conn,
+            document_id,
+            i64::try_from(world.now).unwrap(),
+        )
+        .unwrap()
+    }
+
+    /// `#infraclearsession` replay (haiven-dev `tasks/infra.md`, pane %152,
+    /// Codex, 2026-10-12): Run Agent Doc accepted receipt 3486 at 15:05:59 and
+    /// Codex's `UserPromptSubmit` hook wrote the lease; the turn's preflight
+    /// (run from Codex's first tool call) started at 15:06:00 but the operator
+    /// interrupted at 15:06:03, before preflight promoted the receipt. The
+    /// first Clear press (15:06:05) was inside the interrupt settle window and
+    /// queued on `turn_active_lease`. Before the next press a NON-clear reader
+    /// read the lease, which retired it from the rollout's `turn_aborted`
+    /// record as a side effect (`turn_ended reason=interrupt`, no
+    /// `turn_status_projection_repaired` line) without settling anything; the
+    /// clear guard then found no lease to retire, and receipt 3486 kept
+    /// answering `dispatch_turn_pending` for every press (15:06:14, :21, :27,
+    /// `rearmed=true`). The next dispatch's preflight (15:06:52) then promoted
+    /// the stale 3486 instead of its own receipt 3491. The retirement edge
+    /// itself must settle the ended turn's receipt, whoever reads it.
+    #[test]
+    fn sim_codex_interrupt_before_preflight_settles_receipt_on_any_retiring_read() {
+        let doc = "/repo/tasks/infra.md";
+        let mut world = TurnSimWorld::new("%152");
+        let stale = sim_accept_route_dispatch(&world, doc);
+        world.codex_submit_prompt("Run agent-doc on tasks/infra.md");
+        world.tick(4);
+        world.codex_interrupt();
+        world.tick(2);
+        assert!(world.live(), "inside the interrupt settle window");
+        assert!(sim_dispatch_pending(&world, doc));
+
+        // Any lease read past the settle window retires it — here the plain
+        // pane read, not the clear guard or the supervisor probe.
+        world.tick(agent_doc_turn::turn_status::TURN_INTERRUPT_SETTLE_SECS);
+        assert!(!world.live());
+        assert_eq!(
+            last_harness_turn_end_for_pane(&world.base, world.pane).map(|r| r.reason),
+            Some("interrupt".to_string())
+        );
+        assert_eq!(
+            sim_receipt(&world, stale),
+            ("accepted".to_string(), true),
+            "the interrupted turn's unpromoted receipt is settled on the retirement edge"
+        );
+        assert!(
+            !sim_dispatch_pending(&world, doc),
+            "the ended turn no longer reads as dispatch_turn_pending"
+        );
+
+        // The next Run Agent Doc's turn promotes ITS OWN receipt.
+        world.tick(25);
+        let next = sim_accept_route_dispatch(&world, doc);
+        world.codex_submit_prompt("Run agent-doc on tasks/infra.md");
+        let conn = open_state_db(&world.base).unwrap();
+        assert_eq!(
+            agent_doc_sqlite::state_store::mark_open_dispatches_turn_started(&conn, doc).unwrap(),
+            1
+        );
+        assert_eq!(sim_receipt(&world, next), ("running".to_string(), false));
+        // And its normal turn end settles it.
+        world.tick(60);
+        let stop = r#"{"hook_event_name":"Stop","stop_hook_active":false}"#;
+        apply_turn_status_hook_at(&world.base, world.pane, false, Some(stop), world.now).unwrap();
+        assert_eq!(sim_receipt(&world, next), ("running".to_string(), true));
+    }
+
+    /// `#infraclearsession`: the `turn-status idle` hook (Codex `Stop`) for a
+    /// turn that ended before its preflight promoted the receipt settles that
+    /// receipt — and only it: a dispatch accepted after the ended turn's lease
+    /// belongs to a newer turn and stays pending.
+    #[test]
+    fn sim_turn_end_hook_settles_an_unpromoted_receipt_one_per_turn() {
+        let doc = "/repo/tasks/infra.md";
+        let mut world = TurnSimWorld::new("%152");
+        let ended = sim_accept_route_dispatch(&world, doc);
+        world.tick(1);
+        world.codex_submit_prompt("Run agent-doc on tasks/infra.md");
+        world.tick(3);
+        let newer = sim_accept_route_dispatch(&world, doc);
+        let stop = r#"{"hook_event_name":"Stop","stop_hook_active":false}"#;
+        apply_turn_status_hook_at(&world.base, world.pane, false, Some(stop), world.now).unwrap();
+        assert!(!world.live());
+        assert_eq!(sim_receipt(&world, ended), ("accepted".to_string(), true));
+        assert_eq!(
+            sim_receipt(&world, newer),
+            ("accepted".to_string(), false),
+            "a dispatch accepted after the ended turn's lease is a newer turn's"
+        );
+        assert!(sim_dispatch_pending(&world, doc));
     }
 
     /// `#devclear`: the exact read Clear Session Context's live-turn guard makes

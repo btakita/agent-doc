@@ -152,6 +152,65 @@ fn provision_authoritative_pane(
         .map(|_| ())
 }
 
+fn project_root_for_claim(file: &Path) -> Option<std::path::PathBuf> {
+    agent_doc_project_root_io::project_root_containing(file)
+        .or_else(|| file.parent().map(Path::to_path_buf))
+}
+
+/// The installation navigation lane session a claim acts for
+/// (`#ideriderindependentnav` P6), without creating it. Only when the claim's
+/// authoritative session is the project's own pin: a multi-session document
+/// binding (GH #17) keeps its own session.
+fn claim_requester_lane(
+    file: &Path,
+    configured_session: Option<&str>,
+    client_id: Option<&str>,
+) -> Option<String> {
+    let client_id = client_id.map(str::trim).filter(|id| !id.is_empty())?;
+    let root = project_root_for_claim(file)?;
+    let (project_session, lane_session) =
+        agent_doc_controller_io::project_controller::navigation_lane_session_name_for_client(
+            &root, client_id,
+        )?;
+    (configured_session == Some(project_session.as_str())).then_some(lane_session)
+}
+
+/// The session a claim provisions a new pane in: the requester's lane session
+/// (created on first use, never adopting a session agent-doc did not create)
+/// when [`claim_requester_lane`] names one, else the authoritative session.
+fn claim_provision_session(
+    tmux: &tmux_router::Tmux,
+    file: &Path,
+    configured_session: Option<&str>,
+    requester_lane: Option<&str>,
+    client_id: Option<&str>,
+) -> Result<Option<String>> {
+    let (Some(_), Some(client_id)) = (requester_lane, client_id) else {
+        return Ok(configured_session.map(str::to_string));
+    };
+    let Some(root) = project_root_for_claim(file) else {
+        return Ok(configured_session.map(str::to_string));
+    };
+    let Some(lane) =
+        agent_doc_controller_io::project_controller::navigation_lane_session_for_client(
+            tmux, &root, client_id,
+        )?
+    else {
+        return Ok(configured_session.map(str::to_string));
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "claim_navigation_lane_target file={} client={} session={} provisioned={}",
+            file.display(),
+            client_id,
+            lane.session,
+            lane.provisioned,
+        ),
+    );
+    Ok(Some(lane.session))
+}
+
 fn enforce_cross_session_claim(
     file: &Path,
     pane_id: &str,
@@ -204,6 +263,11 @@ pub struct ClaimOptions<'a> {
     pub force: bool,
     pub isolate: bool,
     pub new_pane: bool,
+    /// `#ideriderindependentnav` P6: the editor surface client the claim acts
+    /// for (`--client-id`). In `per_installation` mode an installation-scoped
+    /// client's provisioned pane starts in its own navigation lane session,
+    /// and a pane already in that lane is accepted as in the project session.
+    pub client_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,6 +309,7 @@ pub fn run(
         force,
         isolate,
         new_pane,
+        client_id,
     } = options;
     // --isolate: spawn a fresh Claude Code process in a new tmux window scoped to
     // the nearest git repo root for this document (#8jzg).
@@ -341,6 +406,10 @@ pub fn run(
         project_config_io::project_tmux_session()
     };
 
+    // `#ideriderindependentnav` P6: the requester's own navigation lane, when
+    // the claim acts for an installation lane's client (not created here).
+    let requester_lane = claim_requester_lane(file, configured_session.as_deref(), client_id);
+
     // tmux_session frontmatter field is deprecated — no longer written on claim.
     // Session targeting now uses current_tmux_session() at route time.
     // Validate claiming pane is in the configured target session.
@@ -350,7 +419,28 @@ pub fn run(
     {
         let pane_tmux_session =
             agent_doc_tmux_io::target_session_name(&tmux, pane_id).unwrap_or_default();
+        let in_requester_lane = requester_lane.as_deref().is_some_and(|lane| {
+            lane == pane_tmux_session
+                && project_root_for_claim(file).is_some_and(|root| {
+                    agent_doc_controller_io::project_controller::is_owned_navigation_lane_session(
+                        &tmux, &root, lane,
+                    )
+                })
+        });
+        if in_requester_lane {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "claim_navigation_lane_pane_accepted file={} pane={} session={} client={}",
+                    file.display(),
+                    pane_id,
+                    pane_tmux_session,
+                    client_id.unwrap_or("none"),
+                ),
+            );
+        }
         if let Some(configured) = configured_session.as_deref()
+            && !in_requester_lane
             && !pane_tmux_session.is_empty()
             && pane_tmux_session != configured
         {
@@ -479,7 +569,14 @@ pub fn run(
                         file,
                         &session_id,
                         &file_str,
-                        configured_session.as_deref(),
+                        claim_provision_session(
+                            &tmux,
+                            file,
+                            configured_session.as_deref(),
+                            requester_lane.as_deref(),
+                            client_id,
+                        )?
+                        .as_deref(),
                     )?;
                     return Ok(());
                 }
@@ -510,7 +607,14 @@ pub fn run(
             file,
             &session_id,
             &file_str,
-            configured_session.as_deref(),
+            claim_provision_session(
+                &tmux,
+                file,
+                configured_session.as_deref(),
+                requester_lane.as_deref(),
+                client_id,
+            )?
+            .as_deref(),
         )?;
         return Ok(());
     }
@@ -562,7 +666,10 @@ pub fn run(
     if provision_new {
         eprintln!(
             "[claim] provisioning a new pane in authoritative session {}",
-            configured_session.as_deref().unwrap_or("(auto-detect)")
+            requester_lane
+                .as_deref()
+                .or(configured_session.as_deref())
+                .unwrap_or("(auto-detect)")
         );
         provision_authoritative_pane(
             effects,
@@ -570,7 +677,14 @@ pub fn run(
             file,
             &session_id,
             &file_str,
-            configured_session.as_deref(),
+            claim_provision_session(
+                &tmux,
+                file,
+                configured_session.as_deref(),
+                requester_lane.as_deref(),
+                client_id,
+            )?
+            .as_deref(),
         )?;
         return Ok(());
     }
@@ -904,6 +1018,86 @@ mod tests {
         assert_eq!(
             *effects.provisions.lock().unwrap(),
             vec![(Some("project-session".to_string()), Vec::new())]
+        );
+    }
+
+    /// `#ideriderindependentnav` P6: a claim acts for its client's own lane
+    /// only in `per_installation` mode, for an installation-scoped client, and
+    /// when the claim's authoritative session is the project pin.
+    #[test]
+    fn claim_requester_lane_is_the_clients_lane_only_for_the_pinned_session() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let config = dir.path().join(".agent-doc/config.toml");
+        std::fs::write(
+            &config,
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "x").unwrap();
+        let idea = Some("jetbrains@IU.0a1b2c3d-pid:41");
+        assert_eq!(
+            claim_requester_lane(&doc, Some("proj"), idea).as_deref(),
+            Some("proj-IU-0a1b2c3d")
+        );
+        assert_eq!(claim_requester_lane(&doc, Some("other"), idea), None);
+        assert_eq!(claim_requester_lane(&doc, None, idea), None);
+        assert_eq!(claim_requester_lane(&doc, Some("proj"), None), None);
+        assert_eq!(
+            claim_requester_lane(&doc, Some("proj"), Some("vscode-pid:9")),
+            None
+        );
+        std::fs::write(&config, "tmux_session = \"proj\"\n").unwrap();
+        assert_eq!(claim_requester_lane(&doc, Some("proj"), idea), None);
+    }
+
+    /// `#ideriderindependentnav` P6: a claim for a lane client provisions into
+    /// that client's lane session (created on first use); without a lane the
+    /// authoritative session is unchanged. Isolated tmux server only.
+    #[test]
+    #[ignore = "isolated tmux integration test; run make tmux-ci"]
+    fn navigation_lane_requester_claim_provisions_into_the_clients_lane() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "x").unwrap();
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("claim-navigation-lane");
+        tmux.new_session("proj", dir.path()).unwrap();
+        let idea = Some("jetbrains@IU.0a1b2c3d-pid:41");
+        let lane = claim_requester_lane(&doc, Some("proj"), idea);
+        assert_eq!(
+            claim_provision_session(&tmux, &doc, Some("proj"), lane.as_deref(), idea)
+                .unwrap()
+                .as_deref(),
+            Some("proj-IU-0a1b2c3d")
+        );
+        assert!(tmux.session_alive("proj-IU-0a1b2c3d"));
+        let root = project_root_for_claim(&doc).unwrap();
+        assert!(
+            agent_doc_controller_io::project_controller::is_owned_navigation_lane_session(
+                &tmux,
+                &root,
+                "proj-IU-0a1b2c3d"
+            ),
+            "a pane in the requester's own lane passes the cross-session check"
+        );
+        assert!(
+            !agent_doc_controller_io::project_controller::is_owned_navigation_lane_session(
+                &tmux, &root, "proj"
+            )
+        );
+        assert_eq!(
+            claim_provision_session(&tmux, &doc, Some("proj"), None, idea)
+                .unwrap()
+                .as_deref(),
+            Some("proj"),
+            "no requester lane keeps the authoritative session"
         );
     }
 

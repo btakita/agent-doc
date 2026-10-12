@@ -61,6 +61,7 @@ class ForceClaimAction : AnAction(), DumbAware {
                     position,
                     force = true,
                     newPane = false,
+                    clientId = CpRouteClient.navigationClientId,
                 )
                 LOG.debug("force-claim: ${cmd.joinToString(" ")}")
                 val result = SyncLayoutAction.runCommandWithTimeout(

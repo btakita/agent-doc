@@ -131,6 +131,80 @@ pub fn resolve_target_session(
     Ok(fallback)
 }
 
+/// `#ideriderindependentnav` P6: retarget a route's resolved session at the
+/// navigation lane of the editor client it acts for.
+///
+/// Returns `shared_target` unchanged when there is no client, the project
+/// navigates in `shared` mode, the client is unscoped, the project has no
+/// `tmux_session` pin, or `shared_target` is not that pin (a multi-session
+/// document binding keeps its own session). Otherwise the client's lane session
+/// is provisioned on first use (never adopting a session agent-doc did not
+/// create) and returned. Only a pane the route starts lands there: an existing
+/// pane is dispatched where it lives, because route resolves it from the
+/// registry and actor binding, never from the target session.
+pub fn requester_lane_target_session(
+    tmux: &Tmux,
+    file: &Path,
+    shared_target: String,
+    requester: Option<&str>,
+) -> Result<RequesterLaneTarget> {
+    let Some(client_id) = requester.map(str::trim).filter(|client| !client.is_empty()) else {
+        return Ok(RequesterLaneTarget::shared(shared_target));
+    };
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
+    let pin = agent_doc_project_config_io::load_project_from(
+        &project_root.join(".agent-doc").join("config.toml"),
+    )
+    .tmux_session
+    .filter(|session| !session.trim().is_empty());
+    if pin.as_deref() != Some(shared_target.as_str()) {
+        return Ok(RequesterLaneTarget::shared(shared_target));
+    }
+    let Some(lane) =
+        agent_doc_controller_io::project_controller::navigation_lane_session_for_client(
+            tmux,
+            &project_root,
+            client_id,
+        )?
+    else {
+        return Ok(RequesterLaneTarget::shared(shared_target));
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_navigation_lane_target file={} client={} session={} shared_session={} provisioned={}",
+            file.display(),
+            client_id,
+            lane.session,
+            shared_target,
+            lane.provisioned,
+        ),
+    );
+    Ok(RequesterLaneTarget {
+        session: lane.session,
+        navigation_lane: true,
+    })
+}
+
+/// The session a route targets, and whether it is an installation navigation
+/// lane (P6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequesterLaneTarget {
+    pub session: String,
+    /// The session is the requester's installation lane: the lane's layout
+    /// owns its topology, so a pane started there is staged, not split.
+    pub navigation_lane: bool,
+}
+
+impl RequesterLaneTarget {
+    fn shared(session: String) -> Self {
+        Self {
+            session,
+            navigation_lane: false,
+        }
+    }
+}
+
 pub fn ensure_auto_start_target_session(
     tmux: &Tmux,
     context_session: Option<&str>,

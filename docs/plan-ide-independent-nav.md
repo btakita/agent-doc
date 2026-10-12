@@ -3,8 +3,10 @@
 Status: P1 landed on branch `ridernav`; P2a landed on branch `ridernavp2a`; P2b landed on
 branch `ridernavp2b`; P3 landed on branch `ridernavp3`; P4's explicit handoff landed on branch
 `ridernavp4`. P5's migration, lane cleanup, docs, and two-IDE end-to-end test landed on branch
-`ridernavp5`; the controller-side reconcile trigger landed on branch `ridernavp6gc`; the lane
-awareness carried over from P3/P4 is still open (listed under P5).
+`ridernavp5`; the lane awareness carried over from P3/P4 is still open (listed under P5).
+P6's lane-aware `sync_tmux_layout` command and recycle republish landed on branch
+`ridernavp6republish`; the switch-back-before-gc behavior of the shared sync landed on branch
+`ridernavp6switchback`; the controller-side reconcile trigger landed on branch `ridernavp6gc`.
 
 ## Problem
 
@@ -204,7 +206,9 @@ What landed (the original scope follows below):
   sink keeps one latest-wins projector per lane (`PaneLayoutDesiredLaneProjector`) and
   publishes into that client's lane graph, so the manual Sync Tmux Layout arranges the
   requesting IDE's own lane and two IDEs' frames never coalesce each other away. A lane frame
-  is marked seen on the shared graph so a route's plane catch-up never waits for it.
+  is marked seen on the shared graph when the sink dispatches it (not when the lane's
+  projector thread applies it, `#laneplaneflake`), so a route's plane catch-up never waits
+  for it, even while that lane's projector retries.
 - JetBrains: `CpRouteClient.tmuxFocusState` sends `caller` = its surface client id
   (`tmuxFocusStateRequest`); `paneLayoutDesiredStatePublishRequest` adds `client_id`;
   `IdeTerminalCoordinator` passes `--client-id`; `TmuxPaneFocusSync.focusStateIsOwnLane`
@@ -344,6 +348,13 @@ What landed (the original scope follows below):
   `TriggerIgnoresLiveness` (closes a live IDE's lane) and `TriggerIgnoresMark` (reaps the foreign
   session), both detected, and the isolated-tmux
   `navigation_lane_session_reconcile_is_driven_by_installation_liveness` (`make tmux-ci`).
+  Against `#ridernavp6switchback`'s shared-sync adoption: every non-dry-run reconcile holds the
+  project's `.agent-doc/sync.lock` while it observes and applies, so a sync's adoption and a fold
+  are serialized (the later one finds the pane home; a fold of a pane already home is skipped),
+  and the controller's worker skips a request whose mode no longer matches the config
+  (`mode_changed`). SimWorld models the worker as an asynchronous `ControllerReconcile` event that
+  syncs interleave with; mutation `ReconcileActsOnStalePlan` (apply the plan observed when the
+  trigger fired) is detected, and the tmux test holds the sync lock while a pane is adopted.
 - Verification: unit tests and a proptest of the planner (no fold under `per_installation`; a
   closed lane never held a busy unowned or unfolded document pane; unmarked never touched).
   SimWorld `two_ide_navigation_model` gains `SetMode` (a controller restart, so no retained layout
@@ -361,9 +372,10 @@ What landed (the original scope follows below):
 - Docs: README, `specs/07-session-tmux-commands.md`, `specs/07-core-commands.md` (gc), and
   `editors/jetbrains/SPEC.md`.
 - Still open: (a) route, start, and `agent-doc claim --client-id` creating panes in the
-  requester's lane; (b) the `sync_tmux_layout` command and the recycle republish publishing into
-  the right lane(s); (c) a per-lane `pane_layout_status` channel. The optional focus-driven
-  handoff is not planned.
+  requester's lane (landed in P6); (b) the `sync_tmux_layout` command and the recycle republish publishing into
+  the right lane(s) (landed in P6); (c) a per-lane `pane_layout_status` channel (landed in P6); a controller-side trigger that
+  passes its live installations to the reconcile (landed, `#ridernavp6gc`, above). The optional
+  focus-driven handoff is not planned.
 
 Original scope:
 
@@ -383,6 +395,190 @@ republish; a per-lane `pane_layout_status` channel; optionally an opt-in focus-d
 - Docs: README, SPEC, and `editors/jetbrains/SPEC.md` describe the feature as
   available. A two-IDE end-to-end test in `tests/cross_editor_simworld.rs` uses an
   isolated tmux server and two simulated editor clients.
+
+### P6 (status): per-lane `pane_layout_status` channel (LANDED)
+
+- Pure (editor-surface): `NavigationLane::state_channel(base)`: the shared lane is `base`
+  itself; an installation lane is `<base>/lane/<installation>`.
+- Controller: each `ControllerPaneLayoutGraph` knows its lane and owns its status producer epoch
+  (the process-global `PANE_LAYOUT_STATUS_EPOCH` is gone), so the status is part of each lane
+  graph's scope rather than a side channel (`#stategraphjoin`). `publish_pane_layout_lane_status`
+  publishes the lane graph's own `state_projection()` on `pane_layout_status_channel(lane)`;
+  before P6 an installation lane published nothing. The shared lane publishes on
+  `agent-doc/pane-layout/status/v1` with the same payload, type tag, producer id, and epoch
+  sequence (starting at 1) as before.
+- Subscription: `ControllerStatePlaneSubscribeInvocation` gains an optional `client_id`
+  (omitted from the wire when unset). `state_plane_subscribe` for the status channel with a
+  `client_id` reads that client's lane channel (`NavigationLane::for_client` under the
+  configured mode); the subscription reports the channel it read. No client id, an unscoped
+  client, shared mode, and every other channel are unchanged. The lane's status reaches the
+  subscriber by the existing state-plane push (`#reactive-boundary-ingress`): no polling, no RPC
+  from the controller to the editor.
+- Editors: no plugin change. The JetBrains plugin builds a status subscribe request
+  (`CpRouteClient.statePlaneSubscribeRequest`) but no production path consumes the status yet;
+  a future consumer passes its surface client id. VS Code clients are unscoped and read the
+  shared channel.
+- Verification: editor-surface `lane_state_channel_keeps_the_shared_channel_and_separates_installations`;
+  controller `pane_layout_status_is_published_and_subscribed_per_navigation_lane` (IDEA converged,
+  Rider's effect failed: each subscriber sees only its own lane's phase/reason/attempt, the
+  shared channel stays empty, a later Rider publish leaves IDEA's channel version unchanged, a
+  shared layout publishes only on the shared channel) and
+  `shared_mode_pane_layout_status_is_the_pre_lane_channel_for_every_client` (every client id
+  reads the identical shared subscription, epoch 1, payload equal to the shared graph's
+  projection, no `client_id` on an unscoped invocation's wire). Not modeled in SimWorld: the
+  status channel is a wire projection of each lane graph, and `two_ide_navigation_model` models
+  pane placement, not status delivery.
+
+### P6 (republish): lane-aware `sync_tmux_layout` command and recycle republish (LANDED)
+
+- Command: `ControllerTmuxLayoutSyncInvocation` gains an optional `client_id` (serde default,
+  omitted from the wire when unset; the command-plane payload carries it too). `handle_sync_tmux_layout`
+  takes it off the invocation and resolves `sync_tmux_layout_command_lane(mode, client_id)`: the
+  client's `NavigationLane::for_client` lane when a client id is supplied, else the shared lane.
+  The shared lane is the pre-lane path byte for byte; an installation lane publishes through
+  `publish_pane_layout_desired_invocation_in_lane` (publisher `command`, no shared durable column
+  memory, its own status channel), logs `sync_tmux_layout_lane_routed`, and awaits that lane
+  graph's projection (`await_lane_sync_tmux_layout_projection`). A `manual` command is the P4
+  explicit claim in its own lane. FFI: `agent_doc_sync_tmux_layout_for_client_json(.., client_id)`;
+  the old entry point is that with a null client. No plugin change: the JetBrains manual Sync Tmux
+  Layout already reaches its lane through the plugin publication (P3).
+- Recycle republish: `republish_pane_layout_after_recycle` walks every lane graph
+  (`pane_layout_lane_ids`, shared first). Each lane claims the GH #136 (d) republish against its own
+  last pass's gated documents and republishes its own retained layout into its own lane as
+  `recycle_settled`; a lane that did not gate the settled document is untouched. Under
+  `per_installation` the republish is passive for every lane (lane membership applies to the shared
+  lane too): `recycle_settled_lane_invocation` turns a retained `manual` into
+  `RECYCLE_SETTLED_CALLER_KIND` (`recycle_settled`), so a republish only drops a document whose pane
+  moved away and never hands a pane over; `no_autostart` and the other fields stay the retained
+  ones, so it adds no autostart beyond the retained layout's. `shared` mode republishes the retained
+  invocation unchanged (one lane, the pre-lane path).
+- Verification: controller unit tests for the command lane (`sync_tmux_layout_command_lane_follows_the_client_id_only_per_installation`,
+  `sync_tmux_layout_command_publishes_into_the_requesting_clients_lane`,
+  `shared_mode_sync_tmux_layout_command_is_the_pre_lane_path_for_every_client`) and the recycle
+  republish (`recycle_settle_republishes_each_navigation_lanes_own_retained_layout`,
+  `recycle_settled_lane_invocation_only_demotes_an_explicit_claim`, plus the shared-mode
+  `gh136d_recycle_settle_republishes_a_gated_layout_exactly_once` now asserting the caller kind is
+  kept); an FFI test of the client-scoped invocation; SimWorld `two_ide_navigation_model` gains a
+  `RecycleSettle` event (every lane republishes its retained layout, worst case all gated),
+  exhaustive to depth 5 over 16 events, with the invariant that a settle republishes every lane
+  holding a retained layout and the existing no-move/no-duplicate/no-loss/no-cross-lane checks, and
+  mutations `RecycleSharedOnly`, `RecycleIntoSharedSession`, `RecycleClaimsExplicitly`, all
+  detected; `make tmux-ci` adds `navigation_lane_session_recycle_republish_keeps_every_pane_in_its_lane`
+  (isolated server: two provisioned lanes holding explicit retained claims on a contended pane; the
+  retained claim verbatim would hand the pane over, the republish routes with no handoff, IDEA drops
+  the document into its own window, Rider keeps it, no pane changes session or is duplicated).
+- Still open: a controller-side trigger for the lane reconcile. (Route, start, and
+  `agent-doc claim --client-id`, P5 (a), landed as P6 (route) below.)
+
+### P6 (route): route, start, and claim create panes in the requester's lane (LANDED)
+
+Landed on branch `ridernavp6route` (`#ridernavp6route`, open item (a) of P5).
+
+- Pure (editor-surface): `requester_navigation_lane(mode, requester)` and
+  `requester_pane_placement(mode, project_session, requester, existing_pane_session)` →
+  `Existing { session }` (a request uses a live pane where it lives, in any lane) or
+  `Start { session, lane }` (a missing pane starts in the requester's lane session: the project
+  session for shared mode, no client, or an unscoped client).
+- Route: `agent-doc route --client-id <id>` and the controller `editor_route` payload's
+  `client_id` set the route's navigation client (`NavigationClientGuard`).
+  `requester_lane_target_session` retargets the route's resolved session at the client's lane
+  session (provisioned on first use, never adopting an unmarked session) only in
+  `per_installation` mode, for an installation-scoped client, and when the resolved target is the
+  `tmux_session` pin (a multi-session document binding keeps its own session). Existing panes are
+  still resolved from the actor binding and registry, so they are dispatched where they live; only
+  a start lands in the lane. The controller `editor_route` from such a client merges over,
+  publishes into, awaits, and re-observes the client's own lane graph (`pane_layout_graph_for_lane`;
+  the lease guard, receipt, and re-observe gate carry the lane) and skips the cross-root
+  delegation; the shared lane is byte-identical.
+- Startup: a start into a marked installation lane session is staged in the lane's `stash`
+  (`stage_startup_pane`, `route_startup_navigation_lane_staged`) for the lane's layout to place,
+  instead of splitting beside an anchor: a fresh lane's `agent-doc` window holds only its unowned
+  placeholder shell, which the anchor rule would refuse. Route skips its raw post-start window sync
+  for a lane target (the lane's layout is the only topology writer there).
+- Start: `agent-doc start --client-id <id>` outside tmux first ensures the shared session; a
+  document with a live pane anywhere is reused there. Otherwise the start pane is created in the
+  client's lane session (a new lane's placeholder becomes the start pane, and its
+  `@agent_doc_navigation_lane_placeholder` mark is cleared so the lane gc judges it by its
+  foreground command), logged
+  `start_navigation_lane_target`. Inside tmux the flag changes nothing. In `per_installation`
+  mode `agent-doc start` no longer auto-relocates a pane that lives in one of the project's own
+  marked lane sessions into
+  the project session (`start_navigation_lane_pane_kept`); the end-to-end test found every
+  lane-started pane (route, claim, or lane layout provisioning) being moved to the shared session
+  once its start reached the session check.
+- Claim: `agent-doc claim --client-id <id>` provisions every new pane (`--new-pane`, no pane
+  evidence, an occupied or foreign-owned pane) in the client's lane under the same conditions
+  (`claim_navigation_lane_target`), and a pane already in the client's own marked lane passes the
+  cross-session check (`claim_navigation_lane_pane_accepted`); another IDE's lane is still refused
+  without `--force`.
+- JetBrains: the `editor_route` payload (classic and command-plane) carries `client_id`
+  (`CpRouteClient.navigationClientId`); `ClaimAction.buildClaimCommand` appends `--client-id`
+  for Claim for Tmux Pane, its New Pane recovery, and Force Claim. Plugin and binary ship together.
+- Verification: unit tests and a proptest of the placement; controller tests (a lane client's
+  editor route publishes only into its lane graph and hands the route its client; no client, an
+  unscoped client, and shared mode publish into the shared lane; payload parsing); start-io
+  (isolated server): the start pane lands in the lane, a live shared pane is reused, unscoped and
+  no-client starts stay shared; claim-io: lane resolution and (`make tmux-ci`) lane provisioning;
+  route-io (`make tmux-ci`): a lane start is staged in the lane's stash past the placeholder, the
+  shared session is untouched, the non-lane cases keep the shared target, and an unmarked
+  lane-named session is refused. SimWorld `two_ide_navigation_model` gains a `Route` event driving
+  the production placement (18 events, depth 5): a started pane always lives in the requester's
+  lane, and new mutations `RouteIntoSharedSession`, `RouteMovesExistingPane`, and
+  `RouteDuplicatesPane` are detected. `tests/cross_editor_simworld.rs`
+  `two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end` (`make tmux-ci`) drives the
+  real CLI: IDEA's and Rider's `claim --new-pane --client-id` start panes in their own lanes
+  (staged), no client and VS Code start in the shared session, the shared window is untouched,
+  IDEA may claim a pane in its own lane while Rider is refused, and shared mode ignores the id.
+- Not done: Run Agent Doc remains a passive lane claim, so a document whose pane lives in another
+  lane is dropped from the requester's route layout, as it was dropped from the shared lane's
+  route layout before P6 (the route's layout-convergence behavior for that case is not covered by
+  a test); the Claim actions hand the pane over. The
+  `sync_tmux_layout` command, the recycle republish, and the per-lane `pane_layout_status` channel
+  landed separately (above).
+
+### P6 (switch back): shared sync before `agent-doc gc` migrates lane panes (LANDED)
+
+The question: after `editor_navigation` switches from `per_installation` back to `shared` (the
+controller reads it at its next start), lane sessions still hold document panes until
+`agent-doc gc` folds them. What does a shared-lane sync (passive heartbeat, manual Sync Tmux
+Layout, route's layout, recycle republish) do with such a document?
+
+- Observed before the fix (isolated tmux probe through the real sync body): the shared lane's
+  lane guards are identity, so a lane pane fell under the ordinary cross-session rules. With an
+  explicit project window the reconcile joined the lane pane into it (`SCOPE_CROSS`), which is an
+  adoption, but a layout change swapped a lane pane against a project pane across sessions and
+  pushed the project pane into the lane. With no explicit window the sync body followed the
+  focused document's pane (or the tmux client's current session) into the lane session and
+  arranged it, joining or swapping the project session's panes into the lane. No duplicate was
+  started (the pane is alive and registered), but panes moved the wrong way.
+- Decision: in shared mode no IDE navigates a lane, so a lane session agent-doc created (marked
+  for this root) is a migration source, never a target. Every shared sync, passive or manual,
+  (a) arranges the live project session whenever it resolves such a lane
+  (`agent_doc_editor_surface::shared_sync_target_session`, sync body
+  `shared_mode_stale_lane_target`; an explicit lane window is dropped;
+  `navigation_lane_stale_target_retargeted`), and (b) adopts each laid-out document whose pane is
+  still in such a lane into the project session's `stash` before the reconcile, with the P4
+  handoff mechanics (`adopt_stale_navigation_lane_panes` over `hand_over_navigation_lane_pane`;
+  `navigation_lane_stale_pane_adopted`). The same pane id and actor binding move, so nothing is
+  started twice or lost; a document outside the layout stays in its lane until a sync shows it or
+  gc folds it. Unmarked lane-named sessions and a dead project session keep the pre-lane rules.
+  Passive adoption is not the P4 "passive never moves a pane" violation: that rule protects a
+  live lane from another IDE, and after a switch back no lane is live.
+- Verification: editor-surface `shared_sync_retargets_only_a_marked_lane_of_the_project_in_shared_mode`;
+  SimWorld `two_ide_navigation_model` resolves a shared sync's target from the focused document's
+  pane through `shared_sync_target_session`, records every adoption, and checks that no shared-mode
+  sync arranges a lane session (exhaustive to depth 5 over 16 events), with the scenario
+  `switching_back_to_shared_adopts_lane_panes_before_gc` (passive and explicit adoption, a document
+  outside the layout waiting for gc, gc then folding nothing and closing both lanes) and mutations
+  `SharedSyncFollowsStaleLane`, `DuplicateOnAdopt`, `LoseOnAdopt`, all detected. `make tmux-ci` adds
+  `navigation_lane_guard_switch_back_to_shared_adopts_lane_panes_before_gc` (isolated server: a
+  passive heartbeat with no window focused on a lane document arranges the project session and
+  adopts it; a heartbeat focused on a lane document it does not show moves nothing; a sync naming
+  the lane's own window is retargeted and adopts; every registry entry keeps its pane, every new
+  pane is a bare shell outside the layout, and gc then closes the lane). Disabling either half of
+  the fix fails that test. Full (manual) mode takes the same path (the retarget and adoption run
+  before any mode-specific phase) but is not driven on the isolated server, because its dead-pane
+  actor sweep reads the default tmux server.
 
 ## Risks
 

@@ -187,6 +187,8 @@ class CpRouteClientCommandPlaneTest {
         assertEquals(true, payload.get("dispatch_only").asBoolean)
         assertEquals("root:plan.md:run", payload.get("route_key").asString)
         assertEquals("attempt-7", payload.get("attempt_id").asString)
+        // `#ideriderindependentnav` P6: the controller routes into this IDE's lane.
+        assertEquals(CpRouteClient.navigationClientId, payload.get("client_id").asString)
     }
 
     @Test

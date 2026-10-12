@@ -3620,33 +3620,86 @@ pub unsafe extern "C" fn agent_doc_sync_tmux_layout_json(
     no_autostart: c_int,
     exact_visible: c_int,
 ) -> FfiJsonResult {
+    unsafe {
+        agent_doc_sync_tmux_layout_for_client_json(
+            project_root,
+            columns_json,
+            window,
+            focus,
+            no_autostart,
+            exact_visible,
+            std::ptr::null(),
+        )
+    }
+}
+
+/// [`agent_doc_sync_tmux_layout_json`] for one editor client
+/// (`#ideriderindependentnav` P6): with `editor_navigation = "per_installation"`
+/// an installation-scoped `client_id` arranges that client's own navigation
+/// lane session. A null `client_id`, an unscoped client, and `shared` mode are
+/// the shared lane, exactly like [`agent_doc_sync_tmux_layout_json`].
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_sync_tmux_layout_for_client_json(
+    project_root: *const c_char,
+    columns_json: *const c_char,
+    window: *const c_char,
+    focus: *const c_char,
+    no_autostart: c_int,
+    exact_visible: c_int,
+    client_id: *const c_char,
+) -> FfiJsonResult {
     ffi_json_from_result((|| -> anyhow::Result<_> {
         let project_root = unsafe { optional_ffi_string(project_root, "project_root") }?;
         let columns_json = unsafe { required_ffi_string(columns_json, "columns_json") }?;
         let window = unsafe { optional_ffi_string(window, "window") }?;
         let focus = unsafe { optional_ffi_string(focus, "focus") }?;
+        let client_id = unsafe { optional_ffi_string(client_id, "client_id") }?;
         let columns: Vec<String> =
             serde_json::from_str(&columns_json).context("parse columns_json")?;
         let focus_path = focus.as_deref().map(Path::new);
         let root = resolve_admin_root(project_root.as_deref(), focus_path)?;
         agent_doc_controller_io::project_controller::sync_tmux_layout(
             &root,
-            agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncInvocation {
+            sync_tmux_layout_ffi_invocation(
                 columns,
                 window,
                 focus,
-                no_autostart: no_autostart != 0,
-                exact_visible: exact_visible != 0,
-                caller_kind: if no_autostart != 0 {
-                    "automatic".to_string()
-                } else {
-                    "manual".to_string()
-                },
-                column_order: Default::default(),
-                actor_bindings: Vec::new(),
-            },
+                no_autostart != 0,
+                exact_visible != 0,
+                client_id,
+            ),
         )
     })())
+}
+
+fn sync_tmux_layout_ffi_invocation(
+    columns: Vec<String>,
+    window: Option<String>,
+    focus: Option<String>,
+    no_autostart: bool,
+    exact_visible: bool,
+    client_id: Option<String>,
+) -> agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncInvocation {
+    agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncInvocation {
+        columns,
+        window,
+        focus,
+        no_autostart,
+        exact_visible,
+        caller_kind: if no_autostart {
+            "automatic".to_string()
+        } else {
+            "manual".to_string()
+        },
+        column_order: Default::default(),
+        actor_bindings: Vec::new(),
+        client_id,
+    }
 }
 
 /// Pause, resume, or drain queue work through the project controller and return
@@ -5005,6 +5058,34 @@ mod tests {
             shared_mode.get("navigation_lane").is_none(),
             "shared mode never reports an installation lane: {shared_mode}"
         );
+    }
+
+    /// `#ideriderindependentnav` P6: the client-scoped sync FFI names its
+    /// client on the `sync_tmux_layout` invocation; the legacy entry point (a
+    /// null client id) keeps the pre-lane wire shape with no `client_id`.
+    #[test]
+    fn sync_tmux_layout_for_client_ffi_names_the_requesting_client() {
+        let columns = vec!["/p/a.md".to_string()];
+        let lane = sync_tmux_layout_ffi_invocation(
+            columns.clone(),
+            None,
+            Some("/p/a.md".to_string()),
+            false,
+            true,
+            Some("jetbrains@IU.0a1b2c3d-pid:41".to_string()),
+        );
+        assert_eq!(
+            lane.client_id.as_deref(),
+            Some("jetbrains@IU.0a1b2c3d-pid:41")
+        );
+        assert_eq!(lane.caller_kind, "manual");
+        let wire = serde_json::to_value(&lane).unwrap();
+        assert_eq!(wire["client_id"], "jetbrains@IU.0a1b2c3d-pid:41");
+
+        let legacy = sync_tmux_layout_ffi_invocation(columns, None, None, true, false, None);
+        assert_eq!(legacy.caller_kind, "automatic");
+        let wire = serde_json::to_value(&legacy).unwrap();
+        assert!(wire.get("client_id").is_none(), "{wire}");
     }
 
     /// GH #134: the Remote Dev shape from the issue (`windows=0`, one remote

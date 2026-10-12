@@ -110,6 +110,21 @@ impl NavigationLane {
         self.installation().unwrap_or("shared")
     }
 
+    /// The state-plane channel that carries this lane's copy of the per-lane
+    /// projection published on `base_channel`.
+    ///
+    /// The shared lane is `base_channel` itself, so a shared-mode subscriber
+    /// and every unscoped client (VS Code) read exactly the pre-lane channel.
+    /// An installation lane is `<base_channel>/lane/<installation>`: a
+    /// distinct channel, so one lane's frames never reach another lane's
+    /// subscriber and never displace the shared channel's retained snapshot.
+    pub fn state_channel(&self, base_channel: &str) -> String {
+        match self {
+            Self::Shared => base_channel.to_string(),
+            Self::Installation(installation) => format!("{base_channel}/lane/{installation}"),
+        }
+    }
+
     /// The tmux session backing this lane, derived from the project's
     /// configured session.
     ///
@@ -264,6 +279,12 @@ impl LaneClaim {
 /// only drop the document, never take the pane back.
 pub const LANE_HANDOFF_CALLER_KIND: &str = "lane_handoff";
 
+/// The `caller_kind` of an installation lane's recycle-settle republish when
+/// its retained layout was an explicit claim (`#ideriderindependentnav` P6).
+/// It is passive ([`LaneClaim::for_caller_kind`]), so a background republish
+/// never hands a pane over from another lane.
+pub const RECYCLE_SETTLED_CALLER_KIND: &str = "recycle_settled";
+
 /// One lane's layout columns with every document whose pane lives in another
 /// lane removed (`cross_lane_layout_dropped`), or, for an explicit claim,
 /// marked for handoff into this lane.
@@ -276,6 +297,39 @@ pub struct LaneLayoutPartition {
     /// `(document, owner session)` for each document whose pane an explicit
     /// claim hands over to this lane (P4). These documents stay in `kept`.
     pub handoffs: Vec<(String, String)>,
+}
+
+/// The session a sync of the shared navigation lane arranges, given the session
+/// the sync body resolved (`#ridernavp6switchback`).
+///
+/// After `editor_navigation` switches from `per_installation` back to `shared`,
+/// installation lane sessions agent-doc created stay alive until `agent-doc gc`
+/// folds their panes back. Until then the sync body can resolve one of them as
+/// its target: the focused document's pane, or the tmux client's current
+/// session, may still be there. In shared mode no editor navigates a lane, so
+/// the shared sync arranges the project session instead, and a document whose
+/// pane is still in the lane is adopted into it (same pane, joined across
+/// sessions), never started a second time. Every other case keeps `resolved`:
+/// per-installation mode (lanes are live), a session that only carries a lane's
+/// name (`lane_marked` false: agent-doc did not create it, so the pre-lane
+/// rules apply), and a dead project session (nothing to arrange instead).
+pub fn shared_sync_target_session<'a>(
+    mode: NavigationMode,
+    project_session: &'a str,
+    resolved: &'a str,
+    lane_marked: bool,
+    project_session_alive: bool,
+) -> &'a str {
+    if mode == NavigationMode::Shared
+        && lane_marked
+        && project_session_alive
+        && resolved != project_session
+        && is_lane_session_of(project_session, resolved)
+    {
+        project_session
+    } else {
+        resolved
+    }
 }
 
 /// The lane among `lanes` whose session is `session`, for a project whose
@@ -350,6 +404,72 @@ pub fn partition_lane_layout_columns_for_claim(
         }
     }
     partition
+}
+
+/// The navigation lane a route, start, or `agent-doc claim` acts for
+/// (`#ideriderindependentnav` P6): the lane of `requester` (an editor surface
+/// client id passed as `--client-id` or in an editor route payload), or the
+/// shared lane when the request names no client.
+pub fn requester_navigation_lane(mode: NavigationMode, requester: Option<&str>) -> NavigationLane {
+    requester
+        .map(str::trim)
+        .filter(|client| !client.is_empty())
+        .map_or(NavigationLane::Shared, |client| {
+            NavigationLane::for_client(mode, client)
+        })
+}
+
+/// Where a route, start, or `agent-doc claim` on behalf of a requester puts a
+/// document's pane (`#ideriderindependentnav` P6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequesterPanePlacement {
+    /// The document already has a live pane in `session`; the request uses it
+    /// where it lives. A request never moves a pane between lanes: only an
+    /// explicit layout claim (P4) hands one over.
+    Existing { session: String },
+    /// The document has no live pane; a new one starts in `session`, the
+    /// requester's lane session (the project session for the shared lane).
+    Start {
+        session: String,
+        lane: NavigationLane,
+    },
+}
+
+impl RequesterPanePlacement {
+    /// The session the request's pane lives in, or starts in.
+    pub fn session(&self) -> &str {
+        match self {
+            Self::Existing { session } | Self::Start { session, .. } => session,
+        }
+    }
+}
+
+/// Place a route, start, or claim request from `requester` for a document
+/// whose live pane (if any) lives in `existing_pane_session`.
+///
+/// In `shared` mode, and for a request without a client or from an unscoped
+/// client, a new pane starts in `project_session`, exactly as before lanes. In
+/// `per_installation` mode an installation-scoped requester's new pane starts
+/// in its own lane session. An existing pane is always used in place.
+pub fn requester_pane_placement(
+    mode: NavigationMode,
+    project_session: &str,
+    requester: Option<&str>,
+    existing_pane_session: Option<&str>,
+) -> RequesterPanePlacement {
+    if let Some(session) = existing_pane_session
+        .map(str::trim)
+        .filter(|session| !session.is_empty())
+    {
+        return RequesterPanePlacement::Existing {
+            session: session.to_string(),
+        };
+    }
+    let lane = requester_navigation_lane(mode, requester);
+    RequesterPanePlacement::Start {
+        session: lane.tmux_session_name(project_session),
+        lane,
+    }
 }
 
 /// One pane of an installation lane session, as the lane reconcile sees it
@@ -655,6 +775,38 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    #[test]
+    fn shared_sync_retargets_only_a_marked_lane_of_the_project_in_shared_mode() {
+        let lane = "proj-IU-0a1b2c3d";
+        assert_eq!(
+            shared_sync_target_session(NavigationMode::Shared, "proj", lane, true, true),
+            "proj",
+            "a stale marked lane is replaced by the project session"
+        );
+        assert_eq!(
+            shared_sync_target_session(NavigationMode::PerInstallation, "proj", lane, true, true),
+            lane,
+            "per-installation lanes stay live targets"
+        );
+        assert_eq!(
+            shared_sync_target_session(NavigationMode::Shared, "proj", lane, false, true),
+            lane,
+            "an unmarked lane-named session keeps the pre-lane rules"
+        );
+        assert_eq!(
+            shared_sync_target_session(NavigationMode::Shared, "proj", lane, true, false),
+            lane,
+            "a dead project session has nothing to arrange instead"
+        );
+        for other in ["proj", "scratch", "proj-", "other-IU-1"] {
+            assert_eq!(
+                shared_sync_target_session(NavigationMode::Shared, "proj", other, true, true),
+                other,
+                "{other} is not a lane of proj"
+            );
+        }
+    }
+
     const IDEA: &str = "jetbrains@IU.0a1b2c3d-pid:41";
     const IDEA_FOCUS: &str = "jetbrains-focus@IU.0a1b2c3d-pid:41";
     const RIDER: &str = "jetbrains@RD.9f8e7d6c-pid:42";
@@ -675,6 +827,33 @@ mod tests {
                 "{client}"
             );
         }
+    }
+
+    #[test]
+    fn lane_state_channel_keeps_the_shared_channel_and_separates_installations() {
+        const BASE: &str = "agent-doc/pane-layout/status/v1";
+        for mode in [NavigationMode::Shared, NavigationMode::PerInstallation] {
+            assert_eq!(
+                NavigationLane::for_client(mode, "vscode-pid:9").state_channel(BASE),
+                BASE,
+                "an unscoped client reads the pre-lane channel in {mode:?}"
+            );
+        }
+        for client in [IDEA, RIDER] {
+            assert_eq!(
+                NavigationLane::for_client(NavigationMode::Shared, client).state_channel(BASE),
+                BASE,
+                "shared mode keeps every client on the pre-lane channel"
+            );
+        }
+        let mode = NavigationMode::PerInstallation;
+        let idea = NavigationLane::for_client(mode, IDEA).state_channel(BASE);
+        let idea_focus = NavigationLane::for_client(mode, IDEA_FOCUS).state_channel(BASE);
+        let rider = NavigationLane::for_client(mode, RIDER).state_channel(BASE);
+        assert_eq!(idea, "agent-doc/pane-layout/status/v1/lane/IU.0a1b2c3d");
+        assert_eq!(idea_focus, idea, "one IDE's clients share its lane channel");
+        assert_ne!(rider, idea);
+        assert_ne!(rider, BASE);
     }
 
     #[test]
@@ -832,6 +1011,7 @@ mod tests {
             "projection",
             "",
             LANE_HANDOFF_CALLER_KIND,
+            RECYCLE_SETTLED_CALLER_KIND,
         ] {
             assert_eq!(
                 LaneClaim::for_caller_kind(passive),
@@ -894,6 +1074,90 @@ mod tests {
         assert_eq!(lane_owning_session(&lanes, "p", "p-RD-9f"), Some(rider));
         assert_eq!(lane_owning_session(&lanes, "p", "p-XX-00"), None);
         assert_eq!(lane_owning_session(&lanes[..1], "p", "p-IU-0a"), None);
+    }
+
+    #[test]
+    fn a_requester_starts_a_new_pane_in_its_own_lane_only_in_per_installation_mode() {
+        let start = |mode, requester| requester_pane_placement(mode, "p", requester, None);
+        assert_eq!(
+            start(NavigationMode::PerInstallation, Some(IDEA)),
+            RequesterPanePlacement::Start {
+                session: "p-IU-0a1b2c3d".to_string(),
+                lane: NavigationLane::Installation("IU.0a1b2c3d".to_string()),
+            }
+        );
+        assert_eq!(
+            start(NavigationMode::PerInstallation, Some(RIDER)).session(),
+            "p-RD-9f8e7d6c"
+        );
+        for (mode, requester) in [
+            (NavigationMode::Shared, Some(IDEA)),
+            (NavigationMode::Shared, None),
+            (NavigationMode::PerInstallation, None),
+            (NavigationMode::PerInstallation, Some("vscode-pid:9")),
+            (NavigationMode::PerInstallation, Some("  ")),
+        ] {
+            assert_eq!(
+                start(mode, requester),
+                RequesterPanePlacement::Start {
+                    session: "p".to_string(),
+                    lane: NavigationLane::Shared,
+                },
+                "{mode:?} {requester:?} keeps the pre-lane project session"
+            );
+        }
+    }
+
+    #[test]
+    fn a_requester_uses_an_existing_pane_where_it_lives() {
+        for existing in ["p", "p-RD-9f8e7d6c", "elsewhere"] {
+            assert_eq!(
+                requester_pane_placement(
+                    NavigationMode::PerInstallation,
+                    "p",
+                    Some(IDEA),
+                    Some(existing)
+                ),
+                RequesterPanePlacement::Existing {
+                    session: existing.to_string()
+                },
+                "a request never moves a pane between lanes"
+            );
+        }
+        assert_eq!(
+            requester_pane_placement(NavigationMode::PerInstallation, "p", Some(IDEA), Some(" "))
+                .session(),
+            "p-IU-0a1b2c3d",
+            "a blank pane session is no pane"
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn requester_placement_never_moves_and_starts_only_in_the_requester_lane(
+            product in "[A-Z]{2}",
+            hash in "[0-9a-f]{8}",
+            per_installation in any::<bool>(),
+            existing in proptest::option::of("[a-z]{1,4}(-[A-Z]{2}-[0-9a-f]{8})?"),
+        ) {
+            let mode = if per_installation {
+                NavigationMode::PerInstallation
+            } else {
+                NavigationMode::Shared
+            };
+            let client = format!("jetbrains@{product}.{hash}-pid:1");
+            let placement = requester_pane_placement(mode, "p", Some(&client), existing.as_deref());
+            match (&existing, &placement) {
+                (Some(existing), RequesterPanePlacement::Existing { session }) => {
+                    prop_assert_eq!(existing, session);
+                }
+                (None, RequesterPanePlacement::Start { session, lane }) => {
+                    prop_assert_eq!(session, &NavigationLane::for_client(mode, &client).tmux_session_name("p"));
+                    prop_assert_eq!(lane.is_shared(), !per_installation);
+                }
+                _ => prop_assert!(false, "{existing:?} -> {placement:?}"),
+            }
+        }
     }
 
     fn lane(

@@ -825,15 +825,7 @@ infra.md and its pane are not touched.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#infraclearsession]
-- ~~do [#bgclearpolicy]: Do you have enough direction for this? The hourglass is still visible in the queue.~~
-- ~~do [#ridernavp3]~~
-- ~~do [#ridernavp4]~~
-- ~~do [#ridernavp5]~~
-- ~~do [#stopreopenflake]~~
-- ~~do [#multilinequeuehead]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/242~~
-- ~~release + publish~~
+- 🚧 do [#infraclearsession]
 - 🚧 do [#ridernavp6route]
 - 🚧 do [#ridernavp6republish]
 - 🚧 do [#ridernavp6status]
@@ -844,7 +836,7 @@ infra.md and its pane are not touched.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#infraclearsession] infra.md: Clear Session Context wedged after manually interrupting Codex turn. Have we already fixed this in the upcoming release?
+- [ ] 🚧 [#infraclearsession] infra.md: Clear Session Context wedged after manually interrupting Codex turn. Have we already fixed this in the upcoming release?
 - [ ] 🚧 [#ridernavp6route] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): route, start and agent-doc claim --client-id create panes in the requesting IDE's lane in per_installation mode; today a new pane reaches an installation lane only through that IDE's explicit claim.
 - [ ] 🚧 [#ridernavp6republish] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): the sync_tmux_layout command and the recycle republish still publish only into the shared lane; make them lane-aware.
 - [ ] 🚧 [#ridernavp6status] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): add a per-lane pane_layout_status channel; it reports only the shared lane today.

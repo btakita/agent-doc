@@ -1003,6 +1003,43 @@ under the terminal cycle
 It merges in the next batch.
 
 **Batch 15** (GH #243, plugins 0.2.559 / 0.2.560) is in `make check` / `make tmux-ci`. `reaperciflake`, the CI-only red test on `main`, is still in progress. The v0.35.494 GitHub Release is still building, and PyPI publishes after it.
+❯ 🚧 Run Agent Doc on frontend.md issue:
+```
+› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+
+
+• The agent-doc cycle could not start because the live editor buffer lacks the required operator-text authority. I’m
+  running the permitted read-only session check now to recover any pending operator prompt; I will not edit the
+  document or run preflight.
+
+• Ran agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  └ [steering 1/1] dispatch=subagent source=queue change=added sent=explicit
+    verbatim: #actionable-review
+    action: DISPATCH NOW to a NEW background subagent (one per item). Claim it first with `agent-doc queue claim '/hom…
+    + 10 lines (^t to expand)
+
+• Agent-doc admission failed because the live editor buffer lacks operator_text_authority_v1. No document changes were
+  made, and preflight was not rerun.
+
+  Pending operator prompt:
+
+  > #actionable-review
+
+  Session state is ready for supervisor clear-and-continue. A partial-staging warning also remains in src/rpg-spike:
+  committed progression changes have related uncommitted conformance changes.
+
+  Worked for 20s • 3:17 PM
+```
+
+### Re: frontend.md admission refused — opus-5-5 · 2026-10-12T18:20-04:00
+
+> **Queue prompt:** do [#runfrontendissue]
+
+**Deferred:** a subagent is working on this on branch `runfrontendissue`. Run Agent Doc on frontend.md was refused at admission because the live editor buffer has no `operator_text_authority_v1`. The agent stopped correctly, but your queued `#actionable-review` can't run until the editor provides that authority. The likely cause is a mismatch between the plugin and the binary after today's many installs and plugin bumps, or an editor replica that never re-published the authority after a rebuild.
+
+The subagent is diagnosing it from the haiven-dev logs and state, read-only. The fix will either make a live editor always publish the authority, or let preflight request a re-publish and retry once instead of refusing indefinitely. The authority guard stays strict.
+
+There are no new follow-up items this cycle; everything is tracked under `#runfrontendissue`.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -1011,7 +1048,8 @@ It merges in the next batch.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#fixlazilycodex]
+- do [#runfrontendissue]
+- 🚧 do [#fixlazilycodex]
 - 🚧 do [#reaperciflake]
 - 🚧 do [#ridernavp6routecontended]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243
@@ -1024,7 +1062,26 @@ It merges in the next batch.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fixlazilycodex] Fix lazily.md Codex hook issue:
+- [ ] [#runfrontendissue] Run Agent Doc on frontend.md issue:
+  ```
+  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  • The agent-doc cycle could not start because the live editor buffer lacks the required operator-text authority. I’m
+  running the permitted read-only session check now to recover any pending operator prompt; I will not edit the
+  document or run preflight.
+  • Ran agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  └ [steering 1/1] dispatch=subagent source=queue change=added sent=explicit
+  verbatim: #actionable-review
+  action: DISPATCH NOW to a NEW background subagent (one per item). Claim it first with `agent-doc queue claim '/hom…
+  + 10 lines (^t to expand)
+  • Agent-doc admission failed because the live editor buffer lacks operator_text_authority_v1. No document changes were
+  made, and preflight was not rerun.
+  Pending operator prompt:
+  > #actionable-review
+  Session state is ready for supervisor clear-and-continue. A partial-staging warning also remains in src/rpg-spike:
+  committed progression changes have related uncommitted conformance changes.
+  Worked for 20s • 3:17 PM
+  ```
+- [ ] 🚧 [#fixlazilycodex] Fix lazily.md Codex hook issue:
   ```
   • Cycle cycle-1791827706347 converged and committed successfully. No queue work is drainable.
   • Hook stopped

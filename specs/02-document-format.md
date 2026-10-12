@@ -185,17 +185,24 @@ When the queue drains to empty: `auto` is stripped from the opening tag, `queue_
 **Parsing rules:**
 1. Lines starting with `- ` at column 0 → single-line prompt.
 2. `~~~prompt` opens a multi-line prompt fence; `~~~` closes it.
-3. Bare `---` (not followed by ` start` or ` stop`) opens a multi-line prompt fence; matching `---` closes it.
+3. Bare `---` (not followed by ` start` or ` stop`) opens a multi-line prompt fence; matching `---` closes it. A `---` line inside a balanced Markdown code fence (a pasted log) never closes it.
 4. `--- start`, `--- start <time>`, `--- start at <time>`, `~~~start` → start fence.
 5. `--- stop`, `~~~stop` → stop fence.
 6. Blank lines between items are ignored.
 7. Content outside list items, prompt fences, or control fences is inert `Freeform`; a balanced ordinary Markdown code fence is one inert block, so list-looking lines inside pasted evidence are never prompts.
 8. A narrow recovery recognizes non-native prose plus a balanced Markdown code fence as one exact-span multiline prompt when an explicit request appears before or after the fence and no later non-empty queue-native item exists. Already-completed rows may precede it. A trailing empty list placeholder does not block recovery and is never runnable.
+9. **Pasted multi-line heads (`#multilinequeuehead`).** A bullet-less title run (one or more non-indented prose lines) immediately followed by a balanced Markdown code fence is one multiline prompt when it is *introduced*: the previous non-blank line is a `---` separator, or it sits directly beneath another multi-line item (a `---` / `~~~prompt` / `~~~done` fence or another head of this shape). Further balanced fences separated only by blank lines belong to the same head. The head ends at its last fence closer, and the next non-blank line must be a boundary: the end of the queue, queue-native syntax, or another introduced title-plus-fence head. Each operator-pasted block is therefore its own head, in operator order (`#qauthorder`); a block pasted directly after another is never folded into it. A single `---` right after the last fence is the head's trailing separator when a boundary follows it; otherwise it stays to open the next `---` fence. An unpaired `---` directly above such a head is that head's leading separator, so it cannot later pair with a newly typed `---` and re-segment the queue. A lone title plus fence with no introduction stays inert evidence under rule 7 unless rule 8 or `#qfreetext-sep` claims it. The Markdown-AST overlay enumerates these heads with the same shared grammar (`overlay::queue_fenced_title_block`), so strike, claim, consume, and the residue guard address the same node. Only the head's first line can name its tracked id: a `[#id]` quoted inside the pasted log never makes the head id-backed. `queue claim` / `queue brief --item` accept the head's title line when exactly one live multi-line head starts with it; several heads with the same title are ambiguous and must be named by their full text.
 
 Single-line list prompts and canonical multiline prompt fences are one ordered,
 AST-addressable item sequence. Node-keyed consumption of a multiline live item
 renders `~~~done` / `~~~` around the same prompt text; unstrike restores the
-bare `---` / `---` live shape. A narrowly recovered prose-plus-fenced-diagnostic
+bare `---` / `---` live shape. A `~~~done` fence is the item's own completion
+marker: the `#ftstrike` ` — auto-struck: …` note is appended only to a
+single-line `~~text~~` strike, never to the fence's closing `~~~` line (an info
+string there leaves the fence unclosed, swallowing the component's close marker
+so every later projection fails with `unclosed component`). The strike also
+drops the in-progress marker from the fence body's first line
+(`#multilinequeuehead`). A narrowly recovered prose-plus-fenced-diagnostic
 head that has no AST node key is consumed only through the exact byte range
 returned by the queue parser; that range alone becomes a canonical `~~~done`
 item, and later queue bytes are preserved. A malformed or unknown surface that

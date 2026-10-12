@@ -290,6 +290,166 @@ pub fn queue_item_accepts_continuation(item_content: &str) -> bool {
         && !item.text.starts_with("[#")
 }
 
+/// Byte-free shape of one bullet-less multi-line queue head: a prose title run
+/// followed by one or more balanced Markdown code fences
+/// (`#multilinequeuehead`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueueFencedTitleBlock {
+    /// Index of the last line that belongs to the head's text (the final fence
+    /// closer).
+    pub last_text_line: usize,
+    /// Index of the last line the head's span owns. Equal to
+    /// `last_text_line`, or one trailing `---` separator line after it.
+    pub last_line: usize,
+}
+
+/// Fence closer for a Markdown code-fence opener line (trimmed): the opener's
+/// run of backticks or tildes. The `~~~prompt` / `~~~done` / `~~~start` /
+/// `~~~stop` queue surfaces are not code fences.
+fn queue_code_fence_run(trimmed: &str) -> Option<(char, usize)> {
+    let ch = trimmed.chars().next()?;
+    if ch != '`' && ch != '~' {
+        return None;
+    }
+    let run = trimmed.chars().take_while(|c| *c == ch).count();
+    if run < 3 {
+        return None;
+    }
+    if ch == '~' && matches!(trimmed, "~~~prompt" | "~~~done" | "~~~start" | "~~~stop") {
+        return None;
+    }
+    // A backtick fence's info string may not contain a backtick.
+    if ch == '`' && trimmed[run..].contains('`') {
+        return None;
+    }
+    Some((ch, run))
+}
+
+fn queue_code_fence_closes(trimmed: &str, (ch, run): (char, usize)) -> bool {
+    trimmed.len() >= run && trimmed.chars().all(|c| c == ch)
+}
+
+/// Index of the closer of the balanced code fence opened at `open`, if any.
+fn queue_code_fence_close(lines: &[&str], open: usize) -> Option<usize> {
+    let fence = queue_code_fence_run(lines.get(open)?.trim())?;
+    (open + 1..lines.len()).find(|&j| queue_code_fence_closes(lines[j].trim(), fence))
+}
+
+/// Index of the `---` line that closes the bare `---` fence opened at `open`.
+///
+/// `---` lines inside a balanced code fence (a pasted log) never close it
+/// (`#multilinequeuehead`). Shared by `document_queue::parse_spans` and this
+/// overlay.
+pub fn queue_bare_fence_close(lines: &[&str], open: usize) -> Option<usize> {
+    let mut index = open + 1;
+    while index < lines.len() {
+        let trimmed = lines[index].trim();
+        if trimmed == "---" {
+            return Some(index);
+        }
+        if let Some(close) = queue_code_fence_close(lines, index) {
+            index = close + 1;
+            continue;
+        }
+        index += 1;
+    }
+    None
+}
+
+/// Recognize a bullet-less multi-line queue head starting at `lines[start]`
+/// (`#multilinequeuehead`).
+///
+/// Operators paste diagnostic reports into `agent:queue` as a short title line
+/// followed by a fenced log, separated from the previous item by a `---` line
+/// or pasted directly beneath the previous multi-line item, without a list
+/// bullet or a closing wrapper. Each such block is ONE head:
+///
+/// - The block must be introduced: the previous non-blank line is a `---`
+///   separator, or the caller reports (`after_multiline_item`) that the block
+///   directly follows another multi-line item (a `---` / `~~~prompt` /
+///   `~~~done` fence or a head of this shape). A lone title plus fence with no
+///   such context stays inert pasted evidence unless the legacy
+///   `#queue-unwrapped-fenced-task` / `#qfreetext-sep` shapes claim it.
+/// - The title run is one or more non-indented prose lines (lines that
+///   [`queue_continuation_line`] accepts).
+/// - The title run is immediately followed by a balanced code fence (```` ``` ````
+///   or `~~~`). Further balanced fences separated only by blank lines belong to
+///   the same head.
+/// - The head ends at its last fence closer. The next non-blank line must start
+///   something else: the end of the body, queue-native syntax (a list item,
+///   fence, directive, marker), or another title-plus-fence head. Trailing prose
+///   after the fence is not a boundary this rule decides; the caller's legacy
+///   shapes (`#queue-unwrapped-fenced-task`, `#qfreetext-sep`) keep owning it.
+/// - A single `---` directly after the last fence is the head's trailing
+///   separator when what follows it is again a boundary; otherwise it is left
+///   in place to open the next `---` fenced prompt.
+///
+/// This line-level grammar is shared by `document_queue::parse_spans` and this
+/// overlay so both enumerators segment the same heads.
+pub fn queue_fenced_title_block(
+    lines: &[&str],
+    start: usize,
+    after_multiline_item: bool,
+) -> Option<QueueFencedTitleBlock> {
+    let is_title_line = |line: &str| {
+        !line.starts_with([' ', '\t'])
+            && queue_continuation_line(line)
+            && queue_code_fence_run(line.trim()).is_none()
+    };
+    if !is_title_line(lines.get(start)?) {
+        return None;
+    }
+    let introduced = after_multiline_item
+        || lines[..start]
+            .iter()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .is_some_and(|line| line.trim() == "---");
+    if !introduced {
+        return None;
+    }
+    let mut fence_open = start + 1;
+    while fence_open < lines.len() && is_title_line(lines[fence_open]) {
+        fence_open += 1;
+    }
+    let mut last = queue_code_fence_close(lines, fence_open)?;
+    loop {
+        let mut next = last + 1;
+        while next < lines.len() && lines[next].trim().is_empty() {
+            next += 1;
+        }
+        match queue_code_fence_close(lines, next) {
+            Some(close) => last = close,
+            None => break,
+        }
+    }
+    let next_nonblank = |from: usize| (from..lines.len()).find(|&j| !lines[j].trim().is_empty());
+    let is_boundary = |index: Option<usize>| match index {
+        None => true,
+        Some(j) => {
+            !queue_continuation_line(lines[j]) || queue_fenced_title_block(lines, j, true).is_some()
+        }
+    };
+    let after = next_nonblank(last + 1);
+    if let Some(separator) = after
+        && lines[separator].trim() == "---"
+    {
+        let last_line = if is_boundary(next_nonblank(separator + 1)) {
+            separator
+        } else {
+            last
+        };
+        return Some(QueueFencedTitleBlock {
+            last_text_line: last,
+            last_line,
+        });
+    }
+    is_boundary(after).then_some(QueueFencedTitleBlock {
+        last_text_line: last,
+        last_line: last,
+    })
+}
+
 fn strip_one_pin(text: &str) -> Option<(&str, bool)> {
     let t = text.trim_start();
     for m in OPERATOR_PIN_MARKERS {
@@ -316,6 +476,10 @@ fn item_id(kind: &ItemKind, text: &str) -> String {
     if let Some(id) = extract_bracket_id(text) {
         return id;
     }
+    content_item_id(kind, text)
+}
+
+fn content_item_id(kind: &ItemKind, text: &str) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     format!("{kind:?}").hash(&mut hasher);
     text.trim().hash(&mut hasher);
@@ -400,8 +564,17 @@ fn parse_multiline_item(
 ) -> Item {
     let raw = source[start_byte..raw_end_byte].to_string();
     let kind = classify(&text);
-    let explicit_id = extract_bracket_id(&text).is_some();
-    let id = item_id(&kind, &text);
+    // `#multilinequeuehead`: only the head's first line can name a tracked id.
+    // A pasted log further down routinely quotes `do [#other]`; reading that as
+    // this node's id made a free-text report an explicit-id node keyed after
+    // unrelated tracked work.
+    let first_line = text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("");
+    let leading_id = extract_bracket_id(first_line);
+    let explicit_id = leading_id.is_some();
+    let id = leading_id.unwrap_or_else(|| content_item_id(&kind, &text));
     Item {
         id,
         explicit_id,
@@ -452,13 +625,47 @@ fn queue_multiline_items(
     body_start: usize,
     body_end: usize,
     code_ranges: &[(usize, usize)],
+    list_items: &[Item],
 ) -> Vec<Item> {
     let lines = source_lines(source, body_start, body_end);
+    let contents: Vec<&str> = lines.iter().map(|line| line.content).collect();
     let mut items = Vec::new();
     let mut index = 0usize;
+    // Line index just past the last multi-line item, so a title block pasted
+    // directly beneath it (blank lines only between) is introduced by it.
+    let mut multiline_end: Option<usize> = None;
+    let follows_multiline = |end: Option<usize>, at: usize| {
+        end.is_some_and(|end| end <= at && contents[end..at].iter().all(|l| l.trim().is_empty()))
+    };
+    let title_block_item = |start: usize, from: usize, block: QueueFencedTitleBlock| {
+        let text = contents[from..=block.last_text_line].join("\n");
+        parse_multiline_item(
+            source,
+            lines[start].start_byte,
+            lines[block.last_line].content_end_byte,
+            lines[block.last_line].end_byte,
+            text,
+            false,
+        )
+    };
     while index < lines.len() {
         let line = lines[index];
         let trimmed = line.content.trim();
+        // `#multilinequeuehead`: a bullet-less title line plus fenced block.
+        // Lines a list item already owns (`#queuecruft` continuation) and
+        // lines inside code are never a new head.
+        if !in_code(code_ranges, line.start_byte)
+            && !list_items
+                .iter()
+                .any(|item| item.start_byte <= line.start_byte && line.start_byte < item.end_byte)
+            && let Some(block) =
+                queue_fenced_title_block(&contents, index, follows_multiline(multiline_end, index))
+        {
+            items.push(title_block_item(index, index, block));
+            index = block.last_line + 1;
+            multiline_end = Some(index);
+            continue;
+        }
         let fence = match trimmed {
             // A bare thematic-break fence is queue syntax only outside a
             // Markdown code block.
@@ -474,12 +681,22 @@ fn queue_multiline_items(
             index += 1;
             continue;
         };
-        let close_index = (index + 1..lines.len()).find(|candidate| {
-            let candidate_line = lines[*candidate];
-            candidate_line.content.trim() == closer
-                && (closer != "---" || !in_code(code_ranges, candidate_line.start_byte))
-        });
+        let close_index = if closer == "---" {
+            queue_bare_fence_close(&contents, index)
+        } else {
+            (index + 1..lines.len()).find(|candidate| lines[*candidate].content.trim() == closer)
+        };
         let Some(close_index) = close_index else {
+            // `#multilinequeuehead`: an unclosed `---` directly above a
+            // title-plus-fence head is that head's leading separator.
+            if closer == "---"
+                && let Some(block) = queue_fenced_title_block(&contents, index + 1, true)
+            {
+                items.push(title_block_item(index, index + 1, block));
+                index = block.last_line + 1;
+                multiline_end = Some(index);
+                continue;
+            }
             // Match document_queue's fail-closed treatment of unclosed fences:
             // the opener is inert and later list items remain addressable.
             index += 1;
@@ -499,6 +716,7 @@ fn queue_multiline_items(
                 text,
                 struck,
             ));
+            multiline_end = Some(close_index + 1);
         }
         index = close_index + 1;
     }
@@ -519,7 +737,8 @@ fn include_queue_multiline_items(
         .map(|relative| component.start_byte + relative + 1)
         .unwrap_or(body_end)
         .min(body_end);
-    let multiline = queue_multiline_items(source, body_start, body_end, code_ranges);
+    let multiline =
+        queue_multiline_items(source, body_start, body_end, code_ranges, &component.items);
     if multiline.is_empty() {
         return;
     }

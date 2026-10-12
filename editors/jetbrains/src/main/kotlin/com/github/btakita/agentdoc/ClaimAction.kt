@@ -121,12 +121,18 @@ class ClaimAction : AnAction(), DumbAware {
 
         internal fun shouldSyncLayoutAfterClaim(exitCode: Int): Boolean = exitCode == 0
 
+        /**
+         * `clientId` (`#ideriderindependentnav` P6) names this IDE's navigation lane: with
+         * `editor_navigation = "per_installation"` a pane the claim provisions lives in this
+         * IDE's own lane session. The binary must be at least as new as this plugin.
+         */
         internal fun buildClaimCommand(
             agentDoc: String,
             relativePath: String,
             position: String?,
             force: Boolean,
             newPane: Boolean,
+            clientId: String? = null,
         ): List<String> {
             val cmd = mutableListOf(agentDoc, "claim", relativePath)
             when {
@@ -134,6 +140,7 @@ class ClaimAction : AnAction(), DumbAware {
                 force -> cmd.add("--force")
             }
             if (!newPane && position != null) cmd.addAll(listOf("--position", position))
+            clientId?.takeIf { it.isNotBlank() }?.let { cmd.addAll(listOf("--client-id", it)) }
             return cmd
         }
     }
@@ -244,7 +251,14 @@ class ClaimAction : AnAction(), DumbAware {
         force: Boolean,
         newPane: Boolean,
     ): Pair<Int, String> {
-        val cmd = buildClaimCommand(agentDoc, relativePath, position, force, newPane)
+        val cmd = buildClaimCommand(
+            agentDoc,
+            relativePath,
+            position,
+            force,
+            newPane,
+            CpRouteClient.navigationClientId,
+        )
         LOG.debug("claim: ${cmd.joinToString(" ")}")
         val result = SyncLayoutAction.runCommandWithTimeout(cmd, cwd, CLAIM_PROCESS_TIMEOUT_MS)
         val output = if (result.timedOut) {

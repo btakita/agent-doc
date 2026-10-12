@@ -119,6 +119,28 @@ class TerminalUtilTest {
         assertEquals("--col", payload.getAsJsonArray("layout_args")[0].asString)
         assertEquals("--focus", payload.getAsJsonArray("layout_args")[2].asString)
         assertFalse(payload.has("column_order"))
+        assertEquals(
+            "the route names this IDE's navigation lane (#ideriderindependentnav P6)",
+            CpRouteClient.navigationClientId,
+            payload.get("client_id").asString,
+        )
+    }
+
+    @Test
+    fun `CP editor route request omits the client id only when none is given`() {
+        val request = CpRouteClient.editorRouteRequest(
+            filePath = "/repo/tasks/root.md",
+            relativePath = "tasks/root.md",
+            layoutArgs = listOf("--col", "/repo/tasks/root.md"),
+            waitForReadySeconds = 15,
+            attemptId = null,
+            routeKey = null,
+            clientId = null,
+        )
+        val payload = com.google.gson.JsonParser.parseString(
+            request.get("diagnostic_payload").asString,
+        ).asJsonObject
+        assertFalse(payload.has("client_id"))
     }
 
     @Test

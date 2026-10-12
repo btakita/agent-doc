@@ -900,6 +900,11 @@ internal object CpRouteClient {
     // GH #111: `layout_mode` says what the `--col` arguments assert — `exact` for a
     // positive observation of the whole visible layout, `ensure` for "this document
     // needs a column". Controllers that predate the field ignore it.
+    //
+    // `#ideriderindependentnav` P6: `client_id` names this IDE's navigation lane, so
+    // with `editor_navigation = "per_installation"` the route arranges this IDE's
+    // own lane and a pane it starts lives there. In `shared` mode it changes
+    // nothing; an older controller ignores the field.
     internal fun editorRoutePayload(
         relativePath: String,
         layoutArgs: List<String>,
@@ -908,6 +913,7 @@ internal object CpRouteClient {
         routeKey: String?,
         columnOrder: String? = null,
         layoutMode: String? = null,
+        clientId: String? = navigationClientId,
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("source", "jetbrains_plugin")
@@ -924,6 +930,7 @@ internal object CpRouteClient {
         // observation. An older controller ignores the unknown field.
         columnOrder?.let { payload.addProperty("column_order", it) }
         layoutMode?.let { payload.addProperty("layout_mode", it) }
+        clientId?.let { payload.addProperty("client_id", it) }
         return payload
     }
 
@@ -936,6 +943,7 @@ internal object CpRouteClient {
         routeKey: String?,
         columnOrder: String? = null,
         layoutMode: String? = null,
+        clientId: String? = navigationClientId,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -945,6 +953,7 @@ internal object CpRouteClient {
             routeKey,
             columnOrder,
             layoutMode,
+            clientId,
         )
         val request = JsonObject()
         request.addProperty("command", EditorCommandName.EditorRoute.token)
@@ -977,6 +986,7 @@ internal object CpRouteClient {
         controllerCommand: String = "editor_command_submit",
         columnOrder: String? = null,
         layoutMode: String? = null,
+        clientId: String? = navigationClientId,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -986,6 +996,7 @@ internal object CpRouteClient {
             routeKey,
             columnOrder,
             layoutMode,
+            clientId,
         )
         return commandSubmitRequest(
             filePath = filePath,

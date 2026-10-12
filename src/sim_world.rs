@@ -1428,9 +1428,10 @@ mod multi_tmux_session_model {
 mod two_ide_navigation_model {
     use agent_doc_editor_surface::{
         InstallationFocus, LaneClaim, LanePaneObservation, LaneReconcileAction,
-        LaneSessionObservation, LayoutOwnerKey, NavigationLane, NavigationMode, SurfaceAuthority,
-        editor_installation, is_lane_session_of, partition_lane_layout_columns_for_claim,
-        plan_navigation_lane_reconcile,
+        LaneSessionObservation, LayoutOwnerKey, NavigationLane, NavigationMode,
+        RequesterPanePlacement, SurfaceAuthority, editor_installation, is_lane_session_of,
+        partition_lane_layout_columns_for_claim, plan_navigation_lane_reconcile,
+        requester_pane_placement,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -1490,6 +1491,15 @@ mod two_ide_navigation_model {
         GcIgnoresOwnedPanes,
         /// The gc ignores a live installation's lane (P5).
         GcIgnoresLiveSurface,
+        /// A route/start/claim from a lane client starts its pane in the
+        /// shared session (the pre-P6 behavior).
+        RouteIntoSharedSession,
+        /// A route from a lane client pulls the document's existing pane into
+        /// its own lane (P6).
+        RouteMovesExistingPane,
+        /// A route starts a second pane for a document that already has one
+        /// in another lane (P6).
+        RouteDuplicatesPane,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1503,6 +1513,9 @@ mod two_ide_navigation_model {
         SetMode(NavigationMode),
         /// `agent-doc gc` runs the lane reconcile (P5).
         Gc,
+        /// Run Agent Doc / `agent-doc route|start|claim --client-id` from this
+        /// client for the second document of its layout (P6).
+        Route(usize),
     }
 
     #[derive(Default)]
@@ -1538,6 +1551,9 @@ mod two_ide_navigation_model {
         folded: Vec<(String, String)>,
         /// A disable's gc left a document pane in a lane session.
         unfolded_after_disable: Vec<(String, String)>,
+        /// `(document, client, started in, requester's lane session)` for
+        /// every pane a route/start/claim started (P6).
+        route_starts: Vec<(String, usize, String, String)>,
     }
 
     struct Sim {
@@ -1639,6 +1655,11 @@ mod two_ide_navigation_model {
                 }
                 Event::SetMode(mode) => self.set_mode(mode),
                 Event::Gc => self.gc(),
+                Event::Route(client) => {
+                    if self.world.live.contains(&client) {
+                        self.route(client);
+                    }
+                }
                 Event::Retire(client) => {
                     if !self.world.live.remove(&client) {
                         return;
@@ -1690,6 +1711,56 @@ mod two_ide_navigation_model {
                             .push((document.clone(), session.clone(), lane.clone()));
                         *session = lane.clone();
                     }
+                }
+            }
+        }
+
+        /// A route/start/claim from `client` for its layout's second document,
+        /// placed by the production [`requester_pane_placement`] (P6).
+        fn route(&mut self, client: usize) {
+            let document = LAYOUTS[client][1].to_string();
+            let own_lane = self.lane(client).tmux_session_name(PROJECT_SESSION);
+            let existing = (self.world.pane_count.get(&document).copied().unwrap_or(0) > 0)
+                .then(|| self.world.pane_session.get(&document).cloned())
+                .flatten();
+            match requester_pane_placement(
+                self.mode,
+                PROJECT_SESSION,
+                Some(CLIENTS[client].0),
+                existing.as_deref(),
+            ) {
+                RequesterPanePlacement::Existing { session } => match self.mutation {
+                    Mutation::RouteMovesExistingPane if session != own_lane => {
+                        self.world
+                            .moved
+                            .push((document.clone(), session, own_lane.clone()));
+                        self.world.pane_session.insert(document, own_lane.clone());
+                        if own_lane != PROJECT_SESSION {
+                            self.world.lane_sessions.insert(own_lane);
+                        }
+                    }
+                    Mutation::RouteDuplicatesPane if session != own_lane => {
+                        *self.world.pane_count.entry(document).or_default() += 1;
+                    }
+                    _ => {}
+                },
+                RequesterPanePlacement::Start { session, .. } => {
+                    let session = if self.mutation == Mutation::RouteIntoSharedSession {
+                        PROJECT_SESSION.to_string()
+                    } else {
+                        session
+                    };
+                    if session != PROJECT_SESSION {
+                        // The requester's lane session is provisioned on first use.
+                        self.world.lane_sessions.insert(session.clone());
+                    }
+                    self.world
+                        .pane_session
+                        .insert(document.clone(), session.clone());
+                    self.world.pane_count.insert(document.clone(), 1);
+                    self.world
+                        .route_starts
+                        .push((document, client, session, own_lane));
                 }
             }
         }
@@ -1935,6 +2006,13 @@ mod two_ide_navigation_model {
             if let Some((document, session)) = self.world.unfolded_after_disable.first() {
                 return Err(format!("disable left {document} in lane {session}"));
             }
+            for (document, client, started, own_lane) in &self.world.route_starts {
+                if started != own_lane {
+                    return Err(format!(
+                        "client {client} started {document} in {started}, not its lane {own_lane}"
+                    ));
+                }
+            }
             if let Some((document, from, to)) = self.world.moved.first() {
                 return Err(format!(
                     "pane of {document} moved across sessions {from} -> {to}"
@@ -2014,6 +2092,7 @@ mod two_ide_navigation_model {
                     Event::Layout(client),
                     Event::Claim(client),
                     Event::Retire(client),
+                    Event::Route(client),
                 ]
             })
             .chain([
@@ -2181,6 +2260,78 @@ mod two_ide_navigation_model {
             violation.contains("while its installation is live"),
             "{violation}"
         );
+    }
+
+    #[test]
+    fn a_lane_route_starting_in_the_shared_session_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RouteIntoSharedSession,
+            DEPTH,
+        )
+        .expect("a lane client's route must start its pane in its own lane");
+        assert!(violation.contains("not its lane"), "{violation}");
+    }
+
+    #[test]
+    fn a_route_moving_or_duplicating_an_existing_pane_is_detected() {
+        let moved = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RouteMovesExistingPane,
+            DEPTH,
+        )
+        .expect("a route must use another lane's pane where it lives");
+        assert!(moved.contains("moved across sessions"), "{moved}");
+        let duplicated = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RouteDuplicatesPane,
+            DEPTH,
+        )
+        .expect("a route must not start a second pane for a placed document");
+        assert!(duplicated.contains("duplicated"), "{duplicated}");
+    }
+
+    #[test]
+    fn routes_start_panes_in_the_requesting_lane_and_reuse_placed_ones() {
+        let idea = "proj-IU-0a1b2c3d".to_string();
+        let rider = "proj-RD-9f8e7d6c".to_string();
+        let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        // Rider routes `c` (its second document): a new pane in Rider's lane.
+        sim.step(Event::Route(1));
+        // IDEA routes `b`: a new pane in IDEA's lane.
+        sim.step(Event::Route(0));
+        // VS Code (unscoped) routes `a`: the shared session.
+        sim.step(Event::Route(2));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.pane_session["/project/c.md"], rider);
+        assert_eq!(sim.world.pane_session["/project/b.md"], idea);
+        assert_eq!(sim.world.pane_session["/project/a.md"], PROJECT_SESSION);
+        assert_eq!(
+            sim.world.lane_sessions,
+            BTreeSet::from([idea.clone(), rider.clone()])
+        );
+        // IDEA's layout shows `a` and `b`: `b` is in its lane, `a` (shared)
+        // is dropped passively; routing again reuses every placed pane.
+        sim.step(Event::Layout(0));
+        sim.step(Event::Route(0));
+        sim.step(Event::Route(1));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.route_starts.len(), 3);
+        assert!(sim.world.pane_count.values().all(|count| *count == 1));
+        // Shared mode: every route starts in the project session.
+        let mut shared = Sim::new(NavigationMode::Shared, Mutation::None);
+        for client in 0..CLIENTS.len() {
+            shared.step(Event::Route(client));
+        }
+        assert_eq!(shared.check(), Ok(()));
+        assert!(
+            shared
+                .world
+                .pane_session
+                .values()
+                .all(|session| session == PROJECT_SESSION)
+        );
+        assert!(shared.world.lane_sessions.is_empty());
     }
 
     #[test]

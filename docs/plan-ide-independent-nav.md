@@ -338,7 +338,7 @@ What landed (the original scope follows below):
 - Docs: README, `specs/07-session-tmux-commands.md`, `specs/07-core-commands.md` (gc), and
   `editors/jetbrains/SPEC.md`.
 - Still open: (a) route, start, and `agent-doc claim --client-id` creating panes in the
-  requester's lane; (b) the `sync_tmux_layout` command and the recycle republish publishing into
+  requester's lane (landed in P6, below); (b) the `sync_tmux_layout` command and the recycle republish publishing into
   the right lane(s); (c) a per-lane `pane_layout_status` channel; a controller-side trigger that
   passes its live installations to the reconcile (today only `agent-doc gc` runs it). The optional
   focus-driven handoff is not planned.
@@ -361,6 +361,65 @@ republish; a per-lane `pane_layout_status` channel; optionally an opt-in focus-d
 - Docs: README, SPEC, and `editors/jetbrains/SPEC.md` describe the feature as
   available. A two-IDE end-to-end test in `tests/cross_editor_simworld.rs` uses an
   isolated tmux server and two simulated editor clients.
+
+### P6 (route): route, start, and claim create panes in the requester's lane (LANDED)
+
+Landed on branch `ridernavp6route` (`#ridernavp6route`, open item (a) of P5).
+
+- Pure (editor-surface): `requester_navigation_lane(mode, requester)` and
+  `requester_pane_placement(mode, project_session, requester, existing_pane_session)` →
+  `Existing { session }` (a request uses a live pane where it lives, in any lane) or
+  `Start { session, lane }` (a missing pane starts in the requester's lane session: the project
+  session for shared mode, no client, or an unscoped client).
+- Route: `agent-doc route --client-id <id>` and the controller `editor_route` payload's
+  `client_id` set the route's navigation client (`NavigationClientGuard`).
+  `requester_lane_target_session` retargets the route's resolved session at the client's lane
+  session (provisioned on first use, never adopting an unmarked session) only in
+  `per_installation` mode, for an installation-scoped client, and when the resolved target is the
+  `tmux_session` pin (a multi-session document binding keeps its own session). Existing panes are
+  still resolved from the actor binding and registry, so they are dispatched where they live; only
+  a start lands in the lane. The controller `editor_route` from such a client merges over,
+  publishes into, awaits, and re-observes the client's own lane graph (`pane_layout_graph_for_lane`;
+  the lease guard, receipt, and re-observe gate carry the lane) and skips the cross-root
+  delegation; the shared lane is byte-identical.
+- Startup: a start into a marked installation lane session is staged in the lane's `stash`
+  (`stage_startup_pane`, `route_startup_navigation_lane_staged`) for the lane's layout to place,
+  instead of splitting beside an anchor: a fresh lane's `agent-doc` window holds only its unowned
+  placeholder shell, which the anchor rule would refuse. Route skips its raw post-start window sync
+  for a lane target (the lane's layout is the only topology writer there).
+- Start: `agent-doc start --client-id <id>` outside tmux first ensures the shared session; a
+  document with a live pane anywhere is reused there. Otherwise the start pane is created in the
+  client's lane session (a new lane's placeholder becomes the start pane), logged
+  `start_navigation_lane_target`. Inside tmux the flag changes nothing.
+- Claim: `agent-doc claim --client-id <id>` provisions every new pane (`--new-pane`, no pane
+  evidence, an occupied or foreign-owned pane) in the client's lane under the same conditions
+  (`claim_navigation_lane_target`), and a pane already in the client's own marked lane passes the
+  cross-session check (`claim_navigation_lane_pane_accepted`); another IDE's lane is still refused
+  without `--force`.
+- JetBrains: the `editor_route` payload (classic and command-plane) carries `client_id`
+  (`CpRouteClient.navigationClientId`); `ClaimAction.buildClaimCommand` appends `--client-id`
+  for Claim for Tmux Pane, its New Pane recovery, and Force Claim. Plugin and binary ship together.
+- Verification: unit tests and a proptest of the placement; controller tests (a lane client's
+  editor route publishes only into its lane graph and hands the route its client; no client, an
+  unscoped client, and shared mode publish into the shared lane; payload parsing); start-io
+  (isolated server): the start pane lands in the lane, a live shared pane is reused, unscoped and
+  no-client starts stay shared; claim-io: lane resolution and (`make tmux-ci`) lane provisioning;
+  route-io (`make tmux-ci`): a lane start is staged in the lane's stash past the placeholder, the
+  shared session is untouched, the non-lane cases keep the shared target, and an unmarked
+  lane-named session is refused. SimWorld `two_ide_navigation_model` gains a `Route` event driving
+  the production placement (18 events, depth 5): a started pane always lives in the requester's
+  lane, and new mutations `RouteIntoSharedSession`, `RouteMovesExistingPane`, and
+  `RouteDuplicatesPane` are detected. `tests/cross_editor_simworld.rs`
+  `two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end` (`make tmux-ci`) drives the
+  real CLI: IDEA's and Rider's `claim --new-pane --client-id` start panes in their own lanes
+  (staged), no client and VS Code start in the shared session, the shared window is untouched,
+  IDEA may claim a pane in its own lane while Rider is refused, and shared mode ignores the id.
+- Not done: Run Agent Doc remains a passive lane claim, so a document whose pane lives in another
+  lane is dropped from the requester's route layout, as it was dropped from the shared lane's
+  route layout before P6 (the route's layout-convergence behavior for that case is not covered by
+  a test); the Claim actions hand the pane over. The
+  `sync_tmux_layout` command, the recycle republish, and the per-lane `pane_layout_status` channel
+  are separate items.
 
 ## Risks
 

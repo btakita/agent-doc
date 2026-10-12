@@ -53,6 +53,40 @@ static ROUTE_STEERING_DELIVERY: RefCell<Option<String>> = const { RefCell::new(N
 /// because that turn is already doing the work. Benign: reported with exit 0,
 /// never as the `EX_TEMPFAIL` deferral or a recovery command.
 static ROUTE_LIVE_OWNER_TURN: RefCell<Option<String>> = const { RefCell::new(None) };
+/// `#ideriderindependentnav` P6: the editor surface client this route acts
+/// for (`agent-doc route --client-id`, or the controller `editor_route`'s
+/// requester). In `per_installation` mode an installation-scoped client's new
+/// pane starts in its own navigation lane session.
+static NAVIGATION_CLIENT: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// The editor surface client this route acts for, if any (P6).
+pub fn navigation_client_id() -> Option<String> {
+    NAVIGATION_CLIENT.with(|cell| cell.borrow().clone())
+}
+
+/// Scopes [`navigation_client_id`] to one route invocation and restores the
+/// previous value on drop.
+pub struct NavigationClientGuard {
+    previous: Option<String>,
+}
+
+impl NavigationClientGuard {
+    pub fn set(client_id: Option<&str>) -> Self {
+        let client_id = client_id
+            .map(str::trim)
+            .filter(|client| !client.is_empty())
+            .map(str::to_string);
+        let previous = NAVIGATION_CLIENT.with(|cell| cell.replace(client_id));
+        Self { previous }
+    }
+}
+
+impl Drop for NavigationClientGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        NAVIGATION_CLIENT.with(|cell| *cell.borrow_mut() = previous);
+    }
 }
 
 /// Exit code for an editor route that completed without dispatching

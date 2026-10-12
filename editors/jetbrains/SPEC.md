@@ -266,6 +266,15 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   contended document's pane from another IDE's lane into this IDE's lane before arranging it. Passive
   publications (`automatic` heartbeats, `resync`) never move a pane. No plugin change was needed:
   the plugin already sent `caller_kind` and `client_id` on every publication.
+- New panes start in the requesting IDE's lane (`#ideriderindependentnav` P6): the Run Agent Doc
+  `editor_route` payload (classic and command-plane) carries `client_id` = this IDE's surface
+  client id, so in `per_installation` mode the controller arranges this IDE's lane for the route
+  and a pane the route starts lives in this IDE's lane session. Claim for Tmux Pane, its New Pane
+  recovery, and Force Claim run `agent-doc claim ... --client-id <id>`, so a pane the claim
+  provisions starts in this IDE's lane and a pane already in this IDE's lane passes the claim's
+  cross-session check. An existing pane is used where it lives; in `shared` mode the client id
+  changes nothing. The plugin and binary must ship together: an older binary rejects
+  `claim --client-id` (an older controller ignores the payload field).
 - Per-installation lanes are available (`#ideriderindependentnav` P5): switching
   `editor_navigation` either way needs no plugin action. Enabling moves no pane; after switching
   back to `shared`, `agent-doc gc` folds every lane's document panes into the shared session and

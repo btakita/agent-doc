@@ -117,7 +117,12 @@ IDE: that explicit request hands the pane over to the requesting IDE's lane
 read when the project controller starts; an unknown value logs a warning and
 keeps `shared`. Each JetBrains IDE's agent-doc terminal attaches to its own lane
 session, its manual Sync Tmux Layout arranges that lane, and tmux-to-editor focus
-mirroring reads only that lane ([plan](docs/plan-ide-independent-nav.md)).
+mirroring reads only that lane ([plan](docs/plan-ide-independent-nav.md)). A new
+pane started from an IDE lands in that IDE's lane too: **Run Agent Doc** arranges
+the requesting IDE's lane and starts a missing pane there, and the Claim actions
+pass the IDE's client id (`agent-doc claim --client-id <id>`; `agent-doc route` and
+`agent-doc start` accept the same flag). An existing pane is always used where it
+lives; only an explicit Claim or Sync Tmux Layout moves it.
 
 Switching the mode is safe on a project that already has a shared window.
 Turning `per_installation` on moves no pane: existing panes stay in the shared

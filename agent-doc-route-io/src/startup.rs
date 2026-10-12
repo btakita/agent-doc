@@ -481,6 +481,12 @@ fn create_anchored_startup_pane(
     if !layout_owned {
         return tmux.split_window(anchor, cwd, split_flag);
     }
+    stage_startup_pane(tmux, session_name, cwd)
+}
+
+/// Create a startup pane in a detached `stash` window of `session_name`, for
+/// the layout to place.
+fn stage_startup_pane(tmux: &Tmux, session_name: &str, cwd: &Path) -> Result<String> {
     // A remote startup can complete after the requesting layout was superseded.
     // Only the current layout effect may place this binding in the visible
     // window. `new_window` selects its window, so use an explicitly detached
@@ -700,10 +706,27 @@ pub fn auto_start_in_session_with_lock_mode(
     let window_panes = tmux
         .list_panes_ordered(&format!("{}:agent-doc", session_name))
         .unwrap_or_default();
-    let registered_anchor =
-        find_registered_pane_in_session(tmux, &registry_base_dir, session_name, "");
+    // `#ideriderindependentnav` P6: an installation navigation lane's layout is
+    // the only topology writer for its session, and a fresh lane's `agent-doc`
+    // window holds only its unowned placeholder shell. A start there (route,
+    // `agent-doc claim --client-id`, or the lane's own layout provisioning) is
+    // staged in the lane's `stash` for the lane layout to place; it never
+    // splits beside an anchor.
+    let navigation_lane_start =
+        agent_doc_controller_io::project_controller::is_owned_navigation_lane_session(
+            tmux,
+            &registry_base_dir,
+            session_name,
+        );
+    let registered_anchor = if navigation_lane_start {
+        None
+    } else {
+        find_registered_pane_in_session(tmux, &registry_base_dir, session_name, "")
+    };
     let mut window_anchor_refusal = None;
-    let existing_pane = if skip_wait {
+    let existing_pane = if navigation_lane_start {
+        None
+    } else if skip_wait {
         provision_only_visible_anchor(&window_panes, split_before)
     } else if registered_anchor.is_some() {
         registered_anchor
@@ -769,7 +792,21 @@ pub fn auto_start_in_session_with_lock_mode(
     };
     let split_flag = if split_before { "-dbh" } else { "-dh" };
     let layout_owned_start = skip_wait || crate::invocation::defer_startup_focus_to_layout();
-    let new_pane = if let Some(ref target) = existing_pane {
+    let new_pane = if navigation_lane_start {
+        let pane = stage_startup_pane(tmux, session_name, &cwd)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_startup_navigation_lane_staged file={} pane={} session={}",
+                file_path, pane, session_name
+            ),
+        );
+        eprintln!(
+            "[route] staged pane {} in navigation lane session '{}' for its layout to place",
+            pane, session_name
+        );
+        pane
+    } else if let Some(ref target) = existing_pane {
         match create_anchored_startup_pane(
             tmux,
             session_name,

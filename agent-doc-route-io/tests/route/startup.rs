@@ -4325,6 +4325,103 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert_ne!(iso.pane_window(&new_pane).unwrap(), window);
     }
 
+    /// `#ideriderindependentnav` P6: a route or claim acting for an
+    /// installation lane's client targets that client's own lane session
+    /// (provisioned on first use), and a pane started there is staged in the
+    /// lane's `stash` for the lane's layout to place: it never splits beside
+    /// the lane's unowned placeholder (which would refuse) and never lands in
+    /// the shared session. Shared mode, an unscoped client, and a target that
+    /// is not the project pin keep the shared target. A same-named session
+    /// agent-doc did not create is refused, never adopted.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn provision_pane_for_a_lane_client_stages_in_its_navigation_lane() {
+        use agent_doc_route_io::session_resolution::{
+            RequesterLaneTarget, requester_lane_target_session,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let _bin_guard = crate::tests::EnvGuard::set("AGENT_DOC_ROUTE_BIN", "/bin/echo");
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let config = dir.path().join(".agent-doc/config.toml");
+        std::fs::write(
+            &config,
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let file = dir.path().join("lane.md");
+        std::fs::write(&file, "# lane\n").unwrap();
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-navigation-lane-start");
+        let shared_pane = iso.auto_start("proj", dir.path()).unwrap();
+        let shared_window = iso.pane_window(&shared_pane).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", &shared_window, "agent-doc"]);
+        let shared_before = iso.list_session_panes("proj");
+        let idea = "jetbrains@IU.0a1b2c3d-pid:41";
+
+        let target =
+            requester_lane_target_session(&iso, &file, "proj".to_string(), Some(idea)).unwrap();
+        assert_eq!(
+            target,
+            RequesterLaneTarget {
+                session: "proj-IU-0a1b2c3d".to_string(),
+                navigation_lane: true,
+            }
+        );
+        let lane_window_before = iso.list_window_panes("proj-IU-0a1b2c3d:agent-doc").unwrap();
+        assert_eq!(lane_window_before.len(), 1, "the lane's idle placeholder");
+
+        let pane = agent_doc_route_io::startup::provision_pane(
+            &iso,
+            &file,
+            "route-test-navigation-lane-session",
+            &file.display().to_string(),
+            Some(&target.session),
+            &[],
+            route_startup_effects(),
+        )
+        .expect("a lane start is staged, never refused by the placeholder");
+        assert_eq!(iso.pane_session(&pane).unwrap(), "proj-IU-0a1b2c3d");
+        assert_eq!(
+            iso.list_window_panes("proj-IU-0a1b2c3d:agent-doc").unwrap(),
+            lane_window_before,
+            "the lane's layout, not the start, places the pane"
+        );
+        assert_eq!(
+            iso.list_session_panes("proj"),
+            shared_before,
+            "the shared session is untouched"
+        );
+
+        for (requester, shared_target) in [
+            (None, "proj"),
+            (Some("vscode-pid:9"), "proj"),
+            (Some(idea), "elsewhere"),
+        ] {
+            assert_eq!(
+                requester_lane_target_session(&iso, &file, shared_target.to_string(), requester)
+                    .unwrap(),
+                RequesterLaneTarget {
+                    session: shared_target.to_string(),
+                    navigation_lane: false,
+                },
+                "{requester:?} {shared_target}"
+            );
+        }
+        let rider = "jetbrains@RD.9f8e7d6c-pid:42";
+        iso.new_session("proj-RD-9f8e7d6c", dir.path()).unwrap();
+        assert!(
+            requester_lane_target_session(&iso, &file, "proj".to_string(), Some(rider)).is_err(),
+            "an unmarked lane-named session is never adopted"
+        );
+        std::fs::write(&config, "tmux_session = \"proj\"\n").unwrap();
+        assert!(
+            !requester_lane_target_session(&iso, &file, "proj".to_string(), Some(idea))
+                .unwrap()
+                .navigation_lane,
+            "shared mode keeps the shared target"
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn manual_layout_provisions_paused_queue_without_dispatch_or_resume() {

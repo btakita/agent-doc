@@ -173,6 +173,15 @@ pub fn run_with_tmux_with_options(
         .to_string_lossy()
         .into_owned();
     let target_session = resolve_target_session(tmux, None, col_args, Some(file), &harness)?;
+    // `#ideriderindependentnav` P6: a route acting for an installation lane's
+    // client starts a missing pane in that lane's session.
+    let lane_target = crate::session_resolution::requester_lane_target_session(
+        tmux,
+        file,
+        target_session,
+        crate::invocation::navigation_client_id().as_deref(),
+    )?;
+    let target_session = lane_target.session;
     eprintln!("[route] target tmux session: {}", target_session);
 
     // === SINGLE EXIT POINT PATTERN ===
@@ -218,12 +227,17 @@ pub fn run_with_tmux_with_options(
             // dispatch, but a pane provisioned by this route did not exist during
             // that pass. Reconcile only that fresh-target case. Existing-pane
             // routes stay single-sync and therefore keep the anti-bounce guarantee.
-            crate::startup_sync::reconcile_newly_provisioned_route(
-                tmux,
-                pid,
-                &created_panes,
-                col_args,
-            );
+            // An installation lane's layout is the only topology writer for
+            // its session (P6): a pane the route staged there is placed by
+            // the lane's next layout pass, never by a raw window sync.
+            if !lane_target.navigation_lane {
+                crate::startup_sync::reconcile_newly_provisioned_route(
+                    tmux,
+                    pid,
+                    &created_panes,
+                    col_args,
+                );
+            }
             agent_doc_controller_io::editor_route_errors::clear_for_success(
                 file,
                 "route_success",

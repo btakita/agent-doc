@@ -49,7 +49,7 @@ may republish the retained intent, but remains subject to the same rule.
 
 ## start
 
-`agent-doc start <FILE> [--force]`
+`agent-doc start <FILE> [--force] [--client-id ID]`
 
 - Server identity observation represents an absent server or empty bootstrap
   reply explicitly and leaves the prior identity/registry untouched. The first
@@ -70,10 +70,18 @@ may republish the retained intent, but remains subject to the same rule.
 - `--force` is the only supported escape hatch for intentionally rebinding the current pane during repair work, and the registry rebind must still record supersession provenance in the session log.
 - When a fresh start falls back to a new session binding because the configured session is dead, `.agent-doc/config.toml` must be updated to the new live session.
 - Harness launches must auto-add writable roots for parent-repo patchback and nested submodule git metadata when needed.
+- Navigation lanes (`#ideriderindependentnav` P6): `--client-id` names the requesting editor
+  surface client. From outside tmux, with `editor_navigation = "per_installation"`, a
+  `tmux_session` pin, and an installation-scoped client, the start pane is created in that
+  client's own lane session (provisioned on first use; a new lane's idle placeholder pane becomes
+  the start pane), logged `start_navigation_lane_target`. A document that already has a live
+  pane anywhere is reused where it lives, never started again in the lane. Inside tmux the start
+  binds the current pane and the flag changes nothing. Shared mode and unscoped clients keep the
+  shared session.
 
 ## route
 
-`agent-doc route <FILE> [--pane P] [--debounce MS]`
+`agent-doc route <FILE> [--pane P] [--debounce MS] [--client-id ID]`
 
 - Routes a harness-native reopen command into the authoritative pane for the document.
 - Unless explicitly disabled with `--debounce 0`, route first waits for both filesystem mtime and the shared editor typing indicator to be idle for the debounce window (default 500ms). If the combined proof does not settle within the bounded wait, route fails before inserting frontmatter, cleaning duplicate answered prompt tails, or submitting pane input.
@@ -171,9 +179,29 @@ may republish the retained intent, but remains subject to the same rule.
 - Claude Code, Codex, and OpenCode dispatch-only routes label accepted pane delivery as accepted-only when no dispatch-start proof is available. OpenCode pane-state transition proof, when observed, is recorded as stronger dispatch-start proof (`proof=pane_state_changed proof_scope=dispatch_start`).
 - Frontmatter-only metadata churn must not count as prompt-bearing work that blocks or requires a routed admission projection.
 
+- Navigation lanes (`#ideriderindependentnav` P6): a route acts for a requesting editor client,
+  `--client-id` on the CLI or the controller `editor_route` payload's `client_id` (JetBrains sends
+  its surface client id). With `editor_navigation = "per_installation"`, an installation-scoped
+  client, and a resolved target that is the `tmux_session` pin, the route's target session becomes
+  that client's lane session, provisioned on first use (an unmarked same-named session fails
+  closed), logged `route_navigation_lane_target`. Only a pane the route starts lands there: an
+  existing pane is resolved from the actor binding and registry and dispatched where it lives, in
+  any lane (`requester_pane_placement`); a stash rescue applies only to a pane already in the lane.
+  A start into an installation lane session (any session marked `@agent_doc_navigation_lane` for
+  this root) is staged in the lane's `stash` window (`route_startup_navigation_lane_staged`) for
+  the lane's layout to place: the lane's idle placeholder shell never blocks it as an unowned
+  anchor, and route runs no raw post-start window sync there. The controller `editor_route` from
+  such a client merges over, publishes into, and awaits that client's own lane graph
+  (`controller_editor_route_navigation_lane`), never the shared lane's, and skips the cross-root
+  main-window delegation (an installation lane is this root's own session); the lane's layout
+  provisions the routed document's pane in the lane. The route stays a passive lane claim, so a
+  document whose pane lives in another lane is dropped from the requester's layout as before; the
+  Claim actions hand it over. Shared mode, a route without a client, an unscoped client, and a
+  multi-session document binding other than the pin keep the shared target byte for byte.
+
 ## claim
 
-`agent-doc claim <FILE> [--position left|right|top|bottom] [--window W] [--pane P] [--new-pane]`
+`agent-doc claim <FILE> [--position left|right|top|bottom] [--window W] [--pane P] [--new-pane] [--client-id ID]`
 
 - After pane/session admission, claim persists any generated document UUID before
   every provisioning branch, including occupied-pane and cross-root fallbacks.
@@ -188,6 +216,16 @@ may republish the retained intent, but remains subject to the same rule.
 - Pane validation runs **before** any file mutation (`#claim-validate-before-scaffold`). `claim` resolves the pane and applies the cross-session guard before the empty-file auto-scaffold writes/commits the document. A rejected cross-session claim must leave the target file byte-identical (no scaffold, no `agent-doc(<doc>)` commit) — earlier the auto-scaffold ran first, so an empty `.md` opened in a pane on the wrong tmux session was scaffolded and committed and *then* the claim failed with "pane %N is in tmux session '1' but project session is '0'", converting a file the operator never opted into.
 - Explicit claim performs only file-scoped stale-binding validation. It must not invoke global resync/prune work or wait on unrelated panes before mutating the requested document.
 - For new template documents, `claim` scaffolds the default `status` and `exchange` components and saves a baseline snapshot with empty exchange content.
+
+- Navigation lanes (`#ideriderindependentnav` P6): `--client-id` names the requesting editor
+  surface client (the JetBrains Claim for Tmux Pane, Force Claim, and New Pane actions pass it).
+  With `editor_navigation = "per_installation"`, an installation-scoped client, and the pin as the
+  claim's authoritative session, every pane the claim provisions (`--new-pane`, no pane evidence,
+  an occupied or foreign-owned pane) starts in that client's own lane session, provisioned on
+  first use (`claim_navigation_lane_target`) and staged in its `stash` for the lane's layout to
+  place. A pane that already lives in that client's own marked lane session passes the
+  cross-session check (`claim_navigation_lane_pane_accepted`); a pane in another IDE's lane is
+  still refused without `--force`. Shared mode and unscoped clients are unchanged.
 
 ## focus
 
@@ -256,8 +294,10 @@ loses desktop focus.
   session. The controller keeps one pane-layout graph per lane (its own desired layout,
   observation, receipt, structural assignments, width memory, and published generation, all in the
   controller process scope and derived from the one actor store); the shared lane's graph is the
-  one every non-lane caller uses (route, recycle republish, the `sync_tmux_layout` command), and
-  installation lanes' graphs are created on first use.
+  one every non-lane caller uses (a route without an installation-lane client, recycle
+  republish, the `sync_tmux_layout` command), and installation lanes' graphs are created on first
+  use. An editor route from an installation lane's client uses that lane's graph (P6, see
+  `route`).
 - Plugin layout publications are lane-routed (P3): a `pane_layout_desired` state-plane frame
   carries its publisher's surface `client_id`, and the controller projects it into that client's
   lane graph (a frame without one, and every frame in shared mode, is the shared lane). Each lane

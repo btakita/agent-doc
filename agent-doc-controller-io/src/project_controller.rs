@@ -148,6 +148,10 @@ pub struct ControllerEditorRouteInvocation {
     /// route's layout, so the layout plane owns tmux topology for the rest of
     /// the route. Route must not raw-join a stashed pane back into view.
     pub layout_owned_by_controller: bool,
+    /// `#ideriderindependentnav` P6: the requesting editor surface client when
+    /// the route acts for an installation navigation lane. A pane the route
+    /// starts lives in that lane's session; `None` keeps the shared target.
+    pub navigation_client_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3094,8 +3098,13 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         Ok(ControllerEditorRouteRuntimeResult {
             exit_code: 0,
             output: format!(
-                "test editor route accepted for {}",
-                invocation.relative_path
+                "test editor route accepted for {}{}",
+                invocation.relative_path,
+                invocation
+                    .navigation_client_id
+                    .as_deref()
+                    .map(|client| format!(" navigation_client={client}"))
+                    .unwrap_or_default(),
             ),
         })
     }
@@ -8199,12 +8208,6 @@ impl ControllerRuntime {
         )
     }
 
-    /// Publications the layout arbiter displaced or refused since the last
-    /// drain (`layoutpublisherarbiter`).
-    fn drain_pane_layout_supersessions(&self) -> Vec<PaneLayoutSupersession> {
-        self.pane_layout_graph().drain_supersessions()
-    }
-
     /// The newest `pane_layout_desired` frame version on the editor state
     /// plane, whether or not it has been projected yet.
     fn pane_layout_plane_head(&self) -> Option<u64> {
@@ -8252,7 +8255,7 @@ impl ControllerRuntime {
             .claim_recycle_republish(settled_document_was_gated)
     }
 
-    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    #[cfg(test)]
     fn pane_layout_projection(&self) -> PaneLayoutProjection {
         self.pane_layout_graph().projection()
     }
@@ -8278,42 +8281,6 @@ impl ControllerRuntime {
         self.pane_layout_graph()
             .ctx
             .get(&self.pane_layout_graph().owned_assignments)
-    }
-
-    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-    fn await_pane_layout_generation(
-        &self,
-        generation: u64,
-        timeout: Duration,
-    ) -> PaneLayoutProjection {
-        self.pane_layout_graph()
-            .await_generation(generation, timeout)
-    }
-
-    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-    fn await_pane_layout_route_document(
-        &self,
-        document: &str,
-        timeout: Duration,
-    ) -> PaneLayoutProjection {
-        self.pane_layout_graph()
-            .await_route_document(document, timeout)
-    }
-
-    /// GH #110: await a change from `observed` for at most `timeout`. See
-    /// [`ControllerPaneLayoutGraph::await_projection_change`].
-    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-    fn await_pane_layout_projection_change(
-        &self,
-        observed: &PaneLayoutProjection,
-        timeout: Duration,
-    ) -> PaneLayoutProjection {
-        self.pane_layout_graph()
-            .await_projection_change(observed, timeout)
-    }
-
-    fn release_pane_layout_route_lease(&self, generation: u64) -> Option<PaneLayoutDesired> {
-        self.pane_layout_graph().release_route_lease(generation)
     }
 
     fn try_claim_coordination(&self, scopes: &[String], owner_token: &str, owner_pid: u32) -> bool {

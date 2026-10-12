@@ -378,37 +378,44 @@ pub fn bootstrap_start_inside_tmux_if_needed_with_purpose(
     resume: Option<&agent_doc_harness::ResumeRequest>,
     harness_override: Option<&str>,
 ) -> Result<Option<TmuxEnsureOutcome>> {
+    bootstrap_start_inside_tmux_for_client(
+        file,
+        force,
+        route_owned,
+        route_owned_reap_policy,
+        route_owned_start_purpose,
+        resume,
+        harness_override,
+        None,
+    )
+}
+
+/// [`bootstrap_start_inside_tmux_if_needed_with_purpose`] on behalf of an
+/// editor surface client (`agent-doc start --client-id`,
+/// `#ideriderindependentnav` P6). In `per_installation` mode an
+/// installation-scoped client's start pane lives in its own navigation lane
+/// session; otherwise (and for a document that already has a live pane
+/// anywhere) the start is the shared one, unchanged.
+#[allow(clippy::too_many_arguments)]
+pub fn bootstrap_start_inside_tmux_for_client(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    route_owned_reap_policy: agent_doc_supervisor::route_owned::RouteOwnedReapPolicy,
+    route_owned_start_purpose: RouteOwnedStartPurpose,
+    resume: Option<&agent_doc_harness::ResumeRequest>,
+    harness_override: Option<&str>,
+    client_id: Option<&str>,
+) -> Result<Option<TmuxEnsureOutcome>> {
     if agent_doc_tmux_io::in_tmux() {
         return Ok(None);
     }
 
     prepare_start_document_for_tmux_bootstrap(file)?;
-    let outcome = ensure_tmux_session(file, None)?;
-    if outcome.document_pane.is_some() && !force {
-        eprintln!(
-            "[start] {} already has a live supervisor in pane {}; session '{}' reused",
-            file.display(),
-            outcome.document_pane.as_deref().unwrap_or(&outcome.pane_id),
-            outcome.session_name,
-        );
-        return Ok(Some(outcome));
-    }
-
     let tmux = tmux_for_environment();
-    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
-        .or_else(|| agent_doc_project_config_io::project_root_for_doc(&canonical))
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let pane_id = if outcome.created {
-        outcome.pane_id.clone()
-    } else {
-        tmux.new_window(&outcome.session_name, &project_root)
-            .with_context(|| {
-                format!(
-                    "failed to provision a start pane in tmux session {}",
-                    outcome.session_name
-                )
-            })?
+    let target = match start_bootstrap_target(&tmux, file, force, client_id)? {
+        StartBootstrap::Reuse(outcome) => return Ok(Some(outcome)),
+        StartBootstrap::Start(target) => target,
     };
     let command = start_reexec_command(
         file,
@@ -419,13 +426,97 @@ pub fn bootstrap_start_inside_tmux_if_needed_with_purpose(
         resume,
         harness_override,
     )?;
-    tmux.send_keys(&pane_id, &command)
-        .with_context(|| format!("failed to re-exec agent-doc start in pane {pane_id}"))?;
+    tmux.send_keys(&target.pane_id, &command).with_context(|| {
+        format!(
+            "failed to re-exec agent-doc start in pane {}",
+            target.pane_id
+        )
+    })?;
     eprintln!(
         "[start] dispatched into tmux session '{}' pane {}; attach with: {}",
-        outcome.session_name, pane_id, outcome.attach_command,
+        target.outcome.session_name, target.pane_id, target.outcome.attach_command,
     );
-    Ok(Some(outcome))
+    Ok(Some(target.outcome))
+}
+
+/// What an outside-tmux start does with its document.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum StartBootstrap {
+    /// The document already has a live supervisor pane; it is reused where
+    /// it lives.
+    Reuse(TmuxEnsureOutcome),
+    /// Re-exec the start in a new pane.
+    Start(StartBootstrapTarget),
+}
+
+/// The pane an outside-tmux start re-execs into, and the ensure outcome that
+/// names its session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StartBootstrapTarget {
+    outcome: TmuxEnsureOutcome,
+    pane_id: String,
+}
+
+/// Resolve where an outside-tmux start runs. A document that already has a
+/// live supervisor pane (and `force` is off) is reused where it lives: a start
+/// never moves or duplicates a pane, in any lane. Otherwise the start pane is created in the requester's lane session
+/// (P6) or, without a lane, the shared session, exactly as before.
+fn start_bootstrap_target(
+    tmux: &tmux_router::Tmux,
+    file: &Path,
+    force: bool,
+    client_id: Option<&str>,
+) -> Result<StartBootstrap> {
+    let shared = ensure_tmux_session_with(tmux, file, None)?;
+    if shared.document_pane.is_some() && !force {
+        eprintln!(
+            "[start] {} already has a live supervisor in pane {}; session '{}' reused",
+            file.display(),
+            shared.document_pane.as_deref().unwrap_or(&shared.pane_id),
+            shared.session_name,
+        );
+        return Ok(StartBootstrap::Reuse(shared));
+    }
+    let client_id = client_id.map(str::trim).filter(|id| !id.is_empty());
+    let outcome = if client_id.is_some() {
+        ensure_tmux_session_with_ide_client(tmux, file, None, false, client_id)?
+    } else {
+        shared
+    };
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
+        .or_else(|| agent_doc_project_config_io::project_root_for_doc(&canonical))
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let pane_id = if outcome.created {
+        // A freshly created session (or navigation lane) starts with exactly
+        // one idle pane; the start takes it over.
+        outcome.pane_id.clone()
+    } else {
+        tmux.new_window(&outcome.session_name, &project_root)
+            .with_context(|| {
+                format!(
+                    "failed to provision a start pane in tmux session {}",
+                    outcome.session_name
+                )
+            })?
+    };
+    if outcome.resolution == "navigation_lane" {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "start_navigation_lane_target file={} client={} session={} pane={} provisioned={}",
+                file.display(),
+                client_id.unwrap_or("none"),
+                outcome.session_name,
+                pane_id,
+                outcome.created,
+            ),
+        );
+    }
+    Ok(StartBootstrap::Start(StartBootstrapTarget {
+        outcome,
+        pane_id,
+    }))
 }
 
 /// Validate document admission and persist a missing session identity before an
@@ -3065,6 +3156,98 @@ mod tests {
             ensure_tmux_session_with_ide(&tmux, &file, None, true).unwrap(),
             "shared mode is the pre-lane ensure byte for byte"
         );
+    }
+
+    /// `#ideriderindependentnav` P6: an outside-tmux `agent-doc start
+    /// --client-id` creates its start pane in the requesting installation's own
+    /// lane session in `per_installation` mode (taking over the lane's idle
+    /// placeholder when the lane is new), keeps the shared session without a
+    /// client, and reuses a document's live pane where it lives instead of
+    /// starting a second one in the lane. Isolated tmux server only.
+    #[test]
+    fn start_bootstrap_starts_a_requester_pane_in_its_navigation_lane() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\nagent_doc_session: tmux-lane-start\n---\n").unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("agent-doc-start-lane");
+        let idea = "jetbrains@IU.0a1b2c3d-pid:41";
+        let start = |client: Option<&str>| match start_bootstrap_target(&tmux, &file, false, client)
+            .unwrap()
+        {
+            StartBootstrap::Start(target) => target,
+            StartBootstrap::Reuse(outcome) => panic!("unexpected reuse of {outcome:?}"),
+        };
+
+        let shared = start(None);
+        assert_eq!(shared.outcome.session_name, "proj");
+        assert_eq!(tmux.pane_session(&shared.pane_id).unwrap(), "proj");
+
+        let lane = start(Some(idea));
+        assert_eq!(lane.outcome.session_name, "proj-IU-0a1b2c3d");
+        assert_eq!(lane.outcome.resolution, "navigation_lane");
+        assert!(
+            lane.outcome.created,
+            "the lane session is provisioned on first use"
+        );
+        assert_eq!(
+            lane.pane_id, lane.outcome.pane_id,
+            "a new lane's idle placeholder pane becomes the start pane"
+        );
+        assert_eq!(
+            tmux.pane_session(&lane.pane_id).unwrap(),
+            "proj-IU-0a1b2c3d"
+        );
+        let again = start(Some(idea));
+        assert!(!again.outcome.created);
+        assert_ne!(
+            again.pane_id, lane.pane_id,
+            "a later start gets its own pane"
+        );
+        assert_eq!(
+            tmux.pane_session(&again.pane_id).unwrap(),
+            "proj-IU-0a1b2c3d"
+        );
+        let vscode = start(Some("vscode-pid:7"));
+        assert_eq!(vscode.outcome.session_name, "proj");
+
+        // The document now has a live pane in the shared session: a lane
+        // client's start reuses it there and never starts a second pane.
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            tmux_router::registry::canonical_registry_key_in(
+                dir.path(),
+                &file.display().to_string(),
+            ),
+            tmux_router::RegistryEntry {
+                pane: shared.pane_id.clone(),
+                pid: 1,
+                cwd: dir.path().display().to_string(),
+                started: "2026-10-12T00:00:00Z".to_string(),
+                session_id: "tmux-lane-start".to_string(),
+                file: file.display().to_string(),
+                window: String::new(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
+        let panes_before = tmux.list_session_panes("proj-IU-0a1b2c3d");
+        match start_bootstrap_target(&tmux, &file, false, Some(idea)).unwrap() {
+            StartBootstrap::Reuse(outcome) => {
+                assert_eq!(outcome.session_name, "proj");
+                assert_eq!(
+                    outcome.document_pane.as_deref(),
+                    Some(shared.pane_id.as_str())
+                );
+            }
+            StartBootstrap::Start(target) => panic!("started a second pane: {target:?}"),
+        }
+        assert_eq!(tmux.list_session_panes("proj-IU-0a1b2c3d"), panes_before);
     }
 
     #[test]

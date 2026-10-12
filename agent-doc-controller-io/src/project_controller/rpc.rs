@@ -10020,6 +10020,13 @@ struct ControllerEditorRoutePayload {
     /// the column count by [`EditorRouteLayoutMode::resolve`].
     #[serde(default)]
     layout_mode: Option<String>,
+    /// `#ideriderindependentnav` P6: the requesting editor surface client. In
+    /// `per_installation` mode an installation-scoped client's route publishes
+    /// its layout into that client's own navigation lane, and a pane the route
+    /// starts lives in that lane's session. Absent (older editors, VS Code)
+    /// keeps the shared lane.
+    #[serde(default)]
+    client_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -10935,6 +10942,7 @@ fn realtime_steering_event_for_text(
 fn publish_editor_route_layout_locally<'a>(
     bootstrap: &ControllerBootstrap,
     runtime: &'a ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
     canonical: &Path,
     routed_document: &str,
     mut layout_invocation: ControllerTmuxLayoutSyncInvocation,
@@ -10952,8 +10960,11 @@ fn publish_editor_route_layout_locally<'a>(
     // `layoutpublisherarbiter`: merge over every editor state-plane frame
     // ordered before this route, then stamp the route with that plane head.
     let plane_basis = await_editor_route_plane_catch_up(canonical, runtime, route_deadline);
-    let (retained_columns, retained_focus, retained_owner) = runtime
-        .pane_layout_desired()
+    // `#ideriderindependentnav` P6: the route merges over, publishes into, and
+    // awaits its own lane's graph (the shared lane for every pre-lane route).
+    let lane_graph = runtime.pane_layout_graph_for_lane(lane);
+    let (retained_columns, retained_focus, retained_owner) = lane_graph
+        .desired()
         .map(|desired| {
             (
                 desired.invocation.columns,
@@ -10987,6 +10998,14 @@ fn publish_editor_route_layout_locally<'a>(
         retained_columns,
         retained_focus,
         || {
+            if !lane.is_shared() {
+                // The live survey observes the shared session; an installation
+                // lane merges over its own retained layout only.
+                return LiveLayoutDocumentsObservation::unavailable(
+                    "navigation_lane",
+                    "navigation_lane",
+                );
+            }
             live_tmux.map_or_else(
                 || observe_live_layout_documents(bootstrap, runtime, &layout_invocation),
                 |tmux| {
@@ -11021,11 +11040,9 @@ fn publish_editor_route_layout_locally<'a>(
                 winner: PaneLayoutPublisher::PluginPublication,
                 loser: PaneLayoutPublisher::Route,
                 reason: "ensure_route_cannot_widen_plugin_split",
-                winner_generation: runtime.pane_layout_desired().map(|d| d.generation),
+                winner_generation: lane_graph.desired().map(|d| d.generation),
                 loser_generation: None,
-                winner_plane_basis: runtime
-                    .pane_layout_desired()
-                    .and_then(|d| d.provenance.plane_basis),
+                winner_plane_basis: lane_graph.desired().and_then(|d| d.provenance.plane_basis),
                 loser_plane_basis: plane_basis,
                 winner_columns: retained_columns.clone(),
                 loser_columns: dropped_columns,
@@ -11054,6 +11071,7 @@ fn publish_editor_route_layout_locally<'a>(
     let (first_receipt, route_layout_lease, published_layout) = handle_editor_route_layout(
         bootstrap,
         runtime,
+        lane,
         layout_invocation,
         // A live tmux observation is a positive count of panes that exist: the
         // route may keep them all (GH #136 follow-up b), never more.
@@ -11156,6 +11174,24 @@ fn handle_editor_route_rpc_with_layout_delegate(
     let mut layout_invocation =
         editor_route_layout_invocation(&bootstrap.project_root, &layout_args)?;
     layout_invocation.column_order = payload.column_order;
+    // `#ideriderindependentnav` P6: the lane this route acts for. Shared mode,
+    // a payload without a client, and an unscoped client keep the shared lane,
+    // byte for byte.
+    let route_lane = agent_doc_editor_surface::requester_navigation_lane(
+        runtime.editor_surface_graph.navigation_mode(),
+        payload.client_id.as_deref(),
+    );
+    if !route_lane.is_shared() {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_editor_route_navigation_lane file={} lane={} client={}",
+                canonical.display(),
+                route_lane.label(),
+                payload.client_id.as_deref().unwrap_or("none"),
+            ),
+        );
+    }
     let routed_document = canonical
         .canonicalize()
         .unwrap_or_else(|_| canonical.clone())
@@ -11190,6 +11226,7 @@ fn handle_editor_route_rpc_with_layout_delegate(
         route_editor_layout_with_owner(
             bootstrap,
             runtime,
+            &route_lane,
             &canonical,
             &routed_document,
             layout_invocation,
@@ -11246,6 +11283,10 @@ fn handle_editor_route_rpc_with_layout_delegate(
         // `#routelaterescue`: the layout above already converged; from here the
         // layout plane is the only topology writer for this route.
         layout_owned_by_controller: true,
+        // P6: a pane this route starts lives in the requester's lane session.
+        navigation_client_id: (!route_lane.is_shared())
+            .then(|| payload.client_id.clone())
+            .flatten(),
     })?;
     agent_doc_ops_log_io::log_op(
         &canonical,
@@ -11353,6 +11394,7 @@ struct EditorRouteLayoutDelegationReceipt {
 fn route_editor_layout_with_owner<'a>(
     bootstrap: &ControllerBootstrap,
     runtime: &'a ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
     canonical: &Path,
     routed_document: &str,
     layout_invocation: ControllerTmuxLayoutSyncInvocation,
@@ -11387,10 +11429,19 @@ fn route_editor_layout_with_owner<'a>(
         &controller_root,
         column_roots.iter().map(|root| Some(root.as_path())),
     );
+    // `#ideriderindependentnav` P6: an installation lane is this root's own
+    // tmux session (derived from its pin), so no enclosing controller owns its
+    // window: the route publishes into the lane graph here.
+    let owner = if lane.is_shared() {
+        owner
+    } else {
+        agent_doc_controller::layout_owner::LayoutOwner::Local
+    };
     let agent_doc_controller::layout_owner::LayoutOwner::Delegate(owner_root) = owner else {
         let (receipt, observations, lease) = publish_editor_route_layout_locally(
             bootstrap,
             runtime,
+            lane,
             canonical,
             routed_document,
             layout_invocation,
@@ -11465,6 +11516,7 @@ fn route_editor_layout_with_owner<'a>(
             let (receipt, observations, lease) = publish_editor_route_layout_locally(
                 bootstrap,
                 runtime,
+                lane,
                 canonical,
                 routed_document,
                 layout_invocation,
@@ -11524,6 +11576,7 @@ fn publish_delegated_editor_route_layout(
     match publish_editor_route_layout_locally(
         bootstrap,
         runtime,
+        &agent_doc_editor_surface::NavigationLane::Shared,
         &canonical,
         &delegation.routed_document,
         delegation.invocation,
@@ -17509,6 +17562,7 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             prune_before_lookup: false,
             background_existing_pane_only: true,
             layout_owned_by_controller: false,
+            navigation_client_id: None,
         };
         match enqueue_orphan_drain_route(invocation) {
             Ok(true) => {}
@@ -28207,6 +28261,32 @@ pub fn navigation_lane_session_for_client(
     }))
 }
 
+/// The `(project session, lane session)` `client_id`'s own installation lane
+/// would use for `project_root`, without creating it (`#ideriderindependentnav`
+/// P6). `None` exactly when [`navigation_lane_session_for_client`] returns
+/// `Ok(None)`: `shared` mode, an unscoped client, or no `tmux_session` pin.
+pub fn navigation_lane_session_name_for_client(
+    project_root: &Path,
+    client_id: &str,
+) -> Option<(String, String)> {
+    let (navigation_mode, _) =
+        agent_doc_project_config_io::editor_navigation_mode_for_root(project_root);
+    let lane = agent_doc_editor_surface::NavigationLane::for_client(navigation_mode, client_id);
+    lane.installation()?;
+    navigation_lane_sessions(project_root, navigation_mode, &lane)
+}
+
+/// Whether `session` is an installation navigation lane session agent-doc
+/// created for `project_root` (`#ideriderindependentnav` P6). A session that
+/// merely carries a lane's name, and the project's own session, are not.
+pub fn is_owned_navigation_lane_session(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    session: &str,
+) -> bool {
+    !session.trim().is_empty() && navigation_lane_session_marked(tmux, project_root, session)
+}
+
 /// Create `lane_session` with `agent-doc` + `stash` windows unless agent-doc
 /// already created it. Returns whether this call created it.
 ///
@@ -31794,6 +31874,7 @@ pub(crate) fn handle_sync_tmux_layout(
 fn handle_editor_route_layout<'a>(
     bootstrap: &ControllerBootstrap,
     runtime: &'a ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
     invocation: ControllerTmuxLayoutSyncInvocation,
     claim: PaneLayoutClaim,
     await_timeout: Duration,
@@ -31802,9 +31883,10 @@ fn handle_editor_route_layout<'a>(
     PaneLayoutRouteLeaseGuard<'a>,
     EditorRoutePublishedLayout,
 )> {
-    let (desired, invocation) = publish_pane_layout_desired_invocation(
+    let (desired, invocation) = publish_pane_layout_desired_invocation_in_lane(
         bootstrap,
         runtime,
+        lane,
         invocation,
         None,
         PaneLayoutPublication::FreshRouteIntent,
@@ -31812,22 +31894,33 @@ fn handle_editor_route_layout<'a>(
     )?;
     let lease = PaneLayoutRouteLeaseGuard {
         runtime,
+        lane: lane.clone(),
         project_root: bootstrap.project_root.clone(),
         generation: desired.generation,
     };
     let published = EditorRoutePublishedLayout {
+        lane: lane.clone(),
         generation: desired.generation,
         document: invocation.focus.clone().unwrap_or_default(),
         invocation: invocation.clone(),
     };
-    let receipt =
-        await_sync_tmux_layout_projection(bootstrap, runtime, desired, invocation, await_timeout)?;
+    let receipt = await_sync_tmux_layout_projection_in_lane(
+        bootstrap,
+        runtime,
+        lane,
+        desired,
+        invocation,
+        await_timeout,
+    )?;
     Ok((receipt, lease, published))
 }
 
 /// What one editor-route publication put on the layout graph, kept so the GH
 /// #110 gates can re-observe it without publishing again.
 struct EditorRoutePublishedLayout {
+    /// The navigation lane the route published into (P6).
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    lane: agent_doc_editor_surface::NavigationLane,
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     generation: u64,
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -31837,27 +31930,24 @@ struct EditorRoutePublishedLayout {
 
 struct PaneLayoutRouteLeaseGuard<'a> {
     runtime: &'a ControllerRuntime,
+    /// The lane whose graph holds the route lease (P6).
+    lane: agent_doc_editor_surface::NavigationLane,
     project_root: PathBuf,
     generation: u64,
 }
 
 impl Drop for PaneLayoutRouteLeaseGuard<'_> {
     fn drop(&mut self) {
+        let graph = self.runtime.pane_layout_graph_for_lane(&self.lane);
         // The passive publication a route lease deferred lands here, outside
         // `publish_pane_layout_desired_invocation`, so it reports its own
         // narrowing (GH #111).
-        if let Some(released) = self
-            .runtime
-            .release_pane_layout_route_lease(self.generation)
-        {
+        if let Some(released) = graph.release_route_lease(self.generation) {
             log_pane_layout_narrowed(&self.project_root, &released);
         }
         // `layoutpublisherarbiter`: a deferred plugin publication that now
         // displaces the route is logged here too.
-        log_pane_layout_supersessions(
-            &self.project_root,
-            &self.runtime.drain_pane_layout_supersessions(),
-        );
+        log_pane_layout_supersessions(&self.project_root, &graph.drain_supersessions());
     }
 }
 
@@ -31868,9 +31958,31 @@ fn await_sync_tmux_layout_projection(
     invocation: ControllerTmuxLayoutSyncInvocation,
     await_timeout: Duration,
 ) -> Result<ControllerTmuxLayoutSyncReceipt> {
+    await_sync_tmux_layout_projection_in_lane(
+        bootstrap,
+        runtime,
+        &agent_doc_editor_surface::NavigationLane::Shared,
+        desired,
+        invocation,
+        await_timeout,
+    )
+}
+
+/// [`await_sync_tmux_layout_projection`] on one navigation lane's graph
+/// (`#ideriderindependentnav` P6). The shared lane is the pre-lane await byte
+/// for byte; an installation lane awaits its own graph and leaves the
+/// pre-await survey to its lane effect worker, which observes the lane session.
+fn await_sync_tmux_layout_projection_in_lane(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    desired: PaneLayoutDesired,
+    invocation: ControllerTmuxLayoutSyncInvocation,
+    await_timeout: Duration,
+) -> Result<ControllerTmuxLayoutSyncReceipt> {
     #[cfg(any(test, feature = "test-support"))]
     {
-        let _ = (&desired, await_timeout);
+        let _ = (&desired, await_timeout, lane);
         let mut invocation = invocation;
         invocation.actor_bindings = runtime.pane_layout_actor_bindings();
         return runtime_effects()?.sync_tmux_layout(
@@ -31898,22 +32010,25 @@ fn await_sync_tmux_layout_projection(
                 file_panes: Vec::new(),
             });
         }
+        let graph = runtime.pane_layout_graph_for_lane(lane);
         // A repeated foreground command is also a physical observation edge.
         // Re-observe before awaiting so an identical desired Source cannot reuse
         // a stale Converged projection after pane focus or geometry drift.
-        refresh_pane_layout_observation_before_await(bootstrap, runtime, &desired);
+        if lane.is_shared() {
+            refresh_pane_layout_observation_before_await(bootstrap, runtime, &desired);
+        }
         if invocation.caller_kind == "editor_route"
             && let Some(document) = invocation.focus.clone()
         {
             return Ok(editor_route_layout_receipt(
-                runtime,
+                &graph,
                 desired.generation,
                 invocation,
                 &document,
                 await_timeout,
             ));
         }
-        let projection = runtime.await_pane_layout_generation(desired.generation, await_timeout);
+        let projection = graph.await_generation(desired.generation, await_timeout);
         let (applied, reason) = pane_layout_await_outcome(&projection, desired.generation);
         let receipt_generation = pane_layout_projection_desired(&projection)
             .map(|current| current.generation)
@@ -31933,7 +32048,7 @@ fn await_sync_tmux_layout_projection(
             no_autostart: invocation.no_autostart,
             exact_visible: invocation.exact_visible,
             routes_created_panes,
-            file_panes: runtime.pane_layout_effect_file_panes(receipt_generation),
+            file_panes: graph.effect_file_panes(receipt_generation),
         })
     }
 }
@@ -31943,13 +32058,13 @@ fn await_sync_tmux_layout_projection(
 /// and its GH #110 re-observations, which must not publish again.
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn editor_route_layout_receipt(
-    runtime: &ControllerRuntime,
+    graph: &ControllerPaneLayoutGraph,
     published_generation: u64,
     invocation: ControllerTmuxLayoutSyncInvocation,
     document: &str,
     await_timeout: Duration,
 ) -> ControllerTmuxLayoutSyncReceipt {
-    let projection = runtime.await_pane_layout_route_document(document, await_timeout);
+    let projection = graph.await_route_document(document, await_timeout);
     let (applied, reason) = pane_layout_route_await_outcome(&projection, document);
     // Preserve the projection that won arbitration, even when it omits the
     // routed document. Falling back to the route's original columns hid the
@@ -31975,7 +32090,7 @@ fn editor_route_layout_receipt(
         no_autostart: receipt_invocation.no_autostart,
         exact_visible: receipt_invocation.exact_visible,
         routes_created_panes,
-        file_panes: runtime.pane_layout_effect_file_panes(receipt_generation),
+        file_panes: graph.effect_file_panes(receipt_generation),
     }
 }
 
@@ -32013,14 +32128,15 @@ fn reobserve_editor_route_layout(
     {
         let _ = bootstrap;
         let deadline = Instant::now() + timeout;
-        let current = runtime.pane_layout_projection();
+        let graph = runtime.pane_layout_graph_for_lane(&published.lane);
+        let current = graph.projection();
         if crate::project_controller::pane_layout_route_readiness(&current, &published.document)
             == PaneLayoutRouteReadiness::Refused
         {
-            runtime.await_pane_layout_projection_change(&current, timeout);
+            graph.await_projection_change(&current, timeout);
         }
         Ok(editor_route_layout_receipt(
-            runtime,
+            &graph,
             published.generation,
             published.invocation.clone(),
             &published.document,
@@ -39778,6 +39894,127 @@ mod tests {
         let second = runtime.pane_layout_desired().unwrap();
         assert!(second.generation > first.generation);
         assert_eq!(second.invocation, first.invocation);
+    }
+
+    /// `#ideriderindependentnav` P6: an editor route from an installation
+    /// lane's client publishes, merges, and awaits in that client's own lane
+    /// graph and hands the route its client, so a pane it starts lives in the
+    /// lane session. The shared lane is untouched. Without a client, from an
+    /// unscoped client, or in `shared` mode the route is the pre-lane one.
+    #[test]
+    fn an_editor_route_from_a_lane_client_publishes_into_its_lane_only() {
+        use agent_doc_editor_surface::NavigationLane;
+        let route = |config: &str, client: Option<&str>| {
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            std::fs::write(dir.path().join(".agent-doc/config.toml"), config).unwrap();
+            let file = dir.path().join("plan.md");
+            std::fs::write(
+                &file,
+                "---\nagent_doc_session: plan\nagent: codex\n---\n# plan\n",
+            )
+            .unwrap();
+            let bootstrap = test_bootstrap(&dir);
+            let runtime = test_controller_runtime(&bootstrap);
+            let mut payload = serde_json::json!({
+                "relative_path": "plan.md",
+                "layout_args": ["--col", file.display().to_string(), "--focus", file.display().to_string()],
+                "dispatch_only": true,
+                "plain_trigger": true
+            });
+            if let Some(client) = client {
+                payload["client_id"] = serde_json::Value::String(client.to_string());
+            }
+            let request = ControllerRequest {
+                command: "editor_route".to_string(),
+                file: Some(file.clone()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(payload.to_string()),
+                sequence: None,
+            };
+            let result = handle_editor_route_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
+            let canonical = file.canonicalize().unwrap().display().to_string();
+            (dir, runtime, result, canonical)
+        };
+        let lanes = "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n";
+        let idea = "jetbrains@IU.0a1b2c3d-pid:41";
+        let idea_lane = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+
+        let (dir, runtime, result, canonical) = route(lanes, Some(idea));
+        assert_eq!(result.exit_code, 0);
+        assert!(
+            result
+                .output
+                .ends_with(&format!("navigation_client={idea}")),
+            "the route acts for the requester's lane: {}",
+            result.output
+        );
+        let routed = runtime
+            .pane_layout_graph_for_lane(&idea_lane)
+            .desired()
+            .expect("the route publishes into the requester's lane graph");
+        assert_eq!(routed.invocation.columns, vec![canonical.clone()]);
+        assert_eq!(routed.invocation.caller_kind, "editor_route");
+        assert!(
+            runtime.pane_layout_desired().is_none(),
+            "the shared lane is untouched"
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("controller_editor_route_navigation_lane")
+                && ops.contains("lane=IU.0a1b2c3d"),
+            "{ops}"
+        );
+
+        for (config, client) in [
+            (lanes, None),
+            (lanes, Some("vscode-pid:9")),
+            ("tmux_session = \"proj\"\n", Some(idea)),
+        ] {
+            let (_dir, runtime, result, canonical) = route(config, client);
+            assert_eq!(result.exit_code, 0);
+            assert!(
+                !result.output.contains("navigation_client="),
+                "{config:?} {client:?}: {}",
+                result.output
+            );
+            assert_eq!(
+                runtime.pane_layout_desired().unwrap().invocation.columns,
+                vec![canonical],
+                "{config:?} {client:?} publishes into the shared lane"
+            );
+            assert!(
+                runtime
+                    .pane_layout_graph_for_lane(&idea_lane)
+                    .desired()
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn editor_route_payload_carries_an_optional_client_id() {
+        let with: ControllerEditorRoutePayload = serde_json::from_str(
+            r#"{"relative_path":"plan.md","client_id":"jetbrains@IU.0a1b2c3d-pid:41"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            with.client_id.as_deref(),
+            Some("jetbrains@IU.0a1b2c3d-pid:41")
+        );
+        let without: ControllerEditorRoutePayload =
+            serde_json::from_str(r#"{"relative_path":"plan.md"}"#).unwrap();
+        assert!(without.client_id.is_none(), "an older editor sends none");
     }
 
     /// `#crossrootcolumnflip` fixture: a superproject root and a nested root

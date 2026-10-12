@@ -483,6 +483,23 @@ Other work still running:
 - **Rider/IDE independent navigation (`#ideriderindependentnav`):** the agent stopped while waiting on its own `make check`, so I restarted it to finish and report.
 
 The exchange is long: 433 lines across 23 responses. I'm leaving it alone while the queue is active.
+
+### Re: dispatch status — opus-5-5 · 2026-10-12T06:12-04:00
+
+**New queue item, lazily.md:** you reported that Run Agent Doc, then Ctrl+C in Codex, then Clear Session Context left the Clear wedged. I claimed it and handed it to a subagent working in its own worktree on branch `codexclearwedge`. The subagent will only read lazily.md, its pane, and the logs; it won't send keys or clear anything there. It will find the state the Clear waits on that never settles, and check whether the earlier Claude-side fix for the same sequence (`#runctrlclaude`) never covered Codex. The fix gets a regression test and a spec update.
+
+**`#ideriderindependentnav`:** phase 1 is done on branch `ridernav` (`50039bc7af`), and its `make check` passed (10254 tests). It changes no behavior yet. It lays the groundwork: each IDE gets its own "lane", and focus ownership is now tracked per project and per lane. The design gives each IDE its own tmux session, because tmux shares a session's current window across every attached terminal. The plan is `docs/plan-ide-independent-nav.md` on that branch. Four phases remain:
+- **P2:** per-lane layout and an opt-in `editor_navigation` setting. This is the switch that actually turns on independent navigation.
+- **P3:** editor wiring.
+- **P4:** a document open in both IDEs.
+- **P5:** rollout and cleanup.
+
+I'll file P2–P5 as backlog ids when I merge `ridernav`, so they queue behind it rather than starting from `main` before it lands.
+
+**Still running:**
+- The v0.35.492 release is still in its checks; nothing is tagged yet.
+- The subagents for `#fpeseverityparse`, `idleclear` and build/test turnaround are still working.
+- `gh241` and now `ridernav` are waiting for the next merge batch.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -491,7 +508,7 @@ The exchange is long: 433 lines across 23 responses. I'm leaving it alone while 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#fpeseverityparse]
+- 🚧 do [#fpeseverityparse]
 - 🚧 do [#idleclearrestart]: Yes, Idle clear should type `/clear`.
 - 🚧 How can we optimize the agent-doc build process + test process to reduce the turnaround time?
 - 🚧 sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
@@ -504,7 +521,7 @@ The exchange is long: 433 lines across 23 responses. I'm leaving it alone while 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fpeseverityparse] Run Agent Doc + editing during the turn in infra.md resulted in duplication + corruption of the queue items:
+- [ ] 🚧 [#fpeseverityparse] Run Agent Doc + editing during the turn in infra.md resulted in duplication + corruption of the queue items:
   ```
   - 🚧 do - do - [from:actionable-review key=stggrafanaowner] do [#stggrafanaowner]
   [#sbxdeeplevers]

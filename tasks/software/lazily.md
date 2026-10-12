@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a131e1-8e9a-7e71-a44e-50556bb5003d
+  codex: 01a13200-74b6-7423-9a27-70555c511d7f
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,6 +18,7 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish'
+queue: go
 ---
 
 ## Status
@@ -119,12 +120,39 @@ The expired `btakita/agent-doc` artifact-purge audit is refreshed in isolated wo
 The fresh handoff contains 565 verified candidates totaling 9,879,236,243 bytes and withholds 545 artifacts totaling 8,636,981,950 bytes. The full dry run accepted all 565 with zero refused, skipped, or failed. The durability-only dry run accepted 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refused exactly 535 PyPI-backed artifacts totaling 9,009,746,025 bytes as perishable. `make artifact-purge-check` and `git diff --check` passed; the initial default-cap safety probe correctly aborted at 565 candidates without deletion.
 
 The refreshed handoff expires at `2026-10-19T21:27:35Z` and becomes stale 24 hours earlier. The destructive purge remains gated on separate, explicit operator authorization, with the 30-artifact durable-only option preferred. The five tracked audit/script changes remain uncommitted because `#spec-test-commit-push` is undefined, so this refresh is review-gated solely on explicit commit/integration authorization. No additional backlog follow-up is needed because this gated item retains the exact integration action, while `#lzagentdocartifactpurge` retains the destructive operator decision.
+
+### Re: release + publish — gpt-5 · 2026-10-12T18:18-04:00
+
+> **Queue prompt:** release + publish
+
+No release or publication was performed. This directive names no repository, artifact, version, tag, or linked backlog item, while the session contains several plausible targets. The queue-level `#spec-test-commit-push` preset is also undefined, so commit, integration, and push authority is unresolved. A release requires an exact target and version/tag plus explicit prerequisite integration and push authorization.
+
+### Re: #fixrunturn — gpt-5 · 2026-10-12T18:18-04:00
+
+The overlapping Run Agent Doc rejection is fixed in isolated worktree `/home/brian/worktrees/agent-doc-fixrunturn-stack-20261012/agent-doc`, branch `fix/run-agent-doc-turn-rejection-20261012`, from base `06afd858eebc81440dbbebec6a51f0ec788391f1`.
+
+The live route correctly observed the newly edited queue head as `Uncommitted`, but collapsed that typed state to `None`; dispatch-only then reread stale disk state, concluded that no queue continuation owned the Codex Stop hook, and injected a bare trigger into the still-active/finalizing turn. The fix preserves one authoritative typed queue-head observation through the route decision. Both committed and uncommitted pending heads now make the active Codex Stop hook the sole continuation owner, Run Agent Doc coalesces without submitting a competing trigger, and the stale disk reread is removed.
+
+The intended diff is exactly six files under `agent-doc-route-io`: `src/authoritative_dispatch.rs`, `src/dispatch_only.rs`, `src/pane_resolution.rs`, `src/queue_dispatch.rs`, `src/startup.rs`, and `tests/route.rs`. Focused regressions passed; `cargo test -p agent-doc-route-io` passed 207 tests with zero failures; `make check-fast` passed; and a fresh, fully isolated authoritative `make check` exited 0 with all 10,417 workspace tests, 196 VS Code tests, both JetBrains variants, cross-editor simulation, editor parity, Python bootstrap, and formal checks green. `git diff --check` passed and latest main CI run `38309375303` was green.
+
+No commit, push, install, release, or publication occurred because `#spec-test-commit-push` is undefined. The code-complete item is review-gated solely on explicit commit/integration authorization. No additional backlog follow-up is needed because the gated item retains the exact six-file integration action and unblock condition.
+
+### Re: #fixrunturn free-text residue — gpt-5 · 2026-10-12T18:18-04:00
+
+> **Queue prompt:** agent-doc creating [#fixrunturn] leftover free-text in the queue: `- My first attempt to write the next queue item was deleted by agent-doc. The agent also restarted.`
+
+**Deferred:** investigation is complete, but this exact free-text node stays queued for the immediately following cycle so the leading `release + publish` prompt and the id-backed `#fixrunturn` lifecycle closeout can be consumed without an out-of-order multi-head strike. The queue parser preserved it because the operator authored two separate nodes around `---`; no exact promotion receipt linked the first sentence to `#fixrunturn`, and similarity-based deletion would violate operator-text preservation.
+
+The exchange is above its advisory size threshold, but the queue remains active, so draining continues without compaction.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
+- ~~release + publish~~
+- ~~do [#fixrunturn]~~
+- ~~agent-doc creating [#fixrunturn] leftover free-text in the queue: `- My first attempt to write the next queue item was deleted by agent-doc. The agent also restarted.`~~
 <!-- /agent:queue -->
 
 ## Backlog
@@ -135,6 +163,7 @@ The refreshed handoff expires at `2026-10-19T21:27:35Z` and becomes stale 24 hou
 ## Review
 
 <!-- agent:review -->
+- [/] [#fixrunturn] Run Agent Doc route-race fix and deterministic coverage are complete and fully verified in /home/brian/worktrees/agent-doc-fixrunturn-stack-20261012/agent-doc on branch fix/run-agent-doc-turn-rejection-20261012 from base 06afd858eebc81440dbbebec6a51f0ec788391f1; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate exactly the six agent-doc-route-io files and run the single coordinator install.
 - [/] [#lzagentdocartifactrefresh] Fresh artifact-purge handoff and both dry-run modes are complete and verified in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 on branch task/lzagentdocartifactrefresh-20261012 from base 215dc9dc52339478da6cc90aa5c7d5808f3e54c5; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate the five tracked btakita/agent-doc audit/script files without the scratch .audit-work reports.
 - [/] [#lzinteropcoldstart] Cold-start fix and deterministic coverage are complete and verified in /home/brian/worktrees/agent-loop-lzinteropcoldstart-20261012 on branch task/lzinteropcoldstart-20261012 from base a282bba7b853016809dc2c0c5cc51dcd4590d92e; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate exactly the five src/lazily-interop code/documentation/test files and exclude the validation-only release-pin gitlinks.
 - [/] [#lzreleasepins] Prepared exactly 13 released Lazily gitlink pins in /home/brian/worktrees/agent-loop-lzreleasepins-oct12-2 on branch task/lzreleasepins-oct12-2. The cold-start verification defect is fixed and the exact network-suite-merge gate is green in /home/brian/worktrees/agent-loop-lzinteropcoldstart-20261012: all nine peers prepare before the strict deadline and semantic, channel, timer, timeout, and revision-barrier reports pass. Blocked only until the five-file #lzinteropcoldstart fix is integrated and explicit commit/push authorization is supplied because #spec-test-commit-push is undefined; then commit and push only the intended fix and 13 gitlinks.

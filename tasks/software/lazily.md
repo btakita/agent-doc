@@ -953,6 +953,28 @@ The `#push` authorization is recorded. No ordinary repository files changed and 
 Verification: the delegated read-only audit independently classified all 13 review entries; `agent-doc review list` confirmed the source set. Changed paths before closeout: only this session document through the binary-owned response transaction. Confidence: high. Escalation: define the queue-wide commit preset or provide explicit commit authority before workers integrate the preserved Core implementations.
 
 Session accretion remains above the warning threshold; I continued the active queue without compaction.
+
+### Re: #lzcoreprofile — gpt-5 · 2026-10-12T07:32-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcoreprofile]
+
+Phase 1 is implementation-complete and freshly revalidated in `/home/brian/worktrees/lazily-spec-lzcoreprofile-20261012`. The preserved worktree contains the candidate Core registry, closed schema, byte-exact generated documentation, nine binding mappings, dependency/cycle/adapter checks, capability exclusions, and eleven negative semantic probes.
+
+Verification passed:
+
+- `make check`: 389 pytest tests passed, the Lean build succeeded, and all repository checks completed.
+- `make core-profile-check`: 11 negative cases rejected; 9 bindings, 7 symbols, and 16 fixtures validated.
+- Focused profile tests: 4 passed.
+- Schema meta-validation, JavaScript syntax validation, and `git diff --check`: passed.
+- Latest lazily-spec `CI` run: completed successfully (run `37258006428`).
+
+The registry-level Phase 1 contract is complete. Core-only builds across every binding remain downstream evidence rather than part of this changeset.
+
+I returned `#lzcoreprofile` to review because integration is blocked solely on authorization: the queue-wide `#spec-test-commit-push` preset is undefined, so the worker was explicitly prohibited from committing or pushing. No commit, push, install, or integration occurred. No additional backlog follow-up is needed because the complete implementation remains preserved in its worktree and the review item now states the exact authorization that clears the gate.
+
+Changed files in the preserved worktree: `Makefile`, `tests/test_schema_conformance.py`, `docs/core-beta.md`, `profiles/core-v1.json`, `schemas/core-profile.schema.json`, `scripts/check-core-profile.mjs`, and `tests/test_core_profile.py`. Confidence: high. Escalation: define `#spec-test-commit-push` or provide explicit commit/integration authority.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -960,7 +982,7 @@ Session accretion remains above the warning threshold; I continued the active qu
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - ~~#actionable-review: #push~~
-- do [#lzcoreprofile]
+- ~~do [#lzcoreprofile]~~
 - do [#lzcoreclaims]
 - do [#lzcorefacades]
 - do [#lzcorecompat]
@@ -973,7 +995,6 @@ Session accretion remains above the warning threshold; I continued the active qu
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: create the canonical candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates.
 - [ ] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.
 - [ ] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
 - [ ] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
@@ -986,6 +1007,7 @@ Session accretion remains above the warning threshold; I continued the active qu
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates are complete and verified in /home/brian/worktrees/lazily-spec-lzcoreprofile-20261012; blocked until explicit commit/integration authorization is supplied or the queue-wide #spec-test-commit-push preset is defined.
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.

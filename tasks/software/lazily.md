@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a12fd8-c75b-7563-8090-d12f66089ccb
+  codex: 01a130fc-b3b3-7ef3-aec8-85b859609139
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -1087,16 +1087,29 @@ Phase 4 is implementation-complete across isolated worktrees for every candidate
 I returned `#lzcorecompat` to review because Phase 1 and Phase 3 must integrate first and the queue-wide `#spec-test-commit-push` preset is undefined. No worker had authority to commit, integrate, push, install, release, or publish. No additional actionable backlog item is needed: the complete worktrees are preserved, and the review item states the exact authorization, toolchain, and upstream validation conditions that clear the gate.
 
 Confidence: high. Escalation: integrate Phases 1 and 3, provide explicit commit/integration authority or define `#spec-test-commit-push`, make the older Zig formatters available, and resolve or accept the Rust corrected-profile divergence.
+
+### Re: do [#lzcoreconsumers] — gpt-5 · 2026-10-12T13:25-04:00
+
+Phase 5 is code-complete in the current worktrees: 56 files across `lazily-spec` and the nine candidate bindings now define a canonical artifact-consumer contract, generated support/deprecation policy, corrected quickstart/schema claims, per-binding clean installed-artifact consumers, and minimum/current CI toolchain matrices.
+
+Verification completed:
+
+- the aggregate `--run-consumers --require-all` gate passed all nine bindings from the coordinator checkout (`tart-6ced301063`);
+- support-policy tests passed 7/7 (`tart-0438dc0e7f`), schema tests passed 4/4 (`tart-27eee48171`), generated-policy drift checks passed, and workflow YAML validation passed;
+- Rust, JavaScript, Python, Go, Kotlin, C++, C#, Dart, and Zig clean consumers all passed; Dart used Puro 3.9.2 because the system Dart installation is broken;
+- the publish-credential proof initially detected the expected Makefile preimage drift, then passed after its exact hashes and hunk offsets were refreshed (`tart-9de4d0ad8c`);
+- the latest available GitHub CI run is green for every repository with a `CI` workflow; `lazily-py` has no workflow named `CI`, and its latest `wheels` run is green.
+
+The authoritative workspace `make check` progressed through 1,525 passing Agent Doc tests before stopping on the pre-existing generated-skill parity failure: the `src/agent-doc` source tree is version `0.35.456`, while its checked-in development Claude skill is newer (`0.35.485`). I preserved that unrelated user-owned drift rather than downgrading the skill.
+
+`#lzcoreconsumers` is review-gated because the queue's `#spec-test-commit-push` preset is undefined, so no ordinary commit, push, install, release, or publish was authorized. The aggregate check also currently consumes Phase 1's uncommitted `core-v1.json` from its existing worktree until `#lzcoreprofile` is integrated. No additional backlog follow-up is needed because the Phase 5 implementation itself is complete; the gate clears when the operator resolves the preset authorization, integrates the existing Phase 1 profile, and decides how to reconcile the unrelated Agent Doc source/skill parity drift before the final full-suite rerun.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- ~~do [#lzcoreclaims]~~
-- ~~do [#lzcorefacades]~~
-- ~~do [#lzcorecompat]~~
-- do [#lzcoreconsumers]
+- ~~do [#lzcoreconsumers]~~
 - do [#lzreleasepins]
 - do [#lzcorecohort]
 - do [#lzagentdocartifactrefresh]
@@ -1105,7 +1118,6 @@ Confidence: high. Escalation: integrate Phases 1 and 3, provide explicit commit/
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [ ] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 - [ ] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
 - [ ] [#lzagentdocartifactrefresh] Regenerate the expired btakita/agent-doc artifact-purge audit/handoff, rerun both full and durability-only dry-run options, refresh counterpart-durability evidence and counts, then re-gate the destructive purge on explicit operator authorization without deleting artifacts.
@@ -1114,6 +1126,7 @@ Confidence: high. Escalation: integrate Phases 1 and 3, provide explicit commit/
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [/] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md: Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and module compatibility tests are complete in the listed isolated worktrees; blocked until Phase 1/3 are integrated first, explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, Zig 0.15.2/0.16.0 formatters are available, and the Rust corrected-profile divergence is resolved and validated.
 - [/] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md: additive idiomatic Core facades and package-content/identity checks are complete for all candidate bindings in /home/brian/worktrees/agent-loop-lzcorefacades-20261012, with Kotlin/Go/C# correctly retaining canonical package locations; blocked until corrected Phase 1 is integrated first, explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, and the unavailable Zig 0.15.2/0.16.0 formatting gate can be run.
 - [/] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md: the spec evidence contract and all nine binding declarations/report generators are complete and pass the aggregate --require-all gate in isolated worktrees; blocked until explicit commit/integration authorization is supplied or the queue-wide #spec-test-commit-push preset is defined.

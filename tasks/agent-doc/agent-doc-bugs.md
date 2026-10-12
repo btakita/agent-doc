@@ -945,6 +945,30 @@ The fix now has to cover both cases:
 - Ownership and routing no longer stay on a pane in an unattached session while the same document has a pane in the attached session.
 
 **v0.35.494** is in `make release`.
+
+### Re: GH #244 dispatched; v0.35.494 tagged — opus-5-5 · 2026-10-12T17:05-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/244
+
+**Deferred:** a subagent has this on branch `gh244`. The cause: a per-window `window-size manual` pin, left behind by `resize-window -A`, holds the managed `agent-doc` window smaller than its only client. The repair only unpins the stash height, so it reports `already_converged` while the window stays dot-padded. The fix:
+- **Detect the pin** as not converged when the window is smaller than every attached client.
+- **Release it** so the window follows its client again.
+- **Scope it** to windows agent-doc owns, never your own windows.
+
+It comes with tests on an isolated tmux server.
+
+> **Queue prompt:** do [#queuedclearflake]
+
+Done (`b5788440d9`), and released in v0.35.494. The race was in the product. During supervisor startup, a Clear could skip the queue and type `/clear` into a running turn, for three reasons:
+- **Late receipt release:** the Ready transition released dispatch receipts one commit late.
+- **Repeated Ready:** a repeated Ready also released a running turn's receipt.
+- **Blank pane:** the startup pane looked blank, so the guard did not check it for a live turn.
+
+All three are fixed. The test file passed 24 of 24 runs, including runs under heavy CPU load. Reverting any one fix makes the widened race fail 6 of 6 runs.
+
+**v0.35.494** is tagged (`8af04b806a`) and installed locally. The release check ran 10,382 tests, and `make tmux-ci` passed. The GitHub Release build is still running and PyPI publishes after it, so `#release` stays open until both are confirmed.
+
+**Batch 14** (`claimeddrainwarn` + `ridernavp6routecontended`, plugins 0.2.557 / 0.2.558) is in its checks. The "handed to the supervisor 103 min ago" warning is the false alarm `claimeddrainwarn` fixes.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -953,13 +977,12 @@ The fix now has to cover both cases:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#queuedclearflake]
-- ~~do [#ridernavp6route]~~
-- ~~do [#ridernavp6gc]~~
+- ~~do [#queuedclearflake]~~
 - 🚧 do [#ridernavp6routecontended]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243
-- #gh-fix https://github.com/btakita/agent-doc/issues/243#issuecomment-6129952007
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243#issuecomment-6129952007
 - 🚧 do [#claimeddrainwarn]
+- #gh-fix https://github.com/btakita/agent-doc/issues/244
 - 🚧 #release
 <!-- /agent:queue -->
 
@@ -967,7 +990,6 @@ The fix now has to cover both cases:
 
 <!-- agent:backlog priority queue -->
 - [ ] 🚧 [#claimeddrainwarn] [agent-doc] preflight warns supervisor_drain_handoff_undrained (the [focused-cycle] head was handed to the supervisor N min ago and is still undrained; recycle the supervisor) for over 30 minutes on agent-doc-bugs.md (2026-10-12) while every remaining queue head is claimed by a subagent or coordinator, so the supervisor correctly has nothing to drain. Likely interplay with the new auto-clear item-boundary yield (queue_auto_clear_yield) recording a handoff that claims then make undrainable. Exclude claimed heads from the handoff and the warning, and do not tell the operator to recycle a healthy supervisor; regression test.
-- [ ] 🚧 [#queuedclearflake] [agent-doc] tests/clear_queued_live_turn_tmux.rs queued_clear_is_dropped_when_a_newer_prompt_starts_first failed its ui_outcome=queued assertion inside make tmux-ci (2026-10-12, ridernavp6route merge run) and passed 2 of 2 alone. Find the timing dependency and fix it with an explicit readiness signal; never rerun to green or lengthen a timeout.
 - [ ] 🚧 [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
 <!-- /agent:backlog -->
 

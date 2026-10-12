@@ -830,6 +830,26 @@ infra.md and its pane are not touched.
 Also filed: `ridernavp6routecontended`. When the document's pane is in another IDE's lane, Run Agent Doc drops the document from the requesting IDE's layout, and nobody has defined or tested what happens next.
 
 The infra.md Clear fix (`infraclearsession`) is in `make check` / `make tmux-ci` now.
+
+### Re: infra.md Clear fix landed — opus-5-5 · 2026-10-12T13:15-04:00
+
+> **Queue prompt:** do [#infraclearsession]
+
+Done (`6d8f498bb3`). It is on `main` and installed: `make check` passed 10,348 tests, and `make tmux-ci` passed.
+
+**Your question:** this was not fixed by the upcoming release, because 0.35.492's `#codexclearwedge` missed this path. What happened:
+- 15:06:03Z: you interrupted Codex 3 seconds into the turn, before its first tool call, so preflight never marked the dispatch as running.
+- A few seconds later, a different agent-doc process read the turn lease. That read ended the interrupted lease but settled nothing.
+- Every Clear after that saw a dispatch still pending and re-queued itself.
+- The stale dispatch then also caused your next Run Agent Doc to mark the wrong dispatch as running.
+
+**The fix:** the dispatch is now settled at the moment the lease is ended, in the same database transaction. It no longer matters whether the CLI, a supervisor, or a supervisor mid-recycle ended it. The normal turn-end hook uses the same rule. No timer was added or lengthened.
+
+**Regression test:** a SimWorld replay of the infra.md sequence fails without the fix.
+
+Your queued Clear on infra.md (epoch 79) should have gone through when that turn ended.
+
+Also filed: `steeringeditmisalign`. When you delete struck queue lines, steering reports untouched items as "edited", with "previous" text taken from a removed item. It pairs queue lines by position instead of by item, which is the noise you've been seeing.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -838,7 +858,7 @@ The infra.md Clear fix (`infraclearsession`) is in `make check` / `make tmux-ci`
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#infraclearsession]
+- ~~do [#infraclearsession]~~
 - 🚧 do [#ridernavp6route]
 - 🚧 do [#ridernavp6republish]
 - 🚧 do [#ridernavp6status]
@@ -846,14 +866,15 @@ The infra.md Clear fix (`infraclearsession`) is in `make check` / `make tmux-ci`
 - 🚧 do [#ridernavp6switchback]
 - do [#lanegcflake]
 - do [#ridernavp6routecontended]
+- do [#steeringeditmisalign]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#steeringeditmisalign] [agent-doc] After the operator deletes struck queue lines, mid-turn steering reports unchanged claimed items as change=edited with a previous text taken from a different, removed item (2026-10-12 agent-doc-bugs.md: previous do [#bgclearpolicy] verbatim do [#infraclearsession]; previous do [#ridernavp4] verbatim do [#ridernavp6route]; previous do [#ridernavp3] verbatim do [#ridernavp6gc]). The queue steering diff pairs nodes by position instead of by item identity. Pair queue nodes by stable identity (tracked id or free-text key) so removals stay removals and untouched items produce no steering, with a regression test.
 - [ ] [#lanegcflake] [agent-doc] tests/cross_editor_simworld.rs two_ide_navigation_lanes_migrate_and_clean_up_end_to_end (P5, on main since d6da68546a) is nondeterministic: in make tmux-ci it kept an empty lane as a busy unowned pane instead of closing it, and failed 1 of 3 runs alone (2026-10-12, ridernavp6route subagent). Suspected cause, unverified: the fresh lane shell is still running zsh startup when gc reads pane activity. Find and fix the nondeterminism in the test or the gc busy-pane classification; never rerun to green or lengthen a timeout.
 - [ ] [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
-- [ ] 🚧 [#infraclearsession] infra.md: Clear Session Context wedged after manually interrupting Codex turn. Have we already fixed this in the upcoming release?
 - [ ] 🚧 [#ridernavp6route] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): route, start and agent-doc claim --client-id create panes in the requesting IDE's lane in per_installation mode; today a new pane reaches an installation lane only through that IDE's explicit claim.
 - [ ] 🚧 [#ridernavp6republish] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): the sync_tmux_layout command and the recycle republish still publish only into the shared lane; make them lane-aware.
 - [ ] 🚧 [#ridernavp6status] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): add a per-lane pane_layout_status channel; it reports only the shared lane today.

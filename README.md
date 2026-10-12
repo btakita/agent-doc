@@ -109,9 +109,11 @@ editor_navigation = "per_installation"   # default: "shared"
 Each installation then gets its own lane session `<tmux_session>-<installation>`
 (for example `agent-loop-IU-0a1b2c3d`), created on that IDE's first layout sync
 with `agent-doc` and `stash` windows. A document's pane stays in the lane that
-started it: another IDE's layout drops it (`cross_lane_layout_dropped` in
+started it: another IDE's layout heartbeats drop it (`cross_lane_layout_dropped` in
 `ops.log`) and its focus is refused (`owned_by_other_lane`) instead of moving the
-pane. VS Code and older JetBrains plugins stay on the shared session. The mode is
+pane. To move it, run **Sync Tmux Layout** or **Claim for Tmux Pane** in the other
+IDE: that explicit request hands the pane over to the requesting IDE's lane
+(`navigation_lane_handoff`) and the IDE that lost it re-arranges without it. VS Code and older JetBrains plugins stay on the shared session. The mode is
 read when the project controller starts; an unknown value logs a warning and
 keeps `shared`. Each JetBrains IDE's agent-doc terminal attaches to its own lane
 session, its manual Sync Tmux Layout arranges that lane, and tmux-to-editor focus

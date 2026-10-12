@@ -3519,6 +3519,26 @@ fn run_with_options_internal_at_root(
         .into_iter()
         .filter(|col| !col.is_empty())
         .collect();
+    // `#ideriderindependentnav` P4: a passive focus-only expansion restores
+    // columns from the project's remembered layout, which can name a document
+    // whose pane lives in another navigation lane (for example one an explicit
+    // claim just handed over). Re-apply the lane guard so the expansion can
+    // never join that pane back across sessions.
+    if let Some(session) = target_session.as_deref() {
+        let (kept, dropped) = drop_columns_owned_by_other_navigation_lanes(
+            tmux,
+            &sync_project_root,
+            col_args,
+            session,
+            reactive_actor_bindings,
+        );
+        col_args = kept;
+        for (file, owner_session) in &dropped {
+            sync_log(&format!(
+                "cross_lane_layout_dropped document={file} owner_session={owner_session} target_session={session} stage=focus_only_expansion"
+            ));
+        }
+    }
     let col_args = col_args.as_slice();
     sync_log(&format!(
         "=== sync start: col_args={:?} window={:?} focus={:?} auto_start_mode={}",
@@ -10693,6 +10713,201 @@ mod tests {
                 "{pane}: a new lane's empty pane is stashed in {session}"
             );
         }
+    }
+
+    /// `#ideriderindependentnav` P4: the explicit handoff of a contended
+    /// document through the real sync body. IDEA's lane shows `a` and `b`;
+    /// Rider's editor also shows `a`. Passive syncs leave `a` in IDEA's lane.
+    /// An explicit claim from Rider (the controller's handoff, then Rider's
+    /// sync, then IDEA's passive republish) moves `a`'s pane into Rider's lane
+    /// session; afterwards alternating passive syncs never move it back, an
+    /// explicit claim from IDEA hands it back, and at every step:
+    /// - each document has exactly one live pane, visible in exactly one lane
+    ///   window (no pane duplicated or lost);
+    /// - each lane window shows exactly the documents its lane owns;
+    /// - the shared session is untouched.
+    /// Isolated tmux server only.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_guard_explicit_handoff_moves_a_contended_pane_once() {
+        use agent_doc_controller_io::project_controller::{
+            NavigationLaneHandoff, NavigationLaneHandoffOutcome, hand_over_navigation_lane_pane,
+            navigation_lane_session_for_client,
+        };
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let _cwd = ScopedCurrentDir::set(&root);
+        let iso = agent_doc_tmux_io::isolated_test_tmux("lane-handoff-e2e");
+
+        let shared_pane = iso.new_session("proj", &root).unwrap();
+        let shared_window = iso.pane_window(&shared_pane).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &shared_window, "agent-doc"])
+            .unwrap();
+        let shared_panes_before = iso.list_window_panes(&shared_window).unwrap();
+
+        let lane_session = |client: &str| {
+            navigation_lane_session_for_client(&iso, &root, client)
+                .unwrap()
+                .expect("an installation lane")
+                .session
+        };
+        let idea = lane_session("jetbrains@IU.0a1b2c3d-pid:41");
+        let rider = lane_session("jetbrains@RD.9f8e7d6c-pid:42");
+        let agent_doc_window = |session: &str| {
+            iso.raw_cmd(&[
+                "list-windows",
+                "-t",
+                &format!("{session}:"),
+                "-F",
+                "#{window_id} #{window_name}",
+            ])
+            .unwrap()
+            .lines()
+            .find_map(|line| {
+                let (id, name) = line.split_once(' ')?;
+                (name == "agent-doc").then(|| id.to_string())
+            })
+            .expect("lane agent-doc window")
+        };
+        let idea_window = agent_doc_window(&idea);
+        let rider_window = agent_doc_window(&rider);
+
+        let document = |name: &str, session: &str| {
+            let path = root.join(format!("tasks/{name}.md"));
+            std::fs::write(
+                &path,
+                format!("---\nagent_doc_session: {name}\n---\n\n# {name}\n"),
+            )
+            .unwrap();
+            let pane = iso.new_window(session, &root).unwrap();
+            let window = iso.pane_window(&pane).unwrap();
+            let file = path.to_string_lossy().into_owned();
+            sessions::register_full_with_cwd_in(
+                &root,
+                name,
+                &pane,
+                &file,
+                pane_pid_from_tmux(&iso, &pane).unwrap(),
+                &window,
+                &root.to_string_lossy(),
+            )
+            .unwrap();
+            (file, pane)
+        };
+        let (doc_a, pane_a) = document("contended-a", &idea);
+        let (doc_b, pane_b) = document("idea-b", &idea);
+        let (doc_r, pane_r) = document("rider-r", &rider);
+
+        let sync = |columns: Vec<String>, window: &str, focus: &str| {
+            run_with_options_internal_at_root(
+                &root,
+                &columns,
+                Some(window),
+                Some(focus),
+                AutoStartMode::SafePassive,
+                false,
+                false,
+                &[],
+                &MainLayoutEligibility::default(),
+                &iso,
+            )
+            .unwrap();
+        };
+        let idea_layout = || vec![doc_a.clone(), doc_b.clone()];
+        let rider_layout = || vec![doc_r.clone(), doc_a.clone()];
+        let hand_over = |from: &str, to: &str| {
+            hand_over_navigation_lane_pane(
+                &iso,
+                &root,
+                "proj",
+                to,
+                &NavigationLaneHandoff {
+                    document: doc_a.clone(),
+                    pane: pane_a.clone(),
+                    from_session: from.to_string(),
+                },
+            )
+            .unwrap()
+        };
+        let check = |step: &str, idea_panes: Vec<&String>, rider_panes: Vec<&String>| {
+            let idea_now = iso.list_panes_ordered(&idea_window).unwrap();
+            let rider_now = iso.list_panes_ordered(&rider_window).unwrap();
+            assert_eq!(
+                idea_now,
+                idea_panes.into_iter().cloned().collect::<Vec<_>>(),
+                "{step}: IDEA's lane window"
+            );
+            assert_eq!(
+                rider_now,
+                rider_panes.into_iter().cloned().collect::<Vec<_>>(),
+                "{step}: Rider's lane window"
+            );
+            for pane in [&pane_a, &pane_b, &pane_r] {
+                assert!(iso.pane_alive(pane), "{step}: {pane} is never lost");
+                let visible = [&idea_now, &rider_now]
+                    .iter()
+                    .filter(|window| window.contains(pane))
+                    .count();
+                assert!(visible <= 1, "{step}: {pane} visible in two lanes");
+            }
+            assert_eq!(
+                iso.list_window_panes(&shared_window).unwrap(),
+                shared_panes_before,
+                "{step}: the shared session is untouched"
+            );
+        };
+
+        // Passive syncs: `a` stays in IDEA's lane.
+        for round in 0..2 {
+            sync(idea_layout(), &idea_window, &doc_a);
+            sync(rider_layout(), &rider_window, &doc_r);
+            check(
+                &format!("passive round {round}"),
+                vec![&pane_a, &pane_b],
+                vec![&pane_r],
+            );
+            assert_eq!(iso.pane_session(&pane_a).unwrap(), idea);
+        }
+
+        // Rider's explicit claim: the controller hands the pane over, Rider's
+        // sync places it, and IDEA's passive republish drops it.
+        assert!(matches!(
+            hand_over(&idea, &rider),
+            NavigationLaneHandoffOutcome::Moved { placeholder: None }
+        ));
+        sync(rider_layout(), &rider_window, &doc_a);
+        sync(idea_layout(), &idea_window, &doc_b);
+        check("after Rider's claim", vec![&pane_b], vec![&pane_r, &pane_a]);
+        assert_eq!(iso.pane_session(&pane_a).unwrap(), rider);
+
+        // Passive alternation never moves it back.
+        for round in 0..2 {
+            sync(idea_layout(), &idea_window, &doc_a);
+            sync(rider_layout(), &rider_window, &doc_r);
+            check(
+                &format!("passive round {round} after Rider's claim"),
+                vec![&pane_b],
+                vec![&pane_r, &pane_a],
+            );
+            assert_eq!(iso.pane_session(&pane_a).unwrap(), rider);
+        }
+
+        // IDEA's explicit claim hands it back.
+        assert!(matches!(
+            hand_over(&rider, &idea),
+            NavigationLaneHandoffOutcome::Moved { placeholder: None }
+        ));
+        sync(idea_layout(), &idea_window, &doc_a);
+        sync(rider_layout(), &rider_window, &doc_r);
+        check("after IDEA's claim", vec![&pane_a, &pane_b], vec![&pane_r]);
+        assert_eq!(iso.pane_session(&pane_a).unwrap(), idea);
     }
 
     #[test]

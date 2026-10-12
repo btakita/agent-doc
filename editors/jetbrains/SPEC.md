@@ -260,6 +260,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   projection of another installation's lane is never mirrored (defense in depth for "focus
   mirroring goes only to the IDE that owns the window"). In `shared` mode the controller maps the
   same client id to the shared lane, so nothing changes there.
+- Explicit lane handoff (`#ideriderindependentnav` P4): the layout publication of Sync Tmux Layout,
+  and the one Claim for Tmux Pane, Force Claim, and Load Tmux Window run after `agent-doc claim`,
+  carries `caller_kind = "manual"`; the controller treats it as an explicit claim and moves a
+  contended document's pane from another IDE's lane into this IDE's lane before arranging it. Passive
+  publications (`automatic` heartbeats, `resync`) never move a pane. No plugin change was needed:
+  the plugin already sent `caller_kind` and `client_id` on every publication.
 - An observation with no detected columns is structurally `unknown`, not a one-column layout.
   It may select the focused document's existing pane, but it cannot add, stash, reorder, or
   provision panes. A proven local single editor window publishes one column. The presence of

@@ -1393,10 +1393,12 @@ mod multi_tmux_session_model {
 
 /// `#ideriderindependentnav` / `#idefocusowner` reference model: two JetBrains
 /// installations (IntelliJ IDEA and Rider) plus an unscoped editor publish
-/// focus claims and layout heartbeats into one project. Layout ownership is
-/// keyed by [`agent_doc_editor_surface::LayoutOwnerKey`] (root + navigation
-/// lane) and decided by the production [`agent_doc_editor_surface::InstallationFocus`]
-/// fold; a driving layout heartbeat projects onto its lane's tmux session.
+/// focus claims, passive layout heartbeats, and explicit claims (`Sync Tmux
+/// Layout`, the sync after `Claim for Tmux Pane`) into one project. Layout
+/// ownership is keyed by [`agent_doc_editor_surface::LayoutOwnerKey`] (root +
+/// navigation lane) and decided by the production
+/// [`agent_doc_editor_surface::InstallationFocus`] fold; a driving layout
+/// projects onto its lane's tmux session.
 ///
 /// Exhaustive over every event sequence up to a fixed depth:
 /// - shared mode: between two focus handoffs the shared session is reshaped by
@@ -1404,17 +1406,21 @@ mod multi_tmux_session_model {
 ///   installation is the focus owner;
 /// - per-installation mode: no installation is ever deferred, and every lane
 ///   session is reshaped only by its own installation;
-/// - both modes (P2b): a document's pane lives in exactly one session and never
-///   changes session as a consequence of a layout sync. Each IDE shows two of
-///   three documents, so every document is contended by two lanes; a lane
-///   syncs only documents it owns or that have no pane yet
-///   (`partition_lane_layout_columns`, `cross_lane_layout_dropped`), and a new
-///   pane starts in the syncing lane's session;
+/// - both modes (P2b): a passive layout never moves a pane across sessions.
+///   Each IDE shows two of three documents, so every document is contended by
+///   two lanes; a passive sync arranges only documents its lane owns or that
+///   have no pane yet (`partition_lane_layout_columns`,
+///   `cross_lane_layout_dropped`), and a new pane starts in the syncing lane;
+/// - P4: only an explicit claim moves a pane, always into the claiming lane
+///   (`partition_lane_layout_columns_for_claim`, `navigation_lane_handoff`);
+///   every document keeps exactly one pane (none duplicated or lost); and the
+///   lane that lost the pane is republished, so no lane window ever shows a
+///   document whose pane lives in another lane;
 /// - every mutation below is detected.
 mod two_ide_navigation_model {
     use agent_doc_editor_surface::{
-        InstallationFocus, LayoutOwnerKey, NavigationLane, NavigationMode, SurfaceAuthority,
-        editor_installation, partition_lane_layout_columns,
+        InstallationFocus, LaneClaim, LayoutOwnerKey, NavigationLane, NavigationMode,
+        SurfaceAuthority, editor_installation, partition_lane_layout_columns_for_claim,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -1452,12 +1458,23 @@ mod two_ide_navigation_model {
         /// A lane syncs every document it shows, joining a pane that lives in
         /// another lane's session into its own (no `cross_lane_layout_dropped`).
         MoveAcrossLanes,
+        /// A passive heartbeat claims like an explicit sync (P4).
+        HandoffOnPassive,
+        /// A handoff starts a new pane in the claiming lane instead of moving
+        /// the existing one (P4).
+        DuplicateOnHandoff,
+        /// A handoff kills the old pane without placing it (P4).
+        LoseOnHandoff,
+        /// The lane that lost a pane is not republished (P4).
+        NoRepublish,
     }
 
     #[derive(Clone, Copy, Debug)]
     enum Event {
         Focus(usize),
         Layout(usize),
+        /// An explicit claim: `Sync Tmux Layout` or `Claim for Tmux Pane`.
+        Claim(usize),
         Retire(usize),
     }
 
@@ -1472,8 +1489,17 @@ mod two_ide_navigation_model {
         deferred: usize,
         /// document -> the session its pane lives in.
         pane_session: BTreeMap<String, String>,
-        /// `(document, from, to)` for every pane a sync moved across sessions.
+        /// document -> how many live panes it has.
+        pane_count: BTreeMap<String, usize>,
+        /// `(document, from, to)` for every pane a passive sync moved.
         moved: Vec<(String, String, String)>,
+        /// `(document, from, to, explicit)` for every lane handoff.
+        handoffs: Vec<(String, String, String, bool)>,
+        /// session -> the documents its lane window shows after its last
+        /// projection.
+        projected: BTreeMap<String, BTreeSet<String>>,
+        /// session -> the client whose layout it last projected.
+        last_layout: BTreeMap<String, usize>,
     }
 
     struct Sim {
@@ -1524,42 +1550,53 @@ mod two_ide_navigation_model {
                 .authority_for(editor_installation(CLIENTS[client].0))
         }
 
+        fn focus(&mut self, client: usize) {
+            let Some(installation) = editor_installation(CLIENTS[client].1) else {
+                return;
+            };
+            let key = self.key(client);
+            let fold = self.world.owners.entry(key).or_default();
+            if let Some(next) = fold.claim(installation) {
+                *fold = next;
+                self.world.writers_since_handoff.clear();
+            }
+        }
+
         fn step(&mut self, event: Event) {
             match event {
                 Event::Focus(client) => {
                     if !self.world.live.contains(&client) {
                         return;
                     }
-                    let Some(installation) = editor_installation(CLIENTS[client].1) else {
-                        return;
-                    };
-                    let key = self.key(client);
-                    let fold = self.world.owners.entry(key).or_default();
-                    if let Some(next) = fold.claim(installation) {
-                        *fold = next;
-                        self.world.writers_since_handoff.clear();
-                    }
+                    self.focus(client);
                 }
-                Event::Layout(client) => {
+                Event::Layout(client) | Event::Claim(client) => {
                     if !self.world.live.contains(&client) {
                         return;
+                    }
+                    let explicit = matches!(event, Event::Claim(_));
+                    if explicit {
+                        // An operator's explicit action comes from the IDE it
+                        // focused, so it also claims the focus.
+                        self.focus(client);
                     }
                     if !self.authority(client).drives() {
                         self.world.deferred += 1;
                         return;
                     }
                     let session = self.target_session(client);
-                    self.sync_panes(client, &session);
-                    self.world
-                        .writers_since_handoff
-                        .entry(session.clone())
-                        .or_default()
-                        .insert(client);
-                    self.world
-                        .writers
-                        .entry(session)
-                        .or_default()
-                        .insert(client);
+                    let claim = if explicit || self.mutation == Mutation::HandoffOnPassive {
+                        LaneClaim::Explicit
+                    } else {
+                        LaneClaim::Passive
+                    };
+                    let from = self.sync_panes(client, &session, claim, explicit);
+                    self.record_writer(client, &session);
+                    if self.mutation != Mutation::NoRepublish {
+                        for from in from {
+                            self.republish(&from);
+                        }
+                    }
                 }
                 Event::Retire(client) => {
                     if !self.world.live.remove(&client) {
@@ -1585,29 +1622,88 @@ mod two_ide_navigation_model {
             }
         }
 
+        fn record_writer(&mut self, client: usize, session: &str) {
+            self.world
+                .writers_since_handoff
+                .entry(session.to_string())
+                .or_default()
+                .insert(client);
+            self.world
+                .writers
+                .entry(session.to_string())
+                .or_default()
+                .insert(client);
+        }
+
+        /// The lane that lost a pane re-projects its last layout passively
+        /// (`navigation_lane_handoff_republished`), dropping the document.
+        fn republish(&mut self, session: &str) {
+            let Some(client) = self.world.last_layout.get(session).copied() else {
+                self.world.projected.remove(session);
+                return;
+            };
+            self.sync_panes(client, session, LaneClaim::Passive, false);
+            self.record_writer(client, session);
+        }
+
         /// The structural sync of `client`'s layout into `session`, using the
-        /// production lane partition in per-installation mode.
-        fn sync_panes(&mut self, client: usize, session: &str) {
+        /// production lane partition in per-installation mode. Returns the
+        /// sessions an explicit claim took panes from.
+        fn sync_panes(
+            &mut self,
+            client: usize,
+            session: &str,
+            claim: LaneClaim,
+            explicit: bool,
+        ) -> BTreeSet<String> {
             let columns = LAYOUTS[client]
                 .iter()
                 .map(|document| document.to_string())
                 .collect::<Vec<_>>();
+            let mut taken_from = BTreeSet::new();
             let kept = if self.mode == NavigationMode::PerInstallation
                 && self.mutation != Mutation::MoveAcrossLanes
             {
-                partition_lane_layout_columns(&columns, PROJECT_SESSION, session, |document| {
-                    self.world.pane_session.get(document).cloned()
-                })
-                .kept
+                let partition = partition_lane_layout_columns_for_claim(
+                    &columns,
+                    PROJECT_SESSION,
+                    session,
+                    claim,
+                    |document| self.world.pane_session.get(document).cloned(),
+                );
+                for (document, from) in partition.handoffs {
+                    self.world.handoffs.push((
+                        document.clone(),
+                        from.clone(),
+                        session.to_string(),
+                        explicit,
+                    ));
+                    match self.mutation {
+                        Mutation::DuplicateOnHandoff => {
+                            *self.world.pane_count.entry(document.clone()).or_default() += 1;
+                        }
+                        Mutation::LoseOnHandoff => {
+                            self.world.pane_count.insert(document.clone(), 0);
+                        }
+                        _ => {}
+                    }
+                    self.world
+                        .pane_session
+                        .insert(document, session.to_string());
+                    taken_from.insert(from);
+                }
+                partition.kept
             } else {
                 columns
             };
+            let mut shown = BTreeSet::new();
             for document in kept {
                 match self.world.pane_session.get(&document).cloned() {
                     None => {
                         self.world
                             .pane_session
-                            .insert(document, session.to_string());
+                            .insert(document.clone(), session.to_string());
+                        *self.world.pane_count.entry(document.clone()).or_default() += 1;
                     }
                     Some(from) if from != session => {
                         self.world
@@ -1615,11 +1711,15 @@ mod two_ide_navigation_model {
                             .push((document.clone(), from, session.to_string()));
                         self.world
                             .pane_session
-                            .insert(document, session.to_string());
+                            .insert(document.clone(), session.to_string());
                     }
                     Some(_) => {}
                 }
+                shown.insert(document);
             }
+            self.world.projected.insert(session.to_string(), shown);
+            self.world.last_layout.insert(session.to_string(), client);
+            taken_from
         }
 
         /// The invariant this mode promises, or the violation.
@@ -1628,6 +1728,30 @@ mod two_ide_navigation_model {
                 return Err(format!(
                     "pane of {document} moved across sessions {from} -> {to}"
                 ));
+            }
+            for (document, from, to, explicit) in &self.world.handoffs {
+                if !explicit {
+                    return Err(format!(
+                        "a passive sync handed {document} over {from} -> {to}"
+                    ));
+                }
+            }
+            for document in self.world.pane_session.keys() {
+                match self.world.pane_count.get(document).copied().unwrap_or(0) {
+                    1 => {}
+                    0 => return Err(format!("pane of {document} lost")),
+                    count => return Err(format!("{document} duplicated into {count} panes")),
+                }
+            }
+            for (session, shown) in &self.world.projected {
+                for document in shown {
+                    let owner = self.world.pane_session.get(document);
+                    if owner != Some(session) {
+                        return Err(format!(
+                            "{session} still shows {document} whose pane lives in {owner:?}"
+                        ));
+                    }
+                }
             }
             match self.mode {
                 NavigationMode::Shared => {
@@ -1677,6 +1801,7 @@ mod two_ide_navigation_model {
                 [
                     Event::Focus(client),
                     Event::Layout(client),
+                    Event::Claim(client),
                     Event::Retire(client),
                 ]
             })
@@ -1760,6 +1885,46 @@ mod two_ide_navigation_model {
     }
 
     #[test]
+    fn a_passive_handoff_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::HandoffOnPassive,
+            DEPTH,
+        )
+        .expect("a passive heartbeat that claims must hand a pane over");
+        assert!(violation.contains("passive sync handed"), "{violation}");
+    }
+
+    #[test]
+    fn a_duplicated_or_lost_pane_is_detected() {
+        let duplicated = explore(
+            NavigationMode::PerInstallation,
+            Mutation::DuplicateOnHandoff,
+            DEPTH,
+        )
+        .expect("starting a second pane on handoff duplicates the document");
+        assert!(duplicated.contains("duplicated"), "{duplicated}");
+        let lost = explore(
+            NavigationMode::PerInstallation,
+            Mutation::LoseOnHandoff,
+            DEPTH,
+        )
+        .expect("killing the pane on handoff loses the document");
+        assert!(lost.contains("lost"), "{lost}");
+    }
+
+    #[test]
+    fn a_handoff_without_republishing_the_old_lane_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::NoRepublish,
+            DEPTH,
+        )
+        .expect("the old lane keeps showing a pane it lost");
+        assert!(violation.contains("still shows"), "{violation}");
+    }
+
+    #[test]
     fn contended_documents_stay_in_the_lane_that_first_placed_them() {
         let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
         sim.step(Event::Layout(0));
@@ -1786,6 +1951,41 @@ mod two_ide_navigation_model {
                 .values()
                 .all(|session| session == PROJECT_SESSION)
         );
+    }
+
+    #[test]
+    fn an_explicit_claim_hands_the_pane_over_and_passive_syncs_keep_it_there() {
+        let idea = "proj-IU-0a1b2c3d".to_string();
+        let rider = "proj-RD-9f8e7d6c".to_string();
+        let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        sim.step(Event::Layout(0));
+        sim.step(Event::Layout(1));
+        assert_eq!(sim.world.pane_session["/project/b.md"], idea);
+        // Rider claims: `b` moves into Rider's lane, IDEA's lane drops it.
+        sim.step(Event::Claim(1));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.pane_session["/project/b.md"], rider);
+        assert_eq!(
+            sim.world.projected[&idea],
+            BTreeSet::from(["/project/a.md".to_string()])
+        );
+        assert_eq!(
+            sim.world.projected[&rider],
+            BTreeSet::from(["/project/b.md".to_string(), "/project/c.md".to_string()])
+        );
+        // IDEA's passive heartbeats never take it back.
+        sim.step(Event::Layout(0));
+        sim.step(Event::Layout(0));
+        assert_eq!(sim.world.pane_session["/project/b.md"], rider);
+        // IDEA's explicit claim does.
+        sim.step(Event::Claim(0));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.pane_session["/project/b.md"], idea);
+        assert_eq!(
+            sim.world.projected[&rider],
+            BTreeSet::from(["/project/c.md".to_string()])
+        );
+        assert_eq!(sim.world.handoffs.len(), 2);
     }
 
     #[test]

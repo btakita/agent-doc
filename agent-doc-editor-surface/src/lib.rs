@@ -50,8 +50,9 @@ pub use installation_focus::{
     claims_installation_focus, editor_installation,
 };
 pub use navigation_lane::{
-    LaneLayoutPartition, LanePaneMembership, LayoutOwnerKey, NavigationLane, NavigationMode,
-    is_lane_session_of, lane_label_for_session, partition_lane_layout_columns,
+    LANE_HANDOFF_CALLER_KIND, LaneClaim, LaneLayoutPartition, LanePaneMembership, LayoutOwnerKey,
+    NavigationLane, NavigationMode, is_lane_session_of, lane_label_for_session,
+    lane_owning_session, partition_lane_layout_columns, partition_lane_layout_columns_for_claim,
     tmux_session_name_component,
 };
 pub use remote_layout::{

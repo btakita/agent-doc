@@ -511,8 +511,17 @@ pane-layout drift survey, and the target-window fallback derive the session per
 lane: the shared lane reads the pin itself, an installation lane reads
 `<pin>-<installation>`. A sync for one lane drops every document whose live pane
 lives in another lane of the project (`cross_lane_layout_dropped`), both in the
-controller before the effect and in the sync body after column memory, so a pane
-never changes session through a layout sync.
+controller before the effect and in the sync body after column memory and after
+a passive focus-only expansion, so a pane never changes session through a
+passive layout sync. The one exception is an explicit claim (P4): a `manual`
+layout publication (`Sync Tmux Layout`, the sync after `Claim for Tmux Pane`)
+hands a contended document's pane over to the requesting lane, only between
+lane sessions agent-doc owns (the pin or a lane session marked
+`@agent_doc_navigation_lane` for this root), and republishes the lane it left
+passively (`navigation_lane_handoff`, `navigation_lane_handoff_republished`).
+Route, start, and claim themselves still provision into the shared lane; a pane
+they start there reaches an installation lane through that lane's next explicit
+claim.
 
 **Deferred.** In shared navigation mode the pane-layout target-window fallback
 (`pane_layout_target_window_id`) without an explicit window still reads the

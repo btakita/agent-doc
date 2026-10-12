@@ -1,7 +1,8 @@
 # Plan: independent tmux navigation per JetBrains installation (`#ideriderindependentnav`)
 
 Status: P1 landed on branch `ridernav`; P2a landed on branch `ridernavp2a`; P2b landed on
-branch `ridernavp2b`; P3 landed on branch `ridernavp3`. P4 and P5 are open.
+branch `ridernavp2b`; P3 landed on branch `ridernavp3`; P4's explicit handoff landed on branch
+`ridernavp4`. P5 (plus the P4 remainders listed there) is open.
 
 ## Problem
 
@@ -236,7 +237,55 @@ Original scope:
 - Verification: Kotlin unit tests for the request shape and the lane filter, plus a
   Rust FFI test.
 
-### P4: contended documents (one document visible in both IDEs)
+### P4: contended documents (one document visible in both IDEs) (LANDED: explicit handoff)
+
+What landed (the original scope follows below):
+- Pure (editor-surface): `LaneClaim` (`Passive` / `Explicit`, from `caller_kind`: only `manual`
+  is explicit) and `partition_lane_layout_columns_for_claim`, which under an explicit claim keeps
+  another lane's document and lists it in `LaneLayoutPartition.handoffs` instead of `dropped`.
+  `LANE_HANDOFF_CALLER_KIND` (`lane_handoff`) is the passive kind of a post-handoff republish;
+  `lane_owning_session` maps a session back to a known lane.
+- Controller: `route_pane_layout_desired_to_lane` returns the handoffs (document, pane from the
+  actor binding, owner session). Before the structural sync the lane worker runs
+  `hand_over_navigation_lane_pane` for each: both sessions must be lanes agent-doc owns (the pin
+  or a session marked `@agent_doc_navigation_lane` = root; `#bare-foreign-session-guard`), the pane
+  must still be in the claimed session (else `pane_moved`; already in the lane is a no-op), an
+  empty shell is left behind when it was the last pane of the old lane's `agent-doc` window, and
+  the pane moves into the requester's `stash` window (`stash_pane`), from where the lane's sync
+  places it. A refusal drops the document as a passive sync would
+  (`navigation_lane_handoff_refused`). The lane the pane left is republished from its retained
+  layout as a fresh `lane_handoff` generation with `no_autostart` (publisher `LaneHandoff`, a
+  derived width authority), so it re-projects without the document and can never take it back.
+  Ownership is where the pane lives (its id and actor binding are unchanged), so no separate
+  transfer record is written; ops.log carries `navigation_lane_handoff` and
+  `navigation_lane_handoff_republished`.
+- Sync body: the lane guard is re-applied after a passive focus-only expansion, which restores
+  columns from the project-wide remembered layout and could otherwise join another lane's pane
+  (found by the end-to-end handoff test).
+- Editors: no plugin change. Sync Tmux Layout, and the sync Claim for Tmux Pane / Force Claim /
+  Load Tmux Window run after `agent-doc claim`, already publish `caller_kind = manual` with
+  `client_id` (P3), which is the explicit claim. Every passive kind never moves a pane.
+- Shared mode: no lane sessions are resolved, so no handoff; behavior is unchanged.
+- Verification: SimWorld `two_ide_navigation_model` gains an explicit `Claim` event, pane counts,
+  and per-lane projected documents, exhaustive to depth 5 over 12 events: handoff only on an
+  explicit claim and always into the claimer's lane, exactly one pane per document, and no lane
+  window showing a document whose pane lives elsewhere. New mutations `HandoffOnPassive`,
+  `DuplicateOnHandoff`, `LoseOnHandoff`, and `NoRepublish` are all detected. Unit tests cover the
+  claim kinds, the explicit partition (plus a proptest), lane routing with handoffs and refusal,
+  and the passive republish. `make tmux-ci` adds an isolated-server test of
+  `hand_over_navigation_lane_pane` (placeholder, idempotence, stale pane, shared-session source,
+  foreign-name refusal both ways) and an end-to-end test through the real sync body: passive
+  rounds keep the contended pane in IDEA's lane, Rider's explicit claim moves it, passive rounds
+  never move it back, IDEA's explicit claim returns it, no pane is lost or visible in two lanes,
+  and the shared session is untouched.
+- Not done (moved to P5): route, start and `agent-doc claim` still provision into the shared lane
+  (a pane they start reaches an installation lane through that lane's next explicit claim, which
+  the plugin's Claim action performs); the `sync_tmux_layout` command and the recycle republish
+  still publish into the shared lane; the per-lane `pane_layout_status` channel; the optional
+  focus-driven handoff (not built; it would make passive focus move panes, so it needs its own
+  opt-in).
+
+Original scope:
 
 - Default rule from P2: the pane stays in the lane that owns it.
 - Explicit handoff: `Claim for Tmux Pane` or manual `Sync Tmux Layout` in the other
@@ -250,6 +299,10 @@ Original scope:
   pane belongs to exactly one lane. An isolated tmux test covers `join-pane`.
 
 ### P5: rollout, GC, and migration
+
+Carried over from P3/P4: lane awareness of route, start, `agent-doc claim` (a `--client-id`
+so a new pane starts in the requesting lane), the `sync_tmux_layout` command and the recycle
+republish; a per-lane `pane_layout_status` channel; optionally an opt-in focus-driven handoff.
 
 - Enabling `per_installation` on a project with an existing shared window: existing
   panes stay in the shared session, which remains the lane of unscoped clients, and

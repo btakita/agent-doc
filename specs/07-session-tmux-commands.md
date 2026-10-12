@@ -287,7 +287,32 @@ loses desktop focus.
   defense in depth. An editor `Focus` on such a document is refused with `owned_by_other_lane`
   and never escalates to a structural sync. An installation lane's focus escalation republishes
   that lane's layout. Lanes are allowed sessions under `tmux_sessions` when derived from an
-  allowed session, and a document bound to the pin belongs in every lane of the pin.
+  allowed session, and a document bound to the pin belongs in every lane of the pin. The sync body
+  applies the lane rule again after a passive focus-only expansion, which restores columns from the
+  project's remembered layout and so could otherwise name another lane's document.
+- Explicit lane handoff (P4, `per_installation` only): a lane publication whose `caller_kind` is
+  `manual` (the JetBrains `Sync Tmux Layout` action and the layout sync that follows `Claim for
+  Tmux Pane`, `Force Claim`, and `Load Tmux Window`) is an explicit claim
+  (`LaneClaim::Explicit`). Its worker keeps each document whose pane lives in another lane of the
+  project and hands the pane over before the structural sync: the pane moves into the requesting
+  lane session's `stash` window (pane id unchanged, so its actor binding stays valid; ownership
+  is where the pane lives, so no other record moves) and the sync places it
+  (`navigation_lane_handoff document=.. pane=.. from_lane=.. to_session=.. placeholder=..`).
+  Both sessions must be lanes agent-doc owns, the project session or an installation lane
+  session carrying `@agent_doc_navigation_lane` = this root; a session that only carries a
+  lane's name is never a source or a target (`#bare-foreign-session-guard`). A pane that has
+  left the claimed session since the claim was routed, or any other refusal, keeps the pane where
+  it is and drops the document as a passive sync would (`navigation_lane_handoff_refused
+  reason=navigation_lane_handoff_{source,target}_not_owned|pane_moved|pane_missing|move_failed..`).
+  When the pane was the last one in the old lane's `agent-doc` window an empty shell is left in its
+  place so that lane keeps its window (its next sync stashes the shell inside its own session). The
+  lane the pane left, when this controller holds its retained layout, is republished as a fresh
+  generation of that layout with `caller_kind = lane_handoff`, `no_autostart`, and publisher
+  `lane_handoff` (`navigation_lane_handoff_republished`), so it re-projects without the document
+  and can never take the pane back or start a new one. Every other `caller_kind` (`automatic`
+  heartbeats, focus escalations, `editor_route`, `resync`, recycle republishes) is passive and
+  never moves a pane. A handoff retried by the same generation is a no-op (`AlreadyInLane`).
+  Shared navigation mode never resolves lane sessions, so it never hands over.
 - The `tmux_focus_state` read projection is per lane: the request's `caller` is the editor client
   id, and the projection reports the active pane of that client's lane session (shared lane: the
   configured session). A lane reports a document only while its own session's current window is

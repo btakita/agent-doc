@@ -465,6 +465,10 @@ pub(crate) enum PaneLayoutPublisher {
     /// GH #136 follow-up (d): the retained layout republished because a
     /// supervisor whose column the last pass gated out has recycled.
     RecycleSettled,
+    /// `#ideriderindependentnav` P4: the retained layout of a navigation lane
+    /// republished because an explicit claim in another lane took one of its
+    /// panes, so the lane re-projects without that document.
+    LaneHandoff,
     /// A publication with no recorded publisher (tests, legacy callers).
     #[default]
     Unattributed,
@@ -479,6 +483,7 @@ impl PaneLayoutPublisher {
             Self::EditorSurface => "editor_surface",
             Self::Command => "command",
             Self::RecycleSettled => "recycle_settled",
+            Self::LaneHandoff => "lane_handoff",
             Self::Unattributed => "unattributed",
         }
     }
@@ -597,7 +602,8 @@ impl PaneLayoutClaim {
         match (self.publisher, self.route) {
             (PaneLayoutPublisher::Route, Some(PaneLayoutRouteClaim::Ensure))
             | (PaneLayoutPublisher::Escalation, _)
-            | (PaneLayoutPublisher::RecycleSettled, _) => LayoutWidthAuthority::Derived,
+            | (PaneLayoutPublisher::RecycleSettled, _)
+            | (PaneLayoutPublisher::LaneHandoff, _) => LayoutWidthAuthority::Derived,
             _ => LayoutWidthAuthority::EditorSplitObservation,
         }
     }
@@ -730,7 +736,8 @@ pub(crate) fn arbitrate_pane_layout_publication(
     let structure_owner = match (claim.publisher, claim.route) {
         (PaneLayoutPublisher::Route, Some(PaneLayoutRouteClaim::Ensure))
         | (PaneLayoutPublisher::Escalation, _)
-        | (PaneLayoutPublisher::RecycleSettled, _) => {
+        | (PaneLayoutPublisher::RecycleSettled, _)
+        | (PaneLayoutPublisher::LaneHandoff, _) => {
             // Re-placing columns inside a structure keeps its owner, unless
             // the publication changed the count.
             match current {
@@ -2398,7 +2405,6 @@ impl ControllerPaneLayoutLanes {
     }
 
     /// Lanes that currently hold a graph, in lane order (`Shared` first).
-    #[cfg_attr(not(test), allow(dead_code))]
     fn lane_ids(&self) -> Vec<agent_doc_editor_surface::NavigationLane> {
         self.lanes.lock().keys().cloned().collect()
     }
@@ -8161,6 +8167,12 @@ impl ControllerRuntime {
         factory: ControllerPaneLayoutSinkFactory,
     ) {
         self.pane_layout_lanes.install_sink_factory(factory);
+    }
+
+    /// Navigation lanes that currently hold a pane-layout graph (`Shared`
+    /// first).
+    fn pane_layout_lane_ids(&self) -> Vec<agent_doc_editor_surface::NavigationLane> {
+        self.pane_layout_lanes.lane_ids()
     }
 
     /// The pane-layout graph for `lane`, created on first use.

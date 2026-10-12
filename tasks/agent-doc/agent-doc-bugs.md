@@ -1098,6 +1098,57 @@ To unwedge, start with the least disruptive option:
 2. If Run Agent Doc still refuses, run the JetBrains "Reload agent-doc library" action, or run `agent-doc admin reload-lib` in the haiven-dev project. Note that reload-lib reloads every live editor registration, not just frontend.md.
 
 Once admission passes, frontend.md's queued `#actionable-review` drains normally.
+
+### Re: v0.35.494 published; batches 14–16 landed — opus-5-5 · 2026-10-12T20:25-04:00
+
+> **Queue prompt:** #release
+
+**v0.35.494 is published.**
+- The GitHub Release workflow succeeded and lists 13 assets.
+- PyPI serves `agent_doc-0.35.494-py3-none-any.whl`.
+- It is installed locally.
+- It includes auto-clear between queue items (on by default), IDE navigation lanes P5–P6, and the fixes for Clear after a Codex interrupt, the queued-Clear startup race, and steering identity.
+
+Batches 14, 15 and 16 are now on `main` (`81dc23a40d`) and installed. Each passed `make check` and `make tmux-ci`; batch 16 ran 10,409 tests.
+
+> **Queue prompt:** do [#ridernavp6routecontended]
+
+Done (`2a0d5f699e`). Run Agent Doc from IDE B on a document whose pane lives in IDE A's lane now:
+- dispatches to that pane where it is, with no second harness and no pane move;
+- skips the layout wait, which could never finish;
+- shows B an `owned_by_other_lane` notice. In JetBrains this is an information notification.
+
+> **Queue prompt:** do [#claimeddrainwarn]
+
+Done (`aeeb475a4d`). The auto-clear yield had recorded a supervisor handoff for a head that was already claimed. Both the handoff record and the "undrained" warning now use the first unclaimed head the supervisor can actually drain. When every head is claimed, nothing is recorded, and a ready supervisor is never told to recycle.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/243
+
+Fix then close: fixed (`d35e4a7cb9`), and GH #243 is closed with a comment.
+- With no `tmux_session` pin, route and sync now prefer a session a client is attached to.
+- A dispatch into an unwatched pane returns a `pane-not-visible` notice with the attach command.
+- `start --force` retires the agent-doc supervisor pane it bypasses.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/243#issuecomment-6129952007
+
+Fix then close: covered by the same fix. A document keeps one live supervisor pane. The controller's authoritative pane wins, and any other agent-doc supervisor pane for that document is retired before a foreground route dispatches.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/244
+
+Fix then close: fixed (`92baf48a1a`), and GH #244 is closed. Layout repair now releases a per-window `window-size manual` pin on agent-doc's own windows when the window is smaller than every attached client. It reports `Repaired` instead of `already_converged`.
+
+> **Queue prompt:** do [#reaperciflake]
+
+Done (`45e3c26ab3`). On the GitHub runner `/bin/sh` is dash, and dash's un-execed fork child briefly shows the controller's exact command line. The reaper counted that child as a second controller; it now skips such fork images but still reaps them. In a dash container under load, the test went from failing 1 in 150 runs to passing 400 of 400.
+
+> **Queue prompt:** do [#fixlazilycodex]
+
+Done (`a6c014f636`). The Stop hook's check for remaining prompt work counted a subagent-claimed queue head as unanswered. So each Stop reopened a cycle and captured Codex's closing status as a "recovered response". That left three status-only commits in lazily.md; I did not remove them. Claimed heads are now skipped, and a payload that is already in HEAD is a no-op.
+
+**Batch 17 is in its checks:**
+- `runfrontendissue`: the frontend.md wedge was a liveness channel stuck since about Sept 28, with 4,425 messages blocked behind a rejected reused epoch.
+- `simworldcitimeout`: the SimWorld search now visits distinct states instead of replaying every event sequence, and runs 13× faster.
+- `controllerforkimage`: the duplicate-controller reaper had been killing the live controller's spawn child.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -1107,12 +1158,12 @@ Once admission passes, frontend.md's queued `#actionable-review` drains normally
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - do [#runfrontendissue]
-- 🚧 do [#fixlazilycodex]
-- 🚧 do [#reaperciflake]
-- 🚧 do [#ridernavp6routecontended]
+- ~~do [#fixlazilycodex]~~
+- ~~do [#reaperciflake]~~
+- ~~do [#ridernavp6routecontended]~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243#issuecomment-6129952007
-- 🚧 do [#claimeddrainwarn]
+- ~~do [#claimeddrainwarn]~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/244
 - 🚧 #release
 - do [#simworldcitimeout]
@@ -1143,16 +1194,6 @@ Once admission passes, frontend.md's queued `#actionable-review` drains normally
   committed progression changes have related uncommitted conformance changes.
   Worked for 20s • 3:17 PM
   ```
-- [ ] 🚧 [#fixlazilycodex] Fix lazily.md Codex hook issue:
-  ```
-  • Cycle cycle-1791827706347 converged and committed successfully. No queue work is drainable.
-  • Hook stopped
-  └ agent-doc Stop hook failed closed: post-commit Stop payload is already materialized in HEAD; refusing to capture it
-  under the terminal cycle
-  ```
-- [ ] 🚧 [#reaperciflake] [agent-doc] CI is red on main at v0.35.494 (8af04b806a, run 38291750666): agent-doc-test-support project_controller_reaper_tests::reaper_terminates_only_controllers_rooted_under_its_root fails on the GitHub runner with an assertion at agent-doc-test-support/src/lib.rs:1129 while passing in every local make check. Find the environment dependency (process scan, /proc visibility, PID namespace, cwd/root resolution, timing) and fix it at the source; never skip it on CI or rerun to green.
-- [ ] 🚧 [#claimeddrainwarn] [agent-doc] preflight warns supervisor_drain_handoff_undrained (the [focused-cycle] head was handed to the supervisor N min ago and is still undrained; recycle the supervisor) for over 30 minutes on agent-doc-bugs.md (2026-10-12) while every remaining queue head is claimed by a subagent or coordinator, so the supervisor correctly has nothing to drain. Likely interplay with the new auto-clear item-boundary yield (queue_auto_clear_yield) recording a handoff that claims then make undrainable. Exclude claimed heads from the handoff and the warning, and do not tell the operator to recycle a healthy supervisor; regression test.
-- [ ] 🚧 [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
 <!-- /agent:backlog -->
 
 ## Review

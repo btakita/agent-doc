@@ -97,7 +97,6 @@ const EDITOR_SURFACE_PROJECTION_TYPE_TAG: &str = "agent-doc.editor-surface.proje
 pub const CAPTURED_FINALIZE_WAKE_STATE_CHANNEL: &str = "agent-doc/captured-finalize/wake/v1";
 const CAPTURED_FINALIZE_WAKE_TYPE_TAG: &str = "agent-doc.captured-finalize.wake.v1";
 const EDITOR_REPLICA_REGISTERED_REACTIVE_REASON: &str = "editor_replica_registered";
-static PANE_LAYOUT_STATUS_EPOCH: AtomicU64 = AtomicU64::new(1);
 static DOCUMENT_DELIVERY_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
 static OPERATOR_CLEAR_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
 static CAPTURED_FINALIZE_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
@@ -1640,6 +1639,7 @@ fn document_turn_authority_stream_request(
         after_controller_generation: cursor.map(|value| value.controller_generation),
         after_version: cursor.map(|value| value.plane_version).unwrap_or(0),
         timeout_ms: STATE_PLANE_SUBSCRIBE_MAX.as_millis() as u64,
+        client_id: None,
     };
     let request = ControllerRequest {
         command: "document_turn_authority_stream".to_string(),
@@ -1846,6 +1846,7 @@ pub fn subscribe_document_delivery_wakes_for_file(
         after_controller_generation: after.map(|cursor| cursor.controller_generation),
         after_version: after.map(|cursor| cursor.plane_version).unwrap_or(0),
         timeout_ms: timeout.as_millis().min(u64::MAX as u128) as u64,
+        client_id: None,
     };
     let request = ControllerRequest {
         command: "state_plane_subscribe".to_string(),
@@ -1917,6 +1918,7 @@ pub fn subscribe_operator_clear_wakes_for_file(
         after_controller_generation: after.map(|cursor| cursor.controller_generation),
         after_version: after.map(|cursor| cursor.plane_version).unwrap_or(0),
         timeout_ms: timeout.as_millis().min(u64::MAX as u128) as u64,
+        client_id: None,
     };
     let request = ControllerRequest {
         command: "state_plane_subscribe".to_string(),
@@ -1972,6 +1974,7 @@ pub fn subscribe_captured_finalize_wakes_for_file(
         after_controller_generation: after.map(|cursor| cursor.controller_generation),
         after_version: after.map(|cursor| cursor.plane_version).unwrap_or(0),
         timeout_ms: timeout.as_millis().min(u64::MAX as u128) as u64,
+        client_id: None,
     };
     let request = ControllerRequest {
         command: "state_plane_subscribe".to_string(),
@@ -27424,51 +27427,65 @@ pub(super) fn clear_captured_finalize_wake(runtime: &ControllerRuntime, document
     runtime.captured_finalize_wakes.lock().remove(document_hash);
 }
 
-/// Publish the pane-layout status of `lane`. The status channel carries the
-/// shared lane's projection (the wire shape predates lanes), so an
-/// installation lane's worker does not republish it; that lane's projection is
-/// read from its own graph.
+/// Publish the pane-layout status of `lane` on that lane's own channel
+/// (`#ideriderindependentnav` P6). The shared lane publishes on
+/// `agent-doc/pane-layout/status/v1` exactly as before lanes existed; an
+/// installation lane publishes its own graph's projection on
+/// `agent-doc/pane-layout/status/v1/lane/<installation>`, so one lane's sync
+/// progress or failure never reaches another lane's subscriber.
 fn publish_pane_layout_lane_status(
     runtime: &ControllerRuntime,
     lane: &agent_doc_editor_surface::NavigationLane,
 ) {
     if lane.is_shared() {
         publish_pane_layout_status(runtime);
+    } else {
+        publish_pane_layout_graph_status(runtime, &runtime.pane_layout_graph_for_lane(lane));
     }
 }
 
+/// Publish the shared lane's pane-layout status.
 fn publish_pane_layout_status(runtime: &ControllerRuntime) {
-    let Some(status) = runtime.pane_layout_state_projection() else {
+    publish_pane_layout_graph_status(runtime, runtime.pane_layout_graph());
+}
+
+fn publish_pane_layout_graph_status(
+    runtime: &ControllerRuntime,
+    graph: &super::ControllerPaneLayoutGraph,
+) {
+    let Some(status) = graph.state_projection() else {
         return;
     };
     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
         return;
     };
-    let epoch = PANE_LAYOUT_STATUS_EPOCH.fetch_add(1, Ordering::SeqCst);
+    let channel = graph.status_channel();
+    let epoch = graph.next_status_epoch();
     let producer_id = format!(
         "agent-doc-controller:{}:{}",
         std::process::id(),
         bootstrap.controller_generation
     );
-    let result = state_plane_snapshot_message_json(
-        epoch,
-        PANE_LAYOUT_STATUS_STATE_CHANNEL,
-        PANE_LAYOUT_STATUS_TYPE_TAG,
-        &status,
-    )
-    .and_then(|message_json| {
-        runtime.publish_state_plane_frame(
-            PANE_LAYOUT_STATUS_STATE_CHANNEL.to_string(),
-            producer_id,
-            message_json,
-            epoch,
-            None,
-        )
-    });
+    let result =
+        state_plane_snapshot_message_json(epoch, &channel, PANE_LAYOUT_STATUS_TYPE_TAG, &status)
+            .and_then(|message_json| {
+                runtime.publish_state_plane_frame(
+                    channel.clone(),
+                    producer_id,
+                    message_json,
+                    epoch,
+                    None,
+                )
+            });
     if let Err(error) = result {
+        let lane = if graph.lane.is_shared() {
+            String::new()
+        } else {
+            format!(" navigation_lane={}", graph.lane.label())
+        };
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
-            &format!("pane_layout_status_publish_deferred error={error:#}"),
+            &format!("pane_layout_status_publish_deferred{lane} error={error:#}"),
         );
     }
 }
@@ -27537,12 +27554,40 @@ pub(crate) fn handle_state_plane_subscribe(
         "state-plane subscribe channel is empty"
     );
     let timeout = Duration::from_millis(invocation.timeout_ms).min(STATE_PLANE_SUBSCRIBE_MAX);
-    Ok(runtime.subscribe_state_plane(
+    let channel = state_plane_subscription_channel(
+        runtime.editor_surface_graph.navigation_mode(),
         &invocation.channel,
+        invocation.client_id.as_deref(),
+    );
+    Ok(runtime.subscribe_state_plane(
+        &channel,
         invocation.after_controller_generation,
         invocation.after_version,
         timeout,
     ))
+}
+
+/// The channel a `state_plane_subscribe` for `channel` by `client_id` reads.
+///
+/// The pane-layout status channel is per navigation lane
+/// (`#ideriderindependentnav` P6): a subscriber naming its client id reads its
+/// own lane's channel, so an installation lane's status never shows in another
+/// lane. Every other channel, every subscriber without a client id, every
+/// unscoped client, and every client in `shared` mode reads `channel`
+/// unchanged, which is the pre-lane behavior.
+fn state_plane_subscription_channel(
+    navigation_mode: agent_doc_editor_surface::NavigationMode,
+    channel: &str,
+    client_id: Option<&str>,
+) -> String {
+    match client_id {
+        Some(client_id) if channel == PANE_LAYOUT_STATUS_STATE_CHANNEL => {
+            super::pane_layout_status_channel(
+                &agent_doc_editor_surface::NavigationLane::for_client(navigation_mode, client_id),
+            )
+        }
+        _ => channel.to_string(),
+    }
 }
 
 #[derive(Default)]
@@ -38403,6 +38448,292 @@ mod tests {
         assert!(
             ops.contains("navigation_lane=IU.0a1b2c3d"),
             "a lane projection is attributed to its lane: {ops}"
+        );
+    }
+
+    fn pane_layout_statuses_from_frames(
+        frames: &[ControllerStatePlaneFrame],
+    ) -> Vec<ControllerPaneLayoutStateProjection> {
+        frames
+            .iter()
+            .map(|frame| {
+                let message: lazily::IpcMessage =
+                    serde_json::from_str(&frame.message_json).unwrap();
+                let payload = state_plane_snapshot_payload(
+                    &message,
+                    &frame.channel,
+                    PANE_LAYOUT_STATUS_TYPE_TAG,
+                )
+                .unwrap();
+                serde_json::from_slice(&payload).unwrap()
+            })
+            .collect()
+    }
+
+    fn subscribe_pane_layout_status(
+        runtime: &ControllerRuntime,
+        client_id: Option<&str>,
+    ) -> ControllerStatePlaneSubscription {
+        let mut payload = serde_json::json!({
+            "channel": PANE_LAYOUT_STATUS_STATE_CHANNEL,
+            "after_version": 0,
+            "timeout_ms": 0,
+        });
+        if let Some(client_id) = client_id {
+            payload["client_id"] = serde_json::Value::String(client_id.to_string());
+        }
+        let request: ControllerRequest = serde_json::from_value(serde_json::json!({
+            "command": "state_plane_subscribe",
+            "diagnostic_payload": payload.to_string(),
+        }))
+        .unwrap();
+        handle_state_plane_subscribe(runtime, request).unwrap()
+    }
+
+    /// `#ideriderindependentnav` P6: each navigation lane graph publishes its
+    /// pane-layout status on its own channel, and a subscriber naming its
+    /// client id reads its own lane's status. One lane's sync failure or
+    /// progress never shows in another lane, and the shared channel carries
+    /// only the shared lane.
+    #[test]
+    fn pane_layout_status_is_published_and_subscribed_per_navigation_lane() {
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "editor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let runtime = ControllerRuntime::new(test_bootstrap(&dir)).unwrap();
+        assert_eq!(
+            runtime.editor_surface_graph.navigation_mode(),
+            NavigationMode::PerInstallation
+        );
+        let idea_client = "jetbrains@IU.0a1b2c3d-pid:41";
+        let rider_client = "jetbrains@RD.9f8e7d6c-pid:42";
+        let idea = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let rider = NavigationLane::Installation("RD.9f8e7d6c".to_string());
+        let idea_graph = runtime.pane_layout_graph_for_lane(&idea);
+        let rider_graph = runtime.pane_layout_graph_for_lane(&rider);
+
+        // IDEA converges; Rider's structural effect fails.
+        let mut idea_invocation = super::super::tests::pane_layout_desired_for_test(1).invocation;
+        idea_invocation.columns = vec!["/project/idea.md".to_string()];
+        let idea_desired = idea_graph.set_desired(idea_invocation, None);
+        idea_graph.record_observation(PaneLayoutObservation {
+            generation: idea_desired.generation,
+            actor_bindings: idea_graph.actor_bindings(),
+            report: layout_sync_state_report(
+                true,
+                "synced",
+                Vec::new(),
+                Vec::new(),
+                vec!["%1".to_string()],
+                LayoutSyncStateTarget::default(),
+            ),
+        });
+        idea_graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: idea_desired.generation,
+            actor_bindings: idea_graph.actor_bindings(),
+            attempt: 1,
+            phase: PaneLayoutEffectPhase::Converged,
+            reason: "observed_layout_convergence".to_string(),
+            file_panes: Vec::new(),
+            focus_required: false,
+            focus_applied: false,
+        });
+        let mut rider_invocation = super::super::tests::pane_layout_desired_for_test(1).invocation;
+        rider_invocation.columns = vec!["/project/rider.md".to_string()];
+        let rider_desired = rider_graph.set_desired(rider_invocation, None);
+        rider_graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: rider_desired.generation,
+            actor_bindings: rider_graph.actor_bindings(),
+            attempt: 3,
+            phase: PaneLayoutEffectPhase::RetryPending,
+            reason: "tmux_effect_failed:rider".to_string(),
+            file_panes: Vec::new(),
+            focus_required: false,
+            focus_applied: false,
+        });
+
+        for lane in [&idea, &rider, &NavigationLane::Shared] {
+            publish_pane_layout_lane_status(&runtime, lane);
+        }
+
+        let idea_status = subscribe_pane_layout_status(&runtime, Some(idea_client));
+        assert_eq!(
+            idea_status.channel,
+            "agent-doc/pane-layout/status/v1/lane/IU.0a1b2c3d"
+        );
+        let idea_status = pane_layout_statuses_from_frames(&idea_status.frames);
+        assert_eq!(idea_status.len(), 1);
+        assert_eq!(idea_status[0].phase, ControllerPaneLayoutPhase::Converged);
+        assert_eq!(idea_status[0].columns, vec!["/project/idea.md".to_string()]);
+
+        let rider_status = pane_layout_statuses_from_frames(
+            &subscribe_pane_layout_status(&runtime, Some(rider_client)).frames,
+        );
+        assert_eq!(rider_status.len(), 1);
+        assert_eq!(
+            rider_status[0].phase,
+            ControllerPaneLayoutPhase::RetryPending
+        );
+        assert_eq!(
+            rider_status[0].reason_code,
+            ControllerPaneLayoutReasonCode::EffectFailed
+        );
+        assert_eq!(rider_status[0].attempt, 3);
+        assert_eq!(
+            rider_status[0].columns,
+            vec!["/project/rider.md".to_string()]
+        );
+
+        // The focus client of one IDE shares that IDE's lane channel.
+        assert_eq!(
+            pane_layout_statuses_from_frames(
+                &subscribe_pane_layout_status(&runtime, Some("jetbrains-focus@IU.0a1b2c3d-pid:41"))
+                    .frames
+            ),
+            idea_status
+        );
+
+        // The shared lane has no desired layout, so it published nothing:
+        // neither installation lane's status reached the shared channel, for
+        // an unscoped client or a subscriber without a client id.
+        for client in [None, Some("vscode-pid:9")] {
+            let shared = subscribe_pane_layout_status(&runtime, client);
+            assert_eq!(shared.channel, PANE_LAYOUT_STATUS_STATE_CHANNEL);
+            assert!(shared.frames.is_empty(), "{client:?}: {:?}", shared.frames);
+        }
+
+        // Rider's later convergence republishes only Rider's lane; IDEA's
+        // channel keeps its one retained snapshot.
+        let idea_version = runtime
+            .subscribe_state_plane(&pane_layout_status_channel(&idea), None, 0, Duration::ZERO)
+            .latest_version;
+        rider_graph.record_observation(PaneLayoutObservation {
+            generation: rider_desired.generation,
+            actor_bindings: rider_graph.actor_bindings(),
+            report: layout_sync_state_report(
+                true,
+                "synced",
+                Vec::new(),
+                Vec::new(),
+                vec!["%1".to_string()],
+                LayoutSyncStateTarget::default(),
+            ),
+        });
+        rider_graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: rider_desired.generation,
+            actor_bindings: rider_graph.actor_bindings(),
+            attempt: 4,
+            phase: PaneLayoutEffectPhase::Converged,
+            reason: "observed_layout_convergence".to_string(),
+            file_panes: Vec::new(),
+            focus_required: false,
+            focus_applied: false,
+        });
+        publish_pane_layout_lane_status(&runtime, &rider);
+        let rider_status = pane_layout_statuses_from_frames(
+            &subscribe_pane_layout_status(&runtime, Some(rider_client)).frames,
+        );
+        assert_eq!(
+            rider_status.last().unwrap().phase,
+            ControllerPaneLayoutPhase::Converged
+        );
+        assert_eq!(
+            runtime
+                .subscribe_state_plane(&pane_layout_status_channel(&idea), None, 0, Duration::ZERO,)
+                .latest_version,
+            idea_version,
+            "another lane's publication never touches this lane's channel"
+        );
+
+        // A shared-lane layout publishes on the shared channel only.
+        runtime.pane_layout_graph().set_desired(
+            super::super::tests::pane_layout_desired_for_test(1).invocation,
+            None,
+        );
+        publish_pane_layout_lane_status(&runtime, &NavigationLane::Shared);
+        let shared = pane_layout_statuses_from_frames(
+            &subscribe_pane_layout_status(&runtime, Some("vscode-pid:9")).frames,
+        );
+        assert_eq!(shared.len(), 1);
+        assert_eq!(shared[0].phase, ControllerPaneLayoutPhase::NeedsEffect);
+        assert_eq!(
+            pane_layout_statuses_from_frames(
+                &subscribe_pane_layout_status(&runtime, Some(idea_client)).frames
+            ),
+            idea_status
+        );
+    }
+
+    /// `#ideriderindependentnav` P6: in the default `shared` mode, the
+    /// pane-layout status channel is exactly the pre-lane one: every client,
+    /// installation-scoped or not, with or without a client id, reads the same
+    /// shared channel and the same frames, and no lane channel is published.
+    #[test]
+    fn shared_mode_pane_layout_status_is_the_pre_lane_channel_for_every_client() {
+        use agent_doc_editor_surface::NavigationMode;
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new(test_bootstrap(&dir)).unwrap();
+        assert_eq!(
+            runtime.editor_surface_graph.navigation_mode(),
+            NavigationMode::Shared
+        );
+        let desired = runtime.pane_layout_graph().set_desired(
+            super::super::tests::pane_layout_desired_for_test(1).invocation,
+            None,
+        );
+        publish_pane_layout_status(&runtime);
+
+        let baseline = subscribe_pane_layout_status(&runtime, None);
+        assert_eq!(baseline.channel, PANE_LAYOUT_STATUS_STATE_CHANNEL);
+        assert_eq!(baseline.frames.len(), 1);
+        assert_eq!(
+            baseline.frames[0].epoch, 1,
+            "the shared producer epoch starts at 1"
+        );
+        let status = pane_layout_statuses_from_frames(&baseline.frames);
+        assert_eq!(status[0].generation, desired.generation);
+        assert_eq!(
+            Some(status[0].clone()),
+            runtime.pane_layout_graph().state_projection()
+        );
+        for client in [
+            "jetbrains@IU.0a1b2c3d-pid:41",
+            "jetbrains@RD.9f8e7d6c-pid:42",
+            "vscode-pid:9",
+            "",
+        ] {
+            assert_eq!(
+                subscribe_pane_layout_status(&runtime, Some(client)),
+                baseline,
+                "{client}"
+            );
+        }
+        // A non-status channel ignores the client id.
+        assert_eq!(
+            state_plane_subscription_channel(
+                NavigationMode::PerInstallation,
+                PANE_LAYOUT_DESIRED_STATE_CHANNEL,
+                Some("jetbrains@IU.0a1b2c3d-pid:41"),
+            ),
+            PANE_LAYOUT_DESIRED_STATE_CHANNEL
+        );
+        assert_eq!(
+            serde_json::to_value(ControllerStatePlaneSubscribeInvocation {
+                channel: PANE_LAYOUT_STATUS_STATE_CHANNEL.to_string(),
+                after_controller_generation: None,
+                after_version: 0,
+                timeout_ms: 0,
+                client_id: None,
+            })
+            .unwrap()
+            .get("client_id"),
+            None,
+            "an unscoped subscribe invocation keeps the pre-lane wire shape"
         );
     }
 

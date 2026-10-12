@@ -339,7 +339,7 @@ What landed (the original scope follows below):
   `editors/jetbrains/SPEC.md`.
 - Still open: (a) route, start, and `agent-doc claim --client-id` creating panes in the
   requester's lane; (b) the `sync_tmux_layout` command and the recycle republish publishing into
-  the right lane(s); (c) a per-lane `pane_layout_status` channel; a controller-side trigger that
+  the right lane(s); (c) a per-lane `pane_layout_status` channel (landed in P6); a controller-side trigger that
   passes its live installations to the reconcile (today only `agent-doc gc` runs it). The optional
   focus-driven handoff is not planned.
 
@@ -361,6 +361,39 @@ republish; a per-lane `pane_layout_status` channel; optionally an opt-in focus-d
 - Docs: README, SPEC, and `editors/jetbrains/SPEC.md` describe the feature as
   available. A two-IDE end-to-end test in `tests/cross_editor_simworld.rs` uses an
   isolated tmux server and two simulated editor clients.
+
+### P6 (status): per-lane `pane_layout_status` channel (LANDED)
+
+- Pure (editor-surface): `NavigationLane::state_channel(base)`: the shared lane is `base`
+  itself; an installation lane is `<base>/lane/<installation>`.
+- Controller: each `ControllerPaneLayoutGraph` knows its lane and owns its status producer epoch
+  (the process-global `PANE_LAYOUT_STATUS_EPOCH` is gone), so the status is part of each lane
+  graph's scope rather than a side channel (`#stategraphjoin`). `publish_pane_layout_lane_status`
+  publishes the lane graph's own `state_projection()` on `pane_layout_status_channel(lane)`;
+  before P6 an installation lane published nothing. The shared lane publishes on
+  `agent-doc/pane-layout/status/v1` with the same payload, type tag, producer id, and epoch
+  sequence (starting at 1) as before.
+- Subscription: `ControllerStatePlaneSubscribeInvocation` gains an optional `client_id`
+  (omitted from the wire when unset). `state_plane_subscribe` for the status channel with a
+  `client_id` reads that client's lane channel (`NavigationLane::for_client` under the
+  configured mode); the subscription reports the channel it read. No client id, an unscoped
+  client, shared mode, and every other channel are unchanged. The lane's status reaches the
+  subscriber by the existing state-plane push (`#reactive-boundary-ingress`): no polling, no RPC
+  from the controller to the editor.
+- Editors: no plugin change. The JetBrains plugin builds a status subscribe request
+  (`CpRouteClient.statePlaneSubscribeRequest`) but no production path consumes the status yet;
+  a future consumer passes its surface client id. VS Code clients are unscoped and read the
+  shared channel.
+- Verification: editor-surface `lane_state_channel_keeps_the_shared_channel_and_separates_installations`;
+  controller `pane_layout_status_is_published_and_subscribed_per_navigation_lane` (IDEA converged,
+  Rider's effect failed: each subscriber sees only its own lane's phase/reason/attempt, the
+  shared channel stays empty, a later Rider publish leaves IDEA's channel version unchanged, a
+  shared layout publishes only on the shared channel) and
+  `shared_mode_pane_layout_status_is_the_pre_lane_channel_for_every_client` (every client id
+  reads the identical shared subscription, epoch 1, payload equal to the shared graph's
+  projection, no `client_id` on an unscoped invocation's wire). Not modeled in SimWorld: the
+  status channel is a wire projection of each lane graph, and `two_ide_navigation_model` models
+  pane placement, not status delivery.
 
 ## Risks
 

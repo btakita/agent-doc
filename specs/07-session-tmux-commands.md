@@ -267,6 +267,17 @@ loses desktop focus.
 - Each lane graph has its own effect sink and latest-wins worker, and its structural-effect
   cancellation is bound to that lane's published generation, so a newer layout in one lane never
   supersedes or cancels another lane's sync body.
+- Pane-layout status is per lane (P6): each lane graph publishes its own derived status (phase,
+  reason code, attempt, columns, observation) on its own state-plane channel, with its own producer
+  epoch. The shared lane's channel is `agent-doc/pane-layout/status/v1`, unchanged from before
+  lanes; an installation lane's channel is `agent-doc/pane-layout/status/v1/lane/<installation>`
+  (`NavigationLane::state_channel`). A `state_plane_subscribe` to the status channel may carry the
+  subscriber's surface `client_id`; the controller then reads that client's lane channel
+  (`NavigationLane::for_client`), so an installation lane's sync progress or failure never shows
+  to another lane's subscriber and never displaces the shared channel's retained snapshot. A
+  subscribe without `client_id`, an unscoped client (VS Code), and every client in `shared` mode
+  read the shared channel exactly as before, and the field is omitted from the wire when unset.
+  Other channels ignore `client_id`.
 - Lane routing (`per_installation` only; shared mode is the identity and reads no extra tmux
   state): an editor surface `Sync` publishes into the observing client's lane graph. An
   installation lane's desired layout never writes the shared lane's durable column memory and

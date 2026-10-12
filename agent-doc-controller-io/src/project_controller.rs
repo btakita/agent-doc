@@ -418,6 +418,12 @@ pub struct ControllerStatePlaneSubscribeInvocation {
     pub after_version: u64,
     #[serde(default)]
     pub timeout_ms: u64,
+    /// The subscribing editor surface client id (`#ideriderindependentnav`
+    /// P6). A subscription to a per-lane channel (pane-layout status) reads
+    /// that client's navigation lane's channel. Omitted, or for an unscoped
+    /// client or shared mode, it reads the shared lane: the pre-lane channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1453,6 +1459,21 @@ struct ControllerPaneLayoutGraph {
     width_memory: Mutex<PaneLayoutWidthMemory>,
     waiters: Condvar,
     wait_lock: Mutex<()>,
+    /// The navigation lane this graph belongs to. Its status is published on
+    /// that lane's own channel ([`pane_layout_status_channel`]).
+    lane: agent_doc_editor_surface::NavigationLane,
+    /// The producer epoch of this lane's pane-layout status channel. Each lane
+    /// channel is its own producer stream, so one lane's publications never
+    /// advance (or skip) another lane's epochs.
+    status_epoch: AtomicU64,
+}
+
+/// The state-plane channel carrying `lane`'s pane-layout status
+/// (`#ideriderindependentnav` P6). The shared lane is
+/// [`PANE_LAYOUT_STATUS_STATE_CHANNEL`] itself (the pre-lane wire); an
+/// installation lane has its own `<channel>/lane/<installation>` channel.
+pub fn pane_layout_status_channel(lane: &agent_doc_editor_surface::NavigationLane) -> String {
+    lane.state_channel(PANE_LAYOUT_STATUS_STATE_CHANNEL)
 }
 
 /// Process-scoped derivative of the durable document-to-view binding
@@ -1572,7 +1593,11 @@ impl ControllerPaneLayoutGraph {
         scope: &agent_doc_state_scope::ProcessScope,
         live_actor_bindings: Computed<ControllerActorStore>,
     ) -> Self {
-        Self::new_in_process_ctx(scope.ctx().clone(), live_actor_bindings)
+        Self::new_in_process_ctx(
+            scope.ctx().clone(),
+            live_actor_bindings,
+            agent_doc_editor_surface::NavigationLane::Shared,
+        )
     }
 
     /// Build a graph in an existing controller `ProcessScope` graph.
@@ -1585,6 +1610,7 @@ impl ControllerPaneLayoutGraph {
     fn new_in_process_ctx(
         ctx: ThreadSafeContext,
         live_actor_bindings: Computed<ControllerActorStore>,
+        lane: agent_doc_editor_surface::NavigationLane,
     ) -> Self {
         let desired = ctx.source(None::<PaneLayoutDesired>);
         let structural_receipt = ctx.source(None);
@@ -1684,7 +1710,19 @@ impl ControllerPaneLayoutGraph {
             width_memory: Mutex::new(PaneLayoutWidthMemory::default()),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
+            lane,
+            status_epoch: AtomicU64::new(1),
         }
+    }
+
+    /// This lane's pane-layout status channel.
+    fn status_channel(&self) -> String {
+        pane_layout_status_channel(&self.lane)
+    }
+
+    /// The next producer epoch of this lane's status channel.
+    fn next_status_epoch(&self) -> u64 {
+        self.status_epoch.fetch_add(1, Ordering::SeqCst)
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -2347,6 +2385,7 @@ impl ControllerPaneLayoutLanes {
         let shared = Arc::new(ControllerPaneLayoutGraph::new_in_process_ctx(
             ctx.clone(),
             live_actor_bindings,
+            agent_doc_editor_surface::NavigationLane::Shared,
         ));
         let lanes = BTreeMap::from([(
             agent_doc_editor_surface::NavigationLane::Shared,
@@ -2396,6 +2435,7 @@ impl ControllerPaneLayoutLanes {
         let graph = Arc::new(ControllerPaneLayoutGraph::new_in_process_ctx(
             self.ctx.clone(),
             self.live_actor_bindings,
+            lane.clone(),
         ));
         if let Some(factory) = self.sink_factory.lock().as_ref() {
             graph.install_sink(factory(lane));
@@ -8255,10 +8295,6 @@ impl ControllerRuntime {
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     fn pane_layout_projection(&self) -> PaneLayoutProjection {
         self.pane_layout_graph().projection()
-    }
-
-    fn pane_layout_state_projection(&self) -> Option<ControllerPaneLayoutStateProjection> {
-        self.pane_layout_graph().state_projection()
     }
 
     fn record_pane_layout_observation(&self, observation: PaneLayoutObservation) {

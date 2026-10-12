@@ -52,6 +52,16 @@ Claimed and dispatched `#lzreleasepins`, `#lzcorecohort`, and `#lzagentdocartifa
 > **Queue prompt:** #release
 
 No release, publish, tag, version bump, install, commit, or push was performed. This malformed queue head is acknowledged as a no-op: `release` does not define the queued `#release`, no backlog/review item supplies its scope, and the inherited `#spec-test-commit-push` preset is undefined. Re-add a corrected, scoped directive after defining the intended presets and authorization.
+
+### Re: #lzcorecohort — gpt-5 · 2026-10-12T13:53-04:00
+
+Phase 6 is implementation-complete in isolated worktree `/home/brian/worktrees/agent-loop-lzcorecohort-20261012`, branch `task/lzcorecohort-20261012`, based on `02c20e1a71cb971fd8ad82d12b73f77acebb49ba`.
+
+The worker added the immutable BOM schema/verifier, reusable read-only publish gate, documentation, Makefile integration, and negative coverage. It also bound each manifest's declared Spec commit to the exact checked-out `spec_commit` and hardened malformed-manifest failure reporting. Changed paths are `Makefile`, `docs/SUMMARY.md`, `.github/workflows/core-cohort-publish-gate.yml`, `docs/core-cohorts.md`, `schemas/core-cohort.json`, `scripts/verify_core_cohort.py`, and `tests/test_core_cohort.py`.
+
+Verification is green: the targeted cohort suite passed 10 tests; full `make check` exited 0 with 312 pytest tests passed, the 9-job Lean build green, and coverage, fixture, identity, prose, ordering, discriminability, floor, and publication gates green. `git diff --check` also passed; latest upstream CI run `37258006428` was successful.
+
+No commit or push was created because `#spec-test-commit-push` remains undefined. The item is gated on explicit commit/integration authorization; truthful candidate manifests and cross-repository adoption remain gated on `#lzreleasepins` and `#lzrustpublish`. No additional backlog follow-up is needed because the gated item itself retains the exact integration action and unblock conditions.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -60,7 +70,7 @@ No release, publish, tag, version bump, install, commit, or push was performed. 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzcoreconsumers]~~
 - do [#lzreleasepins]
-- do [#lzcorecohort]
+- ~~do [#lzcorecohort]~~
 - do [#lzagentdocartifactrefresh]
 - ~~#release~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
@@ -69,13 +79,13 @@ No release, publish, tag, version bump, install, commit, or push was performed. 
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
-- [ ] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
 - [ ] [#lzagentdocartifactrefresh] Regenerate the expired btakita/agent-doc artifact-purge audit/handoff, rerun both full and durability-only dry-run options, refresh counterpart-durability evidence and counts, then re-gate the destructive purge on explicit operator authorization without deleting artifacts.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcorecohort] Phase 6 immutable Core cohort/BOM schema, verifier, reusable read-only publish gate, documentation, Makefile integration, and negative tests are complete in isolated worktree /home/brian/worktrees/agent-loop-lzcorecohort-20261012 on branch task/lzcorecohort-20261012; blocked until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate from base 02c20e1a71cb971fd8ad82d12b73f77acebb49ba; truthful candidate manifests and cross-repo adoption remain gated on #lzreleasepins and #lzrustpublish.
 - [/] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [/] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md: Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and module compatibility tests are complete in the listed isolated worktrees; blocked until Phase 1/3 are integrated first, explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, Zig 0.15.2/0.16.0 formatters are available, and the Rust corrected-profile divergence is resolved and validated.
 - [/] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md: additive idiomatic Core facades and package-content/identity checks are complete for all candidate bindings in /home/brian/worktrees/agent-loop-lzcorefacades-20261012, with Kotlin/Go/C# correctly retaining canonical package locations; blocked until corrected Phase 1 is integrated first, explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, and the unavailable Zig 0.15.2/0.16.0 formatting gate can be run.

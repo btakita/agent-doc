@@ -256,12 +256,12 @@ I also filed annotateddeferstrike: a deferred queue line carrying your note was 
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~[#clearnoticeverify]: verified?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~The tmux panes are not laid out correctly. 2/3|1/3. There were 3 tmux panes during your [#clearnoticeverify] test.~~
-- 🚧 frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)
-- 🚧 release + publish
+- ~~frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#closeoutleaseresume]~~
 - 🚧 do [#flakyintegrate0494]
 - ~~do [#clearsupersedenotice]~~
-- 🚧 I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted. ![img_5.png](img_5.png)
+- ~~I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted. ![img_5.png](img_5.png)~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

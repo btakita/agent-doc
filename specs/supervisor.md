@@ -307,6 +307,43 @@ a closed actor record is replaceable through the stale-authority path.
   and bounds full turn-boundary reconciliation to the quiescent maintenance
   cadence until the deferral clears. This preserves boundary safety without
   consuming sustained CPU or growing logs while an idle session waits.
+- An idle, ready supervisor reads nothing on a quiescent tick
+  (`#fixthrashingbackground`). Every urgent-maintenance reason that bypasses the
+  quiescent gates must be a reason something can change:
+  - The `#gh179` orphaned-empty-preflight reclaim cadence (every 30 ticks) is
+    urgent only while a reclaim is possible: an open durable cycle, an in-flight
+    supervisor IPC handler, or an unreadable cycle state (unknown is not
+    closed). One closeout read per cadence decides it. Unconditionally it ran the
+    whole idle pipeline (queue head, steering wake, frontmatter refresh) on every
+    supervisor every ~15–17s.
+  - Turn attribution is resolved lazily on a quiescent tick and primed only
+    after the quiescent gates, immediately before domain dispatch
+    (`#0.35.413` ordering is preserved for dispatch).
+  - The steering wake (`#steeringwake`) carries settle evidence between its own
+    observations in process (`midturn_steering::WakeSettleCarry`): it never
+    advances the durable hook watermark, and with an editor attached the settle
+    gate has no edit timestamp, so without the carry a held candidate was "first
+    seen" on every observation and re-armed its recheck — a full-text read —
+    forever. With it a held candidate settles (or reaches max hold) and the
+    rechecks stop.
+  - A queue-head probe whose compact revision answers `Detached` reads disk
+    directly instead of asking the controller for the full text it would only
+    answer `Detached` to.
+  `scripts/idle-supervisor-bench.sh` measures supervisor/controller CPU and
+  ops-log reads per idle minute against a scratch project (isolated tmux, fake
+  harness); a quiescent window writes no ops-log lines.
+- Cycle-state reads ask the controller for the closeout projection only
+  (`document_closeout_projection`; in-process, the closeout reader of
+  `agent_doc_state_wire`), never the whole document projection, whose history
+  (a full document image per visible-write commit candidate, every terminal
+  closeout proof) is unbounded per document. A controller that predates the
+  command answers `unknown controller command` and the client falls back to the
+  whole projection. Request-admission turn-attribution priming in the
+  controller uses the same closeout reader.
+- The controller's orphan-drain sweep (`#orphandrain`, every 10s) probes
+  supervisor liveness (a full `/proc` scan) only when the cheap facts leave a
+  dispatch possible (`orphan_drain_may_dispatch`: active queue and a drainable
+  head).
 - Codex background-terminal banners are active-turn evidence. If recent pane
   output contains `Waiting for background terminal (... esc to interrupt)`, the
   supervisor idle-queue watch and route readiness checks must treat the pane as

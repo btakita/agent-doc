@@ -23,7 +23,7 @@
 //! (seeded by preflight) plus one progress record per consumer (`hook`, `cli`,
 //! `follow`), so a polling CLI never steals steering from the in-turn hook.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -471,7 +471,7 @@ fn prepare(
     consumer: &str,
     policy: ClosedCyclePolicy,
 ) -> Result<Option<PreparedObservation>> {
-    prepare_with_gate(file, consumer, policy, true)
+    prepare_with_gate(file, consumer, policy, true, None)
 }
 
 /// [`prepare`] with the unchanged-document gate optional. The gate is a pure
@@ -482,6 +482,7 @@ fn prepare_with_gate(
     consumer: &str,
     policy: ClosedCyclePolicy,
     unchanged_gate: bool,
+    carried: Option<&WakeSettleCarry>,
 ) -> Result<Option<PreparedObservation>> {
     let Some(root) = project_root(file) else {
         return Ok(None);
@@ -527,6 +528,13 @@ fn prepare_with_gate(
         }
         _ => base,
     };
+    // `#fixthrashingbackground`: a non-advancing reader (the idle wake) never
+    // writes its watermark, so the settle gate would see every held candidate
+    // for the first time on every observation. Its in-process carry supplies the
+    // `first_seen_ms` the durable watermark cannot.
+    if let Some(carried) = carried {
+        carried.merge_into(&mut watermark);
+    }
     let cycle_open = cycle
         .as_ref()
         .is_some_and(|cycle| cycle_accepts_steering(cycle, &watermark.cycle_id));
@@ -827,7 +835,123 @@ fn steering_item_identity(item: &SteeringItem) -> String {
 /// channels (preflight, the hook, or the boundary report), so the wake itself
 /// never consumes steering.
 pub fn observe_for_wake(file: &Path) -> Result<WakeObservation> {
-    let hook = prepare_with_gate(file, CONSUMER_HOOK, ClosedCyclePolicy::Boundary, false)?;
+    observe_for_wake_with(file, &mut WakeSettleCarry::default())
+}
+
+/// Settle evidence the idle steering wake carries between its own observations
+/// (`#fixthrashingbackground`).
+///
+/// The wake reads the hook consumer's watermark without advancing it (it must
+/// never consume steering), so the durable watermark never learns when the
+/// wake first saw a held candidate. With a live editor attached the document
+/// has no edit timestamp either (`document_changed_ms = None`), so the settle
+/// gate had no evidence that time had passed at all: every candidate was
+/// "first seen now", stayed `Held`, and asked for another re-observation —
+/// forever. Each one re-read the full document text through the controller.
+/// Observed live 2026-10-12 (haiven-dev): ~30 idle supervisors re-reading
+/// every open document roughly every 17 seconds, 6897 of the last 9577
+/// `controller_crdt_current_text` reads.
+///
+/// The carry is plain in-process data the supervisor owns for its lifetime; it
+/// is keyed by the watermark's cycle and baseline so a re-seed starts fresh. A
+/// supervisor restart forgets it, which costs at most one settle window.
+/// Upper bound on the candidates one [`WakeSettleCarry`] remembers.
+const WAKE_SETTLE_CARRY_MAX: usize = 256;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WakeSettleCarry {
+    identity: Option<(String, String)>,
+    pending: BTreeMap<String, core::PendingObservation>,
+}
+
+impl WakeSettleCarry {
+    /// Candidates the carry holds settle evidence for.
+    pub fn tracked(&self) -> usize {
+        self.pending.len()
+    }
+
+    fn identity_of(watermark: &SteeringWatermark) -> (String, String) {
+        (
+            watermark.cycle_id.clone(),
+            core::content_hash(&watermark.baseline),
+        )
+    }
+
+    fn merge_into(&self, watermark: &mut SteeringWatermark) {
+        if self.identity.as_ref() != Some(&Self::identity_of(watermark)) {
+            return;
+        }
+        for (key, carried) in &self.pending {
+            watermark
+                .pending
+                .entry(key.clone())
+                .and_modify(|durable| {
+                    // The same version seen earlier by the wake is older
+                    // evidence than a later hook observation of it.
+                    if durable.content_hash == carried.content_hash
+                        && carried.first_seen_ms < durable.first_seen_ms
+                    {
+                        *durable = carried.clone();
+                    }
+                })
+                .or_insert_with(|| carried.clone());
+        }
+    }
+
+    fn remember(&mut self, next: Option<&SteeringWatermark>) {
+        let Some(next) = next else {
+            *self = Self::default();
+            return;
+        };
+        let identity = Self::identity_of(next);
+        if self.identity.as_ref() != Some(&identity) {
+            *self = Self {
+                identity: Some(identity),
+                pending: BTreeMap::new(),
+            };
+        }
+        // A candidate that settled leaves `next.pending`, but the wake never
+        // advances the durable watermark, so the next observation meets it
+        // again. Keep its evidence, or it would be "first seen" — and held —
+        // all over again. Bounded by the candidates of one watermark.
+        for (key, observation) in &next.pending {
+            self.pending
+                .entry(key.clone())
+                .and_modify(|kept| {
+                    if kept.content_hash != observation.content_hash {
+                        *kept = observation.clone();
+                    }
+                })
+                .or_insert_with(|| observation.clone());
+        }
+        if self.pending.len() > WAKE_SETTLE_CARRY_MAX {
+            let mut by_age: Vec<(u64, String)> = self
+                .pending
+                .iter()
+                .map(|(key, observation)| (observation.first_seen_ms, key.clone()))
+                .collect();
+            by_age.sort();
+            for (_, key) in by_age
+                .into_iter()
+                .take(self.pending.len() - WAKE_SETTLE_CARRY_MAX)
+            {
+                self.pending.remove(&key);
+            }
+        }
+    }
+}
+
+/// [`observe_for_wake`] with the supervisor's [`WakeSettleCarry`], so a held
+/// candidate settles (or reaches max hold) instead of being re-observed forever.
+pub fn observe_for_wake_with(file: &Path, carry: &mut WakeSettleCarry) -> Result<WakeObservation> {
+    let hook = prepare_with_gate(
+        file,
+        CONSUMER_HOOK,
+        ClosedCyclePolicy::Boundary,
+        false,
+        Some(carry),
+    )?;
+    carry.remember(hook.as_ref().and_then(|prepared| prepared.next.as_ref()));
     let Some(hook_report) = hook.as_ref().and_then(|prepared| prepared.report.clone()) else {
         return Ok(WakeObservation::default());
     };
@@ -882,12 +1006,16 @@ pub fn observe_for_wake(file: &Path) -> Result<WakeObservation> {
 /// read without consuming (the owning turn's hook, its boundary report, or
 /// the idle wake delivers them, `sent=explicit`).
 pub fn explicit_send_pending_items(file: &Path) -> Result<Vec<SteeringItem>> {
-    Ok(
-        prepare_with_gate(file, CONSUMER_HOOK, ClosedCyclePolicy::Boundary, false)?
-            .and_then(|prepared| prepared.report)
-            .map(|report| report.items)
-            .unwrap_or_default(),
-    )
+    Ok(prepare_with_gate(
+        file,
+        CONSUMER_HOOK,
+        ClosedCyclePolicy::Boundary,
+        false,
+        None,
+    )?
+    .and_then(|prepared| prepared.report)
+    .map(|report| report.items)
+    .unwrap_or_default())
 }
 
 fn wake_receipt_key(file: &Path) -> String {
@@ -1805,6 +1933,119 @@ mod tests {
         let after_retarget = observe_for_wake(&file).unwrap();
         assert_eq!(after_retarget.items.len(), 1, "{after_retarget:?}");
         assert!(after_retarget.items[0].verbatim.ends_with("/118"));
+    }
+
+    /// Pin a document's mtime in the future: the settle gate then has no
+    /// document-quiet evidence (quiet = 0), exactly like a live editor-attached
+    /// document whose edit timestamp is unknown (`document_changed_ms = None`).
+    fn no_quiet_evidence(file: &Path) {
+        std::fs::File::options()
+            .write(true)
+            .open(file)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(3600))
+            .unwrap();
+    }
+
+    /// `#fixthrashingbackground`: the idle wake must not poll a held steering
+    /// candidate forever.
+    ///
+    /// Live 2026-10-12 (haiven-dev): with an editor attached the settle gate has
+    /// no edit timestamp, and the wake never advances its watermark, so every
+    /// observation saw the candidate for the first time, held it, and asked for
+    /// another re-observation — a full-document controller read each time, on
+    /// every idle supervisor, indefinitely. The wake's in-process carry is the
+    /// settle evidence: the candidate settles after one window and the
+    /// re-observation requests stop.
+    #[test]
+    fn idle_wake_settles_a_held_candidate_instead_of_rechecking_forever() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        // A short max hold: whichever gate answers (the learned one is on by
+        // default and may call the item still-being-typed), a candidate with
+        // settle evidence is delivered within it.
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "agent_doc_steering_max_hold_ms = 300\n",
+        )
+        .unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 200\n---\n# S\n\n<!-- agent:queue -->\n- current task\n- release\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let closed = baseline.replace("- current task\n", "");
+        std::fs::write(&file, &closed).unwrap();
+        close_cycle(&file, &closed);
+        emit_closeout_steering(&file, &mut Vec::new());
+        let added = closed.replace("- release\n", "- fix the flaky login test.\n- release\n");
+        std::fs::write(&file, &added).unwrap();
+        no_quiet_evidence(&file);
+        let window = std::time::Duration::from_millis(350);
+
+        // Without settle evidence (the pre-fix wake): held on every
+        // observation, each one asking to be re-observed. This is the poll.
+        for _ in 0..3 {
+            let observation = observe_for_wake(&file).unwrap();
+            assert!(observation.items.is_empty(), "{observation:?}");
+            assert_eq!(observation.pending, 1, "{observation:?}");
+            assert!(observation.recheck_after_ms.is_some(), "{observation:?}");
+            std::thread::sleep(window);
+        }
+
+        // With the supervisor's carry: held once, then settled, then silent.
+        let mut carry = WakeSettleCarry::default();
+        let first = observe_for_wake_with(&file, &mut carry).unwrap();
+        assert!(first.items.is_empty(), "{first:?}");
+        assert!(first.recheck_after_ms.is_some(), "{first:?}");
+        assert_eq!(carry.tracked(), 1);
+        std::thread::sleep(window);
+        let settled = observe_for_wake_with(&file, &mut carry).unwrap();
+        assert_eq!(settled.items.len(), 1, "{settled:?}");
+        assert_eq!(settled.recheck_after_ms, None, "{settled:?}");
+        // Idle and unchanged: no further re-observation is ever requested, and
+        // the wake still does not consume the item.
+        for _ in 0..3 {
+            let again = observe_for_wake_with(&file, &mut carry).unwrap();
+            assert_eq!(again.recheck_after_ms, None, "{again:?}");
+            assert_eq!(again.fingerprint, settled.fingerprint);
+        }
+        let hook = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert_eq!(hook.items.len() + hook.pending, 1, "{hook:?}");
+    }
+
+    /// The carry belongs to one watermark: a re-seeded cycle starts fresh.
+    #[test]
+    fn wake_settle_carry_never_crosses_a_reseed() {
+        let mut carry = WakeSettleCarry::default();
+        let mut first = SteeringWatermark::seed("cycle-1", "base", None, Vec::new());
+        first.pending.insert(
+            "k".to_string(),
+            core::PendingObservation {
+                content_hash: "h".to_string(),
+                first_seen_ms: 1,
+                item_started_ms: None,
+                item_started_chars: None,
+            },
+        );
+        carry.remember(Some(&first));
+        let mut same = SteeringWatermark::seed("cycle-1", "base", None, Vec::new());
+        carry.merge_into(&mut same);
+        assert_eq!(same.pending.len(), 1);
+        let mut reseeded = SteeringWatermark::seed("cycle-2", "base", None, Vec::new());
+        carry.merge_into(&mut reseeded);
+        assert!(reseeded.pending.is_empty());
+        carry.remember(None);
+        assert_eq!(carry.tracked(), 0);
     }
 
     /// The operator's complaint: a diagnostic `agent-doc steering` read

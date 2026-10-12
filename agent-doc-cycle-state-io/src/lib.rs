@@ -554,10 +554,10 @@ impl CycleState {
 }
 
 pub fn load(file: &Path) -> Result<Option<CycleState>> {
-    let Some(document) = load_document_projection(file)? else {
+    let Some(closeout) = load_document_closeout_projection(file)? else {
         return Ok(None);
     };
-    reconstruct_cycle_state(&document)
+    reconstruct_cycle_state_from_closeout(&closeout)
 }
 
 /// Reconstruct the authoritative `CycleState` from a document projection: the
@@ -568,9 +568,17 @@ pub fn load(file: &Path) -> Result<Option<CycleState>> {
 pub fn reconstruct_cycle_state(
     document: &agent_doc_state_backbone::DocumentStateProjection,
 ) -> Result<Option<CycleState>> {
-    let projection = ProjectedCloseoutState::from(document.closeout.clone());
+    reconstruct_cycle_state_from_closeout(&document.closeout)
+}
 
-    let mut state = if let Some(checkpoint) = &document.closeout.turn_intent_checkpoint {
+/// [`reconstruct_cycle_state`] from the closeout projection alone, which is all
+/// it reads.
+pub fn reconstruct_cycle_state_from_closeout(
+    closeout: &agent_doc_state_backbone::CloseoutProjection,
+) -> Result<Option<CycleState>> {
+    let projection = ProjectedCloseoutState::from(closeout.clone());
+
+    let mut state = if let Some(checkpoint) = &closeout.turn_intent_checkpoint {
         let actual_sha256 = agent_doc_hash::content_hash(&checkpoint.state_json);
         anyhow::ensure!(
             actual_sha256 == checkpoint.state_sha256,
@@ -776,8 +784,7 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
 }
 
 pub fn load_closeout_projection(file: &Path) -> Result<Option<ProjectedCloseoutState>> {
-    Ok(load_document_projection(file)?
-        .map(|document| ProjectedCloseoutState::from(document.closeout)))
+    Ok(load_document_closeout_projection(file)?.map(ProjectedCloseoutState::from))
 }
 
 pub fn load_projected_captured_response(
@@ -873,6 +880,73 @@ pub fn load_recent_captured_response_checkpoints(
 pub fn load_document_projection(
     file: &Path,
 ) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
+    load_document_projection_part(
+        file,
+        ProjectionPart::<agent_doc_state_backbone::DocumentStateProjection> {
+            command: DOCUMENT_STATE_PROJECTION_COMMAND,
+            extract: |projection| projection,
+            local: agent_doc_state_wire::local_document_projection,
+        },
+    )
+}
+
+/// The live controller command that answers the whole per-document projection.
+const DOCUMENT_STATE_PROJECTION_COMMAND: &str = "document_state_projection";
+/// The live controller command that answers only the closeout projection
+/// (`#fixthrashingbackground`).
+pub const DOCUMENT_CLOSEOUT_PROJECTION_COMMAND: &str = "document_closeout_projection";
+
+/// Load only the closeout part of the per-document projection.
+///
+/// Every cycle-state read (`load`, `load_closeout_projection`, and with them
+/// the per-tick turn attribution of every supervisor log line and the
+/// route-owned completion poll) needs `closeout` and nothing else. The whole
+/// projection also carries unbounded per-document history — every visible
+/// write commit candidate with a full document image, every terminal closeout
+/// proof — so asking for all of it made each of those reads clone and ship
+/// megabytes through the controller's global projection lock. Measured live
+/// 2026-10-12 (haiven-dev `fpe.md`): a 5.1MB projection whose `closeout` was
+/// 34KB, read several times per second per idle supervisor.
+///
+/// A controller that predates the closeout command answers `unknown controller
+/// command`; the read then falls back to the whole projection, so a rolling
+/// upgrade costs exactly what it cost before.
+pub fn load_document_closeout_projection(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::CloseoutProjection>> {
+    match load_document_projection_part(
+        file,
+        ProjectionPart::<agent_doc_state_backbone::CloseoutProjection> {
+            command: DOCUMENT_CLOSEOUT_PROJECTION_COMMAND,
+            extract: |projection| projection.closeout,
+            local: agent_doc_state_wire::local_document_closeout_projection,
+        },
+    ) {
+        Err(err) if is_unknown_controller_command(&err) => {
+            Ok(load_document_projection(file)?.map(|projection| projection.closeout))
+        }
+        other => other,
+    }
+}
+
+fn is_unknown_controller_command(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("unknown controller command")
+}
+
+/// One part of the per-document projection: the controller command that serves
+/// it live, and how to cut it from a whole projection on the in-process and
+/// cold-replay paths.
+struct ProjectionPart<T> {
+    command: &'static str,
+    extract: fn(agent_doc_state_backbone::DocumentStateProjection) -> T,
+    /// The in-controller-process reader for this part.
+    local: fn(&str) -> Option<Option<T>>,
+}
+
+fn load_document_projection_part<T: serde::de::DeserializeOwned>(
+    file: &Path,
+    part: ProjectionPart<T>,
+) -> Result<Option<T>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
     // `#lazily-hot-path`: prefer the controller's live in-memory projection (the
@@ -890,7 +964,7 @@ pub fn load_document_projection(
         in_controller_request() || agent_doc_state_wire::process_is_controller_for(&project_root);
     if controller_socket.exists() && !served_by_this_process {
         let request = serde_json::json!({
-            "command": "document_state_projection",
+            "command": part.command,
             "file": canonical,
         });
         match agent_doc_state_wire::send_ndjson_request_to_actor(
@@ -900,17 +974,19 @@ pub fn load_document_projection(
         ) {
             Ok(raw) => {
                 #[derive(serde::Deserialize)]
+                #[serde(bound = "T: serde::de::DeserializeOwned")]
                 #[allow(dead_code)]
-                struct ProjectionEnvelope {
+                struct ProjectionEnvelope<T> {
                     ok: bool,
-                    data: Option<agent_doc_state_backbone::DocumentStateProjection>,
+                    data: Option<T>,
                     error: Option<String>,
                 }
-                let envelope: ProjectionEnvelope = serde_json::from_str(&raw)
-                    .context("decode document_state_projection response")?;
+                let envelope: ProjectionEnvelope<T> = serde_json::from_str(&raw)
+                    .with_context(|| format!("decode {} response", part.command))?;
                 if !envelope.ok {
                     anyhow::bail!(
-                        "document_state_projection rejected by controller: {}",
+                        "{} rejected by controller: {}",
+                        part.command,
                         envelope.error.as_deref().unwrap_or("unknown error")
                     );
                 }
@@ -946,9 +1022,7 @@ pub fn load_document_projection(
     // worker logging about one document replayed that document's whole event
     // ledger once per line, and only threads carrying the request context's
     // memo escaped it.
-    if served_by_this_process
-        && let Some(projection) = agent_doc_state_wire::local_document_projection(&document_hash)
-    {
+    if served_by_this_process && let Some(projection) = (part.local)(&document_hash) {
         return Ok(projection);
     }
     if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
@@ -971,7 +1045,7 @@ pub fn load_document_projection(
         ledger.append(event);
     }
 
-    Ok(ledger.project_document(&document_hash))
+    Ok(ledger.project_document(&document_hash).map(part.extract))
 }
 
 /// Load only the newest durable current-document authority observation.
@@ -2834,8 +2908,7 @@ fn mark_committed_inner_with_turn_fence(
         append_phase_event_to_session_log(file, &state, file_content);
         return Ok(expected_cycle_id
             .is_none_or(|expected| {
-                state.cycle_id == expected
-                    && state.phase == agent_doc_turn::CyclePhase::Committed
+                state.cycle_id == expected && state.phase == agent_doc_turn::CyclePhase::Committed
             })
             .then_some(state));
     }
@@ -3013,8 +3086,7 @@ fn mark_abandoned_inner_with_turn_fence(
         append_phase_event_to_session_log(file, &state, file_content);
         return Ok(expected_cycle_id
             .is_none_or(|expected| {
-                state.cycle_id == expected
-                    && state.phase == agent_doc_turn::CyclePhase::Abandoned
+                state.cycle_id == expected && state.phase == agent_doc_turn::CyclePhase::Abandoned
             })
             .then_some(state));
     }
@@ -5657,6 +5729,146 @@ mod project_root_symmetry_tests {
 
         agent_doc_state_wire::clear_process_document_projection_reader_for_tests();
         agent_doc_state_wire::clear_controller_process_root_for_tests();
+    }
+
+    /// `#fixthrashingbackground`: inside the controller process a closeout read
+    /// uses the closeout reader and never clones the whole projection (whose
+    /// unbounded history made every request-admission turn-attribution prime
+    /// copy megabytes under the projection lock).
+    #[cfg(unix)]
+    #[test]
+    fn controller_process_closeout_read_never_clones_the_whole_projection() {
+        let _registry = controller_process_registry_guard();
+        let dir = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "# doc\n").unwrap();
+        agent_doc_state_wire::clear_process_document_projection_reader_for_tests();
+        agent_doc_state_wire::set_controller_process_root(dir.path());
+
+        let whole_reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = std::sync::Arc::clone(&whole_reads);
+        agent_doc_state_wire::set_process_document_projection_reader(move |_| {
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Some(agent_doc_state_backbone::DocumentStateProjection::new(
+                "whole",
+            ))
+        });
+        let expected = agent_doc_state_backbone::CloseoutProjection {
+            cycle_id: Some("cycle-live".to_string()),
+            ..Default::default()
+        };
+        let served = expected.clone();
+        agent_doc_state_wire::set_process_document_closeout_reader(move |_| Some(served.clone()));
+
+        let doc_for_worker = doc.clone();
+        let closeout =
+            std::thread::spawn(move || load_document_closeout_projection(&doc_for_worker))
+                .join()
+                .unwrap()
+                .unwrap();
+        assert_eq!(closeout, Some(expected));
+        assert_eq!(
+            load_closeout_projection(&doc)
+                .unwrap()
+                .and_then(|p| p.cycle_id),
+            Some("cycle-live".to_string())
+        );
+        assert_eq!(
+            whole_reads.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "a closeout read must not clone the whole projection"
+        );
+
+        agent_doc_state_wire::clear_process_document_projection_reader_for_tests();
+        agent_doc_state_wire::clear_controller_process_root_for_tests();
+    }
+
+    /// `#fixthrashingbackground`: an external client asks the controller for
+    /// the closeout part by name, and falls back to the whole projection when
+    /// the controller predates that command (a rolling upgrade).
+    #[cfg(unix)]
+    #[test]
+    fn external_closeout_read_asks_for_closeout_and_falls_back_on_an_older_controller() {
+        let _registry = controller_process_registry_guard();
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "# doc\n").unwrap();
+        let socket = agent_doc_controller::paths::socket_path(dir.path());
+        if let Some(parent) = socket.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        agent_doc_state_wire::clear_controller_process_root_for_tests();
+        agent_doc_state_wire::clear_process_document_projection_reader_for_tests();
+
+        let mut whole = agent_doc_state_backbone::DocumentStateProjection::new("whole");
+        whole.closeout.cycle_id = Some("cycle-from-whole".to_string());
+        let closeout_only = agent_doc_state_backbone::CloseoutProjection {
+            cycle_id: Some("cycle-from-closeout".to_string()),
+            ..Default::default()
+        };
+        // First the current controller (knows the command), then an older one.
+        let replies = [
+            Some(serde_json::json!({ "ok": true, "data": closeout_only }).to_string()),
+            None,
+        ];
+        let listener = UnixListener::bind(&socket).unwrap();
+        let commands = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = std::sync::Arc::clone(&commands);
+        let whole_reply = serde_json::json!({ "ok": true, "data": whole }).to_string();
+        let actor = std::thread::spawn(move || {
+            // Read 1: closeout command answered. Read 2: closeout command
+            // refused as unknown, then the whole-projection fallback.
+            let mut script = vec![replies[0].clone().unwrap()];
+            script.push(
+                serde_json::json!({
+                    "ok": false,
+                    "error": "unknown controller command: document_closeout_projection"
+                })
+                .to_string(),
+            );
+            script.push(whole_reply);
+            for reply in script {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                seen.lock()
+                    .unwrap()
+                    .push(request["command"].as_str().unwrap_or_default().to_string());
+                let mut stream = stream;
+                let _ = stream.write_all(reply.as_bytes());
+                let _ = stream.write_all(b"\n");
+                let _ = stream.flush();
+            }
+        });
+
+        let current = load_document_closeout_projection(&doc).unwrap();
+        assert_eq!(
+            current.and_then(|c| c.cycle_id),
+            Some("cycle-from-closeout".to_string())
+        );
+        let older = load_document_closeout_projection(&doc).unwrap();
+        assert_eq!(
+            older.and_then(|c| c.cycle_id),
+            Some("cycle-from-whole".to_string())
+        );
+        actor.join().unwrap();
+        assert_eq!(
+            *commands.lock().unwrap(),
+            vec![
+                DOCUMENT_CLOSEOUT_PROJECTION_COMMAND.to_string(),
+                DOCUMENT_CLOSEOUT_PROJECTION_COMMAND.to_string(),
+                DOCUMENT_STATE_PROJECTION_COMMAND.to_string(),
+            ]
+        );
     }
 
     /// `#ctrlselfrpc`: a projection read inside the controller process must not

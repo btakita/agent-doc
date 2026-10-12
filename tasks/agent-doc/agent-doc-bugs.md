@@ -911,6 +911,26 @@ The subagent will fix each one at its root cause, test each on isolated tmux ser
 **Also filed: `claimeddrainwarn`.** Preflight has been warning for over 30 minutes that a `[focused-cycle]` head was handed to the supervisor and never drained, and it suggests recycling the supervisor. But every remaining head is claimed, so the supervisor correctly has nothing to drain. This is probably a side effect of the new auto-clear item-boundary yield. Do not recycle the supervisor on that warning.
 
 **Batch 12** is in `make check` / `make tmux-ci`. It contains `ridernavp6route` + `ridernavp6gc`, plus JetBrains plugins 0.2.553 / 262 0.2.554. `queuedclearflake` is still with its subagent.
+
+### Re: lane route and controller cleanup landed — opus-5-5 · 2026-10-12T15:55-04:00
+
+Batch 12 is on `main` as `aa0e9ccffe` and installed. `make check` passed 10,380 tests, and `make tmux-ci` passed. The JetBrains plugins are now 0.2.553 and, for 262, 0.2.554.
+
+> **Queue prompt:** do [#ridernavp6route]
+
+Done (`8ec61eaf7b`).
+- **What changed:** route, start and claim accept `--client-id`. In `per_installation` mode a new pane lands in the requesting IDE's lane, and JetBrains sends its id on Run Agent Doc, Claim, New Pane and Force Claim.
+- **Bug found along the way:** `agent-doc start` was moving every lane pane back into the shared session about 5s after launch. That silently undid lane placement for every phase since P2b. Fixed: in `per_installation` mode a pane started in an owned lane stays there, and in `shared` mode stale lane panes are still brought home.
+
+> **Queue prompt:** do [#ridernavp6gc]
+
+Done (`d3579c82f5`).
+- **What changed:** the controller now runs lane cleanup itself when an IDE quits, and after a switch back to shared mode, with no `agent-doc gc` needed. It only closes the lane of an IDE it actually saw quit.
+- **Problems the merge exposed, both fixed:**
+  - The controller's cleanup and the shared sync's lane-pane adoption could both move the same pane. They now share `sync.lock`, and a pane that is already home is skipped.
+  - A cleanup queued under one mode could run after a restart into another mode. A mode guard now blocks that. SimWorld found this case.
+
+Next: `ridernavp6routecontended`, which defines what Run Agent Doc does for a document whose pane is in another IDE's lane, is unblocked and goes to a subagent now. `claimeddrainwarn` goes too. `#release` (v0.35.494) waits for `queuedclearflake` so it doesn't ship over a flaky tmux test.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -920,10 +940,11 @@ The subagent will fix each one at its root cause, test each on isolated tmux ser
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#queuedclearflake]
-- 🚧 do [#ridernavp6route]
-- 🚧 do [#ridernavp6gc]
+- ~~do [#ridernavp6route]~~
+- ~~do [#ridernavp6gc]~~
 - 🚧 do [#ridernavp6routecontended]
 - #gh-fix https://github.com/btakita/agent-doc/issues/243
+- do [#claimeddrainwarn]
 - #release
 <!-- /agent:queue -->
 
@@ -933,8 +954,6 @@ The subagent will fix each one at its root cause, test each on isolated tmux ser
 - [ ] [#claimeddrainwarn] [agent-doc] preflight warns supervisor_drain_handoff_undrained (the [focused-cycle] head was handed to the supervisor N min ago and is still undrained; recycle the supervisor) for over 30 minutes on agent-doc-bugs.md (2026-10-12) while every remaining queue head is claimed by a subagent or coordinator, so the supervisor correctly has nothing to drain. Likely interplay with the new auto-clear item-boundary yield (queue_auto_clear_yield) recording a handoff that claims then make undrainable. Exclude claimed heads from the handoff and the warning, and do not tell the operator to recycle a healthy supervisor; regression test.
 - [ ] 🚧 [#queuedclearflake] [agent-doc] tests/clear_queued_live_turn_tmux.rs queued_clear_is_dropped_when_a_newer_prompt_starts_first failed its ui_outcome=queued assertion inside make tmux-ci (2026-10-12, ridernavp6route merge run) and passed 2 of 2 alone. Find the timing dependency and fix it with an explicit readiness signal; never rerun to green or lengthen a timeout.
 - [ ] 🚧 [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
-- [ ] 🚧 [#ridernavp6route] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): route, start and agent-doc claim --client-id create panes in the requesting IDE's lane in per_installation mode; today a new pane reaches an installation lane only through that IDE's explicit claim.
-- [ ] 🚧 [#ridernavp6gc] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): a controller-side trigger for empty-lane cleanup and per_installation-to-shared migration that knows which IDE installations are live; today only agent-doc gc runs it, using an attached terminal as the only liveness signal.
 <!-- /agent:backlog -->
 
 ## Review

@@ -153,11 +153,23 @@ mod main_layout_eligibility_tests {
 pub(super) struct ControllerEditorSurfaceGraph {
     roots: Mutex<BTreeMap<(PathBuf, String, String), ControllerEditorSurfaceRoot>>,
     terminal_ownership: Mutex<BTreeMap<PathBuf, SurfaceTerminalOwnership>>,
-    /// Per project root: which editor installation most recently gained focus
-    /// and therefore drives the shared tmux surface (`#idefocusowner`). Lives in
-    /// the same ProcessScope as the surface graphs, whose authority it projects.
+    /// Per layout-ownership key (project root + navigation lane): which editor
+    /// installation most recently gained focus and therefore drives that lane's
+    /// tmux surface (`#idefocusowner`, `#ideriderindependentnav`). In shared
+    /// navigation mode every client of a root maps to one key, so this is the
+    /// historical per-root owner. Lives in the same ProcessScope as the surface
+    /// graphs, whose authority it projects.
     /// Lock order: `roots` before `focus_owners`.
-    focus_owners: Mutex<BTreeMap<PathBuf, agent_doc_editor_surface::InstallationFocusOwner>>,
+    focus_owners: Mutex<
+        BTreeMap<
+            agent_doc_editor_surface::LayoutOwnerKey,
+            agent_doc_editor_surface::InstallationFocusOwner,
+        >,
+    >,
+    /// How this controller's editor installations share tmux navigation. The
+    /// production runtime constructs `Shared`; per-installation lanes are
+    /// enabled only together with per-lane session provisioning.
+    navigation_mode: agent_doc_editor_surface::NavigationMode,
     run_intent: ControllerEditorSurfaceIntentRunner,
 }
 
@@ -542,34 +554,92 @@ impl ControllerEditorSurfaceGraph {
             roots: Mutex::new(BTreeMap::new()),
             terminal_ownership: Mutex::new(BTreeMap::new()),
             focus_owners: Mutex::new(BTreeMap::new()),
+            navigation_mode: agent_doc_editor_surface::NavigationMode::default(),
             run_intent,
         }
     }
 
-    /// Publish which installations still have a live surface on `project_root`,
-    /// so a retired focus owner hands the shared tmux surface back to the most
-    /// recently focused live installation (`#idefocusowner`).
+    /// The same graph with an explicit navigation mode
+    /// (`#ideriderindependentnav`). Test-only until per-lane tmux session
+    /// provisioning lands: enabling per-installation lanes before each lane
+    /// has its own session would let two installations drive one window.
+    #[cfg(test)]
+    pub(super) fn with_navigation_mode(
+        mut self,
+        navigation_mode: agent_doc_editor_surface::NavigationMode,
+    ) -> Self {
+        self.navigation_mode = navigation_mode;
+        self
+    }
+
+    pub(super) fn navigation_mode(&self) -> agent_doc_editor_surface::NavigationMode {
+        self.navigation_mode
+    }
+
+    fn layout_owner_key(
+        &self,
+        project_root: &Path,
+        client_id: &str,
+    ) -> agent_doc_editor_surface::LayoutOwnerKey {
+        agent_doc_editor_surface::LayoutOwnerKey::for_client(
+            project_root,
+            self.navigation_mode,
+            client_id,
+        )
+    }
+
+    /// Publish, per navigation lane of `project_root`, which installations
+    /// still have a live surface on that lane, so a retired focus owner hands
+    /// the lane's tmux surface back to the most recently focused live
+    /// installation on the same lane (`#idefocusowner`). A live installation on
+    /// another lane never inherits it.
     fn retain_live_installations(&self, project_root: &Path) {
-        let live = self
-            .roots
-            .lock()
-            .iter()
-            .filter(|((root, _, _), entry)| root == project_root && !entry.retired)
-            .filter_map(|((_, client_id, _), _)| {
-                agent_doc_editor_surface::editor_installation(client_id).map(str::to_string)
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-        if let Some(owner) = self.focus_owners.lock().get(project_root) {
-            owner.retain_live(&live);
+        let mut live_by_key = BTreeMap::<
+            agent_doc_editor_surface::LayoutOwnerKey,
+            std::collections::BTreeSet<String>,
+        >::new();
+        for ((root, client_id, _), entry) in self.roots.lock().iter() {
+            if root != project_root || entry.retired {
+                continue;
+            }
+            if let Some(installation) = agent_doc_editor_surface::editor_installation(client_id) {
+                live_by_key
+                    .entry(self.layout_owner_key(project_root, client_id))
+                    .or_default()
+                    .insert(installation.to_string());
+            }
+        }
+        let empty = std::collections::BTreeSet::new();
+        for (key, owner) in self.focus_owners.lock().iter() {
+            if key.root == project_root {
+                owner.retain_live(live_by_key.get(key).unwrap_or(&empty));
+            }
         }
     }
 
-    /// The installation currently driving `project_root`'s tmux surface.
+    /// The installation currently driving `project_root`'s shared lane.
     #[cfg(test)]
     fn focus_owner(&self, project_root: &Path) -> Option<String> {
+        self.focus_owner_in(
+            project_root,
+            &agent_doc_editor_surface::NavigationLane::Shared,
+        )
+    }
+
+    /// The installation currently driving one navigation lane of
+    /// `project_root`.
+    #[cfg(test)]
+    fn focus_owner_in(
+        &self,
+        project_root: &Path,
+        lane: &agent_doc_editor_surface::NavigationLane,
+    ) -> Option<String> {
         self.focus_owners
             .lock()
-            .get(project_root)
+            .get(&agent_doc_editor_surface::LayoutOwnerKey::new(
+                project_root,
+                lane.clone(),
+            ))
             .and_then(|owner| owner.owner())
             .map(|owner| owner.installation)
     }
@@ -613,7 +683,7 @@ impl ControllerEditorSurfaceGraph {
         let focus_owner = self
             .focus_owners
             .lock()
-            .entry(project_root.to_path_buf())
+            .entry(self.layout_owner_key(project_root, &observation.client_id))
             .or_insert_with(|| agent_doc_editor_surface::InstallationFocusOwner::new_in(scope))
             .clone();
         focus_owner.observe(&observation.client_id, &observation.surface);
@@ -2879,7 +2949,7 @@ pub fn tmux_focus_state(project_root: &Path) -> Result<ControllerTmuxFocusState>
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        handle_tmux_focus_state(&bootstrap, None)
+        handle_tmux_focus_state(&bootstrap, None, None)
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -18656,6 +18726,7 @@ pub(crate) fn handle_request_locked(
         "tmux_focus_state" => controller_envelope(handle_tmux_focus_state(
             &bootstrap_snapshot,
             Some(runtime.as_ref()),
+            request.caller.as_deref(),
         )),
         "main_layout_eligibility" => controller_envelope(Ok(runtime.main_layout_eligibility())),
         "tmux_layout_sync_state" => controller_envelope(handle_tmux_layout_sync_state(
@@ -24248,6 +24319,7 @@ fn inactive_tmux_focus_state(
         pane_id,
         document_id: None,
         record: None,
+        navigation_lane: None,
     }
 }
 
@@ -28328,8 +28400,69 @@ fn pane_layout_effect_worker_wait_for_retry(
 pub(crate) fn handle_tmux_focus_state(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
+    client_id: Option<&str>,
 ) -> Result<ControllerTmuxFocusState> {
-    let Some(session_name) = configured_tmux_session_for_project(&bootstrap.project_root) else {
+    // `#ideriderindependentnav`: the reverse tmux-to-editor mirror reads the
+    // focus of the requesting client's own navigation lane. In shared mode (the
+    // only mode the production runtime constructs today) every client resolves
+    // to the shared lane, i.e. the project's configured session, exactly as
+    // before lanes existed.
+    let navigation_mode = runtime
+        .map(|runtime| runtime.editor_surface_graph.navigation_mode())
+        .unwrap_or_default();
+    let lane = agent_doc_editor_surface::NavigationLane::for_client(
+        navigation_mode,
+        client_id.unwrap_or_default(),
+    );
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    tmux_focus_state_for_lane(
+        &tmux,
+        &bootstrap.project_root,
+        &lane,
+        runtime.map(|runtime| runtime.main_layout_eligibility()),
+        || match runtime {
+            Some(runtime) => Ok(runtime.actor_store_snapshot()),
+            None => {
+                let conn = open_state_db(&bootstrap.project_root)?;
+                load_actor_store_from_db(&conn)
+            }
+        },
+    )
+}
+
+/// The tmux focus projection of one navigation lane of `project_root`.
+///
+/// The lane's session is derived from the project's configured session
+/// ([`agent_doc_editor_surface::NavigationLane::tmux_session_name`]); a lane
+/// reports a document only while ITS session's current window is `agent-doc`,
+/// so a navigation in another lane's session never recalls a selection in this
+/// lane's editor. `actor_store` is read only once the active pane is known.
+fn tmux_focus_state_for_lane(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    main_layout_eligibility: Option<MainLayoutEligibility>,
+    actor_store: impl FnOnce() -> Result<ControllerActorStore>,
+) -> Result<ControllerTmuxFocusState> {
+    let mut state = tmux_focus_state_in_lane_session(
+        tmux,
+        project_root,
+        lane,
+        main_layout_eligibility,
+        actor_store,
+    )?;
+    state.navigation_lane = lane.installation().map(str::to_string);
+    Ok(state)
+}
+
+fn tmux_focus_state_in_lane_session(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    main_layout_eligibility: Option<MainLayoutEligibility>,
+    actor_store: impl FnOnce() -> Result<ControllerActorStore>,
+) -> Result<ControllerTmuxFocusState> {
+    let Some(project_session) = configured_tmux_session_for_project(project_root) else {
         return Ok(inactive_tmux_focus_state(
             "missing_tmux_session",
             None,
@@ -28338,7 +28471,7 @@ pub(crate) fn handle_tmux_focus_state(
             None,
         ));
     };
-    let tmux = agent_doc_tmux_io::configured_tmux();
+    let session_name = lane.tmux_session_name(&project_session);
     if !tmux.session_alive(&session_name) {
         return Ok(inactive_tmux_focus_state(
             "tmux_session_not_alive",
@@ -28348,7 +28481,7 @@ pub(crate) fn handle_tmux_focus_state(
             None,
         ));
     }
-    let (window_id, window_name, pane_id) = active_tmux_window_for_session(&tmux, &session_name);
+    let (window_id, window_name, pane_id) = active_tmux_window_for_session(tmux, &session_name);
     if window_name.as_deref() != Some("agent-doc") {
         return Ok(inactive_tmux_focus_state(
             "outside_agent_doc_window",
@@ -28370,31 +28503,21 @@ pub(crate) fn handle_tmux_focus_state(
     // `#tmuxautosyncreactive` / `#lazily-hot-path`: the controller runtime owns
     // actor bindings reactively; the SQLite store is a durable sink, not the
     // hot-path authority. The JetBrains reverse-mirror polls this RPC every
-    // 500ms, so consult the in-memory reactive actor store when a runtime is
-    // available instead of reopening SQLite on every poll. Cold start (no
-    // runtime) still hydrates from SQLite.
-    let store = match runtime {
-        Some(runtime) => runtime.actor_store_snapshot(),
-        None => {
-            let conn = open_state_db(&bootstrap.project_root)?;
-            load_actor_store_from_db(&conn)?
-        }
-    };
+    // 500ms, so the caller supplies the in-memory reactive actor store when a
+    // runtime is available instead of reopening SQLite on every poll. Cold start
+    // (no runtime) still hydrates from SQLite.
+    let store = actor_store()?;
     let record = actor_record_for_active_pane(&store, &pane_id_value).cloned();
     let process_owner_document = record
         .is_none()
-        .then(|| active_pane_process_owner_document(&tmux, &pane_id_value, &bootstrap.project_root))
+        .then(|| active_pane_process_owner_document(tmux, &pane_id_value, project_root))
         .flatten();
     let document_id = record
         .as_ref()
         .map(|record| record.document_id.clone())
         .or(process_owner_document);
-    if let (Some(runtime), Some(document)) = (runtime, document_id.as_deref())
-        && !document_is_main_layout_eligible(
-            &bootstrap.project_root,
-            &runtime.main_layout_eligibility(),
-            document,
-        )
+    if let (Some(eligibility), Some(document)) = (main_layout_eligibility, document_id.as_deref())
+        && !document_is_main_layout_eligible(project_root, &eligibility, document)
     {
         return Ok(inactive_tmux_focus_state(
             "document_bound_to_editor_view",
@@ -28419,6 +28542,7 @@ pub(crate) fn handle_tmux_focus_state(
         pane_id,
         document_id,
         record,
+        navigation_lane: None,
     })
 }
 
@@ -28665,6 +28789,157 @@ fn current_document_session_id_from_authority(
     authority_session
         .or_else(|| nonempty(registry_session_id))
         .or_else(|| nonempty(actor_session_id))
+}
+
+#[cfg(test)]
+mod navigation_lane_focus_state_tests {
+    //! `#ideriderindependentnav`: the tmux focus projection is split per
+    //! navigation lane, so each editor installation's reverse mirror reads only
+    //! its own lane session.
+    use super::*;
+    use agent_doc_editor_surface::NavigationLane;
+
+    const IDEA: &str = "IU.0a1b2c3d";
+    const RIDER: &str = "RD.9f8e7d6c";
+
+    fn actor(document: &str, pane_id: &str) -> agent_doc_controller::actor::ActorRecord {
+        agent_doc_controller::actor::ActorRecord {
+            document_id: document.to_string(),
+            session_id: format!("session-{pane_id}"),
+            generation: 3,
+            pane_id: pane_id.to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state: agent_doc_controller::actor::ActorState::Ready,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "lane focus state".to_string(),
+                timestamp: 1,
+                prior_generation: 2,
+                new_generation: 3,
+            },
+        }
+    }
+
+    fn new_agent_doc_session(tmux: &tmux_router::Tmux, session: &str) -> String {
+        tmux.raw_cmd(&["new-session", "-d", "-s", session, "-n", "agent-doc"])
+            .unwrap_or_else(|error| panic!("new-session {session}: {error:#}"));
+        tmux.active_pane(session)
+            .unwrap_or_else(|| panic!("{session} has an active pane"))
+    }
+
+    #[test]
+    fn each_lane_reports_only_its_own_sessions_focused_document() {
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("ideriderindependentnav-focus");
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            project.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\n",
+        )
+        .unwrap();
+        let idea_lane = NavigationLane::Installation(IDEA.to_string());
+        let rider_lane = NavigationLane::Installation(RIDER.to_string());
+        assert_eq!(idea_lane.tmux_session_name("proj"), "proj-IU-0a1b2c3d");
+
+        let shared_pane = new_agent_doc_session(&tmux, "proj");
+        let idea_pane = new_agent_doc_session(&tmux, "proj-IU-0a1b2c3d");
+        // Rider's lane session exists but its current window is not agent-doc.
+        let rider_pane = new_agent_doc_session(&tmux, "proj-RD-9f8e7d6c");
+        tmux.raw_cmd(&["new-window", "-t", "proj-RD-9f8e7d6c:", "-n", "notes"])
+            .unwrap();
+
+        let shared_doc = project.path().join("tasks/shared.md");
+        let idea_doc = project.path().join("tasks/idea.md");
+        let rider_doc = project.path().join("tasks/rider.md");
+        let store: ControllerActorStore = [
+            (&shared_doc, &shared_pane),
+            (&idea_doc, &idea_pane),
+            (&rider_doc, &rider_pane),
+        ]
+        .into_iter()
+        .map(|(document, pane)| {
+            let document = document.to_string_lossy().to_string();
+            (document.clone(), actor(&document, pane))
+        })
+        .collect();
+        let read = |lane: &NavigationLane| {
+            tmux_focus_state_for_lane(&tmux, project.path(), lane, None, || Ok(store.clone()))
+                .unwrap()
+        };
+
+        let shared = read(&NavigationLane::Shared);
+        assert!(shared.active, "{shared:?}");
+        assert_eq!(shared.session_name.as_deref(), Some("proj"));
+        assert_eq!(shared.pane_id.as_deref(), Some(shared_pane.as_str()));
+        assert_eq!(
+            shared.document_id.as_deref(),
+            Some(shared_doc.to_string_lossy().as_ref())
+        );
+        assert_eq!(shared.navigation_lane, None);
+        assert!(
+            !serde_json::to_string(&shared)
+                .unwrap()
+                .contains("navigation_lane"),
+            "the shared projection keeps its pre-lane wire shape"
+        );
+
+        let idea = read(&idea_lane);
+        assert!(idea.active, "{idea:?}");
+        assert_eq!(idea.session_name.as_deref(), Some("proj-IU-0a1b2c3d"));
+        assert_eq!(idea.pane_id.as_deref(), Some(idea_pane.as_str()));
+        assert_eq!(
+            idea.document_id.as_deref(),
+            Some(idea_doc.to_string_lossy().as_ref())
+        );
+        assert_eq!(idea.navigation_lane.as_deref(), Some(IDEA));
+
+        // Navigating Rider's lane session to another window recalls nothing in
+        // Rider, and it never leaks another lane's selection.
+        let rider = read(&rider_lane);
+        assert!(!rider.active, "{rider:?}");
+        assert_eq!(rider.reason, "outside_agent_doc_window");
+        assert_eq!(rider.session_name.as_deref(), Some("proj-RD-9f8e7d6c"));
+        assert_eq!(rider.document_id, None);
+        assert_eq!(rider.navigation_lane.as_deref(), Some(RIDER));
+
+        // A lane whose session was never provisioned is inactive, not a
+        // fallback onto the shared session.
+        let absent = read(&NavigationLane::Installation("CL.00000000".to_string()));
+        assert!(!absent.active);
+        assert_eq!(absent.reason, "tmux_session_not_alive");
+        assert_eq!(absent.session_name.as_deref(), Some("proj-CL-00000000"));
+
+        // Selecting a pane in one lane's session moves only that lane.
+        tmux.raw_cmd(&["split-window", "-d", "-t", "proj-IU-0a1b2c3d:agent-doc"])
+            .unwrap();
+        tmux.raw_cmd(&["select-pane", "-t", "proj-IU-0a1b2c3d:agent-doc.1"])
+            .unwrap();
+        let idea_after = read(&idea_lane);
+        assert_ne!(idea_after.pane_id.as_deref(), Some(idea_pane.as_str()));
+        assert_eq!(idea_after.reason, "active_pane_unbound");
+        assert_eq!(read(&NavigationLane::Shared), shared);
+    }
+
+    #[test]
+    fn a_missing_configured_session_is_inactive_for_every_lane() {
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("ideriderindependentnav-nocfg");
+        // A live server, so a regression that reached tmux would observe it.
+        tmux.raw_cmd(&["new-session", "-d", "-s", "proj", "-n", "agent-doc"])
+            .unwrap();
+        let project = tempfile::tempdir().unwrap();
+        for lane in [
+            NavigationLane::Shared,
+            NavigationLane::Installation(IDEA.to_string()),
+        ] {
+            let state = tmux_focus_state_for_lane(&tmux, project.path(), &lane, None, || {
+                panic!("no session: the actor store must not be read")
+            })
+            .unwrap();
+            assert_eq!(state.reason, "missing_tmux_session");
+            assert_eq!(state.navigation_lane.as_deref(), lane.installation());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -36028,6 +36303,188 @@ mod tests {
             SurfaceIntent::Sync { .. }
         ));
         assert_eq!(drained().len(), 1);
+    }
+
+    #[test]
+    fn per_installation_lanes_key_layout_ownership_by_installation() {
+        // `#ideriderindependentnav`: with the installation in the
+        // layout-ownership key, IDEA and Rider no longer compete for one owner.
+        // Each installation's lane has exactly one installation, so each drives
+        // its own lane and neither is ever deferred to the other; the shared
+        // lane keeps the `#idefocusowner` rule for unscoped clients.
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let effects = Arc::new(Mutex::new(Vec::<SurfaceIntent>::new()));
+        let recorded = Arc::clone(&effects);
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(move |_, intent| {
+            recorded.lock().push(intent.clone());
+            Ok("recorded".to_string())
+        }))
+        .with_navigation_mode(NavigationMode::PerInstallation);
+        assert_eq!(graph.navigation_mode(), NavigationMode::PerInstallation);
+        let root = Path::new("/project");
+        let idea = "jetbrains@IU.0a1b2c3d-pid:41";
+        let idea_focus = "jetbrains-focus@IU.0a1b2c3d-pid:41";
+        let rider = "jetbrains@RD.9f8e7d6c-pid:42";
+        let rider_focus = "jetbrains-focus@RD.9f8e7d6c-pid:42";
+        let idea_lane = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let rider_lane = NavigationLane::Installation("RD.9f8e7d6c".to_string());
+        let sequence = std::cell::Cell::new(0_u64);
+        let layout = |files: &[&str]| {
+            let files = files
+                .iter()
+                .map(|file| (*file).to_string())
+                .collect::<Vec<_>>();
+            agent_doc_editor_surface::EditorSurface {
+                focused: files[0].clone(),
+                open: files.clone(),
+                visible: files.clone(),
+                columns: files
+                    .iter()
+                    .map(|file| SurfaceColumn {
+                        files: vec![file.clone()],
+                    })
+                    .collect(),
+                force_reconcile: false,
+                focus_only: false,
+                preserve_focus: true,
+            }
+        };
+        let focus = |document: &str| agent_doc_editor_surface::EditorSurface {
+            focused: document.to_string(),
+            visible: vec![document.to_string()],
+            open: vec![document.to_string()],
+            columns: Vec::new(),
+            force_reconcile: true,
+            focus_only: true,
+            preserve_focus: false,
+        };
+        let observe = |client_id: &str, surface| {
+            sequence.set(sequence.get() + 1);
+            let (accepted, receipt) = graph.observe(
+                &scope,
+                root,
+                EditorSurfaceObservation {
+                    client_id: client_id.to_string(),
+                    surface_id: "project".to_string(),
+                    generation: 100,
+                    sequence: sequence.get(),
+                    surface,
+                },
+                None,
+            );
+            assert!(accepted);
+            receipt
+        };
+        let owner_epoch = |lane: &NavigationLane| {
+            graph
+                .focus_owners
+                .lock()
+                .get(&agent_doc_editor_surface::LayoutOwnerKey::new(
+                    root,
+                    lane.clone(),
+                ))
+                .and_then(|owner| owner.owner())
+                .map(|owner| owner.epoch)
+        };
+
+        observe(idea_focus, focus("/project/a.md"));
+        observe(rider_focus, focus("/project/c.md"));
+        assert_eq!(
+            graph.focus_owner_in(root, &idea_lane).as_deref(),
+            Some("IU.0a1b2c3d")
+        );
+        assert_eq!(
+            graph.focus_owner_in(root, &rider_lane).as_deref(),
+            Some("RD.9f8e7d6c")
+        );
+        assert_eq!(
+            graph.focus_owner(root),
+            None,
+            "scoped installations never claim the shared lane"
+        );
+
+        // Rider gained focus last, yet IDEA's changed layout still drives its
+        // own lane: no deferral exists between lanes.
+        for (client, files) in [
+            (idea, &["/project/a.md", "/project/b.md"][..]),
+            (rider, &["/project/c.md"][..]),
+            (idea, &["/project/b.md"][..]),
+        ] {
+            let receipt = observe(client, layout(files));
+            assert_eq!(receipt.deferred_to, None, "{client}");
+            assert!(
+                matches!(receipt.intent, SurfaceIntent::Sync { .. }),
+                "{client}: {:?}",
+                receipt.intent
+            );
+        }
+
+        // An unscoped editor stays on the shared lane and drives it.
+        let receipt = observe("vscode-pid:9", layout(&["/project/d.md"]));
+        assert_eq!(receipt.deferred_to, None);
+        assert!(matches!(receipt.intent, SurfaceIntent::Sync { .. }));
+
+        // Retiring IDEA clears only IDEA's lane; Rider keeps its epoch (no
+        // fallback re-stamp, because Rider never lost its own lane).
+        let rider_epoch = owner_epoch(&rider_lane);
+        assert!(rider_epoch.is_some());
+        assert_eq!(graph.forget_client_family(root, idea, 100), 1);
+        assert_eq!(graph.forget_client_family(root, idea_focus, 100), 1);
+        assert_eq!(graph.focus_owner_in(root, &idea_lane), None);
+        assert_eq!(
+            graph.focus_owner_in(root, &rider_lane).as_deref(),
+            Some("RD.9f8e7d6c")
+        );
+        assert_eq!(owner_epoch(&rider_lane), rider_epoch);
+        assert_eq!(observe(rider, layout(&["/project/c.md"])).deferred_to, None);
+        assert!(!effects.lock().is_empty());
+    }
+
+    #[test]
+    fn shared_navigation_mode_is_the_default_and_keeps_one_owner_per_root() {
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(|_, _| Ok("ok".to_string())));
+        assert_eq!(graph.navigation_mode(), NavigationMode::Shared);
+        let root = Path::new("/project");
+        for (sequence, client) in [
+            "jetbrains-focus@IU.0a1b2c3d-pid:41",
+            "jetbrains-focus@RD.9f8e7d6c-pid:42",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            graph.observe(
+                &scope,
+                root,
+                EditorSurfaceObservation {
+                    client_id: client.to_string(),
+                    surface_id: "project".to_string(),
+                    generation: 1,
+                    sequence: sequence as u64 + 1,
+                    surface: agent_doc_editor_surface::EditorSurface {
+                        focused: "/project/a.md".to_string(),
+                        visible: vec!["/project/a.md".to_string()],
+                        open: vec!["/project/a.md".to_string()],
+                        columns: Vec::new(),
+                        force_reconcile: true,
+                        focus_only: true,
+                        preserve_focus: false,
+                    },
+                },
+                None,
+            );
+        }
+        assert_eq!(graph.focus_owners.lock().len(), 1, "one key per root");
+        assert_eq!(graph.focus_owner(root).as_deref(), Some("RD.9f8e7d6c"));
+        assert_eq!(
+            graph.focus_owner_in(
+                root,
+                &NavigationLane::Installation("IU.0a1b2c3d".to_string())
+            ),
+            None
+        );
     }
 
     #[test]

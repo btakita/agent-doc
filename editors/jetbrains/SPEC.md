@@ -224,8 +224,11 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - Concurrent JetBrains IDEs on one project (`#idearidereditors`), e.g. IntelliJ IDEA and Rider,
   are independent editor installations. Each registers its own PID-scoped CRDT replica per open
   document, so text edits, agent responses, and turn-state presentation converge in both buffers.
-  Navigation is not independent: both IDEs publish surface observations to the same Project
-  Controller root, which owns one tmux `agent-doc` window per project. Only the installation that
+  Navigation is not independent yet: both IDEs publish surface observations to the same Project
+  Controller root, which owns one tmux `agent-doc` window per project. The controller already keys
+  layout ownership and the `tmux_focus_state` projection by navigation lane
+  (`#ideriderindependentnav`), but runs every client on the shared lane until per-installation
+  tmux sessions are provisioned. Only the installation that
   most recently gained focus drives that window (`#idefocusowner`). The focus lane
   (`jetbrains-focus@<installation>-pid:<pid>`, `focus_only`) publishes only while that IDE's
   project frame is the OS-active window, so an accepted focus-lane fact is the focus-gain event;

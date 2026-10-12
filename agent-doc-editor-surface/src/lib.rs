@@ -31,6 +31,7 @@
 pub mod editor_view_policy;
 pub mod graph;
 pub mod installation_focus;
+pub mod navigation_lane;
 pub mod pane_placement;
 pub mod remote_layout;
 pub mod terminal_ownership;
@@ -47,6 +48,9 @@ pub use graph::{EditorSurfaceState, SurfaceFold};
 pub use installation_focus::{
     FocusOwner, InstallationFocus, InstallationFocusOwner, SurfaceAuthority,
     claims_installation_focus, editor_installation,
+};
+pub use navigation_lane::{
+    LayoutOwnerKey, NavigationLane, NavigationMode, tmux_session_name_component,
 };
 pub use remote_layout::{
     RemoteClientEditors, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,

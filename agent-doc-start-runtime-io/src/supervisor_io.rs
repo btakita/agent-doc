@@ -723,7 +723,14 @@ mod tests {
             Some(true),
         );
         assert!(shared.restart_requested.load(Ordering::Relaxed));
-        assert_eq!(*shared.restart_mode.lock(), "fresh");
+        // `#idlecleartriggerinject`: the fresh restart carries operator-Clear
+        // provenance so the relaunch can skip the unrequested document trigger.
+        assert_eq!(*shared.restart_mode.lock(), "clear:fresh");
+        let intent =
+            agent_doc_supervisor_io::ipc::RestartIntent::decode(shared.restart_mode.lock().clone());
+        assert_eq!(intent.mode, "fresh");
+        assert!(intent.operator_clear);
+        assert!(!intent.restart_agent);
         assert!(written.lock().is_empty(), "must not type /clear into Codex");
     }
     #[test]

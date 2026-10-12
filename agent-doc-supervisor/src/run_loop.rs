@@ -37,6 +37,74 @@ pub fn child_launch_plan(
     }
 }
 
+/// Pending-work facts observed after an operator Clear restarted the child at
+/// an idle prompt (`#idlecleartriggerinject`).
+///
+/// Go-mode `agent:queue` heads are deliberately absent: the per-child idle-queue
+/// watch is the single owner of queue continuation and drains a pending head on
+/// the new child's first idle boundary by itself. Re-triggering the document on
+/// top of it would add a second dispatcher for the same work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OperatorClearPendingWork {
+    /// An agent-doc cycle is still open (a real pending turn the relaunch must
+    /// resume, e.g. a captured response awaiting closeout).
+    pub cycle_open: bool,
+    /// The visible document carries unanswered operator steering / an explicit
+    /// route relative to the closed cycle's baseline (`TurnAdmission`).
+    pub operator_intent_pending: bool,
+    /// The pending-work observation itself failed. Fail OPEN to the historical
+    /// re-trigger: a wasted no-op turn is recoverable, a stranded prompt is not.
+    pub observation_failed: bool,
+}
+
+/// Why a relaunch serving an explicit restart request does or does not
+/// re-submit the document trigger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestedRestartTrigger {
+    /// Not an operator Clear: Restart Agent / IPC restart keep re-triggering.
+    RetriggerRestart,
+    /// Operator Clear, but a real pending turn exists.
+    RetriggerPendingWork(&'static str),
+    /// Operator Clear at an idle prompt with nothing pending: the Clear's whole
+    /// effect is the fresh context, so no `/agent-doc <file>` turn is injected.
+    SuppressOperatorClearIdle,
+}
+
+impl RequestedRestartTrigger {
+    pub const fn auto_trigger(self) -> bool {
+        !matches!(self, Self::SuppressOperatorClearIdle)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RetriggerRestart => "restart_request",
+            Self::RetriggerPendingWork(reason) => reason,
+            Self::SuppressOperatorClearIdle => "operator_clear_no_pending_work",
+        }
+    }
+}
+
+/// Derive the relaunch trigger from restart provenance plus pending-work state
+/// (`#idlecleartriggerinject`). Pure: the run loop observes, this decides.
+pub fn requested_restart_trigger(
+    operator_clear: bool,
+    pending: OperatorClearPendingWork,
+) -> RequestedRestartTrigger {
+    if !operator_clear {
+        return RequestedRestartTrigger::RetriggerRestart;
+    }
+    if pending.cycle_open {
+        return RequestedRestartTrigger::RetriggerPendingWork("open_cycle");
+    }
+    if pending.operator_intent_pending {
+        return RequestedRestartTrigger::RetriggerPendingWork("operator_intent_pending");
+    }
+    if pending.observation_failed {
+        return RequestedRestartTrigger::RetriggerPendingWork("pending_work_unobservable");
+    }
+    RequestedRestartTrigger::SuppressOperatorClearIdle
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PostChildExitAction {
     /// Route-owned single-cycle completion: exit the supervisor.
@@ -114,6 +182,72 @@ mod tests {
             },
             "a harness switch must fresh-spawn and re-submit without entering exact-resume admission",
         );
+    }
+
+    /// `#idlecleartriggerinject`: an operator Clear at an idle prompt with no
+    /// pending work must relaunch WITHOUT the `/agent-doc <file>` trigger, while
+    /// every other restart shape keeps re-triggering.
+    #[test]
+    fn operator_clear_idle_restart_suppresses_document_trigger() {
+        let idle = OperatorClearPendingWork::default();
+        let decision = requested_restart_trigger(true, idle);
+        assert_eq!(decision, RequestedRestartTrigger::SuppressOperatorClearIdle);
+        assert!(!decision.auto_trigger());
+        // The clear restart is `fresh` (first_run=true), so the launch plan's
+        // trigger is exactly the derived decision.
+        assert!(!child_launch_plan(true, decision.auto_trigger(), false).auto_trigger);
+    }
+
+    #[test]
+    fn operator_clear_restart_with_pending_work_still_retriggers() {
+        for (pending, reason) in [
+            (
+                OperatorClearPendingWork {
+                    cycle_open: true,
+                    ..Default::default()
+                },
+                "open_cycle",
+            ),
+            (
+                OperatorClearPendingWork {
+                    operator_intent_pending: true,
+                    ..Default::default()
+                },
+                "operator_intent_pending",
+            ),
+            (
+                OperatorClearPendingWork {
+                    observation_failed: true,
+                    ..Default::default()
+                },
+                "pending_work_unobservable",
+            ),
+        ] {
+            let decision = requested_restart_trigger(true, pending);
+            assert_eq!(
+                decision,
+                RequestedRestartTrigger::RetriggerPendingWork(reason)
+            );
+            assert!(decision.auto_trigger(), "{pending:?}");
+            assert!(child_launch_plan(true, decision.auto_trigger(), false).auto_trigger);
+        }
+    }
+
+    #[test]
+    fn non_clear_restart_requests_keep_retriggering_regardless_of_pending_work() {
+        for pending in [
+            OperatorClearPendingWork::default(),
+            OperatorClearPendingWork {
+                cycle_open: true,
+                operator_intent_pending: true,
+                observation_failed: true,
+            },
+        ] {
+            assert_eq!(
+                requested_restart_trigger(false, pending),
+                RequestedRestartTrigger::RetriggerRestart
+            );
+        }
     }
 
     #[test]

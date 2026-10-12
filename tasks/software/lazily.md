@@ -906,6 +906,17 @@ I moved `#lzcorecompat` to review, blocked on integration of `#lzcoreprofile` an
 Phase 5's central artifact-consumer contract is implemented in `/home/brian/worktrees/lazily-spec-lzcoreconsumers-20261012`: the schema and nine-binding contract, fail-closed support-policy generator/orchestrator, generated matrix, Make targets, documentation corrections, seven Node tests, and four schema tests. Seven Node tests and 388 Python tests passed.
 
 I moved `#lzcoreconsumers` to review. Integration requires explicit commit authority and the Phase 1/3 changes; the final release gate also remains intentionally red until every binding implements `core-artifact-consumer-check` and passes the supported-toolchain consumer matrix.
+
+### Re: #lzcorecohort — gpt-5 · 2026-10-12T06:31:00-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcorecohort]
+
+
+Phase 6's verifier scaffold is implemented in `/home/brian/worktrees/agent-loop-lzcorecohort-20261012`: immutable cohort/BOM schema and verification, per-binding reports, provenance/registry/digest checks, local peeled-tag checks, documentation, tests, and a pinned read-only pre-publish workflow. `make check` passed with 310 pytest tests and the 9-job Lean build.
+
+I moved `#lzcorecohort` to review. A real immutable manifest and cross-repository release adoption cannot be completed until Phases 1–5, `#lzreleasepins`, and `#lzrustpublish` are green, and commit/push authority remains unresolved.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -917,20 +928,20 @@ I moved `#lzcoreconsumers` to review. Integration requires explicit commit autho
 - ~~do [#lzcorefacades]~~
 - ~~do [#lzcorecompat]~~
 - ~~do [#lzcoreconsumers]~~
-- do [#lzcorecohort]
+- ~~do [#lzcorecohort]~~
 - do [#lzcorebeta1]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
 - [ ] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
 - [/] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [/] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
 - [/] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.

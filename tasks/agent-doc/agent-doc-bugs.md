@@ -799,6 +799,24 @@ What's in it:
 Auto-clear between queue items (`bgclearpolicy`) and lane migration/cleanup (P5) landed on `main` after the tag. Both are installed locally and ship in the next release.
 
 `ridernavp6status` is done (`5355e01c79`): each lane now publishes its own pane-layout status, and shared mode is unchanged. It merges with `ridernavp6republish`, which is now being built on top of it. `ridernavp6route` is in progress in parallel, and `ridernavp6gc` and `ridernavp6switchback` follow.
+
+### Re: infra.md Clear wedge — opus-5-5 · 2026-10-12T15:15-04:00
+
+> **Queue prompt:** do [#infraclearsession]
+
+**Deferred:** a subagent is working on it on branch `infraclearsession`.
+
+The upcoming release probably does not fix this. The binary installed when you pressed Clear (15:06Z) already included the 0.35.492 Codex Ctrl+C fix (`codexclearwedge`), yet haiven-dev's ops.log shows:
+- The first press (15:06:06Z) was deferred with `evidence=turn_active_lease`, so the interrupted turn's lease was still held.
+- Every later press (:14, :21, :27) was re-deferred with `evidence=dispatch_turn_pending rearmed=true`.
+
+That fix only settles a dispatch that had not reached preflight when the turn was interrupted. This turn had been running for over 13 minutes, so an interrupt mid-turn after preflight is likely a separate, uncovered path. The supervisor was also recycling around 15:00–15:04 after the install. The subagent will:
+- reconstruct the sequence from ops.log and `state.db`, read-only;
+- find the record that keeps `dispatch_turn_pending` true;
+- settle it on the interrupt or turn-end event, not with a longer timeout;
+- add a regression test that replays it.
+
+infra.md and its pane are not touched.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -807,29 +825,31 @@ Auto-clear between queue items (`bgclearpolicy`) and lane migration/cleanup (P5)
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#infraclearsession]
 - ~~do [#bgclearpolicy]: Do you have enough direction for this? The hourglass is still visible in the queue.~~
 - ~~do [#ridernavp3]~~
 - ~~do [#ridernavp4]~~
 - ~~do [#ridernavp5]~~
 - ~~do [#stopreopenflake]~~
 - ~~do [#multilinequeuehead]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/242~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/242~~
 - ~~release + publish~~
-- do [#ridernavp6route]
-- do [#ridernavp6republish]
-- do [#ridernavp6status]
-- do [#ridernavp6gc]
-- do [#ridernavp6switchback]
+- 🚧 do [#ridernavp6route]
+- 🚧 do [#ridernavp6republish]
+- 🚧 do [#ridernavp6status]
+- 🚧 do [#ridernavp6gc]
+- 🚧 do [#ridernavp6switchback]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ridernavp6route] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): route, start and agent-doc claim --client-id create panes in the requesting IDE's lane in per_installation mode; today a new pane reaches an installation lane only through that IDE's explicit claim.
-- [ ] [#ridernavp6republish] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): the sync_tmux_layout command and the recycle republish still publish only into the shared lane; make them lane-aware.
-- [ ] [#ridernavp6status] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): add a per-lane pane_layout_status channel; it reports only the shared lane today.
-- [ ] [#ridernavp6gc] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): a controller-side trigger for empty-lane cleanup and per_installation-to-shared migration that knows which IDE installations are live; today only agent-doc gc runs it, using an attached terminal as the only liveness signal.
-- [ ] [#ridernavp6switchback] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): verify and pin with a test what the shared sync body does with a document pane still in a lane session after editor_navigation switches back to shared but before agent-doc gc migrates it; the docs and SimWorld model leave it open.
+- [ ] [#infraclearsession] infra.md: Clear Session Context wedged after manually interrupting Codex turn. Have we already fixed this in the upcoming release?
+- [ ] 🚧 [#ridernavp6route] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): route, start and agent-doc claim --client-id create panes in the requesting IDE's lane in per_installation mode; today a new pane reaches an installation lane only through that IDE's explicit claim.
+- [ ] 🚧 [#ridernavp6republish] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): the sync_tmux_layout command and the recycle republish still publish only into the shared lane; make them lane-aware.
+- [ ] 🚧 [#ridernavp6status] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): add a per-lane pane_layout_status channel; it reports only the shared lane today.
+- [ ] 🚧 [#ridernavp6gc] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): a controller-side trigger for empty-lane cleanup and per_installation-to-shared migration that knows which IDE installations are live; today only agent-doc gc runs it, using an attached terminal as the only liveness signal.
+- [ ] 🚧 [#ridernavp6switchback] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): verify and pin with a test what the shared sync body does with a document pane still in a lane session after editor_navigation switches back to shared but before agent-doc gc migrates it; the docs and SimWorld model leave it open.
 <!-- /agent:backlog -->
 
 ## Review

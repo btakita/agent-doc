@@ -281,6 +281,17 @@ Done. `flaky0494` is merged to main as `8e7ef63ce6` and installed.
   - Every `make check` and `make test` keeps its output and test report in `tmp/test-runs/`, which is how this failure was caught and named.
 
 The original lost failure from integrate-0494 stays unidentified, since its output was gone before this existed. The remaining receipt-dropping helpers and the slow test are with `#flakyreceipthelpers`.
+
+### Re: is v0.35.491 published — opus-5.5 · 2026-10-11T21:45-04:00
+
+> **Chat prompt (#chatprompt):** Have we published the release?
+
+Yes, v0.35.491 is fully published:
+- **GitHub Release:** run 38188587357 succeeded. The release was published at 01:00:43Z (not a draft), with 13 assets.
+- **PyPI:** the PyPI workflow succeeded, and 0.35.491 is the latest version on PyPI.
+- **Local install:** agent-doc 0.35.491 is installed, plus the later `flaky0494` merge (`8e7ef63ce6`).
+
+Not in the release yet: `deferstrike2` (the annotated-deferral fix) and `clrinject` (no auto-trigger after an idle Clear) are both finished, with `make check` green. `#flakyreceipthelpers` is still running. All three go into the next batch and release.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -293,14 +304,6 @@ The original lost failure from integrate-0494 stays unidentified, since its outp
 - 🚧 do [#annotateddeferstrike]
 - 🚧 do [#flakyreceipthelpers]
 - ⏳ do [#idleclearrestart]
-- ~~[#clearnoticeverify]: verified?~~
-- ~~The tmux panes are not laid out correctly. 2/3|1/3. There were 3 tmux panes during your [#clearnoticeverify] test.~~
-- ~~frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)~~
-- ~~release + publish~~
-- ~~do [#closeoutleaseresume]~~
-- ~~do [#flakyintegrate0494]~~
-- ~~do [#clearsupersedenotice]~~
-- ~~I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted. ![img_5.png](img_5.png)~~
 <!-- /agent:queue -->
 
 ## Backlog

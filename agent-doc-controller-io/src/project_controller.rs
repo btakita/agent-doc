@@ -365,6 +365,9 @@ const STATE_PLANE_MAX_CHANNELS: usize = 256;
 const DOCUMENT_SCOPED_MAX_CHANNELS: usize = 2_048;
 const DOCUMENT_AUTHORITY_STATE_CHANNEL_PREFIX: &str = "agent-doc/document-turn-authority/v1/";
 const DOCUMENT_DELIVERY_WAKE_STATE_CHANNEL_PREFIX: &str = "agent-doc/document-delivery-wake/v1/";
+/// `#idleclearrestart`: per-document edge published when an operator clear is
+/// queued (deferred) for the supervisor idle watch to deliver.
+const OPERATOR_CLEAR_WAKE_STATE_CHANNEL_PREFIX: &str = "agent-doc/operator-clear-wake/v1/";
 const STATE_PLANE_MAX_RETAINED_FRAMES_PER_CHANNEL: usize = 1_024;
 const STATE_PLANE_MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
 const STATE_PLANE_VERSION_NAMESPACE_BITS: u32 = 32;
@@ -372,6 +375,7 @@ const STATE_PLANE_VERSION_NAMESPACE_BITS: u32 = 32;
 fn is_document_scoped_state_plane_channel(channel: &str) -> bool {
     channel.starts_with(DOCUMENT_AUTHORITY_STATE_CHANNEL_PREFIX)
         || channel.starts_with(DOCUMENT_DELIVERY_WAKE_STATE_CHANNEL_PREFIX)
+        || channel.starts_with(OPERATOR_CLEAR_WAKE_STATE_CHANNEL_PREFIX)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -13266,6 +13270,9 @@ mod tests {
         ));
         assert!(is_document_scoped_state_plane_channel(
             "agent-doc/document-delivery-wake/v1/doc-a"
+        ));
+        assert!(is_document_scoped_state_plane_channel(
+            "agent-doc/operator-clear-wake/v1/doc-a"
         ));
         assert!(!is_document_scoped_state_plane_channel(
             "agent-doc/pane-layout/status/v1"

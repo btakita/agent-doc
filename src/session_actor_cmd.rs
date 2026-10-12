@@ -753,12 +753,12 @@ pub fn clear(file: &Path) -> Result<()> {
             .as_deref()
             .and_then(|pane| capture_context_clear_submit_content_hash(&tmux, pane));
         match send_clear_via_supervisor(&ctx)? {
-            SupervisorClearDelivery::RestartedFresh => {
+            SupervisorClearDelivery::RestartedFresh { reason } => {
                 restarted_fresh_from_supervisor_prompt = true;
                 agent_doc_ops_log_io::log_op(
                     &ctx.canonical_file,
                     &format!(
-                        "session_clear_sent file={} delivery=supervisor_restart_fresh reason=waiting_input",
+                        "session_clear_sent file={} delivery=supervisor_restart_fresh reason={reason}",
                         ctx.canonical_file.display()
                     ),
                 );
@@ -799,12 +799,12 @@ pub fn clear(file: &Path) -> Result<()> {
             .as_deref()
             .and_then(|pane| capture_context_clear_submit_content_hash(&tmux, pane));
         match send_clear_via_supervisor(&ctx)? {
-            SupervisorClearDelivery::RestartedFresh => {
+            SupervisorClearDelivery::RestartedFresh { reason } => {
                 restarted_fresh_from_supervisor_prompt = true;
                 agent_doc_ops_log_io::log_op(
                     &ctx.canonical_file,
                     &format!(
-                        "session_clear_sent file={} delivery=supervisor_restart_fresh reason=waiting_input",
+                        "session_clear_sent file={} delivery=supervisor_restart_fresh reason={reason}",
                         ctx.canonical_file.display()
                     ),
                 );
@@ -967,9 +967,16 @@ fn session_clear_already_satisfied_facts(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SupervisorClearDelivery {
-    RestartedFresh,
+    /// The supervisor replaced the child instead of typing the clear
+    /// (`#idleclearrestart`: no live child, `waiting_input`, or a harness whose
+    /// clear exits the process). `reason` is the supervisor's restart reason.
+    RestartedFresh {
+        reason: String,
+    },
     Sent,
-    LegacyClearUnsupported { error: String },
+    LegacyClearUnsupported {
+        error: String,
+    },
 }
 
 fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<SupervisorClearDelivery> {
@@ -1002,14 +1009,20 @@ fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<SupervisorClearDeli
         }
         anyhow::bail!("{error}");
     }
-    if response
-        .data
-        .as_ref()
+    let data = response.data.as_ref();
+    if data
         .and_then(|data| data.get("restart_fresh"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
     {
-        return Ok(SupervisorClearDelivery::RestartedFresh);
+        // Older supervisors answered every idle clear with a restart and the
+        // reason `supervisor_idle_prompt` / `supervisor_waiting_input`.
+        let reason = data
+            .and_then(|data| data.get("reason"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        return Ok(SupervisorClearDelivery::RestartedFresh { reason });
     }
     Ok(SupervisorClearDelivery::Sent)
 }

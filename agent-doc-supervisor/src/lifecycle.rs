@@ -147,6 +147,187 @@ pub fn boot_resume_action(
     BootResumeAction::RedispatchInterruptedTurn
 }
 
+/// How the supervisor delivers an operator **Clear Session Context** IPC request
+/// (`#idleclearrestart`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorClearDelivery {
+    /// Type the harness-native clear command (`/clear`, OpenCode `/new`) into
+    /// the live child through the supervisor's guarded pane-input path. The
+    /// child process, and every background agent/shell it owns, survives.
+    TypeNativeClear,
+    /// Replace the child through the supervised fresh restart. Reserved for the
+    /// cases where there is no responsive composer to type into, or the
+    /// harness's native clear command itself terminates the process.
+    RestartFresh(OperatorClearRestartReason),
+}
+
+/// Why an operator Clear must replace the child instead of typing the
+/// harness-native clear command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorClearRestartReason {
+    /// The harness child is gone (crash, Stop Agent): there is no live
+    /// composer, so a fresh child is the only way to reach a cleared session.
+    ChildNotAlive,
+    /// The actor is `waiting_input`: the supervisor's own restart-or-quit
+    /// keepalive prompt (or a harness permission prompt) owns the input, not a
+    /// dispatch-ready composer. Typing `/clear` there would answer the wrong
+    /// prompt.
+    SupervisorWaitingInput,
+    /// The harness exits successfully after consuming its native clear (Codex,
+    /// `#clear-ready-restart`); in a route-owned pane that clean exit races the
+    /// completion watcher and can tear the supervisor down before a replacement
+    /// child launches.
+    HarnessClearExitsProcess,
+}
+
+impl OperatorClearRestartReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ChildNotAlive => "child_not_alive",
+            Self::SupervisorWaitingInput => "supervisor_waiting_input",
+            Self::HarnessClearExitsProcess => "harness_clear_exits_process",
+        }
+    }
+}
+
+/// True when the harness's native clear command resets the conversation in
+/// place, keeping the harness process (and its background agents/shells)
+/// alive. Codex is the one harness whose `/clear` ends the process
+/// (`#clear-ready-restart`).
+pub fn native_clear_keeps_harness_process(harness_binary: &str) -> bool {
+    agent_doc_harness::HarnessConfig::from_agent_name(harness_binary).binary != "codex"
+}
+
+/// Decide how an operator Clear reaches the harness (`#idleclearrestart`).
+///
+/// A plain Clear at an idle, dispatch-ready prompt on a responsive child TYPES
+/// the harness-native clear command, exactly like the deferred
+/// (`#clearqueuedliveturn`) delivery: restarting the child would kill every
+/// Claude background agent and shell it owns with no report (2026-10-11 live
+/// test: a background agent stopped at 12/40 ticks). A restart is kept only
+/// where typing cannot work — no live child, the supervisor's keepalive /
+/// permission prompt owns the input, or the harness's clear exits the
+/// process. A non-idle actor (busy, starting) keeps the pre-existing typed
+/// delivery; the client-side `operator_clear` guard has already refused
+/// protected input and queued a clear behind a live turn.
+pub fn operator_clear_delivery(
+    harness_binary: &str,
+    waiting_input: bool,
+    ready: bool,
+    child_alive: bool,
+) -> OperatorClearDelivery {
+    if !(waiting_input || ready) {
+        return OperatorClearDelivery::TypeNativeClear;
+    }
+    if !child_alive {
+        return OperatorClearDelivery::RestartFresh(OperatorClearRestartReason::ChildNotAlive);
+    }
+    if waiting_input {
+        return OperatorClearDelivery::RestartFresh(
+            OperatorClearRestartReason::SupervisorWaitingInput,
+        );
+    }
+    if !native_clear_keeps_harness_process(harness_binary) {
+        return OperatorClearDelivery::RestartFresh(
+            OperatorClearRestartReason::HarnessClearExitsProcess,
+        );
+    }
+    OperatorClearDelivery::TypeNativeClear
+}
+
+#[cfg(test)]
+mod operator_clear_delivery_tests {
+    use super::*;
+
+    /// `#idleclearrestart`: the 2026-10-11 shape. Claude at an idle prompt with
+    /// background agents running must receive a typed `/clear`, never a
+    /// restart that kills the agents.
+    #[test]
+    fn idle_ready_claude_types_native_clear() {
+        assert_eq!(
+            operator_clear_delivery("claude", false, true, true),
+            OperatorClearDelivery::TypeNativeClear
+        );
+    }
+
+    #[test]
+    fn idle_ready_opencode_and_grok_type_native_clear() {
+        for harness in ["opencode", "grok"] {
+            assert_eq!(
+                operator_clear_delivery(harness, false, true, true),
+                OperatorClearDelivery::TypeNativeClear,
+                "{harness}"
+            );
+        }
+    }
+
+    /// `#clear-ready-restart`: Codex exits after consuming `/clear`, so its
+    /// idle clear keeps the supervised fresh restart.
+    #[test]
+    fn idle_ready_codex_keeps_fresh_restart() {
+        assert_eq!(
+            operator_clear_delivery("codex", false, true, true),
+            OperatorClearDelivery::RestartFresh(
+                OperatorClearRestartReason::HarnessClearExitsProcess
+            )
+        );
+    }
+
+    #[test]
+    fn waiting_input_keeps_fresh_restart_for_every_harness() {
+        for harness in ["claude", "codex", "opencode"] {
+            assert_eq!(
+                operator_clear_delivery(harness, true, false, true),
+                OperatorClearDelivery::RestartFresh(
+                    OperatorClearRestartReason::SupervisorWaitingInput
+                ),
+                "{harness}"
+            );
+        }
+    }
+
+    #[test]
+    fn idle_prompt_without_a_live_child_restarts() {
+        for (waiting_input, ready) in [(true, false), (false, true)] {
+            assert_eq!(
+                operator_clear_delivery("claude", waiting_input, ready, false),
+                OperatorClearDelivery::RestartFresh(OperatorClearRestartReason::ChildNotAlive)
+            );
+        }
+    }
+
+    /// A non-idle actor keeps the pre-existing typed delivery for every
+    /// harness; the client guard already queued or refused unsafe presses.
+    #[test]
+    fn non_idle_actor_types_native_clear() {
+        for harness in ["claude", "codex", "opencode"] {
+            for child_alive in [true, false] {
+                assert_eq!(
+                    operator_clear_delivery(harness, false, false, child_alive),
+                    OperatorClearDelivery::TypeNativeClear,
+                    "{harness} child_alive={child_alive}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn restart_reasons_have_stable_log_tokens() {
+        assert_eq!(
+            OperatorClearRestartReason::ChildNotAlive.as_str(),
+            "child_not_alive"
+        );
+        assert_eq!(
+            OperatorClearRestartReason::SupervisorWaitingInput.as_str(),
+            "supervisor_waiting_input"
+        );
+        assert_eq!(
+            OperatorClearRestartReason::HarnessClearExitsProcess.as_str(),
+            "harness_clear_exits_process"
+        );
+    }
+}
+
 /// Whether an operator `session_restart` may replace the harness child now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupervisorRestartAdmission {

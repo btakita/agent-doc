@@ -468,6 +468,54 @@ fn spawn_document_delivery_signal_watch(
     Ok(DocumentDeliverySignalWatch { result })
 }
 
+/// `#idleclearrestart`: park on the controller's queued-operator-clear edge for
+/// this document. Recording a deferred clear changes no document revision and
+/// moves no actor, so a Ready, quiescent watch never re-derived it: the clear
+/// queued behind a route-dispatched or abandoned turn waited for an unrelated
+/// document edit. The edge only re-arms one reconcile; once the watch observes
+/// the deferral it holds every tick urgent until delivery or retirement.
+fn spawn_operator_clear_signal_watch(
+    file: PathBuf,
+    stop: Arc<AtomicBool>,
+) -> std::io::Result<DocumentDeliverySignalWatch> {
+    let (send, result) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("op-clear-sig".into())
+        .spawn(move || {
+            let mut cursor = None;
+            while !stop.load(Ordering::Relaxed) {
+                match agent_doc_controller_io::project_controller::subscribe_operator_clear_wakes_for_file(
+                    &file,
+                    cursor,
+                    std::time::Duration::from_secs(30),
+                ) {
+                    Ok(subscription) => {
+                        cursor = Some(
+                            agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                                controller_generation: subscription.controller_generation,
+                                plane_version: subscription.latest_version,
+                            },
+                        );
+                        if subscription.changed {
+                            match send.try_send(()) {
+                                Ok(()) | Err(std::sync::mpsc::TrySendError::Full(())) => {}
+                                Err(std::sync::mpsc::TrySendError::Disconnected(())) => return,
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // A transport failure is not a queued clear. The
+                        // watch's actor/document edges remain the fallback.
+                        if !sleep_with_stop(&stop, std::time::Duration::from_secs(2)) {
+                            return;
+                        }
+                    }
+                }
+            }
+        })?;
+    Ok(DocumentDeliverySignalWatch { result })
+}
+
 fn spawn_captured_finalize_resume_signal_watch(
     file: PathBuf,
     stop: Arc<AtomicBool>,
@@ -1852,6 +1900,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
         spawn_captured_finalize_resume_signal_watch(path.clone(), Arc::clone(&stop)).ok();
     let document_delivery_signal_watch =
         spawn_document_delivery_signal_watch(path.clone(), Arc::clone(&stop)).ok();
+    let operator_clear_signal_watch =
+        spawn_operator_clear_signal_watch(path.clone(), Arc::clone(&stop)).ok();
     let mut document_delivery_debounce = DocumentDeliveryWakeDebounce::default();
     let mut document_delivery_reconcile_pending = false;
     // Cold-start inspection is the covering snapshot for a capture that
@@ -1925,6 +1975,19 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 log_event(&mut session_log, &event);
                 agent_doc_ops_log_io::log_op(&path, &event);
             }
+        }
+        // `#idleclearrestart`: a queued operator clear is a reconcile edge, so
+        // the drain observes the deferral now rather than at the next document
+        // edit.
+        if operator_clear_signal_watch.as_ref().is_some_and(|watch| {
+            let mut observed = false;
+            while watch.result.try_recv().is_ok() {
+                observed = true;
+            }
+            observed
+        }) {
+            document_delivery_reconcile_pending = true;
+            last_quiescent_maintenance = None;
         }
         // `#steeringwake`: a held (still-being-typed) steering item asked for
         // exactly one re-observation once its settle window can elapse.
@@ -6605,6 +6668,87 @@ mod tests {
             "%180",
             deferred_at + 235,
             "session_start_clear",
+        )
+        .unwrap();
+        assert!(deferred_clear_satisfied_by_harness(&doc, &projection));
+    }
+
+    /// `#sdkclearwedge` 2026-10-12 replay (haiven-dev sdk.md, pane %180): Run
+    /// Agent Doc at 09:07:10 whose prompt Claude Code dropped before persisting
+    /// it (lease 09:07:11, snapshot 09:07:15, no prompt record), so both Clear
+    /// presses (09:07:19, 09:07:26) were queued behind that phantom turn
+    /// (`clear_epoch=92`, deferred at 09:07:20). A new turn starting on the pane
+    /// (Run Agent Doc, `UserPromptSubmit` lease, a `running` dispatch receipt)
+    /// is NEVER proof the context was cleared: only a harness `SessionStart`
+    /// `clear`/`startup` receipt newer than the deferral is. Here that proof was
+    /// real — the operator typed `/clear` by hand at 09:07:32 (new transcript
+    /// `16b3dbee…` opens with the `/clear` command, `session_start_clear`
+    /// receipt at 09:07:33) — so retiring the deferral at 09:07:46 was correct.
+    #[test]
+    fn a_new_turn_never_satisfies_a_deferred_clear_only_a_fresh_conversation_does() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk.md");
+        std::fs::write(&doc, "doc").unwrap();
+        let at = |rfc: &str| agent_doc_turn::turn_status::parse_rfc3339_utc_secs(rfc).unwrap();
+        let deferred_at = at("2026-10-12T09:07:20Z");
+        let projection = agent_doc_state_backbone::QueueContextClearProjection {
+            phase: agent_doc_state_backbone::QueueContextClearPhase::Deferred,
+            file: doc.display().to_string(),
+            target: "%180".to_string(),
+            harness: "claude-code".to_string(),
+            command: "/clear".to_string(),
+            source: Some(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED.to_string()),
+            head_sha256: None,
+            head_bytes: None,
+            clear_epoch: 92,
+            marked_secs: deferred_at,
+            superseded: None,
+        };
+        // Run Agent Doc → the new turn's `UserPromptSubmit` lease. A prompt
+        // hook payload proves no turn end.
+        agent_doc_turn_status_io::apply_turn_status_hook_at(
+            dir.path(),
+            "%180",
+            true,
+            Some(r#"{"hook_event_name":"UserPromptSubmit","session_id":"16b3dbee"}"#),
+            at("2026-10-12T09:07:36Z"),
+        )
+        .unwrap();
+        assert!(
+            !deferred_clear_satisfied_by_harness(&doc, &projection),
+            "a new turn is not a cleared context: the clear stays owed"
+        );
+        // An ordinary `Stop` at the new turn's end is not a fresh conversation.
+        agent_doc_turn_status_io::apply_turn_status_hook_at(
+            dir.path(),
+            "%180",
+            false,
+            Some(r#"{"hook_event_name":"Stop","session_id":"16b3dbee"}"#),
+            at("2026-10-12T09:07:50Z"),
+        )
+        .unwrap();
+        assert!(
+            !deferred_clear_satisfied_by_harness(&doc, &projection),
+            "a turn end is not a cleared context either"
+        );
+        // A `SessionStart` `resume` restores context; it never satisfies.
+        agent_doc_turn_status_io::apply_turn_status_hook_at(
+            dir.path(),
+            "%180",
+            false,
+            Some(r#"{"hook_event_name":"SessionStart","source":"resume","session_id":"16b3dbee"}"#),
+            at("2026-10-12T09:07:51Z"),
+        )
+        .unwrap();
+        assert!(!deferred_clear_satisfied_by_harness(&doc, &projection));
+        // The operator's hand-typed `/clear` is the proof.
+        agent_doc_turn_status_io::apply_turn_status_hook_at(
+            dir.path(),
+            "%180",
+            false,
+            Some(r#"{"hook_event_name":"SessionStart","source":"clear","session_id":"16b3dbee"}"#),
+            at("2026-10-12T09:07:52Z"),
         )
         .unwrap();
         assert!(deferred_clear_satisfied_by_harness(&doc, &projection));

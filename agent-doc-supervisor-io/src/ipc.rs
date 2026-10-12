@@ -352,11 +352,15 @@ const RESTART_AGENT_MODE_PREFIX: &str = "agent:";
 /// Wire prefix marking a fresh restart that an operator **Clear Session Context**
 /// produced at an idle prompt (`#idlecleartriggerinject`).
 ///
-/// A Clear at an idle prompt replaces the child through the supervised fresh
-/// restart (`#clear-ready-restart`). That restart used to be indistinguishable
-/// from any other `fresh` restart, so the relaunch always re-submitted
-/// `/agent-doc <file>` — an unrequested, no-op turn costing ~13s of model time
-/// after every operator Clear. The prefix carries the provenance across the
+/// A Clear at an idle prompt types the harness-native clear into the live child
+/// (`#idleclearrestart`); it replaces the child through the supervised fresh
+/// restart only where typing cannot work — no live child, the supervisor's
+/// keepalive prompt owns the input, or the harness's clear exits the process
+/// (Codex, `#clear-ready-restart`); see
+/// `agent_doc_supervisor::lifecycle::operator_clear_delivery`. That restart used
+/// to be indistinguishable from any other `fresh` restart, so the relaunch
+/// always re-submitted `/agent-doc <file>` — an unrequested, no-op turn costing
+/// ~13s of model time after every operator Clear. The prefix carries the provenance across the
 /// child-exit boundary so the restart loop can derive whether to dispatch from
 /// pending-work state instead.
 const OPERATOR_CLEAR_MODE_PREFIX: &str = "clear:";
@@ -655,35 +659,62 @@ where
             ),
             Err(err) => IpcResponse::err(err),
         },
-        // At either idle prompt boundary, replace the child through the supervised
-        // fresh-restart path instead of typing `/clear`. Codex exits successfully
-        // after consuming `/clear`; in a route-owned pane that clean exit can race
-        // the completion watcher and tear down the supervisor before a replacement
-        // child is launched (#clear-ready-restart).
-        IpcMethod::Clear { bytes: _ } if state.actor_waiting_input() || state.actor_ready() => {
-            // `#idlecleartriggerinject`: tag the restart as operator-Clear
-            // provenance so the relaunch only re-triggers the document when
-            // pending work exists.
-            match request_supervisor_restart(state, RestartIntent::operator_clear_fresh().encode())
-            {
-                Ok(()) => IpcResponse::ok(serde_json::json!({
-                    "n": 0,
-                    "restart_fresh": true,
-                    "reason": "supervisor_idle_prompt"
-                })),
-                Err(err) => IpcResponse::err(err),
+        // `#idleclearrestart`: a Clear at an idle, dispatch-ready prompt on a
+        // responsive child TYPES the harness-native clear, exactly like the
+        // deferred (`#clearqueuedliveturn`) delivery; restarting the child kills
+        // every background agent/shell it owns. The supervised fresh restart is
+        // kept only where typing cannot work: no live child, the supervisor's
+        // keepalive/permission prompt owns the input (`waiting_input`), or the
+        // harness's clear exits the process (Codex, `#clear-ready-restart`: its
+        // clean exit can race the route-owned completion watcher and tear the
+        // supervisor down before a replacement launches).
+        IpcMethod::Clear { bytes } => {
+            let idle = state.actor_ready();
+            match agent_doc_supervisor::lifecycle::operator_clear_delivery(
+                &state.harness_binary(),
+                state.actor_waiting_input(),
+                idle,
+                state.child_alive(),
+            ) {
+                agent_doc_supervisor::lifecycle::OperatorClearDelivery::RestartFresh(reason) => {
+                    // `#idlecleartriggerinject`: tag the restart as operator-Clear
+                    // provenance so the relaunch only re-triggers the document
+                    // when pending work exists.
+                    match request_supervisor_restart(
+                        state,
+                        RestartIntent::operator_clear_fresh().encode(),
+                    ) {
+                        Ok(()) => IpcResponse::ok(serde_json::json!({
+                            "n": 0,
+                            "restart_fresh": true,
+                            "reason": reason.as_str(),
+                        })),
+                        Err(err) => IpcResponse::err(err),
+                    }
+                }
+                agent_doc_supervisor::lifecycle::OperatorClearDelivery::TypeNativeClear => {
+                    match deliver_supervisor_inject(state, &bytes, "ipc_clear") {
+                        Ok(SupervisorInjectDeliveryOutcome::Delivered) => {
+                            mark_supervisor_clear_dispatched(state);
+                            IpcResponse::ok(serde_json::json!({
+                                "n": bytes.len(),
+                                "restart_fresh": false,
+                                "delivery": "native_clear",
+                                "idle_prompt": idle,
+                            }))
+                        }
+                        Ok(SupervisorInjectDeliveryOutcome::DuplicateSuppressed) => {
+                            IpcResponse::ok(serde_json::json!({
+                                "n": 0,
+                                "duplicate": true,
+                                "reason": "prompt_dispatch_duplicate"
+                            }))
+                        }
+                        Err(err) => IpcResponse::err(err),
+                    }
+                }
             }
         }
-        IpcMethod::Clear { bytes } => match deliver_supervisor_inject(state, &bytes, "ipc_clear") {
-            Ok(SupervisorInjectDeliveryOutcome::Delivered) => {
-                mark_supervisor_clear_dispatched(state);
-                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-            }
-            Ok(SupervisorInjectDeliveryOutcome::DuplicateSuppressed) => IpcResponse::ok(
-                serde_json::json!({ "n": 0, "duplicate": true, "reason": "prompt_dispatch_duplicate" }),
-            ),
-            Err(err) => IpcResponse::err(err),
-        },
         IpcMethod::Restart { mode } => match request_supervisor_restart(state, mode) {
             Ok(()) => IpcResponse::ok_empty(),
             Err(err) => IpcResponse::err(err),

@@ -703,8 +703,17 @@ mod tests {
         // the completion path stop the supervisor. Ready is an idle prompt boundary
         // too, so clear must use the same supervised fresh restart as waiting-input
         // rather than writing control text to the child.
-        let shared = Arc::new(SupervisorShared::new("codex", "test-instance".to_string()));
-        *shared.actor_state.lock() = Some(agent_doc_controller::actor::ActorState::Ready);
+        let shared = Arc::new(SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "codex",
+            None,
+            Some(agent_doc_controller::actor::ActorState::Ready),
+            None,
+        ));
+        let mut child = LiveTestChild::spawn();
+        shared.child_pid.store(child.pid(), Ordering::Relaxed);
         let written = Arc::new(Mutex::new(Vec::new()));
         *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
             RecordingWriter(written.clone()),
@@ -722,6 +731,13 @@ mod tests {
             clear.data.as_ref().and_then(|data| data["restart_fresh"].as_bool()),
             Some(true),
         );
+        // `#idleclearrestart`: Codex keeps the restart because its `/clear`
+        // exits the process — not because the child was absent.
+        assert_eq!(
+            clear.data.as_ref().and_then(|data| data["reason"].as_str()),
+            Some("harness_clear_exits_process"),
+        );
+        child.reap();
         assert!(shared.restart_requested.load(Ordering::Relaxed));
         // `#idlecleartriggerinject`: the fresh restart carries operator-Clear
         // provenance so the relaunch can skip the unrequested document trigger.
@@ -732,6 +748,103 @@ mod tests {
         assert!(intent.operator_clear);
         assert!(!intent.restart_agent);
         assert!(written.lock().is_empty(), "must not type /clear into Codex");
+    }
+
+    /// A short-lived real child process standing in for the harness, so
+    /// `child_alive()` reads a live `/proc/<pid>` and a restart's SIGTERM never
+    /// reaches the test process itself.
+    struct LiveTestChild(std::process::Child);
+
+    impl LiveTestChild {
+        fn spawn() -> Self {
+            Self(
+                std::process::Command::new("sleep")
+                    .arg("30")
+                    .spawn()
+                    .expect("spawn stand-in harness child"),
+            )
+        }
+
+        fn pid(&self) -> u32 {
+            self.0.id()
+        }
+
+        fn running(&mut self) -> bool {
+            matches!(self.0.try_wait(), Ok(None))
+        }
+
+        fn reap(&mut self) {
+            if let Err(err) = self.0.kill() {
+                eprintln!("stand-in child kill: {err}");
+            }
+            if let Err(err) = self.0.wait() {
+                eprintln!("stand-in child wait: {err}");
+            }
+        }
+    }
+
+    impl Drop for LiveTestChild {
+        fn drop(&mut self) {
+            if self.running() {
+                self.reap();
+            }
+        }
+    }
+
+    /// `#idleclearrestart`: Clear Session Context at an idle Claude prompt types
+    /// `/clear` into the SAME live child — never a supervised restart, which
+    /// killed the child's background agents/shells with no report (2026-10-11
+    /// live test: a background agent stopped at 12/40 ticks).
+    #[test]
+    fn handle_ipc_clear_at_ready_claude_prompt_types_clear_into_the_live_child() {
+        for harness in ["claude", "opencode"] {
+            let shared = Arc::new(SupervisorShared::with_actor_runtime(
+                "test",
+                "test-instance".to_string(),
+                None,
+                harness,
+                None,
+                Some(agent_doc_controller::actor::ActorState::Ready),
+                None,
+            ));
+            let mut child = LiveTestChild::spawn();
+            shared.child_pid.store(child.pid(), Ordering::Relaxed);
+            let written = Arc::new(Mutex::new(Vec::new()));
+            *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+                Box::new(RecordingWriter(written.clone())),
+            ))));
+            let command = agent_doc_harness::HarnessConfig::from_agent_name(harness)
+                .context_clear_command();
+
+            let clear = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
+                IpcMethod::Clear {
+                    bytes: command.to_string(),
+                },
+                shared.as_ref(),
+            );
+
+            assert!(clear.ok, "{harness}: idle clear must be delivered: {clear:?}");
+            assert_eq!(
+                clear.data.as_ref().and_then(|data| data["restart_fresh"].as_bool()),
+                Some(false),
+                "{harness}"
+            );
+            assert_eq!(
+                clear.data.as_ref().and_then(|data| data["delivery"].as_str()),
+                Some("native_clear"),
+                "{harness}"
+            );
+            assert_eq!(written.lock().as_slice(), command.as_bytes(), "{harness}");
+            assert!(
+                !shared.restart_requested.load(Ordering::Relaxed),
+                "{harness}: an idle clear must not arm a restart"
+            );
+            assert!(
+                child.running(),
+                "{harness}: the harness child must survive an idle clear"
+            );
+            child.reap();
+        }
     }
     #[test]
     fn handle_ipc_stop_bypasses_failed_capability_proof() {

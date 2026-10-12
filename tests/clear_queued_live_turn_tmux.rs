@@ -15,6 +15,10 @@
 //! the pane and never moves the actor, its receipt is promoted to `running` by
 //! the turn's own preflight, and the hook has not yet written a turn lease.
 //!
+//! A Clear at an idle prompt is typed into the same live harness, never a
+//! restart (`#idleclearrestart`): the fake harness records its PID and owns a
+//! background job, standing in for Claude Code background agents/shells.
+//!
 //! Live tmux: `#[ignore]`, run through `make tmux-ci`.
 
 use std::path::PathBuf;
@@ -26,7 +30,7 @@ const FAKE_CLAUDE: &str = r#"#!/usr/bin/env python3
 # Fake Claude Code harness (#clearqueuedliveturn live test). Renders an idle or
 # busy Claude frame, records every submitted line, and ends a turn when the
 # test creates `end_turn`.
-import os, select, sys, termios
+import os, select, subprocess, sys, termios
 # Like Claude Code's raw-mode TUI, never echo typed input into the frame.
 try:
     attrs = termios.tcgetattr(0)
@@ -37,9 +41,16 @@ except termios.error:
 d = os.environ["FAKE_CLAUDE_DIR"]
 open(os.path.join(d, "started"), "w").close()
 log = open(os.path.join(d, "input.log"), "a", buffering=1)
-# A fresh harness process: the supervisor delivers an idle-prompt clear by
-# restarting the harness fresh, so a start after the first is a clear.
+# A fresh harness process. An idle-prompt clear types `/clear` into this same
+# process (#idleclearrestart); a start after the first is a harness restart.
 log.write("<started>\n")
+with open(os.path.join(d, "pids"), "a") as f:
+    f.write("%d\n" % os.getpid())
+# A long-running background job owned by the harness, standing in for Claude
+# Code background agents/shells: a harness restart kills it with the process.
+bg = subprocess.Popen(["sleep", "600"], stdin=subprocess.DEVNULL)
+with open(os.path.join(d, "bg.pids"), "a") as f:
+    f.write("%d\n" % bg.pid)
 RULE = "─" * 40 + "\n"
 def footer():
     # `background` mirrors haiven-dev api.md pane %165 (2026-10-11): an idle
@@ -254,11 +265,12 @@ impl LiveClearScenario {
             std::thread::sleep(Duration::from_millis(200));
         }
         panic!(
-            "timed out waiting until {what}\n--- pane {} ---\n{}\n--- inputs ---\n{:?}\n--- ops.log tail ---\n{}",
+            "timed out waiting until {what}\n--- pane {} ---\n{}\n--- inputs ---\n{:?}\n--- ops.log tail ---\n{}\n--- supervisor idle-watch tail ---\n{}",
             self.pane,
             self.tmux.capture_pane(&self.pane, None).unwrap_or_default(),
             self.inputs(),
             self.ops_log_tail(),
+            self.idle_watch_tail(),
         );
     }
 
@@ -411,8 +423,18 @@ impl LiveClearScenario {
             .collect()
     }
 
-    /// `/clear`s typed into the harness, plus fresh harness restarts (how the
-    /// supervisor delivers a clear at an idle prompt).
+    /// PIDs of every harness process the supervisor launched, in order.
+    fn harness_pids(&self) -> Vec<u32> {
+        read_pids(&self.fake.join("pids"))
+    }
+
+    /// PIDs of the background jobs those harness processes started, in order.
+    fn background_pids(&self) -> Vec<u32> {
+        read_pids(&self.fake.join("bg.pids"))
+    }
+
+    /// `/clear`s typed into the harness, plus harness restarts (Codex, a
+    /// waiting-input or dead child: the cases that still replace the child).
     fn clears(&self) -> usize {
         let inputs = self.inputs();
         let restarts = inputs
@@ -427,6 +449,28 @@ impl LiveClearScenario {
         std::fs::read_to_string(self.root.join(".agent-doc/logs/ops.log")).unwrap_or_default()
     }
 
+    /// The supervisor session logs' idle-queue-watch decisions, for a timeout
+    /// diagnosis (the watch logs there, not to `ops.log`).
+    fn idle_watch_tail(&self) -> String {
+        let mut lines = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(self.root.join(".agent-doc/logs")) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.file_name().is_some_and(|name| name != "ops.log")
+                    && path.extension().is_some_and(|ext| ext == "log")
+                {
+                    let text = std::fs::read_to_string(&path).unwrap_or_default();
+                    lines.extend(
+                        text.lines()
+                            .filter(|line| line.contains("idle_queue_watch"))
+                            .map(str::to_string),
+                    );
+                }
+            }
+        }
+        lines[lines.len().saturating_sub(40)..].join("\n")
+    }
+
     fn ops_log_tail(&self) -> String {
         let log = self.ops_log();
         let lines: Vec<&str> = log.lines().collect();
@@ -434,8 +478,101 @@ impl LiveClearScenario {
     }
 }
 
+impl Drop for LiveClearScenario {
+    fn drop(&mut self) {
+        // The background jobs are the fake harness's own `sleep`s; never leave
+        // one behind when a harness survived to the end of the test.
+        for pid in self.background_pids() {
+            if process_alive(pid)
+                && let Err(err) = Command::new("kill").arg(pid.to_string()).status()
+            {
+                eprintln!("kill background job {pid}: {err}");
+            }
+        }
+    }
+}
+
+fn read_pids(path: &std::path::Path) -> Vec<u32> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.trim().parse().ok())
+        .collect()
+}
+
+/// A live (non-zombie) process.
+fn process_alive(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+        stat.rsplit_once(')')
+            .and_then(|(_, tail)| tail.split_whitespace().next())
+            .is_some_and(|state| !matches!(state, "Z" | "X" | "x"))
+    })
+}
+
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// `#idleclearrestart` (2026-10-11 live test: a Claude background agent stopped
+/// at 12/40 ticks): Clear Session Context at an idle prompt TYPES `/clear` into
+/// the live harness, exactly like the queued delivery. The harness process is
+/// the same one (no restart), the background job it owns keeps running, and no
+/// document trigger follows the clear because no work is pending.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn an_idle_clear_types_clear_into_the_same_harness_and_background_jobs_survive() {
+    let scenario = LiveClearScenario::start("clear-idle-same-child");
+    // Background subagents and a shell are running at the idle prompt.
+    std::fs::write(scenario.fake.join("background"), "").unwrap();
+    std::thread::sleep(Duration::from_secs(1));
+    let harness = scenario.harness_pids();
+    let background = scenario.background_pids();
+    assert_eq!(harness.len(), 1, "one harness launched: {harness:?}");
+    assert_eq!(background.len(), 1, "one background job: {background:?}");
+    assert!(process_alive(harness[0]) && process_alive(background[0]));
+
+    let pressed = scenario.press_clear();
+    assert!(
+        !stderr(&pressed).contains("session_clear queued for"),
+        "an idle prompt clears at once: {}",
+        stderr(&pressed)
+    );
+    scenario.wait_until("the typed /clear reached the harness", || {
+        scenario.inputs().iter().any(|line| line == "/clear")
+    });
+    // Long enough for a restart (and its post-restart trigger) to show.
+    std::thread::sleep(Duration::from_secs(5));
+
+    let inputs = scenario.inputs();
+    assert_eq!(scenario.clears(), 1, "exactly one clear: {inputs:?}");
+    assert_eq!(
+        scenario.harness_pids(),
+        harness,
+        "the clear reached the SAME harness process, never a restart: {inputs:?}"
+    );
+    assert!(
+        process_alive(harness[0]),
+        "the harness child is still running"
+    );
+    assert!(
+        process_alive(background[0]),
+        "the harness's background job survived the clear"
+    );
+    assert!(
+        !inputs.iter().any(|line| line.starts_with("/agent-doc")),
+        "no document trigger follows an idle clear with no pending work: {inputs:?}"
+    );
+    let ops = scenario.ops_log();
+    assert!(
+        ops.lines().any(|line| line.contains("session_clear_sent")),
+        "{}",
+        scenario.ops_log_tail()
+    );
+    assert!(
+        !ops.contains("delivery=supervisor_restart_fresh"),
+        "an idle clear is never a restart:\n{}",
+        scenario.ops_log_tail()
+    );
 }
 
 /// The pane `%149` case: a clear pressed while a route-dispatched turn is
@@ -604,18 +741,25 @@ fn clear_run_clear_after_a_normally_ended_dispatch_turn_delivers_both_clears_in_
         stderr(&first)
     );
     scenario.wait_until("clear #1 reached the pane", || scenario.clears() == 1);
-    // The supervisor delivered clear #1 by restarting the harness fresh, and
-    // re-triggers the document once it is up; let that turn finish.
-    scenario.wait_until("the post-clear auto trigger ran", || {
+    // `#idleclearrestart`: clear #1 was TYPED into the live harness — no
+    // restart, so no post-restart document trigger either.
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(
+        scenario.harness_pids().len(),
+        1,
+        "clear #1 must not restart the harness: {:?}",
+        scenario.inputs()
+    );
+    assert_eq!(
         scenario
             .inputs()
             .iter()
             .filter(|line| *line == "/agent-doc doc.md")
-            .count()
-            >= 2
-    });
-    scenario.end_turn();
-    std::thread::sleep(Duration::from_secs(2));
+            .count(),
+        1,
+        "no trigger follows an idle clear: {:?}",
+        scenario.inputs()
+    );
 
     // Run Agent Doc is accepted; its trigger has not reached the pane yet.
     scenario.accept_dispatch();

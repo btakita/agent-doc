@@ -92,12 +92,14 @@ const PANE_LAYOUT_DESIRED_TYPE_TAG: &str = "agent-doc.pane-layout.desired.v1";
 const PANE_LAYOUT_STATUS_TYPE_TAG: &str = "agent-doc.pane-layout.status.v1";
 const DOCUMENT_TURN_AUTHORITY_TYPE_TAG: &str = "agent-doc.document-turn-authority.v1";
 const DOCUMENT_DELIVERY_WAKE_TYPE_TAG: &str = "agent-doc.document-delivery-wake.v1";
+const OPERATOR_CLEAR_WAKE_TYPE_TAG: &str = "agent-doc.operator-clear-wake.v1";
 const EDITOR_SURFACE_PROJECTION_TYPE_TAG: &str = "agent-doc.editor-surface.projection.v1";
 pub const CAPTURED_FINALIZE_WAKE_STATE_CHANNEL: &str = "agent-doc/captured-finalize/wake/v1";
 const CAPTURED_FINALIZE_WAKE_TYPE_TAG: &str = "agent-doc.captured-finalize.wake.v1";
 const EDITOR_REPLICA_REGISTERED_REACTIVE_REASON: &str = "editor_replica_registered";
 static PANE_LAYOUT_STATUS_EPOCH: AtomicU64 = AtomicU64::new(1);
 static DOCUMENT_DELIVERY_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
+static OPERATOR_CLEAR_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
 static CAPTURED_FINALIZE_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
 static EDITOR_SURFACE_PROJECTION_EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -1453,6 +1455,10 @@ fn document_delivery_wake_channel(document_hash: &str) -> String {
     format!("{DOCUMENT_DELIVERY_WAKE_STATE_CHANNEL_PREFIX}{document_hash}")
 }
 
+fn operator_clear_wake_channel(document_hash: &str) -> String {
+    format!("{OPERATOR_CLEAR_WAKE_STATE_CHANNEL_PREFIX}{document_hash}")
+}
+
 /// Observe the controller's Lazily document-turn authority projection over one
 /// retained socket.
 ///
@@ -1668,6 +1674,23 @@ pub struct DocumentDeliveryWakeSubscription {
     pub visible_delivery_projected: bool,
 }
 
+/// `#idleclearrestart`: one queued (deferred) operator clear for a document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct OperatorClearWakeProjection {
+    document_hash: String,
+    clear_epoch: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorClearWakeSubscription {
+    pub controller_generation: u64,
+    pub latest_version: u64,
+    pub timed_out: bool,
+    /// A queued operator clear for this document was published.
+    pub changed: bool,
+    pub clear_epoch: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapturedFinalizeWakeProjection {
     pub document_hash: String,
@@ -1761,6 +1784,68 @@ pub fn subscribe_document_delivery_wakes_for_file(
             .and_then(|projection| projection.content_hash.clone()),
         visible_delivery_projected: projection
             .is_some_and(|projection| projection.visible_delivery_projected),
+    })
+}
+
+/// Await a queued (deferred) operator clear for one document
+/// (`#idleclearrestart`). A Ready, quiescent supervisor idle watch re-derives
+/// nothing until a document revision or delivery edge, and recording a deferred
+/// clear changes neither, so without this edge the clear queued behind a
+/// route-dispatched (actor never moves) or abandoned turn sat until the next
+/// document edit. The controller publishes one frame per deferral on a
+/// document-scoped Lazily state channel; the watch parks on it.
+pub fn subscribe_operator_clear_wakes_for_file(
+    file: &Path,
+    after: Option<ControllerStatePlaneCursor>,
+    timeout: Duration,
+) -> Result<OperatorClearWakeSubscription> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let channel = operator_clear_wake_channel(&document_hash);
+    let timeout = timeout.min(STATE_PLANE_SUBSCRIBE_MAX);
+    let invocation = ControllerStatePlaneSubscribeInvocation {
+        channel: channel.clone(),
+        after_controller_generation: after.map(|cursor| cursor.controller_generation),
+        after_version: after.map(|cursor| cursor.plane_version).unwrap_or(0),
+        timeout_ms: timeout.as_millis().min(u64::MAX as u128) as u64,
+    };
+    let request = ControllerRequest {
+        command: "state_plane_subscribe".to_string(),
+        file: Some(file.to_path_buf()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("idle_watch_operator_clear_subscription".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(&invocation)?),
+        sequence: None,
+    };
+    let subscription: ControllerStatePlaneSubscription = request_controller_with_timeout(
+        &project_root,
+        request,
+        timeout.saturating_add(Duration::from_secs(2)),
+    )?;
+    let projection = subscription.frames.iter().rev().find_map(|frame| {
+        let message = serde_json::from_str::<lazily::IpcMessage>(&frame.message_json).ok()?;
+        let payload =
+            state_plane_snapshot_payload(&message, &channel, OPERATOR_CLEAR_WAKE_TYPE_TAG).ok()?;
+        serde_json::from_slice::<OperatorClearWakeProjection>(&payload)
+            .ok()
+            .filter(|wake| wake.document_hash == document_hash)
+    });
+    Ok(OperatorClearWakeSubscription {
+        controller_generation: subscription.controller_generation,
+        latest_version: subscription.latest_version,
+        timed_out: subscription.timed_out,
+        changed: projection.is_some(),
+        clear_epoch: projection.map(|projection| projection.clear_epoch),
     })
 }
 
@@ -10589,6 +10674,35 @@ pub(super) fn publish_document_delivery_wake(
         epoch,
         &channel,
         DOCUMENT_DELIVERY_WAKE_TYPE_TAG,
+        &snapshot,
+    )?;
+    runtime.publish_state_plane_frame(channel, producer_id, message_json, epoch, None)?;
+    Ok(())
+}
+
+/// `#idleclearrestart`: publish the queued-operator-clear edge the supervisor
+/// idle watch parks on (see [`subscribe_operator_clear_wakes_for_file`]).
+fn publish_operator_clear_wake(
+    runtime: &ControllerRuntime,
+    document_hash: &str,
+    clear_epoch: u64,
+) -> Result<()> {
+    let channel = operator_clear_wake_channel(document_hash);
+    let epoch = OPERATOR_CLEAR_WAKE_EPOCH.fetch_add(1, Ordering::SeqCst);
+    let bootstrap = runtime.bootstrap_snapshot()?;
+    let producer_id = format!(
+        "agent-doc-controller:{}:{}",
+        std::process::id(),
+        bootstrap.controller_generation
+    );
+    let snapshot = OperatorClearWakeProjection {
+        document_hash: document_hash.to_string(),
+        clear_epoch,
+    };
+    let message_json = state_plane_snapshot_message_json(
+        epoch,
+        &channel,
+        OPERATOR_CLEAR_WAKE_TYPE_TAG,
         &snapshot,
     )?;
     runtime.publish_state_plane_frame(channel, producer_id, message_json, epoch, None)?;
@@ -21229,6 +21343,24 @@ pub(crate) fn handle_queue_context_clear_deferred(
     );
     append_apply_state_event(bootstrap, runtime, event)?;
     let projection = queue_context_clear_projection(runtime, &file)?;
+    // `#idleclearrestart`: wake the supervisor idle watch. The deferral is
+    // durable either way; a failed wake only defers delivery to the watch's
+    // next document/actor edge, so it is logged, never fatal.
+    if let Err(err) = publish_operator_clear_wake(
+        runtime,
+        &agent_doc_hash::document_id_for_path(&file),
+        projection.clear_epoch,
+    ) {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "queue_context_clear_wake_publish_failed file={} clear_epoch={} error={:?}",
+                file.display(),
+                projection.clear_epoch,
+                format!("{err:#}"),
+            ),
+        );
+    }
     agent_doc_ops_log_io::log_op(
         &file,
         &format!(
@@ -33927,6 +34059,88 @@ mod tests {
             ),
             "the handoff to the structural layout owner must be provable: {ops_log}"
         );
+    }
+
+    /// `#idleclearrestart`: recording a deferred operator clear publishes the
+    /// document-scoped wake a Ready, quiescent supervisor idle watch parks on;
+    /// each re-arm publishes again with the new clear epoch.
+    #[test]
+    fn deferred_operator_clear_publishes_one_wake_per_deferral() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let file = dir.path().join("doc.md");
+        std::fs::write(&file, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
+        let file = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let channel = operator_clear_wake_channel(&document_hash);
+        let defer = || {
+            handle_queue_context_clear_deferred(
+                &bootstrap,
+                runtime.as_ref(),
+                ControllerRequest {
+                    command: "queue_context_clear_deferred".to_string(),
+                    file: Some(file.clone()),
+                    session_id: None,
+                    pane_id: Some("%1".to_string()),
+                    window_id: None,
+                    generation: None,
+                    state: None,
+                    caller: Some("test".to_string()),
+                    reason: Some("operator_live_turn_deferred_clear".to_string()),
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: Some("claude-code".to_string()),
+                    diagnostic_payload: Some(
+                        serde_json::to_string(&QueueContextClearPayload {
+                            command: "/clear".to_string(),
+                            head_sha256: None,
+                            head_bytes: None,
+                            retired_reason: None,
+                        })
+                        .unwrap(),
+                    ),
+                    sequence: None,
+                },
+            )
+            .unwrap()
+        };
+        let wake_epoch = |frames: &[ControllerStatePlaneFrame]| {
+            frames.iter().rev().find_map(|frame| {
+                let message =
+                    serde_json::from_str::<lazily::IpcMessage>(&frame.message_json).ok()?;
+                let payload =
+                    state_plane_snapshot_payload(&message, &channel, OPERATOR_CLEAR_WAKE_TYPE_TAG)
+                        .ok()?;
+                serde_json::from_slice::<OperatorClearWakeProjection>(&payload)
+                    .ok()
+                    .filter(|wake| wake.document_hash == document_hash)
+                    .map(|wake| wake.clear_epoch)
+            })
+        };
+
+        let first = defer();
+        let cold = runtime.subscribe_state_plane(&channel, None, 0, Duration::ZERO);
+        assert_eq!(wake_epoch(&cold.frames), Some(first.clear_epoch));
+
+        let quiet = runtime.subscribe_state_plane(
+            &channel,
+            Some(cold.controller_generation),
+            cold.latest_version,
+            Duration::ZERO,
+        );
+        assert!(quiet.frames.is_empty(), "no deferral, no wake");
+
+        let rearmed = defer();
+        assert!(rearmed.clear_epoch > first.clear_epoch);
+        let warm = runtime.subscribe_state_plane(
+            &channel,
+            Some(cold.controller_generation),
+            cold.latest_version,
+            Duration::ZERO,
+        );
+        assert_eq!(wake_epoch(&warm.frames), Some(rearmed.clear_epoch));
     }
 
     #[test]

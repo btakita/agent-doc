@@ -373,11 +373,31 @@ idle prompt.
   `ipc_inject` for routed IPC and `auto_trigger_inject` for restart-triggered
   reopen commands.
 - A restart-triggered reopen is derived from restart provenance and pending
-  work, never hard-coded on every IPC restart (`#idlecleartriggerinject`). An
-  operator Clear Session Context at an idle prompt (`waiting_input` or `ready`)
-  replaces the child through the supervised fresh restart and encodes that
-  provenance in the stored restart mode (`clear:fresh`; the legacy decoder strips
-  the prefix). At the child-exit boundary the supervisor observes, once and
+  work, never hard-coded on every IPC restart (`#idlecleartriggerinject`).
+- Operator Clear Session Context (`Clear` IPC) TYPES the harness-native clear
+  command into the live child whenever a responsive composer can take it
+  (`#idleclearrestart`): a `ready` actor with a live child receives `/clear`
+  (OpenCode `/new`) through the same guarded pane-input delivery as the
+  queued/deferred clear, marks the actor `busy` (`ipc_clear`) until the prompt
+  returns, and answers `restart_fresh=false delivery=native_clear`. The child
+  process, and every Claude background agent and shell it owns, survives;
+  restarting it killed them with no report (2026-10-11 live test: a background
+  agent stopped at 12/40 ticks). The pure decision is
+  `agent_doc_supervisor::lifecycle::operator_clear_delivery`. The supervised
+  fresh restart remains only where typing cannot work, each answered with
+  `restart_fresh=true reason=<…>`: no live child (`child_not_alive`), the actor
+  is `waiting_input` so the supervisor's restart-or-quit keepalive or a harness
+  permission prompt owns the input (`supervisor_waiting_input`), or the
+  harness's native clear exits the process (Codex, `#clear-ready-restart`:
+  `harness_clear_exits_process`). Explicit Restart Agent and
+  `session restart-supervisor` are separate commands and unchanged. A busy or
+  starting actor keeps the pre-existing typed delivery; the client-side
+  `operator_clear` guard has already queued a clear behind a live turn or
+  refused protected input before IPC is contacted. A typed clear has no
+  relaunch, so it never re-triggers the document; queue continuation after it
+  stays with the idle-queue watch and its clear cooldown.
+- A restart-required operator Clear encodes its provenance in the stored
+  restart mode (`clear:fresh`; the legacy decoder strips the prefix). At the child-exit boundary the supervisor observes, once and
   without timers, whether an agent-doc cycle is still open and whether the
   closed-cycle `TurnAdmission` verdict reports unanswered operator intent
   (steering or an explicit route). It re-submits `/agent-doc <file>` only when one

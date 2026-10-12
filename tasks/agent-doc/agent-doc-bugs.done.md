@@ -442,3 +442,4 @@
   - do [#stggrafanaowner]
   ```
 - 2026-10-12 [#ideriderindependentnav] [recommended] [agent-doc] Fully independent navigation per JetBrains installation: one tmux window or session per IDE installation. The installation identity becomes part of the layout-ownership key, tmux-to-editor focus mirroring goes only to the IDE that owns the window, tmux_focus_state and pane ownership are split per window, and specs plus a two-IDE SimWorld are added. Several days.
+- 2026-10-12 [#ridernavp2a] [agent-doc] IDE navigation lanes P2a (docs/plan-ide-independent-nav.md): move the single per-project pane-layout graph behind a per-lane map with no behavior change. Do this first: P2b, P3, P4 and P5 build on it in order.

@@ -570,6 +570,51 @@ Done (`c2149c15f9`). Clear was stuck for about 2 minutes. Codex runs preflight a
 **v0.35.492:** tagged (`a27ed22e2c`) and installed locally. The GitHub Release build is still running. PyPI publishes after it, so I'm keeping "release + publish" open until both are confirmed.
 
 **Next batch:** `turnaround` (faster `make check`) and `ridernavp2a` are merged and in `make check` / `make tmux-ci`. Also in progress: `ridernavp2b`, and the tools.md Codex resume-id wedge.
+
+### Re: v0.35.492 published, next batch landed — opus-5-5 · 2026-10-12T08:25-04:00
+
+> **Queue prompt:** release + publish
+
+v0.35.492 is published:
+- **GitHub Release:** the Linux, Windows and macOS archives, the JetBrains plugins 0.2.547 and 262 0.2.548, and the VS Code extension 0.2.81.
+- **PyPI:** has 0.35.492.
+- **Local:** installed.
+
+It ships idle Clear typing `/clear`, the Codex Ctrl+C Clear fix, the infra.md queue-merge fix, GH #241, the thrashing fix, and navigation-lane phase 1. The first attempt stopped before tagging on the stale tmux test, so nothing broken was published. The Book workflow failed on the follow-up commit because GitHub could not fetch its Pages artifact. The separate mdBook Pages deploy for the same commit succeeded.
+
+Next batch: three branches are merged to `main` as `84f0605de2`. `make check` passed (10268 tests) and `make tmux-ci` passed, and it is installed. The first `make check` attempt failed only because GitHub returned a 504 on the pinned TLA jar download. I seeded the jar from another worktree after checking its SHA-256 matched, then reran `make check`.
+
+> **Queue prompt:** How can we optimize the agent-doc build process + test process to reduce the turnaround time?
+
+Measured and landed (`259a1af585`). `make check` went from about 919s to about 504s, and no check was dropped. The 504s included a full TLA run, which is now skipped when TLA inputs are unchanged. The speedups:
+- The controller-heavy test binaries now run concurrently instead of one after another: 329s down to about 153s.
+- TLA runs 8 checks in parallel, down from about 185s to about 90s. A content receipt skips it entirely when `formal/tla/`, the runner script and the JVM are unchanged.
+- All the Rust test steps share one build. One core-crate edit now recompiles 256 units instead of 479, and `sim-medium` dropped from 66s to about 5s.
+- Dev debug info is now line tables only. Incremental build CPU went from 733s to 429s, and `target/` shrank from 44G to 20G. `CARGO_PROFILE_DEV_DEBUG=2` brings back full debug info.
+- The JetBrains build now reuses the gradle build cache.
+
+Further options, not done:
+- running the gradle/node/lean/TLA steps alongside the Rust tests (opt-in, because the controller tests are load-sensitive);
+- splitting the 639-test `agent_doc_controller_io` binary;
+- trimming wall-clock waits in the slowest nextest tests.
+
+The turnaround work also found that `make check`'s clippy lints only the root crate. I filed that as `clippyworkspacegap`.
+
+> **Queue prompt:** tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.
+
+Fixed (`4ca45b5238`). `915c25bf…` was Claude Code's session id. Claude and Codex share one hook ledger whose rows didn't record which harness wrote them. After the switch, Codex adopted Claude's id and ran `codex resume` on it. Changes:
+- Each ledger row now records its harness.
+- A Codex resume id that has a Claude transcript starts a fresh Codex session instead. This also covers tools.md's frontmatter, which still carries that id.
+
+The wedge itself came from the existing stale-id recovery: its frontmatter clear stalled behind a compaction. That clear now gives up after 5s and relaunches anyway.
+
+The tools.md pane is still on Codex's error screen. Its supervisor should start a fresh Codex session once it restarts on the new binary. That supervisor also had a thread spinning at about 80% CPU, which I filed as `sessionactorspin`.
+
+> **Queue prompt:** do [#ridernavp2a]
+
+Done (`416c2dba1d`). The controller's pane layout is now kept per IDE navigation lane, with no behavior change. P2b, which turns on independent navigation behind the `editor_navigation` setting, is with a subagent now. P3–P5 stay queued behind it.
+
+Still in progress: the lazily.md Codex continuation fix, and `ridernavp2b`. The exchange is long (528+ lines); I'm leaving it alone while the queue is active.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -578,10 +623,10 @@ Done (`c2149c15f9`). Clear was stuck for about 2 minutes. Codex runs preflight a
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 How can we optimize the agent-doc build process + test process to reduce the turnaround time?
-- 🚧 tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.
+- ~~How can we optimize the agent-doc build process + test process to reduce the turnaround time?~~
+- ~~tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.~~
 - 🚧 release + publish
-- 🚧 do [#ridernavp2a]
+- ~~do [#ridernavp2a]~~
 - 🚧 do [#ridernavp2b]
 - 🚧 do [#ridernavp3]
 - 🚧 do [#ridernavp4]
@@ -619,12 +664,15 @@ for the existing controller state edge unless it explicitly reports `needs_opera
     [session-check] INTERRUPTED: cycle `cycle-1791805221920` is `committed` (commit_success), but the active harness s…
     + 2 lines (^t to expand)
 ```
+- do [#clippyworkspacegap]
+- do [#sessionactorspin]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#ridernavp2a] [agent-doc] IDE navigation lanes P2a (docs/plan-ide-independent-nav.md): move the single per-project pane-layout graph behind a per-lane map with no behavior change. Do this first: P2b, P3, P4 and P5 build on it in order.
+- [ ] [#clippyworkspacegap] [agent-doc] make check runs cargo clippy --all-targets --all-features without --workspace, and the workspace has no default-members, so it lints only the root agent-doc crate; the other 143 crates are linted only by check-fast and only when affected. Make the authoritative check lint the whole workspace and fix whatever it surfaces.
+- [ ] [#sessionactorspin] [agent-doc] The tools.md supervisor (pid 2155812, 2026-10-12) had its session-actor thread at about 80% CPU while the stale Codex resume-id frontmatter clear stalled behind a compaction. codexresumeid bounded the wait to 5s but did not stop the spin. Find and fix the busy loop, with a regression test.
 - [ ] 🚧 [#ridernavp2b] [agent-doc] IDE navigation lanes P2b (docs/plan-ide-independent-nav.md), after ridernavp2a: opt-in editor_navigation = shared or per_installation in .agent-doc/config.toml; per-lane layout sync routing, lane-aware layout check and target-window fallback, lane session creation on first sync, cross_lane_layout_dropped and owned_by_other_lane refusals, per-lane sync cancellation instead of the process-global cancel.
 - [ ] 🚧 [#ridernavp3] [agent-doc] IDE navigation lanes P3 (docs/plan-ide-independent-nav.md), after ridernavp2b: FFI agent_doc_tmux_focus_state_for_client_json; agent-doc terminal attaches to its lane session; JetBrains sends its client id with tmux_focus_state and TmuxPaneFocusSync ignores other-lane focus; plugin version bump by the coordinator.
 - [ ] 🚧 [#ridernavp4] [agent-doc] IDE navigation lanes P4 (docs/plan-ide-independent-nav.md), after ridernavp3: a document open in both IDEs stays in its owning lane; Claim for Tmux Pane or Sync Tmux Layout in the other IDE hands it over; SimWorld plus isolated-tmux handoff tests.

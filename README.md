@@ -122,7 +122,10 @@ pane started from an IDE lands in that IDE's lane too: **Run Agent Doc** arrange
 the requesting IDE's lane and starts a missing pane there, and the Claim actions
 pass the IDE's client id (`agent-doc claim --client-id <id>`; `agent-doc route` and
 `agent-doc start` accept the same flag). An existing pane is always used where it
-lives; only an explicit Claim or Sync Tmux Layout moves it. When a supervisor
+lives; only an explicit Claim or Sync Tmux Layout moves it. **Run Agent Doc** on a
+document whose pane lives in another IDE's lane runs it in that pane, leaves this
+IDE's tmux layout as it was, and shows a notice naming the lane the pane is in
+(`owned_by_other_lane`); use Claim for Tmux Pane to bring it over. When a supervisor
 that a layout pass left out restarts, each IDE's lane that left it out re-applies
 its own last layout in its own session; that re-arrangement never takes a pane
 from another IDE's lane.

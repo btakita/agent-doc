@@ -200,10 +200,25 @@ may republish the retained intent, but remains subject to the same rule.
   such a client merges over, publishes into, and awaits that client's own lane graph
   (`controller_editor_route_navigation_lane`), never the shared lane's, and skips the cross-root
   main-window delegation (an installation lane is this root's own session); the lane's layout
-  provisions the routed document's pane in the lane. The route stays a passive lane claim, so a
-  document whose pane lives in another lane is dropped from the requester's layout as before; the
-  Claim actions hand it over. Shared mode, a route without a client, an unscoped client, and a
-  multi-session document binding other than the pin keep the shared target byte for byte.
+  provisions the routed document's pane in the lane. The route stays a passive lane claim, so it
+  never moves a pane; the Claim actions hand one over.
+  **Contended route** (`#ridernavp6routecontended`): when the routed document's live pane (its
+  actor binding) lives in another lane of the project (another installation's lane session, or the
+  pin for an installation lane), `requester_route_layout` returns `DispatchInOtherLane` and the
+  controller publishes **no** layout: the requester's lane would strip the document from every
+  frame it projects (`cross_lane_layout_dropped`), so a layout wait on it could never see the
+  document. The route skips the layout publication and its wait entirely
+  (`controller_editor_route_owned_by_other_lane ... outcome=dispatched_in_other_lane
+  layout=unpublished`), dispatches into the existing pane where it lives (its single live owner:
+  no second harness, no pane move, no stash rescue across sessions), and reports where it is: the
+  result carries `owned_by_other_lane { pane, owner_lane, owner_session }` and its output ends with
+  the line `[agent-doc] owned_by_other_lane: <file> runs in pane <pane> of navigation lane <lane>
+  (tmux session <session>); ...`, which the JetBrains plugin shows as an information
+  notification. The requester's retained lane layout is untouched. A pane in the requester's own
+  lane, a pane in a session that is no lane of this project, and a document without a live pane
+  keep the publishing route. Shared mode, a route without a client, an unscoped client, and a
+  multi-session document binding other than the pin keep the shared target byte for byte; shared
+  mode reads no actor pane or tmux session for this decision.
 
 ## claim
 

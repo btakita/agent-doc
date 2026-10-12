@@ -614,6 +614,7 @@ object TerminalUtil {
                         finalError = routeAttemptError(exitCode, failureKind, output)
                     } else {
                         LOG.warn("[route] SUCCESS: $output")
+                        routeOwnedByOtherLaneNotice(output)?.let { notifyRunAgentDocOwnedByOtherLane(project, it) }
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
                         StateProjectionBridge.recordRouteDispatchProven(
                             documentPath,
@@ -2353,6 +2354,22 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             "The Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
     }
 
+    /** `#ridernavp6routecontended`: the agent-doc `route_owned_by_other_lane_notice` prefix. */
+    internal const val ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX = "[agent-doc] owned_by_other_lane:"
+
+    /**
+     * `#ridernavp6routecontended`: the notice a route appends when the document's pane lives in
+     * another IDE's navigation lane, so Run Agent Doc dispatched there and left this IDE's tmux
+     * layout unchanged. Null for every other route.
+     */
+    internal fun routeOwnedByOtherLaneNotice(output: String): String? =
+        output.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.startsWith(ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX) }
+            ?.removePrefix(ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+
     internal fun buildRunAgentDocQueuedMessage(relativePath: String): String {
         return "Agent Doc is queued behind the active owner for $relativePath.\n" +
             "It should run when that turn drains."
@@ -2602,6 +2619,17 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             notification.notify(project)
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
+        }
+    }
+
+    private fun notifyRunAgentDocOwnedByOtherLane(project: Project, notice: String) {
+        try {
+            NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(notificationHtml(notice), NotificationType.INFORMATION)
+                .notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $notice")
         }
     }
 

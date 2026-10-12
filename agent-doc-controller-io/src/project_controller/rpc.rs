@@ -10170,6 +10170,76 @@ struct ControllerEditorRoutePayload {
 struct ControllerEditorRouteResult {
     exit_code: i32,
     output: String,
+    /// `#ridernavp6routecontended`: set when the routed document's pane lives
+    /// in another navigation lane, so the route dispatched there and published
+    /// no layout. Omitted otherwise, so every other route's wire is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owned_by_other_lane: Option<EditorRouteOtherLanePane>,
+}
+
+/// The routed document's live pane in another navigation lane of this project
+/// (`#ridernavp6routecontended`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct EditorRouteOtherLanePane {
+    /// The document's pane (its actor binding).
+    pane: String,
+    /// The owning lane's label: `shared` or the installation component.
+    owner_lane: String,
+    /// The tmux session the pane lives in.
+    owner_session: String,
+    /// The project's configured tmux session the lanes derive from.
+    #[serde(skip)]
+    project_session: String,
+}
+
+/// `#ridernavp6routecontended`: where the routed document's pane lives when it
+/// is another navigation lane's, per [`agent_doc_editor_surface::requester_route_layout`].
+///
+/// `None` (publish the route's layout as before) in `shared` mode (no actor or
+/// tmux read at all), without a `tmux_session` pin, without a live actor pane,
+/// or when the pane is in the requester's own lane or a non-lane session.
+fn editor_route_other_lane_pane(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    routed_document: &Path,
+    pane_session: impl FnOnce(&str) -> Option<String>,
+) -> Option<EditorRouteOtherLanePane> {
+    let mode = runtime.editor_surface_graph.navigation_mode();
+    if mode != agent_doc_editor_surface::NavigationMode::PerInstallation {
+        return None;
+    }
+    let project_session = configured_tmux_session_for_project(&bootstrap.project_root)?;
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &bootstrap.project_root,
+        &routed_document.to_string_lossy(),
+    );
+    let pane = runtime
+        .actor_store_snapshot()
+        .get(&document_id)
+        .map(|record| record.pane_id.clone())
+        .filter(|pane| !pane.trim().is_empty())?;
+    let session = pane_session(&pane);
+    match agent_doc_editor_surface::requester_route_layout(
+        mode,
+        &project_session,
+        lane,
+        session.as_deref(),
+    ) {
+        agent_doc_editor_surface::RequesterRouteLayout::Publish => None,
+        agent_doc_editor_surface::RequesterRouteLayout::DispatchInOtherLane { owner_session } => {
+            Some(EditorRouteOtherLanePane {
+                pane,
+                owner_lane: agent_doc_editor_surface::lane_label_for_session(
+                    &project_session,
+                    &owner_session,
+                )
+                .to_string(),
+                owner_session,
+                project_session,
+            })
+        }
+    }
 }
 
 fn handle_crdt_current_text_rpc(
@@ -11359,35 +11429,68 @@ fn handle_editor_route_rpc_with_layout_delegate(
             ),
         );
     }
-    let (layout_receipt, layout_observations, _route_layout_lease) =
-        route_editor_layout_with_owner(
-            bootstrap,
-            runtime,
-            &route_lane,
-            &canonical,
-            &routed_document,
-            layout_invocation,
-            payload.layout_mode.as_deref(),
-            route_deadline,
-            live_tmux,
-            delegate_layout,
-        )?;
+    // `#ridernavp6routecontended`: a route is a passive lane claim, so the
+    // requester's lane drops a document whose pane lives in another lane from
+    // every frame it projects. Publishing would wait on a frame that can never
+    // show the document; dispatch into the pane where it lives instead (its
+    // single live owner: no second harness, no pane move) and say where it is.
+    let other_lane =
+        editor_route_other_lane_pane(bootstrap, runtime, &route_lane, &canonical, |pane| {
+            match live_tmux {
+                Some(tmux) => tmux.pane_session(pane).ok(),
+                None => agent_doc_tmux_io::configured_tmux().pane_session(pane).ok(),
+            }
+        });
+    let _route_layout_lease = match &other_lane {
+        Some(other) => {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_editor_route_owned_by_other_lane file={} navigation_lane={} owner_lane={} owner_session={} pane={} outcome=dispatched_in_other_lane layout=unpublished",
+                    canonical.display(),
+                    route_lane.label(),
+                    other.owner_lane,
+                    other.owner_session,
+                    other.pane,
+                ),
+            );
+            None
+        }
+        None => {
+            let (layout_receipt, layout_observations, route_layout_lease) =
+                route_editor_layout_with_owner(
+                    bootstrap,
+                    runtime,
+                    &route_lane,
+                    &canonical,
+                    &routed_document,
+                    layout_invocation,
+                    payload.layout_mode.as_deref(),
+                    route_deadline,
+                    live_tmux,
+                    delegate_layout,
+                )?;
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_editor_route_layout_converged file={} columns={} focus={} reason={} observations={} wait_for_ready_secs={} harness_ready_secs={}",
+                    canonical.display(),
+                    layout_receipt.columns.len(),
+                    layout_receipt.focus.as_deref().unwrap_or("none"),
+                    layout_receipt.reason,
+                    layout_observations,
+                    wait_secs,
+                    route_deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_secs(),
+                ),
+            );
+            route_layout_lease
+        }
+    };
     let harness_ready_secs = route_deadline
         .saturating_duration_since(Instant::now())
         .as_secs();
-    agent_doc_ops_log_io::log_op(
-        &canonical,
-        &format!(
-            "controller_editor_route_layout_converged file={} columns={} focus={} reason={} observations={} wait_for_ready_secs={} harness_ready_secs={}",
-            canonical.display(),
-            layout_receipt.columns.len(),
-            layout_receipt.focus.as_deref().unwrap_or("none"),
-            layout_receipt.reason,
-            layout_observations,
-            wait_secs,
-            harness_ready_secs,
-        ),
-    );
     // Preserve an initial observation for diagnostics, but do not make it the
     // final user-facing answer. The route can cross the pending safe boundary
     // and let this supervisor re-exec before it returns.
@@ -11439,6 +11542,17 @@ fn handle_editor_route_rpc_with_layout_delegate(
         ),
     );
     let mut output = result.output;
+    if let Some(other) = &other_lane {
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push_str(&agent_doc_editor_surface::route_owned_by_other_lane_notice(
+            &relative_path,
+            &other.pane,
+            &other.project_session,
+            &other.owner_session,
+        ));
+    }
     // GH #110 ask 5 (diagnostic half; see GH #109 for pane selection): the
     // occupant guard only proves the pane is alive and owned, not that its
     // route-owned supervisor runs the installed build. Re-observe after the
@@ -11482,6 +11596,7 @@ fn handle_editor_route_rpc_with_layout_delegate(
     Ok(ControllerEditorRouteResult {
         exit_code: result.exit_code,
         output,
+        owned_by_other_lane: other_lane,
     })
 }
 
@@ -35907,6 +36022,7 @@ mod tests {
         let result = ControllerEditorRouteResult {
             exit_code: 75,
             output: "\n[route] active closeout for a.md could not be drained before reroute; nothing was dispatched\nmore".to_string(),
+            owned_by_other_lane: None,
         };
         assert_eq!(
             editor_route_terminal_reason("editor_route", &result),
@@ -35915,6 +36031,7 @@ mod tests {
         let silent = ControllerEditorRouteResult {
             exit_code: 1,
             output: String::new(),
+            owned_by_other_lane: None,
         };
         assert_eq!(
             editor_route_terminal_reason("editor_route", &silent),
@@ -42222,6 +42339,341 @@ mod tests {
                     .is_none()
             );
         }
+    }
+
+    /// `#ridernavp6routecontended`: a project whose editors navigate their own
+    /// lanes, with `plan.md`'s actor bound to `%7` when `bound`.
+    fn contended_route_fixture(
+        config: &str,
+        bound: bool,
+    ) -> (
+        tempfile::TempDir,
+        ControllerBootstrap,
+        Arc<ControllerRuntime>,
+        PathBuf,
+    ) {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join(".agent-doc/config.toml"), config).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: plan\nagent: codex\n---\n# plan\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        let canonical = canonical_controller_request_file(&bootstrap, &file);
+        if bound {
+            let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+                &bootstrap.project_root,
+                &canonical.to_string_lossy(),
+            );
+            runtime.apply_actor_store_write(&agent_doc_controller::actor::ActorStoreWrite {
+                record: agent_doc_controller::actor::ActorRecord {
+                    document_id,
+                    session_id: "session-7".to_string(),
+                    generation: 3,
+                    pane_id: "%7".to_string(),
+                    window_id: "@1".to_string(),
+                    harness: "codex".to_string(),
+                    state: agent_doc_controller::actor::ActorState::Ready,
+                    last_transition: agent_doc_controller::actor::ActorLastTransition {
+                        caller: "test".to_string(),
+                        reason: "contended route".to_string(),
+                        timestamp: 1,
+                        prior_generation: 2,
+                        new_generation: 3,
+                    },
+                },
+                evicted_document_ids: Vec::new(),
+            });
+        }
+        (dir, bootstrap, runtime, canonical)
+    }
+
+    /// `#ridernavp6routecontended`: Run Agent Doc from Rider on a document
+    /// whose pane lives in IDEA's lane (or the shared session) resolves that
+    /// pane as another lane's, so the route dispatches there and publishes no
+    /// layout. A pane in Rider's own lane, a non-lane session, no live pane,
+    /// no pin, and `shared` mode keep the publishing route; `shared` mode
+    /// never reads the actor store's pane session.
+    #[test]
+    fn an_editor_route_resolves_a_pane_in_another_lane_as_dispatch_in_place() {
+        use agent_doc_editor_surface::NavigationLane;
+        let lanes = "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n";
+        let rider = NavigationLane::Installation("RD.9f8e7d6c".to_string());
+        let (_dir, bootstrap, runtime, canonical) = contended_route_fixture(lanes, true);
+        let resolve = |lane: &NavigationLane, session: Option<&str>| {
+            editor_route_other_lane_pane(&bootstrap, runtime.as_ref(), lane, &canonical, |pane| {
+                assert_eq!(pane, "%7", "the pane of the routed document's actor");
+                session.map(str::to_string)
+            })
+        };
+        assert_eq!(
+            resolve(&rider, Some("proj-IU-0a1b2c3d")),
+            Some(EditorRouteOtherLanePane {
+                pane: "%7".to_string(),
+                owner_lane: "IU-0a1b2c3d".to_string(),
+                owner_session: "proj-IU-0a1b2c3d".to_string(),
+                project_session: "proj".to_string(),
+            })
+        );
+        assert_eq!(
+            resolve(&rider, Some("proj")).map(|other| other.owner_lane),
+            Some("shared".to_string())
+        );
+        // VS Code (shared lane) on a pane in an installation lane.
+        assert_eq!(
+            resolve(&NavigationLane::Shared, Some("proj-IU-0a1b2c3d"))
+                .map(|other| other.owner_session),
+            Some("proj-IU-0a1b2c3d".to_string())
+        );
+        for session in [Some("proj-RD-9f8e7d6c"), Some("elsewhere"), None] {
+            assert_eq!(resolve(&rider, session), None, "{session:?}");
+        }
+
+        for (config, bound) in [
+            (lanes, false),
+            ("editor_navigation = \"per_installation\"\n", true),
+            ("tmux_session = \"proj\"\n", true),
+        ] {
+            let (_dir, bootstrap, runtime, canonical) = contended_route_fixture(config, bound);
+            assert_eq!(
+                editor_route_other_lane_pane(
+                    &bootstrap,
+                    runtime.as_ref(),
+                    &rider,
+                    &canonical,
+                    |_| panic!("{config:?} bound={bound}: no pane session to read")
+                ),
+                None
+            );
+        }
+    }
+
+    /// `#ridernavp6routecontended`: why the route must not publish for such a
+    /// document. A route is a passive lane claim, so the requester's lane
+    /// worker strips the routed document (and its focus) from the frame it
+    /// projects; no frame of that lane can ever show it, so a layout wait on
+    /// it has nothing to converge on.
+    #[test]
+    fn a_route_frame_for_another_lanes_document_is_stripped_by_the_lane() {
+        let root = Path::new("/project");
+        let mut desired = super::super::tests::pane_layout_desired_for_test(5);
+        desired.invocation.caller_kind = "editor_route".to_string();
+        desired.invocation.columns = vec!["/project/plan.md".to_string()];
+        desired.invocation.focus = Some("/project/plan.md".to_string());
+        let bindings = vec![ControllerTmuxActorBinding {
+            document_path: "/project/plan.md".to_string(),
+            session_id: String::new(),
+            pane_id: "%7".to_string(),
+            generation: 1,
+        }];
+        let rider_route = PaneLayoutLaneRoute {
+            sessions: Some(("proj".to_string(), "proj-RD-9f8e7d6c".to_string())),
+            window: Some("@42".to_string()),
+            provisioned: false,
+        };
+        let LaneRoutedLayout {
+            desired: routed,
+            dropped,
+            handoffs,
+        } = route_pane_layout_desired_to_lane(root, &rider_route, desired, &bindings, |pane| {
+            (pane == "%7").then(|| "proj-IU-0a1b2c3d".to_string())
+        });
+        assert!(routed.invocation.columns.is_empty());
+        assert_eq!(routed.invocation.focus, None);
+        assert!(handoffs.is_empty(), "a route never hands the pane over");
+        assert_eq!(
+            dropped,
+            vec![(
+                "/project/plan.md".to_string(),
+                "proj-IU-0a1b2c3d".to_string()
+            )]
+        );
+        assert_eq!(
+            agent_doc_editor_surface::requester_route_layout(
+                agent_doc_editor_surface::NavigationMode::PerInstallation,
+                "proj",
+                &agent_doc_editor_surface::NavigationLane::Installation("RD.9f8e7d6c".to_string()),
+                Some("proj-IU-0a1b2c3d"),
+            ),
+            agent_doc_editor_surface::RequesterRouteLayout::DispatchInOtherLane {
+                owner_session: "proj-IU-0a1b2c3d".to_string()
+            },
+            "the route decision agrees with the lane partition"
+        );
+    }
+
+    /// `#ridernavp6routecontended` end to end through the editor route handler
+    /// on an isolated tmux server: IDEA's lane holds `plan.md`'s pane; Rider's
+    /// Run Agent Doc dispatches (the test runtime's route effect) without
+    /// publishing into Rider's or the shared lane graph, so its layout wait
+    /// never runs; the pane stays in IDEA's lane, Rider's lane gains no pane,
+    /// and the route reports `owned_by_other_lane` with the owning lane. IDEA's
+    /// own route still publishes into IDEA's lane.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_session_route_from_another_lane_dispatches_in_place() {
+        use agent_doc_editor_surface::NavigationLane;
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("navlane-route-contended");
+        let lanes = "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n";
+        let (dir, bootstrap, runtime, canonical) = contended_route_fixture(lanes, false);
+        tmux.new_session("proj", dir.path()).unwrap();
+        let route_lane = |installation: &str| {
+            pane_layout_lane_route(
+                dir.path(),
+                agent_doc_editor_surface::NavigationMode::PerInstallation,
+                &NavigationLane::Installation(installation.to_string()),
+                &tmux,
+            )
+            .unwrap()
+        };
+        route_lane("IU.0a1b2c3d");
+        route_lane("RD.9f8e7d6c");
+        let idea_pane = tmux
+            .raw_cmd(&[
+                "split-window",
+                "-d",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-t",
+                "proj-IU-0a1b2c3d:agent-doc",
+            ])
+            .unwrap()
+            .trim()
+            .to_string();
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &canonical.to_string_lossy(),
+        );
+        runtime.apply_actor_store_write(&agent_doc_controller::actor::ActorStoreWrite {
+            record: agent_doc_controller::actor::ActorRecord {
+                document_id,
+                session_id: "session-idea".to_string(),
+                generation: 3,
+                pane_id: idea_pane.clone(),
+                window_id: String::new(),
+                harness: "codex".to_string(),
+                state: agent_doc_controller::actor::ActorState::Ready,
+                last_transition: agent_doc_controller::actor::ActorLastTransition {
+                    caller: "test".to_string(),
+                    reason: "contended route".to_string(),
+                    timestamp: 1,
+                    prior_generation: 2,
+                    new_generation: 3,
+                },
+            },
+            evicted_document_ids: Vec::new(),
+        });
+        let panes = |session: &str| {
+            tmux.raw_cmd(&["list-panes", "-s", "-t", session, "-F", "#{pane_id}"])
+                .unwrap()
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        let rider_panes_before = panes("proj-RD-9f8e7d6c");
+        let route = |client: &str| {
+            let payload = serde_json::json!({
+                "relative_path": "plan.md",
+                "layout_args": ["--col", canonical.display().to_string(), "--focus", canonical.display().to_string()],
+                "dispatch_only": true,
+                "plain_trigger": true,
+                "client_id": client,
+                "wait_for_ready_secs": 2,
+            });
+            let mut request = empty_controller_request("editor_route");
+            request.file = Some(canonical.clone());
+            request.diagnostic_payload = Some(payload.to_string());
+            let started = Instant::now();
+            let result = handle_editor_route_rpc_with_tmux(
+                &bootstrap,
+                runtime.as_ref(),
+                request,
+                Some(&tmux),
+            )
+            .unwrap();
+            (result, started.elapsed())
+        };
+
+        let rider = NavigationLane::Installation("RD.9f8e7d6c".to_string());
+        let (result, elapsed) = route("jetbrains@RD.9f8e7d6c-pid:42");
+        assert_eq!(result.exit_code, 0, "{}", result.output);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "no layout wait: {elapsed:?}"
+        );
+        let notice = result
+            .output
+            .lines()
+            .find(|line| {
+                line.starts_with(agent_doc_editor_surface::ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX)
+            })
+            .unwrap_or_else(|| panic!("owned_by_other_lane notice: {}", result.output));
+        assert!(
+            notice.contains(&format!("pane {idea_pane} of navigation lane IU-0a1b2c3d")),
+            "{notice}"
+        );
+        assert_eq!(
+            result
+                .owned_by_other_lane
+                .as_ref()
+                .map(|other| other.owner_session.as_str()),
+            Some("proj-IU-0a1b2c3d")
+        );
+        let wire = serde_json::to_value(&result).unwrap();
+        assert_eq!(wire["owned_by_other_lane"]["owner_lane"], "IU-0a1b2c3d");
+        assert!(wire["owned_by_other_lane"].get("project_session").is_none());
+        assert!(
+            runtime
+                .pane_layout_graph_for_lane(&rider)
+                .desired()
+                .is_none(),
+            "Rider's lane graph gets no frame it would have to strip"
+        );
+        assert!(
+            runtime.pane_layout_desired().is_none(),
+            "nor the shared lane"
+        );
+        assert_eq!(
+            tmux.pane_session(&idea_pane).unwrap(),
+            "proj-IU-0a1b2c3d",
+            "the pane is not moved"
+        );
+        assert_eq!(
+            panes("proj-RD-9f8e7d6c"),
+            rider_panes_before,
+            "no second pane"
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("controller_editor_route_owned_by_other_lane")
+                && ops.contains("owner_lane=IU-0a1b2c3d")
+                && ops.contains("outcome=dispatched_in_other_lane"),
+            "{ops}"
+        );
+
+        // IDEA routes its own lane's document: the publishing route, no notice.
+        let (result, _) = route("jetbrains@IU.0a1b2c3d-pid:41");
+        assert_eq!(result.exit_code, 0, "{}", result.output);
+        assert!(result.owned_by_other_lane.is_none());
+        assert!(
+            !result
+                .output
+                .contains(agent_doc_editor_surface::ROUTE_OWNED_BY_OTHER_LANE_NOTICE_PREFIX)
+        );
+        assert!(
+            runtime
+                .pane_layout_graph_for_lane(&NavigationLane::Installation(
+                    "IU.0a1b2c3d".to_string()
+                ))
+                .desired()
+                .is_some()
+        );
     }
 
     #[test]

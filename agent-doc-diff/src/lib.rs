@@ -348,7 +348,9 @@ pub fn archive_content_proves_exact_append(
             && delta.strip_prefix('\n') == Some(appended))
 }
 
-fn neutralize_proven_external_done_archive_drains(
+/// Rewrite `previous` so each proven external-done drain already shows the
+/// drained (empty) body `current` carries; every other byte is unchanged.
+pub fn neutralize_proven_external_done_archive_drains(
     previous: &str,
     current: &str,
     proven: &[ExternalDoneArchiveDrainCandidate],

@@ -70,7 +70,12 @@ fn resolve_external_done_archive_target(doc: &Path, archive_path: &str) -> Optio
     }
 }
 
-fn proven_external_done_archive_drains<S: DocumentBaselineStore + ?Sized>(
+/// Prove which external-done drains between `previous` and `current` were
+/// published as the exact complete append to their configured archive target,
+/// against the archive baseline `snapshots` resolves. Shared by the
+/// prompt-bearing diff and session-check's active-session drift guard
+/// (`#stopreopenflake`) so both classify the same projection the same way.
+pub fn proven_external_done_archive_drains<S: DocumentBaselineStore + ?Sized>(
     snapshots: &S,
     doc: &Path,
     previous: &str,

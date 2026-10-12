@@ -1056,7 +1056,44 @@ fn read_stdin_payload() -> Result<String> {
     Ok(payload)
 }
 
+thread_local! {
+    static CODEX_SESSION_ID_OVERRIDE: std::cell::RefCell<Option<Option<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Restores the previous thread-scoped Codex session id on drop.
+#[doc(hidden)]
+pub struct CodexSessionIdOverrideGuard(Option<Option<String>>);
+
+impl Drop for CodexSessionIdOverrideGuard {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        CODEX_SESSION_ID_OVERRIDE.with(|cell| *cell.borrow_mut() = previous);
+    }
+}
+
+/// Test seam (`#stopreopenflake`): pin the active Codex session id that
+/// [`current_session_id`] reports, for the CURRENT THREAD only. `None` pins
+/// "no active Codex session" regardless of the process environment.
+///
+/// `CODEX_THREAD_ID` is process-global: a test that sets it (even under a
+/// lock) is observed by every unlocked test running in parallel, and a test
+/// run from inside a Codex pane inherits the operator's real thread id. Either
+/// way an unrelated test's active-session drift classification flips. Tests
+/// must pin the session id here instead of mutating the environment.
+#[doc(hidden)]
+pub fn override_codex_session_id_for_current_thread(
+    session_id: Option<&str>,
+) -> CodexSessionIdOverrideGuard {
+    let previous =
+        CODEX_SESSION_ID_OVERRIDE.with(|cell| cell.replace(Some(session_id.map(str::to_string))));
+    CodexSessionIdOverrideGuard(previous)
+}
+
 pub fn current_session_id() -> Option<String> {
+    if let Some(pinned) = CODEX_SESSION_ID_OVERRIDE.with(|cell| cell.borrow().clone()) {
+        return pinned;
+    }
     std::env::var("CODEX_THREAD_ID")
         .ok()
         .filter(|value| !value.trim().is_empty())

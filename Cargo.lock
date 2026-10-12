@@ -2180,6 +2180,7 @@ dependencies = [
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-diff",
+ "agent-doc-diff-io",
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",

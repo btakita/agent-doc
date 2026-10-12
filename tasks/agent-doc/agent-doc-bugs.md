@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -1002,7 +1003,7 @@ under the terminal cycle
 It merges in the next batch.
 
 **Batch 15** (GH #243, plugins 0.2.559 / 0.2.560) is in `make check` / `make tmux-ci`. `reaperciflake`, the CI-only red test on `main`, is still in progress. The v0.35.494 GitHub Release is still building, and PyPI publishes after it.
-❯ 🚧 Run Agent Doc on frontend.md issue:
+❯ Run Agent Doc on frontend.md issue:
 ```
 › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
 
@@ -1173,6 +1174,33 @@ Done (`bf2d46c439`). The two-IDE navigation model used to replay all 3.2M event 
 > **Queue prompt:** do [#controllerforkimage]
 
 Done (`366416c1ba`). This was a real production bug. A Rust-spawned child shows the controller's exact command line until it execs. Because of that, the duplicate-controller reaper sent SIGTERM to the live controller's own spawn child, and the orphan sweep treated that child as an orphan. Every site that counts or targets processes now treats an un-execed fork image as its parent. The removed-root reaper and `controller restart` still include fork images, because their job is to leave nothing running.
+
+### Re: v0.35.495 release, README cleanup — opus-5-5 · 2026-10-12T20:50-04:00
+
+> **Queue prompt:** #release
+
+**Deferred:** `make release` for v0.35.495 is running on the release tree (`038ea3c9ec`, on top of `main` `b53dc250a2`). It reruns `make check` and `make tmux-ci` and tags only if both pass. It contains batches 14–17:
+- the frontend.md liveness-channel fix;
+- GH #243 and GH #244;
+- the contended-lane route;
+- the Codex Stop no-op;
+- the claimed-head drain warning;
+- the controller fork-image fixes;
+- the faster SimWorld model.
+
+JetBrains plugins are 0.2.561 and 0.2.562. I'll confirm the GitHub Release and PyPI before closing this.
+
+> **Queue prompt:** do [#cleanreadmeconcise]
+
+**Deferred:** a subagent is working on this on branch `readmecleanup`. The new README will cover, in order:
+- what agent-doc is and why;
+- a short "how it works";
+- supported editors (JetBrains, VS Code, Zed, or none) and harnesses (Claude Code, Codex, Grok Build, OpenCode);
+- quick install and a first session.
+
+Long reference sections move into SPEC.md, specs/ or docs/, with links. Every support claim is checked against the code before it goes in. If something on your list isn't actually supported in the repo (Zed is the one I'm least sure of), the subagent will flag it rather than claim it.
+
+The earlier admission refusal this turn was a transient: the document changed while the merge was being computed. This cycle was admitted normally.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -1180,12 +1208,15 @@ Done (`366416c1ba`). This was a real production bug. A Rust-spawned child shows 
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#cleanreadmeconcise]
+- 🚧 #release
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] 🚧 [#cleanreadmeconcise] Clean up the README.md to be more concise and appealing to humans. Explain that it works with JetBrains + VSCode + Zed + direct with Claude Code + Codex + Grok Build + OpenCode.
 <!-- /agent:backlog -->
 
 ## Review

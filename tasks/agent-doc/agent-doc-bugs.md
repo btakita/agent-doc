@@ -402,6 +402,29 @@ For reference, today's `make check` dropped from about 290s to 136s for the test
 Since that's the same clear-delivery code the `#idleclearrestart` change is rewriting, I gave it to that subagent (claim `subagent:idleclear`) rather than starting a conflicting branch. The fix: "satisfied" must require real proof (a delivered `/clear` receipt or a fresh harness session). A run started after the press either keeps the clear queued or drops it with the "not sent" notice, never silently. It will be covered by a regression test for this exact sequence.
 
 **Now:** the clear didn't happen. Press Clear Session Context again once this sdk.md turn ends, or type `/clear` yourself at the idle prompt.
+
+### Re: GH #241 and #ideriderindependentnav dispatched — opus-5.5 · 2026-10-12T05:25-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/241
+
+**Deferred:** this went to a background subagent (claim `subagent:gh241`, branch `gh241`). The issue: in Remote Dev, when one of two editors for an open document is removed, the IDE fires `fileClosed`. The plugin's close handler then deregistered the document's only CRDT replica while the file stayed open, and nothing re-registered it for 4h48m, so a committed response never reached the editor buffer.
+
+The fix will do two things:
+- Deregister only when no editor for that file remains open in any client.
+- Have an "editor open, no live replica" state trigger re-registration, so a missed deregister heals itself.
+
+It will add Kotlin and SimWorld regression tests and bump the plugin versions. Following `#gh-fix` ("fix then close"), I'll close the issue with its drafted comment once the fix is integrated on main.
+
+> **Queue prompt:** do [#ideriderindependentnav]
+
+**Deferred:** this went to a background subagent (claim `subagent:ridernav`, branch `ridernav`). The goal is fully independent navigation per JetBrains installation, with one tmux window per IDE:
+- The installation identity becomes part of the layout-ownership key.
+- Focus mirroring goes only to the IDE that owns the window.
+- `tmux_focus_state` and pane ownership are split per window.
+
+It's estimated at several days, so the subagent first writes a phase plan. Then it lands as many independently verified phases as it can, each with `make check` passing, keeping the current focused-IDE behavior as the one-IDE fallback. I'll file the remaining phases as separate backlog ids.
+
+Still running: `#idleclearrestart` (with the sdk.md false-"satisfied" clear) and the build/test turnaround work. The exchange is large (371 lines); I'll compact only if you ask.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -411,8 +434,10 @@ Since that's the same clear-delivery code the `#idleclearrestart` change is rewr
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#idleclearrestart]: Yes, Idle clear should type `/clear`.
-- How can we optimize the agent-doc build process + test process to reduce the turnaround time?
-- sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
+- 🚧 How can we optimize the agent-doc build process + test process to reduce the turnaround time?
+- 🚧 sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
+- #gh-fix https://github.com/btakita/agent-doc/issues/241
+- do [#ideriderindependentnav]
 <!-- /agent:queue -->
 
 ## Backlog

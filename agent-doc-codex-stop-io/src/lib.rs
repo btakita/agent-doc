@@ -3706,7 +3706,23 @@ mod tests {
                 &dir.path().join("codex-home"),
             ),
         );
+        // `#stopreopenflake`: hermetic active Codex session. The session id is
+        // read from process-global `CODEX_THREAD_ID`; a parallel test binding
+        // it (or a run launched from a Codex pane) made an unrelated Stop see an
+        // active session and reclassify post-commit drift. Pin "no session" on
+        // this thread; tests that need one bind it with
+        // `codex_session_bound_to_this_thread`, never `std::env::set_var`.
+        std::mem::forget(
+            agent_doc_codex_hook_io::override_codex_session_id_for_current_thread(None),
+        );
         dir
+    }
+
+    /// Bind the active Codex session (`codex-session`, the id `track_doc`
+    /// records) for the current test thread only (`#stopreopenflake`).
+    fn codex_session_bound_to_this_thread() -> agent_doc_codex_hook_io::CodexSessionIdOverrideGuard
+    {
+        agent_doc_codex_hook_io::override_codex_session_id_for_current_thread(Some("codex-session"))
     }
 
     fn write_codex_mcp_config(root: &Path) {
@@ -5589,9 +5605,7 @@ Done.\n\
         fs::write(&doc, &drifted).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
-        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
-        let prev = std::env::var("CODEX_THREAD_ID").ok();
-        unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
+        let _session = codex_session_bound_to_this_thread();
 
         match agent_doc_session_check_io::inspect(
             &doc,
@@ -5614,12 +5628,6 @@ Done.\n\
             stop_hook_active: false,
         })
         .unwrap();
-
-        if let Some(value) = prev {
-            unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
-        } else {
-            unsafe { std::env::remove_var("CODEX_THREAD_ID") };
-        }
 
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();
@@ -5716,6 +5724,23 @@ Done.\n\
         fs::write(&archive, format!("{archive_before}{removed_body}")).unwrap();
         fs::write(&doc, &archived).unwrap();
 
+        // `#stopreopenflake`: a real Codex Stop hook runs with the tracked
+        // session bound (`CODEX_THREAD_ID`). This test used to read that
+        // process-global ambiently, so it passed alone (no session) and failed
+        // whenever a parallel test had bound one. Bind it explicitly: the
+        // proven archive drain must stay neutral to the active-session
+        // post-commit drift guard as well as to the prompt-bearing diff.
+        let _session = codex_session_bound_to_this_thread();
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {}
+            other => panic!("a proven done-archive drain is not post-commit drift: {other:?}"),
+        }
+
         let response = apply_stop(&StopInput {
             session_id: "codex-session".to_string(),
             turn_id: "turn-1".to_string(),
@@ -5805,9 +5830,7 @@ Done.\n\
         );
         fs::write(&doc, &revised).unwrap();
 
-        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
-        let previous_thread_id = std::env::var("CODEX_THREAD_ID").ok();
-        unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
+        let _session = codex_session_bound_to_this_thread();
 
         let response = apply_stop(&StopInput {
             session_id: "codex-session".to_string(),
@@ -5819,12 +5842,6 @@ Done.\n\
             stop_hook_active: false,
         })
         .unwrap();
-
-        if let Some(value) = previous_thread_id {
-            unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
-        } else {
-            unsafe { std::env::remove_var("CODEX_THREAD_ID") };
-        }
 
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();
@@ -5936,9 +5953,7 @@ Done.\n\
         })
         .unwrap();
 
-        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
-        let prev = std::env::var("CODEX_THREAD_ID").ok();
-        unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
+        let _session = codex_session_bound_to_this_thread();
 
         match agent_doc_session_check_io::inspect(
             &doc,
@@ -5962,12 +5977,6 @@ Done.\n\
             stop_hook_active: false,
         })
         .unwrap();
-
-        if let Some(value) = prev {
-            unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
-        } else {
-            unsafe { std::env::remove_var("CODEX_THREAD_ID") };
-        }
 
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();

@@ -275,7 +275,23 @@ fn detect_active_session_post_commit_drift_inner(
     };
     let current =
         crate::resolve_current_document_content(file, "active_session_post_commit_drift")?;
-    let comparison = BaselineComparison::new(&snapshot, &current);
+    // `#donearchive-stop-race` / `#stopreopenflake`: an `agent:done
+    // archive=...` body proven published as the exact append to its archive
+    // is binary-owned staging, not harness drift. Classify against a baseline
+    // that already shows the drained body, exactly as the prompt-bearing diff
+    // does; unproven clears, revisions, and marker edits still differ below.
+    let proven_archive_drains = agent_doc_diff_io::proven_external_done_archive_drains(
+        &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
+        file,
+        &snapshot,
+        &current,
+    );
+    let drift_baseline = agent_doc_diff::neutralize_proven_external_done_archive_drains(
+        &snapshot,
+        &current,
+        &proven_archive_drains,
+    );
+    let comparison = BaselineComparison::new(&drift_baseline, &current);
     if comparison.is_equal() {
         return Ok(None);
     }
@@ -286,14 +302,15 @@ fn detect_active_session_post_commit_drift_inner(
     let steering = crate::realtime_steering_set_since_turn_baseline(file)?;
     let prompt_marker = steering.marker();
     if prompt_marker.is_none()
-        && active_session_drift_is_only_exchange_or_backlog_metadata(&snapshot, &current)
+        && active_session_drift_is_only_exchange_or_backlog_metadata(&drift_baseline, &current)
     {
         return Ok(None);
     }
-    if prompt_marker.is_none() && promptless_comment_only_drift(&snapshot, &current) {
+    if prompt_marker.is_none() && promptless_comment_only_drift(&drift_baseline, &current) {
         return Ok(None);
     }
-    if prompt_marker.is_none() && exchange_only_promptless_content_drift(&snapshot, &current) {
+    if prompt_marker.is_none() && exchange_only_promptless_content_drift(&drift_baseline, &current)
+    {
         return Ok(None);
     }
     let prompt_preview = session

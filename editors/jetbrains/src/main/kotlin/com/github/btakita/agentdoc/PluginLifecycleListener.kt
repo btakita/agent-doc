@@ -110,6 +110,12 @@ class PluginLifecycleListener : ProjectManagerListener {
                     override fun selectionChanged(event: FileEditorManagerEvent) {
                         val file = event.newFile ?: return
                         if (file.name.endsWith(".md")) {
+                            // GH #241 self-heal: selecting an open document whose
+                            // replica went missing without a transport loss (a
+                            // removed duplicate editor on an older plugin, a lost
+                            // registration) re-attaches it from this editor event.
+                            // A no-op while the replica is attached.
+                            CrdtReplicaManager.ensureOpenDocumentReplica(project, file.path, "selection")
                             CrdtReplicaManager.requestRemoteDrain(project, file.path, "selection")
                         }
                     }
@@ -128,7 +134,8 @@ class PluginLifecycleListener : ProjectManagerListener {
                     }
 
                     override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
-                        TypingTracker.clearOpenDocumentReport(file)
+                        // GH #241: a removed duplicate editor is not a document close.
+                        TypingTracker.onEditorClosed(project, source, file)
                     }
                 },
             )

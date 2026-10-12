@@ -151,6 +151,23 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
     }
 
     override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+        // GH #241: `fileClosed` also fires when a duplicate editor is removed while the
+        // file stays open (locally or in a Remote Dev client). Publishing this editor's
+        // liveness `Close` then would tell the plane the document is no longer open.
+        if (!file.name.endsWith(".md")) {
+            publishClose(file)
+            return
+        }
+        DocumentCloseDecision.route(
+            consumer = "reliable-sync-liveness",
+            project = project,
+            source = source,
+            file = file,
+            onRelease = { publishClose(file) },
+        )
+    }
+
+    private fun publishClose(file: VirtualFile) {
         val fallbackRoot = project.basePath ?: return
         val filePath = file.path
         ApplicationManager.getApplication().executeOnPooledThread {

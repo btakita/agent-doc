@@ -162,6 +162,10 @@ existing rows are never rewritten.
 in `.agent-doc/state.db`; session logs and `ops.log` are append-only diagnostics.
 Normal route, start, sync, clear, restart, and queue-dispatch paths must not treat logs as write
 authorities once the controller record exists.
+- Each `ops.log` and `cycles.jsonl` record is assembled with its terminating
+  newline before it is submitted to the append descriptor. The writer uses one
+  `write_all` call per logical record so concurrent process or thread writers
+  cannot interleave another record between the body and its newline.
 - The pure route-owned lifecycle policy distinguishes a dispatching new session,
   a provision-only editor-layout session, and supervisor reentry. Effective queue
   control blocks only the dispatching new-session transition. Route provisioning

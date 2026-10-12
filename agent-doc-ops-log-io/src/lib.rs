@@ -259,6 +259,18 @@ fn logs_dir(project_root: &Path) -> PathBuf {
     project_root.join(".agent-doc/logs")
 }
 
+/// Append one complete newline-terminated record through a single `write` call.
+///
+/// `writeln!` may write the record body and its newline separately. With multiple
+/// `O_APPEND` descriptors, another writer can then land between those writes and
+/// merge two logical records onto one line.
+fn write_append_record(writer: &mut impl Write, record: &str) -> std::io::Result<()> {
+    let mut bytes = Vec::with_capacity(record.len() + 1);
+    bytes.extend_from_slice(record.as_bytes());
+    bytes.push(b'\n');
+    writer.write_all(&bytes)
+}
+
 fn rotate_completed_cycle_logs(project_root: &Path, session_id: Option<&str>, max_bytes: u64) {
     let logs_dir = logs_dir(project_root);
     let _ = rotate_log_if_oversized(&logs_dir.join("ops.log"), max_bytes);
@@ -291,7 +303,7 @@ pub fn append_ops_log_at_project(
         message,
         &suffix,
     );
-    writeln!(f, "{line}").ok()
+    write_append_record(&mut f, &line).ok()
 }
 
 fn git_head_hash(file: &Path) -> Option<String> {
@@ -335,7 +347,7 @@ pub fn append_cycle_entry_at_project(project_root: &Path, entry: &CycleEntry) ->
         .append(true)
         .open(&log_path)
         .ok()?;
-    writeln!(f, "{json}").ok()?;
+    write_append_record(&mut f, &json).ok()?;
     drop(f);
 
     // A cycle entry is appended only after the operation reached its durable
@@ -505,6 +517,31 @@ pub fn latest_unclosed_write_completed_commit_missing(file: &Path) -> Result<Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct RecordingWriter {
+        writes: Vec<Vec<u8>>,
+    }
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.writes.push(buf.to_vec());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn append_record_writes_body_and_newline_together() {
+        let mut writer = RecordingWriter::default();
+
+        write_append_record(&mut writer, "first record").unwrap();
+
+        assert_eq!(writer.writes, vec![b"first record\n".to_vec()]);
+    }
 
     fn make_project(root: &Path) -> PathBuf {
         std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();

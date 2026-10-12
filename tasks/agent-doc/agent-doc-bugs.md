@@ -56,7 +56,7 @@ No new actionable backlog or queue items came out of this. The two remaining rev
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #actionable-review
+- #gh-fix https://github.com/btakita/agent-doc/issues/245
 <!-- /agent:queue -->
 
 ## Backlog

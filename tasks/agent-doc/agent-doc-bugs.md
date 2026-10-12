@@ -931,6 +931,20 @@ Done (`d3579c82f5`).
   - A cleanup queued under one mode could run after a restart into another mode. A mode guard now blocks that. SimWorld found this case.
 
 Next: `ridernavp6routecontended`, which defines what Run Agent Doc does for a document whose pane is in another IDE's lane, is unblocked and goes to a subagent now. `claimeddrainwarn` goes too. `#release` (v0.35.494) waits for `queuedclearflake` so it doesn't ship over a flaky tmux test.
+
+### Re: GH #243 follow-up comment — opus-5-5 · 2026-10-12T16:40-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/243#issuecomment-6129952007
+
+**Deferred:** this went to the same subagent that is fixing GH #243 (branch `gh243`), and the item is claimed under it.
+
+The comment shows the same bug from the other side. After you re-attached to session `0`, the `start --force` pane `%4` stayed the owner, the route target and the queue-claim holder, even though it sits in detached session `1`. The pane you can see, `%2`, is still alive, and its writes are refused because `%4` owns the document.
+
+The fix now has to cover both cases:
+- `start --force` retires the agent-doc pane it bypassed, so one document never has two live panes.
+- Ownership and routing no longer stay on a pane in an unattached session while the same document has a pane in the attached session.
+
+**v0.35.494** is in `make release`.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -944,6 +958,7 @@ Next: `ridernavp6routecontended`, which defines what Run Agent Doc does for a do
 - ~~do [#ridernavp6gc]~~
 - 🚧 do [#ridernavp6routecontended]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243
+- #gh-fix https://github.com/btakita/agent-doc/issues/243#issuecomment-6129952007
 - 🚧 do [#claimeddrainwarn]
 - 🚧 #release
 <!-- /agent:queue -->

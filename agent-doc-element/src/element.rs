@@ -15,6 +15,8 @@
 //!   agent open/close marker vs. an ordinary HTML comment.
 //! - Component names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`; invalid names, unmatched opens,
 //!   unmatched closes, and mismatched open/close pairs all return `Err`.
+//! - `Unclosed` and `Mismatched` errors carry the 1-based line of the offending opening (and
+//!   closing) marker, so a refusal names the exact line to fix (`#inlinecodemarker`).
 //! - `boundary:*` prefixed markers (`<!-- agent:boundary:ID -->`) are recognised and skipped
 //!   during component parsing; they are not treated as component open tags.
 //! - Opening markers may carry space-separated `key=value` inline attributes
@@ -214,12 +216,20 @@ pub enum ComponentParseError {
     Mismatched {
         open_name: String,
         close_name: String,
+        /// 1-based line of the opening marker the close failed to match.
+        open_line: usize,
+        /// 1-based line of the mismatched closing marker.
+        close_line: usize,
     },
     UnmatchedClose {
         name: String,
     },
     Unclosed {
         name: String,
+        /// 1-based line of the opening marker left without a close, so a
+        /// refusal names the exact line an operator (or a requote repair) must
+        /// fix — e.g. marker-shaped prose whose closing backtick was lost.
+        line: usize,
     },
 }
 
@@ -230,17 +240,19 @@ impl fmt::Display for ComponentParseError {
             Self::Mismatched {
                 open_name,
                 close_name,
+                open_line,
+                close_line,
             } => write!(
                 f,
-                "mismatched component: opened '{open_name}' but closed '{close_name}'"
+                "mismatched component: opened '{open_name}' but closed '{close_name}' (opening marker at line {open_line}, closing marker at line {close_line})"
             ),
             Self::UnmatchedClose { name } => write!(
                 f,
                 "closing marker for component '{name}' without matching open marker"
             ),
-            Self::Unclosed { name } => write!(
+            Self::Unclosed { name, line } => write!(
                 f,
-                "unclosed component: <!-- agent:{name} --> without matching close"
+                "unclosed component: <!-- agent:{name} --> without matching close (opening marker at line {line})"
             ),
         }
     }
@@ -1044,9 +1056,7 @@ pub fn find_markdown_literal_ranges(doc: &str) -> Vec<(usize, usize)> {
             Event::Code(_) | Event::Html(_) | Event::InlineHtml(_) => {
                 Some((range.start, range.end))
             }
-            Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) => {
-                Some((range.start, range.end))
-            }
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) => Some((range.start, range.end)),
             Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_)))
                 if fenced_code_block_is_balanced(&doc[range.clone()]) =>
             {
@@ -1102,7 +1112,12 @@ pub fn find_line_local_code_spans(doc: &str) -> Vec<(usize, usize)> {
         if !raw_line.contains('`') {
             continue;
         }
-        let run_len = |at: usize| bytes[at..line_end].iter().take_while(|b| **b == b'`').count();
+        let run_len = |at: usize| {
+            bytes[at..line_end]
+                .iter()
+                .take_while(|b| **b == b'`')
+                .count()
+        };
         let mut i = line_start;
         while i < line_end {
             if bytes[i] != b'`' {
@@ -1303,6 +1318,11 @@ pub fn find_non_agent_html_comment_ranges(doc: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
+/// 1-based line number of byte `offset` (only computed on the error path).
+fn line_number_at(bytes: &[u8], offset: usize) -> usize {
+    bytes[..offset].iter().filter(|b| **b == b'\n').count() + 1
+}
+
 /// Parse all components from a document.
 ///
 /// Uses a stack for nesting. Returns components sorted by `open_start`.
@@ -1388,6 +1408,8 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
                         return Err(ComponentParseError::Mismatched {
                             open_name,
                             close_name: name.to_string(),
+                            open_line: line_number_at(bytes, open_start),
+                            close_line: line_number_at(bytes, marker_start),
                         }
                         .into());
                     }
@@ -1430,8 +1452,12 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
         pos = close;
     }
 
-    if let Some((name, _, _, _)) = stack.last() {
-        return Err(ComponentParseError::Unclosed { name: name.clone() }.into());
+    if let Some((name, _, open_start, _)) = stack.last() {
+        return Err(ComponentParseError::Unclosed {
+            name: name.clone(),
+            line: line_number_at(bytes, *open_start),
+        }
+        .into());
     }
 
     templates.sort_by_key(|t| t.open_start);
@@ -3611,8 +3637,12 @@ Fix applied to skip non-agent <!-- sequences.
         // Replacing rather than appending keeps operator-visible attribute order
         // stable across repeated edits.
         assert_eq!(
-            set_open_marker_attr("<!-- agent:backlog queue=append priority -->", "queue", Some("sync"))
-                .unwrap(),
+            set_open_marker_attr(
+                "<!-- agent:backlog queue=append priority -->",
+                "queue",
+                Some("sync")
+            )
+            .unwrap(),
             "<!-- agent:backlog queue=sync priority -->"
         );
     }
@@ -3691,8 +3721,8 @@ Fix applied to skip non-agent <!-- sequences.
             .into_iter()
             .find(|c| is_backlog_component(&c.name))
             .unwrap();
-        let marker = set_open_marker_attr(&doc[comp.open_start..comp.open_end], "queue", None)
-            .unwrap();
+        let marker =
+            set_open_marker_attr(&doc[comp.open_start..comp.open_end], "queue", None).unwrap();
         let updated = format!("{}{}", marker, &doc[comp.open_end..]);
         let reparsed = parse(&updated)
             .unwrap()
@@ -4009,8 +4039,10 @@ Fix applied to skip non-agent <!-- sequences.
                 );
                 let components = parse(&doc).expect("prose marker must not unbalance the parse");
                 assert!(
-                    components.iter().all(|c| doc[c.close_start..].starts_with("<!-- /agent:")
-                        && doc[..c.close_start].ends_with('\n')),
+                    components
+                        .iter()
+                        .all(|c| doc[c.close_start..].starts_with("<!-- /agent:")
+                            && doc[..c.close_start].ends_with('\n')),
                     "only the real, standalone close markers may be parsed: {doc}"
                 );
                 assert!(
@@ -4062,6 +4094,120 @@ Fix applied to skip non-agent <!-- sequences.
                 .map(|occurrence| (occurrence.line, occurrence.line_anchored))
                 .collect::<Vec<_>>(),
             vec![(1, true), (3, false)],
+        );
+    }
+
+    // --- #inlinecodemarker: marker-shaped prose quoted in a response ---
+
+    /// The exact line a coordinator response wrote into the operator's
+    /// session document (2026-10-12): an opening `agent:queue` marker quoted
+    /// inside an inline code span inside bold text, in the exchange ABOVE the
+    /// document's real `agent:queue`.
+    const INLINE_CODE_QUEUE_PROSE_LINE: &str = "- **`<!-- agent:queue disable-auto-clear ... -->`** turns it off, and preflight reports the setting.\n";
+
+    fn inline_code_marker_session_doc(prose: &str) -> String {
+        format!(
+            "<!-- agent:status -->\nok\n<!-- /agent:status -->\n\
+<!-- agent:exchange -->\n### Re: auto-clear default\n\n\
+> **Chat prompt (#chatprompt):** auto-clear should on by default and disabled with a queue element attribute. disable-auto-clear perhaps?\n\n\
+Agreed:\n- **On by default for an active queue.**\n{prose}\
+- **The instructions get corrected to match.**\n\
+<!-- /agent:exchange -->\n\
+<!-- agent:queue subagents preset=\"#spec-test-build-install-commit-push\" priority go -->\n\
+- do [#bgclearpolicy]\n\
+<!-- /agent:queue -->\n"
+        )
+    }
+
+    fn assert_only_real_queue(doc: &str) {
+        assert_eq!(structural_corruption_reason(doc), None, "{doc}");
+        let components = parse(doc).expect("quoted marker prose must not unbalance the parse");
+        let queues: Vec<&Component> = components.iter().filter(|c| c.name == "queue").collect();
+        assert_eq!(queues.len(), 1, "exactly the real queue parses: {doc}");
+        assert_eq!(
+            queues[0].attrs.get("preset").map(String::as_str),
+            Some("#spec-test-build-install-commit-push"),
+            "the parsed queue is the real one, not the quoted `disable-auto-clear` prose"
+        );
+        assert!(!queues[0].attrs.contains_key("disable-auto-clear"));
+        assert_eq!(queues[0].content(doc), "- do [#bgclearpolicy]\n");
+        assert!(
+            structural_marker_occurrences(doc)
+                .iter()
+                .all(|occurrence| occurrence.line_anchored),
+            "the quoted marker is prose, not structure: {doc}"
+        );
+    }
+
+    #[test]
+    fn inlinecodemarker_session_doc_inline_code_marker_is_prose() {
+        assert_only_real_queue(&inline_code_marker_session_doc(
+            INLINE_CODE_QUEUE_PROSE_LINE,
+        ));
+    }
+
+    #[test]
+    fn inlinecodemarker_every_backtick_run_length_masks_the_marker() {
+        for prose in [
+            "- `<!-- agent:queue disable-auto-clear -->` off.\n",
+            "- ``<!-- agent:queue disable-auto-clear -->`` off.\n",
+            "- ``` <!-- agent:queue disable-auto-clear --> ``` off.\n",
+            "- `` `<!-- agent:queue disable-auto-clear -->` `` off.\n",
+            "> - **`<!-- agent:queue disable-auto-clear ... -->`** quoted.\n",
+            "<details>\n- **`<!-- agent:queue disable-auto-clear ... -->`** html block.\n</details>\n\n",
+            "- a `x` b **`<!-- agent:queue disable-auto-clear -->`** two spans.\n",
+            // A CommonMark code span may cross a soft line break.
+            "- `<!-- agent:queue\n  disable-auto-clear -->` wrapped span.\n",
+        ] {
+            assert_only_real_queue(&inline_code_marker_session_doc(prose));
+        }
+    }
+
+    #[test]
+    fn inlinecodemarker_fenced_marker_is_prose() {
+        for fence in ["```", "~~~", "````"] {
+            let prose = format!(
+                "{fence}markdown\n<!-- agent:queue disable-auto-clear ... -->\n{INLINE_CODE_QUEUE_PROSE_LINE}{fence}\n"
+            );
+            assert_only_real_queue(&inline_code_marker_session_doc(&prose));
+        }
+    }
+
+    #[test]
+    fn inlinecodemarker_unquoted_marker_fails_closed_naming_its_line() {
+        // The closing backtick lost (or never written): the marker is live
+        // structure, the document is unparseable, and the refusal must name
+        // the line that has to change rather than only the component name.
+        let prose = "- **`<!-- agent:queue disable-auto-clear ... -->** turns it off.\n";
+        let doc = inline_code_marker_session_doc(prose);
+        let line = doc
+            .lines()
+            .position(|l| l.contains("disable-auto-clear ... -->"))
+            .unwrap()
+            + 1;
+        let err = parse(&doc).expect_err("an unquoted opener must not parse");
+        let message = err.to_string();
+        assert!(
+            message.contains("opened 'queue' but closed 'exchange'"),
+            "{message}"
+        );
+        assert!(
+            message.contains(&format!("opening marker at line {line}")),
+            "the refusal names the offending line {line}: {message}"
+        );
+        // The same stray opener with nothing after it to mis-close it is
+        // reported as unclosed, again naming its line.
+        let tail = format!("{}{prose}", inline_code_marker_session_doc(""));
+        let tail_line = tail.lines().count();
+        let message = parse(&tail).expect_err("trailing opener").to_string();
+        assert!(
+            message.contains("unclosed component: <!-- agent:queue -->")
+                && message.contains(&format!("opening marker at line {tail_line}")),
+            "{message}"
+        );
+        assert!(
+            structural_corruption_reason(&doc).is_some(),
+            "the commit/write gate refuses the same document"
         );
     }
 

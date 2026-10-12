@@ -143,9 +143,10 @@ class TypingTrackerEdtBudgetTest {
                 lifecycle.contains("CrdtReplicaManager.ensureOpenDocumentReplica("),
         )
         assertTrue(
-            "file-close events must publish this editor's reliable-sync close",
+            "file-close events must publish this editor's reliable-sync close once no client has the file open",
             lifecycle.contains("override fun fileClosed(source: FileEditorManager, file: VirtualFile)") &&
-                lifecycle.contains("TypingTracker.clearOpenDocumentReport(file)"),
+                lifecycle.contains("TypingTracker.onEditorClosed(project, source, file)") &&
+                tracker.contains("onRelease = { clearOpenDocumentReport(file) }"),
         )
         val clearBody = tracker.substringAfter("fun clearOpenDocumentReport")
             .substringBefore("fun observeLazilyCurrentNow")

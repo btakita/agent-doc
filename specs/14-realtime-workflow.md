@@ -521,6 +521,39 @@ ACKing, applying, or broadcasting a change, and must be disposed when the docume
 authority by itself; if it runs after newer operator input, it must rebase
 against that input or fail closed.
 
+### Removing one editor is not closing the document (GH #241)
+
+"The document closes" means **no editor for the file remains open in any client**.
+An editor event that removes one editor of a file — a duplicate editor, an
+Editor/Preview replacement, or a Remote Dev guest dropping one of two editors —
+is not a close while another editor, local or in any Remote Dev client, still has
+the file open. Releasing the document on such an event publishes the closing cut,
+deregisters the document's only CRDT replica and reports the per-editor
+reliable-sync `Close`, so the still-open buffer stops receiving controller
+deliveries: GH #241 measured 4 h 48 min with `realtime_doc_resolve ...
+live_editors=0 editor_open=true` and every stale-replica recovery request
+`request_skipped reason=no_live_editor`, because the controller cannot ask an
+editor that has no registration to re-register.
+
+Rules:
+
+- A plugin releases a document (closing cut, replica deregister, per-editor
+  close, reliable-sync liveness `Close`) only after observing that the file is
+  open in no client. The observation must not count retained hidden-tab editors
+  (JetBrains `EditorTracker.activeEditors`, GH #175), or a genuinely closed
+  document would keep its replica forever.
+- A removal observed while the file is still open keeps the replica and
+  re-observes it (a no-op while attached), then re-observes the open set once
+  after a bounded delay so a client manager that drops the file late still
+  releases it.
+- Re-registration of an open document whose replica is missing is editor-owned
+  and event-driven: the editor is the only process that can create its own
+  replica. Besides open, rename, startup, reload and the peer replica pull,
+  selecting an open document re-attaches a missing replica.
+- VS Code's `onDidCloseTextDocument` is already document-scoped (it fires only
+  when the `TextDocument` itself is disposed, not when one of several editors on
+  it closes), so it satisfies this rule without an open-set check.
+
 ## Realtime Queue + Exchange Rules
 
 The `agent:queue` and `agent:exchange` components are realtime document state,

@@ -443,6 +443,32 @@ object TypingTracker : DocumentListener {
         scheduleFullContentReport(file.path, document)
     }
 
+    /**
+     * `fileClosed` ingress (GH #241). The platform fires `fileClosed` when one editor
+     * for a file is removed, including a duplicate editor while another editor -- or a
+     * Remote Dev client -- still has the file open. Only a close that leaves the file
+     * open in NO client publishes the closing cut and deregisters the replica; a
+     * removed duplicate keeps it and re-observes the replica so a registration lost any
+     * other way re-attaches here instead of waiting for an unrelated transport recovery.
+     */
+    fun onEditorClosed(project: Project, source: FileEditorManager?, file: VirtualFile) {
+        if (!file.name.endsWith(".md")) return
+        DocumentCloseDecision.route(
+            consumer = "crdt-replica",
+            project = project,
+            source = source,
+            file = file,
+            onKeep = {
+                CrdtReplicaManager.ensureOpenDocumentReplica(
+                    project,
+                    file.path,
+                    "editor-removed-file-still-open",
+                )
+            },
+            onRelease = { clearOpenDocumentReport(file) },
+        )
+    }
+
     fun clearOpenDocumentReport(file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         val filePath = file.path

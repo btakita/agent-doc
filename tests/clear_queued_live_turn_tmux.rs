@@ -19,6 +19,11 @@
 //! restart (`#idleclearrestart`): the fake harness records its PID and owns a
 //! background job, standing in for Claude Code background agents/shells.
 //!
+//! Queue auto-clear (`#bgclearpolicy`) runs on the same harness: between two
+//! `go` queue items the supervisor types `/clear` into the same live process
+//! (once, after the first item's committed closeout), and `disable-auto-clear`
+//! drains both items without one.
+//!
 //! Live tmux: `#[ignore]`, run through `make tmux-ci`.
 
 use std::path::PathBuf;
@@ -126,8 +131,14 @@ struct LiveClearScenario {
     ceiling: PathBuf,
 }
 
+const PLAIN_DOC: &str = "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000c1\nagent: claude\n---\n\n# Session\n\n## User\n\nhello\n";
+
 impl LiveClearScenario {
     fn start(label: &str) -> Self {
+        Self::start_with_document(label, PLAIN_DOC)
+    }
+
+    fn start_with_document(label: &str, document: &str) -> Self {
         let tmp = tempfile::TempDir::new().unwrap();
         let controllers = agent_doc_test_support::ProjectControllerReaper::under(tmp.path());
         let root = tmp.path().canonicalize().unwrap().join("project");
@@ -151,11 +162,7 @@ impl LiveClearScenario {
             std::fs::set_permissions(&fake_claude, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let doc = root.join(DOC);
-        std::fs::write(
-            &doc,
-            "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000c1\nagent: claude\n---\n\n# Session\n\n## User\n\nhello\n",
-        )
-        .unwrap();
+        std::fs::write(&doc, document).unwrap();
         for args in [
             vec!["init", "-q"],
             vec!["config", "user.email", "test@example.com"],
@@ -256,8 +263,12 @@ impl LiveClearScenario {
         scenario
     }
 
-    fn wait_until(&self, what: &str, mut condition: impl FnMut() -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(45);
+    fn wait_until(&self, what: &str, condition: impl FnMut() -> bool) {
+        self.wait_until_within(what, Duration::from_secs(45), condition);
+    }
+
+    fn wait_until_within(&self, what: &str, budget: Duration, mut condition: impl FnMut() -> bool) {
+        let deadline = Instant::now() + budget;
         while Instant::now() < deadline {
             if condition() {
                 return;
@@ -462,7 +473,10 @@ impl LiveClearScenario {
                     let text = std::fs::read_to_string(&path).unwrap_or_default();
                     lines.extend(
                         text.lines()
-                            .filter(|line| line.contains("idle_queue_watch"))
+                            .filter(|line| {
+                                line.contains("idle_queue_watch")
+                                    || line.contains("idle-queue watch")
+                            })
                             .map(str::to_string),
                     );
                 }
@@ -861,5 +875,148 @@ fn a_repeat_press_rearms_the_queued_clear_behind_the_run_started_before_it() {
         inputs.last().map(String::as_str),
         Some("/clear"),
         "{inputs:?}"
+    );
+}
+
+/// A two-item `go` queue for the `#bgclearpolicy` auto-clear scenarios.
+fn auto_clear_queue_doc(marker: &str) -> String {
+    format!(
+        "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000c1\nagent: claude\nagent_doc_format: template\n---\n\n# Session\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nhello\n<!-- /agent:exchange -->\n\n## Queue\n\n{marker}\n- answer item one\n- answer item two\n<!-- /agent:queue -->\n"
+    )
+}
+
+impl LiveClearScenario {
+    /// Document triggers the supervisor typed into the harness.
+    fn triggers(&self) -> usize {
+        self.inputs()
+            .iter()
+            .filter(|line| line.contains("agent-doc") && line.contains(DOC))
+            .count()
+    }
+
+    /// The agent's cycle for the dispatched head, as the real harness hooks and
+    /// the agent run it: `UserPromptSubmit`, preflight, a committed response that
+    /// answers (and so consumes) the free-text head, then `Stop` and the idle
+    /// frame.
+    fn answer_head(&self, head: &str) {
+        self.hook(true, "UserPromptSubmit");
+        let pane = [("TMUX_PANE", self.pane.as_str())];
+        let preflight = self.agent_doc(&["preflight", DOC], &pane, None);
+        assert!(
+            preflight.status.success(),
+            "preflight: {}\n{}",
+            String::from_utf8_lossy(&preflight.stdout),
+            stderr(&preflight)
+        );
+        let response = format!(
+            "<!-- patch:exchange -->\n### Re: {head} — test-model\n\n> **Queue prompt:** {head}\n\nDone: {head}.\n<!-- /patch:exchange -->\n"
+        );
+        let write = self.agent_doc(&["write", "--commit", DOC], &pane, Some(&response));
+        assert!(
+            write.status.success(),
+            "write --commit: {}\n{}",
+            String::from_utf8_lossy(&write.stdout),
+            stderr(&write)
+        );
+        self.end_turn();
+    }
+}
+
+/// `#bgclearpolicy`: with queue auto-clear on (the default), the supervisor
+/// resets the context between queue items. After item one's committed
+/// closeout it types `/clear` into the SAME live harness — the process and its
+/// background job survive — and only then dispatches item two.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn queue_auto_clear_types_clear_between_items_into_the_same_harness() {
+    let scenario = LiveClearScenario::start_with_document(
+        "queue-auto-clear",
+        &auto_clear_queue_doc("<!-- agent:queue go -->"),
+    );
+    std::fs::write(scenario.fake.join("background"), "").unwrap();
+    // Run Agent Doc starts item one.
+    scenario.route_dispatch_turn();
+    let harness = scenario.harness_pids();
+    let background = scenario.background_pids();
+    assert_eq!(scenario.clears(), 0, "no clear before the first item");
+
+    scenario.answer_head("answer item one");
+    // No editor is attached, so no document-delivery edge wakes the watch; it
+    // re-observes the queue on its 60s safety revision interval.
+    scenario.wait_until_within(
+        "the supervisor dispatched item two",
+        Duration::from_secs(240),
+        || scenario.triggers() == 2,
+    );
+    std::thread::sleep(Duration::from_secs(2));
+
+    let inputs = scenario.inputs();
+    let first = inputs
+        .iter()
+        .position(|line| line.contains("agent-doc"))
+        .unwrap();
+    let second = inputs
+        .iter()
+        .rposition(|line| line.contains("agent-doc"))
+        .unwrap();
+    assert_eq!(
+        inputs[first + 1..second]
+            .iter()
+            .filter(|line| *line == "/clear")
+            .count(),
+        1,
+        "exactly one /clear between the two items: {inputs:?}"
+    );
+    assert_eq!(scenario.clears(), 1, "{inputs:?}");
+    assert_eq!(
+        scenario.harness_pids(),
+        harness,
+        "the clear was typed into the SAME harness process, never a restart: {inputs:?}"
+    );
+    assert!(
+        process_alive(harness[0]) && process_alive(background[0]),
+        "the harness and its background job survived the clear"
+    );
+    let ops = scenario.ops_log();
+    assert!(
+        ops.lines().any(|line| line.contains("] queue_auto_clear ")
+            && line.contains("delivery=native_clear")
+            && line.contains("result=sent")),
+        "{}",
+        scenario.ops_log_tail()
+    );
+}
+
+/// `#bgclearpolicy`: `disable-auto-clear` drains both items in one context.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn queue_disable_auto_clear_drains_without_a_clear() {
+    let scenario = LiveClearScenario::start_with_document(
+        "queue-no-auto-clear",
+        &auto_clear_queue_doc("<!-- agent:queue go disable-auto-clear -->"),
+    );
+    scenario.route_dispatch_turn();
+    scenario.answer_head("answer item one");
+    // No editor is attached, so no document-delivery edge wakes the watch; it
+    // re-observes the queue on its 60s safety revision interval.
+    scenario.wait_until_within(
+        "the supervisor dispatched item two",
+        Duration::from_secs(240),
+        || scenario.triggers() == 2,
+    );
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!(
+        scenario.clears(),
+        0,
+        "disable-auto-clear never clears: {:?}",
+        scenario.inputs()
+    );
+    assert!(
+        !scenario
+            .ops_log()
+            .lines()
+            .any(|line| line.contains("] queue_auto_clear ")),
+        "{}",
+        scenario.ops_log_tail()
     );
 }

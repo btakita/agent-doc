@@ -15,6 +15,7 @@ pub mod idle_drain;
 pub mod no_changes_explanation;
 pub mod prompt_component_attrs;
 pub mod queue;
+pub mod queue_auto_clear;
 pub mod queue_claim;
 pub mod queue_closeout_guard;
 pub mod queue_command;

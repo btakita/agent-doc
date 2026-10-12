@@ -602,7 +602,7 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
             .as_object_mut()
             .expect("session-check result is an object"),
         if ok {
-            QueueContinuationProjection::Known(continuation.as_ref().and_then(Option::as_ref))
+            QueueContinuationProjection::from_tool(continuation.as_ref())
         } else {
             QueueContinuationProjection::Unsettled("closeout_unsettled")
         },
@@ -736,7 +736,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
             .as_object_mut()
             .expect("finalize result is an object"),
         if ok {
-            QueueContinuationProjection::Known(continuation.as_ref().and_then(Option::as_ref))
+            QueueContinuationProjection::from_tool(continuation.as_ref())
         } else {
             QueueContinuationProjection::Unsettled("closeout_unsettled")
         },
@@ -747,34 +747,82 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
     ))
 }
 
+/// The queue continuation an MCP closeout tool reports, plus whether the
+/// in-session drain hands this boundary to the supervisor's auto-clear
+/// (`#bgclearpolicy`), so MCP agents follow the same yield as `session-check`.
+struct ToolQueueContinuation {
+    continuation: Option<agent_doc_queue::queue_continuation::QueueContinuation>,
+    auto_clear_yield: bool,
+}
+
 fn resolve_tool_queue_continuation(
     file: &Path,
     resolve_reason: &str,
-) -> Result<Option<agent_doc_queue::queue_continuation::QueueContinuation>> {
+) -> Result<ToolQueueContinuation> {
     let content =
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, resolve_reason)?;
-    agent_doc_queue_io::queue_continuation::detect_for_content(file, &content)
+    let continuation = agent_doc_queue_io::queue_continuation::detect_for_content(file, &content)?;
+    let auto_clear_yield = continuation.is_some()
+        && agent_doc_queue_io::queue_auto_clear::in_session_auto_clear_yield(file, &content, true)
+            .yields;
+    Ok(ToolQueueContinuation {
+        continuation,
+        auto_clear_yield,
+    })
 }
 
 #[derive(Clone, Copy)]
 enum QueueContinuationProjection<'a> {
     Known(Option<&'a agent_doc_queue::queue_continuation::QueueContinuation>),
+    /// `#bgclearpolicy`: continuation work remains, but the supervisor clears
+    /// the context and dispatches it; the agent ends its turn.
+    AutoClearYield(&'a agent_doc_queue::queue_continuation::QueueContinuation),
     Unsettled(&'static str),
+}
+
+impl<'a> QueueContinuationProjection<'a> {
+    fn from_tool(resolved: Option<&'a ToolQueueContinuation>) -> Self {
+        match resolved {
+            Some(ToolQueueContinuation {
+                continuation: Some(continuation),
+                auto_clear_yield: true,
+            }) => Self::AutoClearYield(continuation),
+            Some(resolved) => Self::Known(resolved.continuation.as_ref()),
+            None => Self::Known(None),
+        }
+    }
 }
 
 fn add_queue_continuation_fields(
     result: &mut Map<String, Value>,
     projection: QueueContinuationProjection<'_>,
 ) {
-    let (known, continuation, unsettled_reason) = match projection {
-        QueueContinuationProjection::Known(continuation) => (true, continuation, None),
-        QueueContinuationProjection::Unsettled(reason) => (false, None, Some(reason)),
+    let (known, continuation, unsettled_reason, auto_clear_yield) = match projection {
+        QueueContinuationProjection::Known(continuation) => (true, continuation, None, false),
+        QueueContinuationProjection::AutoClearYield(continuation) => {
+            (true, Some(continuation), None, true)
+        }
+        QueueContinuationProjection::Unsettled(reason) => (false, None, Some(reason), false),
     };
     result.insert("queue_continuation_known".to_string(), Value::Bool(known));
     result.insert(
         "queue_continuation_required".to_string(),
         if known {
-            Value::Bool(continuation.is_some())
+            Value::Bool(continuation.is_some() && !auto_clear_yield)
+        } else {
+            Value::Null
+        },
+    );
+    result.insert(
+        "queue_auto_clear_yield".to_string(),
+        Value::Bool(auto_clear_yield),
+    );
+    result.insert(
+        "queue_continuation_guidance".to_string(),
+        if auto_clear_yield {
+            Value::String(
+                agent_doc_queue::queue_continuation::QUEUE_AUTO_CLEAR_YIELD_GUIDANCE.to_string(),
+            )
         } else {
             Value::Null
         },
@@ -1103,6 +1151,29 @@ mod tests {
         assert!(result["next_queue_head_id"].is_null());
         assert!(result["queue_continuation_reason"].is_null());
         assert!(result["queue_continuation_unsettled_reason"].is_null());
+    }
+
+    #[test]
+    fn auto_clear_yield_reports_the_next_head_without_requiring_continuation() {
+        let continuation = agent_doc_queue::queue_continuation::QueueContinuation {
+            head_prompt: "do [#next]".to_string(),
+            head_id: Some("next".to_string()),
+            reason: "queue_auto_continuation".to_string(),
+        };
+        let mut result = Map::new();
+        add_queue_continuation_fields(
+            &mut result,
+            QueueContinuationProjection::AutoClearYield(&continuation),
+        );
+        assert_eq!(result["queue_continuation_known"], true);
+        assert_eq!(result["queue_continuation_required"], false);
+        assert_eq!(result["queue_auto_clear_yield"], true);
+        assert_eq!(result["next_queue_prompt"], "do [#next]");
+        assert!(
+            result["queue_continuation_guidance"]
+                .as_str()
+                .is_some_and(|guidance| guidance.contains("END THIS TURN"))
+        );
     }
 
     #[test]

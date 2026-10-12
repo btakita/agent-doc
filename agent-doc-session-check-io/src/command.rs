@@ -1964,6 +1964,19 @@ fn run_with_options_inner(
                     );
                     return Ok(());
                 }
+                // #bgclearpolicy: queue auto-clear (the default) hands this item
+                // boundary to the ready supervisor, which resets the agent
+                // context and dispatches the next head to the fresh context. The
+                // in-session loop ends its turn instead of continuing here.
+                let auto_clear = agent_doc_queue_io::queue_auto_clear::in_session_auto_clear_yield(
+                    file,
+                    &continuation_content,
+                    true,
+                );
+                if auto_clear.yields {
+                    report_queue_auto_clear_yield(file, &continuation.head_prompt, &auto_clear);
+                    return Ok(());
+                }
                 if let Some(command) =
                     agent_doc_queue::queue_command::slash_command_text(&continuation.head_prompt)
                 {
@@ -2134,7 +2147,7 @@ fn run_with_options_inner(
                             &supervisor_head,
                         );
                         eprintln!(
-                            "[session-check] queue continues via supervisor: {head_description} remains for the CP/supervisor clear-and-continue path (force /clear + re-dispatch to a fresh session). End this turn so the supervisor takes over — NOT an operator stall ({}; #qfocsup). {}",
+                            "[session-check] queue continues via supervisor: {head_description} remains for the CP/supervisor clear-and-continue path (it re-dispatches the head, clearing the context first when queue auto-clear is on). End this turn so the supervisor takes over — NOT an operator stall ({}; #qfocsup). {}",
                             file.display(),
                             outcome_fields
                         );
@@ -2307,6 +2320,53 @@ fn warn_unrecorded_chat_prompts(file: &Path) {
 /// Under `--codex-final-gate` the check exits `2`, the gate's "work is still
 /// owed" code that an active queue continuation already uses: pending steering
 /// must be handled before a final answer, but it is not a failed closeout (`1`).
+/// `#bgclearpolicy`: report the in-session drain's hand-off of this item
+/// boundary to the supervisor's auto-clear. The yield is intentional, so it
+/// reconciles the stall projection like any valid stop, releases the `/loop`
+/// drain-owner lease (the supervisor dispatches only once no loop owns the
+/// drain), and records the hand-off so a supervisor that never drains it is
+/// reported (`#supdrainyieldfalsifiable`) and the next yield falls back to the
+/// in-session drain.
+fn report_queue_auto_clear_yield(
+    file: &Path,
+    head_prompt: &str,
+    decision: &agent_doc_queue_io::queue_auto_clear::AutoClearYield,
+) {
+    clear_queue_drain_stall_after_valid_closeout(file, "queue_auto_clear_yield");
+    let file_str = file.to_string_lossy();
+    if agent_doc_queue_io::drain_owner::read_drain_owner_lease(&file_str).is_some_and(|lease| {
+        lease.owner == agent_doc_queue_io::drain_owner::DRAIN_OWNER_CLAUDE_LOOP
+    }) {
+        agent_doc_queue_io::drain_owner::clear_drain_owner_lease(&file_str);
+    }
+    if let Ok(content) = crate::resolve_current_document_content(file, "queue_auto_clear_yield")
+        && let Some(head) = agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+            &content,
+            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        )
+    {
+        agent_doc_controller_io::project_controller::record_supervisor_drain_handoff(file, &head);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_auto_clear_yield source=session_check file={} head_bytes={} supervisor_drain_readiness={} (#bgclearpolicy)",
+            file.display(),
+            head_prompt.len(),
+            decision.readiness_reason(),
+        ),
+    );
+    println!(
+        "queue_continuation_required=false queue_auto_clear_yield=true next_queue_prompt={:?} supervisor_drain_readiness={}",
+        head_prompt,
+        decision.readiness_reason(),
+    );
+    eprintln!(
+        "[session-check] {}",
+        agent_doc_queue::queue_continuation::QUEUE_AUTO_CLEAR_YIELD_GUIDANCE
+    );
+}
+
 fn report_steering_pending(file: &Path, message: &str, codex_final_gate: bool) {
     println!("{message}");
     println!("queue_continuation_required=false steering_pending=true");

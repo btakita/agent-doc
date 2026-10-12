@@ -871,6 +871,17 @@ pub struct PreflightOutput {
     /// Explicit non-stall guidance when continuation is required.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_continuation_guidance: Option<String>,
+    /// `#bgclearpolicy`: whether the document's `agent:queue` resets agent
+    /// context between items (`true` by default; `false` when the marker carries
+    /// `disable-auto-clear`). Absent when the document has no queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_auto_clear: Option<bool>,
+    /// `#bgclearpolicy`: the in-session drain yields this item boundary to the
+    /// ready supervisor, which clears the context and dispatches the next head.
+    /// When true, `queue_continuation_required` is false and the guidance says
+    /// to end the turn without scheduling `/loop`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queue_auto_clear_yield: bool,
     /// Bounded session-growth / churn advisory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_accretion: Option<agent_doc_session_accretion::SessionAccretionReport>,

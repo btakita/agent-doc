@@ -540,7 +540,10 @@ fn normalize_queue_tag_token(token: &str) -> String {
 }
 
 fn is_queue_boolean_attr(key: &str) -> bool {
-    matches!(key, "auto" | "priority" | "go" | "start" | "stop")
+    matches!(
+        key,
+        "auto" | "priority" | "go" | "start" | "stop" | "disable-auto-clear"
+    )
 }
 
 fn strip_malformed_true_suffix(value: &str) -> Option<&str> {

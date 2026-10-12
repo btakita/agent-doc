@@ -2412,7 +2412,10 @@ fn queue_tag_token_key(token: &str) -> &str {
 }
 
 fn is_queue_boolean_attr(key: &str) -> bool {
-    matches!(key, "auto" | "priority" | "go" | "start" | "stop" | "pause")
+    matches!(
+        key,
+        "auto" | "priority" | "go" | "start" | "stop" | "pause" | "disable-auto-clear"
+    )
 }
 
 fn strip_malformed_true_suffix(value: &str) -> Option<&str> {

@@ -425,6 +425,15 @@ It will add Kotlin and SimWorld regression tests and bump the plugin versions. F
 It's estimated at several days, so the subagent first writes a phase plan. Then it lands as many independently verified phases as it can, each with `make check` passing, keeping the current focused-IDE behavior as the one-IDE fallback. I'll file the remaining phases as separate backlog ids.
 
 Still running: `#idleclearrestart` (with the sdk.md false-"satisfied" clear) and the build/test turnaround work. The exchange is large (371 lines); I'll compact only if you ask.
+
+### Re: closing completed subagents — opus-5.5 · 2026-10-12T05:35-04:00
+
+> **Chat prompt (#chatprompt):** Can we close the completed subagents?
+
+Done.
+- **Subagents:** I stopped the 5 completed ones still listed in this session: the splice verifier, the queued-clear live check, the flaky-test hunt, the live IntelliJ clear-notice test, and the receipt helpers. The 4 running ones are untouched: `idleclear`, `turnaround`, `gh241` and `ridernav`.
+- **Worktrees:** I removed the 20 finished worktrees for today's subagent and integration branches. That's every branch I'd confirmed was merged into `origin/main` with no uncommitted tracked changes. Their local branches are deleted too; the commits are all on main.
+- **Disk:** free space went from 879G to 1.1T (`rcpthelpers` and `integrate-0499` alone held about 80 GB of build output each).
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 

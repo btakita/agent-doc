@@ -1258,7 +1258,18 @@ v0.35.495 is out:
 - **Local install:** `agent-doc --version` reports 0.35.495.
 
 The Apache-2.0 relicense and the README rewrite are on main *after* this tag (`06afd858ee`). They first ship in 0.35.496.
-<!-- agent:boundary:75cf33a3 -->
+> **Chat prompt (#chatprompt):** Have we released?
+
+### Re: have we released? — opus-5.5 · 2026-10-12T09:00-04:00
+
+**Yes.** v0.35.488 is fully released:
+- `make release` exited 0 with `tag_publish_handoff=complete` and `local_install_full=complete`.
+- Tag `v0.35.488` (`1318e9005`) is on GitHub, and the GitHub Release is published with all 13 assets.
+
+**Releases have continued since then.** Other sessions have shipped through **v0.35.495**: it is the installed `agent-doc --version`, PyPI's latest, and its PyPI workflow is green.
+
+**Bookkeeping is already done.** `capturegatedispatched`, `visiblewritewallclock` and `editoropscheckpointfail` are in the done archive. The `refresh_memory durable_reload` lock-stall follow-up was filed and closed as `refreshmemlockstall`. The queue is empty. Nothing from the 0.35.488 batch is left open.
+<!-- agent:boundary:3e1f2a15 -->
 <!-- /agent:exchange -->
 
 <!--

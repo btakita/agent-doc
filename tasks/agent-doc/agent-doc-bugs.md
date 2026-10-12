@@ -266,6 +266,21 @@ I also filed annotateddeferstrike: a deferred queue line carrying your note was 
 **Deferred:** I'm integrating `flaky0494` myself (claim `coordinator:integrate-flaky`, worktree `integrate-0497` off main). The authoritative `make check` is running, with its log and exit code outside the repo. If it passes, I'll push it to main, run `make install`, and close this item.
 
 `#idleclearrestart` is still yours to decide: should Clear at an idle prompt type `/clear` instead of restarting Claude? The restart kills its background agents. No subagent can make that call for you.
+
+### Re: #flakyintegrate0494 integrated — opus-5.5 · 2026-10-11T21:25-04:00
+
+> **Queue prompt:** do [#flakyintegrate0494]
+
+Done. `flaky0494` is merged to main as `8e7ef63ce6` and installed.
+- **First run failed:** the first authoritative `make check` on the merge failed (exit 2) on `agent-doc-preflight-command-io progress::tests::crossing_the_deadline_at_a_phase_boundary_refuses_by_name`. The new per-run test record kept the output: the test gave itself a 40ms budget, which the safety margin turns into a deadline of about 0ms, and expected its first phase to start inside it. With three subagents running test suites at once, the first phase started 88ms in. It was a wall-clock race in the test, not a product bug.
+- **Fixed, not rerun:** the test now starts with a one-hour budget, checks that the first phase is inside it, then moves the installed run's deadline to "now" to cross the boundary. No sleep, no timing dependency.
+- **Second run passed:** `make check` exit 0, 10226/10226.
+- **What `flaky0494` itself contributes:**
+  - `build.rs` no longer watches the workspace root, so cargo stops relinking every test program and deleting them under a running test run.
+  - The `already_applied_*` tests use an already-running controller and record receipts strictly.
+  - Every `make check` and `make test` keeps its output and test report in `tmp/test-runs/`, which is how this failure was caught and named.
+
+The original lost failure from integrate-0494 stays unidentified, since its output was gone before this existed. The remaining receipt-dropping helpers and the slow test are with `#flakyreceipthelpers`.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -283,7 +298,7 @@ I also filed annotateddeferstrike: a deferred queue line carrying your note was 
 - ~~frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)~~
 - ~~release + publish~~
 - ~~do [#closeoutleaseresume]~~
-- 🚧 do [#flakyintegrate0494]
+- ~~do [#flakyintegrate0494]~~
 - ~~do [#clearsupersedenotice]~~
 - ~~I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted. ![img_5.png](img_5.png)~~
 <!-- /agent:queue -->
@@ -295,7 +310,6 @@ I also filed annotateddeferstrike: a deferred queue line carrying your note was 
 - [ ] 🚧 [#annotateddeferstrike] [agent-doc] A deferred annotated queue head is struck anyway: for an annotated head the closeout requires the operator-note answer quote, which then sits between the queue-prompt echo and the deferral paragraph, so the deferral is not recognized, the head is consumed and its claim released (2026-10-11, twice on the clearnoticeverify heads). Recognize a deferral paragraph that follows the operator-note answer, with a regression test.
 - [ ] 🚧 [#flakyreceipthelpers] [agent-doc] Follow-up from flaky0494: simulated-editor socket listeners in agent-doc-test-support/src/lib.rs:781, agent-doc-write-converge-io/src/convergence_fixture_tests.rs:170 and agent-doc-commit-io/tests/git.rs:104 drop receipt errors the way the fixed already_applied_* tests did (may flake under load); and finalize_integration reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once hits the 180s nextest limit under load ~80 (performance, do not raise the limit). Integrate branch flaky0494 first.
 - [ ] [#idleclearrestart] [operator-verify] [agent-doc] Decide: Clear Session Context at an idle prompt restarts the Claude process (supervisor_restart_fresh) instead of typing /clear, killing running Claude background agents/shells with no report (2026-10-11 live test: agent stopped at 12/40 ticks). Queued clears type /clear. Should idle Clear type /clear too?
-- [ ] 🚧 [#flakyintegrate0494] [agent-doc] A full make check on integrate-0494 (merge of splicectl + gh240, 3fbe838baa) stopped at 1 failure after 101/10205 tests; the rerun on the same commit passed 10205/10205. The first log was deleted before reading, so the test is unknown. Capture it on recurrence (keep nextest junit/output from every authoritative run) and fix the nondeterminism; never rerun to green.
 <!-- /agent:backlog -->
 
 ## Review

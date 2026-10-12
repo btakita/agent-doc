@@ -35661,7 +35661,9 @@ pub fn force_restart_controller(
 
     let self_pid = std::process::id();
     let mut reaped = Vec::new();
-    for pid in crate::process::project_controller_pids(project_root) {
+    // Kill-everything: a restart leaves no process serving this root, fork
+    // images included (#controllerforkimage).
+    for pid in crate::process::project_controller_pids_including_fork_images(project_root) {
         if pid == self_pid {
             continue;
         }
@@ -47639,6 +47641,123 @@ mod tests {
 
         assert!(should_stop);
         assert!(response.contains("\"ok\":true"), "{response}");
+    }
+
+    /// #controllerforkimage: the authoritative controller's un-exec'd fork image
+    /// (a `Command::spawn` child before its exec) is not a stale duplicate.
+    /// Before the fix it was reported in `stale_duplicate_pids` and
+    /// `reap_stale_duplicate_controllers` SIGTERMed it.
+    #[test]
+    fn stale_duplicate_discovery_ignores_the_authoritative_controllers_fork_image() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let (mut sentinel, fork_image) = spawn_controller_sentinel_with_fork_image(dir.path(), &[]);
+        let pid = sentinel.id();
+
+        let duplicates = discover_stale_duplicate_pids(dir.path(), Some(pid));
+        let unowned = discover_stale_duplicate_pids(dir.path(), None);
+        reap_stale_duplicate_controllers(dir.path(), Some(pid), 0);
+        let fork_image_alive = process_is_alive(fork_image);
+        let roots_excluding_controller = crate::process::controller_project_roots(pid);
+        kill_test_pid(fork_image);
+        let _ = sentinel.kill();
+        let _ = sentinel.wait();
+
+        assert_eq!(duplicates, Vec::<u32>::new());
+        assert_eq!(unowned, vec![pid], "one pid per controller");
+        assert!(
+            fork_image_alive,
+            "the duplicate reaper must not signal the fork image"
+        );
+        let root =
+            agent_doc_controller::command_line::canonical_path_for_command_line_compare(dir.path());
+        assert!(
+            !roots_excluding_controller.contains(&root),
+            "the excluded controller's fork image must not put its root back"
+        );
+    }
+
+    /// #controllerforkimage: a forced restart is kill-everything for its root,
+    /// fork images included.
+    #[test]
+    fn force_restart_controller_also_reaps_a_controllers_fork_image() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let (sentinel, fork_image) = spawn_controller_sentinel_with_fork_image(dir.path(), &[]);
+        let pid = sentinel.id();
+
+        let outcome = force_restart_controller(dir.path(), true);
+        let fork_image_exited = wait_for_test_pid_exit(fork_image, Duration::from_secs(2));
+        if !fork_image_exited {
+            kill_test_pid(fork_image);
+        }
+        let status = wait_for_test_child_exit(
+            sentinel,
+            Duration::from_secs(2),
+            "forced restart must reap the controller",
+        );
+        // `reaped_pids` cannot name the sentinel here: it is this test's own
+        // child, a zombie (still in `/proc`) until `wait` reaps it.
+        outcome.unwrap();
+        assert!(!status.success(), "sentinel pid {pid} must die by signal");
+        assert!(
+            fork_image_exited,
+            "the fork image must not outlive a forced restart"
+        );
+    }
+
+    /// #controllerforkimage: a supervisor's fork image does not count as another
+    /// open supervisor for the excluded supervisor's document.
+    #[test]
+    fn open_supervisor_documents_ignore_an_excluded_supervisors_fork_image() {
+        use std::process::{Command, Stdio};
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "body").unwrap();
+        let mut supervisor = Command::new("sh")
+            .arg("-c")
+            .arg("(while :; do sleep 1; done) & wait")
+            .arg("agent-doc")
+            .arg("start")
+            .arg("--route-owned")
+            .arg(&doc)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = supervisor.id();
+        let start = Instant::now();
+        let fork_image = loop {
+            let fork_image = crate::process::process_pids()
+                .into_iter()
+                .find(|candidate| {
+                    crate::process::process_parent_pid(*candidate) == Some(pid)
+                        && crate::process::open_supervisor_document(*candidate).is_some()
+                });
+            if fork_image.is_some() || start.elapsed() > Duration::from_secs(5) {
+                break fork_image;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let excluding = crate::process::open_supervisor_documents(pid);
+        let including = crate::process::open_supervisor_documents(std::process::id());
+        if let Some(fork_image) = fork_image {
+            kill_test_pid(fork_image);
+        }
+        let _ = supervisor.kill();
+        let _ = supervisor.wait();
+
+        assert!(
+            fork_image.is_some(),
+            "fake supervisor never forked its subshell image"
+        );
+        let doc = agent_doc_controller::command_line::canonical_path_for_command_line_compare(&doc);
+        assert!(including.contains(&doc));
+        assert!(
+            !excluding.contains(&doc),
+            "the excluded supervisor's fork image must not report its document open"
+        );
     }
 
     #[test]

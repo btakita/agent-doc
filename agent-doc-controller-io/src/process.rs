@@ -116,34 +116,11 @@ fn parse_proc_stat_state_and_start(stat: &str) -> Option<(char, u64)> {
     Some((state, start_ticks))
 }
 
-/// Parent pid (field 4) from a `/proc/<pid>/stat` line, counted from the
-/// last `)` because `comm` may contain spaces and parentheses.
-fn parse_proc_stat_ppid(stat: &str) -> Option<u32> {
-    let rest = &stat[stat.rfind(')')? + 1..];
-    rest.split_whitespace().nth(1)?.parse().ok()
-}
-
-pub fn process_parent_pid(pid: u32) -> Option<u32> {
-    parse_proc_stat_ppid(&read_proc_stat(pid)?)
-}
-
-/// `pid` is a fork of its parent that has not exec'd yet: its command line is
-/// the parent's, byte for byte. A shell that forks before every external
-/// command (`/bin/sh` = dash, a `( ... )` subshell, a `vfork` child) briefly or
-/// persistently shows the parent's argv, so a `/proc` scan matching command
-/// lines sees the same process image twice (#reaperciflake).
-pub fn is_unexeced_fork_of_parent(pid: u32) -> bool {
-    let Some(ppid) = process_parent_pid(pid).filter(|ppid| *ppid > 0) else {
-        return false;
-    };
-    let (Ok(own), Ok(parent)) = (
-        std::fs::read(format!("/proc/{pid}/cmdline")),
-        std::fs::read(format!("/proc/{ppid}/cmdline")),
-    ) else {
-        return false;
-    };
-    !own.is_empty() && own == parent
-}
+// The fork-image rule lives with supervisor discovery (the lower crate) so both
+// `/proc` walkers share one implementation (#reaperciflake, #controllerforkimage).
+pub use agent_doc_supervisor_io::process::{
+    cmdline_is_unexeced_fork_image, is_unexeced_fork_of_parent, process_parent_pid,
+};
 
 fn read_proc_stat(pid: u32) -> Option<String> {
     std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()
@@ -238,15 +215,75 @@ fn supervisor_document_from_observation(
     Some(resolve_process_document_path(&document, process_cwd))
 }
 
+/// Drop un-exec'd fork images from a `/proc` scan, given each pid's parent and
+/// a command-line reader. A fork image is a child whose command line is its
+/// parent's byte for byte; it is the parent's process image, not a second
+/// process of that kind (#controllerforkimage). Pure over its two readers so
+/// the rule is testable against a fake process tree.
+pub fn without_unexeced_fork_images(
+    pids: impl IntoIterator<Item = u32>,
+    parent_of: impl Fn(u32) -> Option<u32>,
+    cmdline_of: impl Fn(u32) -> Option<Vec<u8>>,
+) -> Vec<u32> {
+    pids.into_iter()
+        .filter(|pid| {
+            let Some(parent) = parent_of(*pid).filter(|parent| *parent > 0) else {
+                return true;
+            };
+            let (Some(own), Some(parent)) = (cmdline_of(*pid), cmdline_of(parent)) else {
+                return true;
+            };
+            !cmdline_is_unexeced_fork_image(&own, &parent)
+        })
+        .collect()
+}
+
+/// [`without_unexeced_fork_images`] over the live `/proc`.
+fn distinct_process_images(pids: Vec<u32>) -> Vec<u32> {
+    without_unexeced_fork_images(pids, process_parent_pid, |pid| {
+        std::fs::read(format!("/proc/{pid}/cmdline")).ok()
+    })
+}
+
+/// Live controllers serving `project_root`, one pid per controller.
+///
+/// A controller's un-exec'd fork image (a `Command::spawn` child before its
+/// exec, or a shell fork under `/bin/sh` = dash) carries the controller's
+/// command line verbatim. It is not a second controller: counting it reports a
+/// duplicate that does not exist, and targeting it (the stale-duplicate reaper,
+/// the orphaned-preparing reaper) would SIGTERM the authoritative controller's
+/// child instead of a real duplicate (#controllerforkimage). Kill-everything
+/// paths use [`project_controller_pids_including_fork_images`].
 pub fn project_controller_pids(project_root: &Path) -> Vec<u32> {
+    distinct_process_images(project_controller_pids_including_fork_images(project_root))
+}
+
+/// Every process whose command line serves `project_root`, fork images
+/// included: for paths whose goal is that no such process survives (reaping a
+/// removed root's controllers, a forced restart), so a persistent fork image is
+/// never leaked (#reaperciflake).
+pub fn project_controller_pids_including_fork_images(project_root: &Path) -> Vec<u32> {
     process_pids()
         .into_iter()
         .filter(|pid| is_same_project_controller_pid(project_root, *pid))
         .collect()
 }
 
+/// Every live controller pid, one per controller (fork images excluded, see
+/// [`project_controller_pids`]), with the project root its command line serves.
+pub fn controller_serve_pids() -> Vec<(u32, PathBuf)> {
+    distinct_process_images(process_pids())
+        .into_iter()
+        .filter_map(|pid| controller_serve_project_root(pid).map(|root| (pid, root)))
+        .collect()
+}
+
+/// Project roots served by a live controller other than `exclude_pid`.
+///
+/// Fork images are excluded so `exclude_pid`'s own un-exec'd child cannot put
+/// the excluded controller's root back in the set (#controllerforkimage).
 pub fn controller_project_roots(exclude_pid: u32) -> BTreeSet<PathBuf> {
-    process_pids()
+    distinct_process_images(process_pids())
         .into_iter()
         .filter(|pid| *pid != exclude_pid)
         .filter_map(controller_serve_project_root)
@@ -256,8 +293,10 @@ pub fn controller_project_roots(exclude_pid: u32) -> BTreeSet<PathBuf> {
         .collect()
 }
 
+/// Documents served by a live supervisor other than `exclude_pid`; fork images
+/// are excluded for the same reason as [`controller_project_roots`].
 pub fn open_supervisor_documents(exclude_pid: u32) -> BTreeSet<PathBuf> {
-    process_pids()
+    distinct_process_images(process_pids())
         .into_iter()
         .filter(|pid| *pid != exclude_pid)
         .filter_map(open_supervisor_document)
@@ -328,18 +367,34 @@ mod tests {
         format!("4242 (agent doc) x) {}", fields.join(" "))
     }
 
+    /// A fake process tree: controller 10 (parent 1), its un-exec'd fork image
+    /// 11 (same cmdline), an exec'd child 12 (`git`), a second real controller
+    /// 20 for the same root, and 30 whose parent cmdline cannot be read.
     #[test]
-    fn proc_stat_ppid_parse_counts_fields_from_the_last_paren() {
+    fn fork_images_drop_out_of_a_fake_process_tree() {
+        let controller = b"agent-doc\0controller\0serve\0--project-root\0/p\0".to_vec();
+        let cmdline_of = |pid: u32| match pid {
+            1 => Some(b"/sbin/init\0".to_vec()),
+            10 | 11 | 20 | 30 => Some(controller.clone()),
+            12 => Some(b"git\0status\0".to_vec()),
+            _ => None,
+        };
+        let parent_of = |pid: u32| match pid {
+            10 | 20 => Some(1),
+            11 | 12 => Some(10),
+            30 => Some(99),
+            _ => None,
+        };
         assert_eq!(
-            parse_proc_stat_ppid("4242 (agent doc) x) S 17 4242 0"),
-            Some(17)
+            without_unexeced_fork_images([10, 11, 12, 20, 30], parent_of, cmdline_of),
+            vec![10, 12, 20, 30]
         );
-        assert_eq!(parse_proc_stat_ppid("garbage"), None);
-    }
-
-    #[test]
-    fn a_fresh_exec_is_not_a_fork_image_of_its_parent() {
-        assert!(!is_unexeced_fork_of_parent(std::process::id()));
+        // A pid whose parent is unknown is never dropped: the rule only removes
+        // a pid it can prove is a copy of a process still in the scan.
+        assert_eq!(
+            without_unexeced_fork_images([11], |_| None, cmdline_of),
+            vec![11]
+        );
     }
 
     #[test]

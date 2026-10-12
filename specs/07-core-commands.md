@@ -390,6 +390,27 @@ terminating that fork image with it (`#reaperciflake`). A controller rooted anyw
 down after 60s without a client, so a test process killed before its `TempDir`
 dropped no longer leaks one.
 
+Production `/proc` discovery applies the same fork-image rule
+(`#controllerforkimage`). A controller's `Command::spawn` child shows the
+controller's command line until it execs, and so does a dash fork, so a scan
+that matches command lines could see one controller (or supervisor) twice.
+Every scan that counts or targets processes names one pid per process image:
+`project_controller_pids` and its callers (the stale-duplicate reaper and the
+`status` `stale_duplicate_pids` it reports, the per-project orphaned-preparing
+reaper, the editor-liveness "is any controller running" check, the dashboard),
+the cross-project scan behind the orphaned-preparing sweep and the dashboard
+(`controller_serve_pids`), `controller_project_roots` and
+`open_supervisor_documents` (so an excluded process's own fork image cannot put
+its root or document back), and `supervisor_pid_for_doc` (so a supervisor
+asking about its own document never sees a foreign owner, and the verified
+kill aims at the supervisor, not a short-lived child). Without the rule the
+stale-duplicate reaper SIGTERMed the authoritative controller's spawn child and
+the orphaned-preparing reaper treated the bootstrap-owned controller's child as
+an orphan. Paths whose goal is that nothing serving a root survives — reaping a
+removed project root's controllers and `controller restart` (`force_restart_controller`)
+— use `project_controller_pids_including_fork_images` and terminate fork images
+too, so a persistent one never leaks.
+
 Every `lib-install` writes a new `libagent_doc-<version>.so` beside the binary
 and swaps the unversioned symlink onto it, so the directory used to grow by one
 library per install with nothing ever reaping the predecessors

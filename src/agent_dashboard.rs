@@ -269,15 +269,15 @@ pub(crate) fn collect(base: &Path, params: DashboardParams) -> AgentDashboard {
     }
 }
 
-/// One `/proc` scan: canonical project root -> live controller pids.
+/// One `/proc` scan: canonical project root -> live controller pids, one pid
+/// per controller (a controller's un-exec'd fork image is not a second
+/// controller, #controllerforkimage).
 fn running_controllers() -> BTreeMap<PathBuf, Vec<u32>> {
     let mut running: BTreeMap<PathBuf, Vec<u32>> = BTreeMap::new();
-    for pid in agent_doc_controller_io::process::process_pids() {
-        if let Some(root) = agent_doc_controller_io::process::controller_serve_project_root(pid) {
-            let root =
-                agent_doc_controller::command_line::canonical_path_for_command_line_compare(&root);
-            running.entry(root).or_default().push(pid);
-        }
+    for (pid, root) in agent_doc_controller_io::process::controller_serve_pids() {
+        let root =
+            agent_doc_controller::command_line::canonical_path_for_command_line_compare(&root);
+        running.entry(root).or_default().push(pid);
     }
     running
 }

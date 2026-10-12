@@ -1017,6 +1017,36 @@ I returned `#lzcoreclaims` to review solely because the queue-wide `#spec-test-c
 One isolation incident is recorded separately as `#lzgenericreadmeincident`: a worker invoked `sync-coverage.mjs --help`, but that script has no help mode and rewrote `README.md` in the pre-existing dirty worktrees `/home/brian/worktrees/lazily-rs` and `/home/brian/worktrees/lazily-kt`. The diffs are exactly two generated rollup rows: Reactive graph Python/Kotlin/JavaScript `✅ → ~` and Transport & FFI Kotlin `✅ → ~`. Prior cleanliness could not be proven, so nothing was restored and all unrelated dirty/untracked files were preserved.
 
 No commit, push, install, release, publication, or destructive action occurred. Confidence: high. Escalation: explicit commit/integration authority, plus operator inspection of the two generic README changes.
+
+### Re: #lzcorefacades — gpt-5 · 2026-10-12T11:49-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcorefacades]
+
+Phase 3 is implementation-complete in `/home/brian/worktrees/agent-loop-lzcorefacades-20261012`.
+
+**Complete:**
+
+- C++, Rust, Python, JavaScript, Dart, and Zig have additive idiomatic Core facades plus package-content and identity checks.
+- Kotlin, Go, and C# correctly retain their canonical package/namespace locations; the corrected Phase 1 allow-list maps their existing `Context`, `Source`, `Computed`, `Effect`, batch, scope, and teardown APIs without unnecessary wrapper code.
+- React and `Lazily.R3` remain separate adapters with Core API generation range `1..1`.
+- JavaScript dependencies were provisioned locally with `npm ci --ignore-scripts`; 80 packages installed and `package-lock.json` remained unchanged.
+- `npm run generate:protobuf && npm run typecheck` passed using the unmodified project command; Core identity/package tests passed 2/2.
+- Zig now has compile-time root/Core identity assertions for `Context`, `Source`, `Computed`, `Effect`, and `TeardownScope`; the facade-focused run passed 26/26 build steps and 8/8 tests, and the package-content check passed.
+- C++, Rust, Python, and Dart focused facade, packaging, and formatting checks remain green from the preserved worktree audit.
+
+**External or non-Phase-3 verification gaps:**
+
+- Zig’s full suite is 552/554; the two failures are the pre-existing `UnknownDeltaOp` codec-corpus drift in `ipc.zig`, outside the facade changes.
+- Zig 0.17 formatting passes. The required 0.15.2/0.16.0 formatter checks cannot run because those toolchains are absent and installing them is outside this item’s authorization.
+- Corrected Phase 1 must integrate before this dependent Phase 3 batch.
+
+I returned `#lzcorefacades` to review because the implementation is complete but integration remains externally blocked: `#spec-test-commit-push` is undefined, so commit/push authority is absent, and the older Zig toolchains are unavailable. No additional backlog follow-up is needed because the preserved implementation and this review item name every remaining gate.
+
+New continuation changes: `src/lazily-zig/src/root.zig` and `patches/lazily-zig.patch`. No commit, push, install, release, or publication occurred. Confidence: high. Escalation: integrate corrected Phase 1 first, provide commit/integration authority, and make Zig 0.15.2/0.16.0 available for the remaining formatter gate.
+
+Session accretion remains above the warning threshold; I continued the active queue without compaction.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -1024,7 +1054,7 @@ No commit, push, install, release, publication, or destructive action occurred. 
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzcoreclaims]~~
-- do [#lzcorefacades]
+- ~~do [#lzcorefacades]~~
 - do [#lzcorecompat]
 - do [#lzcoreconsumers]
 - do [#lzreleasepins]
@@ -1035,7 +1065,6 @@ No commit, push, install, release, publication, or destructive action occurred. 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
 - [ ] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
 - [ ] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [ ] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
@@ -1046,6 +1075,7 @@ No commit, push, install, release, publication, or destructive action occurred. 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md: additive idiomatic Core facades and package-content/identity checks are complete for all candidate bindings in /home/brian/worktrees/agent-loop-lzcorefacades-20261012, with Kotlin/Go/C# correctly retaining canonical package locations; blocked until corrected Phase 1 is integrated first, explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, and the unavailable Zig 0.15.2/0.16.0 formatting gate can be run.
 - [/] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md: the spec evidence contract and all nine binding declarations/report generators are complete and pass the aggregate --require-all gate in isolated worktrees; blocked until explicit commit/integration authorization is supplied or the queue-wide #spec-test-commit-push preset is defined.
 - [/] [#lzgenericreadmeincident] [operator-verify] Inspect accidental generated README rollup changes in /home/brian/worktrees/lazily-rs and /home/brian/worktrees/lazily-kt. Prior README cleanliness is unknown; restore only README.md if the two generated rollup changes were unintended, and preserve all unrelated dirty/untracked files.
 - [/] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates are complete and verified in /home/brian/worktrees/lazily-spec-lzcoreprofile-20261012; blocked until explicit commit/integration authorization is supplied or the queue-wide #spec-test-commit-push preset is defined.

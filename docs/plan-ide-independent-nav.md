@@ -316,7 +316,10 @@ What landed (the original scope follows below):
 - Cleanup: a marked lane with no document pane, no busy pane, and no live surface (an attached
   tmux client, or an installation the caller reports live) is closed with `kill-session`, after a
   re-observation confirms the plan. Unmarked sessions are retained and never read
-  (`#bare-foreign-session-guard`). A registry read failure observes nothing.
+  (`#bare-foreign-session-guard`). A registry read failure observes nothing. The shells agent-doc
+  creates in a lane carry `@agent_doc_navigation_lane_placeholder`, and are idle until a client
+  first attaches to the lane, whatever their starting shell runs (`#lanegcflake`: a lane GC'd while
+  its fresh shell still ran rc commands was kept as `busy_unowned_pane`).
 - IO: `project_controller::reconcile_navigation_lane_sessions(tmux, root, live_installations,
   dry_run)`; `agent-doc gc` runs it after its file GC (CLI passes no live installations, so an
   attached terminal is its liveness proof) and prints each planned action; `--dry-run` changes

@@ -363,6 +363,16 @@ loses desktop focus.
   but a known bare shell is busy). A session without the mark is retained (`not_marked`) and
   nothing in it is read, moved, or closed (`#bare-foreign-session-guard`); a registry that cannot
   be read observes nothing.
+  - Placeholder shells (`#lanegcflake`): every shell pane agent-doc itself creates in a lane (the
+    initial `agent-doc` pane, the `stash` shell, a handoff placeholder) carries the pane option
+    `@agent_doc_navigation_lane_placeholder` = this root. While no tmux client has ever attached
+    to its session (`#{session_last_attached}` is empty), such a pane is never busy, whatever its
+    foreground command: a shell that is still starting reports `tmux` before `exec` and then its rc
+    files' children (`grep`, `mkdir`, prompt helpers), none of which the operator started, so the
+    command is not evidence. Once a client has attached (an IDE terminal, `attach`,
+    `switch-client`), the mark no longer applies and the foreground command decides again, so a
+    program the operator left running in it keeps the lane. A pane agent-doc did not create is
+    never covered by the mark. An unreadable attach history counts as attached.
   - `per_installation` (enable migration): no pane ever moves. Panes that lived in the project
     session before the switch stay there, and each installation lane starts empty and acquires
     panes through its own layouts and explicit claims. A lane session is closed only when it holds

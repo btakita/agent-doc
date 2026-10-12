@@ -427,7 +427,10 @@ pub struct LanePaneObservation {
     /// actor binding of this project names it).
     pub document_owned: bool,
     /// The pane's foreground command is not a known bare shell. An unknown
-    /// command counts as busy (false-alive over false-dead).
+    /// command counts as busy (false-alive over false-dead). A shell pane
+    /// agent-doc itself created in the lane is never busy while no client has
+    /// ever attached to the session (`#lanegcflake`): its startup commands are
+    /// not the operator's work.
     pub busy: bool,
 }
 

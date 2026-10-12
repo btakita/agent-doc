@@ -116,6 +116,35 @@ fn parse_proc_stat_state_and_start(stat: &str) -> Option<(char, u64)> {
     Some((state, start_ticks))
 }
 
+/// Parent pid (field 4) from a `/proc/<pid>/stat` line, counted from the
+/// last `)` because `comm` may contain spaces and parentheses.
+fn parse_proc_stat_ppid(stat: &str) -> Option<u32> {
+    let rest = &stat[stat.rfind(')')? + 1..];
+    rest.split_whitespace().nth(1)?.parse().ok()
+}
+
+pub fn process_parent_pid(pid: u32) -> Option<u32> {
+    parse_proc_stat_ppid(&read_proc_stat(pid)?)
+}
+
+/// `pid` is a fork of its parent that has not exec'd yet: its command line is
+/// the parent's, byte for byte. A shell that forks before every external
+/// command (`/bin/sh` = dash, a `( ... )` subshell, a `vfork` child) briefly or
+/// persistently shows the parent's argv, so a `/proc` scan matching command
+/// lines sees the same process image twice (#reaperciflake).
+pub fn is_unexeced_fork_of_parent(pid: u32) -> bool {
+    let Some(ppid) = process_parent_pid(pid).filter(|ppid| *ppid > 0) else {
+        return false;
+    };
+    let (Ok(own), Ok(parent)) = (
+        std::fs::read(format!("/proc/{pid}/cmdline")),
+        std::fs::read(format!("/proc/{ppid}/cmdline")),
+    ) else {
+        return false;
+    };
+    !own.is_empty() && own == parent
+}
+
 fn read_proc_stat(pid: u32) -> Option<String> {
     std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()
 }
@@ -297,6 +326,20 @@ mod tests {
         fields.push(start.to_string());
         fields.extend(["999", "888"].map(str::to_string));
         format!("4242 (agent doc) x) {}", fields.join(" "))
+    }
+
+    #[test]
+    fn proc_stat_ppid_parse_counts_fields_from_the_last_paren() {
+        assert_eq!(
+            parse_proc_stat_ppid("4242 (agent doc) x) S 17 4242 0"),
+            Some(17)
+        );
+        assert_eq!(parse_proc_stat_ppid("garbage"), None);
+    }
+
+    #[test]
+    fn a_fresh_exec_is_not_a_fork_image_of_its_parent() {
+        assert!(!is_unexeced_fork_of_parent(std::process::id()));
     }
 
     #[test]

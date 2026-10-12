@@ -80,8 +80,20 @@ impl ProjectControllerReaper {
         }
     }
 
-    /// Controller PIDs serving a project root under this guard's root.
+    /// Controller PIDs serving a project root under this guard's root, one per
+    /// controller: a forked-but-not-exec'd child carries its controller's
+    /// command line verbatim (dash forks before every external command), so it
+    /// is the same controller image, not a second controller (#reaperciflake).
     pub fn controller_pids(&self) -> Vec<u32> {
+        self.matching_pids()
+            .into_iter()
+            .filter(|pid| !agent_doc_controller_io::process::is_unexeced_fork_of_parent(*pid))
+            .collect()
+    }
+
+    /// Every process whose command line serves a project root under this
+    /// guard's root, fork images included.
+    fn matching_pids(&self) -> Vec<u32> {
         let own_pid = std::process::id();
         agent_doc_controller_io::process::process_pids()
             .into_iter()
@@ -97,10 +109,11 @@ impl ProjectControllerReaper {
             .collect()
     }
 
-    /// Terminate every controller under the root; returns how many were found.
+    /// Terminate every controller under the root, and any fork image of one;
+    /// returns how many processes were found.
     pub fn reap(&self) -> usize {
         use agent_doc_controller_io::process::{ProcessSignal, send_signal};
-        let pids = self.controller_pids();
+        let pids = self.matching_pids();
         for pid in &pids {
             send_signal(*pid, ProcessSignal::Term);
         }
@@ -1097,6 +1110,56 @@ mod project_controller_reaper_tests {
         child
     }
 
+    /// A fake controller whose shell keeps a forked subshell that never execs:
+    /// the fork image carries the controller's command line verbatim, the
+    /// persistent form of the window `/bin/sh` = dash opens before every
+    /// `sleep` it runs (#reaperciflake). Returns the shell and the fork image.
+    fn fake_controller_with_fork_image(root: &Path) -> (Child, u32) {
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("(while :; do sleep 1; done) & wait")
+            .arg("agent-doc")
+            .arg("controller")
+            .arg("serve")
+            .arg("--project-root")
+            .arg(root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let fork_image = loop {
+            let fork_image = agent_doc_controller_io::process::process_pids()
+                .into_iter()
+                .find(|pid| {
+                    agent_doc_controller_io::process::process_parent_pid(*pid) == Some(child.id())
+                        && agent_doc_controller_io::process::controller_serve_project_root(*pid)
+                            .is_some()
+                });
+            if let Some(fork_image) = fork_image {
+                break fork_image;
+            }
+            assert!(Instant::now() < deadline, "fake controller never forked");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        (child, fork_image)
+    }
+
+    fn assert_pid_exits_within(pid: u32, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while process_is_alive(pid) {
+            if Instant::now() >= deadline {
+                agent_doc_controller_io::process::send_signal(
+                    pid,
+                    agent_doc_controller_io::process::ProcessSignal::Kill,
+                );
+                panic!("fork image pid {pid} survived the reaper");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     /// Reap `child`, failing (after killing it) when it is still running at the
     /// deadline, so a broken reaper fails the test instead of hanging it.
     fn assert_exits_within(child: &mut Child, timeout: Duration) {
@@ -1136,6 +1199,24 @@ mod project_controller_reaper_tests {
         );
         drop(_decoy);
         assert_exits_within(&mut theirs, Duration::from_secs(5));
+    }
+
+    /// A forked-but-not-exec'd child of a controller is the same controller
+    /// image, not a second controller: `controller_pids` names the controller
+    /// once, and the reaper still terminates the fork image with it.
+    #[test]
+    fn reaper_counts_a_controller_fork_image_once_and_still_terminates_it() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let (mut controller, fork_image) = fake_controller_with_fork_image(&project);
+
+        let reaper = ProjectControllerReaper::under(fixture.path());
+        assert_eq!(reaper.controller_pids(), vec![controller.id()]);
+        drop(reaper);
+
+        assert_exits_within(&mut controller, Duration::from_secs(5));
+        assert_pid_exits_within(fork_image, Duration::from_secs(5));
     }
 
     /// The fixture's assertion panics; the guard still tears the controller down

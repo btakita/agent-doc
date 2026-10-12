@@ -2672,6 +2672,7 @@ dependencies = [
  "fs2",
  "lazily 0.57.1",
  "parking_lot",
+ "portable-pty",
  "serde",
  "serde_json",
  "tempfile",

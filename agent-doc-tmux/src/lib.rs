@@ -1337,9 +1337,200 @@ impl TmuxClientGeometry {
     }
 }
 
+/// One client attached to a session, as seen by the manual-pin re-fit check
+/// (GH #244): its terminal size and how many of its rows tmux reserves for the
+/// status line (none for a control-mode client).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttachedClientViewport {
+    pub width: u32,
+    pub height: u32,
+    pub status_rows: u32,
+}
+
+impl AttachedClientViewport {
+    /// Parse `list-clients -F '#{client_width} #{client_height} #{status}
+    /// #{client_control_mode}'`. `#{status}` is `off`, `on` or a row count.
+    ///
+    /// `None` when any client's size cannot be read (tmux reports no
+    /// `#{client_height}` for a control-mode client): "smaller than every
+    /// client" is then unprovable, and the caller must not re-fit.
+    pub fn parse_list(output: &str) -> Option<Vec<Self>> {
+        output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                let width = fields.next()?.parse().ok()?;
+                let height = fields.next()?.parse().ok()?;
+                let status = fields.next().unwrap_or("on");
+                let control_mode = fields.next() == Some("1");
+                let status_rows = if control_mode {
+                    0
+                } else {
+                    match status {
+                        "off" => 0,
+                        "on" => 1,
+                        rows => rows.parse().unwrap_or(1),
+                    }
+                };
+                Some(Self {
+                    width,
+                    height,
+                    status_rows,
+                })
+            })
+            .collect()
+    }
+
+    /// The window area this client would show: its size less the status line.
+    pub fn window_area(&self) -> (u32, u32) {
+        (self.width, self.height.saturating_sub(self.status_rows))
+    }
+}
+
+/// GH #244: whether an agent-doc-owned window is held below its clients by a
+/// per-window `window-size manual` pin and should be re-fit.
+///
+/// tmux's `resize-window -A` (commonly bound to a "fit window" key) sets the
+/// window's own `window-size` to `manual` and leaves it there, so the window
+/// stops following its client and is dot-padded once the terminal grows. The
+/// pin is released only when all of these hold:
+///
+/// - the window's **local** (not inherited) `window-size` is `manual` — a
+///   global or session `manual` policy is the operator's choice, not a stray pin;
+/// - at least one client is attached — with none, nothing is dot-padded and
+///   there is no size to fit to;
+/// - the window is smaller than **every** attached client's window area, so no
+///   client relies on the pinned size: no larger than it in either dimension and
+///   strictly smaller in at least one.
+///
+/// The caller must restrict this to windows agent-doc owns; an operator's own
+/// window keeps its pin regardless (`#bare-foreign-session-guard`).
+pub fn manual_window_pin_needs_refit(
+    local_window_size: Option<&str>,
+    window_width: u32,
+    window_height: u32,
+    clients: &[AttachedClientViewport],
+) -> bool {
+    local_window_size.map(str::trim) == Some("manual")
+        && !clients.is_empty()
+        && clients.iter().all(|client| {
+            let (width, height) = client.window_area();
+            window_width <= width
+                && window_height <= height
+                && (window_width < width || window_height < height)
+        })
+}
+
 #[cfg(test)]
 mod client_geometry_tests {
     use super::*;
+
+    fn viewport(width: u32, height: u32) -> AttachedClientViewport {
+        AttachedClientViewport {
+            width,
+            height,
+            status_rows: 1,
+        }
+    }
+
+    #[test]
+    fn gh244_manual_pin_below_its_only_client_needs_refit() {
+        // The incident: `@2` pinned at 203x12 inside a 244x20 client.
+        assert!(manual_window_pin_needs_refit(
+            Some("manual"),
+            203,
+            12,
+            &[viewport(244, 20)]
+        ));
+        // Only one dimension short still dot-pads.
+        assert!(manual_window_pin_needs_refit(
+            Some("manual"),
+            244,
+            12,
+            &[viewport(244, 20)]
+        ));
+        assert!(manual_window_pin_needs_refit(
+            Some("manual\n"),
+            203,
+            19,
+            &[viewport(244, 20)]
+        ));
+    }
+
+    #[test]
+    fn gh244_manual_pin_that_fits_its_client_is_converged() {
+        // 244x19 + one status row is exactly the 244x20 client.
+        assert!(!manual_window_pin_needs_refit(
+            Some("manual"),
+            244,
+            19,
+            &[viewport(244, 20)]
+        ));
+        // A window larger than its client in either dimension is not "held
+        // below" it; some other policy chose that size.
+        assert!(!manual_window_pin_needs_refit(
+            Some("manual"),
+            300,
+            12,
+            &[viewport(244, 20)]
+        ));
+    }
+
+    #[test]
+    fn gh244_only_a_local_manual_pin_with_a_client_is_released() {
+        for policy in [None, Some(""), Some("latest"), Some("largest")] {
+            assert!(
+                !manual_window_pin_needs_refit(policy, 203, 12, &[viewport(244, 20)]),
+                "{policy:?} is not a per-window manual pin"
+            );
+        }
+        assert!(
+            !manual_window_pin_needs_refit(Some("manual"), 203, 12, &[]),
+            "no attached client: nothing to fit to"
+        );
+    }
+
+    #[test]
+    fn gh244_a_client_matching_the_pinned_size_keeps_the_pin() {
+        // Smaller than one client but exactly the other's view: that client
+        // relies on the current size, so it is not "smaller than every client".
+        assert!(!manual_window_pin_needs_refit(
+            Some("manual"),
+            203,
+            12,
+            &[viewport(244, 20), viewport(203, 13)]
+        ));
+        assert!(manual_window_pin_needs_refit(
+            Some("manual"),
+            203,
+            12,
+            &[viewport(244, 20), viewport(210, 30)]
+        ));
+    }
+
+    #[test]
+    fn gh244_client_viewport_parse_reserves_status_rows() {
+        let clients = AttachedClientViewport::parse_list(
+            "244 20 on 0\n160 40 on 1\n100 30 off 0\n80 24 2 0\n\n",
+        )
+        .unwrap();
+        assert_eq!(
+            clients
+                .iter()
+                .map(AttachedClientViewport::window_area)
+                .collect::<Vec<_>>(),
+            vec![(244, 19), (160, 40), (100, 30), (80, 22)]
+        );
+
+        // A control-mode client has no `#{client_height}`: one unreadable
+        // client makes the whole list unprovable.
+        assert_eq!(
+            AttachedClientViewport::parse_list("244 20 on 0\n160  on 1\n"),
+            None
+        );
+        assert_eq!(AttachedClientViewport::parse_list(""), Some(Vec::new()));
+    }
 
     #[test]
     fn the_gh83_rig_reads_as_mismatched_clients_under_latest() {

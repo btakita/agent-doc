@@ -1713,7 +1713,7 @@ pub fn repair_layout(
     let output = agent_doc_tmux_io::list_windows(
         tmux,
         Some(&format!("{}:", session_name)),
-        "#{window_id} #{window_panes} #{window_height} #{automatic-rename} #{allow-rename} #{window_name}",
+        "#{window_id} #{window_panes} #{window_height} #{automatic-rename} #{allow-rename} #{window_width} #{window-size} #{window_name}",
     );
     let window_list = match output {
         Ok(s) => s,
@@ -1735,16 +1735,22 @@ pub fn repair_layout(
         height: String,
         automatic_rename: bool,
         allow_rename: bool,
+        width: String,
+        /// Effective (inherited) `window-size`; GH #244 only probes the local
+        /// option when this is `manual`, so the converged path costs nothing.
+        effective_window_size: String,
     }
     let windows: Vec<WinInfo> = window_list
         .lines()
         .filter_map(|line| {
-            let mut parts = line.splitn(6, ' ');
+            let mut parts = line.splitn(8, ' ');
             let id = parts.next()?.to_string();
             let pane_count: usize = parts.next()?.parse().ok()?;
             let height = parts.next()?.to_string();
             let automatic_rename = parts.next()? == "1";
             let allow_rename = parts.next()? == "1";
+            let width = parts.next()?.to_string();
+            let effective_window_size = parts.next()?.to_string();
             let name = parts.next()?.to_string();
             Some(WinInfo {
                 id,
@@ -1753,10 +1759,15 @@ pub fn repair_layout(
                 height,
                 automatic_rename,
                 allow_rename,
+                width,
+                effective_window_size,
             })
         })
         .collect();
 
+    // Attached clients are listed at most once, and only when an owned window
+    // carries an effective `manual` window-size (GH #244).
+    let mut attached_clients: Option<Vec<agent_doc_tmux::AttachedClientViewport>> = None;
     // `#stashresizerestore`: heal windows pinned by binaries that used the
     // 1000-row join workaround without fully removing tmux's manual-size
     // override. Restrict recovery to the exact staging height and agent-doc's
@@ -1799,6 +1810,51 @@ pub fn repair_layout(
                     "[repair] warning: could not unpin stale 1000-row window {} ({}): {}",
                     window.id, window.name, err
                 ),
+            }
+        } else if agent_doc_owned && window.effective_window_size == "manual" {
+            // GH #244: a per-window `window-size manual` pin (left by tmux's
+            // `resize-window -A`, e.g. an operator's "fit window" key) holds
+            // the window at an old client size; once the terminal grows the
+            // window stays small and dot-padded. Release the pin only when the
+            // window is smaller than every client attached to this session.
+            let clients = attached_clients.get_or_insert_with(|| {
+                agent_doc_tmux_io::list_attached_client_viewports(tmux, session_name)
+            });
+            let local_window_size = agent_doc_tmux_io::local_window_size_option(tmux, &window.id);
+            let (Ok(width), Ok(height)) = (window.width.parse(), window.height.parse()) else {
+                continue;
+            };
+            if agent_doc_tmux::manual_window_pin_needs_refit(
+                local_window_size.as_deref(),
+                width,
+                height,
+                clients,
+            ) {
+                match agent_doc_tmux_io::resize_window_to_clients(tmux, &window.id) {
+                    Ok(()) => {
+                        mutated = true;
+                        sync_log(&format!(
+                            "layout_repair_window_size_pin_released session={} window={} name={} pinned={}x{} clients=[{}]",
+                            session_name,
+                            window.id,
+                            window.name,
+                            width,
+                            height,
+                            clients
+                                .iter()
+                                .map(|client| {
+                                    let (width, height) = client.window_area();
+                                    format!("{width}x{height}")
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ))
+                    }
+                    Err(err) => eprintln!(
+                        "[repair] warning: could not release window-size pin on {} ({}): {}",
+                        window.id, window.name, err
+                    ),
+                }
             }
         }
     }
@@ -8998,6 +9054,216 @@ mod tests {
             local_window_size.trim().is_empty(),
             "repair must remove the per-window manual-size override, got {local_window_size:?}"
         );
+    }
+
+    fn gh244_tmux_value(iso: &tmux_router::Tmux, args: &[&str]) -> String {
+        iso.raw_cmd(args).unwrap().trim().to_string()
+    }
+
+    fn gh244_window_size(iso: &tmux_router::Tmux, target: &str) -> String {
+        gh244_tmux_value(
+            iso,
+            &[
+                "display-message",
+                "-p",
+                "-t",
+                target,
+                "#{window_width}x#{window_height}",
+            ],
+        )
+    }
+
+    fn gh244_local_window_size(iso: &tmux_router::Tmux, target: &str) -> String {
+        gh244_tmux_value(
+            iso,
+            &["show-options", "-w", "-v", "-t", target, "window-size"],
+        )
+    }
+
+    /// A real terminal client (GH #244): control-mode clients report no
+    /// `#{client_height}`, so the "smaller than every client" decision needs a
+    /// pty-backed `tmux attach` whose size the test can grow.
+    struct Gh244PtyClient {
+        master: Box<dyn portable_pty::MasterPty + Send>,
+        child: Box<dyn portable_pty::Child + Send + Sync>,
+    }
+
+    impl Gh244PtyClient {
+        fn attach(
+            iso: &agent_doc_tmux_io::IsolatedTestTmux,
+            session: &str,
+            cols: u16,
+            rows: u16,
+        ) -> Self {
+            let pair = portable_pty::native_pty_system()
+                .openpty(Self::size(cols, rows))
+                .expect("openpty");
+            let mut command = portable_pty::CommandBuilder::new("tmux");
+            command.arg("-S");
+            command.arg(iso.socket_path());
+            command.args(["attach-session", "-t", session]);
+            command.env_remove("TMUX");
+            command.env("TERM", "xterm-256color");
+            let child = pair
+                .slave
+                .spawn_command(command)
+                .expect("spawn tmux client");
+            drop(pair.slave);
+            // Drain the client's output so it never blocks on a full pty.
+            let mut reader = pair.master.try_clone_reader().expect("pty reader");
+            std::thread::spawn(move || {
+                let mut sink = [0u8; 4096];
+                while matches!(std::io::Read::read(&mut reader, &mut sink), Ok(n) if n > 0) {}
+            });
+            Self {
+                master: pair.master,
+                child,
+            }
+        }
+
+        fn size(cols: u16, rows: u16) -> portable_pty::PtySize {
+            portable_pty::PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            }
+        }
+
+        fn resize(&self, cols: u16, rows: u16) {
+            self.master
+                .resize(Self::size(cols, rows))
+                .expect("resize pty");
+        }
+    }
+
+    impl Drop for Gh244PtyClient {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    fn gh244_wait_until(what: &str, mut ready: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !ready() {
+            assert!(std::time::Instant::now() < deadline, "timed out: {what}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn repair_layout_refits_agent_doc_window_pinned_below_its_client_gh244() {
+        // GH #244: a client attaches, the operator's "fit window" key runs
+        // `resize-window -A` (which leaves a per-window `window-size manual`),
+        // then the terminal grows. The owned window stays small and dot-padded
+        // until repair releases the pin.
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-gh244-manual-pin-refit");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _pane = iso.new_session("test", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        let _ = iso.ensure_stash_window("test");
+        iso.raw_cmd(&["set-option", "-g", "window-size", "latest"])
+            .unwrap();
+        iso.raw_cmd(&["select-window", "-t", "test:agent-doc"])
+            .unwrap();
+
+        let client = Gh244PtyClient::attach(&iso, "test", 100, 30);
+        gh244_wait_until("window follows the 100x30 client", || {
+            gh244_window_size(&iso, "test:agent-doc") == "100x29"
+        });
+
+        iso.raw_cmd(&["resize-window", "-A", "-t", "test:agent-doc"])
+            .unwrap();
+        assert_eq!(gh244_local_window_size(&iso, "test:agent-doc"), "manual");
+
+        client.resize(160, 40);
+        gh244_wait_until("client grows to 160x40", || {
+            gh244_tmux_value(
+                &iso,
+                &[
+                    "list-clients",
+                    "-t",
+                    "test",
+                    "-F",
+                    "#{client_width}x#{client_height}",
+                ],
+            ) == "160x40"
+        });
+        assert_eq!(
+            gh244_window_size(&iso, "test:agent-doc"),
+            "100x29",
+            "the manual pin holds the window at the old client size"
+        );
+
+        assert_eq!(
+            repair_layout(&iso, "test", "agent-doc").unwrap(),
+            LayoutRepairOutcome::Repaired,
+            "a pinned, undersized owned window is not converged"
+        );
+        assert_eq!(
+            gh244_local_window_size(&iso, "test:agent-doc"),
+            "",
+            "repair must release the per-window pin"
+        );
+        gh244_wait_until("window re-fits the 160x40 client", || {
+            gh244_window_size(&iso, "test:agent-doc") == "160x39"
+        });
+        assert_eq!(
+            repair_layout(&iso, "test", "agent-doc").unwrap(),
+            LayoutRepairOutcome::AlreadyConverged,
+            "the re-fit converges"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn repair_layout_keeps_manual_pins_it_does_not_own_gh244() {
+        // `#bare-foreign-session-guard`: an operator's own window keeps its
+        // pin, and an owned window with no attached client has nothing to fit.
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-gh244-foreign-pin-kept");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _pane = iso.new_session("test", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        let _ = iso.ensure_stash_window("test");
+        iso.raw_cmd(&["new-window", "-d", "-t", "test:", "-n", "editor"])
+            .unwrap();
+        iso.raw_cmd(&["set-option", "-g", "window-size", "latest"])
+            .unwrap();
+        iso.raw_cmd(&["select-window", "-t", "test:agent-doc"])
+            .unwrap();
+        let _idle = iso.new_session("idle", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "idle:0", "agent-doc"])
+            .unwrap();
+        let _ = iso.ensure_stash_window("idle");
+
+        let _client = Gh244PtyClient::attach(&iso, "test", 160, 40);
+        gh244_wait_until("window follows the 160x40 client", || {
+            gh244_window_size(&iso, "test:agent-doc") == "160x39"
+        });
+
+        // `resize-window -x/-y` pins exactly like `-A` does.
+        for target in ["test:editor", "idle:agent-doc"] {
+            iso.raw_cmd(&["resize-window", "-t", target, "-x", "100", "-y", "30"])
+                .unwrap();
+            assert_eq!(gh244_local_window_size(&iso, target), "manual");
+        }
+
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+        repair_layout(&iso, "idle", "agent-doc").unwrap();
+
+        for target in ["test:editor", "idle:agent-doc"] {
+            assert_eq!(
+                gh244_local_window_size(&iso, target),
+                "manual",
+                "{target} must keep its pin"
+            );
+            assert_eq!(gh244_window_size(&iso, target), "100x30", "{target}");
+        }
+        assert_eq!(gh244_window_size(&iso, "test:agent-doc"), "160x39");
     }
 
     #[test]

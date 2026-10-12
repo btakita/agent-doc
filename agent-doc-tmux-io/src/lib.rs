@@ -572,6 +572,46 @@ pub fn resize_window_to_clients(
         .map(|_| ())
 }
 
+/// GH #244: the window's own (not inherited) `window-size` option, or `None`
+/// when it is unset or tmux cannot be asked.
+pub fn local_window_size_option(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    window: &str,
+) -> Option<String> {
+    runner
+        .run(&agent_doc_tmux_commands::TmuxCommand::new([
+            "show-options",
+            "-wv",
+            "-t",
+            window,
+            "window-size",
+        ]))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// GH #244: every client attached to `session`, with the rows its status line
+/// takes. Empty when none is attached, tmux cannot be asked, or any client's
+/// size is unreadable (a control-mode client reports no height); the
+/// manual-pin re-fit treats empty as "nothing provably larger to fit to".
+pub fn list_attached_client_viewports(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    session: &str,
+) -> Vec<agent_doc_tmux::AttachedClientViewport> {
+    runner
+        .run(&agent_doc_tmux_commands::TmuxCommand::new([
+            "list-clients",
+            "-t",
+            session,
+            "-F",
+            "#{client_width} #{client_height} #{status} #{client_control_mode}",
+        ]))
+        .ok()
+        .and_then(|output| agent_doc_tmux::AttachedClientViewport::parse_list(&output))
+        .unwrap_or_default()
+}
+
 pub fn swap_window(
     runner: &(impl TmuxCommandRunner + ?Sized),
     source: &str,
@@ -1320,6 +1360,32 @@ mod tests {
                 vec!["resize-window", "-t", "@2", "-A"],
                 vec!["set-option", "-w", "-u", "-t", "@2", "window-size"],
             ]
+        );
+    }
+
+    #[test]
+    fn gh244_local_window_size_option_and_client_viewports_parse_tmux_output() {
+        let pinned = FakeRunner {
+            response: "manual\n".to_string(),
+        };
+        assert_eq!(
+            local_window_size_option(&pinned, "@2").as_deref(),
+            Some("manual")
+        );
+        let unset = FakeRunner {
+            response: "\n".to_string(),
+        };
+        assert_eq!(local_window_size_option(&unset, "@2"), None);
+
+        let clients = FakeRunner {
+            response: "244 20 on 0\n".to_string(),
+        };
+        assert_eq!(
+            list_attached_client_viewports(&clients, "0")
+                .iter()
+                .map(agent_doc_tmux::AttachedClientViewport::window_area)
+                .collect::<Vec<_>>(),
+            vec![(244, 19)]
         );
     }
 

@@ -532,7 +532,7 @@ If both checks pass, I'll push to `main`, install, and re-cut v0.35.492. The fir
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/241
 - 🚧 do [#ideriderindependentnav]
 - 🚧 lazily.md issue: Run Agent Doc then Ctrl+c in the Codex terminal then Clear Session Context: Clear Session Context is wedged
-- tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.
+- 🚧 tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.
 - 🚧 release + publish
 <!-- /agent:queue -->
 

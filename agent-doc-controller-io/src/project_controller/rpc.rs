@@ -28080,6 +28080,68 @@ fn observed_pane_window(identity: Result<(String, String)>) -> Option<(String, S
 /// sessions.
 const NAVIGATION_LANE_SESSION_OPTION: &str = "@agent_doc_navigation_lane";
 
+/// tmux pane option that marks a shell pane agent-doc itself created inside a
+/// navigation lane session: the lane's initial `agent-doc` pane, its `stash`
+/// shell, and a handoff placeholder (`#lanegcflake`). Its value is the project
+/// root.
+///
+/// The lane GC cannot read "idle" from `#{pane_current_command}` on such a pane
+/// while its shell is still starting: before `exec` the pane reports `tmux`,
+/// and the shell's rc files run foreground children (`grep`, `mkdir`, `diff`,
+/// prompt helpers) that each read as a running program. A marked pane in a
+/// lane session no client has ever attached to cannot hold anything the
+/// operator started, so [`navigation_lane_pane_busy`] treats it as idle
+/// whatever its startup is running. Once a client has attached, the mark no
+/// longer applies and the pane's foreground command decides again.
+const NAVIGATION_LANE_PLACEHOLDER_PANE_OPTION: &str = "@agent_doc_navigation_lane_placeholder";
+
+/// Mark `pane` as a shell agent-doc created in a navigation lane of
+/// `project_root` ([`NAVIGATION_LANE_PLACEHOLDER_PANE_OPTION`]). Best effort:
+/// an unmarked placeholder is only ever classified by its foreground command,
+/// which errs toward keeping the lane.
+fn mark_navigation_lane_placeholder_pane(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    pane: &str,
+) {
+    let root = project_root.to_string_lossy().to_string();
+    let marked = tmux
+        .cmd()
+        .args([
+            "set-option",
+            "-p",
+            "-q",
+            "-t",
+            pane,
+            NAVIGATION_LANE_PLACEHOLDER_PANE_OPTION,
+            &root,
+        ])
+        .output();
+    if !marked.as_ref().is_ok_and(|output| output.status.success()) {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!("navigation_lane_placeholder_mark_failed pane={pane}"),
+        );
+    }
+}
+
+/// Whether one pane of a marked navigation lane session keeps the lane alive
+/// as the operator's work (`#lanegcflake`).
+///
+/// `untouched_placeholder`: the pane carries
+/// [`NAVIGATION_LANE_PLACEHOLDER_PANE_OPTION`] for this root and no tmux
+/// client has ever attached to its session (`#{session_last_attached}` is
+/// empty). Such a pane is idle by construction, so its shell's startup
+/// commands never make it busy. Every other pane is busy unless its
+/// foreground command is a known bare shell (false-alive over false-dead).
+fn navigation_lane_pane_busy(untouched_placeholder: bool, current_command: &str) -> bool {
+    !untouched_placeholder
+        && agent_doc_supervisor_process::session_liveness::pane_owns_live_agent_from_signals(
+            true,
+            Some(current_command),
+        )
+}
+
 /// The `(project session, lane session)` pair one navigation lane arranges, when
 /// lane membership applies at all.
 ///
@@ -28238,6 +28300,9 @@ fn ensure_navigation_lane_session(
             "agent-doc",
             "-c",
             &root,
+            "-P",
+            "-F",
+            "#{pane_id}",
         ])
         .output()
         .map_err(|error| format!("navigation_lane_session_create_failed:{error}"))?;
@@ -28265,8 +28330,17 @@ fn ensure_navigation_lane_session(
             String::from_utf8_lossy(&marked.stderr).trim()
         ));
     }
-    tmux.ensure_stash_window(lane_session)
+    let initial_pane = String::from_utf8_lossy(&created.stdout).trim().to_string();
+    if !initial_pane.is_empty() {
+        mark_navigation_lane_placeholder_pane(tmux, project_root, &initial_pane);
+    }
+    let stash_window = tmux
+        .ensure_stash_window(lane_session)
         .map_err(|error| format!("navigation_lane_stash_create_failed:{error:#}"))?;
+    // The stash window was created just now, so its only pane is its shell.
+    for stash_pane in tmux.list_window_panes(&stash_window).unwrap_or_default() {
+        mark_navigation_lane_placeholder_pane(tmux, project_root, &stash_pane);
+    }
     agent_doc_ops_log_io::log_op(
         project_root,
         &format!("navigation_lane_session_created session={lane_session} windows=agent-doc,stash"),
@@ -28510,7 +28584,9 @@ pub fn hand_over_navigation_lane_pane(
                 "#{pane_id}",
             ])
             .map_err(|error| format!("navigation_lane_handoff_placeholder_failed:{error:#}"))?;
-        Some(placeholder.trim().to_string())
+        let placeholder = placeholder.trim().to_string();
+        mark_navigation_lane_placeholder_pane(tmux, project_root, &placeholder);
+        Some(placeholder)
     } else {
         None
     };
@@ -28561,7 +28637,9 @@ fn observe_navigation_lane_sessions(
     let Ok(sessions) = tmux.raw_cmd(&[
         "list-sessions",
         "-F",
-        "#{session_name}\t#{session_attached}",
+        // `last:` keeps an empty (never attached) value from being trimmed
+        // off the end of the output.
+        "#{session_name}\t#{session_attached}\tlast:#{session_last_attached}",
     ]) else {
         return Vec::new();
     };
@@ -28578,11 +28656,24 @@ fn observe_navigation_lane_sessions(
     sessions
         .lines()
         .filter_map(|line| {
-            let (session, attached) = line.split_once('\t')?;
-            agent_doc_editor_surface::is_lane_session_of(project_session, session)
-                .then(|| (session.to_string(), attached.trim().parse::<usize>().unwrap_or(1)))
+            let mut fields = line.splitn(3, '\t');
+            let session = fields.next()?;
+            let attached = fields.next().unwrap_or("");
+            // An unreadable attach history counts as attached once, so the
+            // placeholder rule never applies on a read it cannot trust.
+            let ever_attached = fields
+                .next()
+                .and_then(|last| last.strip_prefix("last:"))
+                .is_none_or(|last| !last.trim().is_empty());
+            agent_doc_editor_surface::is_lane_session_of(project_session, session).then(|| {
+                (
+                    session.to_string(),
+                    attached.trim().parse::<usize>().unwrap_or(1),
+                    ever_attached,
+                )
+            })
         })
-        .map(|(session, attached)| {
+        .map(|(session, attached, ever_attached)| {
             let marked = navigation_lane_session_marked(tmux, project_root, &session);
             let panes = if marked {
                 tmux.raw_cmd(&[
@@ -28591,20 +28682,25 @@ fn observe_navigation_lane_sessions(
                     "-t",
                     &format!("={session}:"),
                     "-F",
-                    "#{pane_id}\t#{pane_current_command}",
+                    &format!(
+                        "#{{pane_id}}\t#{{pane_current_command}}\t#{{{NAVIGATION_LANE_PLACEHOLDER_PANE_OPTION}}}"
+                    ),
                 ])
                 .map(|panes| {
+                    let root = project_root.to_string_lossy();
                     panes
                         .lines()
                         .filter_map(|line| {
-                            let (pane, command) = line.split_once('\t').unwrap_or((line, ""));
-                            let pane = pane.trim();
+                            let mut fields = line.splitn(3, '\t');
+                            let pane = fields.next().unwrap_or("").trim();
+                            let command = fields.next().unwrap_or("");
+                            let placeholder = fields.next().is_some_and(|mark| mark == root);
                             (!pane.is_empty()).then(|| agent_doc_editor_surface::LanePaneObservation {
                                 pane: pane.to_string(),
                                 document_owned: owned_panes.contains(pane),
-                                busy: agent_doc_supervisor_process::session_liveness::pane_owns_live_agent_from_signals(
-                                    true,
-                                    Some(command),
+                                busy: navigation_lane_pane_busy(
+                                    placeholder && !ever_attached,
+                                    command,
                                 ),
                             })
                         })
@@ -38779,6 +38875,185 @@ mod tests {
             1,
             "a foreign session is never adopted or reshaped"
         );
+    }
+
+    /// `#lanegcflake`: the lane GC's busy rule. An agent-doc placeholder in a
+    /// lane no client ever attached to is idle whatever its starting shell is
+    /// running (`tmux` before exec, rc children); every other pane is busy
+    /// unless it is a bare shell.
+    #[test]
+    fn navigation_lane_pane_busy_ignores_untouched_placeholder_startup() {
+        for command in ["tmux", "grep", "mkdir", "zsh", "-zsh", "bash", "vim", ""] {
+            assert!(
+                !navigation_lane_pane_busy(true, command),
+                "untouched placeholder running {command:?} is idle"
+            );
+        }
+        for command in ["tmux", "grep", "vim", "claude", "sleep"] {
+            assert!(
+                navigation_lane_pane_busy(false, command),
+                "{command:?} in an operator-reachable pane is busy"
+            );
+        }
+        for shell in ["zsh", "-zsh", "bash", "sh", "fish"] {
+            assert!(!navigation_lane_pane_busy(false, shell), "{shell} is idle");
+        }
+    }
+
+    /// `#lanegcflake`: the panes agent-doc creates for a lane carry the
+    /// placeholder mark, so a lane whose shells are still starting is closed
+    /// deterministically; the mark stops applying once a client has attached,
+    /// and a pane agent-doc did not create is never covered by it. The
+    /// "startup" is made deterministic by respawning the placeholder into a
+    /// long-running command. Isolated tmux server only.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_session_placeholders_are_idle_until_a_client_attaches() {
+        use agent_doc_editor_surface::{LaneReconcileAction, LaneRetainReason};
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("navlane-placeholder");
+        let root = tempfile::TempDir::new().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        tmux.new_session("proj", &root).unwrap();
+        let lane = |client: &str| {
+            navigation_lane_session_for_client(&tmux, &root, client)
+                .unwrap()
+                .unwrap()
+                .session
+        };
+        let lane_panes = |session: &str| -> Vec<(String, String)> {
+            tmux.raw_cmd(&[
+                "list-panes",
+                "-s",
+                "-t",
+                &format!("={session}:"),
+                "-F",
+                &format!("#{{pane_id}}\t#{{{NAVIGATION_LANE_PLACEHOLDER_PANE_OPTION}}}"),
+            ])
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let (pane, mark) = line.split_once('\t').unwrap_or((line, ""));
+                (pane.to_string(), mark.to_string())
+            })
+            .collect()
+        };
+        // Stand-in for a shell still running its rc files: a non-shell
+        // foreground command that stays put for the whole test.
+        let respawn_busy = |pane: &str| {
+            tmux.raw_cmd(&["respawn-pane", "-k", "-t", pane, "sleep 600"])
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while tmux
+                .raw_cmd(&[
+                    "display-message",
+                    "-p",
+                    "-t",
+                    pane,
+                    "#{pane_current_command}",
+                ])
+                .unwrap()
+                != "sleep"
+            {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{pane} never ran sleep"
+                );
+                std::thread::yield_now();
+            }
+        };
+        let attached = |session: &str| {
+            tmux.raw_cmd(&[
+                "display-message",
+                "-p",
+                "-t",
+                &format!("={session}:"),
+                "#{session_attached}",
+            ])
+            .unwrap()
+        };
+        let root_mark = root.to_string_lossy().to_string();
+
+        // Fresh lane, never attached: both agent-doc shells are marked, and it
+        // closes even though its placeholder reads as a running program.
+        let idea = lane("jetbrains@IU.0a1b2c3d-pid:41");
+        let idea_panes = lane_panes(&idea);
+        assert_eq!(idea_panes.len(), 2, "{idea_panes:?}");
+        assert!(
+            idea_panes.iter().all(|(_, mark)| *mark == root_mark),
+            "{idea_panes:?}"
+        );
+        respawn_busy(&idea_panes[0].0);
+
+        // A lane holding a pane agent-doc did not create: the mark never
+        // covers it, attached or not.
+        let clion = lane("jetbrains@CL.11223344-pid:43");
+        let operator_pane = tmux.new_window(&clion, &root).unwrap();
+        respawn_busy(&operator_pane);
+
+        // A lane a client attached to (and left): its placeholder's foreground
+        // command decides again.
+        let rider = lane("jetbrains@RD.9f8e7d6c-pid:42");
+        let rider_placeholder = lane_panes(&rider)[0].0.clone();
+        respawn_busy(&rider_placeholder);
+        let mut client = std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(tmux.socket_path())
+            .args(["-C", "attach-session", "-t", &format!("={rider}")])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while attached(&rider) != "1" {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "client never attached"
+            );
+            std::thread::yield_now();
+        }
+        let _ = client.kill();
+        let _ = client.wait();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while attached(&rider) != "0" {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "client never detached"
+            );
+            std::thread::yield_now();
+        }
+
+        let report = reconcile_navigation_lane_sessions(&tmux, &root, &BTreeSet::new(), false);
+        assert!(report.failures.is_empty(), "{:?}", report.failures);
+        let mut actions = report.actions.clone();
+        actions.sort_by_key(|action| format!("{action:?}"));
+        let mut expected = vec![
+            LaneReconcileAction::Close {
+                session: idea.clone(),
+            },
+            LaneReconcileAction::Retain {
+                session: clion.clone(),
+                reason: LaneRetainReason::BusyUnownedPane,
+            },
+            LaneReconcileAction::Retain {
+                session: rider.clone(),
+                reason: LaneRetainReason::BusyUnownedPane,
+            },
+        ];
+        expected.sort_by_key(|action| format!("{action:?}"));
+        assert_eq!(actions, expected);
+        assert_eq!(report.closed, vec![idea.clone()]);
+        assert!(!tmux.session_alive(&idea));
+        assert!(tmux.session_alive(&clion));
+        assert!(tmux.session_alive(&rider));
+        assert!(tmux.pane_alive(&operator_pane));
+        assert!(tmux.pane_alive(&rider_placeholder));
     }
 
     #[test]

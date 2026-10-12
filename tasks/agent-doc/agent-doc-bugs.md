@@ -969,6 +969,17 @@ All three are fixed. The test file passed 24 of 24 runs, including runs under he
 **v0.35.494** is tagged (`8af04b806a`) and installed locally. The release check ran 10,382 tests, and `make tmux-ci` passed. The GitHub Release build is still running and PyPI publishes after it, so `#release` stays open until both are confirmed.
 
 **Batch 14** (`claimeddrainwarn` + `ridernavp6routecontended`, plugins 0.2.557 / 0.2.558) is in its checks. The "handed to the supervisor 103 min ago" warning is the false alarm `claimeddrainwarn` fixes.
+
+### Re: GH #243 fixed; CI red on main — opus-5-5 · 2026-10-12T17:25-04:00
+
+**GH #243 is fixed on `gh243` (`d35e4a7cb9`).** It merges after batch 14, with a plugin bump.
+- **Detached target:** with no `tmux_session` pin, route and sync now use the default session only when a client is attached to it. Otherwise they use the session the most recently active attached client is showing, never another IDE's lane.
+- **Unseen pane:** a start or Submit that still lands in a pane nobody is watching now returns a `[route] pane-not-visible:` notice with the `tmux attach-session -t <session>` command. JetBrains shows it as a warning instead of SUCCESS.
+- **`start --force`:** it now retires the pane it bypassed, but only after proving that pane runs an `agent-doc start` supervisor for the same document. It sends SIGTERM, then SIGKILL after 5s, stops the harness, and closes the pane.
+- **Your follow-up (`%2` visible but refused, `%4` hidden but owning):** a document now keeps one live supervisor pane. The controller's authoritative pane wins, because it holds the generation, the queue claims and the route target. Any other agent-doc supervisor pane for that document is retired before a foreground route dispatches.
+- **A choice for you:** the route does not move the winning pane into the session you are watching. Pane placement belongs to the layout code. In your scenario, `%2` would exit and you would get the attach command for session `1`. If you would rather the visible pane win, or have the route move the winner, say so.
+
+**CI is red on `main` at v0.35.494.** `reaper_terminates_only_controllers_rooted_under_its_root` fails on the GitHub runner but passed in every local `make check`. It is filed as `reaperciflake`, and a subagent is finding the environment dependency to fix it at the source.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -977,6 +988,7 @@ All three are fixed. The test file passed 24 of 24 runs, including runs under he
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#reaperciflake]
 - ~~do [#queuedclearflake]~~
 - 🚧 do [#ridernavp6routecontended]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243
@@ -989,6 +1001,7 @@ All three are fixed. The test file passed 24 of 24 runs, including runs under he
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#reaperciflake] [agent-doc] CI is red on main at v0.35.494 (8af04b806a, run 38291750666): agent-doc-test-support project_controller_reaper_tests::reaper_terminates_only_controllers_rooted_under_its_root fails on the GitHub runner with an assertion at agent-doc-test-support/src/lib.rs:1129 while passing in every local make check. Find the environment dependency (process scan, /proc visibility, PID namespace, cwd/root resolution, timing) and fix it at the source; never skip it on CI or rerun to green.
 - [ ] 🚧 [#claimeddrainwarn] [agent-doc] preflight warns supervisor_drain_handoff_undrained (the [focused-cycle] head was handed to the supervisor N min ago and is still undrained; recycle the supervisor) for over 30 minutes on agent-doc-bugs.md (2026-10-12) while every remaining queue head is claimed by a subagent or coordinator, so the supervisor correctly has nothing to drain. Likely interplay with the new auto-clear item-boundary yield (queue_auto_clear_yield) recording a handoff that claims then make undrainable. Exclude claimed heads from the handoff and the warning, and do not tell the operator to recycle a healthy supervisor; regression test.
 - [ ] 🚧 [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
 <!-- /agent:backlog -->

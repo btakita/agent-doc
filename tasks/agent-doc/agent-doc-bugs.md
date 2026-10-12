@@ -1293,13 +1293,13 @@ Exchange is 1239 lines / 57 sections. It needs a compaction at some point, but t
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#fixrunturn]
+- 🚧 do [#fixrunturn]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fixrunturn] Fix Run Agent Doc turn rejection on infra.md
+- [ ] 🚧 [#fixrunturn] Fix Run Agent Doc turn rejection on infra.md
   ```
   • The overlapping agent-doc invocation was refused because the prior finalize was still completing. Session recovery is
   now healthy: cycle cycle-1791841356168 is committed.

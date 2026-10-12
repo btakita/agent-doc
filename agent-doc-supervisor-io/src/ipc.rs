@@ -349,18 +349,92 @@ pub enum SupervisorInjectDeliveryOutcome {
 
 const RESTART_AGENT_MODE_PREFIX: &str = "agent:";
 
-pub fn decode_restart_intent(mode: String) -> (String, bool) {
-    match mode.strip_prefix(RESTART_AGENT_MODE_PREFIX) {
-        Some(mode) => (mode.to_string(), true),
-        None => (mode, false),
+/// Wire prefix marking a fresh restart that an operator **Clear Session Context**
+/// produced at an idle prompt (`#idlecleartriggerinject`).
+///
+/// A Clear at an idle prompt replaces the child through the supervised fresh
+/// restart (`#clear-ready-restart`). That restart used to be indistinguishable
+/// from any other `fresh` restart, so the relaunch always re-submitted
+/// `/agent-doc <file>` — an unrequested, no-op turn costing ~13s of model time
+/// after every operator Clear. The prefix carries the provenance across the
+/// child-exit boundary so the restart loop can derive whether to dispatch from
+/// pending-work state instead.
+const OPERATOR_CLEAR_MODE_PREFIX: &str = "clear:";
+
+/// Decoded supervisor restart intent: the lineage `mode` plus its provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestartIntent {
+    /// `continue` / `fresh` lineage mode.
+    pub mode: String,
+    /// Operator "Restart Agent" (`agent:` prefix): replace the harness child.
+    pub restart_agent: bool,
+    /// Operator Clear at an idle prompt (`clear:` prefix,
+    /// `#idlecleartriggerinject`): the relaunch must not re-trigger the document
+    /// unless pending work exists.
+    pub operator_clear: bool,
+}
+
+impl RestartIntent {
+    pub fn decode(encoded: String) -> Self {
+        let mut rest = encoded.as_str();
+        let mut restart_agent = false;
+        let mut operator_clear = false;
+        loop {
+            if let Some(tail) = rest.strip_prefix(RESTART_AGENT_MODE_PREFIX) {
+                restart_agent = true;
+                rest = tail;
+            } else if let Some(tail) = rest.strip_prefix(OPERATOR_CLEAR_MODE_PREFIX) {
+                operator_clear = true;
+                rest = tail;
+            } else {
+                break;
+            }
+        }
+        Self {
+            mode: rest.to_string(),
+            restart_agent,
+            operator_clear,
+        }
     }
+
+    pub fn encode(&self) -> String {
+        let mut encoded = String::new();
+        if self.restart_agent {
+            encoded.push_str(RESTART_AGENT_MODE_PREFIX);
+        }
+        if self.operator_clear {
+            encoded.push_str(OPERATOR_CLEAR_MODE_PREFIX);
+        }
+        encoded.push_str(&self.mode);
+        encoded
+    }
+
+    /// The restart an operator Clear requests at an idle prompt.
+    pub fn operator_clear_fresh() -> Self {
+        Self {
+            mode: "fresh".to_string(),
+            restart_agent: false,
+            operator_clear: true,
+        }
+    }
+}
+
+pub fn decode_restart_intent(mode: String) -> (String, bool) {
+    let intent = RestartIntent::decode(mode);
+    (intent.mode, intent.restart_agent)
 }
 
 pub fn request_supervisor_restart<S>(state: &S, mode: String) -> Result<(), String>
 where
     S: SupervisorIpcLifecycleState + ?Sized,
 {
-    let (mode, restart_agent) = decode_restart_intent(mode);
+    let intent = RestartIntent::decode(mode);
+    let encoded_intent = intent.encode();
+    let RestartIntent {
+        mode,
+        restart_agent,
+        ..
+    } = intent;
     // Refresh the IPC-visible binary projection on every restart request even
     // when the child is dead and the request will take the normal relaunch
     // path. Re-exec is now a transport-continuity decision, not a binary-
@@ -400,11 +474,7 @@ where
         && agent_doc_supervisor::lifecycle::supervisor_restart_admission(cycle_open, child_alive)
             == agent_doc_supervisor::lifecycle::SupervisorRestartAdmission::DeferCycleOpen
     {
-        state.set_restart_mode(if restart_agent {
-            format!("{RESTART_AGENT_MODE_PREFIX}{mode}")
-        } else {
-            mode
-        });
+        state.set_restart_mode(encoded_intent);
         state.set_restart_reexec(false);
         state.set_restart_deferred_until_boundary(true);
         // Publish the request last. Production uses a release/acquire pair so
@@ -419,11 +489,9 @@ where
     // so it can re-resolve both `agent:` and the document's exact `resume:`
     // binding. Normalizing this to plain `continue` here made that boundary
     // indistinguishable from crash recovery.
-    state.set_restart_mode(if restart_agent {
-        format!("{RESTART_AGENT_MODE_PREFIX}{mode}")
-    } else {
-        mode
-    });
+    // `#idlecleartriggerinject`: an operator-Clear provenance prefix survives the
+    // same boundary so the relaunch can decide whether to re-trigger.
+    state.set_restart_mode(encoded_intent);
     state.set_restart_deferred_until_boundary(false);
     state.set_restart_requested(true);
     // A controller-only continue recycle preserves the live harness child across
@@ -593,7 +661,11 @@ where
         // the completion watcher and tear down the supervisor before a replacement
         // child is launched (#clear-ready-restart).
         IpcMethod::Clear { bytes: _ } if state.actor_waiting_input() || state.actor_ready() => {
-            match request_supervisor_restart(state, "fresh".to_string()) {
+            // `#idlecleartriggerinject`: tag the restart as operator-Clear
+            // provenance so the relaunch only re-triggers the document when
+            // pending work exists.
+            match request_supervisor_restart(state, RestartIntent::operator_clear_fresh().encode())
+            {
                 Ok(()) => IpcResponse::ok(serde_json::json!({
                     "n": 0,
                     "restart_fresh": true,
@@ -1021,6 +1093,59 @@ mod tests {
         /// explicitly sets up an open cycle over a live child.
         cycle_open: bool,
         child_alive: bool,
+    }
+
+    /// `#idlecleartriggerinject`: restart provenance round-trips through the
+    /// encoded `restart_mode`, and the legacy decoder strips the clear prefix so
+    /// no caller ever sees `clear:fresh` as a lineage mode.
+    #[test]
+    fn restart_intent_round_trips_operator_clear_provenance() {
+        for (raw, mode, restart_agent, operator_clear) in [
+            ("fresh", "fresh", false, false),
+            ("continue", "continue", false, false),
+            ("agent:continue", "continue", true, false),
+            ("clear:fresh", "fresh", false, true),
+            ("agent:clear:fresh", "fresh", true, true),
+        ] {
+            let intent = RestartIntent::decode(raw.to_string());
+            assert_eq!(intent.mode, mode, "{raw}");
+            assert_eq!(intent.restart_agent, restart_agent, "{raw}");
+            assert_eq!(intent.operator_clear, operator_clear, "{raw}");
+            assert_eq!(intent.encode(), raw);
+            assert_eq!(
+                decode_restart_intent(raw.to_string()),
+                (mode.to_string(), restart_agent)
+            );
+        }
+        assert_eq!(
+            RestartIntent::operator_clear_fresh().encode(),
+            "clear:fresh"
+        );
+    }
+
+    /// The operator-Clear provenance must survive the restart request into the
+    /// stored mode on both the immediate and the cycle-open deferred path.
+    #[test]
+    fn operator_clear_restart_request_preserves_provenance() {
+        for cycle_open in [false, true] {
+            let state = RestartLifecycleState {
+                cycle_open,
+                child_alive: true,
+                waiting_input: false,
+                binary_stale: false,
+                restart_requested: AtomicBool::new(false),
+                restart_deferred: AtomicBool::new(false),
+                restart_reexec: AtomicBool::new(false),
+                child_killed: AtomicBool::new(false),
+                prompt_woken: AtomicBool::new(false),
+                restart_mode: Mutex::new(String::new()),
+            };
+            request_supervisor_restart(&state, RestartIntent::operator_clear_fresh().encode())
+                .expect("operator clear restart is accepted");
+            assert_eq!(*state.restart_mode.lock().unwrap(), "clear:fresh");
+            assert!(!state.restart_reexec.load(Ordering::Relaxed));
+            assert_eq!(state.restart_deferred.load(Ordering::Relaxed), cycle_open);
+        }
     }
 
     /// `#haivendupsession`: an operator `session_restart` arriving while the

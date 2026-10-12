@@ -34,6 +34,46 @@ fn deferred_restart_ready_to_replace_child(
     !deferred_until_boundary || (!cycle_open && actor_ready)
 }
 
+/// Observe the pending-work facts that decide whether a relaunch serving an
+/// operator Clear re-triggers the document (`#idlecleartriggerinject`).
+///
+/// One-shot at the child-exit boundary, not a poll: the cycle-open fact is the
+/// same projection the restart/recycle gates read, and operator intent is the
+/// shared closed-cycle `TurnAdmission` verdict, so this cannot disagree with what
+/// preflight would admit.
+fn operator_clear_pending_work(
+    shared: &SupervisorShared,
+    file: &Path,
+) -> agent_doc_supervisor::run_loop::OperatorClearPendingWork {
+    let cycle_open = shared.agent_doc_cycle_open();
+    if cycle_open {
+        return agent_doc_supervisor::run_loop::OperatorClearPendingWork {
+            cycle_open,
+            ..Default::default()
+        };
+    }
+    match agent_doc_session_check_io::turn_admission(file, false) {
+        Ok(verdict) => agent_doc_supervisor::run_loop::OperatorClearPendingWork {
+            operator_intent_pending: verdict.continues_with_operator_intent(),
+            ..Default::default()
+        },
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "operator_clear_pending_work_unobservable file={} error={:?} (#idlecleartriggerinject)",
+                    file.display(),
+                    format!("{err:#}"),
+                ),
+            );
+            agent_doc_supervisor::run_loop::OperatorClearPendingWork {
+                observation_failed: true,
+                ..Default::default()
+            }
+        }
+    }
+}
+
 pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     run_with_reap_policy(file, force, route_owned, RouteOwnedReapPolicy::Auto)
 }
@@ -2113,8 +2153,11 @@ pub fn run_with_reap_policy_resume_and_harness(
             }
             PostChildExitAction::AutoRestart => {
                 let encoded_mode = shared.restart_mode.lock().clone();
-                let (mode, restart_agent) =
-                    agent_doc_supervisor_io::ipc::decode_restart_intent(encoded_mode);
+                let agent_doc_supervisor_io::ipc::RestartIntent {
+                    mode,
+                    restart_agent,
+                    operator_clear,
+                } = agent_doc_supervisor_io::ipc::RestartIntent::decode(encoded_mode);
                 first_run = mode == "fresh";
                 refresh_resume_from_frontmatter = restart_agent && !first_run;
                 if first_run {
@@ -2123,11 +2166,40 @@ pub fn run_with_reap_policy_resume_and_harness(
                             .map(|state| state.session_id),
                     );
                 }
-                auto_trigger_next_launch = true;
+                // `#idlecleartriggerinject`: an operator Clear at an idle prompt
+                // re-triggers the document only when pending work exists; every
+                // other restart request keeps the historical re-trigger.
+                let trigger = agent_doc_supervisor::run_loop::requested_restart_trigger(
+                    operator_clear,
+                    if operator_clear {
+                        operator_clear_pending_work(&shared, file)
+                    } else {
+                        agent_doc_supervisor::run_loop::OperatorClearPendingWork::default()
+                    },
+                );
+                auto_trigger_next_launch = trigger.auto_trigger();
+                if operator_clear {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "operator_clear_restart_trigger file={} auto_trigger={} reason={} (#idlecleartriggerinject)",
+                            file.display(),
+                            trigger.auto_trigger(),
+                            trigger.as_str(),
+                        ),
+                    );
+                }
                 restart_count += 1;
                 log_event(
                     &mut session_log,
-                    &format!("ipc_restart mode={} restart_count={}", mode, restart_count),
+                    &format!(
+                        "ipc_restart mode={} restart_count={} operator_clear={} auto_trigger={} trigger_reason={}",
+                        mode,
+                        restart_count,
+                        operator_clear,
+                        trigger.auto_trigger(),
+                        trigger.as_str()
+                    ),
                 );
                 continue;
             }

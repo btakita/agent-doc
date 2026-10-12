@@ -4400,6 +4400,35 @@ mod tests {
         );
     }
 
+    /// `#idlecleartriggerinject`: the IPC restart arm must derive the relaunch
+    /// trigger from restart provenance + pending work, never hard-code it. The
+    /// 2026-10-11 clearnotice live test showed every operator Clear at an idle
+    /// prompt (`delivery=supervisor_restart_fresh`) followed ~10s later by an
+    /// unrequested `auto_trigger_inject` of `/agent-doc <file>`.
+    #[test]
+    fn ipc_restart_arm_derives_auto_trigger_from_operator_clear_pending_work() {
+        let source = include_str!("run.rs");
+        let arm = source
+            .split_once("PostChildExitAction::AutoRestart => {")
+            .and_then(|(_, tail)| tail.split_once("PostChildExitAction::NormalExitClassification"))
+            .map(|(body, _)| body)
+            .expect("IPC restart arm must remain discoverable");
+        assert!(
+            arm.contains("RestartIntent::decode(") && arm.contains("operator_clear"),
+            "the restart arm must decode operator-Clear provenance"
+        );
+        assert!(
+            arm.contains("requested_restart_trigger(")
+                && arm.contains("operator_clear_pending_work(")
+                && arm.contains("auto_trigger_next_launch = trigger.auto_trigger();"),
+            "the relaunch trigger must be derived from pending-work state"
+        );
+        assert!(
+            !arm.contains("auto_trigger_next_launch = true;"),
+            "an unconditional re-trigger injects a no-op turn after every operator Clear"
+        );
+    }
+
     #[test]
     fn auto_trigger_waits_for_retained_document_projection_after_restart() {
         let source = include_str!("lib.rs");

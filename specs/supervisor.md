@@ -335,6 +335,23 @@ idle prompt.
 - Supervisor-owned dispatch paths report `busy` before injection, using
   `ipc_inject` for routed IPC and `auto_trigger_inject` for restart-triggered
   reopen commands.
+- A restart-triggered reopen is derived from restart provenance and pending
+  work, never hard-coded on every IPC restart (`#idlecleartriggerinject`). An
+  operator Clear Session Context at an idle prompt (`waiting_input` or `ready`)
+  replaces the child through the supervised fresh restart and encodes that
+  provenance in the stored restart mode (`clear:fresh`; the legacy decoder strips
+  the prefix). At the child-exit boundary the supervisor observes, once and
+  without timers, whether an agent-doc cycle is still open and whether the
+  closed-cycle `TurnAdmission` verdict reports unanswered operator intent
+  (steering or an explicit route). It re-submits `/agent-doc <file>` only when one
+  of those holds, or when the observation itself failed (fail open); otherwise
+  the fresh child stays at its idle prompt and no `auto_trigger_inject` runs. The
+  decision is logged as `operator_clear_restart_trigger auto_trigger=<bool>
+  reason=<open_cycle|operator_intent_pending|pending_work_unobservable|operator_clear_no_pending_work>`.
+  Go-mode queue heads are not part of this decision: the per-child idle-queue
+  watch is the single owner of queue continuation and drains a pending head on
+  the new child's first idle boundary. Restart Agent, IPC `session restart`,
+  harness switches, crash recovery, and recycle resume keep re-triggering.
 - Clean exits that require operator input report `waiting_input`; flap halts
   report `blocked`; supervisor shutdown reports `closed`.
 - Every lifecycle report carries the session id, pane id, and generation. The

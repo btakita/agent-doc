@@ -567,30 +567,39 @@ Done (`c2149c15f9`). Clear was stuck for about 2 minutes. Codex runs preflight a
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#fpeseverityparse]~~
-- ~~do [#idleclearrestart]: Yes, Idle clear should type `/clear`.~~
 - 🚧 How can we optimize the agent-doc build process + test process to reduce the turnaround time?
-- ~~sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/241~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#ideriderindependentnav]~~
-- ~~lazily.md issue: Run Agent Doc then Ctrl+c in the Codex terminal then Clear Session Context: Clear Session Context is wedged~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.
 - 🚧 release + publish
-- do [#ridernavp2a]
-- do [#ridernavp2b]
-- do [#ridernavp3]
-- do [#ridernavp4]
-- do [#ridernavp5]
+- 🚧 do [#ridernavp2a]
+- 🚧 do [#ridernavp2b]
+- 🚧 do [#ridernavp3]
+- 🚧 do [#ridernavp4]
+- 🚧 do [#ridernavp5]
+---
+lazily.md issue
+```
+• Blocked by hook
+  └ Queue continuation, not an error: agent-doc kept the active `agent:queue auto` moving for /home/brian/work/btakita/
+agent-loop/tasks/software/lazily.md. Codex labels every Stop continuation `Blocked by hook`; here that label means the
+next queue item is being handed back to this turn. The next queue prompt is "do [#lzcoreprofile]". Continue THIS turn
+in-pane: answer that prompt in /home/brian/work/btakita/agent-loop/tasks/software/lazily.md and persist with `agent-doc
+finalize /home/brian/work/btakita/agent-loop/tasks/software/lazily.md` (or `agent-doc write --commit /home/brian/work/
+btakita/agent-loop/tasks/software/lazily.md`). Do NOT run `agent-doc /home/brian/work/btakita/agent-loop/tasks/software/
+lazily.md` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and
+do not send the final answer yet. A background context reset was requested because session accretion is block
+(exchange_lines=924, response_sections=31, recent_committed_cycles=2, recent_noop_closeouts=0), but automatic context
+clearing is disabled; only an explicit operator clear may reset the session.
+```
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ridernavp2a] [agent-doc] IDE navigation lanes P2a (docs/plan-ide-independent-nav.md): move the single per-project pane-layout graph behind a per-lane map with no behavior change. Do this first: P2b, P3, P4 and P5 build on it in order.
-- [ ] [#ridernavp2b] [agent-doc] IDE navigation lanes P2b (docs/plan-ide-independent-nav.md), after ridernavp2a: opt-in editor_navigation = shared or per_installation in .agent-doc/config.toml; per-lane layout sync routing, lane-aware layout check and target-window fallback, lane session creation on first sync, cross_lane_layout_dropped and owned_by_other_lane refusals, per-lane sync cancellation instead of the process-global cancel.
-- [ ] [#ridernavp3] [agent-doc] IDE navigation lanes P3 (docs/plan-ide-independent-nav.md), after ridernavp2b: FFI agent_doc_tmux_focus_state_for_client_json; agent-doc terminal attaches to its lane session; JetBrains sends its client id with tmux_focus_state and TmuxPaneFocusSync ignores other-lane focus; plugin version bump by the coordinator.
-- [ ] [#ridernavp4] [agent-doc] IDE navigation lanes P4 (docs/plan-ide-independent-nav.md), after ridernavp3: a document open in both IDEs stays in its owning lane; Claim for Tmux Pane or Sync Tmux Layout in the other IDE hands it over; SimWorld plus isolated-tmux handoff tests.
-- [ ] [#ridernavp5] [agent-doc] IDE navigation lanes P5 (docs/plan-ide-independent-nav.md), after ridernavp4: enable/disable migration for a project with an existing shared window, cleanup of empty lane sessions agent-doc created (never foreign ones), README and SPEC, two-IDE end-to-end test in tests/cross_editor_simworld.rs.
+- [ ] 🚧 [#ridernavp2a] [agent-doc] IDE navigation lanes P2a (docs/plan-ide-independent-nav.md): move the single per-project pane-layout graph behind a per-lane map with no behavior change. Do this first: P2b, P3, P4 and P5 build on it in order.
+- [ ] 🚧 [#ridernavp2b] [agent-doc] IDE navigation lanes P2b (docs/plan-ide-independent-nav.md), after ridernavp2a: opt-in editor_navigation = shared or per_installation in .agent-doc/config.toml; per-lane layout sync routing, lane-aware layout check and target-window fallback, lane session creation on first sync, cross_lane_layout_dropped and owned_by_other_lane refusals, per-lane sync cancellation instead of the process-global cancel.
+- [ ] 🚧 [#ridernavp3] [agent-doc] IDE navigation lanes P3 (docs/plan-ide-independent-nav.md), after ridernavp2b: FFI agent_doc_tmux_focus_state_for_client_json; agent-doc terminal attaches to its lane session; JetBrains sends its client id with tmux_focus_state and TmuxPaneFocusSync ignores other-lane focus; plugin version bump by the coordinator.
+- [ ] 🚧 [#ridernavp4] [agent-doc] IDE navigation lanes P4 (docs/plan-ide-independent-nav.md), after ridernavp3: a document open in both IDEs stays in its owning lane; Claim for Tmux Pane or Sync Tmux Layout in the other IDE hands it over; SimWorld plus isolated-tmux handoff tests.
+- [ ] 🚧 [#ridernavp5] [agent-doc] IDE navigation lanes P5 (docs/plan-ide-independent-nav.md), after ridernavp4: enable/disable migration for a project with an existing shared window, cleanup of empty lane sessions agent-doc created (never foreign ones), README and SPEC, two-IDE end-to-end test in tests/cross_editor_simworld.rs.
 <!-- /agent:backlog -->
 
 ## Review

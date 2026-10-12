@@ -471,7 +471,11 @@ Landed on branch `ridernavp6route` (`#ridernavp6route`, open item (a) of P5).
   client's lane session (a new lane's placeholder becomes the start pane, and its
   `@agent_doc_navigation_lane_placeholder` mark is cleared so the lane gc judges it by its
   foreground command), logged
-  `start_navigation_lane_target`. Inside tmux the flag changes nothing.
+  `start_navigation_lane_target`. Inside tmux the flag changes nothing. `agent-doc start` no
+  longer auto-relocates a pane that lives in one of the project's own marked lane sessions into
+  the project session (`start_navigation_lane_pane_kept`); the end-to-end test found every
+  lane-started pane (route, claim, or lane layout provisioning) being moved to the shared session
+  once its start reached the session check.
 - Claim: `agent-doc claim --client-id <id>` provisions every new pane (`--new-pane`, no pane
   evidence, an occupied or foreign-owned pane) in the client's lane under the same conditions
   (`claim_navigation_lane_target`), and a pane already in the client's own marked lane passes the

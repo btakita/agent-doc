@@ -78,7 +78,10 @@ may republish the retained intent, but remains subject to the same rule.
   judges it by its foreground command), logged `start_navigation_lane_target`. A document that already has a live
   pane anywhere is reused where it lives, never started again in the lane. Inside tmux the start
   binds the current pane and the flag changes nothing. Shared mode and unscoped clients keep the
-  shared session.
+  shared session. A start whose pane lives in one of the project's own navigation lane sessions
+  (marked `@agent_doc_navigation_lane` = root) is never auto-relocated into the project session
+  (`start_navigation_lane_pane_kept`): before this, every lane-started pane (route, claim, or a
+  lane layout's provisioning) was moved into the shared session when its `agent-doc start` ran.
 
 ## route
 

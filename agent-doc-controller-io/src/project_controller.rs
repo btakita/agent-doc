@@ -8294,7 +8294,7 @@ impl ControllerRuntime {
             .record_gated(generation, gated_documents);
     }
 
-    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    #[cfg(test)]
     fn pane_layout_projection(&self) -> PaneLayoutProjection {
         self.pane_layout_graph().projection()
     }

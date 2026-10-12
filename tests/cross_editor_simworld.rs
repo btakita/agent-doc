@@ -1354,36 +1354,57 @@ fn two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end() {
             .unwrap_or_else(|| panic!("no started pane: {stderr}"))
             .to_string();
         assert!(!before.contains(&pane), "a new pane: {stderr}");
-        pane
+        let staged_in_lane = stderr.contains(&format!(
+            "[route] staged pane {pane} in navigation lane session"
+        ));
+        (pane, staged_in_lane)
     };
     let session_of = |pane: &str| iso.pane_session(pane).unwrap();
 
     // IDEA and Rider each start a document in their own lane.
-    let idea_pane = provision(&document("idea"), Some(IDEA));
+    // The claim stages the pane in the lane's stash for the lane's layout (it
+    // never splits into the lane window); asserted from what the claim did,
+    // since the started processes may later arrange their own lane.
+    let (idea_pane, staged) = provision(&document("idea"), Some(IDEA));
     assert_eq!(session_of(&idea_pane), IDEA_LANE);
-    let idea_lane_window = iso
-        .list_window_panes(&format!("{IDEA_LANE}:agent-doc"))
-        .unwrap();
-    assert!(
-        !idea_lane_window.contains(&idea_pane),
-        "the pane is staged for the lane's layout, not split into its window"
-    );
-    assert_eq!(
-        session_of(&provision(&document("rider"), Some(RIDER))),
-        RIDER_LANE
-    );
+    assert!(staged, "the lane pane is staged for the lane's layout");
+    let (rider_pane, staged) = provision(&document("rider"), Some(RIDER));
+    assert_eq!(session_of(&rider_pane), RIDER_LANE);
+    assert!(staged);
 
-    // No client, and an unscoped client: the shared session.
-    assert_eq!(session_of(&provision(&document("plain"), None)), "proj");
-    assert_eq!(
-        session_of(&provision(&document("vscode"), Some("vscode-pid:9"))),
-        "proj"
-    );
-    assert_eq!(
-        shared_window_panes(),
-        shared_before,
-        "no request changed the shared agent-doc window"
-    );
+    // No client, and an unscoped client: the shared session, placed by the
+    // shared path (never staged as a lane start).
+    let (plain_pane, staged) = provision(&document("plain"), None);
+    assert_eq!(session_of(&plain_pane), "proj");
+    assert!(!staged);
+    let (vscode_pane, staged) = provision(&document("vscode"), Some("vscode-pid:9"));
+    assert_eq!(session_of(&vscode_pane), "proj");
+    assert!(!staged);
+    // Each lane pane's `agent-doc start` reaches its session check and keeps
+    // the pane in its lane; it never relocates it into the project session.
+    let ops_log = root.join(".agent-doc/logs/ops.log");
+    for pane in [&idea_pane, &rider_pane] {
+        let kept = format!("start_navigation_lane_pane_kept pane={pane} ");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !std::fs::read_to_string(&ops_log)
+            .unwrap_or_default()
+            .contains(&kept)
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the start in {pane} never reached its session check"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    assert_eq!(session_of(&idea_pane), IDEA_LANE);
+    assert_eq!(session_of(&rider_pane), RIDER_LANE);
+    for pane in shared_window_panes() {
+        assert!(
+            shared_before.contains(&pane) || pane == plain_pane || pane == vscode_pane,
+            "a lane request reached the shared agent-doc window: {pane}"
+        );
+    }
 
     // An unowned pane in IDEA's lane: IDEA may claim it; Rider may not.
     let spare = iso.new_window(IDEA_LANE, &root).unwrap();
@@ -1405,8 +1426,7 @@ fn two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end() {
 
     // Shared mode: a client id is ignored.
     configure("shared");
-    assert_eq!(
-        session_of(&provision(&document("shared-mode"), Some(IDEA))),
-        "proj"
-    );
+    let (shared_mode_pane, staged) = provision(&document("shared-mode"), Some(IDEA));
+    assert_eq!(session_of(&shared_mode_pane), "proj");
+    assert!(!staged);
 }

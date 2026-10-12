@@ -1768,8 +1768,30 @@ fn prepare_start_runtime_with_admission(
         agent_doc_controller_io::project_controller::main_layout_eligibility(&project_root)?;
     let main_layout_relocation_allowed =
         main_layout_eligibility.permits(canonical.to_string_lossy().as_ref());
+    // `#ideriderindependentnav`: a pane in one of this project's own navigation
+    // lane sessions belongs to that lane (a route, claim, start, or lane layout
+    // started it there). Start never moves a pane between lanes; only an
+    // explicit layout claim hands one over.
+    let in_navigation_lane = pane_session.as_deref().is_some_and(|session| {
+        agent_doc_controller_io::project_controller::is_owned_navigation_lane_session(
+            &tmux,
+            &project_root,
+            session,
+        )
+    });
+    if in_navigation_lane {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "start_navigation_lane_pane_kept pane={} session={}",
+                pane_id,
+                pane_session.as_deref().unwrap_or_default(),
+            ),
+        );
+    }
     if let Some(target) = start_target
         && main_layout_relocation_allowed
+        && !in_navigation_lane
         && !relocate_if_wrong_session(&tmux, &pane_id, &target.session)
         && target.authority == agent_doc_sync::LayoutSessionAuthority::ScopedProject
         && pane_session

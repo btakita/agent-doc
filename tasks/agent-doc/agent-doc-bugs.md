@@ -434,6 +434,15 @@ Done.
 - **Subagents:** I stopped the 5 completed ones still listed in this session: the splice verifier, the queued-clear live check, the flaky-test hunt, the live IntelliJ clear-notice test, and the receipt helpers. The 4 running ones are untouched: `idleclear`, `turnaround`, `gh241` and `ridernav`.
 - **Worktrees:** I removed the 20 finished worktrees for today's subagent and integration branches. That's every branch I'd confirmed was merged into `origin/main` with no uncommitted tracked changes. Their local branches are deleted too; the commits are all on main.
 - **Disk:** free space went from 879G to 1.1T (`rcpthelpers` and `integrate-0499` alone held about 80 GB of build output each).
+
+### Re: actionable review sweep — opus-5.5 · 2026-10-12T05:45-04:00
+
+> **Queue prompt:** #actionable-review
+
+I checked all 3 review items against current evidence. **None can be acted on by an agent right now, so nothing moved to the backlog or queue:**
+- **`#frontendlivedispatch`** (operator-verify): the haiven-dev ops.log has no `route_dispatch_only_recycle_inflight_ready_after_start outcome=settled` or `supervisor_recycle_graph_settled reason=dispatch_ready_after_start` for `frontend`, and no `recycle_ttl_elapsed_supervisor_alive` refusal either. The pass needs you to click Run Agent Doc in your live `frontend.md` pane. Doing that from here would inject a prompt into your session, so it stays with you.
+- **`#jb262dynlauncherrecommen`:** your policy decision. Keep the accurate-warning fallback for 262 packages, or authorize a real restart-free launcher for the 262 split-mode plugin. It stays in review until you choose.
+- **`#pypiquotarecheck`:** rechecked now, still waiting on PyPI. Usage is 8.36 GiB of pre-cutover plus 3.19 MiB of post-cutover releases; about 47,722 more releases fit; verdict "headroom fine — do NOT delete releases". pypi/support#12214 is still open with no change since 2026-09-10. I updated the item with these numbers.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -445,8 +454,9 @@ Done.
 - 🚧 do [#idleclearrestart]: Yes, Idle clear should type `/clear`.
 - 🚧 How can we optimize the agent-doc build process + test process to reduce the turnaround time?
 - 🚧 sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
-- #gh-fix https://github.com/btakita/agent-doc/issues/241
-- do [#ideriderindependentnav]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/241
+- 🚧 do [#ideriderindependentnav]
+- #actionable-review
 <!-- /agent:queue -->
 
 ## Backlog
@@ -460,11 +470,11 @@ Done.
 <!-- agent:review -->
 - [/] [#frontendlivedispatch] [operator-verify] [agent-doc] Live confirmation that Run Agent Doc on haiven-dev frontend.md dispatches (fixes 0.35.483: runfrontenddispatch 3d9fbad86, dispatchreadyselfheal 81b9e1910). Precondition met 2026-10-11: pane %166's supervisor re-registered on the current binary (pid 3851566, healthy/ready) and install_fanout recycles now settle. Remaining: the operator clicks Run Agent Doc on frontend.md; pass = route_dispatch_only_recycle_inflight_ready_after_start outcome=settled or supervisor_recycle_graph_settled reason=dispatch_ready_after_start in haiven-dev ops.log, with no refusal=recycle_ttl_elapsed_supervisor_alive.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
-- [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-06: 8.363 GiB of 10.0 GiB, 1.637 GiB headroom, 198 releases through 0.35.465, post-cutover mean 35.3 KiB, approximately 48,621 further releases fit; VERDICT headroom fine. The support issue remains open with only the github-actions bot comment and has not changed since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
+- [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
-- [ ] [#ideriderindependentnav] [recommended] [agent-doc] Fully independent navigation per JetBrains installation: one tmux window or session per IDE installation. The installation identity becomes part of the layout-ownership key, tmux-to-editor focus mirroring goes only to the IDE that owns the window, tmux_focus_state and pane ownership are split per window, and specs plus a two-IDE SimWorld are added. Several days.
+- [ ] 🚧 [#ideriderindependentnav] [recommended] [agent-doc] Fully independent navigation per JetBrains installation: one tmux window or session per IDE installation. The installation identity becomes part of the layout-ownership key, tmux-to-editor focus mirroring goes only to the IDE that owns the window, tmux_focus_state and pane ownership are split per window, and specs plus a two-IDE SimWorld are added. Several days.
 - [ ] [#ghrecvpolicy] [agent-doc] Recipient-side [receive] auto_create_components policy for multi-user workspaces (GH #40, https://github.com/btakita/agent-doc/issues/40). Parked until multi-user workspace support exists.
 <!-- /agent:icebox -->
 

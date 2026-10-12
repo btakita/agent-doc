@@ -456,7 +456,7 @@ I checked all 3 review items against current evidence. **None can be acted on by
 - 🚧 sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/241
 - 🚧 do [#ideriderindependentnav]
-- #actionable-review
+- 🚧 #actionable-review
 <!-- /agent:queue -->
 
 ## Backlog

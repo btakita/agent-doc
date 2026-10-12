@@ -472,3 +472,24 @@
   ```
 - 2026-10-12 [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
 - 2026-10-12 [#claimeddrainwarn] [agent-doc] preflight warns supervisor_drain_handoff_undrained (the [focused-cycle] head was handed to the supervisor N min ago and is still undrained; recycle the supervisor) for over 30 minutes on agent-doc-bugs.md (2026-10-12) while every remaining queue head is claimed by a subagent or coordinator, so the supervisor correctly has nothing to drain. Likely interplay with the new auto-clear item-boundary yield (queue_auto_clear_yield) recording a handoff that claims then make undrainable. Exclude claimed heads from the handoff and the warning, and do not tell the operator to recycle a healthy supervisor; regression test.
+- 2026-10-12 [#runfrontendissue] Run Agent Doc on frontend.md issue:
+  ```
+  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  • The agent-doc cycle could not start because the live editor buffer lacks the required operator-text authority. I’m
+  running the permitted read-only session check now to recover any pending operator prompt; I will not edit the
+  document or run preflight.
+  • Ran agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  └ [steering 1/1] dispatch=subagent source=queue change=added sent=explicit
+  verbatim: #actionable-review
+  action: DISPATCH NOW to a NEW background subagent (one per item). Claim it first with `agent-doc queue claim '/hom…
+  + 10 lines (^t to expand)
+  • Agent-doc admission failed because the live editor buffer lacks operator_text_authority_v1. No document changes were
+  made, and preflight was not rerun.
+  Pending operator prompt:
+  > #actionable-review
+  Session state is ready for supervisor clear-and-continue. A partial-staging warning also remains in src/rpg-spike:
+  committed progression changes have related uncommitted conformance changes.
+  Worked for 20s • 3:17 PM
+  ```
+- 2026-10-12 [#simworldcitimeout] [agent-doc] CI run 38286493725 (aa0e9ccffe, 2026-10-12) failed with four sim_world::two_ide_navigation_model tests (per_installation and shared variants) hitting the 180s nextest TIMEOUT on the GitHub runner; locally the model search takes about 23 to 48s. The exhaustive search grew with each lane phase (now about 19 events at depth 5). Make the model check bounded and fast on a 2-4 core runner (partial-order reduction, symmetry, or splitting scenarios) without dropping any mutation it must catch; never raise the timeout.
+- 2026-10-12 [#controllerforkimage] [agent-doc] Production project_controller_pids and controller_project_roots in agent-doc-controller-io/src/process.rs match processes by command line, so under dash a controller's un-execed fork child (same cmdline as its parent) can be counted as a second controller (found by reaperciflake). Filter un-execed fork images with the new is_unexeced_fork_of_parent helper wherever controllers are counted or targeted, with tests.

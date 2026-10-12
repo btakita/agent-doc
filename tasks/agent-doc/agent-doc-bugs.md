@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -1149,6 +1148,31 @@ Done (`a6c014f636`). The Stop hook's check for remaining prompt work counted a s
 - `runfrontendissue`: the frontend.md wedge was a liveness channel stuck since about Sept 28, with 4,425 messages blocked behind a rejected reused epoch.
 - `simworldcitimeout`: the SimWorld search now visits distinct states instead of replaying every event sequence, and runs 13× faster.
 - `controllerforkimage`: the duplicate-controller reaper had been killing the live controller's spawn child.
+
+### Re: frontend.md unwedged at the root; batch 17 landed — opus-5-5 · 2026-10-12T20:30-04:00
+
+Batch 17 is on `main` (`b53dc250a2`) and installed. `make check` passed (10,417 tests), and `make tmux-ci` passed.
+
+> **Queue prompt:** do [#runfrontendissue]
+
+Done (`5121adb759`), and confirmed live. The IDE had advertised `operator_text_authority_v1` all along; its registration just never reached the controller:
+- Since about 2026-09-28, frontend.md's editor-to-controller liveness channel was stuck at epoch 32339.
+- The sender reused that number for a different message, and the receiver rejected it on every retry.
+- 4,425 messages queued behind it, including the IDE's registration.
+
+The fix:
+- **Receiver:** keeps a reused epoch under its own derived key and moves on, overwriting nothing.
+- **Sender:** allocates new epochs above everything the receiver has recorded.
+
+After the install, haiven-dev's `ops.log` shows `reliable_sync_epoch_reuse_reconciled` for frontend.md (epoch 32339, 20:23:23Z) and for the second stuck document (epoch 36857). frontend.md's outbox cursor moved from 32338 to 36771, and its queue of undelivered messages is now empty. The refusal should not come back after a controller restart. Run Agent Doc on frontend.md should be admitted, so its `#actionable-review` can drain.
+
+> **Queue prompt:** do [#simworldcitimeout]
+
+Done (`bf2d46c439`). The two-IDE navigation model used to replay all 3.2M event sequences. It now does a breadth-first search over distinct, normalized states, about 19k at depth 5. The slowest test went from 87s to 6.8s on 2 cores at the same depth. All 27 mutations are still caught, and a cross-check test confirms that normalizing states preserves every verdict.
+
+> **Queue prompt:** do [#controllerforkimage]
+
+Done (`366416c1ba`). This was a real production bug. A Rust-spawned child shows the controller's exact command line until it execs. Because of that, the duplicate-controller reaper sent SIGTERM to the live controller's own spawn child, and the orphan sweep treated that child as an orphan. Every site that counts or targets processes now treats an un-execed fork image as its parent. The removed-root reaper and `controller restart` still include fork images, because their job is to leave nothing running.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -1156,44 +1180,12 @@ Done (`a6c014f636`). The Stop hook's check for remaining prompt work counted a s
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#runfrontendissue]
-- ~~do [#fixlazilycodex]~~
-- ~~do [#reaperciflake]~~
-- ~~do [#ridernavp6routecontended]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/243~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/243#issuecomment-6129952007~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#claimeddrainwarn]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/244~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#release~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#simworldcitimeout]
-- do [#controllerforkimage]
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#simworldcitimeout] [agent-doc] CI run 38286493725 (aa0e9ccffe, 2026-10-12) failed with four sim_world::two_ide_navigation_model tests (per_installation and shared variants) hitting the 180s nextest TIMEOUT on the GitHub runner; locally the model search takes about 23 to 48s. The exhaustive search grew with each lane phase (now about 19 events at depth 5). Make the model check bounded and fast on a 2-4 core runner (partial-order reduction, symmetry, or splitting scenarios) without dropping any mutation it must catch; never raise the timeout.
-- [ ] [#controllerforkimage] [agent-doc] Production project_controller_pids and controller_project_roots in agent-doc-controller-io/src/process.rs match processes by command line, so under dash a controller's un-execed fork child (same cmdline as its parent) can be counted as a second controller (found by reaperciflake). Filter un-execed fork images with the new is_unexeced_fork_of_parent helper wherever controllers are counted or targeted, with tests.
-- [ ] [#runfrontendissue] Run Agent Doc on frontend.md issue:
-  ```
-  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
-  • The agent-doc cycle could not start because the live editor buffer lacks the required operator-text authority. I’m
-  running the permitted read-only session check now to recover any pending operator prompt; I will not edit the
-  document or run preflight.
-  • Ran agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
-  └ [steering 1/1] dispatch=subagent source=queue change=added sent=explicit
-  verbatim: #actionable-review
-  action: DISPATCH NOW to a NEW background subagent (one per item). Claim it first with `agent-doc queue claim '/hom…
-  + 10 lines (^t to expand)
-  • Agent-doc admission failed because the live editor buffer lacks operator_text_authority_v1. No document changes were
-  made, and preflight was not rerun.
-  Pending operator prompt:
-  > #actionable-review
-  Session state is ready for supervisor clear-and-continue. A partial-staging warning also remains in src/rpg-spike:
-  committed progression changes have related uncommitted conformance changes.
-  Worked for 20s • 3:17 PM
-  ```
 <!-- /agent:backlog -->
 
 ## Review

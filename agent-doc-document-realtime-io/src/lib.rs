@@ -14211,6 +14211,121 @@ mod tests {
         assert_eq!(pending.target_content.matches("agent:boundary:").count(), 1);
     }
 
+    /// `#fpeseverityparse`: `queue add` delivers attributed heads
+    /// (`[from:actionable-review key=<id>] do [#<id>]`) while the operator types
+    /// `do [#<id>]` lines for the same ids into the same queue. Observed in
+    /// infra.md on 2026-10-12 as
+    /// `- do - [from:actionable-review key=stggrafanaowner] do [#stggrafanaowner]`
+    /// and `- do [#stggrafanaowner]do [#sbxdeeplevers]`. The keyed merge keyed
+    /// both lines by `id:<id>`, so every retained-write composition and
+    /// projection rebase treated two different queue lines as one cell and
+    /// dropped (or spliced) the inbound head. This drives the real retained
+    /// intent journal and the controller's rebase over the editor cut.
+    #[test]
+    fn inbound_queue_heads_survive_operator_lines_for_the_same_ids() {
+        let base0 = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ #actionable-review\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents priority go -->\n",
+            "- 🚧 do [#fpeseverityparse]\n",
+            "- ~~[#grafanaseverityunwrap]: push + PR~~ — auto-struck\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let struck = "- ~~[#grafanaseverityunwrap]: push + PR~~ — auto-struck\n";
+        let stg_head = "- [from:actionable-review key=stggrafanaowner] do [#stggrafanaowner]\n";
+        let sbx_head = "- [from:actionable-review key=sbxdeeplevers] do [#sbxdeeplevers]\n";
+        let operator_lines = concat!(
+            "- do [#stggrafanaowner]\n",
+            "- do [#stgrefreshonly]\n",
+            "- do [#sbxdeeplevers]\n",
+        );
+        let close = "<!-- /agent:queue -->\n";
+        // First `queue add`, planned on base0.
+        let t1 = base0.replace(close, &format!("{stg_head}{close}"));
+        // The operator replaced the struck line with three queue lines while
+        // the first head was projected; the second `queue add` is derived from
+        // that newer relay cut.
+        let r1 = t1.replace(struck, operator_lines);
+        let c2 = r1.replace(close, &format!("{sbx_head}{close}"));
+        let assert_queue = |label: &str, doc: &str, operator: &str| {
+            assert_eq!(doc.matches(stg_head).count(), 1, "{label} stg head:\n{doc}");
+            assert_eq!(doc.matches(sbx_head).count(), 1, "{label} sbx head:\n{doc}");
+            assert_eq!(
+                doc.matches("[from:").count(),
+                2,
+                "{label} spliced tag:\n{doc}"
+            );
+            for line in operator.lines() {
+                assert_eq!(
+                    doc.lines().filter(|candidate| *candidate == line).count(),
+                    1,
+                    "{label} operator line {line:?}:\n{doc}"
+                );
+            }
+        };
+
+        // Controller projection of the first intent over the operator's cut.
+        let d1 = base0.replace(struck, operator_lines);
+        let p1 = agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+            base0, &t1, &d1,
+        )
+        .unwrap();
+        assert_eq!(p1.matches(stg_head).count(), 1, "first projection:\n{p1}");
+        for line in operator_lines.lines() {
+            assert_eq!(
+                p1.lines().filter(|c| *c == line).count(),
+                1,
+                "first projection:\n{p1}"
+            );
+        }
+
+        // Retained-write composition of the two `queue add` intents.
+        let (_dir, file, _canonical) = temp_doc(base0);
+        for (expected, target) in [(base0, t1.as_str()), (r1.as_str(), c2.as_str())] {
+            ensure_deferred_document_write_intent(
+                &file,
+                expected,
+                target,
+                "queue_add",
+                DocumentWriteDeferredReason::EditorProjectionPending,
+            )
+            .unwrap();
+        }
+        let pending = pending_document_write(&file).expect("composed queue add retained");
+        assert_eq!(
+            pending.target_content.matches(stg_head).count(),
+            1,
+            "{}",
+            pending.target_content
+        );
+        assert_eq!(
+            pending.target_content.matches(sbx_head).count(),
+            1,
+            "{}",
+            pending.target_content
+        );
+
+        // The operator keeps editing before the controller projects the
+        // composed intent onto the relay cut.
+        let edited =
+            operator_lines.replace("- do [#stgrefreshonly]\n", "- do [#stgrefreshonly] now\n");
+        let delivery = r1.replace(operator_lines, &edited);
+        let projected =
+            agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+                pending
+                    .expected_content
+                    .as_deref()
+                    .expect("composed intent keeps its base"),
+                &pending.target_content,
+                &delivery,
+            )
+            .unwrap();
+        assert_queue("composed projection", &projected, &edited);
+    }
+
     #[test]
     fn retained_target_retries_do_not_multiply_operator_cleaned_queue_item() {
         let base = concat!(

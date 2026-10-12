@@ -1119,9 +1119,40 @@ fn normalize_item_text(item: &str) -> String {
         .join(" ")
 }
 
-/// Durable key for a list item: its `#id` when present (stable across strike /
+/// Identity of an inbound attributed queue head (`#queueinbound`):
+/// `- [from:<source>( key=<key>)?] <text>`, as written by `agent-doc queue add`.
+///
+/// Such a head is its own queue line, deduped by `source` + `key` (or by its
+/// exact text when unkeyed). Its free text routinely names the tracked-work id
+/// it hands over (`[from:actionable-review key=stggrafanaowner] do
+/// [#stggrafanaowner]`), so keying it by that first `[#id]` would give it the
+/// SAME identity as the operator's own `do [#stggrafanaowner]` line. Every
+/// keyed merge (deferred-write composition, retained-target rebase, editor-cut
+/// rebase) then treats two different queue lines as one cell: the inbound head
+/// is dropped by the cell conflict policy, or its bytes are spliced into the
+/// operator's line (`- do - [from:...] do [#stggrafanaowner]`,
+/// `#fpeseverityparse`). Keying by the attribution tag keeps it distinct from
+/// any operator line and stable across strike / progress markers.
+fn inbound_head_key(item: &str) -> Option<String> {
+    let normalized = normalize_item_text(item);
+    let rest = normalized.strip_prefix("[from:")?;
+    let tag = &rest[..rest.find(']')?];
+    if tag.is_empty() || tag.contains(['#', '[']) {
+        return None;
+    }
+    Some(match tag.split_once(" key=") {
+        Some((source, key)) => format!("from:{source}:key={key}"),
+        None => format!("txt:{normalized}"),
+    })
+}
+
+/// Durable key for a list item: an inbound head's attribution tag (see
+/// [`inbound_head_key`]), else its `#id` when present (stable across strike /
 /// text edits), else its normalized text.
 fn list_item_key(item: &str) -> String {
+    if let Some(key) = inbound_head_key(item) {
+        return key;
+    }
     match first_hash_id(item) {
         Some(id) => format!("id:{id}"),
         None => format!("txt:{}", normalize_item_text(item)),
@@ -4964,6 +4995,70 @@ Second answer line three.
                 bare,
                 "new-marker free text must key identically to the bare line: {decorated:?}"
             );
+        }
+    }
+
+    /// `#fpeseverityparse`: an inbound attributed head that names a tracked-work
+    /// id keys by its attribution tag, never by that id, so it cannot share a
+    /// cell with the operator's own line for the same id.
+    #[test]
+    fn inbound_head_keys_by_attribution_not_by_named_id() {
+        let head = "- [from:actionable-review key=stggrafanaowner] do [#stggrafanaowner]\n";
+        assert_eq!(
+            list_item_key(head),
+            "from:actionable-review:key=stggrafanaowner"
+        );
+        assert_ne!(
+            list_item_key(head),
+            list_item_key("- do [#stggrafanaowner]\n")
+        );
+        // Strike and progress markers keep the same identity.
+        assert_eq!(
+            list_item_key(head),
+            list_item_key(
+                "- ~~🚧 [from:actionable-review key=stggrafanaowner] do [#stggrafanaowner]~~\n"
+            )
+        );
+        // Unkeyed inbound heads dedupe by text, so they key by text.
+        assert_eq!(
+            list_item_key("- [from:ci] fix [#build42]\n"),
+            "txt:[from:ci] fix [#build42]"
+        );
+        // A non-inbound line is unchanged.
+        assert_eq!(list_item_key("- do [#a1] [from:x]"), "id:a1");
+    }
+
+    /// `#fpeseverityparse`: the operator types `do [#stggrafanaowner]` while
+    /// `queue add` delivers `[from:actionable-review key=stggrafanaowner] do
+    /// [#stggrafanaowner]`. Both lines must survive the keyed merge exactly
+    /// once and unspliced.
+    #[test]
+    fn inbound_head_and_operator_line_for_same_id_both_survive_merge() {
+        let base = "<!-- agent:queue -->\n- 🚧 do [#fpe]\n<!-- /agent:queue -->\n";
+        let head = "- [from:actionable-review key=stg] do [#stg]\n";
+        let ours = base.replace(
+            "<!-- /agent:queue -->",
+            &format!("{head}<!-- /agent:queue -->"),
+        );
+        let theirs = base.replace(
+            "<!-- /agent:queue -->",
+            "- do [#stg]\n- do [#sbx]\n<!-- /agent:queue -->",
+        );
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        for (a, b) in [(&ours, &theirs), (&theirs, &ours)] {
+            let merged = merge_by_component(Some(&base_state), a, b).unwrap();
+            assert_eq!(merged.matches(head).count(), 1, "merged:\n{merged}");
+            assert_eq!(
+                merged.matches("- do [#stg]\n").count(),
+                1,
+                "merged:\n{merged}"
+            );
+            assert_eq!(
+                merged.matches("- do [#sbx]\n").count(),
+                1,
+                "merged:\n{merged}"
+            );
+            assert_eq!(merged.matches("[from:").count(), 1, "merged:\n{merged}");
         }
     }
 

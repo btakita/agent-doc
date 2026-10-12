@@ -559,6 +559,17 @@ Done (`52c9398612`). When merging concurrent edits, agent-doc identified a `queu
 Done (`c2149c15f9`). Clear was stuck for about 2 minutes. Codex runs preflight at its first tool call, so a Ctrl+C one second in left the dispatch record half-open, and the earlier Claude-side fix only closed records that preflight had already started. An ended turn now closes that half-open record too. One remaining edge case: a Codex turn that ends normally without ever running preflight would still hit the wait, which I judged rare.
 
 **Release:** v0.35.492 is re-cut on this tree with an updated VERSIONS.md entry, and `make release` is running. Still in flight: the tools.md Codex resume-id wedge and the build/test speed-up.
+
+### Re: lazily.md Codex continuation, release status — opus-5-5 · 2026-10-12T08:05-04:00
+
+**New queue item, lazily.md "Blocked by hook" continuation:** I claimed it and gave it to a subagent on branch `codexstopcont`. It will only read lazily.md, its pane and the logs. The message points at a real problem. Session accretion is at `block` (924 exchange lines), yet Codex's Stop hook keeps continuing the queue in the same session, and it says the context reset it requested will not happen because automatic clearing is disabled. Under the drain contract, the supervisor is supposed to reset context between queue items. For Codex that reset has to be a fresh restart at the idle point between items, because Codex's `/clear` exits the process. The subagent will:
+- confirm the cause from the logs;
+- make the hook hand over to that reset instead of continuing in place;
+- shorten the instruction text the pane shows you.
+
+**v0.35.492:** tagged (`a27ed22e2c`) and installed locally. The GitHub Release build is still running. PyPI publishes after it, so I'm keeping "release + publish" open until both are confirmed.
+
+**Next batch:** `turnaround` (faster `make check`) and `ridernavp2a` are merged and in `make check` / `make tmux-ci`. Also in progress: `ridernavp2b`, and the tools.md Codex resume-id wedge.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -589,6 +600,24 @@ lazily.md` from this pane — that re-invokes the owner pane and hits the recurs
 do not send the final answer yet. A background context reset was requested because session accretion is block
 (exchange_lines=924, response_sections=31, recent_committed_cycles=2, recent_noop_closeouts=0), but automatic context
 clearing is disabled; only an explicit operator clear may reset the session.
+```
+---
+sdk.md issue
+```
+• Blocked by hook
+  └ agent-doc Stop hook kept `agent:queue auto` paused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
+sdk.md because the prior binary-owned editor write is still converging (intent_id=unobserved-retained-intent). The same
+owner pane continues only after that retained delivery and its terminal closeout settle. The hook did not select a new
+prompt or create another capture. Do not resend, recapture, rerun finalize/write/repair, force disk, or recycle; wait
+for the existing controller state edge unless it explicitly reports `needs_operator`. Do not send the final answer yet.
+
+• The document write is still converging through the editor/controller path. I’m holding the completed result without
+  resubmitting anything and waiting for the controller’s terminal state.
+
+• Failed (exit 1) agent-doc session-check '/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md'
+  └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md total_ms=1008…
+    [session-check] INTERRUPTED: cycle `cycle-1791805221920` is `committed` (commit_success), but the active harness s…
+    + 2 lines (^t to expand)
 ```
 <!-- /agent:queue -->
 

@@ -624,8 +624,8 @@ Still in progress: the lazily.md Codex continuation fix, and `ridernavp2b`. The 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~How can we optimize the agent-doc build process + test process to reduce the turnaround time?~~
-- ~~tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.~~
-- 🚧 release + publish
+- ~~tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#ridernavp2a]~~
 - 🚧 do [#ridernavp2b]
 - 🚧 do [#ridernavp3]

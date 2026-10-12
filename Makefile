@@ -204,9 +204,16 @@ tmux-ci:
 	done
 	@AGENT_DOC_TMUX_CI_SUCCEEDED=1 python3 scripts/dev-check.py record-tmux-ci
 
-# Lint
+# Lint every workspace member (`#clippyworkspacegap`). The workspace has no
+# `default-members`, so a bare `cargo clippy` selects only the root agent-doc
+# package: the other members' lib targets were linted only as its dependencies,
+# and their tests, examples, and benches, plus members the root does not depend
+# on, were linted only by `check-fast` when affected. `--workspace` makes the
+# authoritative gate lint them all. Clippy runs rustc in check mode, so it
+# cannot reuse TEST_BUILD's artifacts; it shares the target dir and the
+# `--workspace` member selection instead.
 clippy:
-	@$(CARGO_CMD) clippy --quiet --all-targets --all-features -- -D warnings
+	@$(CARGO_CLEAN_ENV) $(CARGO_CMD) clippy --quiet --workspace --all-targets --all-features -- -D warnings
 
 # Verify the complete release projection and every agent-doc crate's privacy.
 version-sync:

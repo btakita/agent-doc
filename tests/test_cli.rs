@@ -15010,6 +15010,27 @@ fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
             && makefile.contains("python3 scripts/test-run-record self-test"),
         "nextest's JUnit report must be kept per run, outside target/, and the recorder self-tested"
     );
+
+    // `#clippyworkspacegap`: the workspace has no `default-members`, so a bare
+    // `cargo clippy` lints only the root package. The authoritative gate must
+    // lint every member with warnings denied, and `check` must run it.
+    let clippy = recipe("clippy");
+    assert!(
+        clippy.contains("$(CARGO_CMD) clippy ")
+            && clippy.contains(" --workspace ")
+            && clippy.contains("--all-targets --all-features -- -D warnings"),
+        "make check's clippy must lint the whole workspace with -D warnings: {clippy}"
+    );
+    let check_prereqs = makefile
+        .lines()
+        .find(|line| line.starts_with("check: ") && !line.contains(":="))
+        .expect("Makefile check target missing");
+    assert!(
+        check_prereqs
+            .split_whitespace()
+            .any(|prereq| prereq == "clippy"),
+        "make check must run the workspace clippy step: {check_prereqs}"
+    );
     let nextest_config = fs::read_to_string(manifest_dir.join(".config/nextest.toml")).unwrap();
     assert!(
         nextest_config.contains("[profile.default.junit]\npath = \"junit.xml\""),

@@ -205,7 +205,9 @@ What landed (the original scope follows below):
   sink keeps one latest-wins projector per lane (`PaneLayoutDesiredLaneProjector`) and
   publishes into that client's lane graph, so the manual Sync Tmux Layout arranges the
   requesting IDE's own lane and two IDEs' frames never coalesce each other away. A lane frame
-  is marked seen on the shared graph so a route's plane catch-up never waits for it.
+  is marked seen on the shared graph when the sink dispatches it (not when the lane's
+  projector thread applies it, `#laneplaneflake`), so a route's plane catch-up never waits
+  for it, even while that lane's projector retries.
 - JetBrains: `CpRouteClient.tmuxFocusState` sends `caller` = its surface client id
   (`tmuxFocusStateRequest`); `paneLayoutDesiredStatePublishRequest` adds `client_id`;
   `IdeTerminalCoordinator` passes `--client-id`; `TmuxPaneFocusSync.focusStateIsOwnLane`

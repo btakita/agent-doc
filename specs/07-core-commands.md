@@ -381,7 +381,11 @@ client for 60s retires instead of handing off
 (`controller_idle_root_retired_instead_of_handoff`). Test fixtures that launch a
 controller own a `ProjectControllerReaper` from `agent-doc-test-support`, which
 terminates every controller rooted under the fixture directory when it drops,
-including during a panic, and a controller rooted anywhere inside a
+including during a panic. It identifies controllers from `/proc` command lines,
+so it reports a forked-but-not-exec'd child (whose command line is its parent's,
+byte for byte: `/bin/sh` = dash forks before every external command, as does a
+`( ... )` subshell) as the same controller rather than a second one, while still
+terminating that fork image with it (`#reaperciflake`). A controller rooted anywhere inside a
 `<temp>/.tmpXXXX` directory (for example `<temp>/.tmpXXXX/project`) shuts itself
 down after 60s without a client, so a test process killed before its `TempDir`
 dropped no longer leaks one.

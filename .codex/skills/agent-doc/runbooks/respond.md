@@ -267,6 +267,27 @@ consumed by id and the annotation is re-queued verbatim as its own free-text lin
 right after it. A bare `[#id]: note` (no `do`) is inert prose, i.e. an ordinary
 free-text head answered through the `#qdeferstrike` quote above.
 
+**Deferring an annotated head (`#annotateddeferstrike`).** Deferral does not waive
+the annotation answer. For an annotated head you are not finishing this cycle
+(`do [#id]: note`, `[#id]: note`, or a free-text head carrying an operator note),
+write the three parts in this order, each its own paragraph:
+
+```markdown
+> **Queue prompt:** do [#id]: Test yourself
+
+> **Operator note:** Test yourself
+
+**Deferred:** dispatched to a subagent (claim `subagent:label`); it reports back with ...
+```
+
+The `**Deferred:**` paragraph is both the answer prose for the operator note and
+the deferral of the head: the deferral scan skips `> **Operator note:**` quotes
+that follow the echo, so the head stays queued and its claim stays held. A
+deferred id-backed head is then consumed only by an explicit `--done <id>` (or
+`--pending-gate`/`--review-resolve`); its `### Re: #id` heading or the prompt
+diff no longer completes it. Without the `**Deferred:**` lead the same shape
+reads as answered and the head is consumed.
+
 A queue head that references one or more registered `#preset` names is a preset
 head, not ordinary free text, including composable forms such as `#gh-fix URL`.
 Address every resolved preset expansion supplied by preflight. The closeout gate

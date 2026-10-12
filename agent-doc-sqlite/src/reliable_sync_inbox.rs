@@ -74,6 +74,28 @@ fn insert_liveness_record(
     epoch: i64,
     ops_json: &str,
 ) -> Result<()> {
+    match insert_liveness_record_reporting(tx, source_key, epoch, ops_json)? {
+        LivenessJournalInsert::Recorded => Ok(()),
+        LivenessJournalInsert::EpochConflict => Err(anyhow!(
+            "reliable-sync epoch reuse for source {source_key} at {epoch} carried different liveness ops"
+        )),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LivenessJournalInsert {
+    /// The batch is journaled at `(source_key, epoch)` (fresh or identical redelivery).
+    Recorded,
+    /// `(source_key, epoch)` already holds a DIFFERENT batch.
+    EpochConflict,
+}
+
+fn insert_liveness_record_reporting(
+    tx: &Transaction<'_>,
+    source_key: &str,
+    epoch: i64,
+    ops_json: &str,
+) -> Result<LivenessJournalInsert> {
     tx.execute(
         "INSERT OR IGNORE INTO reliable_sync_liveness_journal \
          (source_key, epoch, ops_json) VALUES (?1, ?2, ?3)",
@@ -85,12 +107,43 @@ fn insert_liveness_record(
         params![source_key, epoch],
         |row| row.get(0),
     )?;
-    if stored != ops_json {
-        return Err(anyhow!(
-            "reliable-sync epoch reuse for source {source_key} at {epoch} carried different liveness ops"
-        ));
+    Ok(if stored == ops_json {
+        LivenessJournalInsert::Recorded
+    } else {
+        LivenessJournalInsert::EpochConflict
+    })
+}
+
+/// Stable 64-bit FNV-1a digest. Used only to give a reconciled epoch-reuse
+/// batch a deterministic journal key, so redelivering the same conflicting
+/// frame is idempotent instead of appending a row per retry.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
-    Ok(())
+    hash
+}
+
+/// Journal source key for a liveness batch that arrived at an epoch the
+/// receiver had already journaled with different ops (`#runfrontendissue`).
+pub fn epoch_reuse_reconciled_source_key(source_key: &str, epoch: u64, ops_json: &str) -> String {
+    format!(
+        "{source_key}#epoch-reuse:{epoch}:{:016x}",
+        fnv1a64(ops_json.as_bytes())
+    )
+}
+
+/// How [`record_remote_frame_reconciling`] journaled an inbound frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteFrameReceipt {
+    /// Receiver cursor after the commit (monotone).
+    pub ack_through: u64,
+    /// `Some(source_key)` when the sender re-used an already-journaled epoch with
+    /// a different liveness batch and the batch was preserved under that
+    /// reconciled journal key instead of being refused.
+    pub epoch_reuse_reconciled: Option<String>,
 }
 
 /// Atomically durably record an inbound frame and advance its receive cursor.
@@ -98,12 +151,48 @@ fn insert_liveness_record(
 /// `liveness_ops_json` is present only for liveness frames. The cursor is still
 /// persisted for document-op and other reliable-sync frames, but those payloads
 /// have their own canonical durability path and do not enter this journal.
+///
+/// Strict form: a different liveness batch at an already-journaled epoch is an
+/// error. The controller's receive path uses [`record_remote_frame_reconciling`].
 pub fn record_remote_frame(
     path: &Path,
     document_hash: &str,
     epoch: u64,
     liveness_ops_json: Option<&str>,
 ) -> Result<u64> {
+    record_remote_frame_inner(path, document_hash, epoch, liveness_ops_json, false)
+        .map(|receipt| receipt.ack_through)
+}
+
+/// [`record_remote_frame`] that never wedges a channel on sender epoch reuse
+/// (`#runfrontendissue`).
+///
+/// A sender whose epoch allocator lost track of an already-delivered frame
+/// (a lost ACK, a regressed cursor, two racing allocators) re-uses that epoch
+/// for a NEW batch. Refusing it is a permanent head-of-line block: the
+/// at-least-once sender retries the same frame forever and every later
+/// liveness fact (including a live editor's `Open`/`Register` carrying
+/// `operator_text_authority_v1`) never reaches the controller. Liveness ops are
+/// state-based CRDT facts (OR-set membership, LWW registers), so folding both
+/// batches is exactly as correct as folding them under distinct epochs. The
+/// conflicting batch is therefore journaled under a deterministic reconciled
+/// key and the cursor advances; nothing that was journaled is overwritten.
+pub fn record_remote_frame_reconciling(
+    path: &Path,
+    document_hash: &str,
+    epoch: u64,
+    liveness_ops_json: Option<&str>,
+) -> Result<RemoteFrameReceipt> {
+    record_remote_frame_inner(path, document_hash, epoch, liveness_ops_json, true)
+}
+
+fn record_remote_frame_inner(
+    path: &Path,
+    document_hash: &str,
+    epoch: u64,
+    liveness_ops_json: Option<&str>,
+    reconcile_epoch_reuse: bool,
+) -> Result<RemoteFrameReceipt> {
     let mut connection = open(path)?;
     let tx = connection.transaction()?;
     let epoch_i64 = sqlite_epoch(epoch)?;
@@ -120,11 +209,44 @@ pub fn record_remote_frame(
         |row| row.get::<_, i64>(0),
     )?;
     let ack_through = rust_epoch(ack_through_i64)?;
+    let mut epoch_reuse_reconciled = None;
     if let Some(ops_json) = liveness_ops_json {
-        insert_liveness_record(&tx, document_hash, epoch_i64, ops_json)?;
+        if reconcile_epoch_reuse {
+            if insert_liveness_record_reporting(&tx, document_hash, epoch_i64, ops_json)?
+                == LivenessJournalInsert::EpochConflict
+            {
+                let reconciled = epoch_reuse_reconciled_source_key(document_hash, epoch, ops_json);
+                insert_liveness_record(&tx, &reconciled, epoch_i64, ops_json)?;
+                epoch_reuse_reconciled = Some(reconciled);
+            }
+        } else {
+            insert_liveness_record(&tx, document_hash, epoch_i64, ops_json)?;
+        }
     }
     tx.commit()?;
-    Ok(ack_through)
+    Ok(RemoteFrameReceipt {
+        ack_through,
+        epoch_reuse_reconciled,
+    })
+}
+
+/// Highest epoch the receiver has observed on `document_hash`'s channel: the
+/// receive cursor joined with the newest journaled liveness epoch for that
+/// source. A sender sharing this database must allocate strictly above it, or
+/// its next frame re-uses an epoch the receiver already holds (`#runfrontendissue`).
+pub fn receiver_epoch_frontier(path: &Path, document_hash: &str) -> Result<u64> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let connection = open(path)?;
+    let frontier: i64 = connection.query_row(
+        "SELECT MAX( \
+             COALESCE((SELECT ack_through FROM reliable_sync_inbox_cursor WHERE document_hash = ?1), 0), \
+             COALESCE((SELECT MAX(epoch) FROM reliable_sync_liveness_journal WHERE source_key = ?1), 0))",
+        params![document_hash],
+        |row| row.get(0),
+    )?;
+    rust_epoch(frontier)
 }
 
 /// Durably record a controller-originated liveness batch (for example an
@@ -409,6 +531,76 @@ mod tests {
             .expect_err("different payload at the same epoch must fail");
         assert!(error.to_string().contains("epoch reuse"));
         assert_eq!(load(&path).unwrap().cursors[0].ack_through, 2);
+    }
+
+    #[test]
+    fn reconciling_receiver_preserves_both_batches_on_epoch_reuse_and_acks() {
+        // `#runfrontendissue`: haiven-dev `frontend.md` journaled a `Close` at
+        // epoch 32339 while the sender's cursor stayed at 32338, so the sender
+        // re-used 32339 for a `Register`. The strict receiver refused it forever
+        // and 4,424 later liveness frames (the live editor's `Open`/`Register`)
+        // never reached the controller.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reliable-sync.db");
+        let original = r#"[{"Close":{"document_hash":"doc","pid":7,"observed_tags":["t1"]}}]"#;
+        let reused = r#"[{"Open":{"document_hash":"doc","pid":8,"tag":"t2"}}]"#;
+        record_remote_frame(&path, "doc", 2, Some(original)).unwrap();
+
+        let receipt = record_remote_frame_reconciling(&path, "doc", 2, Some(reused)).unwrap();
+        assert_eq!(
+            receipt.ack_through, 2,
+            "the sender must be able to prune the frame"
+        );
+        let reconciled = receipt
+            .epoch_reuse_reconciled
+            .expect("epoch reuse is reported, not hidden");
+        assert_eq!(
+            reconciled,
+            epoch_reuse_reconciled_source_key("doc", 2, reused)
+        );
+
+        // Redelivering the same conflicting frame is idempotent.
+        let again = record_remote_frame_reconciling(&path, "doc", 2, Some(reused)).unwrap();
+        assert_eq!(
+            again.epoch_reuse_reconciled.as_deref(),
+            Some(reconciled.as_str())
+        );
+
+        let snapshot = load(&path).unwrap();
+        let journal = snapshot
+            .liveness
+            .iter()
+            .map(|record| {
+                (
+                    record.source_key.as_str(),
+                    record.epoch,
+                    record.ops_json.as_str(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            journal,
+            vec![("doc", 2, original), (reconciled.as_str(), 2, reused)],
+            "neither batch is overwritten or dropped"
+        );
+
+        // A later fresh epoch on the channel continues normally.
+        let next = record_remote_frame_reconciling(&path, "doc", 3, Some("[]")).unwrap();
+        assert_eq!(next.ack_through, 3);
+        assert!(next.epoch_reuse_reconciled.is_none());
+    }
+
+    #[test]
+    fn receiver_frontier_covers_a_journaled_epoch_ahead_of_the_cursor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reliable-sync.db");
+        assert_eq!(receiver_epoch_frontier(&path, "doc").unwrap(), 0);
+        record_remote_frame(&path, "doc", 4, Some("[]")).unwrap();
+        assert_eq!(receiver_epoch_frontier(&path, "doc").unwrap(), 4);
+        // A journal row ahead of the cursor (the frontend.md shape).
+        record_local_liveness(&path, "doc", 9, "[1]").unwrap();
+        assert_eq!(receiver_epoch_frontier(&path, "doc").unwrap(), 9);
+        assert_eq!(receiver_epoch_frontier(&path, "other").unwrap(), 0);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a126ff-58d4-78e3-a863-b702751fd428
+  codex: 01a12909-0937-7b31-9a57-b23ab4c53ebc
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -16,6 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
+queue: go
 ---
 
 ## Status
@@ -834,12 +835,35 @@ I kept `#lzbetascope` in review and narrowed it to the final promotion decision.
 Verification: `git diff --check -- tasks/software/plan-lazily-core-beta.md` passed; the Markdown structure was inspected through tsift; only the new plan file was staged in the ordinary repository commit. No source or build surface changed, so no project test suite was required. Confidence: high. Escalation: none for planning; the explicit promotion and external publishing decisions remain gated.
 
 Session accretion remains in the warning range; I continued the active queue without compacting it.
+
+### Re: Lazily Core implementation batch — gpt-5 · 2026-10-12T06:23:06-04:00
+
+The seven-item fan-out completed its authorized in-worktree work, but none of the items can be closed yet. The queue names `#spec-test-commit-push`, while that preset is absent from this document's `prompt_presets`; the resolved authorization therefore explicitly prohibited commits, pushes, installs, releases, and publication. I preserved every implementation in an isolated worktree and released all worker claims without integrating or claiming completion.
+
+- `#lzcoreprofile`: implemented the canonical nine-binding, seven-symbol Core profile, schema, semantic/dependency validator, generated documentation, and 11 negative probes in `/home/brian/worktrees/lazily-spec-lzcoreprofile-20261012`. `make check`, 277 schema tests, 4 focused tests, and `git diff --check` passed.
+- `#lzcoreclaims`: implemented profile-driven evidence/declaration/report validation, skip and fixtureless-claim checks, five negative probes, and corrected Python/Kotlin/JavaScript merge plus Kotlin C-ABI overclaims in `/home/brian/worktrees/lazily-spec-lzcoreclaims-20261012`. The focused evidence checks and 272 schema tests passed. Its `--require-all` gate correctly remains red until all nine bindings emit declarations and runtime reports.
+- `#lzcorefacades`: added backward-compatible Core facades and package-content tests for Rust, Python, JavaScript, Dart, Zig, and C++ in `/home/brian/worktrees/agent-loop-lzcorefacades-20261012`; Kotlin, Go, and C# retain their canonical package locations. Focused Rust, Python, JavaScript, Dart, Zig, and C++ checks passed. TypeScript checking was unavailable because that worktree lacks installed `tsc` dependencies.
+- `#lzcorecompat`: remains open because Phase 1 and Phase 3 are not integrated, so truthful API snapshots cannot yet be generated. The audit confirmed that no candidate binding currently enforces a native Core API snapshot/compatibility gate, structured earliest-removal metadata is absent, and React/R3 lack oldest-supported-Core endpoint tests. No files changed.
+- `#lzcoreconsumers`: implemented the central artifact-consumer schema/contract, support-policy generator, documentation, tests, and fail-closed orchestration in `/home/brian/worktrees/lazily-spec-lzcoreconsumers-20261012`. Seven Node tests and 388 Python tests passed. Per-binding `core-artifact-consumer-check` targets remain unimplemented, so the release `--require-all` gate correctly stays red.
+- `#lzcorecohort`: implemented an immutable cohort/BOM verifier scaffold, schema, documentation, tests, and reusable read-only publish gate in `/home/brian/worktrees/agent-loop-lzcorecohort-20261012`. `make check` passed with 310 pytest tests and the 9-job Lean build. A real immutable manifest and cross-repo release adoption remain blocked on Phases 1–5, `#lzreleasepins`, and `#lzrustpublish`.
+- `#lzcorebeta1`: was not executed. `#lzbetascope` and `#lzreleasepins` remain review-gated, Phases 1–6 are open, no two-RC or four-week-freeze evidence exists, and the resolved authorization forbids publishing or announcing.
+
+The latest lazily-spec `CI` run inspected was completed successfully (run `37258006428`). No `--done` outcomes were applied: all seven items remain open until the preset is defined (or explicit commit/push authority is supplied), the overlapping lazily-spec worktrees are reconciled in dependency order, and each phase's stated gates pass.
+
+Session accretion remains above the warning threshold; I continued the active queue without compacting it.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
+- do [#lzcoreprofile]
+- do [#lzcoreclaims]
+- do [#lzcorefacades]
+- do [#lzcorecompat]
+- do [#lzcoreconsumers]
+- do [#lzcorecohort]
+- do [#lzcorebeta1]
 <!-- /agent:queue -->
 
 ## Backlog

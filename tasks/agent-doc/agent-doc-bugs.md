@@ -904,24 +904,17 @@ Done (`b4544973ef`). Steering now pairs old and new queue lines by item identity
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#queuedclearflake]
-- ~~do [#laneplaneflake]~~
-- ~~do [#infraclearsession]~~
+- 🚧 do [#queuedclearflake]
 - 🚧 do [#ridernavp6route]
-- ~~do [#ridernavp6republish]~~
-- ~~do [#ridernavp6status]~~
 - 🚧 do [#ridernavp6gc]
-- ~~do [#ridernavp6switchback]~~
-- ~~do [#lanegcflake]~~
-- do [#ridernavp6routecontended]
-- ~~do [#steeringeditmisalign]~~
+- 🚧 do [#ridernavp6routecontended]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#queuedclearflake] [agent-doc] tests/clear_queued_live_turn_tmux.rs queued_clear_is_dropped_when_a_newer_prompt_starts_first failed its ui_outcome=queued assertion inside make tmux-ci (2026-10-12, ridernavp6route merge run) and passed 2 of 2 alone. Find the timing dependency and fix it with an explicit readiness signal; never rerun to green or lengthen a timeout.
-- [ ] [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
+- [ ] 🚧 [#queuedclearflake] [agent-doc] tests/clear_queued_live_turn_tmux.rs queued_clear_is_dropped_when_a_newer_prompt_starts_first failed its ui_outcome=queued assertion inside make tmux-ci (2026-10-12, ridernavp6route merge run) and passed 2 of 2 alone. Find the timing dependency and fix it with an explicit readiness signal; never rerun to green or lengthen a timeout.
+- [ ] 🚧 [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
 - [ ] 🚧 [#ridernavp6route] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): route, start and agent-doc claim --client-id create panes in the requesting IDE's lane in per_installation mode; today a new pane reaches an installation lane only through that IDE's explicit claim.
 - [ ] 🚧 [#ridernavp6gc] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): a controller-side trigger for empty-lane cleanup and per_installation-to-shared migration that knows which IDE installations are live; today only agent-doc gc runs it, using an attached terminal as the only liveness signal.
 <!-- /agent:backlog -->

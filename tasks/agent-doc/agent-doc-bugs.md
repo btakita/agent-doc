@@ -2,8 +2,8 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a12175-b9c0-7db0-af02-218c5501efe7
-agent: claude
+  codex: 01a13262-1421-7ec2-922c-d920a2bae450
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -48,6 +48,20 @@ I checked the three gated review items to see which ones I can act on. I did thi
 - **pypiquotarecheck: stays gated.** I rechecked pypi/support#12214: still OPEN, one comment, last updated 2026-09-10. The quota headroom verdict from today's check still holds. It is unblocked only by a human reply on PyPI's side.
 
 No new actionable backlog or queue items came out of this. The two remaining review items are genuinely gated. Side note: frontend.md had a short burst of idle_queue_dispatch_deferred reason=defer_unrendered_frame around 22:30Z. It cleared on its own (3 events), so I didn't file anything.
+
+### Re: GitHub issue #245 — gpt-5 · 2026-10-12T19:48-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/245
+
+Fixed, integrated, installed, pushed, and closed.
+
+- `agent-doc-ops-log-io` now assembles each `ops.log` and `cycles.jsonl` record with its terminating newline and submits the complete buffer through one `write_all` call, preventing concurrent appenders from landing between the record body and newline.
+- Added deterministic writer-level regression coverage and updated `specs/08b-single-process-control-plane.md` with the append atomicity contract.
+- Integrated on `main` as `b5f41ff4db` and pushed to GitHub.
+- Authoritative `make check` passed from a clean build: 10,423 tests passed, 167 skipped; both JetBrains builds and the cross-editor checks passed. `make install` also completed successfully.
+- GitHub issue #245 is closed. CI run 38324006988 for `b5f41ff4db` is in progress; local full-suite verification is the closeout proof.
+
+A separate `release + publish` queue item arrived mid-turn and was claimed and dispatched to `subagent:release_publish`; it remains in flight for its own release-readiness handoff.
 <!-- agent:boundary:aef928d5 -->
 <!-- /agent:exchange -->
 
@@ -56,7 +70,8 @@ No new actionable backlog or queue items came out of this. The two remaining rev
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/245
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/245~~
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

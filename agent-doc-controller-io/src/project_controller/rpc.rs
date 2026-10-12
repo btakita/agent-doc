@@ -15790,10 +15790,21 @@ fn install_local_document_projection_reader(runtime: &Arc<ControllerRuntime>) {
         *slot.borrow_mut() = Some(Arc::downgrade(runtime));
     });
     let runtime = Arc::downgrade(runtime);
+    let closeout_runtime = runtime.clone();
     agent_doc_state_wire::set_local_document_projection_reader(move |document_hash| {
         runtime.upgrade().and_then(|runtime| {
             runtime
                 .document_state_projection(document_hash)
+                .ok()
+                .flatten()
+        })
+    });
+    // `#fixthrashingbackground`: request admission primes turn attribution
+    // from the closeout alone; never clone the document's whole history for it.
+    agent_doc_state_wire::set_local_document_closeout_reader(move |document_hash| {
+        closeout_runtime.upgrade().and_then(|runtime| {
+            runtime
+                .document_closeout_projection(document_hash)
                 .ok()
                 .flatten()
         })
@@ -15809,10 +15820,19 @@ fn install_local_document_projection_reader(runtime: &Arc<ControllerRuntime>) {
 /// pinning the runtime past shutdown.
 fn install_process_document_projection_reader(runtime: &Arc<ControllerRuntime>) {
     let runtime = Arc::downgrade(runtime);
+    let closeout_runtime = runtime.clone();
     agent_doc_state_wire::set_process_document_projection_reader(move |document_hash| {
         runtime.upgrade().and_then(|runtime| {
             runtime
                 .document_state_projection(document_hash)
+                .ok()
+                .flatten()
+        })
+    });
+    agent_doc_state_wire::set_process_document_closeout_reader(move |document_hash| {
+        closeout_runtime.upgrade().and_then(|runtime| {
+            runtime
+                .document_closeout_projection(document_hash)
                 .ok()
                 .flatten()
         })
@@ -17163,10 +17183,20 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                 ),
             );
         }
+        let queue_active = drainable.is_some() && queue_control.allows_unattended_drain();
+        // `#fixthrashingbackground`: the supervisor liveness probe scans all of
+        // `/proc`; it cannot change a skip into a dispatch, so ask only when the
+        // cheap facts leave a dispatch possible.
+        if !agent_doc_controller::orphan_drain::orphan_drain_may_dispatch(
+            queue_active,
+            drainable.is_some(),
+        ) {
+            continue;
+        }
         let observation = OrphanDrainObservation {
             // The supervisor-scope resolver owns activation (`queue: go`,
             // queue-tag `go`, and legacy active state) as well as drainability.
-            queue_active: drainable.is_some() && queue_control.allows_unattended_drain(),
+            queue_active,
             has_drainable_head: drainable.is_some(),
             supervisor_alive: agent_doc_supervisor_io::process::supervisor_pid_for_doc(&file)
                 .is_some(),
@@ -18370,6 +18400,16 @@ pub(crate) fn handle_request_locked(
             // inspects the authoritative in-memory projection instead of
             // replaying cold `state.db`. No fact is emitted.
             controller_envelope(handle_document_state_projection(runtime.as_ref(), request))
+        }
+        "document_closeout_projection" => {
+            // `#fixthrashingbackground`: the closeout part only. Cycle-state
+            // reads need nothing else, and the whole projection carries
+            // unbounded per-document history (full commit-candidate images,
+            // every terminal closeout proof).
+            controller_envelope(handle_document_closeout_projection(
+                runtime.as_ref(),
+                request,
+            ))
         }
         "record_owner_pane_wedge" => controller_envelope(handle_record_owner_pane_wedge(
             &bootstrap_snapshot,
@@ -20645,6 +20685,15 @@ pub(crate) fn handle_document_state_projection(
     runtime.document_state_projection(&document_hash)
 }
 
+pub(crate) fn handle_document_closeout_projection(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<Option<agent_doc_state_backbone::CloseoutProjection>> {
+    let file = request_file(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    runtime.document_closeout_projection(&document_hash)
+}
+
 /// Shared core of closeout owner claim: decide the CAS from the live
 /// in-memory projection (`decide_owner_claim`), emit the `CloseoutOwnerClaimed`
 /// fact when acquired, and update the supervisor-recycle graph. Pure authority
@@ -21232,10 +21281,10 @@ pub(crate) fn handle_queue_context_clear_settled(
             clear_epoch,
             projection.phase,
             payload.retired_reason.as_deref().unwrap_or("none"),
-            projection
-                .superseded
-                .as_ref()
-                .map_or_else(|| "none".to_string(), |superseded| superseded.clear_epoch.to_string()),
+            projection.superseded.as_ref().map_or_else(
+                || "none".to_string(),
+                |superseded| superseded.clear_epoch.to_string()
+            ),
         ),
     );
     Ok(projection)

@@ -4111,9 +4111,9 @@ impl ControllerDocumentAuthorityGraph {
                 let document = document_projections
                     .observe(ctx, &key.document_hash)
                     .flatten();
-                let superseded = document
-                    .as_ref()
-                    .and_then(|document| deferred_clear_superseded_projection(&document.queue.context_clear));
+                let superseded = document.as_ref().and_then(|document| {
+                    deferred_clear_superseded_projection(&document.queue.context_clear)
+                });
                 let closeout = document
                     .map(|document| document.closeout)
                     .unwrap_or_default();
@@ -8667,6 +8667,20 @@ impl ControllerRuntime {
             .cloned())
     }
 
+    /// The closeout part of [`Self::document_state_projection`], cloned under
+    /// the projection lock without copying the rest of the document's history.
+    fn document_closeout_projection(
+        &self,
+        document_hash: &str,
+    ) -> Result<Option<agent_doc_state_backbone::CloseoutProjection>> {
+        Ok(self
+            .memory
+            .lock()
+            .state_projection
+            .document(document_hash)
+            .map(|document| document.closeout.clone()))
+    }
+
     fn wait_for_supervisor_recycle_settle(
         &self,
         timeout: Duration,
@@ -12212,19 +12226,26 @@ mod tests {
             });
         document_graphs.set_projection(document_hash, Some(document));
         let projection = authority_graph.projection(document_hash, document_id);
-        assert!(projection.turn_in_flight, "the newer prompt's turn is still running");
+        assert!(
+            projection.turn_in_flight,
+            "the newer prompt's turn is still running"
+        );
         assert_eq!(
             projection.deferred_clear_superseded,
-            Some(agent_doc_turn::cp_projection::DeferredClearSupersededProjection {
-                clear_epoch: 3,
-                pane: "%149".into(),
-                reason: "newer_prompt".into(),
-                superseded_at: 1_040,
-            })
+            Some(
+                agent_doc_turn::cp_projection::DeferredClearSupersededProjection {
+                    clear_epoch: 3,
+                    pane: "%149".into(),
+                    reason: "newer_prompt".into(),
+                    superseded_at: 1_040,
+                }
+            )
         );
         document_graphs.set_projection(
             document_hash,
-            Some(agent_doc_state_backbone::DocumentStateProjection::new(document_hash)),
+            Some(agent_doc_state_backbone::DocumentStateProjection::new(
+                document_hash,
+            )),
         );
         assert_eq!(
             authority_graph
@@ -18987,6 +19008,86 @@ agent:queue\n\
     // `#retainedclearreactive` — the retained-write clear as a subscribed
     // `Effect`, not a `settle_*` call every consumer has to remember.
     // -----------------------------------------------------------------------
+
+    /// `#fixthrashingbackground`: cycle-state reads ask for the closeout part
+    /// only. The whole projection carries unbounded per-document history (here
+    /// a full commit-candidate document image per write); the closeout answer
+    /// must equal the whole projection's closeout and carry none of it.
+    #[test]
+    fn closeout_projection_command_answers_closeout_without_document_history() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        let image = "x".repeat(64 * 1024);
+        let mut events = vec![
+            preflight_started_event(&document_hash),
+            response_captured_event(&document_hash),
+        ];
+        for revision in 0..8_u64 {
+            events.push(agent_doc_state_backbone::StateEvent::new(
+                format!("commit-candidate-{revision}-{document_hash}"),
+                agent_doc_state_backbone::StateFact::VisibleWriteCommitCandidateObserved {
+                    document_hash: document_hash.clone(),
+                    patch_id: format!("patch-{revision}"),
+                    model_revision: revision,
+                    editor_visible_hash: format!("visible-{revision}"),
+                    commit_candidate_hash: format!("candidate-{revision}"),
+                    commit_candidate_content: Some(format!("{image}{revision}")),
+                    source: "test".to_string(),
+                },
+            ));
+        }
+        for event in &events {
+            append_state_event(dir.path(), event).unwrap();
+        }
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let request = |command: &str| ControllerRequest {
+            command: command.to_string(),
+            file: Some(file.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence: None,
+        };
+        let mut should_stop = false;
+        let mut answer = |command: &str| {
+            rpc::handle_request_locked(
+                &(serde_json::to_string(&request(command)).unwrap() + "\n"),
+                &runtime,
+                &mut should_stop,
+            )
+            .unwrap()
+        };
+        let whole = answer("document_state_projection");
+        let closeout = answer("document_closeout_projection");
+
+        #[derive(serde::Deserialize)]
+        struct Envelope<T> {
+            ok: bool,
+            data: Option<T>,
+        }
+        let whole: Envelope<agent_doc_state_backbone::DocumentStateProjection> =
+            serde_json::from_str(&whole).unwrap();
+        let closeout_bytes = closeout.len();
+        let closeout: Envelope<agent_doc_state_backbone::CloseoutProjection> =
+            serde_json::from_str(&closeout).unwrap();
+        assert!(whole.ok && closeout.ok);
+        let whole = whole.data.expect("projection");
+        assert_eq!(whole.visible_write.commit_candidates.len(), 8);
+        assert_eq!(closeout.data.expect("closeout"), whole.closeout);
+        assert!(
+            closeout_bytes < image.len(),
+            "the closeout answer must not carry document history ({closeout_bytes} bytes)"
+        );
+    }
 
     fn retained_test_document(dir: &tempfile::TempDir) -> (PathBuf, String) {
         let file = dir.path().join("session.md");

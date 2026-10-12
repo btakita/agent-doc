@@ -55,6 +55,23 @@ thread_local! {
     /// O(1) seam instead of self-IPC or replaying the entire durable ledger.
     static LOCAL_DOCUMENT_PROJECTION_READER: RefCell<Option<LocalDocumentProjectionReader>> =
         const { RefCell::new(None) };
+    /// The closeout-only companion of [`LOCAL_DOCUMENT_PROJECTION_READER`]
+    /// (`#fixthrashingbackground`).
+    static LOCAL_DOCUMENT_CLOSEOUT_READER: RefCell<Option<LocalDocumentCloseoutReader>> =
+        const { RefCell::new(None) };
+}
+
+type LocalDocumentCloseoutReader =
+    Box<dyn Fn(&str) -> Option<agent_doc_state_backbone::CloseoutProjection>>;
+
+/// Install the thread-local live closeout reader beside the thread-local
+/// projection reader.
+pub fn set_local_document_closeout_reader(
+    reader: impl Fn(&str) -> Option<agent_doc_state_backbone::CloseoutProjection> + 'static,
+) {
+    LOCAL_DOCUMENT_CLOSEOUT_READER.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(reader));
+    });
 }
 
 /// The project root this process is the live project controller for.
@@ -147,6 +164,7 @@ pub fn clear_process_document_projection_reader_for_tests() {
     if let Ok(mut slot) = PROCESS_DOCUMENT_PROJECTION_READER.write() {
         *slot = None;
     }
+    clear_process_document_closeout_reader_for_tests();
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -205,6 +223,72 @@ pub fn local_document_projection(document_hash: &str) -> Option<Option<DocumentS
             None
         }
     }
+}
+
+/// Process-wide live closeout reader (`#fixthrashingbackground`).
+///
+/// Every controller request that names a file primes its turn attribution,
+/// which reads the document's closeout. Served through
+/// [`local_document_projection`] that cloned the WHOLE projection under the
+/// controller's projection lock — including unbounded per-document history
+/// (a full document image per visible-write commit candidate) — on every
+/// request. This reader answers the closeout part alone.
+type SharedDocumentCloseoutReader =
+    Box<dyn Fn(&str) -> Option<agent_doc_state_backbone::CloseoutProjection> + Send + Sync>;
+
+static PROCESS_DOCUMENT_CLOSEOUT_READER: std::sync::RwLock<Option<SharedDocumentCloseoutReader>> =
+    std::sync::RwLock::new(None);
+
+/// Install the process-wide live closeout reader.
+pub fn set_process_document_closeout_reader(
+    reader: impl Fn(&str) -> Option<agent_doc_state_backbone::CloseoutProjection>
+    + Send
+    + Sync
+    + 'static,
+) {
+    match PROCESS_DOCUMENT_CLOSEOUT_READER.write() {
+        Ok(mut slot) => *slot = Some(Box::new(reader)),
+        Err(err) => eprintln!(
+            "[agent-doc] process closeout reader registry poisoned ({err}) — closeout reads will clone the whole live projection"
+        ),
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub fn clear_process_document_closeout_reader_for_tests() {
+    if let Ok(mut slot) = PROCESS_DOCUMENT_CLOSEOUT_READER.write() {
+        *slot = None;
+    }
+}
+
+/// The live closeout projection, with the same `None` / `Some(None)` meaning
+/// as [`local_document_projection`].
+///
+/// Thread-local readers are the narrowest scope (the request path installs
+/// them), so they win, the closeout reader before the whole-projection one;
+/// otherwise the process-wide closeout reader answers. Only when no closeout
+/// reader is installed anywhere does this fall back to cutting the closeout out
+/// of a whole projection.
+pub fn local_document_closeout_projection(
+    document_hash: &str,
+) -> Option<Option<agent_doc_state_backbone::CloseoutProjection>> {
+    if let Some(closeout) =
+        LOCAL_DOCUMENT_CLOSEOUT_READER.with(|slot| slot.borrow().as_ref().map(|r| r(document_hash)))
+    {
+        return Some(closeout);
+    }
+    if let Some(projection) = LOCAL_DOCUMENT_PROJECTION_READER
+        .with(|slot| slot.borrow().as_ref().map(|r| r(document_hash)))
+    {
+        return Some(projection.map(|projection| projection.closeout));
+    }
+    if let Ok(slot) = PROCESS_DOCUMENT_CLOSEOUT_READER.read()
+        && let Some(reader) = slot.as_ref()
+    {
+        return Some(reader(document_hash));
+    }
+    local_document_projection(document_hash)
+        .map(|projection| projection.map(|projection| projection.closeout))
 }
 
 #[derive(Debug)]

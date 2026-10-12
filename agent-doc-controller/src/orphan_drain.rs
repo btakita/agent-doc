@@ -135,6 +135,19 @@ pub struct OrphanDrainObservation {
 /// first trigger registers.
 pub const DEFAULT_MIN_DISPATCH_INTERVAL_SECS: u64 = 90;
 
+/// Whether [`orphan_drain_decision`] could reach `Dispatch` at all, judged
+/// from the facts that cost nothing to observe (`#fixthrashingbackground`).
+///
+/// `supervisor_alive` is a full `/proc` scan with a command-line parse per
+/// process, and the sweep runs for every open document every ten seconds — on
+/// a workstation with ~30 idle documents that was tens of thousands of `/proc`
+/// reads per tick to learn something no idle document needed: without an
+/// active queue and a drainable head the decision is a skip whatever the
+/// supervisor's liveness.
+pub fn orphan_drain_may_dispatch(queue_active: bool, has_drainable_head: bool) -> bool {
+    queue_active && has_drainable_head
+}
+
 /// Decide whether the controller should drain a supervisor-less document.
 ///
 /// Fail-quiet by construction: every gate is a skip, never an error. The order
@@ -172,6 +185,32 @@ pub fn orphan_drain_decision(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Skipping the liveness probe is only sound if it can never change the
+    /// answer: exhaustively, a document the cheap gate rejects is a skip
+    /// whatever the supervisor's liveness and the remaining facts.
+    #[test]
+    fn the_cheap_gate_never_hides_a_dispatch() {
+        for bits in 0..64_u32 {
+            let bit = |n: u32| bits & (1 << n) != 0;
+            let observation = OrphanDrainObservation {
+                queue_active: bit(0),
+                has_drainable_head: bit(1),
+                supervisor_alive: bit(2),
+                loop_owns_drain: bit(3),
+                pane_busy: bit(4),
+                secs_since_last_dispatch: bit(5).then_some(0),
+            };
+            if !orphan_drain_may_dispatch(observation.queue_active, observation.has_drainable_head)
+            {
+                assert_ne!(
+                    orphan_drain_decision(observation, DEFAULT_MIN_DISPATCH_INTERVAL_SECS),
+                    OrphanDrainDecision::Dispatch,
+                    "{observation:?}"
+                );
+            }
+        }
+    }
 
     fn drainable_orphan() -> OrphanDrainObservation {
         OrphanDrainObservation {

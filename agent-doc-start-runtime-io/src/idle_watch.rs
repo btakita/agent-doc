@@ -139,6 +139,17 @@ fn empty_preflight_reclaim_probe_due(tick: u32) -> bool {
     tick.is_multiple_of(EMPTY_PREFLIGHT_RECLAIM_TICK_INTERVAL)
 }
 
+/// `#fixthrashingbackground`: is there anything the gh179 reclaim could act on?
+///
+/// The reclaim itself only runs for an open cycle (`effective_cycle_open`: an
+/// open durable cycle or an in-flight supervisor IPC handler), so a tick whose
+/// cycle is closed has nothing to reclaim and must stay quiescent. An
+/// unreadable cycle state is not evidence the cycle closed
+/// (`#idlerevisionreactive`): keep probing, exactly as before.
+fn empty_preflight_reclaim_candidate(cycle_open: Option<bool>, inflight_handlers: u64) -> bool {
+    inflight_handlers > 0 || cycle_open.unwrap_or(true)
+}
+
 /// A same-child `execve` reentry reparses the editor-authoritative document
 /// before it can adopt the preserved harness. Refuse the irreversible process
 /// swap while that document is transiently malformed; the current supervisor
@@ -1005,9 +1016,19 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
             }
             Some(revision)
         }
-        // Detached / missing-replica / unavailable: fall through to the full read,
-        // which owns those cases and their backoff bookkeeping. Failing open keeps
-        // a degraded revision probe from changing the supervisor's decisions.
+        // `#fixthrashingbackground`: the controller already answered that no
+        // live editor holds the document, so disk is the authority. The full
+        // read below would ask the controller the same question again only to
+        // be told `Detached` and read disk anyway — two extra RPCs per
+        // reconcile (`idle_watch_active_queue_head` + `durable_buffer_state`)
+        // for a document whose plugin endpoint is registered but whose replica
+        // is not (haiven-dev `frontend.md`/`fpe.md`, 2026-10-12).
+        Ok(Some(agent_doc_crdt_relay_io::CurrentRevision::Detached)) => {
+            return idle_watch_disk_queue_head(file);
+        }
+        // Missing-replica / unavailable: fall through to the full read, which
+        // owns those cases and their backoff bookkeeping. Failing open keeps a
+        // degraded revision probe from changing the supervisor's decisions.
         _ => None,
     };
     let current =
@@ -1784,6 +1805,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
             });
             let mut steering_recheck_at: Option<std::time::Instant> = None;
+            // `#fixthrashingbackground`: settle evidence for held steering
+            // candidates. Without it a held candidate under a live editor was
+            // "first seen" on every observation, never settled, and re-armed
+            // `steering_recheck_at` forever — a full-text read per recheck.
+            let mut steering_wake_carry =
+                agent_doc_session_check_io::midturn_steering::WakeSettleCarry::default();
             let mut steering_wake_error_logged = false;
             let mut prev_actor_ready = false;
             // The ONE thing here that is genuinely an effect: writing a
@@ -1851,7 +1878,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // A tick cannot span two turns, so the scope is exact rather
                 // than a TTL guess, and it drops at the end of each iteration.
                 let _turn_attribution = agent_doc_ops_log_io::begin_turn_attribution_scope();
-                agent_doc_ops_log_io::prime_turn_attribution(&path);
+                // `#fixthrashingbackground`: the scope opens every tick, but the
+                // attribution is resolved lazily — a quiescent tick that logs
+                // nothing must not read the document projection at all. Priming
+                // (`#0.35.413`, resolve before domain dispatch) happens below,
+                // once the tick has passed the quiescent gates and is about to
+                // dispatch.
                 // `#idlequiet`: stale-binary convergence is the one check that
                 // must remain prompt at every stage of a turn. Keep it ahead of
                 // every quiescent fast-path gate; it is a local inode/stat probe
@@ -2204,8 +2236,21 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         last_stale_recycle_reconcile,
                         now,
                     );
+                // `#fixthrashingbackground`: the gh179 cadence only matters while
+                // a cycle is open, and it is urgent maintenance — it bypasses
+                // every quiescent gate and runs the whole idle pipeline (queue
+                // head, steering wake, frontmatter refresh: full-document reads).
+                // Unconditionally that was a full pipeline every 30 ticks (~17s
+                // under load) on every idle supervisor. One cheap closeout read
+                // per cadence decides whether there is anything to reclaim.
                 let empty_preflight_reclaim_probe_due =
-                    empty_preflight_reclaim_probe_due(empty_preflight_reclaim_ticks);
+                    empty_preflight_reclaim_probe_due(empty_preflight_reclaim_ticks)
+                        && empty_preflight_reclaim_candidate(
+                            agent_doc_cycle_state_io::load_with_closeout_projection(&path)
+                                .map(|state| state.is_some_and(|state| state.is_open()))
+                                .ok(),
+                            agent_doc_ipc_io::inflight_connection_handlers(),
+                        );
                 empty_preflight_reclaim_ticks = empty_preflight_reclaim_ticks.wrapping_add(1);
                 let exclusive_supervisor_maintenance = context_reset_in_flight
                     || awaiting_clear_settle
@@ -2418,6 +2463,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     last_safety_revision_observation = Some(now);
                 }
+                // Turn attribution is resolved before domain dispatch, never on a
+                // quiescent tick (`#fixthrashingbackground`): priming at the top
+                // of every 500ms tick was a document-projection RPC per tick per
+                // supervisor whether or not anything was logged or dispatched.
+                agent_doc_ops_log_io::prime_turn_attribution(&path);
                 // `#capproofbg`: a *pending* managed-capability proof no longer
                 // stalls the idle-queue dispatch. Drain dispatch proceeds
                 // immediately while the proof runs in the background; only a proven
@@ -2614,7 +2664,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 && actor_ready_fast
                 && active_transition != IdleQueueTransition::Unresolved
             {
-                match agent_doc_session_check_io::midturn_steering::observe_for_wake(&path) {
+                match agent_doc_session_check_io::midturn_steering::observe_for_wake_with(
+                    &path,
+                    &mut steering_wake_carry,
+                ) {
                     Ok(observation) => {
                         steering_wake_error_logged = false;
                         steering_recheck_at = observation
@@ -6202,6 +6255,54 @@ mod tests {
         );
     }
 
+    /// `#fixthrashingbackground`: a quiescent idle tick reads nothing.
+    ///
+    /// The loop primed turn attribution at the top of every 500ms tick, which is
+    /// a document-projection read (a controller RPC) per tick per supervisor
+    /// even when the tick then sleeps through the quiescent fast path. Priming
+    /// must stay ahead of domain dispatch (`#0.35.413`) but behind every
+    /// quiescent `continue`; and the steering wake must carry settle evidence,
+    /// or a held candidate re-arms its recheck (a full-text read) forever.
+    #[test]
+    fn quiescent_idle_ticks_read_no_projection_and_steering_wake_carries_settle_evidence() {
+        let source = include_str!("idle_watch.rs");
+        let loop_body = &source[source
+            .find("let _turn_attribution = agent_doc_ops_log_io::begin_turn_attribution_scope();")
+            .expect("tick scope")..];
+        let prime = ["agent_doc_ops_log_io::", "prime_turn_attribution(&path);"].concat();
+        let prime_at = loop_body.find(&prime).expect("priming before dispatch");
+        assert_eq!(
+            loop_body.matches(&prime).count(),
+            1,
+            "the idle tick primes turn attribution exactly once"
+        );
+        for quiescent_exit in [
+            "if idle_watch_fast_path_can_sleep(",
+            "if !idle_watch_revision_observation_due(",
+            "if !idle_watch_projection_reconcile_due(",
+        ] {
+            let at = loop_body.find(quiescent_exit).expect(quiescent_exit);
+            assert!(
+                at < prime_at,
+                "`{quiescent_exit}` must exit a quiescent tick before turn attribution is primed"
+            );
+        }
+        let dispatch_at = loop_body
+            .find("let clear_cooldown_active = clear_cooldown_blocks_auto_dispatch(")
+            .expect("domain dispatch");
+        assert!(
+            prime_at < dispatch_at,
+            "attribution is primed before domain dispatch"
+        );
+
+        let wake = ["midturn_steering::", "observe_for_wake("].concat();
+        assert!(
+            !source.contains(&wake),
+            "the idle wake must use `observe_for_wake_with` and its settle carry"
+        );
+        assert!(source.contains("observe_for_wake_with("));
+    }
+
     #[test]
     fn generation_transition_never_weakens_an_uncaptured_open_cycle() {
         let source = include_str!("idle_watch.rs");
@@ -6313,6 +6414,30 @@ mod tests {
         assert!(
             source.contains("harness_turn_live={}"),
             "the reclaim receipt must report whether a live turn vetoed the reclaim"
+        );
+    }
+
+    /// `#fixthrashingbackground`: the reclaim cadence must not wake a closed,
+    /// idle document's whole pipeline; only an open (or unknown) cycle or an
+    /// in-flight handler makes the probe due.
+    #[test]
+    fn empty_preflight_reclaim_probe_is_due_only_when_something_could_be_reclaimed() {
+        assert!(!empty_preflight_reclaim_candidate(Some(false), 0));
+        assert!(empty_preflight_reclaim_candidate(Some(true), 0));
+        assert!(empty_preflight_reclaim_candidate(Some(false), 1));
+        assert!(
+            empty_preflight_reclaim_candidate(None, 0),
+            "an unreadable cycle state is not proof the cycle closed"
+        );
+        let source = include_str!("idle_watch.rs");
+        let gate = [
+            "empty_preflight_reclaim_probe_due(empty_preflight_reclaim_ticks)\n",
+            "                        && empty_preflight_reclaim_candidate(",
+        ]
+        .concat();
+        assert!(
+            source.contains(&gate),
+            "the urgent reclaim cadence must be gated on a reclaimable cycle"
         );
     }
 

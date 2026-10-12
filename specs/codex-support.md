@@ -9,7 +9,11 @@ envelope. A refused or interrupted admission prevents Stop from capturing the
 refusal explanation, recovering a prior cycle, or continuing its queue. A new
 prompt replaces that receipt; late receipts from an older turn cannot fence the
 new prompt. The receipt describes harness admission only and never changes the
-document's retained capture, queue, or canonical authority.
+document's retained capture, queue, or canonical authority. An exact same-turn
+repeat of an admitted trigger never writes a refusal receipt: it reuses the
+admission while the cycle is uncaptured and is coalesced into the turn's own
+in-flight closeout otherwise, so Stop keeps its queue continuation
+(`#fixrunturn`, see `specs/09-git-integration.md`).
 
 ### Already Multi-Harness
 

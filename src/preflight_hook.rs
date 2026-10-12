@@ -21,6 +21,11 @@ use agent_doc_hooks_io::preflight_user_prompt_submit::{
 /// this as the final seal prevents partial preflight output from being mistaken
 /// for an admitted cycle.
 pub const CONTRACT_MARKER: &str = "[agent-doc] cycle contract (preflight already ran in the binary; do NOT run `agent-doc preflight` for this turn)";
+/// `#fixrunturn`: directive for a same-turn repeat that arrived while the turn's
+/// own closeout was in flight. Deliberately NOT the in-pane admission directive:
+/// that one says "execute its unresolved work now", which would start a second
+/// response over the closeout still landing.
+const CODEX_CLOSEOUT_IN_FLIGHT_DIRECTIVE: &str = "[agent-doc] Codex same-turn repeat during closeout: this trigger was coalesced into the closeout already in flight in this turn. Do NOT start a second response, do NOT rerun `agent-doc finalize`/`write`, and do NOT execute `agent-doc <FILE>` as a shell command. Finish the in-flight closeout and end the turn; the Stop hook owns the continuation for any pending operator prompt.";
 const CODEX_IN_PANE_ADMISSION_DIRECTIVE: &str = "[agent-doc] Codex in-pane admission: continue this response cycle in the current turn. Do NOT execute `agent-doc <FILE>` as a shell command; that would recursively re-enter the owning pane. When `owned_pane_self_invocation` is non-null, execute its unresolved work now; do not reply that the document is merely already active or ask the operator to resend the task.";
 
 /// Printed to **stdout** when the prompt *was* an `agent-doc <FILE>` trigger but
@@ -938,6 +943,61 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Turn context for an exact same-turn repeat of an admitted Codex trigger.
+///
+/// Both shapes keep the turn's original admission authoritative and leave the
+/// exact-thread binding untouched (no refusal receipt), so the Codex Stop hook
+/// still owns the continuation edge.
+///
+/// `#fixrunturn`: when the turn's own closeout is in flight, the repeat is an
+/// operator Run that arrived mid-finalize. It must neither start a second
+/// response nor be refused: refusing stamped `preflight_admitted=false`, and the
+/// Stop hook then retired the binding without the queue continuation, so the
+/// operator's pending prompt was dropped. Coalesced, the closeout finishes and
+/// the Stop hook re-dispatches the pending prompt (auto-queue continuation or
+/// active-session-prompt writeback) once the cycle commits.
+fn same_turn_repeat_context(
+    existing: &agent_doc_codex_hook_io::SameTurnAdmittedInvocation,
+) -> anyhow::Result<String> {
+    use agent_doc_codex_hook_io::SameTurnRepeatKind;
+    match existing.kind {
+        SameTurnRepeatKind::OpenPreflight => {
+            let reuse = serde_json::to_string_pretty(&serde_json::json!({
+                "reused_admission": true,
+                "kind": existing.kind.as_str(),
+                "document": existing.doc_path,
+                "cycle_id": existing.cycle_id,
+                "required_action": "Continue the unresolved work in the current turn; the original cycle contract remains authoritative.",
+            }))?;
+            Ok(format!(
+                "{reuse}\n{CONTRACT_MARKER}\n{CODEX_IN_PANE_ADMISSION_DIRECTIVE}"
+            ))
+        }
+        SameTurnRepeatKind::CloseoutInFlight { phase } => {
+            agent_doc_ops_log_io::log_op(
+                &existing.doc_path,
+                &format!(
+                    "codex_same_turn_repeat_coalesced_into_closeout file={} cycle_id={} phase={} binding=preserved continuation_owner=codex_stop (#fixrunturn)",
+                    existing.doc_path.display(),
+                    existing.cycle_id,
+                    phase.as_str(),
+                ),
+            );
+            let reuse = serde_json::to_string_pretty(&serde_json::json!({
+                "reused_admission": true,
+                "kind": existing.kind.as_str(),
+                "document": existing.doc_path,
+                "cycle_id": existing.cycle_id,
+                "cycle_phase": phase.as_str(),
+                "required_action": "This turn already owns the document and its closeout for this cycle is still in flight. Let that closeout finish; do not start a second response, rerun finalize/write, recapture, or report a refusal. End the turn normally once the closeout returns: the Stop hook re-dispatches any pending operator prompt as a continuation of this turn.",
+            }))?;
+            Ok(format!(
+                "{reuse}\n{CONTRACT_MARKER}\n{CODEX_CLOSEOUT_IN_FLIGHT_DIRECTIVE}"
+            ))
+        }
+    }
+}
+
 /// Codex `UserPromptSubmit` entry point.
 ///
 /// Codex installs one hook command, so admission and session tracking are kept
@@ -968,16 +1028,7 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
     // fresh pending one. Exact turn/prompt/document identity keeps unrelated
     // and genuinely new prompts on the normal fail-closed path.
     if let Some(existing) = agent_doc_codex_hook_io::same_turn_admitted_invocation(&input)? {
-        let reuse = serde_json::to_string_pretty(&serde_json::json!({
-            "reused_admission": true,
-            "kind": "same_turn_repeat",
-            "document": existing.doc_path,
-            "cycle_id": existing.cycle_id,
-            "required_action": "Continue the unresolved work in the current turn; the original cycle contract remains authoritative.",
-        }))?;
-        emit_user_prompt_submit_context(&format!(
-            "{reuse}\n{CONTRACT_MARKER}\n{CODEX_IN_PANE_ADMISSION_DIRECTIVE}"
-        ));
+        emit_user_prompt_submit_context(&same_turn_repeat_context(&existing)?);
         return Ok(());
     }
 

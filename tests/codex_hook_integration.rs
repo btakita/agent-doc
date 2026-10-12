@@ -571,6 +571,105 @@ fn codex_hook_cli_reuses_exact_same_turn_admission() {
     assert_eq!(state.preflight_admitted, Some(true));
 }
 
+/// `#fixrunturn` (infra.md, 2026-10-12): Run Agent Doc typed the trigger into a
+/// busy Codex pane and Codex steered it into the turn while that turn's own
+/// finalize had the cycle at `write_applied`. The hook used to run a fresh
+/// preflight, which refused ("previous cycle ... is still `write_applied`") and
+/// stamped a refusal receipt that fenced the Stop hook's queue continuation.
+#[test]
+fn codex_hook_cli_coalesces_same_turn_repeat_into_in_flight_closeout() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    let submit_payload = json!({
+        "session_id": "closeout-repeat-session",
+        "turn_id": "closeout-repeat-turn",
+        "cwd": tmp.path().display().to_string(),
+        "prompt": format!("agent-doc {}", doc.display()),
+    });
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(submit_payload.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "cycle contract (preflight already ran",
+        ));
+    let admitted = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+    let content = fs::read_to_string(&doc).unwrap();
+    agent_doc_cycle_state_io::mark_response_captured(
+        &doc,
+        "response_captured",
+        Some(&content),
+        Some(&content),
+        "sha-closeout-in-flight",
+        None,
+    )
+    .unwrap();
+    agent_doc_cycle_state_io::mark_write_applied(
+        &doc,
+        "write_applied",
+        Some(&content),
+        Some(&content),
+    )
+    .unwrap();
+
+    let repeated = agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(submit_payload.to_string())
+        .assert()
+        .success();
+    let hook_output: serde_json::Value = serde_json::from_slice(&repeated.get_output().stdout)
+        .expect("coalesced repeat stdout must be exactly one valid JSON document");
+    let context = hook_output["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("coalesced repeat must carry additionalContext");
+    assert!(context.contains("\"reused_admission\": true"), "{context}");
+    assert!(
+        context.contains("\"kind\": \"same_turn_repeat_closeout_in_flight\""),
+        "{context}"
+    );
+    assert!(
+        context.contains("\"cycle_phase\": \"write_applied\""),
+        "{context}"
+    );
+    assert!(
+        context.contains("cycle contract (preflight already ran"),
+        "{context}"
+    );
+    assert!(
+        context.contains("Do NOT start a second response"),
+        "{context}"
+    );
+    assert!(
+        !context.contains("cycle contract UNAVAILABLE"),
+        "the overlapping trigger must not be refused: {context}"
+    );
+    assert!(
+        !context.contains("execute its unresolved work now"),
+        "the in-pane admission directive would start a second response over the closeout: {context}"
+    );
+
+    // The in-flight cycle is untouched and the exact-thread binding keeps its
+    // admission, so the Stop hook still owns the continuation.
+    let after = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+    assert_eq!(after.cycle_id, admitted.cycle_id);
+    assert_eq!(after.phase.as_str(), "write_applied");
+    let state = agent_doc_codex_hook_io::load_state(tmp.path(), "closeout-repeat-session")
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.preflight_admitted, Some(true));
+    assert_eq!(state.last_turn_id, "closeout-repeat-turn");
+    let ops_log =
+        fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+    assert!(
+        ops_log.contains("codex_same_turn_repeat_coalesced_into_closeout"),
+        "the coalescing decision must be observable in ops.log"
+    );
+}
+
 #[test]
 fn codex_hook_cli_wraps_admission_failure_in_one_json_document() {
     let tmp = TempDir::new().unwrap();

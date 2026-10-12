@@ -244,16 +244,76 @@ pub struct UserPromptSubmitInput {
 pub struct SameTurnAdmittedInvocation {
     pub doc_path: PathBuf,
     pub cycle_id: String,
+    pub kind: SameTurnRepeatKind,
+}
+
+/// Where the admitted turn's document cycle stood when Codex steered the
+/// exact same trigger back into that turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SameTurnRepeatKind {
+    /// The turn's cycle is still `preflight_started` with nothing captured:
+    /// the repeat re-enters the same response cycle.
+    OpenPreflight,
+    /// The turn's own closeout is in flight (`response_captured` or
+    /// `write_applied`). A fresh preflight would refuse against that cycle
+    /// ("previous cycle is still `write_applied`") and the refusal receipt
+    /// would fence the Stop hook out of its queue continuation, stranding the
+    /// operator's pending prompt (`#fixrunturn`). The repeat is coalesced
+    /// instead: the turn keeps its admitted binding, finishes the closeout,
+    /// and the Stop hook re-dispatches any pending prompt once it commits.
+    CloseoutInFlight { phase: agent_doc_turn::CyclePhase },
+}
+
+impl SameTurnRepeatKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenPreflight => "same_turn_repeat",
+            Self::CloseoutInFlight { .. } => "same_turn_repeat_closeout_in_flight",
+        }
+    }
+}
+
+/// Classify the document cycle an exact same-turn repeat lands on.
+///
+/// Pure so the shape boundary is unit-testable without a state store. Terminal
+/// cycles return `None`: a fresh preflight admits a new cycle there, so the
+/// ordinary admission path is already correct.
+pub fn classify_same_turn_repeat(
+    cycle: &agent_doc_cycle_state_io::CycleState,
+) -> Option<SameTurnRepeatKind> {
+    if !cycle.is_open() {
+        return None;
+    }
+    if cycle.last_event == "preflight_started"
+        && cycle.capture_id.is_none()
+        && cycle.response_sha256.is_none()
+    {
+        return Some(SameTurnRepeatKind::OpenPreflight);
+    }
+    match cycle.phase {
+        agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied => {
+            Some(SameTurnRepeatKind::CloseoutInFlight { phase: cycle.phase })
+        }
+        _ => None,
+    }
 }
 
 /// Return the existing admission only when Codex repeats the exact trigger in
-/// the exact turn that already opened the document's still-uncaptured cycle.
+/// the exact turn that already owns the document's still-open cycle — either
+/// still uncaptured, or with its own closeout in flight.
 ///
 /// Codex can steer another user message into an active turn. Re-running
 /// preflight for that message makes the cycle look like a competing fresh turn
-/// and fails closed against its own `preflight_started` state. The durable
-/// admission receipt plus exact session/turn/prompt/document identity is the
-/// continuation edge: anything less specific remains on normal admission.
+/// and fails closed against its own open state. The durable admission receipt
+/// plus exact session/turn/prompt/document identity is the continuation edge:
+/// anything less specific remains on normal admission.
+///
+/// `#fixrunturn` (infra.md, 2026-10-12): Run Agent Doc typed the trigger into a
+/// busy Codex pane; Codex steered it into the turn while that turn's own
+/// finalize had cycle `write_applied`. The fresh preflight refused, the refusal
+/// receipt replaced the admitted binding, and the Stop hook then retired the
+/// binding without its queue continuation — the operator's queued prompt was
+/// never answered. [`SameTurnRepeatKind::CloseoutInFlight`] keeps the binding.
 pub fn same_turn_admitted_invocation(
     input: &UserPromptSubmitInput,
 ) -> Result<Option<SameTurnAdmittedInvocation>> {
@@ -281,16 +341,13 @@ pub fn same_turn_admitted_invocation(
     let Some(cycle) = agent_doc_cycle_state_io::load(&doc_path)? else {
         return Ok(None);
     };
-    if !cycle.is_open()
-        || cycle.last_event != "preflight_started"
-        || cycle.capture_id.is_some()
-        || cycle.response_sha256.is_some()
-    {
+    let Some(kind) = classify_same_turn_repeat(&cycle) else {
         return Ok(None);
-    }
+    };
     Ok(Some(SameTurnAdmittedInvocation {
         doc_path,
         cycle_id: cycle.cycle_id,
+        kind,
     }))
 }
 
@@ -1679,8 +1736,116 @@ mod tests {
             Some(SameTurnAdmittedInvocation {
                 doc_path: doc,
                 cycle_id: cycle.cycle_id,
+                kind: SameTurnRepeatKind::OpenPreflight,
             })
         );
+    }
+
+    /// `#fixrunturn` (infra.md, 2026-10-12): Run Agent Doc steered the exact
+    /// trigger into the Codex turn while that turn's own finalize had the cycle
+    /// at `write_applied`. The repeat must keep the turn's admission instead of
+    /// falling through to a fresh preflight that refuses against its own
+    /// in-flight closeout and fences the Stop hook's continuation.
+    #[test]
+    fn exact_same_turn_trigger_during_own_closeout_is_coalesced_not_refused() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let input = UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: format!("agent-doc {}", doc.display()),
+        };
+        apply_user_prompt_submit(&input).unwrap();
+        let content = fs::read_to_string(&doc).unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content))
+            .unwrap();
+        record_preflight_admission(&input, true).unwrap();
+
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&content),
+            Some(&content),
+            "sha-response",
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            same_turn_admitted_invocation(&input).unwrap(),
+            Some(SameTurnAdmittedInvocation {
+                doc_path: doc.clone(),
+                cycle_id: cycle.cycle_id.clone(),
+                kind: SameTurnRepeatKind::CloseoutInFlight {
+                    phase: agent_doc_turn::CyclePhase::ResponseCaptured,
+                },
+            })
+        );
+
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
+        let repeat = same_turn_admitted_invocation(&input).unwrap().unwrap();
+        assert_eq!(
+            repeat.kind,
+            SameTurnRepeatKind::CloseoutInFlight {
+                phase: agent_doc_turn::CyclePhase::WriteApplied,
+            }
+        );
+        assert_eq!(repeat.kind.as_str(), "same_turn_repeat_closeout_in_flight");
+
+        // The coalesced repeat leaves the admitted exact-thread binding intact,
+        // which is what lets the Stop hook own the continuation.
+        let root = project_root_for(dir.path()).unwrap();
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(state.preflight_admitted, Some(true));
+        assert_eq!(state.last_turn_id, "turn-1");
+    }
+
+    #[test]
+    fn same_turn_repeat_classification_covers_every_cycle_phase() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let content = fs::read_to_string(&doc).unwrap();
+        let open = agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content))
+            .unwrap();
+        assert_eq!(
+            classify_same_turn_repeat(&open),
+            Some(SameTurnRepeatKind::OpenPreflight)
+        );
+        for phase in [
+            agent_doc_turn::CyclePhase::ResponseCaptured,
+            agent_doc_turn::CyclePhase::WriteApplied,
+        ] {
+            let mut cycle = open.clone();
+            cycle.phase = phase;
+            cycle.last_event = phase.as_str().to_string();
+            cycle.capture_id = Some(cycle.cycle_id.clone());
+            cycle.response_sha256 = Some("sha".to_string());
+            assert_eq!(
+                classify_same_turn_repeat(&cycle),
+                Some(SameTurnRepeatKind::CloseoutInFlight { phase })
+            );
+        }
+        // Terminal cycles stay on ordinary admission: a fresh preflight admits.
+        for phase in [
+            agent_doc_turn::CyclePhase::Committed,
+            agent_doc_turn::CyclePhase::Abandoned,
+        ] {
+            let mut cycle = open.clone();
+            cycle.phase = phase;
+            cycle.last_event = phase.as_str().to_string();
+            assert_eq!(classify_same_turn_repeat(&cycle), None);
+        }
+        // A `preflight_started` phase that already moved past the bare
+        // admission event is neither shape; stay fail-closed.
+        let mut drifted = open.clone();
+        drifted.last_event = "preflight_queue_maintenance".to_string();
+        assert_eq!(classify_same_turn_repeat(&drifted), None);
     }
 
     #[test]

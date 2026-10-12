@@ -6383,6 +6383,110 @@ Reviewed the gated items.\n\
         }
     }
 
+    /// Drive the `#fixrunturn` shape up to the turn's Stop: an admitted Codex
+    /// turn whose own closeout is in flight (`write_applied`) receives the exact
+    /// trigger again as Codex steering (Run Agent Doc typed into the busy pane),
+    /// then that closeout commits. `pre_fix_refusal` replays what the hook did
+    /// before the fix — refresh the binding and stamp a refusal receipt — instead
+    /// of the coalesced repeat, which leaves the binding untouched.
+    fn stop_after_same_turn_repeat_during_closeout(pre_fix_refusal: bool) -> StopResponse {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(
+            &dir,
+            &["What is the merge order for my accepted PRs on haiven-infra?"],
+        );
+        init_git_repo(dir.path(), &doc);
+        let content = fs::read_to_string(&doc).unwrap();
+        let trigger = UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-infra".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: format!("agent-doc {}", doc.display()),
+        };
+        apply_user_prompt_submit(&trigger).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        agent_doc_codex_hook_io::record_preflight_admission(&trigger, true).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&content),
+            Some(&content),
+            "sha-infra-response",
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
+
+        // The steered repeat lands while the turn's own closeout is in flight.
+        let repeat = agent_doc_codex_hook_io::same_turn_admitted_invocation(&trigger)
+            .unwrap()
+            .expect("an exact same-turn repeat during closeout must keep its admission");
+        assert!(matches!(
+            repeat.kind,
+            agent_doc_codex_hook_io::SameTurnRepeatKind::CloseoutInFlight { .. }
+        ));
+        if pre_fix_refusal {
+            apply_user_prompt_submit(&trigger).unwrap();
+            agent_doc_codex_hook_io::record_preflight_admission(&trigger, false).unwrap();
+        }
+
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
+
+        apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-infra".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "PR #253 is green; recorded the review gate.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap()
+    }
+
+    /// `#fixrunturn` (infra.md, 2026-10-12): the operator's queued prompt must
+    /// be re-dispatched by the Stop hook after an overlapping Run Agent Doc
+    /// arrives mid-finalize — not dropped behind a refusal receipt.
+    #[test]
+    fn same_turn_repeat_during_closeout_keeps_stop_queue_continuation() {
+        match stop_after_same_turn_repeat_during_closeout(false) {
+            StopResponse::Block { reason, .. } => {
+                assert!(
+                    reason.starts_with("Queue continuation, not an error:"),
+                    "{reason}"
+                );
+                assert!(
+                    reason.contains("What is the merge order for my accepted PRs"),
+                    "the pending operator prompt must be re-dispatched: {reason}"
+                );
+            }
+            other => panic!("the coalesced repeat must keep the queue continuation: {other:?}"),
+        }
+    }
+
+    /// The pre-fix shape, kept as the guard's witness: a refusal receipt for the
+    /// steered repeat makes Stop retire the binding and let the turn end with
+    /// the queued prompt unanswered. If this ever starts continuing, the
+    /// refusal fence changed and the regression above no longer proves the fix.
+    #[test]
+    fn refusal_receipt_for_same_turn_repeat_strands_the_queue_prompt() {
+        assert_eq!(
+            stop_after_same_turn_repeat_during_closeout(true),
+            StopResponse::Continue { continue_: true }
+        );
+    }
+
     #[test]
     fn stop_blocks_clean_closeout_when_auto_queue_has_next_prompt() {
         let dir = setup_project();

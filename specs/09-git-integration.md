@@ -94,6 +94,26 @@ trigger may attempt admission again. Consequently Stop must never turn a pane
 authority refusal into an instruction to run `agent-doc commit` from the same
 non-owning pane.
 
+**Same-turn repeat during the turn's own closeout (`#fixrunturn`).** Codex
+steers a message typed into a busy pane into the running turn, so an operator's
+Run Agent Doc can deliver the exact trigger (same session, turn, prompt, and
+document) to a turn that already holds admission. When the document cycle is
+still `preflight_started` with nothing captured, the hook reuses the admission
+(`kind: same_turn_repeat`). When that turn's own closeout is in flight (cycle
+`response_captured` or `write_applied`), the hook coalesces the repeat
+(`kind: same_turn_repeat_closeout_in_flight`, ops-log
+`codex_same_turn_repeat_coalesced_into_closeout`): it emits the admission
+marker with a directive to let the closeout finish and not start a second
+response, and it leaves the exact-thread binding untouched. It must not run a
+fresh preflight there: that preflight refuses against the turn's own open cycle
+("previous cycle ... is still `write_applied`"), and its refusal receipt makes
+Stop retire the binding without the queue continuation, so the operator's
+pending prompt is never answered (infra.md, 2026-10-12). Because the binding
+keeps its admission, Stop re-dispatches the pending prompt after the closeout
+commits through its ordinary ladder: auto-queue continuation, or the
+active-session-prompt writeback block. A terminal cycle is not a repeat shape;
+the ordinary admission path admits a new cycle there.
+
 Prompt writeback debt is cycle-scoped. `UserPromptSubmit` records the cycle ID and
 whether that cycle was open when it observed the prompt. Once that same cycle has
 a captured response and reaches `committed`, the Stop hook must retire the prompt

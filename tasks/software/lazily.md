@@ -17,6 +17,7 @@ prompt_presets:
   '#followup': Add follow-up work into the backlog + queue
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
+  'release': 'release + publish'
 queue: go
 ---
 
@@ -37,6 +38,14 @@ completed
 Compacted content:
 - Archived 36 response topic(s): advance review; #lzambienttokenresolve; #lzmacosrunner; 33 more
 - Prior summary/context: prior compacted content: Archived 23 response topic(s): are the dependencies feature-gated; #lzktoptionaldeps protobu...
+
+### Re: release queue dispatch — gpt-5 · 2026-10-12T13:49-04:00
+
+Claimed and dispatched `#lzreleasepins`, `#lzcorecohort`, and `#lzagentdocartifactrefresh` to isolated workers. Because the queue-level `#spec-test-commit-push` preset is undefined, those workers are restricted to in-worktree work and evidence; they may not commit, push, install, release, or publish.
+
+> **Queue prompt:** #release
+
+**Deferred:** the release worker made no changes and took no outward action because the queued `#release` has no matching backlog/review item, while frontmatter defines `release` (without `#`) rather than `'#release'`. Define the intended `#release` preset or provide the exact release scope, and define `#spec-test-commit-push` or otherwise give explicit authorization for any commit, push, version bump, tag, publish, install, or release action.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -47,6 +56,7 @@ Compacted content:
 - do [#lzreleasepins]
 - do [#lzcorecohort]
 - do [#lzagentdocartifactrefresh]
+- #release
 <!-- /agent:queue -->
 
 ## Backlog

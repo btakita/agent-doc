@@ -454,7 +454,7 @@ I checked all 3 review items against current evidence. **None can be acted on by
 - `#pypiquotarecheck` waits on an external PyPI support reply; it was rechecked 2026-10-12, headroom fine.
 
 Details are in the 05:45 response. The review list is unchanged at 3 gated items.
-❯ 🚧 Run Agent Doc + editing during the turn in infra.md resulted in duplication + corruption of the queue items:
+❯ Run Agent Doc + editing during the turn in infra.md resulted in duplication + corruption of the queue items:
 ```
 - 🚧 do [#fpeseverityparse]
 - do - [from:actionable-review key=stggrafanaowner] do [#stggrafanaowner]
@@ -497,6 +497,7 @@ The exchange is long: 433 lines across 23 responses. I'm leaving it alone while 
 - 🚧 sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/241
 - 🚧 do [#ideriderindependentnav]
+- lazily.md issue: Run Agent Doc then Ctrl+c in the Codex terminal then Clear Session Context: Clear Session Context is wedged
 - 🚧 release + publish
 <!-- /agent:queue -->
 

@@ -355,6 +355,21 @@ Done. `rcpthelpers` (`0c7e665d41`) is in the same batch, installed.
 I removed the thrash worktree, which reclaimed 2.1 GB of scratch files.
 
 `#idleclearrestart` is still yours: should Clear at an idle prompt type `/clear` instead of restarting Claude, which kills its background agents?
+
+### Re: is the release published — opus-5.5 · 2026-10-12T00:15-04:00
+
+> **Chat prompt (#chatprompt):** Is the relese published?
+
+v0.35.491 is published: the GitHub Release went out at 01:00:43Z, and PyPI's latest is 0.35.491.
+
+The fixes integrated since then are **not** released yet. Five batches have landed on main since the `v0.35.491` tag, and are installed locally only:
+- `flaky0494`: the build no longer relinks every test program on each cargo command, and every test run is now recorded in `tmp/test-runs/`.
+- `deferstrike2`: a deferred queue line carrying your note stays queued.
+- `clrinject`: an idle Clear no longer sends an unrequested `/agent-doc` turn.
+- `rcpthelpers`: strict receipt fixtures for the simulated-editor tests, plus the controller's faster accept-loop wake.
+- `thrash`: idle supervisors and controllers stop burning CPU.
+
+Each batch passed its own full `make check`. They would ship as v0.35.492: version bump, `VERSIONS.md` entry, parity row, `make release`.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 

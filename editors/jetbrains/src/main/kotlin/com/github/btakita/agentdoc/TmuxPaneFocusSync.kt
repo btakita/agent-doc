@@ -261,9 +261,26 @@ class TmuxPaneFocusSync private constructor(
         }
 
         internal fun isAgentDocWindowActive(projectRoot: String): Boolean? =
-            CpRouteClient.tmuxFocusState(projectRoot)?.let { json ->
-                extractWindowNameFromFocusState(json) == "agent-doc"
+            CpRouteClient.tmuxFocusState(projectRoot)
+                ?.takeIf { focusStateIsOwnLane(it, CpRouteClient.editorInstallationId) }
+                ?.let { json -> extractWindowNameFromFocusState(json) == "agent-doc" }
+
+        /**
+         * `#ideriderindependentnav` P3, defense in depth: focus mirroring goes only to the IDE that
+         * owns the tmux window. A projection of the shared lane (no `navigation_lane`) or of this
+         * installation's own lane is this IDE's; a projection labelled with another installation's
+         * lane is never mirrored into this editor, even if a controller answered with it.
+         */
+        internal fun focusStateIsOwnLane(json: String, installationId: String): Boolean {
+            return try {
+                val root = JsonParser.parseString(json).asJsonObject
+                val data = root.objectOrNull("data") ?: root
+                val lane = data.stringOrNull("navigation_lane") ?: return true
+                lane == installationId
+            } catch (_: Exception) {
+                false
             }
+        }
 
         internal fun extractDocumentPathFromInspection(json: String): String? {
             return try {
@@ -361,6 +378,7 @@ class TmuxPaneFocusSync private constructor(
             for (root in projectRoots) {
                 val json = CpRouteClient.tmuxFocusState(projectRoot = root)
                     ?: continue
+                if (!focusStateIsOwnLane(json, CpRouteClient.editorInstallationId)) continue
                 if (extractWindowNameFromFocusState(json) != "agent-doc") continue
                 extractDocumentPathFromFocusState(json)?.let { return it }
             }

@@ -74,7 +74,7 @@ internal object IdeTerminalCoordinator {
             val result = try {
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
                 SyncLayoutAction.runCommandWithTimeout(
-                    listOf(agentDoc, "tmux", "ensure", relativePath, "--json", "--ide-terminal"),
+                    ideTerminalEnsureCommand(agentDoc, relativePath, CpRouteClient.navigationClientId),
                     cwd,
                     ENSURE_TIMEOUT_MS,
                     captureStderrSeparately = true,
@@ -128,6 +128,27 @@ internal object IdeTerminalCoordinator {
             }
         }
     }
+
+    /**
+     * `#ideriderindependentnav` P3: the ensure names this IDE's surface client, so with
+     * `editor_navigation = "per_installation"` the binary attaches this IDE's terminal to its own
+     * navigation lane session. In `shared` mode the receipt is the shared session, unchanged.
+     */
+    internal fun ideTerminalEnsureCommand(
+        agentDoc: String,
+        relativePath: String,
+        clientId: String,
+    ): List<String> =
+        listOf(
+            agentDoc,
+            "tmux",
+            "ensure",
+            relativePath,
+            "--json",
+            "--ide-terminal",
+            "--client-id",
+            clientId,
+        )
 
     private fun dispatchFailure(project: Project, onFailure: (String) -> Unit, message: String) {
         ApplicationManager.getApplication().invokeLater {

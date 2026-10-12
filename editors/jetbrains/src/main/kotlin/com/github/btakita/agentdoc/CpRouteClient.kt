@@ -162,9 +162,22 @@ internal object CpRouteClient {
     private const val PANE_LAYOUT_DESIRED_TYPE_TAG = "agent-doc.pane-layout.desired.v1"
     private val statePlaneProducerId = "jetbrains-" + java.util.UUID.randomUUID().toString()
     private val statePlaneEpoch = java.util.concurrent.atomic.AtomicLong(0)
-    private val editorInstallationId: String = currentEditorInstallationId()
+    /**
+     * This IDE installation (`<productCode>.<config-dir hash>`). With `editor_navigation =
+     * "per_installation"` it names this IDE's own tmux navigation lane, so a tmux focus projection
+     * whose `navigation_lane` is another installation is not this IDE's (`#ideriderindependentnav`).
+     */
+    internal val editorInstallationId: String = currentEditorInstallationId()
     private val editorSurfaceClientId =
         editorSurfaceClientId("jetbrains", editorInstallationId, ProcessHandle.current().pid())
+
+    /**
+     * The client id this IDE navigates tmux as (`#ideriderindependentnav` P3): its surface client
+     * id. The controller derives the navigation lane from it; in the default `shared` mode every
+     * client resolves to the shared lane, so sending it changes nothing there.
+     */
+    internal val navigationClientId: String
+        get() = editorSurfaceClientId
     private val editorSurfaceGeneration = System.nanoTime().coerceAtLeast(1L)
     private val editorSurfaceSequence = java.util.concurrent.atomic.AtomicLong(0)
     private val editorFocusClientId =
@@ -826,9 +839,7 @@ internal object CpRouteClient {
 
     fun tmuxFocusState(projectRoot: String): String? {
         val socket = cpcSocket(projectRoot)
-        val request = JsonObject().also {
-            it.addProperty("command", "tmux_focus_state")
-        }
+        val request = tmuxFocusStateRequest(navigationClientId)
         return try {
             sendRequestDataToSocket(socket, request).toString()
         } catch (e: Exception) {
@@ -836,6 +847,16 @@ internal object CpRouteClient {
             null
         }
     }
+
+    /**
+     * `#ideriderindependentnav` P3: the reverse tmux-to-editor mirror reads this IDE's own
+     * navigation lane, so the request names this IDE's surface client as its `caller`.
+     */
+    internal fun tmuxFocusStateRequest(clientId: String): JsonObject =
+        JsonObject().also {
+            it.addProperty("command", "tmux_focus_state")
+            it.addProperty("caller", clientId)
+        }
 
     fun stateSubscribe(
         projectRoot: String,
@@ -1022,9 +1043,13 @@ internal fun editorCommandAwaitRequest(
         producerId: String = statePlaneProducerId,
         epoch: Long = statePlaneEpoch.incrementAndGet(),
         columnOrder: String? = null,
+        clientId: String = navigationClientId,
     ): JsonObject {
         val desired = JsonObject()
         desired.addProperty("project_root", projectRoot)
+        // `#ideriderindependentnav` P3: the controller projects this layout into the publishing
+        // client's navigation lane (the shared lane in `shared` mode).
+        desired.addProperty("client_id", clientId)
         desired.add("columns", JsonParser.parseString(columnsJson).asJsonArray)
         window?.let { desired.addProperty("window", it) }
         focus?.let { desired.addProperty("focus", it) }

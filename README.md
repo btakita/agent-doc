@@ -113,8 +113,9 @@ started it: another IDE's layout drops it (`cross_lane_layout_dropped` in
 `ops.log`) and its focus is refused (`owned_by_other_lane`) instead of moving the
 pane. VS Code and older JetBrains plugins stay on the shared session. The mode is
 read when the project controller starts; an unknown value logs a warning and
-keeps `shared`. Attaching each IDE terminal to its own lane session is the next
-phase ([plan](docs/plan-ide-independent-nav.md)).
+keeps `shared`. Each JetBrains IDE's agent-doc terminal attaches to its own lane
+session, its manual Sync Tmux Layout arranges that lane, and tmux-to-editor focus
+mirroring reads only that lane ([plan](docs/plan-ide-independent-nav.md)).
 
 ## Feature Taxonomy
 

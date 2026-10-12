@@ -69,4 +69,25 @@ class IdeTerminalCoordinatorTest {
             ),
         )
     }
+
+    @Test
+    fun `tmux ensure names this IDE's navigation client`() {
+        assertEquals(
+            listOf(
+                "agent-doc",
+                "tmux",
+                "ensure",
+                "tasks/plan.md",
+                "--json",
+                "--ide-terminal",
+                "--client-id",
+                "jetbrains@IU.0a1b2c3d-pid:41",
+            ),
+            IdeTerminalCoordinator.ideTerminalEnsureCommand(
+                "agent-doc",
+                "tasks/plan.md",
+                "jetbrains@IU.0a1b2c3d-pid:41",
+            ),
+        )
+    }
 }

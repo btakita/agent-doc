@@ -74,6 +74,39 @@ pub fn ensure_tmux_session_for_ide(
     ensure_tmux_session_with_ide(&tmux, file, explicit_session, true)
 }
 
+/// IDE-originated ensure on behalf of one editor surface client
+/// (`#ideriderindependentnav` P3).
+///
+/// The project session is ensured exactly as [`ensure_tmux_session_for_ide`]
+/// does. When the project opts into `editor_navigation = "per_installation"`
+/// and `client_id` is installation-scoped, the outcome then targets that
+/// installation's own lane session (created on first use with its `agent-doc`
+/// and `stash` windows), so each IDE's agent-doc terminal attaches to its own
+/// navigation lane. Otherwise the outcome is the shared one, unchanged.
+pub fn ensure_tmux_session_for_ide_client(
+    file: &Path,
+    explicit_session: Option<&str>,
+    client_id: Option<&str>,
+) -> Result<TmuxEnsureOutcome> {
+    let tmux = tmux_for_environment();
+    ensure_tmux_session_for_ide_client_with(&tmux, file, explicit_session, client_id)
+}
+
+pub fn ensure_tmux_session_for_ide_client_with(
+    tmux: &tmux_router::Tmux,
+    file: &Path,
+    explicit_session: Option<&str>,
+    client_id: Option<&str>,
+) -> Result<TmuxEnsureOutcome> {
+    ensure_tmux_session_with_ide_client(
+        tmux,
+        file,
+        explicit_session,
+        true,
+        client_id.map(str::trim).filter(|id| !id.is_empty()),
+    )
+}
+
 pub fn ensure_tmux_session_with(
     tmux: &tmux_router::Tmux,
     file: &Path,
@@ -87,6 +120,16 @@ fn ensure_tmux_session_with_ide(
     file: &Path,
     explicit_session: Option<&str>,
     ide_available: bool,
+) -> Result<TmuxEnsureOutcome> {
+    ensure_tmux_session_with_ide_client(tmux, file, explicit_session, ide_available, None)
+}
+
+fn ensure_tmux_session_with_ide_client(
+    tmux: &tmux_router::Tmux,
+    file: &Path,
+    explicit_session: Option<&str>,
+    ide_available: bool,
+    navigation_client: Option<&str>,
 ) -> Result<TmuxEnsureOutcome> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -146,13 +189,25 @@ fn ensure_tmux_session_with_ide(
         if let Some(failure) = policy.failure.as_deref() {
             anyhow::bail!("{failure}");
         }
+        let target = navigation_lane_ensure_target(
+            tmux,
+            &project_root,
+            navigation_client,
+            EnsureTarget {
+                session_name: target.session_name,
+                pane_id: target.pane_id.clone(),
+                created: false,
+                resolution: "live_registry",
+                document_pane: target.document_match.then_some(target.pane_id),
+            },
+        )?;
         return Ok(tmux_ensure_outcome(
             tmux,
             target.session_name,
-            target.pane_id.clone(),
-            false,
-            "live_registry",
-            target.document_match.then_some(target.pane_id),
+            target.pane_id,
+            target.created,
+            target.resolution,
+            target.document_pane,
             &policy,
         ));
     }
@@ -206,15 +261,74 @@ fn ensure_tmux_session_with_ide(
         reconcile_tmux_server_identity(tmux, &project_root)?;
     }
 
+    let target = navigation_lane_ensure_target(
+        tmux,
+        &project_root,
+        navigation_client,
+        EnsureTarget {
+            session_name,
+            pane_id,
+            created,
+            resolution,
+            document_pane: None,
+        },
+    )?;
     Ok(tmux_ensure_outcome(
         tmux,
-        session_name,
-        pane_id,
-        created,
-        resolution,
-        None,
+        target.session_name,
+        target.pane_id,
+        target.created,
+        target.resolution,
+        target.document_pane,
         &policy,
     ))
+}
+
+/// The session an ensure outcome targets before its attach command is rendered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EnsureTarget {
+    session_name: String,
+    pane_id: String,
+    created: bool,
+    resolution: &'static str,
+    document_pane: Option<String>,
+}
+
+/// `#ideriderindependentnav` P3: retarget the ensured (shared) session at the
+/// navigation lane `navigation_client` navigates, provisioning the lane session
+/// on first use. The shared target is returned unchanged when there is no
+/// client, the project navigates in `shared` mode, the client is unscoped, or
+/// there is no `tmux_session` pin. A document pane is reported only when it
+/// already lives in the lane session: a pane never changes lane here.
+fn navigation_lane_ensure_target(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    navigation_client: Option<&str>,
+    shared: EnsureTarget,
+) -> Result<EnsureTarget> {
+    let Some(client_id) = navigation_client else {
+        return Ok(shared);
+    };
+    let Some(lane) =
+        agent_doc_controller_io::project_controller::navigation_lane_session_for_client(
+            tmux,
+            project_root,
+            client_id,
+        )?
+    else {
+        return Ok(shared);
+    };
+    let pane_id = first_session_pane(tmux, &lane.session)?;
+    let document_pane = shared
+        .document_pane
+        .filter(|pane| tmux.pane_session(pane).ok().as_deref() == Some(lane.session.as_str()));
+    Ok(EnsureTarget {
+        session_name: lane.session,
+        pane_id,
+        created: lane.provisioned,
+        resolution: "navigation_lane",
+        document_pane,
+    })
 }
 
 fn reconcile_tmux_server_identity(tmux: &tmux_router::Tmux, project_root: &Path) -> Result<()> {
@@ -2887,6 +3001,70 @@ mod tests {
             ("0".to_string(), "default")
         );
         assert!(resolve_tmux_session_name(Some("  "), None).is_err());
+    }
+
+    /// `#ideriderindependentnav` P3: an IDE terminal ensure on behalf of an
+    /// installation-scoped client attaches to that installation's own lane
+    /// session in `per_installation` mode; an unscoped client and `shared`
+    /// mode keep the shared session. Isolated tmux server only.
+    #[test]
+    fn ide_terminal_ensure_attaches_each_installation_to_its_navigation_lane() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\nagent_doc_session: tmux-lane-ensure\n---\n").unwrap();
+        let config = dir.path().join(".agent-doc/config.toml");
+        std::fs::write(
+            &config,
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("agent-doc-ensure-lane");
+        let idea = "jetbrains@IU.0a1b2c3d-pid:41";
+
+        let shared = ensure_tmux_session_for_ide_client_with(&tmux, &file, None, None).unwrap();
+        assert_eq!(shared.session_name, "proj");
+        assert!(shared.attach_command.ends_with("attach-session -t proj"));
+
+        let lane = ensure_tmux_session_for_ide_client_with(&tmux, &file, None, Some(idea)).unwrap();
+        assert_eq!(lane.session_name, "proj-IU-0a1b2c3d");
+        assert_eq!(lane.resolution, "navigation_lane");
+        assert!(
+            lane.created,
+            "the lane session is provisioned on first attach"
+        );
+        assert!(
+            lane.attach_command
+                .ends_with("attach-session -t proj-IU-0a1b2c3d"),
+            "{}",
+            lane.attach_command
+        );
+        assert_eq!(
+            tmux.pane_session(&lane.pane_id).unwrap(),
+            "proj-IU-0a1b2c3d"
+        );
+        let mut windows = tmux.list_window_names("proj-IU-0a1b2c3d");
+        windows.sort();
+        assert_eq!(windows, vec!["agent-doc", "stash"]);
+
+        let again =
+            ensure_tmux_session_for_ide_client_with(&tmux, &file, None, Some(idea)).unwrap();
+        assert!(!again.created);
+        assert_eq!(again.session_name, lane.session_name);
+
+        let vscode =
+            ensure_tmux_session_for_ide_client_with(&tmux, &file, None, Some("vscode-pid:7"))
+                .unwrap();
+        assert_eq!(vscode.session_name, "proj");
+
+        std::fs::write(&config, "tmux_session = \"proj\"\n").unwrap();
+        let shared_mode =
+            ensure_tmux_session_for_ide_client_with(&tmux, &file, None, Some(idea)).unwrap();
+        assert_eq!(
+            shared_mode,
+            ensure_tmux_session_with_ide(&tmux, &file, None, true).unwrap(),
+            "shared mode is the pre-lane ensure byte for byte"
+        );
     }
 
     #[test]

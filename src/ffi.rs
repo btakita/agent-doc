@@ -3217,6 +3217,37 @@ pub unsafe extern "C" fn agent_doc_tmux_focus_state_json(
     })())
 }
 
+/// Return the tmux focus projection of the navigation lane `client_id`
+/// navigates (`#ideriderindependentnav` P3).
+///
+/// `client_id` is the editor's surface client id
+/// (`<family>@<installation>-pid:<pid>`). In the default `shared` navigation
+/// mode, for an unscoped client, and for a null/empty id this is exactly
+/// [`agent_doc_tmux_focus_state_json`]. In `per_installation` mode an
+/// installation-scoped client reads its own lane session, and the projection
+/// carries `navigation_lane` (the installation id) so an editor can ignore a
+/// projection of any other lane.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_tmux_focus_state_for_client_json(
+    project_root: *const c_char,
+    client_id: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root = unsafe { optional_ffi_string(project_root, "project_root") }?;
+        let client_id = unsafe { optional_ffi_string(client_id, "client_id") }?;
+        let root = resolve_admin_root(project_root.as_deref(), None)?;
+        agent_doc_controller_io::project_controller::tmux_focus_state_for_client(
+            &root,
+            client_id.as_deref().unwrap_or_default(),
+        )
+    })())
+}
+
 /// Report what an editor looks like right now to the controller-owned graph
 /// (`#jbpluginlazilyeffects`).
 ///
@@ -4814,6 +4845,57 @@ mod tests {
 
     fn utf16_len(text: &str) -> usize {
         text.encode_utf16().count()
+    }
+
+    /// `#ideriderindependentnav` P3: the client-scoped focus FFI reads the
+    /// requesting installation's own navigation lane and labels the projection
+    /// with it; the legacy entry point, an unscoped client, and `shared` mode
+    /// keep the shared lane (no `navigation_lane`). No `tmux_session` pin keeps
+    /// every read off tmux entirely.
+    #[test]
+    fn tmux_focus_state_for_client_ffi_reports_the_clients_navigation_lane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let root = CString::new(tmp.path().to_string_lossy().as_ref()).unwrap();
+        let idea = CString::new("jetbrains@IU.0a1b2c3d-pid:41").unwrap();
+        let vscode = CString::new("vscode-pid:7").unwrap();
+        let read = |client: Option<&CString>| {
+            ffi_json_value(unsafe {
+                match client {
+                    Some(client) => {
+                        agent_doc_tmux_focus_state_for_client_json(root.as_ptr(), client.as_ptr())
+                    }
+                    None => agent_doc_tmux_focus_state_json(root.as_ptr()),
+                }
+            })
+        };
+
+        std::fs::write(
+            tmp.path().join(".agent-doc/config.toml"),
+            "editor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let lane = read(Some(&idea));
+        assert_eq!(lane["reason"], "missing_tmux_session");
+        assert_eq!(lane["navigation_lane"], "IU.0a1b2c3d");
+        for shared in [read(None), read(Some(&vscode))] {
+            assert_eq!(shared["reason"], "missing_tmux_session");
+            assert!(shared.get("navigation_lane").is_none(), "{shared}");
+        }
+        let null_client = ffi_json_value(unsafe {
+            agent_doc_tmux_focus_state_for_client_json(root.as_ptr(), std::ptr::null())
+        });
+        assert!(
+            null_client.get("navigation_lane").is_none(),
+            "{null_client}"
+        );
+
+        std::fs::write(tmp.path().join(".agent-doc/config.toml"), "").unwrap();
+        let shared_mode = read(Some(&idea));
+        assert!(
+            shared_mode.get("navigation_lane").is_none(),
+            "shared mode never reports an installation lane: {shared_mode}"
+        );
     }
 
     /// GH #134: the Remote Dev shape from the issue (`windows=0`, one remote

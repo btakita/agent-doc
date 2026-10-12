@@ -1,7 +1,9 @@
 package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TmuxPaneFocusSyncTest {
@@ -211,5 +213,17 @@ class TmuxPaneFocusSyncTest {
                 editorFocusedDocRoot = "/repo",
             ),
         )
+    }
+
+    @Test
+    fun `focus mirroring accepts only the shared lane or this installation's own lane`() {
+        val idea = "IU.0a1b2c3d"
+        val shared = """{"active":true,"window_name":"agent-doc","document_id":"/repo/a.md"}"""
+        val own = """{"data":{"active":true,"window_name":"agent-doc","navigation_lane":"IU.0a1b2c3d"}}"""
+        val other = """{"active":true,"window_name":"agent-doc","navigation_lane":"RD.9f8e7d6c"}"""
+        assertTrue(TmuxPaneFocusSync.focusStateIsOwnLane(shared, idea))
+        assertTrue(TmuxPaneFocusSync.focusStateIsOwnLane(own, idea))
+        assertFalse(TmuxPaneFocusSync.focusStateIsOwnLane(other, idea))
+        assertFalse(TmuxPaneFocusSync.focusStateIsOwnLane("not json", idea))
     }
 }

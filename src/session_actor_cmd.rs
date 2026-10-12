@@ -1430,9 +1430,12 @@ fn harness_turn_live_evidence(
     ctx: &SessionContext,
     evidence: &LivePaneEvidence,
 ) -> Option<&'static str> {
+    // `#queuedclearflake`: an unobservable viewport (a blank frame, e.g. while a
+    // starting supervisor has not begun relaying its child's screen) is still a
+    // live pane, and harness evidence does not depend on what the pane renders.
     if !matches!(
         evidence.state,
-        LivePaneState::AliveIdle | LivePaneState::AliveBusy
+        LivePaneState::AliveIdle | LivePaneState::AliveBusy | LivePaneState::AliveUnobservable
     ) {
         return None;
     }
@@ -1533,6 +1536,13 @@ fn operator_clear_input_state_for_evidence(
         LivePaneState::ClosedClean | LivePaneState::ProjectionStale | LivePaneState::Unknown => {
             OperatorClearInputState::NoLivePane
         }
+        // `#queuedclearflake`: a blank or too-small viewport hides the composer,
+        // not the turn. Proven live-turn evidence queues the clear behind the
+        // turn exactly as for a rendered frame; without it the viewport stays
+        // protected. Before this, a clear pressed while a starting supervisor had
+        // not yet relayed its child's frame was sent straight into the running
+        // dispatched turn.
+        LivePaneState::AliveUnobservable if harness_turn_live => OperatorClearInputState::LiveTurn,
         LivePaneState::AliveUnobservable => OperatorClearInputState::ProtectedInput,
         LivePaneState::AliveBusy if protected_input => OperatorClearInputState::ProtectedInput,
         LivePaneState::AliveBusy if clean_exit_prompt => OperatorClearInputState::CleanExit,
@@ -5774,6 +5784,17 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             harness_turn_live_evidence(&ctx, &idle),
             Some("dispatch_turn_running")
         );
+        // `#queuedclearflake`: a blank viewport reads the same harness evidence.
+        let blank = LivePaneEvidence {
+            state: LivePaneState::AliveUnobservable,
+            prompt_ready: None,
+            tail: None,
+            ..idle.clone()
+        };
+        assert_eq!(
+            harness_turn_live_evidence(&ctx, &blank),
+            Some("dispatch_turn_running")
+        );
         assert!(!reconcile_idle_projection_from_evidence(&ctx, &idle).unwrap());
         assert!(
             agent_doc_sqlite::state_store::has_open_in_flight_dispatch(&conn, &document_id, 7)
@@ -6067,6 +6088,26 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert_eq!(
             harness_turn_live_evidence(&ctx, &idle),
             Some("dispatch_turn_pending")
+        );
+    }
+
+    /// `#queuedclearflake`: a blank viewport (a starting supervisor that has not
+    /// relayed its child's frame yet) hides the composer, not the turn. With
+    /// live-turn evidence the clear is queued behind the turn, never sent.
+    #[test]
+    fn operator_clear_queues_behind_a_live_turn_in_an_unobservable_viewport() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveUnobservable,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: None,
+            tail: None,
+        };
+
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&evidence, false, false, false, true),
+            OperatorClearInputState::LiveTurn
         );
     }
 

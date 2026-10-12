@@ -650,12 +650,8 @@ fn claude_queue_continuation(
     // discarding it: an unarmed guard is an unbounded loop, so a ledger write
     // that cannot land must fail the hook closed rather than quietly produce
     // the block it can no longer bound.
-    agent_doc_queue_io::continuation_request::record_continuation_request(
-        &file,
-        run_id,
-        &prompt,
-    )
-    .with_context(|| {
+    agent_doc_queue_io::continuation_request::record_continuation_request(&file, run_id, &prompt)
+        .with_context(|| {
         format!(
             "record the Stop-hook continuation request for {}",
             file.display()
@@ -1820,17 +1816,23 @@ fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
     Some(prompt)
 }
 
-fn background_context_clear_suppression_response(
+/// Background context clears are disabled, so a reset reason (session
+/// accretion, recent compaction, or Codex ctx% over threshold) never changes
+/// the continuation. It is recorded in ops.log only: the agent cannot act on it
+/// and Codex shows the Stop payload to the operator verbatim (`#codexstopterse`).
+fn log_background_context_clear_suppressed(
     file: &Path,
     prompt: &str,
     source: &str,
-    context_reset_reason: Option<&str>,
-) -> Option<StopResponse> {
-    let reason = context_reset_reason?;
-    agent_doc_codex_hook_io::log_codex_background_context_clear_suppressed(
-        file, prompt, source, reason,
-    );
-    None
+    last_context_clear_at: Option<u64>,
+) {
+    if let Some(reason) =
+        agent_doc_codex_hook_io::codex_continuation_clear_reason(file, last_context_clear_at)
+    {
+        agent_doc_codex_hook_io::log_codex_background_context_clear_suppressed(
+            file, prompt, source, &reason,
+        );
+    }
 }
 
 enum RepeatedQueueHeadRecovery {
@@ -2069,7 +2071,6 @@ fn repeated_queue_recovery_unavailable_response(
             render_prompt_continuation_instruction(
                 &file.display().to_string(),
                 agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
-                None,
             )
         ),
     }
@@ -2100,7 +2101,6 @@ fn tracked_repeated_queue_recovery_response(
                 render_prompt_continuation_instruction(
                     &file.display().to_string(),
                     agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
-                    None,
                 )
             ),
         });
@@ -2110,16 +2110,12 @@ fn tracked_repeated_queue_recovery_response(
     next_state.last_auto_queue_head = Some(next_prompt.clone());
     next_state.updated_at = now_secs();
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
-    let context_reset_reason =
-        agent_doc_codex_hook_io::codex_continuation_clear_reason(file, state.last_context_clear_at);
-    if let Some(response) = background_context_clear_suppression_response(
+    log_background_context_clear_suppressed(
         file,
         &next_prompt,
         "tracked_state_after_recovery",
-        context_reset_reason.as_deref(),
-    ) {
-        return Ok(response);
-    }
+        state.last_context_clear_at,
+    );
     Ok(StopResponse::Block {
         decision: "block",
         reason: format!(
@@ -2137,7 +2133,6 @@ fn tracked_repeated_queue_recovery_response(
                     render_prompt_continuation_instruction(
                         &display_path,
                         agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
-                        context_reset_reason.as_deref(),
                     )
                 }
             },
@@ -2260,17 +2255,13 @@ fn auto_queue_continuation_response(
     next_state.last_auto_queue_head = Some(prompt.clone());
     next_state.updated_at = now_secs();
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
-    let context_reset_reason =
-        agent_doc_codex_hook_io::codex_continuation_clear_reason(file, state.last_context_clear_at);
     agent_doc_codex_hook_io::log_codex_stop_queue_continuation(file, &prompt, "tracked_state");
-    if let Some(response) = background_context_clear_suppression_response(
+    log_background_context_clear_suppressed(
         file,
         &prompt,
         "tracked_state",
-        context_reset_reason.as_deref(),
-    ) {
-        return Ok(Some(response));
-    }
+        state.last_context_clear_at,
+    );
     // #codex-self-reinvoke-prevent (Option B): redirect the auto-queue
     // continuation to an IN-PANE answer + persist instead of instructing Codex to
     // run `agent-doc <FILE>` again. Re-running the entrypoint from the owner pane
@@ -2282,7 +2273,7 @@ fn auto_queue_continuation_response(
     Ok(Some(StopResponse::Block {
         decision: "block",
         reason: format!(
-            "Queue continuation, not an error: agent-doc kept the active `agent:queue auto` moving for {disp}. Codex labels every Stop continuation `Blocked by hook`; here that label means the next queue item is being handed back to this turn. The next queue prompt is {prompt:?}. {instruction}",
+            "Queue continuation, not an error: Codex labels it `Blocked by hook`. Next `agent:queue auto` prompt for {disp}: {prompt:?}. {instruction}",
             disp = file.display(),
             prompt = prompt,
             instruction = {
@@ -2293,7 +2284,6 @@ fn auto_queue_continuation_response(
                     render_prompt_continuation_instruction(
                         &display_path,
                         agent_doc_codex_hook_io::agent_doc_mcp_configured_for(file),
-                        context_reset_reason.as_deref(),
                     )
                 }
             },
@@ -3323,8 +3313,7 @@ mod tests {
     #[test]
     fn stop_hook_budget_override_is_positive_and_bounded_by_default() {
         assert!(
-            STOP_HOOK_STATE_DB_BUSY_TIMEOUT
-                < std::time::Duration::from_secs(STOP_HOOK_BUDGET_SECS),
+            STOP_HOOK_STATE_DB_BUSY_TIMEOUT < std::time::Duration::from_secs(STOP_HOOK_BUDGET_SECS),
             "exact-thread binding lookup must leave time for document inspection and a fail-closed response"
         );
         assert_eq!(
@@ -3585,7 +3574,10 @@ mod tests {
                 "fn try_recover_repeated_queue_head_response(",
                 "codex_stop_queue_replay_terminal_receipt",
             ),
-            ("fn attempt_stop_closeout(", "codex_stop_replay_terminal_receipt"),
+            (
+                "fn attempt_stop_closeout(",
+                "codex_stop_replay_terminal_receipt",
+            ),
         ] {
             let body = source.split(function).nth(1).unwrap();
             let body = &body[..body.find("\nfn ").unwrap()];
@@ -3597,9 +3589,14 @@ mod tests {
                 .map(|offset| repair + offset)
                 .expect("repair must drop the pre-repair memo");
             let receipt = body
-                .find(&format!("fresh_document_content(file, \"{receipt_source}\")"))
+                .find(&format!(
+                    "fresh_document_content(file, \"{receipt_source}\")"
+                ))
                 .expect("terminal receipt must be read fresh");
-            assert!(invalidate < receipt, "{function} invalidates before the receipt");
+            assert!(
+                invalidate < receipt,
+                "{function} invalidates before the receipt"
+            );
         }
     }
 
@@ -6358,12 +6355,22 @@ Reviewed the gated items.\n\
         .unwrap()
         .expect("pending exchange steering must not be dropped at the stop");
         assert!(
-            response.reason.contains("Also check the CI run for the release."),
+            response
+                .reason
+                .contains("Also check the CI run for the release."),
             "{}",
             response.reason
         );
-        assert!(response.reason.contains("not a failed closeout"), "{}", response.reason);
-        assert!(response.reason.contains("/loop agent-doc"), "{}", response.reason);
+        assert!(
+            response.reason.contains("not a failed closeout"),
+            "{}",
+            response.reason
+        );
+        assert!(
+            response.reason.contains("/loop agent-doc"),
+            "{}",
+            response.reason
+        );
 
         assert!(
             apply_claude_stop_with_drain_readiness(&input, |_| {
@@ -6919,6 +6926,36 @@ Reviewed the gated items.\n\
         assert_eq!(response, StopResponse::Continue { continue_: true });
     }
 
+    /// `#codexstopterse`: Codex prints the Stop continuation `reason` verbatim in
+    /// the operator's pane. A suppressed background context reset is an ops.log
+    /// diagnostic only: it must not leak into that payload, swap the instruction
+    /// path, or grow the fixed text beyond the operator-pane budget.
+    fn assert_operator_pane_continuation_is_terse(reason: &str, doc: &Path) {
+        for leaked in [
+            "context reset",
+            "automatic context clearing",
+            "session accretion",
+            "exchange was compacted",
+            "transcript context",
+            "Run `/clear`",
+        ] {
+            assert!(
+                !reason.contains(leaked),
+                "operator-pane continuation leaked {leaked:?}: {reason}"
+            );
+        }
+        let fixed = reason
+            .replace(&doc.display().to_string(), "")
+            .replace("do [#seopdp] deploy product page", "");
+        let budget =
+            agent_doc_turn::codex_stop_continuation::PROMPT_CONTINUATION_INSTRUCTION_BUDGET + 120;
+        assert!(
+            fixed.chars().count() <= budget,
+            "continuation is a wall of text ({} fixed chars > {budget}): {reason}",
+            fixed.chars().count()
+        );
+    }
+
     #[test]
     fn stop_tracked_session_suppresses_background_clear_after_exchange_compaction() {
         let dir = setup_project();
@@ -6948,11 +6985,7 @@ Reviewed the gated items.\n\
         match response {
             StopResponse::Block { reason, .. } => {
                 assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
-                assert!(
-                    reason.contains("automatic context clearing is disabled"),
-                    "{reason}"
-                );
-                assert!(!reason.contains("Run `/clear`"), "{reason}");
+                assert_operator_pane_continuation_is_terse(&reason, &doc);
             }
             other => panic!("expected in-pane continuation block, got {other:?}"),
         }
@@ -6966,6 +6999,60 @@ Reviewed the gated items.\n\
         assert!(
             ops_log.contains("exchange was compacted after the last tracked context clear"),
             "suppression proof should retain the reset reason:\n{ops_log}"
+        );
+    }
+
+    /// Live repro (lazily.md, 2026-10-12): an MCP-configured Codex session at
+    /// accretion `block` got the CLI-only instruction plus a sentence saying a
+    /// background reset "was requested ... but automatic context clearing is
+    /// disabled". The reset reason must not swap the MCP instruction path or
+    /// reach the operator pane; it stays an ops.log diagnostic.
+    #[test]
+    fn stop_tracked_reset_reason_keeps_mcp_guidance_and_terse_payload() {
+        let dir = setup_project();
+        fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "agent_doc_queue_context_reset = true\n",
+        )
+        .unwrap();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        write_codex_mcp_config(dir.path());
+        init_git_repo(dir.path(), &doc);
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "commit")
+            .expect("continuation required");
+        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
+        track_doc(&dir, &doc, "turn-x");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-x".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Final answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        let display = doc.display().to_string();
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(
+                    reason.starts_with("Queue continuation, not an error:"),
+                    "{reason}"
+                );
+                assert!(
+                    reason.ends_with(&render_prompt_continuation_instruction(&display, true)),
+                    "reset reason must not change the MCP instruction path: {reason}"
+                );
+                assert_operator_pane_continuation_is_terse(&reason, &doc);
+            }
+            other => panic!("expected tracked continuation block, got {other:?}"),
+        }
+        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("codex_background_context_clear_suppressed")
+                && ops_log.contains("result=in_pane_continuation")
+                && ops_log.contains("exchange was compacted after the last tracked context clear"),
+            "the suppressed reset must stay observable in ops.log:\n{ops_log}"
         );
     }
 
@@ -6994,11 +7081,7 @@ Reviewed the gated items.\n\
         match response {
             StopResponse::Block { reason, .. } => {
                 assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
-                assert!(
-                    reason.contains("automatic context clearing is disabled"),
-                    "{reason}"
-                );
-                assert!(!reason.contains("Run `/clear`"), "{reason}");
+                assert_operator_pane_continuation_is_terse(&reason, &doc);
             }
             other => panic!("expected in-pane continuation block, got {other:?}"),
         }
@@ -7116,11 +7199,7 @@ Reviewed the gated items.\n\
         match response {
             StopResponse::Block { reason, .. } => {
                 assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
-                assert!(
-                    reason.contains("automatic context clearing is disabled"),
-                    "{reason}"
-                );
-                assert!(!reason.contains("Run `/clear`"), "{reason}");
+                assert_operator_pane_continuation_is_terse(&reason, &doc);
             }
             other => panic!("expected in-pane continuation block, got {other:?}"),
         }
@@ -7252,7 +7331,7 @@ Reviewed the gated items.\n\
                 assert!(reason.contains("agent_doc_admit"), "{reason}");
                 assert!(reason.contains("agent_doc_finalize"), "{reason}");
                 assert!(reason.contains("agent_doc_session_check"), "{reason}");
-                assert!(reason.contains("agent-doc write --commit"), "{reason}");
+                assert!(reason.contains("agent-doc finalize"), "{reason}");
             }
             other => panic!("expected tracked continuation block, got {other:?}"),
         }

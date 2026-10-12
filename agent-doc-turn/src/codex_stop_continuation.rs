@@ -1,23 +1,27 @@
 //! Pure Codex Stop-hook continuation instruction rendering.
+//!
+//! Codex renders every Stop continuation `reason` verbatim in the operator's
+//! pane under its `Blocked by hook` label, so these strings are operator-visible.
+//! They carry only what the agent must do next (`#codexstopterse`): answer in
+//! this turn, persist through the binary, never re-invoke the owner pane, and
+//! hold the final answer. Diagnostics the agent cannot act on — such as a
+//! suppressed background context reset and its accretion/ctx% reason — belong
+//! in `.agent-doc/logs/ops.log` (`codex_background_context_clear_suppressed`),
+//! never in this payload.
 
-pub fn render_prompt_continuation_instruction(
-    display_path: &str,
-    mcp_configured: bool,
-    context_reset_reason: Option<&str>,
-) -> String {
-    if let Some(reason) = context_reset_reason {
-        return format!(
-            "Continue THIS turn in-pane: answer that prompt in {display_path} and persist with `agent-doc finalize {display_path}` (or `agent-doc write --commit {display_path}`). Do NOT run `agent-doc {display_path}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet. A background context reset was requested because {reason}, but automatic context clearing is disabled; only an explicit operator clear may reset the session."
-        );
-    }
+/// Upper bound for the fixed (path- and prompt-independent) part of a prompt
+/// continuation instruction. A regression past this budget means operator-pane
+/// noise crept back into the Stop payload (`#codexstopterse`).
+pub const PROMPT_CONTINUATION_INSTRUCTION_BUDGET: usize = 320;
 
+pub fn render_prompt_continuation_instruction(display_path: &str, mcp_configured: bool) -> String {
     if mcp_configured {
         format!(
-            "Continue THIS turn in-pane via the configured `agent-doc` MCP server: call `agent_doc_admit` for {display_path}, use `agent_doc_plan` / `agent_doc_read` as needed, answer that prompt in the response passed to `agent_doc_finalize`, and verify the result with `agent_doc_session_check`. If the MCP tools are unavailable in this Codex run, answer that prompt in {display_path} and persist with `agent-doc finalize {display_path}` (or `agent-doc write --commit {display_path}`). Do NOT run `agent-doc {display_path}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet."
+            "Continue THIS turn in-pane via the configured `agent-doc` MCP server (`agent_doc_admit` → `agent_doc_plan` → `agent_doc_finalize` → `agent_doc_session_check`), or `agent-doc finalize {display_path}` if the MCP tools are unavailable. Do NOT run `agent-doc {display_path}` (recursive self-invocation) and do not send the final answer yet."
         )
     } else {
         format!(
-            "Continue THIS turn in-pane: answer that prompt in {display_path} and persist with `agent-doc finalize {display_path}` (or `agent-doc write --commit {display_path}`). Do NOT run `agent-doc {display_path}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet."
+            "Continue THIS turn in-pane: answer it, then persist with `agent-doc finalize {display_path}`. Do NOT run `agent-doc {display_path}` (recursive self-invocation) and do not send the final answer yet."
         )
     }
 }
@@ -37,29 +41,32 @@ mod tests {
     #[test]
     fn prompt_instruction_without_mcp_matches_codex_stop_guidance() {
         assert_eq!(
-            render_prompt_continuation_instruction(DOC, false, None),
-            "Continue THIS turn in-pane: answer that prompt in docs/session.md and persist with `agent-doc finalize docs/session.md` (or `agent-doc write --commit docs/session.md`). Do NOT run `agent-doc docs/session.md` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet."
+            render_prompt_continuation_instruction(DOC, false),
+            "Continue THIS turn in-pane: answer it, then persist with `agent-doc finalize docs/session.md`. Do NOT run `agent-doc docs/session.md` (recursive self-invocation) and do not send the final answer yet."
         );
     }
 
     #[test]
     fn prompt_instruction_prefers_configured_mcp_tools() {
         assert_eq!(
-            render_prompt_continuation_instruction(DOC, true, None),
-            "Continue THIS turn in-pane via the configured `agent-doc` MCP server: call `agent_doc_admit` for docs/session.md, use `agent_doc_plan` / `agent_doc_read` as needed, answer that prompt in the response passed to `agent_doc_finalize`, and verify the result with `agent_doc_session_check`. If the MCP tools are unavailable in this Codex run, answer that prompt in docs/session.md and persist with `agent-doc finalize docs/session.md` (or `agent-doc write --commit docs/session.md`). Do NOT run `agent-doc docs/session.md` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet."
+            render_prompt_continuation_instruction(DOC, true),
+            "Continue THIS turn in-pane via the configured `agent-doc` MCP server (`agent_doc_admit` → `agent_doc_plan` → `agent_doc_finalize` → `agent_doc_session_check`), or `agent-doc finalize docs/session.md` if the MCP tools are unavailable. Do NOT run `agent-doc docs/session.md` (recursive self-invocation) and do not send the final answer yet."
         );
     }
 
+    /// `#codexstopterse`: the operator sees this payload in the Codex pane, so
+    /// the path-independent instruction text must stay within a fixed budget.
     #[test]
-    fn context_reset_reason_overrides_mcp_guidance() {
-        assert_eq!(
-            render_prompt_continuation_instruction(
-                DOC,
-                true,
-                Some("transcript context 91.0% >= clear threshold 90% (#clearcodex)")
-            ),
-            "Continue THIS turn in-pane: answer that prompt in docs/session.md and persist with `agent-doc finalize docs/session.md` (or `agent-doc write --commit docs/session.md`). Do NOT run `agent-doc docs/session.md` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet. A background context reset was requested because transcript context 91.0% >= clear threshold 90% (#clearcodex), but automatic context clearing is disabled; only an explicit operator clear may reset the session."
-        );
+    fn prompt_instruction_stays_within_operator_pane_budget() {
+        for mcp in [false, true] {
+            let rendered = render_prompt_continuation_instruction("", mcp);
+            assert!(
+                rendered.chars().count() <= PROMPT_CONTINUATION_INSTRUCTION_BUDGET,
+                "mcp={mcp}: {} chars > {PROMPT_CONTINUATION_INSTRUCTION_BUDGET}: {rendered}",
+                rendered.chars().count()
+            );
+            assert!(!rendered.contains("context"), "{rendered}");
+        }
     }
 
     #[test]

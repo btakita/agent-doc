@@ -10523,6 +10523,7 @@ mod tests {
     /// - no pane ever changes session, and the shared session is untouched;
     /// - the lane session's initial empty shell pane is stashed inside its own
     ///   lane session on the first sync, never left as a visible extra column.
+    ///
     /// Isolated tmux server only.
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

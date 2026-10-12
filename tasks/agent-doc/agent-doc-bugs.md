@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -1248,6 +1247,17 @@ This first ships in a release in 0.35.496.
 - The GitHub Release page and PyPI 0.35.495 don't exist yet.
 
 I'll close `#release` once both exist.
+
+### Re: v0.35.495 published — opus-5.5 · 2026-10-12T17:45-04:00
+
+> **Queue prompt:** #release
+
+v0.35.495 is out:
+- **GitHub Release:** the Release workflow (run 38306634090) succeeded and attached 13 assets.
+- **PyPI:** `agent-doc/0.35.495/json` returns 200.
+- **Local install:** `agent-doc --version` reports 0.35.495.
+
+The Apache-2.0 relicense and the README rewrite are on main *after* this tag (`06afd858ee`). They first ship in 0.35.496.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -1256,8 +1266,6 @@ I'll close `#release` once both exist.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#cleanreadmeconcise]: declare Apache2. Make the project Apache2.~~
-- 🚧 #release
 <!-- /agent:queue -->
 
 ## Backlog

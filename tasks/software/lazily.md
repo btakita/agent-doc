@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a12909-0937-7b31-9a57-b23ab4c53ebc
+  codex: 01a12fd8-c75b-7563-8090-d12f66089ccb
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -975,15 +975,55 @@ The registry-level Phase 1 contract is complete. Core-only builds across every b
 I returned `#lzcoreprofile` to review because integration is blocked solely on authorization: the queue-wide `#spec-test-commit-push` preset is undefined, so the worker was explicitly prohibited from committing or pushing. No commit, push, install, or integration occurred. No additional backlog follow-up is needed because the complete implementation remains preserved in its worktree and the review item now states the exact authorization that clears the gate.
 
 Changed files in the preserved worktree: `Makefile`, `tests/test_schema_conformance.py`, `docs/core-beta.md`, `profiles/core-v1.json`, `schemas/core-profile.schema.json`, `scripts/check-core-profile.mjs`, and `tests/test_core_profile.py`. Confidence: high. Escalation: define `#spec-test-commit-push` or provide explicit commit/integration authority.
+
+### Re: #lzcoreclaims — gpt-5 · 2026-10-12T08:56-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcoreclaims]
+
+Phase 2 is code-complete across isolated worktrees and passes the all-nine exact-closure gate against the corrected Phase 1 profile.
+
+**Complete:**
+
+- The spec-side declaration/report schemas, structural verifier, executable fixtureless proof contract, assertion-evidence resolution, path/symlink/traversal guards, fresh-artifact enforcement, and fourteen negative self-test probes are implemented in `/home/brian/worktrees/lazily-spec-lzcoreclaims-20261012`.
+- Every candidate binding now has a truthful `scripts/core-conformance.json`, report generator, runtime-skip accounting, executed-fixture/scenario evidence, and active mutation or family-negative-control evidence.
+- Native C-ABI proof is limited to the five bindings that build and invoke a real native artifact: Rust, Go, Zig, C++, and C#. Python, Kotlin, JavaScript, and Dart explicitly make no C-ABI claim.
+- The final report-only command with `--require-all` passed for all nine bindings against `/home/brian/worktrees/lazily-spec-lzcoreprofile-20261012/profiles/core-v1.json`.
+
+**Truthfully partial or skipped binding behavior:**
+
+- C#: 16 passed; no remaining Core-profile evidence gap.
+- Rust: 14 passed, 2 async partial.
+- Go: 13 passed, 3 async-signal partial.
+- JavaScript and Kotlin: 15 passed, 1 bounded-feedback fixture skipped each.
+- Dart: 15 passed, 1 bounded-feedback fixture skipped.
+- Python: 12 passed, 3 async-signal partial, 1 bounded-feedback fixture skipped.
+- Zig: 13 passed, 2 partial, 1 skipped.
+- C++: 15 partial because only `Context` is replayed, plus 1 bounded-feedback fixture skipped; thread-safe and async flavor skips are exact and declared.
+
+These partials are explicit evidence, not collapsed into “none complete.” The acceptance gate proves every claim, skip, fixture, scenario, proof class, and report is accounted for; it does not falsely claim that every binding implements every execution flavor.
+
+**Verification:**
+
+- Aggregate all-nine report-only `--require-all`: passed.
+- Phase 1 corrected profile: `make core-profile-check` passed with 11 negative cases; 5 focused tests and 19 schema checks passed; isolated full `make check` passed with 390 pytest tests plus Lean.
+- Phase 2 spec: schema suite and evidence self-tests passed; the final checker rejects stale/missing/cross-binding evidence and invalid proof commands.
+- Binding full suites: Rust and Go passed; Python 1206 passed/1 skipped; JavaScript 701 passed; Kotlin 533 passed; Dart 762 passed; C++ CTest 66/66; C# 340/340. Zig passed 1114/1116; its two failures are the pre-existing `UnknownDeltaOp` codec-corpus drift outside this work.
+- Latest inspected lazily-spec CI run `37258006428`: successful.
+
+I returned `#lzcoreclaims` to review solely because the queue-wide `#spec-test-commit-push` preset remains undefined, so none of the preserved implementations may be committed, integrated, or pushed. No additional backlog follow-up is needed because the code-complete work is preserved and the review item states the exact authorization that clears the gate.
+
+One isolation incident is recorded separately as `#lzgenericreadmeincident`: a worker invoked `sync-coverage.mjs --help`, but that script has no help mode and rewrote `README.md` in the pre-existing dirty worktrees `/home/brian/worktrees/lazily-rs` and `/home/brian/worktrees/lazily-kt`. The diffs are exactly two generated rollup rows: Reactive graph Python/Kotlin/JavaScript `✅ → ~` and Transport & FFI Kotlin `✅ → ~`. Prior cleanliness could not be proven, so nothing was restored and all unrelated dirty/untracked files were preserved.
+
+No commit, push, install, release, publication, or destructive action occurred. Confidence: high. Escalation: explicit commit/integration authority, plus operator inspection of the two generic README changes.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- ~~#actionable-review: #push~~
-- ~~do [#lzcoreprofile]~~
-- do [#lzcoreclaims]
+- ~~do [#lzcoreclaims]~~
 - do [#lzcorefacades]
 - do [#lzcorecompat]
 - do [#lzcoreconsumers]
@@ -995,7 +1035,6 @@ Changed files in the preserved worktree: `Makefile`, `tests/test_schema_conforma
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.
 - [ ] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
 - [ ] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
 - [ ] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
@@ -1007,6 +1046,8 @@ Changed files in the preserved worktree: `Makefile`, `tests/test_schema_conforma
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md: the spec evidence contract and all nine binding declarations/report generators are complete and pass the aggregate --require-all gate in isolated worktrees; blocked until explicit commit/integration authorization is supplied or the queue-wide #spec-test-commit-push preset is defined.
+- [/] [#lzgenericreadmeincident] [operator-verify] Inspect accidental generated README rollup changes in /home/brian/worktrees/lazily-rs and /home/brian/worktrees/lazily-kt. Prior README cleanliness is unknown; restore only README.md if the two generated rollup changes were unintended, and preserve all unrelated dirty/untracked files.
 - [/] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates are complete and verified in /home/brian/worktrees/lazily-spec-lzcoreprofile-20261012; blocked until explicit commit/integration authorization is supplied or the queue-wide #spec-test-commit-push preset is defined.
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.

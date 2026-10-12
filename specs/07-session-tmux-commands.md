@@ -369,10 +369,27 @@ loses desktop focus.
     from_session=.. to_session=..`; same pane id, so its actor binding stays valid; nothing is
     restarted or duplicated), from where the shared lane's sync places it. When the project
     session is not alive nothing moves or closes (`project_session_missing`). After the folds the
-    lane closes unless a busy unowned pane or an attached client keeps it. Before gc runs, the shared
-    lane's sync applies no lane guard, so a lane pane falls under the ordinary session policy like
-    a pane in any other session; shared mode never targets a lane session, so no pane moves into
-    one.
+    lane closes unless a busy unowned pane or an attached client keeps it.
+  - Switch back before gc (`#ridernavp6switchback`): after the switch to `shared` and before
+    `agent-doc gc` runs, lane sessions still hold document panes. The shared lane's sync then
+    (a) never arranges a lane session: when the session it resolves is a lane of the pin marked
+    for this root (the focused document's pane, or the tmux client's current session, is still
+    there, or the caller names the lane's own `agent-doc` window), it arranges the live project
+    session instead and drops the explicit window (`navigation_lane_stale_target_retargeted
+    stale_session=.. target_session=.. explicit_window=..`, decided by the pure
+    `shared_sync_target_session`), so no project pane is ever joined or swapped into a lane;
+    and (b) adopts each laid-out document whose pane is still in such a lane before the
+    reconcile, with the P4 handoff mechanics (`hand_over_navigation_lane_pane` into the project
+    session's `stash`, an empty shell left when it was the lane window's last pane;
+    `navigation_lane_stale_pane_adopted` / `navigation_lane_stale_pane_adopt_refused`), so the
+    reconcile places the same pane from the project session. This applies to every shared sync,
+    passive heartbeat and manual Sync Tmux Layout alike: in shared mode no IDE navigates a lane,
+    so adopting is the migration gc would do, not a cross-lane move. The pane id and actor
+    binding are unchanged and the pane is alive and registered, so nothing autostarts a second
+    pane; a document outside the shared layout stays in its lane until a sync shows it or gc
+    folds it, and gc then closes the lane. A session that only carries a lane's name (no mark)
+    keeps the pre-lane rules (`#bare-foreign-session-guard`); a dead project session leaves the
+    resolved target unchanged.
   - A close re-observes the session first and closes it only when the fresh plan still closes it
     and it holds no document or busy pane (`close_refused_on_reobserve` otherwise), then runs
     `kill-session -t =<session>` (`navigation_lane_session_closed session=.. mode=..`), which

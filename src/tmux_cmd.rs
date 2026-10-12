@@ -4,9 +4,18 @@ use agent_doc_config::terminal_host::ResolvedTerminalHost;
 use anyhow::Result;
 use std::path::Path;
 
-pub fn ensure(file: &Path, session: Option<&str>, json: bool, ide_terminal: bool) -> Result<()> {
+pub fn ensure(
+    file: &Path,
+    session: Option<&str>,
+    json: bool,
+    ide_terminal: bool,
+    client_id: Option<&str>,
+) -> Result<()> {
     let outcome = if ide_terminal {
-        agent_doc_start_io::ensure_tmux_session_for_ide(file, session)?
+        // `#ideriderindependentnav` P3: the editor's surface client id selects
+        // its navigation lane session; without one (or in `shared` mode) this
+        // is the shared ensure.
+        agent_doc_start_io::ensure_tmux_session_for_ide_client(file, session, client_id)?
     } else {
         agent_doc_start_io::ensure_tmux_session(file, session)?
     };

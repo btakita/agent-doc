@@ -307,6 +307,20 @@ class CpRouteClientCommandPlaneTest {
         assertEquals("/proj/tasks/one.md", desired.getAsJsonArray("columns")[0].asString)
         assertEquals("/proj/tasks/two.md", desired.get("focus").asString)
         assertEquals("manual", desired.get("caller_kind").asString)
+        // `#ideriderindependentnav` P3: the controller routes it into this IDE's lane.
+        assertEquals(CpRouteClient.navigationClientId, desired.get("client_id").asString)
+    }
+
+    @Test
+    fun `tmux focus state request names this IDE's navigation client`() {
+        val request = CpRouteClient.tmuxFocusStateRequest("jetbrains@IU.0a1b2c3d-pid:41")
+        assertEquals("tmux_focus_state", request.get("command").asString)
+        assertEquals("jetbrains@IU.0a1b2c3d-pid:41", request.get("caller").asString)
+        assertTrue(
+            CpRouteClient.navigationClientId.startsWith(
+                "jetbrains@${CpRouteClient.editorInstallationId}-pid:",
+            ),
+        )
     }
 
     @Test

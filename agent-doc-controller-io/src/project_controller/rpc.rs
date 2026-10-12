@@ -3057,6 +3057,30 @@ pub fn inspect_actor(
 }
 
 pub fn tmux_focus_state(project_root: &Path) -> Result<ControllerTmuxFocusState> {
+    tmux_focus_state_with_caller(project_root, None)
+}
+
+/// The tmux focus projection of the navigation lane `client_id` navigates
+/// (`#ideriderindependentnav` P3).
+///
+/// `client_id` is the editor's surface client id
+/// (`<family>@<installation>-pid:<pid>`). In the default `shared` navigation
+/// mode, and for an unscoped client, this is exactly [`tmux_focus_state`]. In
+/// `per_installation` mode an installation-scoped client reads its own lane
+/// session, and the projection carries `navigation_lane` so the editor can
+/// refuse a projection of any other lane.
+pub fn tmux_focus_state_for_client(
+    project_root: &Path,
+    client_id: &str,
+) -> Result<ControllerTmuxFocusState> {
+    let client_id = client_id.trim();
+    tmux_focus_state_with_caller(project_root, (!client_id.is_empty()).then_some(client_id))
+}
+
+fn tmux_focus_state_with_caller(
+    project_root: &Path,
+    caller: Option<&str>,
+) -> Result<ControllerTmuxFocusState> {
     #[cfg(any(test, feature = "test-support"))]
     {
         let bootstrap = ControllerBootstrap {
@@ -3071,7 +3095,7 @@ pub fn tmux_focus_state(project_root: &Path) -> Result<ControllerTmuxFocusState>
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        handle_tmux_focus_state(&bootstrap, None, None)
+        handle_tmux_focus_state(&bootstrap, None, caller)
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -3085,7 +3109,7 @@ pub fn tmux_focus_state(project_root: &Path) -> Result<ControllerTmuxFocusState>
             window_id: None,
             generation: None,
             state: None,
-            caller: None,
+            caller: caller.map(str::to_string),
             reason: None,
             supervisor_pid: None,
             supervisor_socket: None,
@@ -27527,14 +27551,104 @@ struct PaneLayoutDesiredProjectionState {
     worker_active: bool,
 }
 
+/// The `pane_layout_desired` state-plane sink (`#ideriderindependentnav` P3).
+///
+/// Every editor plugin publishes its desired layout on the one channel. A
+/// frame names its publisher's surface client id (`client_id`); the frame is
+/// projected into that client's navigation lane graph. Each lane has its own
+/// latest-wins projector, so one installation's newer publication never
+/// coalesces away another installation's. In the default `shared` mode, and
+/// for every frame without a scoped `client_id`, there is exactly one lane,
+/// the shared lane, and the projector is the pre-lane one.
 struct PaneLayoutDesiredStatePlaneSink {
+    runtime: std::sync::Weak<ControllerRuntime>,
+    lanes: Mutex<
+        std::collections::BTreeMap<
+            agent_doc_editor_surface::NavigationLane,
+            Arc<PaneLayoutDesiredLaneProjector>,
+        >,
+    >,
+}
+
+impl PaneLayoutDesiredStatePlaneSink {
+    fn new(runtime: &Arc<ControllerRuntime>) -> Self {
+        Self {
+            runtime: Arc::downgrade(runtime),
+            lanes: Mutex::new(std::collections::BTreeMap::new()),
+        }
+    }
+
+    fn projector(
+        &self,
+        lane: agent_doc_editor_surface::NavigationLane,
+    ) -> Arc<PaneLayoutDesiredLaneProjector> {
+        let mut lanes = self.lanes.lock();
+        Arc::clone(lanes.entry(lane.clone()).or_insert_with(|| {
+            Arc::new(PaneLayoutDesiredLaneProjector {
+                lane,
+                runtime: self.runtime.clone(),
+                state: Arc::new(Mutex::new(PaneLayoutDesiredProjectionState::default())),
+                wake: Arc::new(Condvar::new()),
+                last_applied_version: Arc::new(AtomicU64::new(0)),
+            })
+        }))
+    }
+}
+
+impl ControllerStatePlaneSink for PaneLayoutDesiredStatePlaneSink {
+    fn project(&self, frame: ControllerStatePlaneFrame) {
+        let navigation_mode = self
+            .runtime
+            .upgrade()
+            .map(|runtime| runtime.editor_surface_graph.navigation_mode())
+            .unwrap_or_default();
+        let lane = pane_layout_state_frame_lane(navigation_mode, &frame);
+        self.projector(lane).project(frame);
+    }
+}
+
+/// The navigation lane a `pane_layout_desired` frame publishes into: its
+/// `client_id`'s lane under `navigation_mode`. A frame without a (decodable)
+/// `client_id` is a pre-P3 publisher or a non-editor producer, and stays on
+/// the shared lane.
+fn pane_layout_state_frame_lane(
+    navigation_mode: agent_doc_editor_surface::NavigationMode,
+    frame: &ControllerStatePlaneFrame,
+) -> agent_doc_editor_surface::NavigationLane {
+    #[derive(Deserialize)]
+    struct DesiredPublisher {
+        #[serde(default)]
+        client_id: Option<String>,
+    }
+    if navigation_mode == agent_doc_editor_surface::NavigationMode::Shared {
+        return agent_doc_editor_surface::NavigationLane::Shared;
+    }
+    let client_id = serde_json::from_str::<lazily::IpcMessage>(&frame.message_json)
+        .ok()
+        .and_then(|message| {
+            state_plane_snapshot_payload(
+                &message,
+                PANE_LAYOUT_DESIRED_STATE_CHANNEL,
+                PANE_LAYOUT_DESIRED_TYPE_TAG,
+            )
+            .ok()
+        })
+        .and_then(|payload| serde_json::from_slice::<DesiredPublisher>(&payload).ok())
+        .and_then(|publisher| publisher.client_id)
+        .unwrap_or_default();
+    agent_doc_editor_surface::NavigationLane::for_client(navigation_mode, &client_id)
+}
+
+/// One navigation lane's latest-wins `pane_layout_desired` projector.
+struct PaneLayoutDesiredLaneProjector {
+    lane: agent_doc_editor_surface::NavigationLane,
     runtime: std::sync::Weak<ControllerRuntime>,
     state: Arc<Mutex<PaneLayoutDesiredProjectionState>>,
     wake: Arc<Condvar>,
     last_applied_version: Arc<AtomicU64>,
 }
 
-impl ControllerStatePlaneSink for PaneLayoutDesiredStatePlaneSink {
+impl PaneLayoutDesiredLaneProjector {
     fn project(&self, frame: ControllerStatePlaneFrame) {
         if frame.plane_version <= self.last_applied_version.load(Ordering::SeqCst) {
             return;
@@ -27561,13 +27675,20 @@ impl ControllerStatePlaneSink for PaneLayoutDesiredStatePlaneSink {
             return;
         }
         let runtime = self.runtime.clone();
+        let lane = self.lane.clone();
         let state = Arc::clone(&self.state);
         let wake = Arc::clone(&self.wake);
         let last_applied_version = Arc::clone(&self.last_applied_version);
         let spawn = std::thread::Builder::new()
             .name("agent-doc-state-plane-projector".to_string())
             .spawn(move || {
-                pane_layout_desired_projection_worker(runtime, state, wake, last_applied_version);
+                pane_layout_desired_projection_worker(
+                    runtime,
+                    lane,
+                    state,
+                    wake,
+                    last_applied_version,
+                );
             });
         if let Err(error) = spawn {
             self.state.lock().worker_active = false;
@@ -27578,6 +27699,7 @@ impl ControllerStatePlaneSink for PaneLayoutDesiredStatePlaneSink {
 
 fn pane_layout_desired_projection_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
+    lane: agent_doc_editor_surface::NavigationLane,
     state: Arc<Mutex<PaneLayoutDesiredProjectionState>>,
     wake: Arc<Condvar>,
     last_applied_version: Arc<AtomicU64>,
@@ -27612,14 +27734,18 @@ fn pane_layout_desired_projection_worker(
         let result = pane_layout_invocation_from_state_frame(&frame).and_then(|invocation| {
             let bootstrap = runtime.bootstrap_snapshot()?;
             let publication = pane_layout_publication_for_invocation(&invocation);
-            publish_pane_layout_desired_invocation(
+            publish_pane_layout_desired_invocation_in_lane(
                 &bootstrap,
                 &runtime,
+                &lane,
                 invocation,
                 Some(frame.plane_version),
                 publication,
                 PaneLayoutPublisher::PluginPublication,
             )?;
+            if !lane.is_shared() {
+                runtime.note_pane_layout_plane_seen_in_other_lane(frame.plane_version);
+            }
             Ok(bootstrap)
         });
         match result {
@@ -27636,8 +27762,13 @@ fn pane_layout_desired_projection_worker(
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
-                        "pane_layout_desired_projected plane_version={} producer={} epoch={}",
-                        frame.plane_version, frame.producer_id, frame.epoch
+                        "pane_layout_desired_projected plane_version={} producer={} epoch={}{}",
+                        frame.plane_version,
+                        frame.producer_id,
+                        frame.epoch,
+                        lane.installation()
+                            .map(|installation| format!(" navigation_lane={installation}"))
+                            .unwrap_or_default(),
                     ),
                 );
                 attempt = 0;
@@ -27686,12 +27817,7 @@ fn pane_layout_projection_retry_delay(attempt: u64) -> Duration {
 pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRuntime>) {
     runtime.install_state_plane_sink(
         PANE_LAYOUT_DESIRED_STATE_CHANNEL,
-        Arc::new(PaneLayoutDesiredStatePlaneSink {
-            runtime: Arc::downgrade(runtime),
-            state: Arc::new(Mutex::new(PaneLayoutDesiredProjectionState::default())),
-            wake: Arc::new(Condvar::new()),
-            last_applied_version: Arc::new(AtomicU64::new(0)),
-        }),
+        Arc::new(PaneLayoutDesiredStatePlaneSink::new(runtime)),
     );
 }
 
@@ -28034,6 +28160,51 @@ fn pane_layout_lane_route(
         window: Some(window),
         provisioned,
     })
+}
+
+/// The tmux session one editor client's own navigation lane lives in, created
+/// on first use (`#ideriderindependentnav` P3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NavigationLaneSession {
+    /// The installation id of the lane.
+    pub installation: String,
+    /// `<project session>-<installation>`.
+    pub session: String,
+    /// This call created the session.
+    pub provisioned: bool,
+}
+
+/// Resolve, and on first use provision, the lane session `client_id`
+/// navigates, for a caller outside the controller (the IDE terminal attach).
+///
+/// `Ok(None)` means the client navigates the shared lane: the project's
+/// `editor_navigation` is `shared` (the default), the client is not
+/// installation-scoped, or the project has no `tmux_session` pin to derive a
+/// lane session from. Each of those keeps the pre-lane attach target. An
+/// installation lane is provisioned exactly like the controller's first
+/// driving layout does ([`pane_layout_lane_route`]); a same-named session that
+/// agent-doc did not create is an error, never adopted.
+pub fn navigation_lane_session_for_client(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    client_id: &str,
+) -> Result<Option<NavigationLaneSession>> {
+    let (navigation_mode, _) =
+        agent_doc_project_config_io::editor_navigation_mode_for_root(project_root);
+    let lane = agent_doc_editor_surface::NavigationLane::for_client(navigation_mode, client_id);
+    let Some(installation) = lane.installation().map(str::to_string) else {
+        return Ok(None);
+    };
+    let Some((_, session)) = navigation_lane_sessions(project_root, navigation_mode, &lane) else {
+        return Ok(None);
+    };
+    let provisioned = ensure_navigation_lane_session(tmux, project_root, &session)
+        .map_err(|reason| anyhow::anyhow!("{reason}"))?;
+    Ok(Some(NavigationLaneSession {
+        installation,
+        session,
+        provisioned,
+    }))
 }
 
 /// Create `lane_session` with `agent-doc` + `stash` windows unless agent-doc
@@ -29174,9 +29345,14 @@ pub(crate) fn handle_tmux_focus_state(
     // default `editor_navigation`) every client resolves
     // to the shared lane, i.e. the project's configured session, exactly as
     // before lanes existed.
+    // Without a runtime (a cold read, the test-support transport) the mode is
+    // the project's configured `editor_navigation`, which is exactly what a
+    // runtime would have read at start.
     let navigation_mode = runtime
         .map(|runtime| runtime.editor_surface_graph.navigation_mode())
-        .unwrap_or_default();
+        .unwrap_or_else(|| {
+            agent_doc_project_config_io::editor_navigation_mode_for_root(&bootstrap.project_root).0
+        });
     let lane = agent_doc_editor_surface::NavigationLane::for_client(
         navigation_mode,
         client_id.unwrap_or_default(),
@@ -37406,6 +37582,251 @@ mod tests {
         assert_eq!(
             navigation_lane_sessions(root.path(), NavigationMode::Shared, &idea),
             None
+        );
+    }
+
+    fn pane_layout_desired_frame_message(columns: &[String], client_id: Option<&str>) -> String {
+        let mut desired = serde_json::json!({
+            "columns": columns,
+            "focus": columns[0],
+            "caller_kind": "manual",
+        });
+        if let Some(client_id) = client_id {
+            desired["client_id"] = serde_json::Value::String(client_id.to_string());
+        }
+        state_plane_snapshot_message_json(
+            1,
+            PANE_LAYOUT_DESIRED_STATE_CHANNEL,
+            PANE_LAYOUT_DESIRED_TYPE_TAG,
+            &desired,
+        )
+        .unwrap()
+    }
+
+    /// `#ideriderindependentnav` P3: a `pane_layout_desired` frame's lane is its
+    /// publisher's `client_id` lane, and only in `per_installation` mode.
+    #[test]
+    fn pane_layout_state_frame_lane_follows_the_publishing_client() {
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        let frame = |client_id: Option<&str>| ControllerStatePlaneFrame {
+            channel: PANE_LAYOUT_DESIRED_STATE_CHANNEL.to_string(),
+            producer_id: "jetbrains-test".to_string(),
+            epoch: 1,
+            plane_version: 1,
+            message_json: pane_layout_desired_frame_message(
+                &["/project/a.md".to_string()],
+                client_id,
+            ),
+            base_epoch: None,
+        };
+        let idea = frame(Some("jetbrains@IU.0a1b2c3d-pid:41"));
+        assert_eq!(
+            pane_layout_state_frame_lane(NavigationMode::PerInstallation, &idea),
+            NavigationLane::Installation("IU.0a1b2c3d".to_string())
+        );
+        assert_eq!(
+            pane_layout_state_frame_lane(NavigationMode::Shared, &idea),
+            NavigationLane::Shared,
+            "shared mode never routes a publication off the shared lane"
+        );
+        for shared in [frame(None), frame(Some("vscode-pid:7"))] {
+            assert_eq!(
+                pane_layout_state_frame_lane(NavigationMode::PerInstallation, &shared),
+                NavigationLane::Shared
+            );
+        }
+        let undecodable = ControllerStatePlaneFrame {
+            message_json: "not json".to_string(),
+            ..idea
+        };
+        assert_eq!(
+            pane_layout_state_frame_lane(NavigationMode::PerInstallation, &undecodable),
+            NavigationLane::Shared
+        );
+    }
+
+    /// `#ideriderindependentnav` P3: plugin layout publications (and so the
+    /// manual Sync Tmux Layout) land in the publishing installation's lane
+    /// graph, each lane projects latest-wins on its own, so IDEA's frame is not
+    /// coalesced away by Rider's newer one, and an unscoped publisher keeps the
+    /// shared lane. A route's plane catch-up on the shared lane counts a lane
+    /// frame as seen.
+    #[test]
+    fn plugin_publications_project_into_the_publishing_clients_navigation_lane() {
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "editor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let doc = |name: &str| {
+            let path = dir.path().join(format!("{name}.md"));
+            std::fs::write(
+                &path,
+                format!("---\nagent_doc_session: {name}\nagent: codex\n---\n# {name}\n"),
+            )
+            .unwrap();
+            path.canonicalize().unwrap().display().to_string()
+        };
+        let (idea_doc, rider_doc, shared_doc) = (doc("idea"), doc("rider"), doc("shared"));
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        assert_eq!(
+            runtime.editor_surface_graph.navigation_mode(),
+            NavigationMode::PerInstallation
+        );
+        let idea = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let rider = NavigationLane::Installation("RD.9f8e7d6c".to_string());
+        let epoch = std::cell::Cell::new(0_u64);
+        let publish = |columns: &[String], client_id: Option<&str>| {
+            epoch.set(epoch.get() + 1);
+            let (frame, duplicate) = runtime
+                .publish_state_plane_frame(
+                    PANE_LAYOUT_DESIRED_STATE_CHANNEL.to_string(),
+                    "jetbrains-test".to_string(),
+                    pane_layout_desired_frame_message(columns, client_id),
+                    epoch.get(),
+                    None,
+                )
+                .unwrap();
+            assert!(!duplicate);
+            frame
+        };
+        let desired_columns = |lane: &NavigationLane| {
+            runtime
+                .pane_layout_graph_for_lane(lane)
+                .desired()
+                .map(|desired| desired.invocation.columns)
+        };
+        let wait_for = |lane: &NavigationLane, columns: &[String]| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while desired_columns(lane).as_deref() != Some(columns) {
+                assert!(
+                    Instant::now() < deadline,
+                    "lane {} never projected {columns:?}: {:?}",
+                    lane.label(),
+                    desired_columns(lane)
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+
+        let idea_frame = publish(
+            std::slice::from_ref(&idea_doc),
+            Some("jetbrains@IU.0a1b2c3d-pid:41"),
+        );
+        let rider_frame = publish(
+            std::slice::from_ref(&rider_doc),
+            Some("jetbrains@RD.9f8e7d6c-pid:42"),
+        );
+        assert!(rider_frame.plane_version > idea_frame.plane_version);
+        wait_for(&idea, std::slice::from_ref(&idea_doc));
+        wait_for(&rider, std::slice::from_ref(&rider_doc));
+        assert_eq!(
+            desired_columns(&NavigationLane::Shared),
+            None,
+            "an installation lane's publication never reaches the shared lane"
+        );
+        assert!(
+            runtime.await_pane_layout_plane_seen(rider_frame.plane_version, Duration::ZERO),
+            "the shared lane's plane catch-up counts lane frames as seen"
+        );
+
+        publish(std::slice::from_ref(&shared_doc), None);
+        wait_for(&NavigationLane::Shared, std::slice::from_ref(&shared_doc));
+        assert_eq!(
+            desired_columns(&idea).as_deref(),
+            Some(std::slice::from_ref(&idea_doc))
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("navigation_lane=IU.0a1b2c3d"),
+            "a lane projection is attributed to its lane: {ops}"
+        );
+    }
+
+    /// `#ideriderindependentnav` P3: the IDE terminal's lane session for a
+    /// client. `shared` mode, an unscoped client, and a missing pin keep the
+    /// shared attach target (`None`) and never touch tmux.
+    #[test]
+    fn navigation_lane_session_for_client_is_none_on_the_shared_lane() {
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        // A tmux binding that would fail loudly if it were ever invoked.
+        let tmux = tmux_router::Tmux::default_server()
+            .with_server_socket(Some("agent-doc-test-never-started".to_string()));
+        for (config, client) in [
+            ("tmux_session = \"proj\"\n", "jetbrains@IU.0a1b2c3d-pid:41"),
+            (
+                "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+                "vscode-pid:7",
+            ),
+            (
+                "editor_navigation = \"per_installation\"\n",
+                "jetbrains@IU.0a1b2c3d-pid:41",
+            ),
+        ] {
+            std::fs::write(root.path().join(".agent-doc/config.toml"), config).unwrap();
+            assert_eq!(
+                navigation_lane_session_for_client(&tmux, root.path(), client).unwrap(),
+                None,
+                "{config:?} {client}"
+            );
+        }
+    }
+
+    /// `#ideriderindependentnav` P3: an installation-scoped client's lane
+    /// session is provisioned for the IDE terminal exactly as the controller's
+    /// first driving layout provisions it, reused afterwards, and a foreign
+    /// same-named session is an error. Isolated tmux server only.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_session_for_client_provisions_the_clients_lane() {
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("navlane-client");
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            root.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        tmux.new_session("proj", root.path()).unwrap();
+        let first =
+            navigation_lane_session_for_client(&tmux, root.path(), "jetbrains@IU.0a1b2c3d-pid:41")
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            first,
+            NavigationLaneSession {
+                installation: "IU.0a1b2c3d".to_string(),
+                session: "proj-IU-0a1b2c3d".to_string(),
+                provisioned: true,
+            }
+        );
+        let mut windows = tmux.list_window_names("proj-IU-0a1b2c3d");
+        windows.sort();
+        assert_eq!(windows, vec!["agent-doc", "stash"]);
+        // The focus client of the same installation shares the lane.
+        let again = navigation_lane_session_for_client(
+            &tmux,
+            root.path(),
+            "jetbrains-focus@IU.0a1b2c3d-pid:41",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!again.provisioned);
+        assert_eq!(again.session, first.session);
+
+        tmux.new_session("proj-RD-9f8e7d6c", root.path()).unwrap();
+        let foreign =
+            navigation_lane_session_for_client(&tmux, root.path(), "jetbrains@RD.9f8e7d6c-pid:42")
+                .unwrap_err();
+        assert!(
+            format!("{foreign:#}").contains("navigation_lane_session_not_owned:proj-RD-9f8e7d6c"),
+            "{foreign:#}"
         );
     }
 

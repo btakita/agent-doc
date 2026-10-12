@@ -672,7 +672,7 @@ guidance.
 
 ## tmux ensure
 
-`agent-doc tmux ensure <FILE> [--session NAME] [--ide-terminal] [--json]`
+`agent-doc tmux ensure <FILE> [--session NAME] [--ide-terminal [--client-id ID]] [--json]`
 
 - Ensures one detached tmux session exists for the document and is safe to call
   repeatedly. An already-live registry target wins so the command never starts
@@ -690,6 +690,19 @@ guidance.
   `terminal_host_reason`, `auto_start_tmux`, the session-resolution source, and
   any registered document pane. `--ide-terminal` is a typed observation from an
   IDE integration, not a host override.
+- Navigation lanes (`#ideriderindependentnav` P3): `--client-id` (requires
+  `--ide-terminal`) is the editor's surface client id
+  (`<family>@<installation>-pid:<pid>`). With `editor_navigation =
+  "per_installation"`, a `tmux_session` pin, and an installation-scoped client,
+  the project session is ensured as usual and the receipt then targets that
+  installation's own lane session `<pin>-<installation>` (resolution
+  `navigation_lane`, `created` when this call provisioned it): the lane session is
+  provisioned on first use exactly as the controller's first driving layout does
+  (`agent-doc` + `stash`, `@agent_doc_navigation_lane` mark; an unmarked
+  same-named session fails closed), the attach command targets it, and a
+  registered document pane is reported only when it already lives in it. In
+  `shared` mode, for an unscoped client (VS Code), or without a pin the receipt is
+  the shared one byte for byte.
 - The receipt is the sole plugin policy input. Plugins focus an already-matching
   terminal, reuse or create an IDE terminal only for a detached session whose
   resolved host is `ide`, and perform no presentation for `external` or `none`.

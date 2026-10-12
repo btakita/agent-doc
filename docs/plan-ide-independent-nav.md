@@ -1,7 +1,7 @@
 # Plan: independent tmux navigation per JetBrains installation (`#ideriderindependentnav`)
 
 Status: P1 landed on branch `ridernav`; P2a landed on branch `ridernavp2a`; P2b landed on
-branch `ridernavp2b`. P3 through P5 are open.
+branch `ridernavp2b`; P3 landed on branch `ridernavp3`. P4 and P5 are open.
 
 ## Problem
 
@@ -183,7 +183,47 @@ Scope (Rust, controller and sync):
   membership per session (the invariant that no pane changes session without a P4
   handoff).
 
-### P3: editor wiring (FFI-first, then JetBrains)
+### P3: editor wiring (FFI-first, then JetBrains) (LANDED)
+
+What landed (the original scope follows below):
+- Focus read: `project_controller::tmux_focus_state_for_client` sends the client id as
+  `caller`; FFI `agent_doc_tmux_focus_state_for_client_json(project_root, client_id)` wraps
+  it (thin). The old entry point keeps the shared lane. Without a runtime the focus handler
+  reads the configured `editor_navigation` instead of assuming `shared`.
+- Terminal attach: `agent-doc tmux ensure <file> --ide-terminal --client-id <id>`
+  (`agent_doc_start_io::ensure_tmux_session_for_ide_client`). The project session is ensured
+  as before; in per-installation mode an installation-scoped client's receipt then targets
+  its lane session (`resolution=navigation_lane`), provisioned on first use through
+  `project_controller::navigation_lane_session_for_client`, the same `ensure_navigation_lane_session`
+  the controller's first driving layout uses (never adopts an unmarked session). The attach
+  command is rendered by the same policy (including an operator `attach_command` template).
+- Plugin publications: a `pane_layout_desired` frame carries `client_id`; the state-plane
+  sink keeps one latest-wins projector per lane (`PaneLayoutDesiredLaneProjector`) and
+  publishes into that client's lane graph, so the manual Sync Tmux Layout arranges the
+  requesting IDE's own lane and two IDEs' frames never coalesce each other away. A lane frame
+  is marked seen on the shared graph so a route's plane catch-up never waits for it.
+- JetBrains: `CpRouteClient.tmuxFocusState` sends `caller` = its surface client id
+  (`tmuxFocusStateRequest`); `paneLayoutDesiredStatePublishRequest` adds `client_id`;
+  `IdeTerminalCoordinator` passes `--client-id`; `TmuxPaneFocusSync.focusStateIsOwnLane`
+  drops a projection labelled with another installation's lane. VS Code needs no change:
+  its clients are unscoped (`vscode-pid:`), so they are always on the shared lane, and it
+  keeps the shared FFI and ensure.
+- Verification: Rust FFI test (lane label per client and mode, no tmux); controller tests for
+  frame lane resolution and lane-routed plugin publications (two lanes, no coalescing, shared
+  untouched, plane catch-up); isolated-tmux tests (`make tmux-ci`) for client lane-session
+  provisioning, the IDE terminal ensure receipt per client and mode, and the end-to-end two-lane
+  case through the real sync body: freshly provisioned lane sessions, alternating syncs with
+  different layouts and a contended document, each window's layout stable round to round, no
+  pane changing session, the shared session untouched, and each lane session's initial empty
+  shell pane stashed inside its own lane on the first sync. Kotlin tests for the request shapes,
+  the ensure command, and the lane filter.
+- Compatibility: the plugin now passes `--client-id` to `agent-doc tmux ensure`; a binary
+  older than this phase rejects the flag, so plugin and binary must ship together.
+- Still open (moved to P4/P5): a per-lane `pane_layout_status` wire channel; lane awareness
+  of route, start, claim, the `sync_tmux_layout` command path and the recycle republish
+  (all still publish into the shared lane).
+
+Original scope:
 
 - FFI: `agent_doc_tmux_focus_state_for_client_json(project_root, client_id)` (the
   old entry point keeps the shared lane). The `ide_terminal` attach outcome takes the

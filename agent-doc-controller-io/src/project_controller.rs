@@ -1932,6 +1932,16 @@ impl ControllerPaneLayoutGraph {
         std::mem::take(&mut *self.supersessions.lock())
     }
 
+    /// Record that editor state-plane version `version` was projected without
+    /// reaching this graph (`#ideriderindependentnav` P3: an installation
+    /// lane's frame). A route awaiting plane catch-up on this graph must not
+    /// wait for a frame that will never be published into it.
+    fn note_plane_seen(&self, version: u64) {
+        let _wait = self.wait_lock.lock();
+        self.plane_seen.fetch_max(version, Ordering::SeqCst);
+        self.waiters.notify_all();
+    }
+
     /// Wait until a publication carrying editor state-plane version `target`
     /// or newer has been seen, for at most `timeout`. True when it was.
     fn await_plane_seen(&self, target: u64, timeout: Duration) -> bool {
@@ -8188,6 +8198,12 @@ impl ControllerRuntime {
     fn pane_layout_plane_head(&self) -> Option<u64> {
         self.state_plane_graph
             .latest_plane_version(PANE_LAYOUT_DESIRED_STATE_CHANNEL)
+    }
+
+    /// An installation lane projected plane version `version` into its own
+    /// graph; the shared lane's plane catch-up counts it as seen.
+    fn note_pane_layout_plane_seen_in_other_lane(&self, version: u64) {
+        self.pane_layout_graph().note_plane_seen(version);
     }
 
     /// Wait (bounded) until the layout graph has seen plane version `target`.

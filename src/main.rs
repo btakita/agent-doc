@@ -3491,6 +3491,11 @@ enum TmuxAction {
         /// Report that an IDE terminal endpoint is available to host the session
         #[arg(long)]
         ide_terminal: bool,
+        /// Editor surface client id (`<family>@<installation>-pid:<pid>`). With
+        /// `--ide-terminal` and `editor_navigation = "per_installation"`, the
+        /// outcome targets that installation's own navigation lane session.
+        #[arg(long, requires = "ide_terminal")]
+        client_id: Option<String>,
     },
 }
 
@@ -4963,7 +4968,14 @@ fn try_main() -> anyhow::Result<()> {
                 session,
                 json,
                 ide_terminal,
-            } => tmux_cmd::ensure(&file, session.as_deref(), json, ide_terminal),
+                client_id,
+            } => tmux_cmd::ensure(
+                &file,
+                session.as_deref(),
+                json,
+                ide_terminal,
+                client_id.as_deref(),
+            ),
         },
         Commands::Run {
             file,

@@ -10511,6 +10511,189 @@ mod tests {
         );
     }
 
+    /// `#ideriderindependentnav` P3: the end-to-end two-lane case through the
+    /// real sync body. IDEA and Rider each get a freshly provisioned lane
+    /// session (exactly as the controller and the IDE terminal attach create
+    /// it: an `agent-doc` window holding one empty shell pane, plus `stash`).
+    /// Under alternating syncs with two different layouts, where Rider's layout
+    /// also names a document whose pane lives in IDEA's lane:
+    /// - each lane's `agent-doc` window shows exactly its own layout, and the
+    ///   tmux layout of each window is stable from one round to the next;
+    /// - the contended document is dropped from Rider's layout, never moved;
+    /// - no pane ever changes session, and the shared session is untouched;
+    /// - the lane session's initial empty shell pane is stashed inside its own
+    ///   lane session on the first sync, never left as a visible extra column.
+    /// Isolated tmux server only.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_guard_two_lanes_alternate_without_crossing_sessions() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let _cwd = ScopedCurrentDir::set(&root);
+        let iso = agent_doc_tmux_io::isolated_test_tmux("lane-guard-e2e");
+
+        // The operator's shared session, which neither lane may touch.
+        let shared_pane = iso.new_session("proj", &root).unwrap();
+        let shared_window = iso.pane_window(&shared_pane).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &shared_window, "agent-doc"])
+            .unwrap();
+        let shared_panes_before = iso.list_window_panes(&shared_window).unwrap();
+
+        let lane_session = |client: &str| {
+            agent_doc_controller_io::project_controller::navigation_lane_session_for_client(
+                &iso, &root, client,
+            )
+            .unwrap()
+            .expect("an installation lane")
+        };
+        let idea = lane_session("jetbrains@IU.0a1b2c3d-pid:41");
+        let rider = lane_session("jetbrains@RD.9f8e7d6c-pid:42");
+        assert!(idea.provisioned && rider.provisioned);
+        let agent_doc_window = |session: &str| {
+            iso.raw_cmd(&[
+                "list-windows",
+                "-t",
+                &format!("{session}:"),
+                "-F",
+                "#{window_id} #{window_name}",
+            ])
+            .unwrap()
+            .lines()
+            .find_map(|line| {
+                let (id, name) = line.split_once(' ')?;
+                (name == "agent-doc").then(|| id.to_string())
+            })
+            .expect("lane agent-doc window")
+        };
+        let idea_window = agent_doc_window(&idea.session);
+        let rider_window = agent_doc_window(&rider.session);
+        // A new lane session starts with one empty shell pane in `agent-doc`.
+        let idea_initial = iso.list_window_panes(&idea_window).unwrap();
+        let rider_initial = iso.list_window_panes(&rider_window).unwrap();
+        assert_eq!(idea_initial.len(), 1);
+        assert_eq!(rider_initial.len(), 1);
+
+        // Each document's pane starts outside its lane's agent-doc window, in
+        // its own lane session.
+        let document = |name: &str, session: &str| {
+            let path = root.join(format!("tasks/{name}.md"));
+            std::fs::write(
+                &path,
+                format!("---\nagent_doc_session: {name}\n---\n\n# {name}\n"),
+            )
+            .unwrap();
+            let pane = iso.new_window(session, &root).unwrap();
+            let window = iso.pane_window(&pane).unwrap();
+            let file = path.to_string_lossy().into_owned();
+            sessions::register_full_with_cwd_in(
+                &root,
+                name,
+                &pane,
+                &file,
+                pane_pid_from_tmux(&iso, &pane).unwrap(),
+                &window,
+                &root.to_string_lossy(),
+            )
+            .unwrap();
+            (file, pane)
+        };
+        let (idea_a, idea_a_pane) = document("idea-a", &idea.session);
+        let (idea_b, idea_b_pane) = document("idea-b", &idea.session);
+        let (rider_a, rider_a_pane) = document("rider-a", &rider.session);
+        let (rider_b, rider_b_pane) = document("rider-b", &rider.session);
+        let pane_sessions = [
+            (&idea_a_pane, &idea.session),
+            (&idea_b_pane, &idea.session),
+            (&rider_a_pane, &rider.session),
+            (&rider_b_pane, &rider.session),
+            (&idea_initial[0], &idea.session),
+            (&rider_initial[0], &rider.session),
+        ];
+
+        let sync = |columns: Vec<String>, window: &str, focus: &str| {
+            run_with_options_internal_at_root(
+                &root,
+                &columns,
+                Some(window),
+                Some(focus),
+                AutoStartMode::SafePassive,
+                false,
+                false,
+                &[],
+                &MainLayoutEligibility::default(),
+                &iso,
+            )
+            .unwrap();
+        };
+        let window_layout = |window: &str| {
+            iso.raw_cmd(&["display-message", "-p", "-t", window, "#{window_layout}"])
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        let mut previous: Option<(String, String)> = None;
+        for round in 0..3 {
+            sync(vec![idea_a.clone(), idea_b.clone()], &idea_window, &idea_a);
+            // Rider's editor also shows IDEA's `idea-a` (a contended document).
+            sync(
+                vec![rider_a.clone(), idea_a.clone(), rider_b.clone()],
+                &rider_window,
+                &rider_a,
+            );
+
+            assert_eq!(
+                iso.list_panes_ordered(&idea_window).unwrap(),
+                vec![idea_a_pane.clone(), idea_b_pane.clone()],
+                "round {round}: IDEA's lane shows exactly IDEA's layout"
+            );
+            assert_eq!(
+                iso.list_panes_ordered(&rider_window).unwrap(),
+                vec![rider_a_pane.clone(), rider_b_pane.clone()],
+                "round {round}: Rider's lane shows Rider's layout without the contended pane"
+            );
+            for (pane, session) in pane_sessions {
+                assert!(iso.pane_alive(pane), "round {round}: {pane} stays alive");
+                assert_eq!(
+                    &iso.pane_session(pane).unwrap(),
+                    session,
+                    "round {round}: {pane} never changes session"
+                );
+            }
+            assert_eq!(
+                iso.list_window_panes(&shared_window).unwrap(),
+                shared_panes_before,
+                "round {round}: the shared session is untouched"
+            );
+            let layouts = (window_layout(&idea_window), window_layout(&rider_window));
+            if let Some(previous) = &previous {
+                assert_eq!(
+                    &layouts, previous,
+                    "round {round}: each lane's layout is stable under alternation"
+                );
+            }
+            previous = Some(layouts);
+        }
+        // The empty initial shell panes were stashed inside their own lanes.
+        for (pane, session) in [
+            (&idea_initial[0], &idea.session),
+            (&rider_initial[0], &rider.session),
+        ] {
+            let window = iso.pane_window(pane).unwrap();
+            assert_eq!(
+                window_name_for_window_id(&iso, &window).as_deref(),
+                Some("stash"),
+                "{pane}: a new lane's empty pane is stashed in {session}"
+            );
+        }
+    }
+
     #[test]
     fn multi_session_sync_drops_columns_bound_to_other_sessions() {
         let tmp = tempfile::TempDir::new().unwrap();

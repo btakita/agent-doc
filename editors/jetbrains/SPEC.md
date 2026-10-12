@@ -227,8 +227,8 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   Navigation is not independent yet: both IDEs publish surface observations to the same Project
   Controller root, which owns one tmux `agent-doc` window per project. The controller already keys
   layout ownership and the `tmux_focus_state` projection by navigation lane
-  (`#ideriderindependentnav`), but runs every client on the shared lane until per-installation
-  tmux sessions are provisioned. Only the installation that
+  (`#ideriderindependentnav`); in the default `shared` mode every client runs on the shared lane
+  (per-installation lanes are below). Only the installation that
   most recently gained focus drives that window (`#idefocusowner`). The focus lane
   (`jetbrains-focus@<installation>-pid:<pid>`, `focus_only`) publishes only while that IDE's
   project frame is the OS-active window, so an accepted focus-lane fact is the focus-gain event;
@@ -248,8 +248,18 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   defer, and before any claim every installation drives as before. Known limits: an IDE activated
   while a non-session file is selected publishes no focus-lane fact and does not claim until an
   agent document gains focus there; a focus-lane fact claims only on the focused document's own
-  controller root. Fully independent per-IDE navigation (one tmux window or session per
-  installation, with reverse focus scoped to it) remains unimplemented (`ideriderindependentnav`).
+  controller root.
+- Per-installation navigation lanes (`#ideriderindependentnav` P3, opt-in with
+  `editor_navigation = "per_installation"`): the plugin names its surface client
+  (`jetbrains@<installation>-pid:<pid>`) everywhere the controller derives a navigation lane from
+  it. `tmux_focus_state` sends it as `caller`; every `pane_layout_desired` publication (including
+  the manual Sync Tmux Layout) carries it as `client_id`; and the IDE terminal ensure passes
+  `agent-doc tmux ensure <file> --json --ide-terminal --client-id <id>`, so this IDE's agent-doc
+  terminal attaches to its own lane session. `TmuxPaneFocusSync` mirrors a tmux focus projection
+  only when it has no `navigation_lane` (the shared lane) or names this installation; a
+  projection of another installation's lane is never mirrored (defense in depth for "focus
+  mirroring goes only to the IDE that owns the window"). In `shared` mode the controller maps the
+  same client id to the shared lane, so nothing changes there.
 - An observation with no detected columns is structurally `unknown`, not a one-column layout.
   It may select the focused document's existing pane, but it cannot add, stash, reorder, or
   provision panes. A proven local single editor window publishes one column. The presence of

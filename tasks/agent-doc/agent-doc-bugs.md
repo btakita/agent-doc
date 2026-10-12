@@ -896,6 +896,21 @@ Done (`b4544973ef`). Steering now pairs old and new queue lines by item identity
 **Up next:**
 - `ridernavp6route` is merged with all of this (`8ec61eaf7b`). One unrelated `make tmux-ci` test failed: `queued_clear_is_dropped_when_a_newer_prompt_starts_first`, which passed when run alone. It is filed as `queuedclearflake` and goes to a subagent now.
 - `ridernavp6gc` (controller-side lane cleanup) merges on top of route next.
+
+### Re: GH #243 dispatched; false supervisor-drain warning — opus-5-5 · 2026-10-12T15:30-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/243
+
+**Deferred:** this is with a subagent on branch `gh243`, built on the lane-aware route/start work that is landing now. The issue reports three failures after a container restart:
+- Route-owned panes started in tmux session `0`, which had no client attached.
+- Submit reported SUCCESS for dispatches into that unwatched pane.
+- `start --force` from your own session left the hidden supervisor and its harness running.
+
+The subagent will fix each one at its root cause, test each on isolated tmux servers, and draft the closing comment. I'll close the issue after merge.
+
+**Also filed: `claimeddrainwarn`.** Preflight has been warning for over 30 minutes that a `[focused-cycle]` head was handed to the supervisor and never drained, and it suggests recycling the supervisor. But every remaining head is claimed, so the supervisor correctly has nothing to drain. This is probably a side effect of the new auto-clear item-boundary yield. Do not recycle the supervisor on that warning.
+
+**Batch 12** is in `make check` / `make tmux-ci`. It contains `ridernavp6route` + `ridernavp6gc`, plus JetBrains plugins 0.2.553 / 262 0.2.554. `queuedclearflake` is still with its subagent.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -908,11 +923,14 @@ Done (`b4544973ef`). Steering now pairs old and new queue lines by item identity
 - 🚧 do [#ridernavp6route]
 - 🚧 do [#ridernavp6gc]
 - 🚧 do [#ridernavp6routecontended]
+- #gh-fix https://github.com/btakita/agent-doc/issues/243
+- #release
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#claimeddrainwarn] [agent-doc] preflight warns supervisor_drain_handoff_undrained (the [focused-cycle] head was handed to the supervisor N min ago and is still undrained; recycle the supervisor) for over 30 minutes on agent-doc-bugs.md (2026-10-12) while every remaining queue head is claimed by a subagent or coordinator, so the supervisor correctly has nothing to drain. Likely interplay with the new auto-clear item-boundary yield (queue_auto_clear_yield) recording a handoff that claims then make undrainable. Exclude claimed heads from the handoff and the warning, and do not tell the operator to recycle a healthy supervisor; regression test.
 - [ ] 🚧 [#queuedclearflake] [agent-doc] tests/clear_queued_live_turn_tmux.rs queued_clear_is_dropped_when_a_newer_prompt_starts_first failed its ui_outcome=queued assertion inside make tmux-ci (2026-10-12, ridernavp6route merge run) and passed 2 of 2 alone. Find the timing dependency and fix it with an explicit readiness signal; never rerun to green or lengthen a timeout.
 - [ ] 🚧 [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
 - [ ] 🚧 [#ridernavp6route] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): route, start and agent-doc claim --client-id create panes in the requesting IDE's lane in per_installation mode; today a new pane reaches an installation lane only through that IDE's explicit claim.

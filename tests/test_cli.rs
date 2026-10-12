@@ -14962,8 +14962,8 @@ fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
     );
     assert!(
         makefile.contains("NEXTEST_NON_BATCHED_FILTER")
-            && makefile.contains("BATCHED_TEST_PACKAGE_ARGS")
-            && makefile.contains("$(CARGO_CMD) test $(BATCHED_TEST_PACKAGE_ARGS)"),
+            && makefile.contains("python3 scripts/run-batched-tests $(foreach package,$(BATCHED_TEST_PACKAGES),--package $(package))")
+            && makefile.contains("--test-threads \"$(TEST_THREADS)\""),
         "controller-heavy packages must avoid nextest's process-per-test startup"
     );
 
@@ -14986,7 +14986,11 @@ fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
         let body = recipe(target);
         let steps: Vec<&str> = body
             .lines()
-            .filter(|line| line.contains("nextest run") || line.contains("$(CARGO_CMD) test "))
+            .filter(|line| {
+                line.contains("nextest run")
+                    || line.contains("$(CARGO_CMD) test ")
+                    || line.contains("scripts/run-batched-tests")
+            })
             .collect();
         assert!(!steps.is_empty(), "{target} must run a test step");
         for step in steps {
@@ -15030,6 +15034,102 @@ fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
             && helper.contains("tool == \"tmux\"")
             && !helper.contains("git\", \"ls-files\", \"--stage\""),
         "affected-package closure and content-addressed proof logic must remain explicit"
+    );
+}
+
+/// Check turnaround: the authoritative gate compiles the workspace ONCE per edit
+/// and runs independent work concurrently, without dropping any check.
+#[test]
+fn test_check_shares_one_build_and_runs_batched_binaries_concurrently() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let makefile = fs::read_to_string(manifest_dir.join("Makefile")).unwrap();
+    let recipe = |target: &str| -> String {
+        let start = makefile
+            .find(&format!("\n{target}:"))
+            .unwrap_or_else(|| panic!("Makefile target {target} missing"));
+        makefile[start + 1..]
+            .lines()
+            .skip(1)
+            .take_while(|line| line.starts_with('\t'))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    // One feature resolution for every Rust step: the shared build matches
+    // nextest's `--workspace` test build, and later steps select from it.
+    assert!(
+        makefile.contains(
+            "TEST_BUILD = $(CARGO_CLEAN_ENV) $(CARGO_CMD) build --workspace --all-targets --quiet"
+        ),
+        "make check must build the workspace once with the test feature resolution"
+    );
+    let test = recipe("test");
+    assert!(
+        test.contains("$(TEST_BUILD)") && !test.contains("build --bin agent-doc --lib"),
+        "make test must not build a second, differently-resolved agent-doc: {test}"
+    );
+    assert!(
+        !test.contains("$(CARGO_CMD) test -p") && !makefile.contains("BATCHED_TEST_PACKAGE_ARGS"),
+        "batched packages must run from the workspace build, not a `-p` re-resolution"
+    );
+    for target in ["sim-medium", "sim-net"] {
+        assert!(
+            recipe(target).contains("$(CARGO_CMD) test --workspace --bin agent-doc "),
+            "{target} must select its test from the shared workspace build"
+        );
+    }
+    let cross = recipe("cross-editor-simworld");
+    assert!(
+        cross.contains("$(TEST_BUILD)") && cross.contains("test --workspace --test cross_editor_simworld"),
+        "cross-editor-simworld must reuse the shared build: {cross}"
+    );
+    assert!(
+        makefile.contains("check: AUDIT_DOCS_FROM_TEST_BUILD := 1")
+            && recipe("audit-docs").contains("\"$(CARGO_TARGET_DIR_ABS)/debug/agent-doc\" audit-docs"),
+        "check's audit-docs must run the binary the shared build produced"
+    );
+
+    // The batched runner keeps one libtest process per binary, fails on any
+    // failing binary, and is self-tested by the check.
+    let runner = fs::read_to_string(manifest_dir.join("scripts/run-batched-tests")).unwrap();
+    assert!(
+        runner.contains("\"--workspace\",\n        \"--all-targets\",\n        \"--no-run\"")
+            && runner.contains("f\"--test-threads={test_threads}\"")
+            && runner.contains("profile.get(\"test\")")
+            && runner.contains("return 1"),
+        "run-batched-tests must run every batched test binary of the workspace build"
+    );
+    assert!(
+        makefile.contains("python3 scripts/run-batched-tests --self-test"),
+        "the batched runner must be self-tested by make check"
+    );
+    let helper = fs::read_to_string(manifest_dir.join("scripts/dev-check.py")).unwrap();
+    assert!(
+        helper.contains("\"build\", \"--workspace\", \"--all-targets\"")
+            && helper.contains("nextest_package_filter")
+            && helper.contains("run-batched-tests"),
+        "check-fast must share make check's build instead of a `-p` feature resolution"
+    );
+
+    // TLA: a content receipt may skip only byte-identical inputs, and parallel
+    // TLC jobs never share a java.io.tmpdir.
+    let tla = fs::read_to_string(manifest_dir.join("scripts/run_tla.sh")).unwrap();
+    assert!(
+        tla.contains("AGENT_DOC_TLA_FORCE")
+            && tla.contains("find . -type f -print0")
+            && tla.contains("sha256sum \"${BASH_SOURCE[0]}\"")
+            && tla.contains("java -version")
+            && tla.contains("local java_tmp=\"${work_dir}/java-tmp-${id}\"")
+            && tla.contains("record_receipt"),
+        "the TLA receipt must cover models, runner, and JVM, and jobs must stay isolated"
+    );
+
+    let cargo_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let manifest: toml::Value = toml::from_str(&cargo_manifest).unwrap();
+    assert_eq!(
+        manifest["profile"]["dev"]["debug"].as_str(),
+        Some("line-tables-only"),
+        "dev/test builds keep line tables (backtraces) without full debuginfo"
     );
 }
 

@@ -355,6 +355,14 @@ predicates = "3"
 proptest = "1"
 tempfile = "3"
 
+# Check turnaround: dev/test builds keep file:line tables (panic backtraces still
+# resolve to source lines) but not full variable/type debuginfo. Measured on a
+# 32-core host for the shared `make check` build: cold CPU 1543s -> 1117s,
+# incremental CPU after a core-crate edit 733s -> 429s, target dir 44G -> 20G.
+# For a debugger session with locals, build with CARGO_PROFILE_DEV_DEBUG=2.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 opt-level = 3
 lto = "fat"

@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""Run the controller-heavy ("batched") test binaries from the shared workspace build.
+
+Check turnaround: the batched packages (Makefile `BATCHED_TEST_PACKAGES`) run one
+libtest process per test binary instead of nextest's one process per test,
+because nextest repeatedly paid controller initialization cost. They used to run
+as `cargo test -p A -p B ... --all-targets -- --test-threads=N`, which cost the
+check twice:
+
+* `-p` resolves features over the selected packages only, so every edit
+  recompiled those packages (and their dependency chain) a second time beside
+  the `--workspace` build nextest had just made (~97 extra units after touching
+  one core crate);
+* cargo runs the selected test binaries one after another, so the step took the
+  SUM of the binaries' wall times (~150-450s) while most of the machine idled.
+
+This runner asks Cargo for exactly the test executables
+`cargo test --workspace --all-targets` builds (a no-op after `make test`'s
+build), keeps those that belong to the batched packages, and runs each binary as
+one libtest process with the same `--test-threads` as before. Binaries run
+concurrently (up to `--jobs`), longest-known first; each binary's output is
+printed as one block when it finishes, so logs never interleave. Every binary
+still runs every test it ran before, and any failing binary fails the step.
+
+Usage:
+    run-batched-tests [--jobs N] [--test-threads N] [--package P ...] [--log-dir DIR]
+    run-batched-tests --self-test
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+CARGO_WRAPPER = ROOT / "scripts" / "with-cargo-cache"
+# Binaries known to dominate the step start first so the step's wall time is
+# bounded by the slowest binary rather than by queueing behind it.
+SLOW_FIRST = ("agent_doc_controller_io", "agent_doc_route_io", "route", "session_check")
+
+
+@dataclass
+class TestBinary:
+    package: str
+    version: str
+    target: str
+    kind: str
+    executable: str
+    manifest_path: str
+    crate_name: str
+
+    @property
+    def label(self) -> str:
+        return f"{self.package}::{self.target}({self.kind})"
+
+
+@dataclass
+class Outcome:
+    binary: TestBinary
+    status: int
+    seconds: float
+    output: bytes = field(repr=False)
+
+
+def select_binaries(messages: list[dict], packages: set[str]) -> list[TestBinary]:
+    """Test-mode executables of `packages` from `cargo --message-format=json` lines."""
+    selected: dict[str, TestBinary] = {}
+    for message in messages:
+        if message.get("reason") != "compiler-artifact":
+            continue
+        executable = message.get("executable")
+        profile = message.get("profile") or {}
+        if not executable or not profile.get("test"):
+            continue
+        package_id = message.get("package_id", "")
+        name, version = package_name_version(package_id, message.get("manifest_path", ""))
+        if name not in packages:
+            continue
+        target = message.get("target") or {}
+        kinds = target.get("kind") or ["?"]
+        selected[executable] = TestBinary(
+            package=name,
+            version=version,
+            target=target.get("name", "?"),
+            kind=kinds[0],
+            executable=executable,
+            manifest_path=message.get("manifest_path", ""),
+            crate_name=target.get("name", "?").replace("-", "_"),
+        )
+    return sorted(selected.values(), key=order_key)
+
+
+def package_name_version(package_id: str, manifest_path: str) -> tuple[str, str]:
+    """Name/version from a package id (`path+file:///x/name#version` or `name 1.0 (...)`)."""
+    if " " in package_id and not package_id.startswith(("path+", "registry+", "git+")):
+        parts = package_id.split()
+        return parts[0], parts[1] if len(parts) > 1 else ""
+    fragment = package_id.rsplit("#", 1)[-1] if "#" in package_id else ""
+    if "@" in fragment:
+        name, version = fragment.split("@", 1)
+        return name, version
+    name = Path(manifest_path).parent.name if manifest_path else ""
+    return name, fragment
+
+
+def order_key(binary: TestBinary) -> tuple[int, str]:
+    for rank, name in enumerate(SLOW_FIRST):
+        if binary.target.replace("-", "_") == name:
+            return rank, binary.label
+    return len(SLOW_FIRST), binary.label
+
+
+def binary_env(binary: TestBinary, base: dict[str, str]) -> dict[str, str]:
+    """The runtime environment `cargo test` gives a test process."""
+    manifest_dir = str(Path(binary.manifest_path).parent)
+    env = dict(base)
+    env.update(
+        {
+            "CARGO_MANIFEST_DIR": manifest_dir,
+            "CARGO_MANIFEST_PATH": binary.manifest_path,
+            "CARGO_PKG_NAME": binary.package,
+            "CARGO_PKG_VERSION": binary.version,
+            "CARGO_CRATE_NAME": binary.crate_name,
+        }
+    )
+    return env
+
+
+def run_binary(binary: TestBinary, test_threads: int, env: dict[str, str]) -> Outcome:
+    start = time.monotonic()
+    process = subprocess.run(
+        [binary.executable, f"--test-threads={test_threads}"],
+        cwd=Path(binary.manifest_path).parent,
+        env=binary_env(binary, env),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    return Outcome(binary, process.returncode, time.monotonic() - start, process.stdout)
+
+
+def run_all(
+    binaries: list[TestBinary],
+    jobs: int,
+    test_threads: int,
+    env: dict[str, str],
+    log_dir: Path | None,
+    runner=run_binary,
+) -> int:
+    lock = threading.Lock()
+    outcomes: list[Outcome] = []
+
+    def one(binary: TestBinary) -> None:
+        outcome = runner(binary, test_threads, env)
+        with lock:
+            outcomes.append(outcome)
+            verdict = "ok" if outcome.status == 0 else f"FAILED (exit {outcome.status})"
+            sys.stdout.write(f"=== {binary.label} {verdict} in {outcome.seconds:.1f}s\n")
+            sys.stdout.flush()
+            sys.stdout.buffer.write(outcome.output)
+            sys.stdout.buffer.flush()
+            if log_dir is not None:
+                log_dir.mkdir(parents=True, exist_ok=True)
+                name = f"{binary.package}--{binary.kind}--{binary.target}.log"
+                (log_dir / name).write_bytes(outcome.output)
+
+    with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
+        for future in [pool.submit(one, binary) for binary in binaries]:
+            future.result()
+
+    failed = [o for o in outcomes if o.status != 0]
+    print("--- batched test binaries (wall seconds)")
+    for outcome in sorted(outcomes, key=lambda o: -o.seconds):
+        mark = "FAILED" if outcome.status else "ok"
+        print(f"{outcome.seconds:8.1f}s {mark:6} {outcome.binary.label}")
+    if failed:
+        print(
+            "run-batched-tests: failing binaries: "
+            + ", ".join(o.binary.label for o in failed),
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def cargo_messages(packages: set[str]) -> list[dict]:
+    command = [
+        str(CARGO_WRAPPER),
+        "cargo",
+        "test",
+        "--workspace",
+        "--all-targets",
+        "--no-run",
+        "--message-format=json-render-diagnostics",
+    ]
+    process = subprocess.run(command, cwd=ROOT, stdout=subprocess.PIPE, check=False)
+    if process.returncode != 0:
+        raise SystemExit(f"run-batched-tests: build failed: {' '.join(command)}")
+    messages = []
+    for line in process.stdout.decode(errors="replace").splitlines():
+        try:
+            messages.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return messages
+
+
+def default_jobs() -> int:
+    return max(1, (os.cpu_count() or 4) // 2)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--package", action="append", default=[], help="batched package (repeatable)")
+    parser.add_argument("--jobs", type=int, default=int(os.environ.get("BATCHED_TEST_JOBS", 0)) or default_jobs())
+    parser.add_argument("--test-threads", type=int, default=2)
+    parser.add_argument("--log-dir")
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args()
+    if args.self_test:
+        self_test()
+        return 0
+    if not args.package:
+        parser.error("at least one --package is required")
+    packages = set(args.package)
+    binaries = select_binaries(cargo_messages(packages), packages)
+    missing = packages - {b.package for b in binaries}
+    if missing:
+        print(f"run-batched-tests: no test binaries found for {sorted(missing)}", file=sys.stderr)
+        return 1
+    print(
+        f"run-batched-tests: {len(binaries)} binaries, jobs={args.jobs}, "
+        f"--test-threads={args.test_threads}",
+        flush=True,
+    )
+    return run_all(
+        binaries,
+        args.jobs,
+        args.test_threads,
+        dict(os.environ),
+        Path(args.log_dir) if args.log_dir else None,
+    )
+
+
+def self_test() -> None:
+    def artifact(name: str, target: str, kind: str, test: bool, exe: str | None) -> dict:
+        return {
+            "reason": "compiler-artifact",
+            "package_id": f"path+file:///w/{name}#0.1.0",
+            "manifest_path": f"/w/{name}/Cargo.toml",
+            "target": {"name": target, "kind": [kind]},
+            "profile": {"test": test},
+            "executable": exe,
+        }
+
+    messages = [
+        artifact("agent-doc-route-io", "route", "test", True, "/t/route-1"),
+        artifact("agent-doc-route-io", "agent_doc_route_io", "lib", True, "/t/lib-1"),
+        artifact("agent-doc-controller-io", "agent_doc_controller_io", "lib", True, "/t/ctl-1"),
+        # Not a test-mode build (plain lib/bin): never run.
+        artifact("agent-doc-route-io", "agent_doc_route_io", "lib", False, None),
+        artifact("agent-doc", "agent-doc", "bin", False, "/t/agent-doc"),
+        # A non-batched package's test binary: nextest owns it.
+        artifact("agent-doc-queue", "agent_doc_queue", "lib", True, "/t/queue-1"),
+        {"reason": "build-finished", "success": True},
+    ]
+    picked = select_binaries(messages, {"agent-doc-route-io", "agent-doc-controller-io"})
+    labels = [b.label for b in picked]
+    assert labels == [
+        "agent-doc-controller-io::agent_doc_controller_io(lib)",
+        "agent-doc-route-io::agent_doc_route_io(lib)",
+        "agent-doc-route-io::route(test)",
+    ], labels
+    assert picked[0].version == "0.1.0", picked[0]
+    assert package_name_version("agent-doc 0.35.1 (path+file:///w)", "") == ("agent-doc", "0.35.1")
+    assert package_name_version("path+file:///w/x#y@1.2.3", "/w/x/Cargo.toml") == ("y", "1.2.3")
+
+    env = binary_env(picked[2], {"KEEP": "1"})
+    assert env["CARGO_MANIFEST_DIR"] == "/w/agent-doc-route-io" and env["KEEP"] == "1", env
+    assert env["CARGO_PKG_NAME"] == "agent-doc-route-io", env
+
+    # A failing binary fails the step even when every other binary passes, and
+    # every binary still runs (no fail-fast that would hide a second failure).
+    ran: list[str] = []
+
+    def fake(binary: TestBinary, threads: int, _env: dict[str, str]) -> Outcome:
+        assert threads == 3
+        ran.append(binary.label)
+        status = 101 if binary.target == "route" else 0
+        return Outcome(binary, status, 0.0, b"output\n")
+
+    with tempfile.TemporaryDirectory(prefix="run-batched-tests-") as tmp:
+        log_dir = Path(tmp) / "logs"
+        devnull = open(os.devnull, "w")
+        saved, sys.stdout = sys.stdout, devnull
+        saved_err, sys.stderr = sys.stderr, devnull
+        try:
+            status = run_all(picked, 2, 3, {}, log_dir, runner=fake)
+            ok_status = run_all(picked[:2], 2, 3, {}, None, runner=fake)
+        finally:
+            sys.stdout, sys.stderr = saved, saved_err
+            devnull.close()
+        assert status == 1, status
+        assert ok_status == 0, ok_status
+        assert sorted(ran[:3]) == sorted(labels), ran
+        assert len(list(log_dir.iterdir())) == 3
+    print("run-batched-tests self-test: ok")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

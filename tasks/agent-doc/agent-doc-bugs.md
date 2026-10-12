@@ -274,16 +274,16 @@ I also filed annotateddeferstrike: a deferred queue line carrying your note was 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#idlecleartriggerinject]
-- do [#annotateddeferstrike]
-- do [#flakyreceipthelpers]
+- 🚧 do [#idlecleartriggerinject]
+- 🚧 do [#annotateddeferstrike]
+- 🚧 do [#flakyreceipthelpers]
 - ⏳ do [#idleclearrestart]
 - ~~[#clearnoticeverify]: verified?~~
 - ~~The tmux panes are not laid out correctly. 2/3|1/3. There were 3 tmux panes during your [#clearnoticeverify] test.~~
 - ~~frondend.md end of turn wedges session...with the formatting messed up ![img_4.png](img_4.png)~~
 - ~~release + publish~~
 - ~~do [#closeoutleaseresume]~~
-- do [#flakyintegrate0494]
+- 🚧 do [#flakyintegrate0494]
 - ~~do [#clearsupersedenotice]~~
 - ~~I want to also diagnose why the tmux pane goes into a format where tabs are inserted. Once it gets corrupted. ![img_5.png](img_5.png)~~
 <!-- /agent:queue -->
@@ -291,11 +291,11 @@ I also filed annotateddeferstrike: a deferred queue line carrying your note was 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#idlecleartriggerinject] [agent-doc] After Clear Session Context at an idle prompt (delivery=supervisor_restart_fresh), the supervisor injects an unrequested /agent-doc <file> turn (auto_trigger_inject), a no-op costing ~13s of model time each time; seen twice in the 2026-10-11 clearnotice live test (evidence: agent-doc-wt/clearnotice/tmp/evidence). Do not auto-dispatch after an operator Clear unless queue work is actually pending.
-- [ ] [#annotateddeferstrike] [agent-doc] A deferred annotated queue head is struck anyway: for an annotated head the closeout requires the operator-note answer quote, which then sits between the queue-prompt echo and the deferral paragraph, so the deferral is not recognized, the head is consumed and its claim released (2026-10-11, twice on the clearnoticeverify heads). Recognize a deferral paragraph that follows the operator-note answer, with a regression test.
-- [ ] [#flakyreceipthelpers] [agent-doc] Follow-up from flaky0494: simulated-editor socket listeners in agent-doc-test-support/src/lib.rs:781, agent-doc-write-converge-io/src/convergence_fixture_tests.rs:170 and agent-doc-commit-io/tests/git.rs:104 drop receipt errors the way the fixed already_applied_* tests did (may flake under load); and finalize_integration reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once hits the 180s nextest limit under load ~80 (performance, do not raise the limit). Integrate branch flaky0494 first.
+- [ ] 🚧 [#idlecleartriggerinject] [agent-doc] After Clear Session Context at an idle prompt (delivery=supervisor_restart_fresh), the supervisor injects an unrequested /agent-doc <file> turn (auto_trigger_inject), a no-op costing ~13s of model time each time; seen twice in the 2026-10-11 clearnotice live test (evidence: agent-doc-wt/clearnotice/tmp/evidence). Do not auto-dispatch after an operator Clear unless queue work is actually pending.
+- [ ] 🚧 [#annotateddeferstrike] [agent-doc] A deferred annotated queue head is struck anyway: for an annotated head the closeout requires the operator-note answer quote, which then sits between the queue-prompt echo and the deferral paragraph, so the deferral is not recognized, the head is consumed and its claim released (2026-10-11, twice on the clearnoticeverify heads). Recognize a deferral paragraph that follows the operator-note answer, with a regression test.
+- [ ] 🚧 [#flakyreceipthelpers] [agent-doc] Follow-up from flaky0494: simulated-editor socket listeners in agent-doc-test-support/src/lib.rs:781, agent-doc-write-converge-io/src/convergence_fixture_tests.rs:170 and agent-doc-commit-io/tests/git.rs:104 drop receipt errors the way the fixed already_applied_* tests did (may flake under load); and finalize_integration reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once hits the 180s nextest limit under load ~80 (performance, do not raise the limit). Integrate branch flaky0494 first.
 - [ ] [#idleclearrestart] [operator-verify] [agent-doc] Decide: Clear Session Context at an idle prompt restarts the Claude process (supervisor_restart_fresh) instead of typing /clear, killing running Claude background agents/shells with no report (2026-10-11 live test: agent stopped at 12/40 ticks). Queued clears type /clear. Should idle Clear type /clear too?
-- [ ] [#flakyintegrate0494] [agent-doc] A full make check on integrate-0494 (merge of splicectl + gh240, 3fbe838baa) stopped at 1 failure after 101/10205 tests; the rerun on the same commit passed 10205/10205. The first log was deleted before reading, so the test is unknown. Capture it on recurrence (keep nextest junit/output from every authoritative run) and fix the nondeterminism; never rerun to green.
+- [ ] 🚧 [#flakyintegrate0494] [agent-doc] A full make check on integrate-0494 (merge of splicectl + gh240, 3fbe838baa) stopped at 1 failure after 101/10205 tests; the rerun on the same commit passed 10205/10205. The first log was deleted before reading, so the test is unknown. Capture it on recurrence (keep nextest junit/output from every authoritative run) and fix the nondeterminism; never rerun to green.
 <!-- /agent:backlog -->
 
 ## Review

@@ -1201,6 +1201,18 @@ JetBrains plugins are 0.2.561 and 0.2.562. I'll confirm the GitHub Release and P
 Long reference sections move into SPEC.md, specs/ or docs/, with links. Every support claim is checked against the code before it goes in. If something on your list isn't actually supported in the repo (Zed is the one I'm least sure of), the subagent will flag it rather than claim it.
 
 The earlier admission refusal this turn was a transient: the document changed while the merge was being computed. This cycle was admitted normally.
+
+### Re: #cleanreadmeconcise license — opus-5.5 · 2026-10-12T16:52-04:00
+
+> **Operator note:** declare Apache2. Make the project Apache2.
+
+**Deferred:** I've told the README subagent (branch `readmecleanup`) to switch the project to **Apache-2.0 only**. That replaces the earlier MIT-only plan. The change covers:
+- a top-level `LICENSE` with the standard Apache License 2.0 text;
+- `license = "Apache-2.0"` in the root and member-crate `Cargo.toml` files and in `pyproject.toml`;
+- the editor plugin manifests (VS Code, Zed, JetBrains, npm);
+- README, docs and AGENTS.md: they will say Apache-2.0 only and link to LICENSE, and every "MIT" and "MIT or Apache-2.0" mention is removed.
+
+It merges in the next batch after v0.35.495, because `make release` is still running in `agent-doc-wt/release-0495`. So the relicense first ships in 0.35.496. `#release` is still in flight.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -1209,7 +1221,7 @@ The earlier admission refusal this turn was a transient: the document changed wh
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#cleanreadmeconcise]
+- 🚧 do [#cleanreadmeconcise]: declare Apache2. Make the project Apache2.
 - 🚧 #release
 <!-- /agent:queue -->
 

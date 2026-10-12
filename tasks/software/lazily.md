@@ -862,6 +862,17 @@ Session accretion remains above the warning threshold; I continued the active qu
 Phase 1 is code-complete in `/home/brian/worktrees/lazily-spec-lzcoreprofile-20261012`: the canonical nine-binding Core profile, JSON Schema, semantic and dependency-boundary validator, generated documentation, and eleven negative probes are implemented. `make check`, 277 schema tests, 4 focused profile tests, and `git diff --check` passed.
 
 I moved `#lzcoreprofile` to review because the queue's `#spec-test-commit-push` preset is undefined, and the resolved authorization explicitly forbids committing or pushing the implementation. The review gate clears when explicit commit/integration authority is supplied; the preserved worktree remains uncommitted.
+
+### Re: #lzcoreclaims — gpt-5 · 2026-10-12T06:26:36-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcoreclaims]
+
+
+Phase 2's central evidence machinery is implemented in `/home/brian/worktrees/lazily-spec-lzcoreclaims-20261012`: profile-driven declaration/report validation, exact fixture/scenario/proof closure, runtime-skip reconciliation, fixtureless-claim evidence, five negative probes, and the corrected Python/Kotlin/JavaScript merge plus Kotlin C-ABI claims. The focused evidence checks and 272 schema tests passed.
+
+I moved `#lzcoreclaims` to review. It cannot be integrated while commit authority is unresolved, and its final `--require-all` gate intentionally remains red until the integrated Phase 1 profile exists and all nine bindings provide Core declarations and runtime reports.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -869,7 +880,7 @@ I moved `#lzcoreprofile` to review because the queue's `#spec-test-commit-push` 
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzcoreprofile]~~
-- do [#lzcoreclaims]
+- ~~do [#lzcoreclaims]~~
 - do [#lzcorefacades]
 - do [#lzcorecompat]
 - do [#lzcoreconsumers]
@@ -880,7 +891,6 @@ I moved `#lzcoreprofile` to review because the queue's `#spec-test-commit-push` 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.
 - [ ] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
 - [ ] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
 - [ ] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
@@ -891,6 +901,7 @@ I moved `#lzcoreprofile` to review because the queue's `#spec-test-commit-push` 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.
 - [/] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: create the canonical candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [/] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.

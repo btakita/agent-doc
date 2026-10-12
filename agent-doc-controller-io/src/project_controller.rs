@@ -243,6 +243,15 @@ pub struct ControllerTmuxLayoutSyncInvocation {
     /// projection immediately before crossing the tmux boundary.
     #[serde(skip)]
     pub actor_bindings: Vec<ControllerTmuxActorBinding>,
+    /// The editor surface client that requested this sync
+    /// (`#ideriderindependentnav` P6). An explicit `sync_tmux_layout` command
+    /// naming its client id publishes into that client's navigation lane; no
+    /// client id (and every client in `shared` mode or unscoped) is the shared
+    /// lane. Consumed when the command is routed, so it never reaches a lane
+    /// graph's retained invocation, and omitted from the wire when unset, so a
+    /// pre-lane caller's payload is byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8282,16 +8291,6 @@ impl ControllerRuntime {
             .record_gated(generation, gated_documents);
     }
 
-    /// GH #136 follow-up (d): claim a recycle-settle republish (see
-    /// [`agent_doc_controller::pane_layout::recycle_settle_republishes_layout`]).
-    pub(crate) fn claim_pane_layout_recycle_republish(
-        &self,
-        settled_document_was_gated: &dyn Fn(&[String]) -> bool,
-    ) -> bool {
-        self.pane_layout_graph()
-            .claim_recycle_republish(settled_document_was_gated)
-    }
-
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     fn pane_layout_projection(&self) -> PaneLayoutProjection {
         self.pane_layout_graph().projection()
@@ -11775,6 +11774,7 @@ mod tests {
                 caller_kind: caller_kind.to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             };
 
         assert!(invocation("manual", false).routes_created_panes());
@@ -11796,6 +11796,7 @@ mod tests {
                 caller_kind: "projection".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             provenance: PaneLayoutProvenance::default(),
         }
@@ -12096,6 +12097,7 @@ mod tests {
                 caller_kind: "automatic".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             None,
         );
@@ -12176,6 +12178,7 @@ mod tests {
                     caller_kind: "automatic".to_string(),
                     column_order: Default::default(),
                     actor_bindings: Vec::new(),
+                    client_id: None,
                 },
                 source_plane_version: None,
                 provenance: PaneLayoutProvenance::default(),
@@ -12273,6 +12276,7 @@ mod tests {
                 caller_kind: "automatic".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             None,
         );
@@ -12304,6 +12308,7 @@ mod tests {
                 caller_kind: "automatic".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             None,
         );
@@ -22671,6 +22676,7 @@ revised operator request
                 caller_kind: "automatic".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             source_plane_version: None,
             provenance: PaneLayoutProvenance::default(),

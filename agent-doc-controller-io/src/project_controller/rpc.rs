@@ -3595,6 +3595,7 @@ pub fn sync_tmux_layout(
                 } else {
                     "manual".to_string()
                 },
+                client_id: invocation.client_id.clone(),
             };
             return request_command_submit_payload(
                 project_root,
@@ -3658,6 +3659,7 @@ pub fn enqueue_tmux_layout_sync(
             } else {
                 "manual".to_string()
             },
+            client_id: invocation.client_id.clone(),
         };
         let accepted: serde_json::Value = request_existing_command_submit_payload_async(
             project_root,
@@ -4087,6 +4089,7 @@ fn automatic_layout_sync_invocation(
         caller_kind: "automatic".to_string(),
         column_order: Default::default(),
         actor_bindings: Vec::new(),
+        client_id: None,
     }
 }
 
@@ -4112,6 +4115,10 @@ struct SyncTmuxLayoutCommandPayload {
     exact_visible: bool,
     #[serde(default)]
     caller_kind: String,
+    /// `#ideriderindependentnav` P6: the requesting editor client, whose
+    /// navigation lane the command publishes into. Omitted when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_id: Option<String>,
 }
 
 #[cfg(not(any(test, feature = "test-support")))]
@@ -13020,6 +13027,7 @@ fn editor_route_layout_invocation(
         caller_kind: "editor_route".to_string(),
         column_order: Default::default(),
         actor_bindings: Vec::new(),
+        client_id: None,
     })
 }
 
@@ -22590,6 +22598,17 @@ pub(crate) fn settle_supervisor_recycle_from(
 /// re-reads freshness and admits the pane only if it now reads fresh; a pane
 /// still stale is gated again by a newer pass. Decided by
 /// [`agent_doc_controller::pane_layout::recycle_settle_republishes_layout`].
+///
+/// `#ideriderindependentnav` P6: every navigation lane graph is considered,
+/// shared first. Each lane claims the republish against its own last pass's
+/// gated documents and republishes its own retained layout into its own lane,
+/// so one lane's settle never re-projects another lane. In `shared` mode the
+/// only lane is the shared lane and the republish is the pre-lane one byte for
+/// byte. Under `per_installation` every lane's republish is passive
+/// ([`recycle_settled_lane_invocation`]): lane membership applies to every
+/// lane there, the shared lane included, so a retained explicit claim
+/// republished verbatim would hand a pane over from another lane. The retained
+/// autostart setting is kept, as the pre-lane republish keeps it.
 fn republish_pane_layout_after_recycle(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -22602,35 +22621,85 @@ fn republish_pane_layout_after_recycle(
             .iter()
             .any(|document| canonical_layout_document_id(project_root, document) == settled_id)
     };
-    if !runtime.claim_pane_layout_recycle_republish(&was_gated) {
+    let lanes_partition = runtime.editor_surface_graph.navigation_mode()
+        == agent_doc_editor_surface::NavigationMode::PerInstallation;
+    for lane in runtime.pane_layout_lane_ids() {
+        republish_lane_pane_layout_after_recycle(
+            bootstrap,
+            runtime,
+            &lane,
+            file,
+            &was_gated,
+            lanes_partition,
+        );
+    }
+}
+
+fn republish_lane_pane_layout_after_recycle(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    file: &Path,
+    was_gated: &dyn Fn(&[String]) -> bool,
+    lanes_partition: bool,
+) {
+    let graph = runtime.pane_layout_graph_for_lane(lane);
+    if !graph.claim_recycle_republish(was_gated) {
         return;
     }
-    let Some(desired) = runtime.pane_layout_desired() else {
+    let Some(desired) = graph.desired() else {
         return;
     };
     let generation = desired.generation;
-    let result = publish_pane_layout_desired_invocation(
+    let invocation = if lanes_partition {
+        recycle_settled_lane_invocation(desired.invocation)
+    } else {
+        desired.invocation
+    };
+    let result = publish_pane_layout_desired_invocation_in_lane(
         bootstrap,
         runtime,
-        desired.invocation,
+        lane,
+        invocation,
         desired.source_plane_version,
         PaneLayoutPublication::FreshIntent,
         PaneLayoutPublisher::RecycleSettled,
     );
+    let lane_field = lane
+        .installation()
+        .map(|installation| format!(" navigation_lane={installation}"))
+        .unwrap_or_default();
     agent_doc_ops_log_io::log_op(
-        project_root,
+        &bootstrap.project_root,
         &match result {
             Ok((republished, _)) => format!(
-                "pane_layout_recycle_settled_republished document={} gated_generation={generation} generation={} (GH #136)",
+                "pane_layout_recycle_settled_republished document={}{lane_field} gated_generation={generation} generation={} (GH #136)",
                 file.display(),
                 republished.generation,
             ),
             Err(error) => format!(
-                "pane_layout_recycle_settled_republish_failed document={} gated_generation={generation} error={error:#} (GH #136)",
+                "pane_layout_recycle_settled_republish_failed document={}{lane_field} gated_generation={generation} error={error:#} (GH #136)",
                 file.display(),
             ),
         },
     );
+}
+
+/// A lane's retained invocation as its recycle-settle republish under
+/// `per_installation` (`#ideriderindependentnav` P6). A retained explicit claim
+/// (`manual`, the operator's own Sync Tmux Layout or Claim) becomes the passive
+/// [`agent_doc_editor_surface::RECYCLE_SETTLED_CALLER_KIND`], so a background
+/// republish never hands a pane over from another lane: a pane that moved
+/// away since stays where it is and is dropped from this lane
+/// (`cross_lane_layout_dropped`). A passive retained kind is kept unchanged.
+/// Columns, focus, window, and `no_autostart` are the retained ones.
+fn recycle_settled_lane_invocation(
+    mut invocation: ControllerTmuxLayoutSyncInvocation,
+) -> ControllerTmuxLayoutSyncInvocation {
+    if agent_doc_editor_surface::LaneClaim::for_caller_kind(&invocation.caller_kind).is_explicit() {
+        invocation.caller_kind = agent_doc_editor_surface::RECYCLE_SETTLED_CALLER_KIND.to_string();
+    }
+    invocation
 }
 
 struct RetainedWriteObservationBasis {
@@ -31180,6 +31249,7 @@ mod desktop_editor_focus_tests {
             caller_kind: "automatic".to_string(),
             column_order: Default::default(),
             actor_bindings: Vec::new(),
+            client_id: None,
         };
         assert!(suppress_inactive_automatic_layout_focus(
             &mut automatic,
@@ -31368,17 +31438,67 @@ fn publish_pane_layout_desired(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     request: ControllerRequest,
-) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
+) -> Result<(
+    agent_doc_editor_surface::NavigationLane,
+    PaneLayoutDesired,
+    ControllerTmuxLayoutSyncInvocation,
+)> {
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
-    let invocation: ControllerTmuxLayoutSyncInvocation =
+    let mut invocation: ControllerTmuxLayoutSyncInvocation =
         serde_json::from_str(&payload_json).context("parse sync tmux layout invocation")?;
-    publish_pane_layout_desired_invocation(
+    let client_id = invocation.client_id.take();
+    let lane = sync_tmux_layout_command_lane(
+        runtime.editor_surface_graph.navigation_mode(),
+        client_id.as_deref(),
+    );
+    let publication = pane_layout_publication_for_invocation(&invocation);
+    if lane.is_shared() {
+        let (desired, invocation) = publish_pane_layout_desired_invocation(
+            bootstrap,
+            runtime,
+            invocation,
+            None,
+            publication,
+            PaneLayoutPublisher::Command,
+        )?;
+        return Ok((lane, desired, invocation));
+    }
+    let (desired, invocation) = publish_pane_layout_desired_invocation_in_lane(
         bootstrap,
         runtime,
-        invocation.clone(),
+        &lane,
+        invocation,
         None,
-        pane_layout_publication_for_invocation(&invocation),
+        publication,
         PaneLayoutPublisher::Command,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "sync_tmux_layout_lane_routed navigation_lane={} client_id={} generation={} caller_kind={}",
+            lane.label(),
+            client_id.as_deref().unwrap_or_default(),
+            desired.generation,
+            desired.invocation.caller_kind,
+        ),
+    );
+    Ok((lane, desired, invocation))
+}
+
+/// The navigation lane an explicit `sync_tmux_layout` command publishes into
+/// (`#ideriderindependentnav` P6): the requesting client's lane under
+/// `navigation_mode` when the command names a client id, else the shared lane.
+/// `shared` mode, an unscoped client, and a command without a client id are
+/// all the shared lane, which is the pre-lane command path.
+fn sync_tmux_layout_command_lane(
+    navigation_mode: agent_doc_editor_surface::NavigationMode,
+    client_id: Option<&str>,
+) -> agent_doc_editor_surface::NavigationLane {
+    client_id.map_or(
+        agent_doc_editor_surface::NavigationLane::Shared,
+        |client_id| {
+            agent_doc_editor_surface::NavigationLane::for_client(navigation_mode, client_id)
+        },
     )
 }
 
@@ -31821,7 +31941,17 @@ pub(crate) fn handle_sync_tmux_layout(
     runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<ControllerTmuxLayoutSyncReceipt> {
-    let (desired, invocation) = publish_pane_layout_desired(bootstrap, runtime, request)?;
+    let (lane, desired, invocation) = publish_pane_layout_desired(bootstrap, runtime, request)?;
+    if !lane.is_shared() {
+        return await_lane_sync_tmux_layout_projection(
+            bootstrap,
+            runtime,
+            &lane,
+            desired,
+            invocation,
+            PANE_LAYOUT_COMMAND_AWAIT,
+        );
+    }
     await_sync_tmux_layout_projection(
         bootstrap,
         runtime,
@@ -31829,6 +31959,80 @@ pub(crate) fn handle_sync_tmux_layout(
         invocation,
         PANE_LAYOUT_COMMAND_AWAIT,
     )
+}
+
+/// [`await_sync_tmux_layout_projection`] for an installation navigation lane's
+/// explicit `sync_tmux_layout` command (`#ideriderindependentnav` P6): the
+/// receipt is the lane graph's projection of the generation the command
+/// published, applied by that lane's own effect worker into the lane session.
+/// The shared lane's graph, durable column memory, and status are untouched.
+fn await_lane_sync_tmux_layout_projection(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    desired: PaneLayoutDesired,
+    invocation: ControllerTmuxLayoutSyncInvocation,
+    await_timeout: Duration,
+) -> Result<ControllerTmuxLayoutSyncReceipt> {
+    let graph = runtime.pane_layout_graph_for_lane(lane);
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        // The test runtime has no tmux effect worker, so the fake adapter is
+        // the observation (as in `await_sync_tmux_layout_projection`).
+        let _ = await_timeout;
+        let mut invocation = invocation;
+        invocation.actor_bindings = graph.actor_bindings();
+        let mut receipt = runtime_effects()?.sync_tmux_layout(
+            &bootstrap.project_root,
+            invocation,
+            &runtime.main_layout_eligibility(),
+        )?;
+        receipt.layout_generation = Some(desired.generation);
+        receipt.layout_publisher = Some(desired.provenance.publisher.label().to_string());
+        Ok(receipt)
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        let _ = bootstrap;
+        let routes_created_panes = invocation.routes_created_panes();
+        if !pane_layout_invocation_awaits_projection(&invocation) {
+            return Ok(ControllerTmuxLayoutSyncReceipt {
+                gated_documents: Vec::new(),
+                applied: false,
+                reason: "projection_published".to_string(),
+                columns: invocation.columns,
+                layout_generation: Some(desired.generation),
+                layout_publisher: Some(desired.provenance.publisher.label().to_string()),
+                window: invocation.window,
+                focus: invocation.focus,
+                no_autostart: invocation.no_autostart,
+                exact_visible: invocation.exact_visible,
+                routes_created_panes,
+                file_panes: Vec::new(),
+            });
+        }
+        let projection = graph.await_generation(desired.generation, await_timeout);
+        let (applied, reason) = pane_layout_await_outcome(&projection, desired.generation);
+        let current = pane_layout_projection_desired(&projection);
+        let receipt_generation = current
+            .map(|current| current.generation)
+            .unwrap_or(desired.generation);
+        Ok(ControllerTmuxLayoutSyncReceipt {
+            gated_documents: Vec::new(),
+            applied,
+            reason: reason.to_string(),
+            columns: invocation.columns,
+            layout_generation: current.map(|current| current.generation),
+            layout_publisher: current
+                .map(|current| current.provenance.publisher.label().to_string()),
+            window: invocation.window,
+            focus: invocation.focus,
+            no_autostart: invocation.no_autostart,
+            exact_visible: invocation.exact_visible,
+            routes_created_panes,
+            file_panes: graph.effect_file_panes(receipt_generation),
+        })
+    }
 }
 
 /// Publish one fresh editor-route layout intent and await its projection.
@@ -32174,6 +32378,7 @@ mod pane_layout_projection_dispatch_tests {
             caller_kind: caller_kind.to_string(),
             column_order: Default::default(),
             actor_bindings: Vec::new(),
+            client_id: None,
         }
     }
 
@@ -36054,6 +36259,7 @@ mod tests {
             caller_kind: "manual".to_string(),
             column_order: agent_doc_tmux::LayoutColumnOrder::Unknown,
             actor_bindings: Vec::new(),
+            client_id: None,
         }
     }
 
@@ -38850,6 +39056,377 @@ mod tests {
         );
     }
 
+    fn per_installation_lane_fixture() -> (
+        tempfile::TempDir,
+        ControllerBootstrap,
+        Arc<ControllerRuntime>,
+    ) {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "editor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        (dir, bootstrap, runtime)
+    }
+
+    fn lane_test_document(dir: &tempfile::TempDir, name: &str) -> String {
+        let path = dir.path().join(format!("{name}.md"));
+        std::fs::write(
+            &path,
+            format!("---\nagent_doc_session: {name}\nagent: codex\n---\n# {name}\n"),
+        )
+        .unwrap();
+        path.canonicalize().unwrap().display().to_string()
+    }
+
+    fn sync_tmux_layout_command_request(
+        columns: &[String],
+        client_id: Option<&str>,
+    ) -> ControllerRequest {
+        let mut invocation = super::super::tests::pane_layout_desired_for_test(1).invocation;
+        invocation.columns = columns.to_vec();
+        invocation.focus = columns.first().cloned();
+        invocation.caller_kind = "manual".to_string();
+        invocation.no_autostart = false;
+        invocation.client_id = client_id.map(str::to_string);
+        serde_json::from_value(serde_json::json!({
+            "command": "sync_tmux_layout",
+            "diagnostic_payload": serde_json::to_string(&invocation).unwrap(),
+        }))
+        .unwrap()
+    }
+
+    /// `#ideriderindependentnav` P6: the lane an explicit `sync_tmux_layout`
+    /// command publishes into. Only an installation-scoped client id under
+    /// `per_installation` leaves the shared lane.
+    #[test]
+    fn sync_tmux_layout_command_lane_follows_the_client_id_only_per_installation() {
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        const IDEA: &str = "jetbrains@IU.0a1b2c3d-pid:41";
+        for mode in [NavigationMode::Shared, NavigationMode::PerInstallation] {
+            assert_eq!(
+                sync_tmux_layout_command_lane(mode, None),
+                NavigationLane::Shared
+            );
+            assert_eq!(
+                sync_tmux_layout_command_lane(mode, Some("vscode-pid:9")),
+                NavigationLane::Shared
+            );
+        }
+        assert_eq!(
+            sync_tmux_layout_command_lane(NavigationMode::Shared, Some(IDEA)),
+            NavigationLane::Shared
+        );
+        assert_eq!(
+            sync_tmux_layout_command_lane(NavigationMode::PerInstallation, Some(IDEA)),
+            NavigationLane::Installation("IU.0a1b2c3d".to_string())
+        );
+    }
+
+    /// `#ideriderindependentnav` P6: an explicit `sync_tmux_layout` command
+    /// naming its client publishes into that client's navigation lane, as the
+    /// `Command` publisher, and never touches the shared lane's graph or its
+    /// durable column memory. A command without a client id, or from an
+    /// unscoped client, is the shared lane. The client id is consumed by the
+    /// routing and never retained in a lane's invocation.
+    #[test]
+    fn sync_tmux_layout_command_publishes_into_the_requesting_clients_lane() {
+        use agent_doc_editor_surface::NavigationLane;
+        let (dir, bootstrap, runtime) = per_installation_lane_fixture();
+        let idea_doc = lane_test_document(&dir, "idea");
+        let rider_doc = lane_test_document(&dir, "rider");
+        let shared_doc = lane_test_document(&dir, "shared");
+        let vscode_doc = lane_test_document(&dir, "vscode");
+        let idea = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let rider = NavigationLane::Installation("RD.9f8e7d6c".to_string());
+        let desired = |lane: &NavigationLane| runtime.pane_layout_graph_for_lane(lane).desired();
+
+        let receipt = handle_sync_tmux_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            sync_tmux_layout_command_request(
+                std::slice::from_ref(&idea_doc),
+                Some("jetbrains@IU.0a1b2c3d-pid:41"),
+            ),
+        )
+        .unwrap();
+        assert!(receipt.applied);
+        let idea_desired = desired(&idea).expect("the idea lane received the command");
+        assert_eq!(receipt.layout_generation, Some(idea_desired.generation));
+        assert_eq!(receipt.layout_publisher.as_deref(), Some("command"));
+        assert_eq!(idea_desired.invocation.columns, vec![idea_doc.clone()]);
+        assert_eq!(
+            idea_desired.provenance.publisher,
+            PaneLayoutPublisher::Command
+        );
+        assert_eq!(idea_desired.invocation.client_id, None);
+        assert!(desired(&NavigationLane::Shared).is_none());
+        assert!(
+            load_layout_state(dir.path()).unwrap_or_default().is_empty(),
+            "an installation lane never writes the shared durable column memory"
+        );
+
+        handle_sync_tmux_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            sync_tmux_layout_command_request(
+                std::slice::from_ref(&rider_doc),
+                Some("jetbrains@RD.9f8e7d6c-pid:42"),
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            desired(&rider).unwrap().invocation.columns,
+            vec![rider_doc.clone()]
+        );
+        assert_eq!(
+            desired(&idea).unwrap().generation,
+            idea_desired.generation,
+            "another lane's command never re-projects this lane"
+        );
+
+        handle_sync_tmux_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            sync_tmux_layout_command_request(std::slice::from_ref(&shared_doc), None),
+        )
+        .unwrap();
+        let shared = desired(&NavigationLane::Shared).unwrap();
+        assert_eq!(shared.invocation.columns, vec![shared_doc.clone()]);
+        assert_eq!(
+            load_layout_state(dir.path()).unwrap(),
+            vec![shared_doc.clone()]
+        );
+
+        handle_sync_tmux_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            sync_tmux_layout_command_request(
+                std::slice::from_ref(&vscode_doc),
+                Some("vscode-pid:9"),
+            ),
+        )
+        .unwrap();
+        let shared = desired(&NavigationLane::Shared).unwrap();
+        assert_eq!(shared.invocation.columns, vec![vscode_doc]);
+        assert_eq!(shared.invocation.client_id, None);
+        assert_eq!(desired(&idea).unwrap().generation, idea_desired.generation);
+        assert_eq!(
+            runtime.pane_layout_lane_ids(),
+            vec![NavigationLane::Shared, idea.clone(), rider.clone()]
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains(
+                "sync_tmux_layout_lane_routed navigation_lane=IU.0a1b2c3d client_id=jetbrains@IU.0a1b2c3d-pid:41"
+            ),
+            "{ops}"
+        );
+        assert_eq!(
+            ops.matches("sync_tmux_layout_lane_routed").count(),
+            2,
+            "only the two installation-lane commands are lane-routed: {ops}"
+        );
+    }
+
+    /// `#ideriderindependentnav` P6: in `shared` mode a command's client id
+    /// changes nothing. Every command reaches the shared lane, no installation
+    /// lane is created, and a command without a client id serializes exactly
+    /// as before (no `client_id` key on the wire).
+    #[test]
+    fn shared_mode_sync_tmux_layout_command_is_the_pre_lane_path_for_every_client() {
+        use agent_doc_editor_surface::NavigationLane;
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        let alpha = lane_test_document(&dir, "alpha");
+        let beta = lane_test_document(&dir, "beta");
+
+        let unnamed = sync_tmux_layout_command_request(std::slice::from_ref(&alpha), None);
+        assert!(
+            !unnamed
+                .diagnostic_payload
+                .as_deref()
+                .unwrap()
+                .contains("client_id"),
+            "an invocation without a client id keeps the pre-lane wire shape"
+        );
+        handle_sync_tmux_layout(&bootstrap, runtime.as_ref(), unnamed).unwrap();
+        let first = runtime.pane_layout_desired().unwrap();
+        handle_sync_tmux_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            sync_tmux_layout_command_request(
+                std::slice::from_ref(&beta),
+                Some("jetbrains@IU.0a1b2c3d-pid:41"),
+            ),
+        )
+        .unwrap();
+        let second = runtime.pane_layout_desired().unwrap();
+        assert!(second.generation > first.generation);
+        assert_eq!(second.invocation.columns, vec![beta.clone()]);
+        assert_eq!(second.invocation.client_id, None);
+        assert_eq!(runtime.pane_layout_lane_ids(), vec![NavigationLane::Shared]);
+        assert_eq!(load_layout_state(dir.path()).unwrap(), vec![beta]);
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(!ops.contains("sync_tmux_layout_lane_routed"), "{ops}");
+    }
+
+    /// `#ideriderindependentnav` P6: a supervisor settle re-applies each
+    /// navigation lane's own retained layout, but only in the lanes whose last
+    /// pass gated the settled document, each into its own lane. An installation
+    /// lane's retained explicit claim is republished passively (so a pane that
+    /// moved away is never taken back) with its autostart setting unchanged.
+    /// `shared` mode's republish (caller kind kept) is
+    /// `gh136d_recycle_settle_republishes_a_gated_layout_exactly_once`.
+    #[test]
+    fn recycle_settle_republishes_each_navigation_lanes_own_retained_layout() {
+        use agent_doc_editor_surface::{LaneClaim, NavigationLane};
+        let (dir, bootstrap, runtime) = per_installation_lane_fixture();
+        let idea_doc = lane_test_document(&dir, "idea");
+        let rider_doc = lane_test_document(&dir, "rider");
+        let shared_doc = lane_test_document(&dir, "shared");
+        let idea = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let rider = NavigationLane::Installation("RD.9f8e7d6c".to_string());
+        for (lane, columns) in [
+            (&idea, vec![idea_doc.clone(), rider_doc.clone()]),
+            (&rider, vec![rider_doc.clone()]),
+            (&NavigationLane::Shared, vec![shared_doc.clone()]),
+        ] {
+            let mut invocation = super::super::tests::pane_layout_desired_for_test(1).invocation;
+            invocation.focus = columns.first().cloned();
+            invocation.columns = columns;
+            invocation.caller_kind = "manual".to_string();
+            invocation.no_autostart = false;
+            let (published, _) = publish_pane_layout_desired_invocation_in_lane(
+                &bootstrap,
+                &runtime,
+                lane,
+                invocation,
+                None,
+                PaneLayoutPublication::FreshIntent,
+                PaneLayoutPublisher::Command,
+            )
+            .unwrap();
+            runtime.pane_layout_graph_for_lane(lane).record_gated(
+                published.generation,
+                published.invocation.columns[..1].to_vec(),
+            );
+        }
+        let desired =
+            |lane: &NavigationLane| runtime.pane_layout_graph_for_lane(lane).desired().unwrap();
+        let before = [&NavigationLane::Shared, &idea, &rider].map(desired);
+
+        // A document no lane gated republishes nothing anywhere.
+        let ungated = lane_test_document(&dir, "ungated");
+        republish_pane_layout_after_recycle(&bootstrap, &runtime, Path::new(&ungated));
+        for (lane, retained) in [&NavigationLane::Shared, &idea, &rider].iter().zip(&before) {
+            assert_eq!(desired(lane).generation, retained.generation);
+        }
+
+        // IDEA gated its own document: only IDEA's lane republishes.
+        republish_pane_layout_after_recycle(&bootstrap, &runtime, Path::new(&idea_doc));
+        let idea_republished = desired(&idea);
+        assert!(idea_republished.generation > before[1].generation);
+        assert_eq!(
+            idea_republished.provenance.publisher,
+            PaneLayoutPublisher::RecycleSettled
+        );
+        assert_eq!(
+            idea_republished.invocation.columns,
+            before[1].invocation.columns
+        );
+        assert_eq!(
+            idea_republished.invocation.focus,
+            before[1].invocation.focus
+        );
+        assert_eq!(
+            idea_republished.invocation.caller_kind,
+            agent_doc_editor_surface::RECYCLE_SETTLED_CALLER_KIND
+        );
+        assert_eq!(
+            LaneClaim::for_caller_kind(&idea_republished.invocation.caller_kind),
+            LaneClaim::Passive,
+            "a background republish can never hand a pane over from another lane"
+        );
+        assert!(!idea_republished.invocation.no_autostart);
+        assert_eq!(desired(&rider).generation, before[2].generation);
+        assert_eq!(
+            desired(&NavigationLane::Shared).generation,
+            before[0].generation
+        );
+
+        // A retried settle is a no-op in every lane.
+        republish_pane_layout_after_recycle(&bootstrap, &runtime, Path::new(&idea_doc));
+        assert_eq!(desired(&idea).generation, idea_republished.generation);
+
+        // Rider's settle republishes Rider's lane only, though IDEA's layout
+        // also lists the document (IDEA's last pass did not gate it).
+        republish_pane_layout_after_recycle(&bootstrap, &runtime, Path::new(&rider_doc));
+        assert!(desired(&rider).generation > before[2].generation);
+        assert_eq!(desired(&rider).invocation.columns, vec![rider_doc.clone()]);
+        assert_eq!(desired(&idea).generation, idea_republished.generation);
+
+        // Lane membership applies to the shared lane too under
+        // `per_installation`, so its republish is passive as well.
+        republish_pane_layout_after_recycle(&bootstrap, &runtime, Path::new(&shared_doc));
+        let shared = desired(&NavigationLane::Shared);
+        assert!(shared.generation > before[0].generation);
+        assert_eq!(
+            shared.invocation.caller_kind,
+            agent_doc_editor_surface::RECYCLE_SETTLED_CALLER_KIND
+        );
+        assert_eq!(shared.invocation.columns, vec![shared_doc.clone()]);
+        assert_eq!(load_layout_state(dir.path()).unwrap(), vec![shared_doc]);
+
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert_eq!(
+            ops.matches("pane_layout_recycle_settled_republished")
+                .count(),
+            3,
+            "{ops}"
+        );
+        assert!(ops.contains("navigation_lane=IU.0a1b2c3d"), "{ops}");
+        assert!(ops.contains("navigation_lane=RD.9f8e7d6c"), "{ops}");
+    }
+
+    /// `#ideriderindependentnav` P6: only a retained explicit claim is
+    /// rewritten for an installation lane's recycle republish; a passive kind
+    /// and every other field are kept.
+    #[test]
+    fn recycle_settled_lane_invocation_only_demotes_an_explicit_claim() {
+        let mut manual = super::super::tests::pane_layout_desired_for_test(1).invocation;
+        manual.caller_kind = "manual".to_string();
+        manual.no_autostart = false;
+        let republished = recycle_settled_lane_invocation(manual.clone());
+        assert_eq!(
+            republished.caller_kind,
+            agent_doc_editor_surface::RECYCLE_SETTLED_CALLER_KIND
+        );
+        assert_eq!(
+            ControllerTmuxLayoutSyncInvocation {
+                caller_kind: manual.caller_kind.clone(),
+                ..republished
+            },
+            manual
+        );
+        for passive in ["automatic", "editor_route", "projection", "lane_handoff"] {
+            let mut invocation = manual.clone();
+            invocation.caller_kind = passive.to_string();
+            assert_eq!(
+                recycle_settled_lane_invocation(invocation.clone()),
+                invocation
+            );
+        }
+    }
+
     /// `#ideriderindependentnav` P3: the IDE terminal's lane session for a
     /// client. `shared` mode, an unscoped client, and a missing pin keep the
     /// shared attach target (`None`) and never touch tmux.
@@ -39046,6 +39623,167 @@ mod tests {
         );
         assert_eq!(tmux.list_window_names("proj-ZZ-00000000").len(), 1);
         assert_eq!(tmux.pane_session(&shared_pane).unwrap(), "proj");
+    }
+
+    /// `#ideriderindependentnav` P6: a recycle settle republishes IDEA's and
+    /// Rider's retained layouts into their own lanes against a real (isolated)
+    /// tmux server. Both retained layouts are explicit claims on a contended
+    /// document whose pane Rider's lane holds: republished verbatim, IDEA's
+    /// would hand the pane over; republished as `recycle_settled` it routes
+    /// with no handoff, IDEA drops the document and targets its own window,
+    /// Rider keeps it, and no pane changes session, is duplicated, or is lost.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_session_recycle_republish_keeps_every_pane_in_its_lane() {
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("navlane-recycle");
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let shared_pane = tmux.new_session("proj", &root).unwrap();
+        let idea = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let rider = NavigationLane::Installation("RD.9f8e7d6c".to_string());
+        let route = |lane: &NavigationLane| {
+            pane_layout_lane_route(&root, NavigationMode::PerInstallation, lane, &tmux).unwrap()
+        };
+        let (idea_route, rider_route) = (route(&idea), route(&rider));
+        let idea_window = idea_route.window.clone().unwrap();
+        let rider_window = rider_route.window.clone().unwrap();
+        let idea_pane = tmux.list_window_panes(&idea_window).unwrap()[0].clone();
+        let rider_pane = tmux.list_window_panes(&rider_window).unwrap()[0].clone();
+        let contended_pane = tmux.split_window(&rider_pane, &root, "-d").unwrap();
+        let idea_doc = lane_test_document(&dir, "idea");
+        let rider_doc = lane_test_document(&dir, "rider");
+        let contended_doc = lane_test_document(&dir, "contended");
+        let binding = |document: &str, pane: &str| ControllerTmuxActorBinding {
+            document_path: document.to_string(),
+            session_id: String::new(),
+            pane_id: pane.to_string(),
+            generation: 1,
+        };
+        let bindings = vec![
+            binding(&idea_doc, &idea_pane),
+            binding(&rider_doc, &rider_pane),
+            binding(&contended_doc, &contended_pane),
+        ];
+        let panes = [&shared_pane, &idea_pane, &rider_pane, &contended_pane];
+        let placement = || {
+            panes
+                .iter()
+                .map(|pane| tmux.pane_session(pane).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let before = placement();
+        assert_eq!(
+            before,
+            vec![
+                "proj",
+                "proj-IU-0a1b2c3d",
+                "proj-RD-9f8e7d6c",
+                "proj-RD-9f8e7d6c"
+            ]
+        );
+
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        let mut retained = BTreeMap::new();
+        for (lane, columns) in [
+            (&idea, vec![idea_doc.clone(), contended_doc.clone()]),
+            (&rider, vec![rider_doc.clone(), contended_doc.clone()]),
+        ] {
+            let mut invocation = super::super::tests::pane_layout_desired_for_test(1).invocation;
+            invocation.focus = columns.first().cloned();
+            invocation.columns = columns;
+            invocation.caller_kind = "manual".to_string();
+            invocation.no_autostart = false;
+            let (published, _) = publish_pane_layout_desired_invocation_in_lane(
+                &bootstrap,
+                &runtime,
+                lane,
+                invocation,
+                None,
+                PaneLayoutPublication::FreshIntent,
+                PaneLayoutPublisher::Command,
+            )
+            .unwrap();
+            runtime
+                .pane_layout_graph_for_lane(lane)
+                .record_gated(published.generation, vec![contended_doc.clone()]);
+            retained.insert(lane.clone(), published);
+        }
+        let route_lane = |route: &PaneLayoutLaneRoute, desired| {
+            route_pane_layout_desired_to_lane(&root, route, desired, &bindings, |pane| {
+                tmux.pane_session(pane).ok()
+            })
+        };
+        // The retained explicit claim, republished verbatim, would take the pane.
+        assert_eq!(
+            route_lane(&idea_route, retained[&idea].clone())
+                .handoffs
+                .iter()
+                .map(|handoff| handoff.pane.clone())
+                .collect::<Vec<_>>(),
+            vec![contended_pane.clone()]
+        );
+
+        republish_pane_layout_after_recycle(&bootstrap, &runtime, Path::new(&contended_doc));
+        let idea_routed = route_lane(
+            &idea_route,
+            runtime.pane_layout_graph_for_lane(&idea).desired().unwrap(),
+        );
+        let rider_routed = route_lane(
+            &rider_route,
+            runtime
+                .pane_layout_graph_for_lane(&rider)
+                .desired()
+                .unwrap(),
+        );
+        for (lane, routed) in [(&idea, &idea_routed), (&rider, &rider_routed)] {
+            assert!(routed.desired.generation > retained[lane].generation);
+            assert_eq!(
+                routed.desired.provenance.publisher,
+                PaneLayoutPublisher::RecycleSettled
+            );
+            assert!(routed.handoffs.is_empty(), "{}: {routed:?}", lane.label());
+        }
+        assert_eq!(
+            idea_routed.desired.invocation.columns,
+            vec![idea_doc.clone()]
+        );
+        assert_eq!(
+            idea_routed.dropped,
+            vec![(contended_doc.clone(), "proj-RD-9f8e7d6c".to_string())]
+        );
+        assert_eq!(idea_routed.desired.invocation.window, Some(idea_window));
+        assert_eq!(
+            rider_routed.desired.invocation.columns,
+            vec![rider_doc, contended_doc]
+        );
+        assert!(rider_routed.dropped.is_empty());
+        assert_eq!(rider_routed.desired.invocation.window, Some(rider_window));
+        assert!(
+            runtime
+                .pane_layout_graph_for_lane(&NavigationLane::Shared)
+                .desired()
+                .is_none(),
+            "the shared lane held no retained layout and is not republished"
+        );
+        assert_eq!(placement(), before, "no pane changed session");
+        let all_panes = tmux
+            .raw_cmd(&["list-panes", "-a", "-F", "#{pane_id}"])
+            .unwrap();
+        for pane in panes {
+            assert_eq!(
+                all_panes.lines().filter(|line| line.trim() == pane).count(),
+                1,
+                "{pane} exists exactly once"
+            );
+        }
     }
 
     /// `#ideriderindependentnav` P2b: an installation lane's session is created
@@ -39590,6 +40328,7 @@ mod tests {
             caller_kind: "projection".to_string(),
             column_order: Default::default(),
             actor_bindings: Vec::new(),
+            client_id: None,
         };
         let message_json = state_plane_snapshot_message_json(
             42,
@@ -41075,6 +41814,10 @@ mod tests {
         );
         assert_eq!(republished.invocation.columns, three.invocation.columns);
         assert_eq!(republished.invocation.focus, three.invocation.focus);
+        assert_eq!(
+            republished.invocation.caller_kind, three.invocation.caller_kind,
+            "shared mode republishes the retained invocation unchanged"
+        );
 
         // The retried settle (`#recyclesettleretry`) and a duplicate are no-ops.
         fixture.settle("gamma");
@@ -41666,6 +42409,7 @@ mod tests {
             caller_kind: "editor_route".to_string(),
             actor_bindings: Vec::new(),
             column_order: Default::default(),
+            client_id: None,
         };
         assert_eq!(editor_route_focus_refusal(&invocation, "/repo/a.md"), None);
         let refusal = editor_route_focus_refusal(&invocation, "/repo/z.md").unwrap();
@@ -42870,6 +43614,7 @@ mod tests {
                 caller_kind: "automatic".to_string(),
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
+                client_id: None,
             },
             provenance: PaneLayoutProvenance::default(),
         };
@@ -44604,6 +45349,7 @@ mod tests {
             caller_kind: "automatic".into(),
             column_order: Default::default(),
             actor_bindings: Vec::new(),
+            client_id: None,
         };
         let old = graph.set_desired(invocation.clone(), None);
         graph.record_structural_assignment(
@@ -44878,6 +45624,7 @@ mod tests {
                     caller_kind: "manual".to_string(),
                     column_order: Default::default(),
                     actor_bindings: Vec::new(),
+                    client_id: None,
                 })
                 .unwrap(),
             ),

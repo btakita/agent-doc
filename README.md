@@ -117,7 +117,10 @@ IDE: that explicit request hands the pane over to the requesting IDE's lane
 read when the project controller starts; an unknown value logs a warning and
 keeps `shared`. Each JetBrains IDE's agent-doc terminal attaches to its own lane
 session, its manual Sync Tmux Layout arranges that lane, and tmux-to-editor focus
-mirroring reads only that lane ([plan](docs/plan-ide-independent-nav.md)).
+mirroring reads only that lane ([plan](docs/plan-ide-independent-nav.md)). When a
+supervisor that a layout pass left out restarts, each IDE's lane that left it out
+re-applies its own last layout in its own session; that re-arrangement never takes a
+pane from another IDE's lane.
 
 Switching the mode is safe on a project that already has a shared window.
 Turning `per_installation` on moves no pane: existing panes stay in the shared

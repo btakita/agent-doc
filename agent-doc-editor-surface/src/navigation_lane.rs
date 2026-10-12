@@ -279,6 +279,12 @@ impl LaneClaim {
 /// only drop the document, never take the pane back.
 pub const LANE_HANDOFF_CALLER_KIND: &str = "lane_handoff";
 
+/// The `caller_kind` of an installation lane's recycle-settle republish when
+/// its retained layout was an explicit claim (`#ideriderindependentnav` P6).
+/// It is passive ([`LaneClaim::for_caller_kind`]), so a background republish
+/// never hands a pane over from another lane.
+pub const RECYCLE_SETTLED_CALLER_KIND: &str = "recycle_settled";
+
 /// One lane's layout columns with every document whose pane lives in another
 /// lane removed (`cross_lane_layout_dropped`), or, for an explicit claim,
 /// marked for handoff into this lane.
@@ -762,6 +768,7 @@ mod tests {
             "projection",
             "",
             LANE_HANDOFF_CALLER_KIND,
+            RECYCLE_SETTLED_CALLER_KIND,
         ] {
             assert_eq!(
                 LaneClaim::for_caller_kind(passive),

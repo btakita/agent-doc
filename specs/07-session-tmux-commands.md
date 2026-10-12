@@ -256,14 +256,38 @@ loses desktop focus.
   session. The controller keeps one pane-layout graph per lane (its own desired layout,
   observation, receipt, structural assignments, width memory, and published generation, all in the
   controller process scope and derived from the one actor store); the shared lane's graph is the
-  one every non-lane caller uses (route, recycle republish, the `sync_tmux_layout` command), and
-  installation lanes' graphs are created on first use.
+  one every non-lane caller uses (route, and a `sync_tmux_layout` command without a client id),
+  and installation lanes' graphs are created on first use.
 - Plugin layout publications are lane-routed (P3): a `pane_layout_desired` state-plane frame
   carries its publisher's surface `client_id`, and the controller projects it into that client's
   lane graph (a frame without one, and every frame in shared mode, is the shared lane). Each lane
   has its own latest-wins projector, so one installation's newer frame never coalesces away
   another's. The manual Sync Tmux Layout action publishes this way, so it arranges the requesting
   IDE's own lane. A lane frame counts as seen for the shared lane's route plane catch-up.
+- The `sync_tmux_layout` controller command is lane-routed (P6): its invocation may carry the
+  requesting editor surface's `client_id` (FFI `agent_doc_sync_tmux_layout_for_client_json`; the
+  command-plane payload `agent-doc.sync_tmux_layout.v1` carries the same optional field, omitted
+  from the wire when unset). The controller consumes the field and publishes the command, as the
+  `command` publisher, into that client's lane graph (`NavigationLane::for_client`), logging
+  `sync_tmux_layout_lane_routed navigation_lane=.. client_id=.. generation=..`; the receipt is that
+  lane graph's projection of the published generation. An installation lane's command never writes
+  the shared durable column memory or the shared status channel. A command without a client id, an
+  unscoped client, and every client in `shared` mode publish into the shared lane exactly as before
+  (the legacy FFI `agent_doc_sync_tmux_layout_json` is the client-scoped entry with no client).
+  A `manual` command is an explicit claim in its own lane (P4).
+- The recycle-settle republish is per lane (P6). When a supervisor reports a settled recycle, every
+  lane graph the controller holds (shared first) claims the republish against its own last pass's
+  gated documents (GH #136 (d)) and, when that lane gated the settled document, republishes its own
+  retained layout as a fresh `recycle_settled` generation into its own lane only
+  (`pane_layout_recycle_settled_republished document=.. navigation_lane=..`; the shared lane's line
+  has no `navigation_lane`). A lane that did not gate the document, or holds no retained layout, is
+  not republished, and one lane's settle never re-projects another lane. Under `per_installation`
+  every lane's republish is passive: a retained explicit claim (`manual`) is republished with
+  `caller_kind = recycle_settled` (`RECYCLE_SETTLED_CALLER_KIND`), so the republish can only drop a
+  document whose pane has since moved to another lane (`cross_lane_layout_dropped`), never hand a
+  pane over; columns, focus, window, and `no_autostart` are the retained ones, so it starts nothing
+  the retained layout would not. In `shared` mode the republish is the retained invocation
+  unchanged, byte for byte as before lanes.
 - Each lane graph has its own effect sink and latest-wins worker, and its structural-effect
   cancellation is bound to that lane's published generation, so a newer layout in one lane never
   supersedes or cancels another lane's sync body.
@@ -321,8 +345,8 @@ loses desktop focus.
   generation of that layout with `caller_kind = lane_handoff`, `no_autostart`, and publisher
   `lane_handoff` (`navigation_lane_handoff_republished`), so it re-projects without the document
   and can never take the pane back or start a new one. Every other `caller_kind` (`automatic`
-  heartbeats, focus escalations, `editor_route`, `resync`, recycle republishes) is passive and
-  never moves a pane. A handoff retried by the same generation is a no-op (`AlreadyInLane`).
+  heartbeats, focus escalations, `editor_route`, `resync`, `recycle_settled` republishes) is
+  passive and never moves a pane. A handoff retried by the same generation is a no-op (`AlreadyInLane`).
   Shared navigation mode never resolves lane sessions, so it never hands over.
 - Lane migration and cleanup (P5, `agent-doc gc`;
   `project_controller::reconcile_navigation_lane_sessions`, planned by the pure

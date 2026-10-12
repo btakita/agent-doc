@@ -128,6 +128,9 @@ level deeper, inside any component whose body is a sequence of keyed children:
 - **List components** (`queue`/`backlog`/`review`/`done`): each `- …` markdown item is a child,
   keyed by its durable `#id` (the identity the strike paths already use) or, for a free-text item,
   its normalized text (strike markers / pin glyphs / checkbox stripped, so a strike keys the same).
+  An inbound `queue add` head (`[from:<source> key=<key>] <text>`) keys by its attribution tag
+  (`from:<source>:key=<key>`, or its normalized text when unkeyed), never by a `[#id]` its text
+  names, so it never shares a cell with the operator's own line for that id (`#fpeseverityparse`).
   Continuation lines attach to the preceding item; leading text is a reserved preamble child.
 - **`exchange`**: each `### Re:` block is a child keyed by its heading (minus the working-tree-only
   ` (HEAD)`). A prompt typed into the exchange attaches to the block it falls within, so it

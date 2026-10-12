@@ -2,6 +2,43 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.494
+
+- **Auto-clear between queue items, on by default (`#bgclearpolicy`).** After an
+  item's proven closeout, at the idle boundary before the next head is
+  dispatched, Claude Code gets `/clear` typed into the same process (background
+  agents and shells survive), OpenCode gets `/new`, and Codex is restarted
+  fresh. It never clears mid-turn, over an unsent draft, with unanswered
+  operator prompts, or while a subagent claim is in flight. A bare
+  `disable-auto-clear` attribute on the `agent:queue` element turns it off. The
+  June disable (`45ff25f994`) is avoided: Codex is never typed `/clear`, at most
+  one clear runs per finished item, and every clear records its source. Also
+  fixes a supervisor stall where a head first seen inside the 2s settle window
+  was never dispatched.
+- **IDE navigation lanes completed (`#ideriderindependentnav` P5-P6).** With
+  `editor_navigation = "per_installation"`:
+  - route, start and claim (`--client-id`) place new panes in the requesting
+    IDE's lane; `agent-doc start` no longer drags lane panes back into the shared
+    session;
+  - the `sync_tmux_layout` command and the recycle republish are lane-aware;
+  - each lane publishes its own pane-layout status;
+  - the controller closes an IDE's empty lane when it sees that IDE quit, and a
+    switch back to `shared` folds lane panes home (also via `agent-doc gc`);
+    shared syncs adopt lane panes instead of arranging a stale lane.
+- **Clear after a Codex interrupt settles the turn (`#infraclearsession`).** The
+  dispatch receipt is settled in the same transaction that ends the interrupted
+  turn's lease, whichever process ends it.
+- **Queued Clear during supervisor startup (`#queuedclearflake`).** The Ready
+  transition releases receipts in the same transaction as the state change, a
+  repeated Ready no longer releases a running turn, and a blank pane's live-turn
+  evidence is checked, so a Clear can no longer skip the queue into a live turn.
+- **Steering pairs queue items by identity (`#steeringeditmisalign`).** Deleting
+  struck lines no longer reports untouched items as edited, and the stuck
+  "operator is still typing" count clears.
+- **Lane reliability.** Lane gc treats agent-doc's own starting shells as idle
+  (`#lanegcflake`), and lane frames count as seen at dispatch so shared-lane
+  routes never wait on another lane's worker (`#laneplaneflake`).
+
 ## 0.35.493
 
 - **Independent navigation per IDE (opt-in, `#ideriderindependentnav` P1-P4).**

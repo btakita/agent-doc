@@ -701,6 +701,23 @@ Also in flight:
 - `multilinequeuehead`.
 
 P3 is done and waiting for a plugin version bump at integration.
+
+### Re: bgclearpolicy direction — opus-5-5 · 2026-10-12T11:05-04:00
+
+> **Queue prompt:** do [#bgclearpolicy]: Do you have enough direction for this? The hourglass is still visible in the queue.
+
+> **Operator note:** Do you have enough direction for this? The hourglass is still visible in the queue.
+
+Yes, there's enough direction. Your two answers, "Re-enable clearing" and "auto-clear should on by default and disabled with a queue element attribute", went to the subagent working on branch `bgclearpolicy`. The hourglass was there only because the item text still began with `[operator-verify] … Decide:`, which flags it as waiting for you. This cycle rewrites the item as the decided spec:
+- on by default;
+- a bare `disable-auto-clear` attribute on the queue element turns it off;
+- Claude Code gets `/clear`, OpenCode gets `/new`, and Codex gets a fresh restart, all at the idle boundary between items.
+
+The item no longer waits for you.
+
+**Deferred:** the work itself is still in progress on that branch. It closes once it is merged and installed.
+
+v0.35.493 is in `make release` now, on the batch merged to `main` (`36da03f4f5`), plus `inlinecodemarker` and IDE navigation P4.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -709,49 +726,14 @@ P3 is done and waiting for a plugin version bump at integration.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏳ do [#bgclearpolicy]
-- ~~do [#ridernavp2b]~~
+- 🚧 do [#bgclearpolicy]: Do you have enough direction for this? The hourglass is still visible in the queue.
 - 🚧 do [#ridernavp3]
 - 🚧 do [#ridernavp4]
 - 🚧 do [#ridernavp5]
-~~~done
-lazily.md issue
-```
-• Blocked by hook
-  └ Queue continuation, not an error: agent-doc kept the active `agent:queue auto` moving for /home/brian/work/btakita/
-agent-loop/tasks/software/lazily.md. Codex labels every Stop continuation `Blocked by hook`; here that label means the
-next queue item is being handed back to this turn. The next queue prompt is "do [#lzcoreprofile]". Continue THIS turn
-in-pane: answer that prompt in /home/brian/work/btakita/agent-loop/tasks/software/lazily.md and persist with `agent-doc
-finalize /home/brian/work/btakita/agent-loop/tasks/software/lazily.md` (or `agent-doc write --commit /home/brian/work/
-btakita/agent-loop/tasks/software/lazily.md`). Do NOT run `agent-doc /home/brian/work/btakita/agent-loop/tasks/software/
-lazily.md` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and
-do not send the final answer yet. A background context reset was requested because session accretion is block
-(exchange_lines=924, response_sections=31, recent_committed_cycles=2, recent_noop_closeouts=0), but automatic context
-clearing is disabled; only an explicit operator clear may reset the session.
-```
-~~~
-sdk.md issue
-```
-• Blocked by hook
-  └ agent-doc Stop hook kept `agent:queue auto` paused for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/
-sdk.md because the prior binary-owned editor write is still converging (intent_id=unobserved-retained-intent). The same
-owner pane continues only after that retained delivery and its terminal closeout settle. The hook did not select a new
-prompt or create another capture. Do not resend, recapture, rerun finalize/write/repair, force disk, or recycle; wait
-for the existing controller state edge unless it explicitly reports `needs_operator`. Do not send the final answer yet.
-
-• The document write is still converging through the editor/controller path. I’m holding the completed result without
-  resubmitting anything and waiting for the controller’s terminal state.
-
-• Failed (exit 1) agent-doc session-check '/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md'
-  └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md total_ms=1008…
-    [session-check] INTERRUPTED: cycle `cycle-1791805221920` is `committed` (commit_success), but the active harness s…
-    + 2 lines (^t to expand)
-```
-- ~~do [#clippyworkspacegap]~~
-- ~~do [#sessionactorspin]~~
 - 🚧 do [#stopreopenflake]
 - 🚧 do [#multilinequeuehead]
-- #gh-fix https://github.com/btakita/agent-doc/issues/242
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/242
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
@@ -759,7 +741,7 @@ for the existing controller state edge unless it explicitly reports `needs_opera
 <!-- agent:backlog priority queue -->
 - [ ] 🚧 [#multilinequeuehead] [agent-doc] Multi-line free-text queue items (a title line plus a fenced pasted block) break two ways (2026-10-12, agent-doc-bugs.md): (1) an operator item pasted directly after another multi-line item without a leading list bullet is folded into the previous head, so the sdk.md issue item never became a head and queue claim/brief rejected it; (2) quoting a multi-line head as a Queue prompt echo did not strike it, so the closeout committed and then session-check INTERRUPTED with completed free-text residue until a preflight plus commit repair wrapped it in a done fence. Parse each operator-added block as its own head and make the echo strike match multi-line heads, with regression tests.
 - [ ] 🚧 [#stopreopenflake] [agent-doc] agent-doc-codex-stop-io test stop_does_not_reopen_for_done_archive_projection_after_commit fails when run in parallel with the rest of the crate (also on unmodified main, 2026-10-12) and passes alone. Find the shared state or timing dependency and fix it; do not rerun to green.
-- [ ] [#bgclearpolicy] [operator-verify] [agent-doc] Decide: background context clearing between queue items has been off for every harness since 45ff25f994 (2026-06-30), but SKILL.md drain-no-defer and agent-doc-session-accretion restart_or_drain_guidance still tell agents the supervisor clears context between items. Either re-enable it (for Codex, a fresh restart at the idle boundary) or change that wording to say only an explicit operator Clear resets the session. Note that accretion block measures exchange size, which only compaction reduces.
+- [ ] 🚧 [#bgclearpolicy] [agent-doc] Auto-clear between queue items, decided 2026-10-12: ON by default for an active agent:queue, disabled by a bare disable-auto-clear attribute on the agent:queue element. At the idle boundary after an item's proven closeout and before the next head is dispatched, Claude Code gets /clear typed into the live child, OpenCode gets /new, and Codex gets a fresh restart; never mid-turn, over an unsent draft, or with unanswered steering. Re-enable safely after finding why 45ff25f994 disabled it (2026-06-30), surface the setting in preflight, and align SKILL.md drain-no-defer, the session-accretion guidance and the Codex stop-hook continuation.
 - [ ] 🚧 [#ridernavp3] [agent-doc] IDE navigation lanes P3 (docs/plan-ide-independent-nav.md), after ridernavp2b: FFI agent_doc_tmux_focus_state_for_client_json; agent-doc terminal attaches to its lane session; JetBrains sends its client id with tmux_focus_state and TmuxPaneFocusSync ignores other-lane focus; plugin version bump by the coordinator.
 - [ ] 🚧 [#ridernavp4] [agent-doc] IDE navigation lanes P4 (docs/plan-ide-independent-nav.md), after ridernavp3: a document open in both IDEs stays in its owning lane; Claim for Tmux Pane or Sync Tmux Layout in the other IDE hands it over; SimWorld plus isolated-tmux handoff tests.
 - [ ] 🚧 [#ridernavp5] [agent-doc] IDE navigation lanes P5 (docs/plan-ide-independent-nav.md), after ridernavp4: enable/disable migration for a project with an existing shared window, cleanup of empty lane sessions agent-doc created (never foreign ones), README and SPEC, two-IDE end-to-end test in tests/cross_editor_simworld.rs.

@@ -817,6 +817,19 @@ That fix only settles a dispatch that had not reached preflight when the turn wa
 - add a regression test that replays it.
 
 infra.md and its pane are not touched.
+
+### Re: lane route landed; P5 test flake — opus-5-5 · 2026-10-12T12:45-04:00
+
+**`ridernavp6route` is done** (`9f42c2a214`), waiting to merge:
+- **Route, start and claim** accept `--client-id`. In `per_installation` mode a new pane goes into the requesting IDE's lane session, entering through its `stash` window past the lane's empty placeholder shell.
+- **JetBrains** sends the id with Run Agent Doc and with Claim, New Pane and Force Claim. The plugin and binary must ship together.
+- **Shared mode** and VS Code are unchanged.
+
+**A flaky test found:** P5's end-to-end test (`two_ide_navigation_lanes_migrate_and_clean_up_end_to_end`, on `main` since `d6da68546a`) sometimes keeps an empty lane as "busy" instead of closing it. It failed once in `make tmux-ci` and 1 of 3 runs alone. A guess, not yet checked: the lane's fresh shell is still running its startup when `gc` reads it. It is filed as `lanegcflake` and goes to a subagent now. The fix will remove the cause, not rerun the test until it passes.
+
+Also filed: `ridernavp6routecontended`. When the document's pane is in another IDE's lane, Run Agent Doc drops the document from the requesting IDE's layout, and nobody has defined or tested what happens next.
+
+The infra.md Clear fix (`infraclearsession`) is in `make check` / `make tmux-ci` now.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -831,11 +844,15 @@ infra.md and its pane are not touched.
 - 🚧 do [#ridernavp6status]
 - 🚧 do [#ridernavp6gc]
 - 🚧 do [#ridernavp6switchback]
+- do [#lanegcflake]
+- do [#ridernavp6routecontended]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lanegcflake] [agent-doc] tests/cross_editor_simworld.rs two_ide_navigation_lanes_migrate_and_clean_up_end_to_end (P5, on main since d6da68546a) is nondeterministic: in make tmux-ci it kept an empty lane as a busy unowned pane instead of closing it, and failed 1 of 3 runs alone (2026-10-12, ridernavp6route subagent). Suspected cause, unverified: the fresh lane shell is still running zsh startup when gc reads pane activity. Find and fix the nondeterminism in the test or the gc busy-pane classification; never rerun to green or lengthen a timeout.
+- [ ] [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
 - [ ] 🚧 [#infraclearsession] infra.md: Clear Session Context wedged after manually interrupting Codex turn. Have we already fixed this in the upcoming release?
 - [ ] 🚧 [#ridernavp6route] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): route, start and agent-doc claim --client-id create panes in the requesting IDE's lane in per_installation mode; today a new pane reaches an installation lane only through that IDE's explicit claim.
 - [ ] 🚧 [#ridernavp6republish] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): the sync_tmux_layout command and the recycle republish still publish only into the shared lane; make them lane-aware.

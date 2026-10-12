@@ -718,6 +718,62 @@ The item no longer waits for you.
 **Deferred:** the work itself is still in progress on that branch. It closes once it is merged and installed.
 
 v0.35.493 is in `make release` now, on the batch merged to `main` (`36da03f4f5`), plus `inlinecodemarker` and IDE navigation P4.
+
+### Re: batches 6–8 landed, v0.35.493 tagged — opus-5-5 · 2026-10-12T11:40-04:00
+
+`main` is now at `d6da68546a` and installed. Batches 6, 7 and 8 each passed `make check` and `make tmux-ci`; batch 8 ran 10345 tests. v0.35.493 is tagged (`6e03ce43ae`) and installed locally. Its GitHub Release workflow is still running and PyPI doesn't have it yet, so **release + publish** stays open until both show 0.35.493.
+
+> **Queue prompt:** do [#bgclearpolicy]: Do you have enough direction for this? The hourglass is still visible in the queue.
+
+> **Operator note:** Do you have enough direction for this? The hourglass is still visible in the queue.
+
+Yes. It is built and merged (`60eeb0b8f5`), and it ships in the next release.
+- Auto-clear between queue items is on by default. `disable-auto-clear` on the `agent:queue` element turns it off.
+- After each item's closeout, at the idle point and before the next head is dispatched:
+  - Claude Code gets `/clear` typed into the same process, so background agents and shells survive.
+  - OpenCode gets `/new`.
+  - Codex gets a fresh restart.
+- It never clears mid-turn, over an unsent draft, while your prompts are unanswered, or while a subagent claim is in flight.
+
+June's `45ff25f994` turned clearing off because `/clear` was typed into a busy Codex on every tick, and a restarted supervisor replayed a leftover `/clear` draft. The new design prevents both:
+- Codex is restarted instead of typed into.
+- There is at most one clear per finished item, recorded before it acts.
+- Each clear is tagged with its source.
+
+While building it, the subagent also fixed a supervisor stall: a new queue head first seen inside the 2-second settle window was never dispatched.
+
+> **Queue prompt:** do [#ridernavp3]
+
+Done (`38febbe454`, in 0.35.493). Each IDE now reads its own focus state, attaches its terminal to its lane session, and publishes layouts (including Sync Tmux Layout) into its own lane. JetBrains ignores focus updates from another lane. The plugins are JetBrains 0.2.549 and 262 0.2.550.
+
+> **Queue prompt:** do [#ridernavp4]
+
+Done (`e4a048b8a7`, in 0.35.493). Claim for Tmux Pane or a manual Sync Tmux Layout in the other IDE moves a shared document's pane there. Passive syncs never move it, and only sessions agent-doc owns are touched. The old lane republishes without that document. A SimWorld search checks that no pane is ever duplicated or lost.
+
+> **Queue prompt:** do [#ridernavp5]
+
+Done in part (`1d3361c6db`). This part covers switching `editor_navigation` either way:
+- **Turning lanes on** moves nothing.
+- **Turning them off, then running `agent-doc gc`,** moves lane panes back into the shared session's `stash` window.
+- **`gc` also closes empty lane sessions** that agent-doc created. It never touches unmarked or foreign sessions, and `--dry-run` previews the plan.
+
+A two-IDE end-to-end test covers this. The rest is filed as five new items: `ridernavp6route`, `ridernavp6republish`, `ridernavp6status`, `ridernavp6gc` and `ridernavp6switchback`.
+
+> **Queue prompt:** do [#stopreopenflake]
+
+Done (`c58a75081e`). The test read the process-wide `CODEX_THREAD_ID` variable that sibling tests set, and it failed 8 of 8 parallel runs on main. Tests now set the Codex session per thread. The fix exposed a real bug: in an active Codex session, a proven `agent:done` archive move counted as drift. That is fixed too.
+
+> **Queue prompt:** do [#multilinequeuehead]
+
+Done (`7dd46ee898`). The strike had put its "auto-struck" note on the closing `~~~` line, which left the fence unclosed and swallowed the queue's closing marker. That is why the earlier closeout failed. A multi-line item now counts as its own queue item when it follows a `---` separator or another multi-line item.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/242
+
+Fix then close: fixed (`3feec687db`), shipped in 0.35.493, and GH #242 is closed with a root-cause comment.
+- **Cause:** IntelliJ moves the document stamp without firing an edit event (undo, save), so a refused burst could never match again and kept retrying every 75 ms.
+- **Fix:** retries now happen only on a new edit event, and identical refusals are logged once with a count.
+
+The earlier parse refusal on this document was not caused by line 690. The `inlinecodemarker` investigation found that the document parses with both main and 0.35.492. The most likely cause was a half-edited queue in your editor buffer at that moment. Parse errors now name the marker's line.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -726,25 +782,29 @@ v0.35.493 is in `make release` now, on the batch merged to `main` (`36da03f4f5`)
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#bgclearpolicy]: Do you have enough direction for this? The hourglass is still visible in the queue.
-- 🚧 do [#ridernavp3]
-- 🚧 do [#ridernavp4]
-- 🚧 do [#ridernavp5]
-- 🚧 do [#stopreopenflake]
-- 🚧 do [#multilinequeuehead]
+- ~~do [#bgclearpolicy]: Do you have enough direction for this? The hourglass is still visible in the queue.~~
+- ~~do [#ridernavp3]~~
+- ~~do [#ridernavp4]~~
+- ~~do [#ridernavp5]~~
+- ~~do [#stopreopenflake]~~
+- ~~do [#multilinequeuehead]~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/242
 - 🚧 release + publish
+- do [#ridernavp6route]
+- do [#ridernavp6republish]
+- do [#ridernavp6status]
+- do [#ridernavp6gc]
+- do [#ridernavp6switchback]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#multilinequeuehead] [agent-doc] Multi-line free-text queue items (a title line plus a fenced pasted block) break two ways (2026-10-12, agent-doc-bugs.md): (1) an operator item pasted directly after another multi-line item without a leading list bullet is folded into the previous head, so the sdk.md issue item never became a head and queue claim/brief rejected it; (2) quoting a multi-line head as a Queue prompt echo did not strike it, so the closeout committed and then session-check INTERRUPTED with completed free-text residue until a preflight plus commit repair wrapped it in a done fence. Parse each operator-added block as its own head and make the echo strike match multi-line heads, with regression tests.
-- [ ] 🚧 [#stopreopenflake] [agent-doc] agent-doc-codex-stop-io test stop_does_not_reopen_for_done_archive_projection_after_commit fails when run in parallel with the rest of the crate (also on unmodified main, 2026-10-12) and passes alone. Find the shared state or timing dependency and fix it; do not rerun to green.
-- [ ] 🚧 [#bgclearpolicy] [agent-doc] Auto-clear between queue items, decided 2026-10-12: ON by default for an active agent:queue, disabled by a bare disable-auto-clear attribute on the agent:queue element. At the idle boundary after an item's proven closeout and before the next head is dispatched, Claude Code gets /clear typed into the live child, OpenCode gets /new, and Codex gets a fresh restart; never mid-turn, over an unsent draft, or with unanswered steering. Re-enable safely after finding why 45ff25f994 disabled it (2026-06-30), surface the setting in preflight, and align SKILL.md drain-no-defer, the session-accretion guidance and the Codex stop-hook continuation.
-- [ ] 🚧 [#ridernavp3] [agent-doc] IDE navigation lanes P3 (docs/plan-ide-independent-nav.md), after ridernavp2b: FFI agent_doc_tmux_focus_state_for_client_json; agent-doc terminal attaches to its lane session; JetBrains sends its client id with tmux_focus_state and TmuxPaneFocusSync ignores other-lane focus; plugin version bump by the coordinator.
-- [ ] 🚧 [#ridernavp4] [agent-doc] IDE navigation lanes P4 (docs/plan-ide-independent-nav.md), after ridernavp3: a document open in both IDEs stays in its owning lane; Claim for Tmux Pane or Sync Tmux Layout in the other IDE hands it over; SimWorld plus isolated-tmux handoff tests.
-- [ ] 🚧 [#ridernavp5] [agent-doc] IDE navigation lanes P5 (docs/plan-ide-independent-nav.md), after ridernavp4: enable/disable migration for a project with an existing shared window, cleanup of empty lane sessions agent-doc created (never foreign ones), README and SPEC, two-IDE end-to-end test in tests/cross_editor_simworld.rs.
+- [ ] [#ridernavp6route] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): route, start and agent-doc claim --client-id create panes in the requesting IDE's lane in per_installation mode; today a new pane reaches an installation lane only through that IDE's explicit claim.
+- [ ] [#ridernavp6republish] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): the sync_tmux_layout command and the recycle republish still publish only into the shared lane; make them lane-aware.
+- [ ] [#ridernavp6status] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): add a per-lane pane_layout_status channel; it reports only the shared lane today.
+- [ ] [#ridernavp6gc] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): a controller-side trigger for empty-lane cleanup and per_installation-to-shared migration that knows which IDE installations are live; today only agent-doc gc runs it, using an attached terminal as the only liveness signal.
+- [ ] [#ridernavp6switchback] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): verify and pin with a test what the shared sync body does with a document pane still in a lane session after editor_navigation switches back to shared but before agent-doc gc migrates it; the docs and SimWorld model leave it open.
 <!-- /agent:backlog -->
 
 ## Review

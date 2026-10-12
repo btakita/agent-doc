@@ -370,6 +370,17 @@ The fixes integrated since then are **not** released yet. Five batches have land
 - `thrash`: idle supervisors and controllers stop burning CPU.
 
 Each batch passed its own full `make check`. They would ship as v0.35.492: version bump, `VERSIONS.md` entry, parity row, `make release`.
+
+### Re: #idleclearrestart — idle Clear will type /clear — opus-5.5 · 2026-10-12T00:20-04:00
+
+> **Queue prompt:** do [#idleclearrestart]: Yes, Idle clear should type `/clear`.
+
+> **Operator note:** Yes, Idle clear should type `/clear`.
+
+**Deferred:** this went to a background subagent (claim `subagent:idleclear`, branch `idleclear` off `e31a862648`), with your decision. An idle Clear on a responsive pane will type the harness's own `/clear` into the live agent, through the same guarded pane-input path the queued clear already uses: the ready-prompt check, the protected-input guard and the settle receipt. It will no longer restart the Claude process, so background agents and shells survive.
+- **Restarts that stay:** only those with a real reason, such as a harness with no native clear command, an unresponsive agent, or an explicit Restart Agent. Those are documented.
+- **Unchanged:** one clear per press, the queued and re-armed behavior, `interrupt-clear`, and no auto-trigger afterwards unless work is pending.
+- **Live test:** on an isolated tmux server with a fake harness, it will check that an idle Clear types `/clear` into the same child process (same PID) and that a background job keeps running.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -378,11 +389,8 @@ Each batch passed its own full `make check`. They would ship as v0.35.492: versi
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#fixthrashingbackground]~~
-- ~~⏭️ do [#idlecleartriggerinject]~~
-- ~~do [#annotateddeferstrike]~~
-- ~~do [#flakyreceipthelpers]~~
-- ⏳ do [#idleclearrestart]
+- ⏭️ do [#idleclearrestart]: Yes, Idle clear should type `/clear`.
+- How can we optimize the agent-doc build process + test process to reduce the turnaround time?
 <!-- /agent:queue -->
 
 ## Backlog

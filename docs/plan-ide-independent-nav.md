@@ -1,6 +1,6 @@
 # Plan: independent tmux navigation per JetBrains installation (`#ideriderindependentnav`)
 
-Status: P1 landed on branch `ridernav`. P2 through P5 are open.
+Status: P1 landed on branch `ridernav`; P2a landed on branch `ridernavp2a`. P2b through P5 are open.
 
 ## Problem
 
@@ -86,7 +86,27 @@ green.
 - Behavior: none in production, because every client resolves to the shared lane.
   Migration: none, because no serialized state changed.
 
-### P2: opt-in config, per-lane pane-layout graph, and lane session provisioning
+### P2a: per-lane pane-layout graph map (LANDED)
+
+- `ControllerRuntime.pane_layout_lanes` (`ControllerPaneLayoutLanes`) holds
+  `BTreeMap<NavigationLane, Arc<ControllerPaneLayoutGraph>>`. The `Shared` entry is
+  created eagerly with the runtime; an installation lane's graph is created on first
+  use (`pane_layout_graph_for_lane`) in the same controller `ProcessScope` graph and
+  derives from the same live actor bindings, so an actor rebind retires that lane's
+  ownership too. Each lane has its own `desired`/`observed`/`receipt`/`assignments`/
+  `width_memory`, retained effect, sink slot, and `published_generation`.
+- Every existing caller goes through `ControllerRuntime::pane_layout_graph()`, the
+  shared lane, so behavior is unchanged. Nothing in production creates an
+  installation lane yet.
+- Verification: `navigation_lanes_hold_independent_pane_layout_state` (two lanes'
+  desired generations, width memory, and structural ownership stay independent; the
+  shared lane is untouched; a lane graph follows actor rebinds). It fails when every
+  lane resolves to the shared graph. Existing layout tests are unchanged apart from
+  `runtime.pane_layout_graph` becoming a method call.
+- Open for P2b: the effect-worker sink is still installed only on the shared lane,
+  and `set_structural_effect_generation` is still process-global (see Risks).
+
+### P2b: opt-in config, lane routing, and lane session provisioning
 
 Scope (Rust, controller and sync):
 - Config: `.agent-doc/config.toml` `editor_navigation = "shared" | "per_installation"`
@@ -94,10 +114,9 @@ Scope (Rust, controller and sync):
   value logs a warning and falls back to `shared`. The runtime constructor passes
   the mode to `ControllerEditorSurfaceGraph`, which removes `#[cfg(test)]` from
   `with_navigation_mode`.
-- `ControllerPaneLayoutGraph` becomes per lane: `BTreeMap<NavigationLane, ControllerPaneLayoutGraph>`,
-  created lazily in the controller `ProcessScope`. Each lane gets its own
-  `desired`/`observed`/`receipt`/`assignments`/`width_memory`, plus its own
-  effect-worker generation. Today's single graph is the `Shared` entry.
+- Install the pane-layout effect sink on each lane graph as it is created, and key
+  the structural-effect cancellation generation by lane (the per-lane graphs
+  themselves landed in P2a).
 - The editor-surface `Sync`/`Focus` path passes the observation's lane.
   `publish_pane_layout_desired_invocation(lane, ..)` sets `invocation.window` to the
   lane session's `agent-doc` window, so the `Explicit` session authority applies.

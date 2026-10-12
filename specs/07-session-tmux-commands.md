@@ -241,8 +241,12 @@ loses desktop focus.
   one installation, so no installation is ever deferred to another, and retiring one
   installation re-stamps no other lane's owner. A lane is a tmux session, not a window: tmux keeps
   one current window per session for every attached client, and a pane belongs to exactly one
-  session. Per-installation mode stays test-only until each lane's session, pane-layout graph, and
-  pane ownership are provisioned (see `docs/plan-ide-independent-nav.md`).
+  session. The controller keeps one pane-layout graph per lane (its own desired layout,
+  observation, receipt, structural assignments, width memory, and published generation, all in the
+  controller process scope and derived from the one actor store); the shared lane's graph is the
+  one every layout caller uses, and installation lanes' graphs are created on first use.
+  Per-installation mode stays test-only until lane routing, each lane's session, and pane
+  ownership are provisioned (see `docs/plan-ide-independent-nav.md`).
 - The `tmux_focus_state` read projection is per lane: the request's `caller` is the editor client
   id, and the projection reports the active pane of that client's lane session (shared lane: the
   configured session). A lane reports a document only while its own session's current window is

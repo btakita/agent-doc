@@ -615,6 +615,60 @@ The tools.md pane is still on Codex's error screen. Its supervisor should start 
 Done (`416c2dba1d`). The controller's pane layout is now kept per IDE navigation lane, with no behavior change. P2b, which turns on independent navigation behind the `editor_navigation` setting, is with a subagent now. P3–P5 stay queued behind it.
 
 Still in progress: the lazily.md Codex continuation fix, and `ridernavp2b`. The exchange is long (528+ lines); I'm leaving it alone while the queue is active.
+
+### Re: batch 5 landed — opus-5-5 · 2026-10-12T09:35-04:00
+
+Four branches are merged to `main` as `f43d19c039`. `make check` passed (10281 tests), `make tmux-ci` passed, and `make install` has run.
+
+> **Queue prompt:** lazily.md issue
+> ```
+> • Blocked by hook
+>   └ Queue continuation, not an error: agent-doc kept the active `agent:queue auto` moving for /home/brian/work/btakita/
+> agent-loop/tasks/software/lazily.md. Codex labels every Stop continuation `Blocked by hook`; here that label means the
+> next queue item is being handed back to this turn. The next queue prompt is "do [#lzcoreprofile]". Continue THIS turn
+> in-pane: answer that prompt in /home/brian/work/btakita/agent-loop/tasks/software/lazily.md and persist with `agent-doc
+> finalize /home/brian/work/btakita/agent-loop/tasks/software/lazily.md` (or `agent-doc write --commit /home/brian/work/
+> btakita/agent-loop/tasks/software/lazily.md`). Do NOT run `agent-doc /home/brian/work/btakita/agent-loop/tasks/software/
+> lazily.md` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and
+> do not send the final answer yet. A background context reset was requested because session accretion is block
+> (exchange_lines=924, response_sections=31, recent_committed_cycles=2, recent_noop_closeouts=0), but automatic context
+> clearing is disabled; only an explicit operator clear may reset the session.
+> ```
+
+Fixed (`4115f8f6ce`). The logs show no loop: the queue moved on from `#lzcoreprofile` to `#lzcoreclaims` as it should. The problem was the message itself.
+- Whenever a reset reason existed, it printed a sentence about a "background context reset" that the agent could not act on.
+- That same code path silently swapped the MCP instructions for CLI-only ones, and lazily.md uses MCP.
+
+The continuation is now one short paragraph, capped at 320 characters for its fixed wording. MCP sessions keep their MCP guidance. The suppressed reset reason now goes to ops.log only.
+
+A clear would not have helped here anyway. Accretion `block` measures the size of the document's exchange, and that stayed `block` even after your Clear restarted Codex fresh. Compacting lazily.md's exchange is what reduces it.
+
+One decision is yours, filed as `bgclearpolicy`. Automatic clearing between queue items has been off for every harness since June 30, but the agent instructions still say the supervisor clears context between items. We should either re-enable it or correct the wording.
+
+> **Queue prompt:** do [#clippyworkspacegap]
+
+Done (`1bfe961f38`). `make check` now runs clippy with `--workspace`, so all 144 crates are linted. The workspace-wide run turned up no lints. I confirmed the old root-only run missed a lint planted in another crate, and that the new run catches it. A Makefile test fails if `--workspace` is ever dropped. The cost is about 29 seconds more on a cold clippy run.
+
+> **Queue prompt:** do [#sessionactorspin]
+
+Done (`e1d1496531`). The 80% CPU was a quadratic CRDT merge, not a polling loop:
+- A compaction cut tools.md from 75 KB to 3 KB.
+- The queued resume-id clear then rebased onto the compacted text, deleting the removed text one character at a time.
+- Each single-character delete rebuilt the whole document order.
+
+Replayed on the exact inputs (the hashes matched ops.log), the old code ran more than 8 minutes before I stopped it. The fix deletes the whole range in one call and takes 0.46s; the resulting CRDT state is identical. New tests fail at 60s if the per-character loop comes back.
+
+> **Queue prompt:** do [#ridernavp2b]
+
+Done (`449846030b`). There is now an opt-in setting, `editor_navigation = "per_installation"` in `.agent-doc/config.toml`:
+- Each IDE gets its own lane session, named `<pinned session>-<installation>` and marked as agent-doc's.
+- Each lane syncs and cancels independently of the other lanes.
+- A pane never moves between lanes. A document whose pane is in another lane is dropped from the sync (`cross_lane_layout_dropped`), and focus on it is refused (`owned_by_other_lane`).
+- An existing session agent-doc did not create is never adopted.
+
+The default `shared` mode is unchanged, and its existing tests pass without edits. P3, which wires the editors to their lanes, is with a subagent now and is built on this branch. P4 and P5 follow it.
+
+Also filed: `stopreopenflake`, a Codex stop-hook test that fails when run in parallel with the rest of its crate, so its cause gets fixed instead of being rerun until it passes.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -623,7 +677,7 @@ Still in progress: the lazily.md Codex continuation fix, and `ridernavp2b`. The 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#ridernavp2b]
+- ~~do [#ridernavp2b]~~
 - 🚧 do [#ridernavp3]
 - 🚧 do [#ridernavp4]
 - 🚧 do [#ridernavp5]
@@ -660,16 +714,16 @@ for the existing controller state edge unless it explicitly reports `needs_opera
     [session-check] INTERRUPTED: cycle `cycle-1791805221920` is `committed` (commit_success), but the active harness s…
     + 2 lines (^t to expand)
 ```
-- 🚧 do [#clippyworkspacegap]
-- 🚧 do [#sessionactorspin]
+- ~~do [#clippyworkspacegap]~~
+- ~~do [#sessionactorspin]~~
+- do [#stopreopenflake]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#clippyworkspacegap] [agent-doc] make check runs cargo clippy --all-targets --all-features without --workspace, and the workspace has no default-members, so it lints only the root agent-doc crate; the other 143 crates are linted only by check-fast and only when affected. Make the authoritative check lint the whole workspace and fix whatever it surfaces.
-- [ ] 🚧 [#sessionactorspin] [agent-doc] The tools.md supervisor (pid 2155812, 2026-10-12) had its session-actor thread at about 80% CPU while the stale Codex resume-id frontmatter clear stalled behind a compaction. codexresumeid bounded the wait to 5s but did not stop the spin. Find and fix the busy loop, with a regression test.
-- [ ] 🚧 [#ridernavp2b] [agent-doc] IDE navigation lanes P2b (docs/plan-ide-independent-nav.md), after ridernavp2a: opt-in editor_navigation = shared or per_installation in .agent-doc/config.toml; per-lane layout sync routing, lane-aware layout check and target-window fallback, lane session creation on first sync, cross_lane_layout_dropped and owned_by_other_lane refusals, per-lane sync cancellation instead of the process-global cancel.
+- [ ] [#stopreopenflake] [agent-doc] agent-doc-codex-stop-io test stop_does_not_reopen_for_done_archive_projection_after_commit fails when run in parallel with the rest of the crate (also on unmodified main, 2026-10-12) and passes alone. Find the shared state or timing dependency and fix it; do not rerun to green.
+- [ ] [#bgclearpolicy] [operator-verify] [agent-doc] Decide: background context clearing between queue items has been off for every harness since 45ff25f994 (2026-06-30), but SKILL.md drain-no-defer and agent-doc-session-accretion restart_or_drain_guidance still tell agents the supervisor clears context between items. Either re-enable it (for Codex, a fresh restart at the idle boundary) or change that wording to say only an explicit operator Clear resets the session. Note that accretion block measures exchange size, which only compaction reduces.
 - [ ] 🚧 [#ridernavp3] [agent-doc] IDE navigation lanes P3 (docs/plan-ide-independent-nav.md), after ridernavp2b: FFI agent_doc_tmux_focus_state_for_client_json; agent-doc terminal attaches to its lane session; JetBrains sends its client id with tmux_focus_state and TmuxPaneFocusSync ignores other-lane focus; plugin version bump by the coordinator.
 - [ ] 🚧 [#ridernavp4] [agent-doc] IDE navigation lanes P4 (docs/plan-ide-independent-nav.md), after ridernavp3: a document open in both IDEs stays in its owning lane; Claim for Tmux Pane or Sync Tmux Layout in the other IDE hands it over; SimWorld plus isolated-tmux handoff tests.
 - [ ] 🚧 [#ridernavp5] [agent-doc] IDE navigation lanes P5 (docs/plan-ide-independent-nav.md), after ridernavp4: enable/disable migration for a project with an existing shared window, cleanup of empty lane sessions agent-doc created (never foreign ones), README and SPEC, two-IDE end-to-end test in tests/cross_editor_simworld.rs.

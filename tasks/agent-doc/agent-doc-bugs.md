@@ -308,6 +308,26 @@ The subagent will make that work driven by events and document revisions instead
 - No full-text read serves as the per-tick probe.
 
 It will also check the controllers' 1–1.5 GB for unbounded growth, measure CPU before and after on an isolated harness, and add a regression test that fails if an idle supervisor starts polling full text again. It won't touch any live process.
+
+### Re: idle-Clear auto-trigger and annotated deferral fixes integrated — opus-5.5 · 2026-10-11T23:55-04:00
+
+> **Queue prompt:** do [#idlecleartriggerinject]
+
+Done. `clrinject` (`753924c04b`) is merged to main as `2af67f4ebb` and installed. Its full `make check` passed (exit 0, 10236/10236).
+- **Cause:** an idle Clear restarts the agent through the same "fresh restart" request as any other restart, and the restart loop always set `auto_trigger_next_launch = true`. That produced the stray `/agent-doc <file>` turn ~10s after each `session_clear_sent delivery=supervisor_restart_fresh`.
+- **Fix:** a Clear restart now records its origin (`clear:fresh`). It re-triggers only if a cycle is still open or an unanswered prompt is pending. If the pending-work check itself fails, it re-triggers anyway, since a wasted turn beats a stranded prompt. Each decision is logged as `operator_clear_restart_trigger`.
+- **Unchanged:** queue heads stay with the idle-queue watch, so there's no second dispatcher. Restart Agent, crash recovery and recycle resume still re-trigger.
+- **Tests:** a source-check test fails if the unconditional `true` comes back.
+
+> **Queue prompt:** do [#annotateddeferstrike]
+
+Done. `deferstrike2` (`6a5d171d43`) is in the same batch, installed.
+- **Cause, free-text heads:** the deferral check looked only one block past the echo, so it stopped at the operator-note quote.
+- **Cause, `do [#id]` heads:** the deferral check never ran at all; the `### Re: #id` heading counted as completion.
+- **Fix:** a deferral paragraph after the operator-note answer now keeps the head queued and its claim held. The note must still be answered, and an explicit `--done`, gate or review-resolve still closes it.
+- **Tests and docs:** today's two reproductions are regression tests, and disabling either half of the fix makes them fail. The runbook and every installed harness copy document the shape: echo, then operator-note quote, then `**Deferred:**`.
+
+**Next batch:** `rcpthelpers` (`#flakyreceipthelpers`) and `thrash` (`#fixthrashingbackground`) are merged in `integrate-0499`, and its `make check` is running.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -316,20 +336,18 @@ It will also check the controllers' 1–1.5 GB for unbounded growth, measure CPU
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#fixthrashingbackground]
-- 🚧 do [#idlecleartriggerinject]
-- 🚧 do [#annotateddeferstrike]
-- 🚧 do [#flakyreceipthelpers]
+- 🚧 do [#fixthrashingbackground]
+- ~~⏭️ do [#idlecleartriggerinject]~~
+- ~~do [#annotateddeferstrike]~~
+- do [#flakyreceipthelpers]
 - ⏳ do [#idleclearrestart]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fixthrashingbackground] Fix agent-doc thrashing in the background
-- [ ] 🚧 [#idlecleartriggerinject] [agent-doc] After Clear Session Context at an idle prompt (delivery=supervisor_restart_fresh), the supervisor injects an unrequested /agent-doc <file> turn (auto_trigger_inject), a no-op costing ~13s of model time each time; seen twice in the 2026-10-11 clearnotice live test (evidence: agent-doc-wt/clearnotice/tmp/evidence). Do not auto-dispatch after an operator Clear unless queue work is actually pending.
-- [ ] 🚧 [#annotateddeferstrike] [agent-doc] A deferred annotated queue head is struck anyway: for an annotated head the closeout requires the operator-note answer quote, which then sits between the queue-prompt echo and the deferral paragraph, so the deferral is not recognized, the head is consumed and its claim released (2026-10-11, twice on the clearnoticeverify heads). Recognize a deferral paragraph that follows the operator-note answer, with a regression test.
-- [ ] 🚧 [#flakyreceipthelpers] [agent-doc] Follow-up from flaky0494: simulated-editor socket listeners in agent-doc-test-support/src/lib.rs:781, agent-doc-write-converge-io/src/convergence_fixture_tests.rs:170 and agent-doc-commit-io/tests/git.rs:104 drop receipt errors the way the fixed already_applied_* tests did (may flake under load); and finalize_integration reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once hits the 180s nextest limit under load ~80 (performance, do not raise the limit). Integrate branch flaky0494 first.
+- [ ] 🚧 [#fixthrashingbackground] Fix agent-doc thrashing in the background
+- [ ] [#flakyreceipthelpers] [agent-doc] Follow-up from flaky0494: simulated-editor socket listeners in agent-doc-test-support/src/lib.rs:781, agent-doc-write-converge-io/src/convergence_fixture_tests.rs:170 and agent-doc-commit-io/tests/git.rs:104 drop receipt errors the way the fixed already_applied_* tests did (may flake under load); and finalize_integration reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once hits the 180s nextest limit under load ~80 (performance, do not raise the limit). Integrate branch flaky0494 first.
 - [ ] [#idleclearrestart] [operator-verify] [agent-doc] Decide: Clear Session Context at an idle prompt restarts the Claude process (supervisor_restart_fresh) instead of typing /clear, killing running Claude background agents/shells with no report (2026-10-11 live test: agent stopped at 12/40 ticks). Queued clears type /clear. Should idle Clear type /clear too?
 <!-- /agent:backlog -->
 

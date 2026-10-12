@@ -71,7 +71,7 @@ A separate `release + publish` queue item arrived mid-turn and was claimed and d
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/245~~
-- release + publish
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog

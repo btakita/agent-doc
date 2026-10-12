@@ -2342,9 +2342,10 @@ fn skip_sync_status_updates_for_mode(auto_start_mode: AutoStartMode) -> bool {
 /// A missing or empty list is the single-session default.
 pub fn tmux_session_policy_for_root(root: &Path) -> agent_doc_sync::TmuxSessionPolicy {
     let config_path = root.join(".agent-doc").join("config.toml");
-    agent_doc_sync::TmuxSessionPolicy::new(
-        agent_doc_project_config_io::load_project_from(&config_path).tmux_sessions,
-    )
+    let config = agent_doc_project_config_io::load_project_from(&config_path);
+    let navigation_lanes = agent_doc_project_config_io::editor_navigation_lanes(&config);
+    agent_doc_sync::TmuxSessionPolicy::new(config.tmux_sessions)
+        .with_navigation_lanes(navigation_lanes)
 }
 
 /// Load the multi-session policy that governs a sync/route candidate set: the
@@ -2419,6 +2420,71 @@ pub fn drop_columns_bound_to_other_sessions(
         })
         .collect();
     (kept, dropped)
+}
+
+/// Per-installation navigation lanes (`#ideriderindependentnav` P2b): drop
+/// layout columns whose document already has a live pane in another lane of
+/// this project (the project session or a sibling installation lane session)
+/// than `target_session`. A pane never changes lane implicitly; P4's explicit
+/// handoff is the only path that may move it. Identity unless the project opts
+/// into `editor_navigation = "per_installation"`, has a `tmux_session` pin, and
+/// `target_session` is one of that pin's lanes.
+pub fn drop_columns_owned_by_other_navigation_lanes(
+    tmux: &Tmux,
+    project_root: &Path,
+    col_args: Vec<String>,
+    target_session: &str,
+    actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+) -> (Vec<String>, Vec<(String, String)>) {
+    let config = agent_doc_project_config_io::load_project_from(
+        &project_root.join(".agent-doc").join("config.toml"),
+    );
+    if !agent_doc_project_config_io::editor_navigation_lanes(&config) {
+        return (col_args, Vec::new());
+    }
+    let Some(project_session) = config
+        .tmux_session
+        .as_deref()
+        .map(str::trim)
+        .filter(|session| !session.is_empty())
+    else {
+        return (col_args, Vec::new());
+    };
+    if target_session != project_session
+        && !agent_doc_editor_surface::is_lane_session_of(project_session, target_session)
+    {
+        return (col_args, Vec::new());
+    }
+    let canonical = |file: &str| {
+        let path = Path::new(file.trim());
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            project_root.join(path)
+        };
+        path.canonicalize().unwrap_or(path)
+    };
+    let partition = agent_doc_editor_surface::partition_lane_layout_columns(
+        &col_args,
+        project_session,
+        target_session,
+        |file| {
+            let document = canonical(file);
+            let pane = actor_bindings
+                .iter()
+                .find(|binding| canonical(&binding.document_path) == document)
+                .map(|binding| binding.pane_id.clone())
+                .or_else(|| {
+                    agent_doc_session_registry_io::lookup_file_entry_in(project_root, &document)
+                        .ok()
+                        .flatten()
+                        .map(|entry| entry.pane)
+                })
+                .filter(|pane| !pane.is_empty() && tmux.pane_alive(pane))?;
+            tmux.pane_session(&pane).ok()
+        },
+    );
+    (partition.kept, partition.dropped)
 }
 
 pub fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
@@ -3243,6 +3309,22 @@ fn run_with_options_internal_at_root(
         for (file, bound_session) in &dropped {
             sync_log(&format!(
                 "cross_session_layout_dropped file={file} bound_session={bound_session} target_session={session}"
+            ));
+        }
+        // `#ideriderindependentnav` P2b, defense in depth: the controller
+        // already drops other lanes' documents before this effect runs, but
+        // column memory above can substitute a remembered document back in.
+        let (kept, dropped) = drop_columns_owned_by_other_navigation_lanes(
+            tmux,
+            &sync_project_root,
+            col_args,
+            session,
+            reactive_actor_bindings,
+        );
+        col_args = kept;
+        for (file, owner_session) in &dropped {
+            sync_log(&format!(
+                "cross_lane_layout_dropped document={file} owner_session={owner_session} target_session={session}"
             ));
         }
     }
@@ -10319,6 +10401,113 @@ mod tests {
                 .as_deref(),
             Some("1"),
             "windowless sync should follow the current live agent-doc window before the configured pin"
+        );
+    }
+
+    /// `#ideriderindependentnav` P2b: the sync body's defense-in-depth lane
+    /// guard is the identity unless the project opts into per-installation
+    /// navigation and the target is one of the pin's lanes.
+    #[test]
+    fn navigation_lane_guard_is_identity_without_per_installation_lanes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        // Never started: any tmux read would fail, proving none is attempted.
+        let tmux = Tmux::default_server()
+            .with_server_socket(Some("agent-doc-test-lane-guard-never-started".to_string()));
+        let columns = vec!["/p/a.md".to_string(), "/p/b.md,/p/c.md".to_string()];
+        for config in [
+            "",
+            "tmux_session = \"proj\"\n",
+            "tmux_session = \"proj\"\neditor_navigation = \"shared\"\n",
+            "editor_navigation = \"per_installation\"\n",
+        ] {
+            std::fs::write(tmp.path().join(".agent-doc/config.toml"), config).unwrap();
+            let (kept, dropped) = drop_columns_owned_by_other_navigation_lanes(
+                &tmux,
+                tmp.path(),
+                columns.clone(),
+                "proj-IU-0a1b2c3d",
+                &[],
+            );
+            assert_eq!(kept, columns, "{config:?}");
+            assert!(dropped.is_empty(), "{config:?}");
+        }
+        std::fs::write(
+            tmp.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let (kept, dropped) = drop_columns_owned_by_other_navigation_lanes(
+            &tmux,
+            tmp.path(),
+            columns.clone(),
+            "research",
+            &[],
+        );
+        assert_eq!(kept, columns, "a foreign target session is not a lane");
+        assert!(dropped.is_empty());
+    }
+
+    /// `#ideriderindependentnav` P2b: a column whose document's live pane is in
+    /// another lane of the project never reaches the lane's sync body. Isolated
+    /// tmux server only.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_guard_drops_documents_whose_pane_lives_in_another_lane() {
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("lane-guard");
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let shared_pane = tmux.new_session("proj", tmp.path()).unwrap();
+        let idea_pane = tmux.new_session("proj-IU-0a1b2c3d", tmp.path()).unwrap();
+        let rider_pane = tmux.new_session("proj-RD-9f8e7d6c", tmp.path()).unwrap();
+        let doc = |name: &str| {
+            let path = tmp.path().join(name);
+            std::fs::write(&path, "# doc\n").unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let (shared_doc, idea_doc, rider_doc, new_doc) = (
+            doc("shared.md"),
+            doc("idea.md"),
+            doc("rider.md"),
+            doc("new.md"),
+        );
+        let binding = |document: &str, pane: &str| {
+            agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                document_path: document.to_string(),
+                session_id: String::new(),
+                pane_id: pane.to_string(),
+                generation: 1,
+            }
+        };
+        let bindings = vec![
+            binding(&shared_doc, &shared_pane),
+            binding(&idea_doc, &idea_pane),
+            binding(&rider_doc, &rider_pane),
+        ];
+        let columns = vec![
+            idea_doc.clone(),
+            format!("{shared_doc},{new_doc}"),
+            rider_doc.clone(),
+        ];
+        let (kept, dropped) = drop_columns_owned_by_other_navigation_lanes(
+            &tmux,
+            tmp.path(),
+            columns,
+            "proj-IU-0a1b2c3d",
+            &bindings,
+        );
+        assert_eq!(kept, vec![idea_doc, new_doc]);
+        assert_eq!(
+            dropped,
+            vec![
+                (shared_doc, "proj".to_string()),
+                (rider_doc, "proj-RD-9f8e7d6c".to_string()),
+            ]
         );
     }
 

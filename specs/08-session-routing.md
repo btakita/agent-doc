@@ -501,12 +501,22 @@ falls back to a session outside the list.
 - *terminal*: an explicit `--session`, the binding, the registry scan, and the
   created default name must all be allowed.
 
-**Deferred.** The editor tmux focus-state query (`handle_tmux_focus_state`) and
-the pane-layout target-window fallback (`pane_layout_target_window_id`) without
-an explicit window still read the project pin. The focus-state query derives its
-session from the pin per navigation lane (`#ideriderindependentnav`): the shared
-lane reads the pin itself, an installation lane reads `<pin>-<installation>`. Editors that pass `--window` are
-unaffected. Path-glob topic rules (routing by directory without frontmatter) are
+**Navigation lanes** (`#ideriderindependentnav`, `editor_navigation =
+"per_installation"`). An installation lane session `<allowed>-<installation>`
+derived from an allowed session is itself allowed
+(`TmuxSessionPolicy::with_navigation_lanes`), so lanes need no `tmux_sessions`
+entry; a document bound to the pin is not "bound to another session" when the
+target is one of the pin's lanes. The editor tmux focus-state query, the
+pane-layout drift survey, and the target-window fallback derive the session per
+lane: the shared lane reads the pin itself, an installation lane reads
+`<pin>-<installation>`. A sync for one lane drops every document whose live pane
+lives in another lane of the project (`cross_lane_layout_dropped`), both in the
+controller before the effect and in the sync body after column memory, so a pane
+never changes session through a layout sync.
+
+**Deferred.** In shared navigation mode the pane-layout target-window fallback
+(`pane_layout_target_window_id`) without an explicit window still reads the
+project pin. Editors that pass `--window` are unaffected. Path-glob topic rules (routing by directory without frontmatter) are
 not implemented. Nested `.agent-doc` roots already give each sub-project its
 own pin and allow-list.
 

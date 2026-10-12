@@ -242,9 +242,11 @@ loses desktop focus.
   the most recently focused live installation under a fresh epoch. Unscoped clients never claim
   or defer.
 - Layout ownership is keyed by `LayoutOwnerKey` = (project root, navigation lane)
-  (`#ideriderindependentnav`), never by the root alone. `NavigationMode::Shared` (the default,
-  and the only mode the production controller constructs today) maps every client of a root to
-  the shared lane, so the key is exactly the per-root `#idefocusowner` owner above.
+  (`#ideriderindependentnav`), never by the root alone. The mode is `editor_navigation` in
+  `.agent-doc/config.toml` (`shared` | `per_installation`), read once when the controller
+  starts; absent or unknown is `shared` (an unknown spelling logs
+  `editor_navigation_mode_rejected` and a warning). `NavigationMode::Shared` maps every client of
+  a root to the shared lane, so the key is exactly the per-root `#idefocusowner` owner above.
   `NavigationMode::PerInstallation` gives each installation-scoped client its own lane, backed by
   its own tmux session `<project session>-<installation>` (characters outside `[A-Za-z0-9_-]`
   become `-`, e.g. `agent-loop-IU-0a1b2c3d`); unscoped clients stay on the shared lane. A lane has
@@ -254,9 +256,32 @@ loses desktop focus.
   session. The controller keeps one pane-layout graph per lane (its own desired layout,
   observation, receipt, structural assignments, width memory, and published generation, all in the
   controller process scope and derived from the one actor store); the shared lane's graph is the
-  one every layout caller uses, and installation lanes' graphs are created on first use.
-  Per-installation mode stays test-only until lane routing, each lane's session, and pane
-  ownership are provisioned (see `docs/plan-ide-independent-nav.md`).
+  one every non-lane caller uses (manual sync, route, recycle republish, plugin publications), and
+  installation lanes' graphs are created on first use.
+- Each lane graph has its own effect sink and latest-wins worker, and its structural-effect
+  cancellation is bound to that lane's published generation, so a newer layout in one lane never
+  supersedes or cancels another lane's sync body.
+- Lane routing (`per_installation` only; shared mode is the identity and reads no extra tmux
+  state): an editor surface `Sync` publishes into the observing client's lane graph. An
+  installation lane's desired layout never writes the shared lane's durable column memory and
+  never republishes the shared `pane_layout_status` channel. Before its structural effect, a
+  lane's worker resolves its route: an installation lane requires a `tmux_session` pin
+  (`navigation_lane_requires_tmux_session`, refused), provisions its session on the first driving
+  layout (`new-session -d -s <lane> -n agent-doc -c <root>` + `stash`, marked with the
+  `@agent_doc_navigation_lane` session option = project root, logged
+  `navigation_lane_session_created`), and targets that session's `agent-doc` window explicitly.
+  A same-named session without that mark is refused (`navigation_lane_session_not_owned`), never
+  adopted. The drift survey and the target-window fallback of an installation lane observe its
+  own session, never the pin. A lane's surveyed layout refolds only that lane's editor clients.
+- Pane ownership per lane: a document's pane lives in exactly one session. A lane's sync keeps
+  only documents with no live pane or with a pane in its own session; a document whose pane lives
+  in the project session or a sibling lane session is dropped from that lane's columns
+  (`cross_lane_layout_dropped document=.. owner_lane=.. owner_session=..`), and a focus target
+  among them is dropped too. The sync body re-applies the same rule after column memory as
+  defense in depth. An editor `Focus` on such a document is refused with `owned_by_other_lane`
+  and never escalates to a structural sync. An installation lane's focus escalation republishes
+  that lane's layout. Lanes are allowed sessions under `tmux_sessions` when derived from an
+  allowed session, and a document bound to the pin belongs in every lane of the pin.
 - The `tmux_focus_state` read projection is per lane: the request's `caller` is the editor client
   id, and the projection reports the active pane of that client's lane session (shared lane: the
   configured session). A lane reports a document only while its own session's current window is

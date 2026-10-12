@@ -114,7 +114,10 @@ fn ensure_tmux_session_with_ide(
     // registry pane is reused only from an allowed session that matches the
     // binding. The single-session default leaves every check a no-op.
     let project_config = agent_doc_project_config_io::load_project_for_doc(&canonical);
-    let session_policy = agent_doc_sync::TmuxSessionPolicy::new(&project_config.tmux_sessions);
+    let session_policy = agent_doc_sync::TmuxSessionPolicy::new(&project_config.tmux_sessions)
+        .with_navigation_lanes(agent_doc_project_config_io::editor_navigation_lanes(
+            &project_config,
+        ));
     let document_binding = session_policy.effective_document_binding(
         agent_doc_sync_io::sync::document_tmux_session_binding(&canonical).as_deref(),
     );

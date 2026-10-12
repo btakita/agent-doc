@@ -351,6 +351,15 @@ pub struct ProjectConfig {
     /// pin) and refuse any target outside the list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tmux_sessions: Vec<String>,
+    /// How several editor installations on this project share tmux
+    /// navigation (`#ideriderindependentnav`): `shared` (the default; one
+    /// `agent-doc` window, driven by the most recently focused installation)
+    /// or `per_installation` (each installation-scoped editor navigates its own
+    /// lane session `<tmux_session>-<installation>`). Kept as the raw spelling
+    /// so an unknown value can be reported instead of silently picking a mode;
+    /// see `agent_doc_project_config_io::editor_navigation_mode`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor_navigation: Option<String>,
     /// Optional tmux client executable. Use an absolute path when GUI/IDE and
     /// terminal environments expose different tmux versions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1069,10 +1078,7 @@ free_text_execution = "goal"
 
     #[test]
     fn post_closeout_push_is_off_by_default() {
-        assert_eq!(
-            ProjectConfig::default().commit.push,
-            CommitPushMode::Off
-        );
+        assert_eq!(ProjectConfig::default().commit.push, CommitPushMode::Off);
         let serialized = toml::to_string(&ProjectConfig::default()).unwrap();
         assert!(!serialized.contains("[commit]"));
     }

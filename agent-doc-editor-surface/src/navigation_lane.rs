@@ -8,8 +8,8 @@
 //!
 //! There are two modes:
 //!
-//! - [`NavigationMode::Shared`] (the default, and the only mode the controller
-//!   runs today): every editor client of a root shares one lane, the project's
+//! - [`NavigationMode::Shared`] (the default; `editor_navigation` in
+//!   `.agent-doc/config.toml` opts out): every editor client of a root shares one lane, the project's
 //!   configured tmux session. Several installations (IntelliJ IDEA and Rider on
 //!   one repository) therefore compete for one `agent-doc` window, and the
 //!   `#idefocusowner` fold ([`crate::InstallationFocus`]) decides which of them
@@ -145,6 +145,132 @@ pub fn tmux_session_name_component(value: &str) -> String {
         .collect()
 }
 
+/// Whether `session` is an installation lane session derived from
+/// `project_session` (`<project session>-<installation component>`), i.e. a
+/// name [`NavigationLane::tmux_session_name`] can produce for some installation.
+///
+/// This is a naming relation, not proof that agent-doc created the session; it
+/// is used only to *refuse* (never to adopt or reap) a pane that lives in a
+/// sibling lane, so a false positive fails closed.
+pub fn is_lane_session_of(project_session: &str, session: &str) -> bool {
+    let project_session = project_session.trim();
+    if project_session.is_empty() {
+        return false;
+    }
+    session
+        .strip_prefix(project_session)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|component| {
+            !component.is_empty()
+                && component
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+        })
+}
+
+/// Where a document's existing pane lives relative to one navigation lane
+/// (`#ideriderindependentnav` P2b).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LanePaneMembership {
+    /// The document has no live pane; a new one starts in the lane's session.
+    Unplaced,
+    /// The pane already lives in this lane's session.
+    InLane,
+    /// The pane lives in another lane of the same project (the shared project
+    /// session or a sibling installation lane session). Sync for this lane must
+    /// drop it and focus must refuse it: a pane never changes lane implicitly.
+    OtherLane { owner_session: String },
+    /// The pane lives in a session that is not a lane of this project; the
+    /// existing session policy (`tmux_sessions`, GH #17) governs it.
+    Foreign { session: String },
+}
+
+impl LanePaneMembership {
+    /// Classify `pane_session` (the session the document's pane lives in, if
+    /// any) against `lane_session`, a lane of `project_session`.
+    pub fn classify(project_session: &str, lane_session: &str, pane_session: Option<&str>) -> Self {
+        let Some(pane_session) = pane_session.map(str::trim).filter(|s| !s.is_empty()) else {
+            return Self::Unplaced;
+        };
+        if pane_session == lane_session {
+            Self::InLane
+        } else if pane_session == project_session
+            || is_lane_session_of(project_session, pane_session)
+        {
+            Self::OtherLane {
+                owner_session: pane_session.to_string(),
+            }
+        } else {
+            Self::Foreign {
+                session: pane_session.to_string(),
+            }
+        }
+    }
+
+    pub fn owned_by_other_lane(&self) -> bool {
+        matches!(self, Self::OtherLane { .. })
+    }
+}
+
+/// The diagnostic owner-lane label of a session of `project_session`:
+/// `shared` for the project session, else the sanitized installation component.
+pub fn lane_label_for_session<'a>(project_session: &str, session: &'a str) -> &'a str {
+    if session == project_session {
+        return "shared";
+    }
+    session
+        .strip_prefix(project_session)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .filter(|component| !component.is_empty())
+        .unwrap_or(session)
+}
+
+/// One lane's layout columns with every document whose pane lives in another
+/// lane removed (`cross_lane_layout_dropped`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LaneLayoutPartition {
+    /// Columns (`file,file`) this lane may arrange; empty columns are removed.
+    pub kept: Vec<String>,
+    /// `(document, owner session)` for each document left in its own lane.
+    pub dropped: Vec<(String, String)>,
+}
+
+/// Partition `columns` for the lane backed by `lane_session`.
+///
+/// `pane_session_of(document)` reports the session of the document's live pane
+/// (`None` when it has none). A document whose pane lives in another lane of
+/// `project_session` is dropped; every other document is kept, so a document
+/// without a pane starts one in this lane and a foreign-session pane stays under
+/// the existing multi-session policy.
+pub fn partition_lane_layout_columns(
+    columns: &[String],
+    project_session: &str,
+    lane_session: &str,
+    mut pane_session_of: impl FnMut(&str) -> Option<String>,
+) -> LaneLayoutPartition {
+    let mut partition = LaneLayoutPartition::default();
+    for column in columns {
+        let mut kept = Vec::new();
+        for file in column.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+            let pane_session = pane_session_of(file);
+            match LanePaneMembership::classify(
+                project_session,
+                lane_session,
+                pane_session.as_deref(),
+            ) {
+                LanePaneMembership::OtherLane { owner_session } => {
+                    partition.dropped.push((file.to_string(), owner_session));
+                }
+                _ => kept.push(file),
+            }
+        }
+        if !kept.is_empty() {
+            partition.kept.push(kept.join(","));
+        }
+    }
+    partition
+}
+
 /// The key every layout-ownership decision is made under: one project root's
 /// one navigation lane. In shared mode every client of a root maps to the same
 /// key, so keying by it is identical to the historical per-root keying.
@@ -276,7 +402,99 @@ mod tests {
         );
     }
 
+    #[test]
+    fn lane_sessions_are_recognized_only_as_derived_from_the_project_session() {
+        assert!(is_lane_session_of("agent-loop", "agent-loop-IU-0a1b2c3d"));
+        assert!(!is_lane_session_of("agent-loop", "agent-loop"));
+        assert!(!is_lane_session_of("agent-loop", "agent-loop-"));
+        assert!(!is_lane_session_of("agent-loop", "agent-loopX-IU"));
+        assert!(!is_lane_session_of("agent-loop", "other-IU-0a1b2c3d"));
+        assert!(!is_lane_session_of("agent-loop", "agent-loop-IU.0a"));
+        assert!(!is_lane_session_of("", "-IU"));
+        assert_eq!(lane_label_for_session("p", "p"), "shared");
+        assert_eq!(lane_label_for_session("p", "p-RD-9f8e7d6c"), "RD-9f8e7d6c");
+        assert_eq!(lane_label_for_session("p", "elsewhere"), "elsewhere");
+    }
+
+    #[test]
+    fn pane_membership_separates_own_lane_other_lanes_and_foreign_sessions() {
+        let classify = |pane| LanePaneMembership::classify("p", "p-IU-0a1b2c3d", pane);
+        assert_eq!(classify(None), LanePaneMembership::Unplaced);
+        assert_eq!(classify(Some("  ")), LanePaneMembership::Unplaced);
+        assert_eq!(classify(Some("p-IU-0a1b2c3d")), LanePaneMembership::InLane);
+        assert!(classify(Some("p")).owned_by_other_lane());
+        assert!(classify(Some("p-RD-9f8e7d6c")).owned_by_other_lane());
+        assert_eq!(
+            classify(Some("research")),
+            LanePaneMembership::Foreign {
+                session: "research".to_string()
+            }
+        );
+        // The shared lane treats installation lanes as other lanes too.
+        assert!(
+            LanePaneMembership::classify("p", "p", Some("p-IU-0a1b2c3d")).owned_by_other_lane()
+        );
+        assert_eq!(
+            LanePaneMembership::classify("p", "p", Some("p")),
+            LanePaneMembership::InLane
+        );
+    }
+
+    #[test]
+    fn lane_partition_drops_only_documents_whose_pane_lives_in_another_lane() {
+        let columns = vec![
+            "/r/a.md".to_string(),
+            "/r/b.md, /r/c.md".to_string(),
+            "/r/d.md".to_string(),
+        ];
+        let sessions = BTreeMap::from([
+            ("/r/a.md", "p-IU-0a"),
+            ("/r/b.md", "p"),
+            ("/r/d.md", "p-RD-9f"),
+        ]);
+        let partition = partition_lane_layout_columns(&columns, "p", "p-IU-0a", |file| {
+            sessions.get(file).map(|session| session.to_string())
+        });
+        assert_eq!(partition.kept, vec!["/r/a.md", "/r/c.md"]);
+        assert_eq!(
+            partition.dropped,
+            vec![
+                ("/r/b.md".to_string(), "p".to_string()),
+                ("/r/d.md".to_string(), "p-RD-9f".to_string()),
+            ]
+        );
+    }
+
+    use std::collections::BTreeMap;
+
     proptest! {
+        #[test]
+        fn lane_partition_never_keeps_a_pane_from_another_lane(
+            placements in proptest::collection::vec(0usize..4, 1..6),
+        ) {
+            let sessions = [None, Some("p-IU-0a"), Some("p"), Some("p-RD-9f")];
+            let columns = (0..placements.len())
+                .map(|index| format!("/r/{index}.md"))
+                .collect::<Vec<_>>();
+            let partition = partition_lane_layout_columns(&columns, "p", "p-IU-0a", |file| {
+                let index: usize = file
+                    .trim_start_matches("/r/")
+                    .trim_end_matches(".md")
+                    .parse()
+                    .unwrap();
+                sessions[placements[index]].map(str::to_string)
+            });
+            prop_assert_eq!(partition.kept.len() + partition.dropped.len(), columns.len());
+            for kept in &partition.kept {
+                let index: usize = kept
+                    .trim_start_matches("/r/")
+                    .trim_end_matches(".md")
+                    .parse()
+                    .unwrap();
+                prop_assert!(placements[index] <= 1);
+            }
+        }
+
         #[test]
         fn installation_lane_sessions_are_tmux_safe_and_distinct_from_the_shared_lane(
             project in "[A-Za-z0-9_-]{1,12}",
@@ -289,6 +507,7 @@ mod tests {
             prop_assert!(session
                 .chars()
                 .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'));
+            prop_assert!(is_lane_session_of(&project, &session));
             prop_assert_ne!(session, NavigationLane::Shared.tmux_session_name(&project));
         }
     }

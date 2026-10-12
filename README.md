@@ -96,6 +96,26 @@ topic or project), list them in `tmux_sessions` and bind documents with
 `tmux_session:` frontmatter; see the
 [multi-session tmux runbook](runbooks/multi-tmux-sessions.md).
 
+When IntelliJ IDEA and Rider (or two installs of one IDE) are open on the same
+project, they share one tmux `agent-doc` window by default, driven by whichever
+IDE was focused last. To let each IDE navigate tmux on its own, opt in:
+
+```toml
+# .agent-doc/config.toml
+tmux_session = "agent-loop"
+editor_navigation = "per_installation"   # default: "shared"
+```
+
+Each installation then gets its own lane session `<tmux_session>-<installation>`
+(for example `agent-loop-IU-0a1b2c3d`), created on that IDE's first layout sync
+with `agent-doc` and `stash` windows. A document's pane stays in the lane that
+started it: another IDE's layout drops it (`cross_lane_layout_dropped` in
+`ops.log`) and its focus is refused (`owned_by_other_lane`) instead of moving the
+pane. VS Code and older JetBrains plugins stay on the shared session. The mode is
+read when the project controller starts; an unknown value logs a warning and
+keeps `shared`. Attaching each IDE terminal to its own lane session is the next
+phase ([plan](docs/plan-ide-independent-nav.md)).
+
 ## Feature Taxonomy
 
 agent-doc has a broad feature surface because the README doubles as a user guide and capability ledger. The reader-facing overview is grouped by workflow layer here; the exhaustive feature catalog is kept near the bottom so installation, architecture, editor setup, and security stay easy to scan.

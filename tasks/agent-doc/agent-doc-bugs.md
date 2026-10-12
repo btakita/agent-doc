@@ -381,6 +381,27 @@ Each batch passed its own full `make check`. They would ship as v0.35.492: versi
 - **Restarts that stay:** only those with a real reason, such as a harness with no native clear command, an unresponsive agent, or an explicit Restart Agent. Those are documented.
 - **Unchanged:** one clear per press, the queued and re-armed behavior, `interrupt-clear`, and no auto-trigger afterwards unless work is pending.
 - **Live test:** on an isolated tmux server with a fake harness, it will check that an idle Clear types `/clear` into the same child process (same PID) and that a background job keeps running.
+
+### Re: build/test turnaround; sdk.md manual-Clear not operated — opus-5.5 · 2026-10-12T05:10-04:00
+
+> **Queue prompt:** How can we optimize the agent-doc build process + test process to reduce the turnaround time?
+
+**Deferred:** this went to a background subagent (claim `subagent:turnaround`, branch `turnaround`). It will answer with measurements, not guesses:
+- **What it times:** each `make check` stage, cold vs warm builds, per-crate and per-binary test time from the nextest reports, link vs compile time, the linker, debug-info and codegen settings, and how much of the check is non-Rust (Gradle, Lean, TLA, sim) and whether those stages run one after another.
+- **What it lands:** the safe wins with before/after timings, for example running independent stages in parallel, skipping unchanged non-Rust stages by fingerprint, and a faster dev linker. It will not weaken any check.
+
+For reference, today's `make check` dropped from about 290s to 136s for the test portion after the controller accept-loop fix, and `install-full` takes about 556s.
+
+> **Queue prompt:** sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
+
+**Deferred:** the haiven-dev ops.log for pane %180 confirms it:
+1. **09:07:19 and 09:07:26:** your Clear presses were correctly deferred behind the live turn (`clear_epoch=92`).
+2. **09:07:35:** Run Agent Doc dispatched a new turn.
+3. **09:07:46:** as that turn started, the supervisor logged `idle_queue_watch_deferred_clear_satisfied ... settled=true (#sdkclearwedge)` and retired the clear. No `/clear` was ever sent. The start of the new turn was wrongly counted as proof the context had been cleared.
+
+Since that's the same clear-delivery code the `#idleclearrestart` change is rewriting, I gave it to that subagent (claim `subagent:idleclear`) rather than starting a conflicting branch. The fix: "satisfied" must require real proof (a delivered `/clear` receipt or a fresh harness session). A run started after the press either keeps the clear queued or drops it with the "not sent" notice, never silently. It will be covered by a regression test for this exact sequence.
+
+**Now:** the clear didn't happen. Press Clear Session Context again once this sdk.md turn ends, or type `/clear` yourself at the idle prompt.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -389,14 +410,15 @@ Each batch passed its own full `make check`. They would ship as v0.35.492: versi
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#idleclearrestart]: Yes, Idle clear should type `/clear`.
+- 🚧 do [#idleclearrestart]: Yes, Idle clear should type `/clear`.
 - How can we optimize the agent-doc build process + test process to reduce the turnaround time?
+- sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#idleclearrestart] [operator-verify] [agent-doc] Decide: Clear Session Context at an idle prompt restarts the Claude process (supervisor_restart_fresh) instead of typing /clear, killing running Claude background agents/shells with no report (2026-10-11 live test: agent stopped at 12/40 ticks). Queued clears type /clear. Should idle Clear type /clear too?
+- [ ] 🚧 [#idleclearrestart] [operator-verify] [agent-doc] Decide: Clear Session Context at an idle prompt restarts the Claude process (supervisor_restart_fresh) instead of typing /clear, killing running Claude background agents/shells with no report (2026-10-11 live test: agent stopped at 12/40 ticks). Queued clears type /clear. Should idle Clear type /clear too?
 <!-- /agent:backlog -->
 
 ## Review

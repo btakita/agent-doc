@@ -28603,8 +28603,10 @@ pub enum NavigationLaneHandoffOutcome {
 }
 
 /// Whether agent-doc created `session` as a navigation lane of `project_root`
-/// (it carries [`NAVIGATION_LANE_SESSION_OPTION`] with this root).
-fn navigation_lane_session_marked(
+/// (it carries [`NAVIGATION_LANE_SESSION_OPTION`] with this root). The sync
+/// body reads it to retarget a shared-mode sync away from a stale lane
+/// (`#ridernavp6switchback`).
+pub fn navigation_lane_session_marked(
     tmux: &tmux_router::Tmux,
     project_root: &Path,
     session: &str,

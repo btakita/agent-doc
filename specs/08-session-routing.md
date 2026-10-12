@@ -526,6 +526,12 @@ never hands a pane over); see `specs/07-session-tmux-commands.md` (P6).
 Route, start, and claim themselves still provision into the shared lane; a pane
 they start there reaches an installation lane through that lane's next explicit
 claim.
+After a switch back to `shared`, until `agent-doc gc` folds the lanes, a shared
+sync never targets a lane session agent-doc created (it arranges the pin
+instead, `navigation_lane_stale_target_retargeted`) and adopts a laid-out
+document's pane from it into the pin's `stash` before the reconcile
+(`navigation_lane_stale_pane_adopted`); see `specs/07-session-tmux-commands.md`
+(`#ridernavp6switchback`).
 
 **Deferred.** In shared navigation mode the pane-layout target-window fallback
 (`pane_layout_target_window_id`) without an explicit window still reads the

@@ -5,7 +5,8 @@ branch `ridernavp2b`; P3 landed on branch `ridernavp3`; P4's explicit handoff la
 `ridernavp4`. P5's migration, lane cleanup, docs, and two-IDE end-to-end test landed on branch
 `ridernavp5`; the lane awareness carried over from P3/P4 is still open (listed under P5).
 P6's lane-aware `sync_tmux_layout` command and recycle republish landed on branch
-`ridernavp6republish`.
+`ridernavp6republish`; the switch-back-before-gc behavior of the shared sync landed on branch
+`ridernavp6switchback`.
 
 ## Problem
 
@@ -440,6 +441,50 @@ republish; a per-lane `pane_layout_status` channel; optionally an opt-in focus-d
   the document into its own window, Rider keeps it, no pane changes session or is duplicated).
 - Still open: route, start, and `agent-doc claim --client-id` (P5 (a), a separate item); a
   controller-side trigger for the lane reconcile.
+
+### P6 (switch back): shared sync before `agent-doc gc` migrates lane panes (LANDED)
+
+The question: after `editor_navigation` switches from `per_installation` back to `shared` (the
+controller reads it at its next start), lane sessions still hold document panes until
+`agent-doc gc` folds them. What does a shared-lane sync (passive heartbeat, manual Sync Tmux
+Layout, route's layout, recycle republish) do with such a document?
+
+- Observed before the fix (isolated tmux probe through the real sync body): the shared lane's
+  lane guards are identity, so a lane pane fell under the ordinary cross-session rules. With an
+  explicit project window the reconcile joined the lane pane into it (`SCOPE_CROSS`), which is an
+  adoption, but a layout change swapped a lane pane against a project pane across sessions and
+  pushed the project pane into the lane. With no explicit window the sync body followed the
+  focused document's pane (or the tmux client's current session) into the lane session and
+  arranged it, joining or swapping the project session's panes into the lane. No duplicate was
+  started (the pane is alive and registered), but panes moved the wrong way.
+- Decision: in shared mode no IDE navigates a lane, so a lane session agent-doc created (marked
+  for this root) is a migration source, never a target. Every shared sync, passive or manual,
+  (a) arranges the live project session whenever it resolves such a lane
+  (`agent_doc_editor_surface::shared_sync_target_session`, sync body
+  `shared_mode_stale_lane_target`; an explicit lane window is dropped;
+  `navigation_lane_stale_target_retargeted`), and (b) adopts each laid-out document whose pane is
+  still in such a lane into the project session's `stash` before the reconcile, with the P4
+  handoff mechanics (`adopt_stale_navigation_lane_panes` over `hand_over_navigation_lane_pane`;
+  `navigation_lane_stale_pane_adopted`). The same pane id and actor binding move, so nothing is
+  started twice or lost; a document outside the layout stays in its lane until a sync shows it or
+  gc folds it. Unmarked lane-named sessions and a dead project session keep the pre-lane rules.
+  Passive adoption is not the P4 "passive never moves a pane" violation: that rule protects a
+  live lane from another IDE, and after a switch back no lane is live.
+- Verification: editor-surface `shared_sync_retargets_only_a_marked_lane_of_the_project_in_shared_mode`;
+  SimWorld `two_ide_navigation_model` resolves a shared sync's target from the focused document's
+  pane through `shared_sync_target_session`, records every adoption, and checks that no shared-mode
+  sync arranges a lane session (exhaustive to depth 5 over 16 events), with the scenario
+  `switching_back_to_shared_adopts_lane_panes_before_gc` (passive and explicit adoption, a document
+  outside the layout waiting for gc, gc then folding nothing and closing both lanes) and mutations
+  `SharedSyncFollowsStaleLane`, `DuplicateOnAdopt`, `LoseOnAdopt`, all detected. `make tmux-ci` adds
+  `navigation_lane_guard_switch_back_to_shared_adopts_lane_panes_before_gc` (isolated server: a
+  passive heartbeat with no window focused on a lane document arranges the project session and
+  adopts it; a heartbeat focused on a lane document it does not show moves nothing; a sync naming
+  the lane's own window is retargeted and adopts; every registry entry keeps its pane, every new
+  pane is a bare shell outside the layout, and gc then closes the lane). Disabling either half of
+  the fix fails that test. Full (manual) mode takes the same path (the retarget and adoption run
+  before any mode-specific phase) but is not driven on the isolated server, because its dead-pane
+  actor sweep reads the default tmux server.
 
 ## Risks
 

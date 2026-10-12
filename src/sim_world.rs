@@ -1424,6 +1424,11 @@ mod multi_tmux_session_model {
 ///   lane document pane back into the project session (none lost or
 ///   duplicated) before its lane closes; in shared mode the project sync may
 ///   adopt a lane pane into the project session, never the reverse;
+/// - switch-back before gc (`#ridernavp6switchback`): after a switch to
+///   `shared`, a sync arranges only the project session, even when the
+///   focused document's pane is still in a lane
+///   (`shared_sync_target_session`), and it adopts a laid-out lane document's
+///   pane, passive or explicit, without starting a second one or losing it;
 /// - every mutation below is detected.
 mod two_ide_navigation_model {
     use agent_doc_editor_surface::{
@@ -1431,7 +1436,7 @@ mod two_ide_navigation_model {
         LaneReconcileAction, LaneSessionObservation, LayoutOwnerKey, NavigationLane,
         NavigationMode, RECYCLE_SETTLED_CALLER_KIND, SurfaceAuthority, editor_installation,
         is_lane_session_of, partition_lane_layout_columns_for_claim,
-        plan_navigation_lane_reconcile,
+        plan_navigation_lane_reconcile, shared_sync_target_session,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -1500,6 +1505,15 @@ mod two_ide_navigation_model {
         /// A recycle settle republishes as an explicit claim (`manual`)
         /// instead of the passive `recycle_settled` (P6).
         RecycleClaimsExplicitly,
+        /// After a switch back to `shared`, a sync follows the focused
+        /// document's pane into the stale lane session it still lives in
+        /// (`#ridernavp6switchback`).
+        SharedSyncFollowsStaleLane,
+        /// The shared sync starts a second pane for a document whose pane is
+        /// still in a stale lane instead of adopting it.
+        DuplicateOnAdopt,
+        /// The shared sync drops a stale lane's pane instead of adopting it.
+        LoseOnAdopt,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1557,6 +1571,11 @@ mod two_ide_navigation_model {
         folded: Vec<(String, String)>,
         /// A disable's gc left a document pane in a lane session.
         unfolded_after_disable: Vec<(String, String)>,
+        /// `(document, from, explicit)` for every pane a shared sync adopted
+        /// from a stale lane session (`#ridernavp6switchback`).
+        adopted: Vec<(String, String, bool)>,
+        /// Lane sessions a sync arranged while the project was in shared mode.
+        shared_mode_lane_targets: Vec<String>,
     }
 
     struct Sim {
@@ -1590,10 +1609,27 @@ mod two_ide_navigation_model {
         }
 
         fn target_session(&self, client: usize) -> String {
-            match self.mutation {
-                Mutation::SharedSessionTarget => PROJECT_SESSION.to_string(),
-                _ => self.lane(client).tmux_session_name(PROJECT_SESSION),
+            if self.mutation == Mutation::SharedSessionTarget {
+                return PROJECT_SESSION.to_string();
             }
+            let lane_session = self.lane(client).tmux_session_name(PROJECT_SESSION);
+            if self.mode != NavigationMode::Shared {
+                return lane_session;
+            }
+            // The sync body has no explicit window here and follows the
+            // focused document's pane, which may still be in a lane session
+            // a switch back to `shared` left behind until gc.
+            let focused = LAYOUTS[client][0];
+            let resolved = match self.world.pane_session.get(focused) {
+                Some(session) if is_lane_session_of(PROJECT_SESSION, session) => session.clone(),
+                _ => lane_session,
+            };
+            if self.mutation == Mutation::SharedSyncFollowsStaleLane {
+                return resolved;
+            }
+            let marked = self.world.lane_sessions.contains(&resolved);
+            shared_sync_target_session(self.mode, PROJECT_SESSION, &resolved, marked, true)
+                .to_string()
         }
 
         fn authority(&self, client: usize) -> SurfaceAuthority {
@@ -1643,6 +1679,9 @@ mod two_ide_navigation_model {
                         return;
                     }
                     let session = self.target_session(client);
+                    if self.mode == NavigationMode::Shared && session != PROJECT_SESSION {
+                        self.world.shared_mode_lane_targets.push(session.clone());
+                    }
                     let claim = if explicit || self.mutation == Mutation::HandoffOnPassive {
                         LaneClaim::Explicit
                     } else {
@@ -1985,7 +2024,21 @@ mod two_ide_navigation_model {
                             && is_lane_session_of(PROJECT_SESSION, &from) =>
                     {
                         // Disabled lanes: the project sync adopts a pane left
-                        // in a lane session before gc folded it.
+                        // in a lane session before gc folded it (the P4
+                        // handoff mechanics: same pane, moved into the project
+                        // session's stash, then placed).
+                        self.world
+                            .adopted
+                            .push((document.clone(), from.clone(), explicit));
+                        match self.mutation {
+                            Mutation::DuplicateOnAdopt => {
+                                *self.world.pane_count.entry(document.clone()).or_default() += 1;
+                            }
+                            Mutation::LoseOnAdopt => {
+                                self.world.pane_count.insert(document.clone(), 0);
+                            }
+                            _ => {}
+                        }
                         self.world
                             .pane_session
                             .insert(document.clone(), session.to_string());
@@ -2022,6 +2075,11 @@ mod two_ide_navigation_model {
             }
             if let Some((document, session)) = self.world.unfolded_after_disable.first() {
                 return Err(format!("disable left {document} in lane {session}"));
+            }
+            if let Some(session) = self.world.shared_mode_lane_targets.first() {
+                return Err(format!(
+                    "a shared-mode sync arranged the stale lane session {session}"
+                ));
             }
             if let Some(session) = self.world.recycle_pending.first() {
                 return Err(format!(
@@ -2311,6 +2369,102 @@ mod two_ide_navigation_model {
         )
         .expect("an explicit recycle republish takes a contended pane");
         assert!(violation.contains("passive sync handed"), "{violation}");
+    }
+
+    #[test]
+    fn a_shared_sync_following_a_stale_lane_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::SharedSyncFollowsStaleLane,
+            DEPTH,
+        )
+        .expect("a shared sync focused on a lane document must not arrange the lane");
+        assert!(violation.contains("stale lane session"), "{violation}");
+    }
+
+    #[test]
+    fn a_duplicated_or_lost_pane_on_switch_back_is_detected() {
+        let duplicated = explore(
+            NavigationMode::PerInstallation,
+            Mutation::DuplicateOnAdopt,
+            DEPTH,
+        )
+        .expect("starting a second pane for a stale lane document duplicates it");
+        assert!(duplicated.contains("duplicated"), "{duplicated}");
+        let lost = explore(
+            NavigationMode::PerInstallation,
+            Mutation::LoseOnAdopt,
+            DEPTH,
+        )
+        .expect("dropping a stale lane pane loses the document");
+        assert!(lost.contains("lost"), "{lost}");
+    }
+
+    /// `#ridernavp6switchback`: two lanes hold panes, the project switches
+    /// back to `shared`, and syncs run before `agent-doc gc`. A passive sync
+    /// focused on a lane document arranges the project session and adopts the
+    /// laid-out lane panes (same pane, once); a lane document outside the
+    /// shared layout stays in its lane until an explicit sync shows it or gc
+    /// folds it; nothing is started twice, lost, or arranged in a lane.
+    #[test]
+    fn switching_back_to_shared_adopts_lane_panes_before_gc() {
+        let idea = "proj-IU-0a1b2c3d".to_string();
+        let rider = "proj-RD-9f8e7d6c".to_string();
+        let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        // IDEA's lane holds `a` and `b`; Rider claims `b` and starts `c`.
+        sim.step(Event::Claim(0));
+        sim.step(Event::Claim(1));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.pane_session["/project/a.md"], idea);
+        assert_eq!(sim.world.pane_session["/project/b.md"], rider);
+        assert_eq!(sim.world.pane_session["/project/c.md"], rider);
+
+        sim.step(Event::SetMode(NavigationMode::Shared));
+        // The unscoped editor's passive heartbeat shows `c` (focused, its
+        // pane is in Rider's stale lane) and `a` (in IDEA's).
+        sim.step(Event::Layout(2));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(
+            sim.world.adopted,
+            vec![
+                ("/project/c.md".to_string(), rider.clone(), false),
+                ("/project/a.md".to_string(), idea.clone(), false),
+            ],
+            "a passive shared sync adopts both laid-out lane panes"
+        );
+        assert_eq!(sim.world.pane_session["/project/a.md"], PROJECT_SESSION);
+        assert_eq!(sim.world.pane_session["/project/c.md"], PROJECT_SESSION);
+        assert_eq!(
+            sim.world.pane_session["/project/b.md"], rider,
+            "b is not laid out: it waits in its lane"
+        );
+        assert_eq!(
+            sim.world.lane_sessions,
+            BTreeSet::from([idea.clone(), rider.clone()]),
+            "only gc closes lanes"
+        );
+        // Rider's explicit claim (now on the shared lane) shows `b`, focused,
+        // while its pane is still in Rider's lane: it arranges the project
+        // session and adopts it.
+        sim.step(Event::Claim(1));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(
+            sim.world.adopted.last(),
+            Some(&("/project/b.md".to_string(), rider.clone(), true))
+        );
+        assert!(sim.world.shared_mode_lane_targets.is_empty());
+        assert!(sim.world.pane_count.values().all(|count| *count == 1));
+        // gc has nothing to fold and closes both lanes.
+        sim.step(Event::Gc);
+        assert_eq!(sim.check(), Ok(()));
+        assert!(sim.world.folded.is_empty());
+        assert!(sim.world.lane_sessions.is_empty());
+        assert!(
+            sim.world
+                .pane_session
+                .values()
+                .all(|session| session == PROJECT_SESSION)
+        );
     }
 
     /// `#ideriderindependentnav` P6: IDEA's explicit claim is retained, Rider

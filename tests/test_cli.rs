@@ -14967,6 +14967,51 @@ fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
         "controller-heavy packages must avoid nextest's process-per-test startup"
     );
 
+    // `#flakyintegrate0494`: a full check once failed one test and the log was
+    // deleted before anyone read it. Every test step of the authoritative gate
+    // runs through the recorder, which keeps output, exit status, and nextest's
+    // JUnit report per run, outside target/.
+    let recipe = |target: &str| -> String {
+        let start = makefile
+            .find(&format!("\n{target}:"))
+            .unwrap_or_else(|| panic!("Makefile target {target} missing"));
+        makefile[start + 1..]
+            .lines()
+            .skip(1)
+            .take_while(|line| line.starts_with('\t'))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    for target in ["test", "sim-medium", "sim-net"] {
+        let body = recipe(target);
+        let steps: Vec<&str> = body
+            .lines()
+            .filter(|line| line.contains("nextest run") || line.contains("$(CARGO_CMD) test "))
+            .collect();
+        assert!(!steps.is_empty(), "{target} must run a test step");
+        for step in steps {
+            assert!(
+                step.contains("$(TEST_RECORD) --label "),
+                "{target}: every test step must keep its output through scripts/test-run-record: {step}"
+            );
+        }
+        assert!(
+            !body.contains("rm -f \"$$log\""),
+            "{target} must not delete a test log"
+        );
+    }
+    assert!(
+        recipe("test").contains("--junit \"$(NEXTEST_JUNIT)\"")
+            && makefile.contains("TEST_RUN_ARTIFACT_ROOT ?= $(CURDIR)/tmp/test-runs")
+            && makefile.contains("python3 scripts/test-run-record self-test"),
+        "nextest's JUnit report must be kept per run, outside target/, and the recorder self-tested"
+    );
+    let nextest_config = fs::read_to_string(manifest_dir.join(".config/nextest.toml")).unwrap();
+    assert!(
+        nextest_config.contains("[profile.default.junit]\npath = \"junit.xml\""),
+        "nextest must write the JUnit report the recorder keeps"
+    );
+
     let wrapper = fs::read_to_string(manifest_dir.join("scripts/with-cargo-cache")).unwrap();
     assert!(
         wrapper.contains("CARGO_TARGET_DIR=\"$PWD/target\"")

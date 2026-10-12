@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""Keep the output of every authoritative test step (`#flakyintegrate0494`).
+
+A full `make check` once failed one test after 101/10205 nextest tests; the
+rerun on the same commit passed, and the only log had already been deleted, so
+the failing test was never known. This recorder makes that loss impossible:
+each test step `make test` / `sim-medium` / `sim-net` runs writes its combined
+output, exit status, command, nextest JUnit report (with the failing test's
+captured stdout/stderr), and a snapshot of concurrently running test processes
+into a per-run, per-checkout directory that outlives the run:
+
+    <root>/<UTC start>-<make pid>/<label>.log
+                                 /<label>.exit
+                                 /<label>.command
+                                 /<label>.junit.xml       (nextest steps)
+                                 /<label>.concurrent.txt  (other test runs)
+                                 /meta.json
+
+The default root (Makefile `TEST_RUN_ARTIFACT_ROOT`) is the checkout's ignored
+`tmp/test-runs/`, outside `target/` so a `cargo clean` or the disk-sweep timer
+cannot remove it. Old runs are pruned: the newest `AGENT_DOC_TEST_RUN_KEEP`
+(default 20) runs are kept, and a run with a failing step is kept until it falls
+out of the newest `AGENT_DOC_TEST_RUN_KEEP_FAILED` (default 100).
+
+Usage:
+    test-run-record exec --run-dir DIR --label NAME [--junit PATH] [--echo] -- CMD...
+    test-run-record self-test
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+DEFAULT_KEEP = 20
+DEFAULT_KEEP_FAILED = 100
+# Processes whose presence marks another test run that can contend with this
+# one for CPU, tmux sockets, /var/tmp, or user state.
+CONCURRENT_MARKERS = ("cargo-nextest", "nextest run", "cargo test", "make check", "make test")
+
+
+def utc_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, "")))
+    except ValueError:
+        return default
+
+
+def run_failed(run_dir: Path) -> bool:
+    for exit_file in run_dir.glob("*.exit"):
+        try:
+            if exit_file.read_text().strip() != "0":
+                return True
+        except OSError:
+            return True
+    return False
+
+
+def prune(root: Path, current: Path, keep: int, keep_failed: int) -> list[Path]:
+    """Remove old run directories; return what was removed."""
+    if not root.is_dir():
+        return []
+    runs = sorted(
+        (p for p in root.iterdir() if p.is_dir() and p.resolve() != current.resolve()),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    removed = []
+    # `current` occupies one of the `keep` slots.
+    for index, run_dir in enumerate(runs, start=1):
+        if index < keep:
+            continue
+        if index < keep_failed and run_failed(run_dir):
+            continue
+        shutil.rmtree(run_dir, ignore_errors=True)
+        removed.append(run_dir)
+    return removed
+
+
+def git_output(*args: str) -> str:
+    try:
+        return subprocess.run(
+            ["git", *args], capture_output=True, text=True, timeout=10, check=False
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def concurrent_snapshot() -> str:
+    """Other test runs alive right now, with their working directories."""
+    own = {os.getpid(), os.getppid()}
+    lines = []
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return "(no /proc; concurrent test runs not recorded)\n"
+    for entry in proc.iterdir():
+        if not entry.name.isdigit() or int(entry.name) in own:
+            continue
+        try:
+            argv = (entry / "cmdline").read_bytes().split(b"\0")
+            # One line per process: shell `-c` scripts carry newlines and tabs.
+            cmdline = " ".join(" ".join(a.decode(errors="replace").split()) for a in argv if a)
+            if not any(marker in cmdline for marker in CONCURRENT_MARKERS):
+                continue
+            cwd = os.readlink(entry / "cwd")
+        except OSError:
+            continue
+        lines.append(f"{entry.name}\t{cwd}\t{cmdline[:300]}")
+    try:
+        load = " ".join(Path("/proc/loadavg").read_text().split()[:3])
+    except OSError:
+        load = "unknown"
+    header = f"recorded_at={utc_now()} loadavg={load}\npid\tcwd\tcmdline\n"
+    return header + "\n".join(sorted(lines)) + ("\n" if lines else "")
+
+
+def write_meta(run_dir: Path) -> None:
+    meta_path = run_dir / "meta.json"
+    if meta_path.exists():
+        return
+    meta = {
+        "started_at": utc_now(),
+        "checkout": os.getcwd(),
+        "head": git_output("rev-parse", "HEAD"),
+        "dirty": bool(git_output("status", "--porcelain", "--untracked-files=no")),
+        "host": socket.gethostname(),
+        "tmpdir": os.environ.get("TMPDIR", ""),
+        "root_ceiling": os.environ.get("AGENT_DOC_ROOT_CEILING_DIRECTORIES", ""),
+    }
+    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
+
+
+def exec_step(args: argparse.Namespace) -> int:
+    run_dir = Path(args.run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    prune(
+        run_dir.parent,
+        run_dir,
+        env_int("AGENT_DOC_TEST_RUN_KEEP", DEFAULT_KEEP),
+        env_int("AGENT_DOC_TEST_RUN_KEEP_FAILED", DEFAULT_KEEP_FAILED),
+    )
+    write_meta(run_dir)
+    label = args.label
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if not command:
+        print("test-run-record: missing command", file=sys.stderr)
+        return 2
+    junit = Path(args.junit) if args.junit else None
+    if junit is not None and junit.exists():
+        # A stale report from an earlier run must never be filed under this one.
+        junit.unlink()
+    (run_dir / f"{label}.command").write_text(" ".join(command) + "\n")
+    (run_dir / f"{label}.concurrent.txt").write_text(concurrent_snapshot())
+    log_path = run_dir / f"{label}.log"
+    with log_path.open("wb") as log:
+        log.write(f"# test-run-record start={utc_now()}\n".encode())
+        log.flush()
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert process.stdout is not None
+        for chunk in iter(lambda: process.stdout.readline(), b""):
+            log.write(chunk)
+            if args.echo:
+                sys.stdout.buffer.write(chunk)
+                sys.stdout.buffer.flush()
+        status = process.wait()
+        log.write(f"# test-run-record end={utc_now()} exit={status}\n".encode())
+    (run_dir / f"{label}.exit").write_text(f"{status}\n")
+    if junit is not None and junit.exists():
+        shutil.copyfile(junit, run_dir / f"{label}.junit.xml")
+    if status != 0:
+        if not args.echo:
+            sys.stdout.buffer.write(log_path.read_bytes())
+            sys.stdout.flush()
+        print(f"test-run-record: {label} failed (exit {status}); kept {run_dir}", file=sys.stderr)
+    return status
+
+
+def self_test() -> None:
+    script = Path(__file__).resolve()
+    with tempfile.TemporaryDirectory(prefix="test-run-record-") as tmp:
+        root = Path(tmp) / "runs"
+        junit = Path(tmp) / "junit.xml"
+        junit.write_text("<stale/>")
+
+        def record(run: str, label: str, code: str, *extra: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [sys.executable, str(script), "exec", "--run-dir", str(root / run),
+                 "--label", label, *extra, "--", sys.executable, "-c", code],
+                capture_output=True, text=True, check=False,
+                env={**os.environ, "AGENT_DOC_TEST_RUN_KEEP": "3", "AGENT_DOC_TEST_RUN_KEEP_FAILED": "5"},
+            )
+
+        # A failing nextest-like step: output, exit status, and a fresh JUnit
+        # report are all kept; a stale report is never copied.
+        writes_junit = f"import sys; open({str(junit)!r}, 'w').write('<fresh/>'); print('FAIL flaky_test'); sys.exit(100)"
+        result = record("20261011T000001Z-1", "nextest", writes_junit, "--junit", str(junit))
+        assert result.returncode == 100, result
+        run = root / "20261011T000001Z-1"
+        assert "FAIL flaky_test" in (run / "nextest.log").read_text()
+        assert "FAIL flaky_test" in result.stdout, "failing quiet step must print its log"
+        assert f"kept {run}" in result.stderr, result.stderr
+        assert (run / "nextest.exit").read_text().strip() == "100"
+        assert (run / "nextest.junit.xml").read_text() == "<fresh/>"
+        assert json.loads((run / "meta.json").read_text())["started_at"]
+        assert (run / "nextest.concurrent.txt").read_text().startswith("recorded_at=")
+
+        # A step that writes no report must not inherit the previous one.
+        junit.write_text("<stale/>")
+        result = record("20261011T000002Z-1", "nextest", "print('ok')", "--junit", str(junit))
+        assert result.returncode == 0 and result.stdout == "", result
+        assert not (root / "20261011T000002Z-1" / "nextest.junit.xml").exists()
+
+        # --echo streams the output live and does not repeat it on failure.
+        result = record("20261011T000003Z-1", "echoed", "import sys; print('live'); sys.exit(1)", "--echo")
+        assert result.stdout.count("live") == 1, result.stdout
+
+        # Pruning keeps the newest KEEP runs (the current one included), and a
+        # run with a failing step until it leaves the newest KEEP_FAILED.
+        prune_root = Path(tmp) / "prune"
+        for index in range(1, 11):
+            run_dir = prune_root / f"20261011T0000{index:02d}Z-1"
+            run_dir.mkdir(parents=True)
+            failed = index in (2, 6)
+            (run_dir / "test.exit").write_text("1\n" if failed else "0\n")
+        current = prune_root / "20261011T000011Z-1"
+        current.mkdir()
+        prune(prune_root, current, keep=3, keep_failed=6)
+        names = sorted(p.name[13:15] for p in prune_root.iterdir())
+        # newest-first others: 10 9 | 8 7 6F 5 | 4 3 2F 1 -> keep 10 9, 6F inside KEEP_FAILED.
+        assert names == ["06", "09", "10", "11"], names
+    print("test-run-record self-test: ok")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="action", required=True)
+    exec_parser = sub.add_parser("exec", help="run one test step and keep its output")
+    exec_parser.add_argument("--run-dir", required=True)
+    exec_parser.add_argument("--label", required=True)
+    exec_parser.add_argument("--junit", help="report the step writes; copied into the run dir")
+    exec_parser.add_argument("--echo", action="store_true", help="stream output live as well")
+    exec_parser.add_argument("command", nargs=argparse.REMAINDER)
+    sub.add_parser("self-test")
+    args = parser.parse_args()
+    if args.action == "self-test":
+        self_test()
+        return 0
+    return exec_step(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -108,6 +108,62 @@ pub fn source_digest_inputs(root: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(inputs.into_values().collect())
 }
 
+/// The directories the build script declares `rerun-if-changed` for, so that
+/// *creating* a source file (which no per-file declaration can observe) still
+/// re-runs it.
+///
+/// Cargo scans a declared directory **recursively** and compares the newest
+/// mtime anywhere beneath it. Declaring the workspace root therefore watched
+/// `target/` itself (`#flakyintegrate0494`): every compile wrote files there
+/// after the build script ran, so the root package was stale on every cargo
+/// invocation — each `cargo build`/`nextest`/`test` re-ran the build script,
+/// recompiled the root crate and relinked every test binary, and a second cargo
+/// process on the same checkout deleted the test binaries out from under a
+/// running nextest (`[double-spawn] failed to exec ... No such file or
+/// directory`). Any write in the checkout (a test log under `tmp/`, a test's
+/// `.agent-doc/`) did the same.
+///
+/// So the workspace root is never declared, and neither is any directory whose
+/// subtree holds a directory the digest excludes (`target`, `node_modules`,
+/// `.agent-doc`, ...): its build/runtime churn would make it permanently stale
+/// for the same reason. The cost is that a *new* file created directly in such
+/// a directory is not noticed until some declared input changes; at the root
+/// that can only be a toolchain file (`Cargo.toml`, `Cargo.lock` and
+/// `build.rs` already exist and are declared individually), and a new member
+/// package is only linked through an edit to an existing, declared manifest.
+pub fn source_digest_watch_directories(root: &Path, inputs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut directories = std::collections::BTreeSet::new();
+    for relative in inputs {
+        let Some(parent) = relative.parent() else {
+            continue;
+        };
+        if parent.as_os_str().is_empty() || parent == Path::new(".") {
+            continue;
+        }
+        directories.insert(parent.to_path_buf());
+    }
+    directories
+        .into_iter()
+        .filter(|directory| !contains_excluded_directory(&root.join(directory)))
+        .collect()
+}
+
+fn contains_excluded_directory(directory: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let Ok(file_type) = entry.file_type() else {
+            return false;
+        };
+        if !file_type.is_dir() {
+            return false;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        EXCLUDED_DIRECTORIES.contains(&name.as_str()) || contains_excluded_directory(&entry.path())
+    })
+}
+
 /// The content-derived build identity for the workspace rooted at `root`.
 ///
 /// The preimage names each file as well as hashing it, so moving code between
@@ -184,7 +240,10 @@ fn normalized_relative_path(relative: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{SOURCE_DIGEST_HEX_LEN, source_digest_inputs, workspace_source_digest};
+    use super::{
+        SOURCE_DIGEST_HEX_LEN, source_digest_inputs, source_digest_watch_directories,
+        workspace_source_digest,
+    };
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -324,6 +383,61 @@ mod tests {
                 "member/Cargo.toml".to_string(),
                 "member/src/lib.rs".to_string(),
                 "src/main.rs".to_string(),
+            ]
+        );
+    }
+
+    /// `#flakyintegrate0494`: cargo scans a declared directory recursively, so
+    /// declaring the workspace root watched `target/` and made the root package
+    /// stale on every cargo invocation (a concurrent cargo then deleted test
+    /// binaries out from under a running nextest). Neither the root nor any
+    /// directory holding build/runtime state may be declared; every directory
+    /// that only holds sources still is, so a newly created source re-runs the
+    /// build script.
+    #[test]
+    fn watch_directories_never_cover_build_or_runtime_state() {
+        let root = TempDir::new().unwrap();
+        workspace(root.path());
+        write(root.path(), "vendored/Cargo.toml", "[package]\nname = \"vendored\"\n");
+        write(root.path(), "vendored/src/lib.rs", "pub fn v() {}\n");
+        write(root.path(), "vendored/node_modules/x/index.js", "\n");
+        write(root.path(), "member/src/deep/mod.rs", "pub fn d() {}\n");
+        let inputs = source_digest_inputs(root.path()).unwrap();
+        let declared: Vec<String> = source_digest_watch_directories(root.path(), &inputs)
+            .iter()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(
+            declared,
+            vec![
+                "member".to_string(),
+                "member/src".to_string(),
+                "member/src/deep".to_string(),
+                "src".to_string(),
+                "vendored/src".to_string(),
+            ],
+            "the root (holding target/) and vendored/ (holding node_modules/) must not be declared"
+        );
+
+        // With `CARGO_TARGET_DIR` outside the checkout the root holds no
+        // `target/`, but it still holds test logs, `.agent-doc/` and editor
+        // state: the root is never declared, whatever it currently contains.
+        std::fs::remove_dir_all(root.path().join("target")).unwrap();
+        std::fs::remove_dir_all(root.path().join("vendored/node_modules")).unwrap();
+        write(root.path(), "tmp/test-runs/run/nextest.log", "log\n");
+        let without_state: Vec<String> = source_digest_watch_directories(root.path(), &inputs)
+            .iter()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(
+            without_state,
+            vec![
+                "member".to_string(),
+                "member/src".to_string(),
+                "member/src/deep".to_string(),
+                "src".to_string(),
+                "vendored".to_string(),
+                "vendored/src".to_string(),
             ]
         );
     }

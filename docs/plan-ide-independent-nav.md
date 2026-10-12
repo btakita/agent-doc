@@ -4,6 +4,8 @@ Status: P1 landed on branch `ridernav`; P2a landed on branch `ridernavp2a`; P2b 
 branch `ridernavp2b`; P3 landed on branch `ridernavp3`; P4's explicit handoff landed on branch
 `ridernavp4`. P5's migration, lane cleanup, docs, and two-IDE end-to-end test landed on branch
 `ridernavp5`; the lane awareness carried over from P3/P4 is still open (listed under P5).
+P6's lane-aware `sync_tmux_layout` command and recycle republish landed on branch
+`ridernavp6republish`.
 
 ## Problem
 
@@ -342,7 +344,7 @@ What landed (the original scope follows below):
   `editors/jetbrains/SPEC.md`.
 - Still open: (a) route, start, and `agent-doc claim --client-id` creating panes in the
   requester's lane; (b) the `sync_tmux_layout` command and the recycle republish publishing into
-  the right lane(s); (c) a per-lane `pane_layout_status` channel; a controller-side trigger that
+  the right lane(s) (landed in P6); (c) a per-lane `pane_layout_status` channel (landed in P6); a controller-side trigger that
   passes its live installations to the reconcile (today only `agent-doc gc` runs it). The optional
   focus-driven handoff is not planned.
 
@@ -364,6 +366,80 @@ republish; a per-lane `pane_layout_status` channel; optionally an opt-in focus-d
 - Docs: README, SPEC, and `editors/jetbrains/SPEC.md` describe the feature as
   available. A two-IDE end-to-end test in `tests/cross_editor_simworld.rs` uses an
   isolated tmux server and two simulated editor clients.
+
+### P6 (status): per-lane `pane_layout_status` channel (LANDED)
+
+- Pure (editor-surface): `NavigationLane::state_channel(base)`: the shared lane is `base`
+  itself; an installation lane is `<base>/lane/<installation>`.
+- Controller: each `ControllerPaneLayoutGraph` knows its lane and owns its status producer epoch
+  (the process-global `PANE_LAYOUT_STATUS_EPOCH` is gone), so the status is part of each lane
+  graph's scope rather than a side channel (`#stategraphjoin`). `publish_pane_layout_lane_status`
+  publishes the lane graph's own `state_projection()` on `pane_layout_status_channel(lane)`;
+  before P6 an installation lane published nothing. The shared lane publishes on
+  `agent-doc/pane-layout/status/v1` with the same payload, type tag, producer id, and epoch
+  sequence (starting at 1) as before.
+- Subscription: `ControllerStatePlaneSubscribeInvocation` gains an optional `client_id`
+  (omitted from the wire when unset). `state_plane_subscribe` for the status channel with a
+  `client_id` reads that client's lane channel (`NavigationLane::for_client` under the
+  configured mode); the subscription reports the channel it read. No client id, an unscoped
+  client, shared mode, and every other channel are unchanged. The lane's status reaches the
+  subscriber by the existing state-plane push (`#reactive-boundary-ingress`): no polling, no RPC
+  from the controller to the editor.
+- Editors: no plugin change. The JetBrains plugin builds a status subscribe request
+  (`CpRouteClient.statePlaneSubscribeRequest`) but no production path consumes the status yet;
+  a future consumer passes its surface client id. VS Code clients are unscoped and read the
+  shared channel.
+- Verification: editor-surface `lane_state_channel_keeps_the_shared_channel_and_separates_installations`;
+  controller `pane_layout_status_is_published_and_subscribed_per_navigation_lane` (IDEA converged,
+  Rider's effect failed: each subscriber sees only its own lane's phase/reason/attempt, the
+  shared channel stays empty, a later Rider publish leaves IDEA's channel version unchanged, a
+  shared layout publishes only on the shared channel) and
+  `shared_mode_pane_layout_status_is_the_pre_lane_channel_for_every_client` (every client id
+  reads the identical shared subscription, epoch 1, payload equal to the shared graph's
+  projection, no `client_id` on an unscoped invocation's wire). Not modeled in SimWorld: the
+  status channel is a wire projection of each lane graph, and `two_ide_navigation_model` models
+  pane placement, not status delivery.
+
+### P6 (republish): lane-aware `sync_tmux_layout` command and recycle republish (LANDED)
+
+- Command: `ControllerTmuxLayoutSyncInvocation` gains an optional `client_id` (serde default,
+  omitted from the wire when unset; the command-plane payload carries it too). `handle_sync_tmux_layout`
+  takes it off the invocation and resolves `sync_tmux_layout_command_lane(mode, client_id)`: the
+  client's `NavigationLane::for_client` lane when a client id is supplied, else the shared lane.
+  The shared lane is the pre-lane path byte for byte; an installation lane publishes through
+  `publish_pane_layout_desired_invocation_in_lane` (publisher `command`, no shared durable column
+  memory, its own status channel), logs `sync_tmux_layout_lane_routed`, and awaits that lane
+  graph's projection (`await_lane_sync_tmux_layout_projection`). A `manual` command is the P4
+  explicit claim in its own lane. FFI: `agent_doc_sync_tmux_layout_for_client_json(.., client_id)`;
+  the old entry point is that with a null client. No plugin change: the JetBrains manual Sync Tmux
+  Layout already reaches its lane through the plugin publication (P3).
+- Recycle republish: `republish_pane_layout_after_recycle` walks every lane graph
+  (`pane_layout_lane_ids`, shared first). Each lane claims the GH #136 (d) republish against its own
+  last pass's gated documents and republishes its own retained layout into its own lane as
+  `recycle_settled`; a lane that did not gate the settled document is untouched. Under
+  `per_installation` the republish is passive for every lane (lane membership applies to the shared
+  lane too): `recycle_settled_lane_invocation` turns a retained `manual` into
+  `RECYCLE_SETTLED_CALLER_KIND` (`recycle_settled`), so a republish only drops a document whose pane
+  moved away and never hands a pane over; `no_autostart` and the other fields stay the retained
+  ones, so it adds no autostart beyond the retained layout's. `shared` mode republishes the retained
+  invocation unchanged (one lane, the pre-lane path).
+- Verification: controller unit tests for the command lane (`sync_tmux_layout_command_lane_follows_the_client_id_only_per_installation`,
+  `sync_tmux_layout_command_publishes_into_the_requesting_clients_lane`,
+  `shared_mode_sync_tmux_layout_command_is_the_pre_lane_path_for_every_client`) and the recycle
+  republish (`recycle_settle_republishes_each_navigation_lanes_own_retained_layout`,
+  `recycle_settled_lane_invocation_only_demotes_an_explicit_claim`, plus the shared-mode
+  `gh136d_recycle_settle_republishes_a_gated_layout_exactly_once` now asserting the caller kind is
+  kept); an FFI test of the client-scoped invocation; SimWorld `two_ide_navigation_model` gains a
+  `RecycleSettle` event (every lane republishes its retained layout, worst case all gated),
+  exhaustive to depth 5 over 16 events, with the invariant that a settle republishes every lane
+  holding a retained layout and the existing no-move/no-duplicate/no-loss/no-cross-lane checks, and
+  mutations `RecycleSharedOnly`, `RecycleIntoSharedSession`, `RecycleClaimsExplicitly`, all
+  detected; `make tmux-ci` adds `navigation_lane_session_recycle_republish_keeps_every_pane_in_its_lane`
+  (isolated server: two provisioned lanes holding explicit retained claims on a contended pane; the
+  retained claim verbatim would hand the pane over, the republish routes with no handoff, IDEA drops
+  the document into its own window, Rider keeps it, no pane changes session or is duplicated).
+- Still open: route, start, and `agent-doc claim --client-id` (P5 (a), a separate item); a
+  controller-side trigger for the lane reconcile.
 
 ## Risks
 

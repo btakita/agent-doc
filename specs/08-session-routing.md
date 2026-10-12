@@ -519,6 +519,10 @@ hands a contended document's pane over to the requesting lane, only between
 lane sessions agent-doc owns (the pin or a lane session marked
 `@agent_doc_navigation_lane` for this root), and republishes the lane it left
 passively (`navigation_lane_handoff`, `navigation_lane_handoff_republished`).
+The `sync_tmux_layout` controller command naming a `client_id` publishes into
+that client's lane, and a supervisor's recycle settle republishes each lane's
+own retained layout into that lane (passively under `per_installation`, so it
+never hands a pane over); see `specs/07-session-tmux-commands.md` (P6).
 Route, start, and claim themselves still provision into the shared lane; a pane
 they start there reaches an installation lane through that lane's next explicit
 claim.

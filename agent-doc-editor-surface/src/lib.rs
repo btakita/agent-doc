@@ -52,9 +52,10 @@ pub use installation_focus::{
 pub use navigation_lane::{
     LANE_HANDOFF_CALLER_KIND, LaneClaim, LaneLayoutPartition, LanePaneMembership,
     LanePaneObservation, LaneReconcileAction, LaneRetainReason, LaneSessionObservation,
-    LayoutOwnerKey, NavigationLane, NavigationMode, is_lane_session_of, lane_label_for_session,
-    lane_owning_session, partition_lane_layout_columns, partition_lane_layout_columns_for_claim,
-    plan_navigation_lane_reconcile, tmux_session_name_component,
+    LayoutOwnerKey, NavigationLane, NavigationMode, RECYCLE_SETTLED_CALLER_KIND,
+    is_lane_session_of, lane_label_for_session, lane_owning_session, partition_lane_layout_columns,
+    partition_lane_layout_columns_for_claim, plan_navigation_lane_reconcile,
+    tmux_session_name_component,
 };
 pub use remote_layout::{
     RemoteClientEditors, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,

@@ -231,6 +231,24 @@ loses desktop focus.
   unless tmux is observed to match it. Retiring the owner's last surface on the root falls back to
   the most recently focused live installation under a fresh epoch. Unscoped clients never claim
   or defer.
+- Layout ownership is keyed by `LayoutOwnerKey` = (project root, navigation lane)
+  (`#ideriderindependentnav`), never by the root alone. `NavigationMode::Shared` (the default,
+  and the only mode the production controller constructs today) maps every client of a root to
+  the shared lane, so the key is exactly the per-root `#idefocusowner` owner above.
+  `NavigationMode::PerInstallation` gives each installation-scoped client its own lane, backed by
+  its own tmux session `<project session>-<installation>` (characters outside `[A-Za-z0-9_-]`
+  become `-`, e.g. `agent-loop-IU-0a1b2c3d`); unscoped clients stay on the shared lane. A lane has
+  one installation, so no installation is ever deferred to another, and retiring one
+  installation re-stamps no other lane's owner. A lane is a tmux session, not a window: tmux keeps
+  one current window per session for every attached client, and a pane belongs to exactly one
+  session. Per-installation mode stays test-only until each lane's session, pane-layout graph, and
+  pane ownership are provisioned (see `docs/plan-ide-independent-nav.md`).
+- The `tmux_focus_state` read projection is per lane: the request's `caller` is the editor client
+  id, and the projection reports the active pane of that client's lane session (shared lane: the
+  configured session). A lane reports a document only while its own session's current window is
+  `agent-doc`; a lane whose session does not exist is `tmux_session_not_alive`, never a fallback
+  onto the shared session. An installation lane's projection carries `navigation_lane`; the
+  shared projection omits the field, keeping its pre-lane wire shape.
 - A `focus_only` refusal the selection lane cannot repair (`actor_pane_not_visible`,
 `outside_agent_doc_window`) escalates to the structural layout owner. With no
 editor columns it republishes the retained desired layout **unchanged** when

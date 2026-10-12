@@ -9276,6 +9276,11 @@ pub struct ControllerTmuxFocusState {
     pub document_id: Option<String>,
     #[serde(default)]
     pub record: Option<agent_doc_controller::actor::ActorRecord>,
+    /// The installation whose navigation lane this projection reports
+    /// (`#ideriderindependentnav`). Absent for the shared lane, so the shared
+    /// projection serializes exactly as it did before lanes existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation_lane: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

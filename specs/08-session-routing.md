@@ -503,7 +503,9 @@ falls back to a session outside the list.
 
 **Deferred.** The editor tmux focus-state query (`handle_tmux_focus_state`) and
 the pane-layout target-window fallback (`pane_layout_target_window_id`) without
-an explicit window still read the project pin. Editors that pass `--window` are
+an explicit window still read the project pin. The focus-state query derives its
+session from the pin per navigation lane (`#ideriderindependentnav`): the shared
+lane reads the pin itself, an installation lane reads `<pin>-<installation>`. Editors that pass `--window` are
 unaffected. Path-glob topic rules (routing by directory without frontmatter) are
 not implemented. Nested `.agent-doc` roots already give each sub-project its
 own pin and allow-list.

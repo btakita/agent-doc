@@ -1391,6 +1391,319 @@ mod multi_tmux_session_model {
     }
 }
 
+/// `#ideriderindependentnav` / `#idefocusowner` reference model: two JetBrains
+/// installations (IntelliJ IDEA and Rider) plus an unscoped editor publish
+/// focus claims and layout heartbeats into one project. Layout ownership is
+/// keyed by [`agent_doc_editor_surface::LayoutOwnerKey`] (root + navigation
+/// lane) and decided by the production [`agent_doc_editor_surface::InstallationFocus`]
+/// fold; a driving layout heartbeat projects onto its lane's tmux session.
+///
+/// Exhaustive over every event sequence up to a fixed depth:
+/// - shared mode: between two focus handoffs the shared session is reshaped by
+///   at most one scoped installation (no IDEA/Rider layout flipping), and that
+///   installation is the focus owner;
+/// - per-installation mode: no installation is ever deferred, and every lane
+///   session is reshaped only by its own installation;
+/// - both mutations below are detected.
+mod two_ide_navigation_model {
+    use agent_doc_editor_surface::{
+        InstallationFocus, LayoutOwnerKey, NavigationLane, NavigationMode, SurfaceAuthority,
+        editor_installation,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+
+    const ROOT: &str = "/project";
+    const PROJECT_SESSION: &str = "proj";
+    const CLIENTS: [(&str, &str); 3] = [
+        (
+            "jetbrains@IU.0a1b2c3d-pid:41",
+            "jetbrains-focus@IU.0a1b2c3d-pid:41",
+        ),
+        (
+            "jetbrains@RD.9f8e7d6c-pid:42",
+            "jetbrains-focus@RD.9f8e7d6c-pid:42",
+        ),
+        ("vscode-pid:9", "vscode-pid:9"),
+    ];
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Mutation {
+        None,
+        /// The owner fold is keyed by the root alone, dropping the lane.
+        RootKeyedOwner,
+        /// Every driving heartbeat projects onto the shared session.
+        SharedSessionTarget,
+        /// Every installation drives regardless of the focus owner (the
+        /// pre-`#idefocusowner` behavior).
+        IgnoreAuthority,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Event {
+        Focus(usize),
+        Layout(usize),
+        Retire(usize),
+    }
+
+    #[derive(Default)]
+    struct World {
+        owners: BTreeMap<LayoutOwnerKey, InstallationFocus>,
+        live: BTreeSet<usize>,
+        /// session -> clients that reshaped it since the last focus handoff.
+        writers_since_handoff: BTreeMap<String, BTreeSet<usize>>,
+        /// session -> every client that ever reshaped it.
+        writers: BTreeMap<String, BTreeSet<usize>>,
+        deferred: usize,
+    }
+
+    struct Sim {
+        mode: NavigationMode,
+        mutation: Mutation,
+        world: World,
+    }
+
+    impl Sim {
+        fn new(mode: NavigationMode, mutation: Mutation) -> Self {
+            Self {
+                mode,
+                mutation,
+                world: World {
+                    live: (0..CLIENTS.len()).collect(),
+                    ..World::default()
+                },
+            }
+        }
+
+        fn lane(&self, client: usize) -> NavigationLane {
+            NavigationLane::for_client(self.mode, CLIENTS[client].0)
+        }
+
+        fn key(&self, client: usize) -> LayoutOwnerKey {
+            match self.mutation {
+                Mutation::RootKeyedOwner => LayoutOwnerKey::new(ROOT, NavigationLane::Shared),
+                _ => LayoutOwnerKey::new(ROOT, self.lane(client)),
+            }
+        }
+
+        fn target_session(&self, client: usize) -> String {
+            match self.mutation {
+                Mutation::SharedSessionTarget => PROJECT_SESSION.to_string(),
+                _ => self.lane(client).tmux_session_name(PROJECT_SESSION),
+            }
+        }
+
+        fn authority(&self, client: usize) -> SurfaceAuthority {
+            if self.mutation == Mutation::IgnoreAuthority {
+                return SurfaceAuthority::default();
+            }
+            self.world
+                .owners
+                .get(&self.key(client))
+                .cloned()
+                .unwrap_or_default()
+                .authority_for(editor_installation(CLIENTS[client].0))
+        }
+
+        fn step(&mut self, event: Event) {
+            match event {
+                Event::Focus(client) => {
+                    if !self.world.live.contains(&client) {
+                        return;
+                    }
+                    let Some(installation) = editor_installation(CLIENTS[client].1) else {
+                        return;
+                    };
+                    let key = self.key(client);
+                    let fold = self.world.owners.entry(key).or_default();
+                    if let Some(next) = fold.claim(installation) {
+                        *fold = next;
+                        self.world.writers_since_handoff.clear();
+                    }
+                }
+                Event::Layout(client) => {
+                    if !self.world.live.contains(&client) {
+                        return;
+                    }
+                    if !self.authority(client).drives() {
+                        self.world.deferred += 1;
+                        return;
+                    }
+                    let session = self.target_session(client);
+                    self.world
+                        .writers_since_handoff
+                        .entry(session.clone())
+                        .or_default()
+                        .insert(client);
+                    self.world
+                        .writers
+                        .entry(session)
+                        .or_default()
+                        .insert(client);
+                }
+                Event::Retire(client) => {
+                    if !self.world.live.remove(&client) {
+                        return;
+                    }
+                    let keys = self.world.owners.keys().cloned().collect::<Vec<_>>();
+                    for key in keys {
+                        let live = self
+                            .world
+                            .live
+                            .iter()
+                            .filter(|live| self.key(**live) == key)
+                            .filter_map(|live| editor_installation(CLIENTS[*live].0))
+                            .map(str::to_string)
+                            .collect::<BTreeSet<_>>();
+                        let fold = self.world.owners.get_mut(&key).unwrap();
+                        if let Some(next) = fold.retain_live(&live) {
+                            *fold = next;
+                            self.world.writers_since_handoff.clear();
+                        }
+                    }
+                }
+            }
+        }
+
+        /// The invariant this mode promises, or the violation.
+        fn check(&self) -> Result<(), String> {
+            match self.mode {
+                NavigationMode::Shared => {
+                    let shared = self
+                        .world
+                        .writers_since_handoff
+                        .get(PROJECT_SESSION)
+                        .cloned()
+                        .unwrap_or_default();
+                    let scoped = shared.iter().filter(|client| **client < 2).count();
+                    let owner = self
+                        .world
+                        .owners
+                        .get(&LayoutOwnerKey::new(ROOT, NavigationLane::Shared))
+                        .and_then(InstallationFocus::owner);
+                    if owner.is_some() && scoped > 1 {
+                        return Err(format!("shared session flipped between {shared:?}"));
+                    }
+                    Ok(())
+                }
+                NavigationMode::PerInstallation => {
+                    if self.world.deferred > 0 {
+                        return Err(format!(
+                            "{} heartbeat(s) deferred across lanes",
+                            self.world.deferred
+                        ));
+                    }
+                    for (session, writers) in &self.world.writers {
+                        for writer in writers {
+                            let own = self.lane(*writer).tmux_session_name(PROJECT_SESSION);
+                            if &own != session {
+                                return Err(format!(
+                                    "client {writer} reshaped {session}, not its lane {own}"
+                                ));
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    fn events() -> Vec<Event> {
+        (0..CLIENTS.len())
+            .flat_map(|client| {
+                [
+                    Event::Focus(client),
+                    Event::Layout(client),
+                    Event::Retire(client),
+                ]
+            })
+            .collect()
+    }
+
+    /// Run every event sequence of length `depth`; return the first violation.
+    fn explore(mode: NavigationMode, mutation: Mutation, depth: u32) -> Option<String> {
+        let events = events();
+        let total = (events.len() as u64).pow(depth);
+        for index in 0..total {
+            let mut sim = Sim::new(mode, mutation);
+            let mut cursor = index;
+            let mut trace = Vec::new();
+            for _ in 0..depth {
+                let event = events[(cursor % events.len() as u64) as usize];
+                cursor /= events.len() as u64;
+                trace.push(event);
+                sim.step(event);
+                if let Err(violation) = sim.check() {
+                    return Some(format!("{violation} after {trace:?}"));
+                }
+            }
+        }
+        None
+    }
+
+    const DEPTH: u32 = 5;
+
+    #[test]
+    fn shared_mode_lets_only_the_focus_owner_reshape_the_shared_session() {
+        assert_eq!(explore(NavigationMode::Shared, Mutation::None, DEPTH), None);
+    }
+
+    #[test]
+    fn per_installation_mode_never_defers_and_never_crosses_lanes() {
+        assert_eq!(
+            explore(NavigationMode::PerInstallation, Mutation::None, DEPTH),
+            None
+        );
+    }
+
+    #[test]
+    fn dropping_the_lane_from_the_owner_key_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::RootKeyedOwner,
+            DEPTH,
+        )
+        .expect("a root-keyed owner must defer one installation in its own lane");
+        assert!(violation.contains("deferred"), "{violation}");
+    }
+
+    #[test]
+    fn projecting_every_lane_onto_the_shared_session_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::SharedSessionTarget,
+            DEPTH,
+        )
+        .expect("a shared-session target must cross lanes");
+        assert!(violation.contains("not its lane"), "{violation}");
+    }
+
+    #[test]
+    fn ignoring_the_focus_owner_in_shared_mode_is_detected() {
+        let violation = explore(NavigationMode::Shared, Mutation::IgnoreAuthority, DEPTH)
+            .expect("without the focus owner both IDEs reshape the shared session");
+        assert!(violation.contains("flipped"), "{violation}");
+    }
+
+    #[test]
+    fn lanes_are_distinct_sessions_and_the_shared_lane_is_the_project_session() {
+        let sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        let sessions = (0..CLIENTS.len())
+            .map(|client| sim.lane(client).tmux_session_name(PROJECT_SESSION))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sessions,
+            vec!["proj-IU-0a1b2c3d", "proj-RD-9f8e7d6c", "proj"],
+            "the unscoped editor stays on the project session"
+        );
+        let shared = Sim::new(NavigationMode::Shared, Mutation::None);
+        assert!(
+            (0..CLIENTS.len())
+                .all(|client| shared.lane(client).tmux_session_name(PROJECT_SESSION) == "proj")
+        );
+    }
+}
+
 /// Installed-build handoff reference model. The controller process is the
 /// lifetime of the reactive actor: a replacement rebuilds its Sources from the
 /// durable projection, while write ordinals prevent observations from an older

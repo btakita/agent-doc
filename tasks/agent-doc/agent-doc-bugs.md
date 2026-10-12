@@ -1065,6 +1065,22 @@ I asked it to put any safe action you can take to unblock it right now at the to
 Two follow-ups are filed:
 - `controllerforkimage`: the production controller-PID lookup has the same weakness.
 - `simworldcitimeout`: an earlier CI run timed out four `two_ide_navigation_model` SimWorld tests at 180s on the 2–4 core runner. The fix is to make the search faster, not to raise the timeout.
+
+### Re: what operator text authority is; GH #243 landed — opus-5-5 · 2026-10-12T18:45-04:00
+
+> **Chat prompt (#chatprompt):** What is the operator text authority?
+
+It is a capability flag that an editor plugin (JetBrains or VS Code) declares when it registers a document with the agent-doc controller. The constant is `operator_text_authority_v1`, in `agent-doc-document-realtime/src/editor_contract.rs`, and spec 14 (Realtime workflow) defines it. By declaring it, the editor promises that it reports the complete text you can see, including unsaved typing, into the shared CRDT. It reports the provenance of your own edits separately. Together these let agent-doc tell your text apart from the agent's.
+
+**Why it gates admission.** Before agent-doc writes a response, compacts, or runs a repair on a document a live editor has open, it must be able to prove the write keeps every line you typed. An editor that is live but has not declared this capability blocks writes; the spec calls such an editor an "operator-authority fence." In that state the controller goes to `ConflictBlocked` and does nothing, rather than risk overwriting your text. Preflight refuses admission for the same reason, which is what frontend.md keeps hitting.
+
+**How it normally gets there.** The plugin publishes it each time it registers, and reloading or updating the plugin publishes a newer registration that carries it. So missing authority usually means one of two things:
+- the IDE's frontend.md replica is registered without the capability, for example an older plugin or library that predates today's installs;
+- a rebuild dropped the record and nothing republished it.
+
+The `runfrontendissue` subagent is establishing which case applies and adding a self-heal (re-publish and retry once). Overwriting the file on disk is the one documented escape hatch, and I do not recommend it while the editor holds your text.
+
+**GH #243 landed and is closed.** It merged to `main` as `c94cec1e36` and is installed. `make check` passed 10,398 tests, and `make tmux-ci` passed. The JetBrains plugins are 0.2.559 / 0.2.560.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 

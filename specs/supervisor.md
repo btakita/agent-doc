@@ -815,6 +815,19 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
     Codex Stop hook allows the stop (`codex_stop_queue_continuation_yield`)
     instead of continuing in-pane. Otherwise the in-session drain continues in
     the same context — never a stall.
+  - A hand-off names the head the supervisor will actually dispatch
+    (`#claimeddrainwarn`): the first supervisor-drainable head that no worker
+    claims, skipping claimed and subagent-held heads exactly as the
+    supervisor's idle drain does. When every remaining head is claimed, no
+    hand-off is recorded and any earlier one is cleared. The undrained check
+    (`#supdrainyieldfalsifiable`, which feeds the preflight
+    `supervisor_drain_handoff_undrained` warning and the "earlier hand-off is
+    overdue" gate) compares against that same unclaimed head; once the recorded
+    head is no longer it (drained, claimed, or nothing supervisor-drainable
+    remains) the hand-off is settled and its record cleared, so a claim released
+    later never revives a stale age. The warning recommends recycling only a
+    supervisor that is not ready; a ready supervisor is healthy, and the remedy
+    is to drain the head in-session.
   - Why background clears were turned off on 2026-06-30 (`45ff25f994`) and how
     auto-clear avoids it: the old reset typed `/clear` into Codex while Codex
     still had a task in progress, re-armed every tick from `[focused-cycle]` head

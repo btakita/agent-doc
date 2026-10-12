@@ -112,28 +112,49 @@ pub fn content_and_staleness_warnings(
     warnings.extend(plugin_byte_identity_warnings(file));
     warnings.extend(jetbrains_staged_install_failure_warnings());
     if let Some(age_secs) =
-        agent_doc_controller_io::project_controller::undrained_supervisor_drain_handoff_age(
-            file, content,
-        )
+        agent_doc_queue_io::queue_auto_clear::undrained_supervisor_drain_handoff_age(file, content)
     {
-        warnings.push(supervisor_drain_handoff_undrained_warning(file, age_secs));
+        // #claimeddrainwarn: a ready supervisor is healthy — never tell the
+        // operator to recycle it; the overdue hand-off falls back to the
+        // in-session drain instead.
+        let supervisor_ready =
+            agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc(file)
+                .is_ready();
+        warnings.push(supervisor_drain_handoff_undrained_warning(
+            file,
+            age_secs,
+            supervisor_ready,
+        ));
     }
     warnings
 }
 
-/// `#supdrainyieldfalsifiable` (GH #73 §3): a `[focused-cycle]` head that
-/// session-check handed to the supervisor is still the supervisor head long
-/// after the hand-off. Without this the same head was silently re-presented as
-/// if nothing had been promised.
-pub fn supervisor_drain_handoff_undrained_warning(file: &Path, age_secs: u64) -> PreflightWarning {
+/// `#supdrainyieldfalsifiable` (GH #73 §3): a queue head that was handed to the
+/// supervisor (a `[focused-cycle]` head or an auto-clear item boundary) is
+/// still the supervisor's next unclaimed head long after the hand-off. Without
+/// this the same head was silently re-presented as if nothing had been promised.
+///
+/// `#claimeddrainwarn`: claimed heads never reach here (they are not the
+/// supervisor's head), and a `supervisor_ready` supervisor is healthy, so the
+/// remedy is the in-session drain, never a recycle.
+pub fn supervisor_drain_handoff_undrained_warning(
+    file: &Path,
+    age_secs: u64,
+    supervisor_ready: bool,
+) -> PreflightWarning {
+    let remedy = if supervisor_ready {
+        "The supervisor is live and ready (it dispatches only once the pane is idle), so do \
+         not recycle it: drain the head in-session this cycle."
+    } else {
+        "The supervisor is not ready to drain it: refresh the supervisor (`agent-doc admin \
+         recycle` after this turn closes, or `agent-doc session restart-supervisor <FILE>`) \
+         or drain the head in-session this cycle."
+    };
     PreflightWarning {
         code: "supervisor_drain_handoff_undrained".to_string(),
         message: format!(
-            "the [focused-cycle] queue head of {} was handed to the supervisor {} min ago and is \
-             still undrained — the supervisor clear-and-continue drain did not happen. Treat it \
-             as a stalled queue: refresh the supervisor (`agent-doc admin recycle` after this \
-             turn closes, or `agent-doc session restart-supervisor <FILE>`) or drain the head \
-             in a fresh session.",
+            "the unclaimed queue head of {} was handed to the supervisor {} min ago and is \
+             still undrained — the supervisor clear-and-continue drain did not happen. {remedy}",
             file.display(),
             age_secs / 60
         ),
@@ -1067,6 +1088,7 @@ mod tests {
         let warning = super::supervisor_drain_handoff_undrained_warning(
             std::path::Path::new("tasks/doc.md"),
             1_260,
+            false,
         );
         assert_eq!(warning.code, "supervisor_drain_handoff_undrained");
         assert!(
@@ -1084,6 +1106,36 @@ mod tests {
             "{}",
             warning.message
         );
+    }
+
+    /// `#claimeddrainwarn`: a ready supervisor is healthy, so the overdue
+    /// hand-off is drained in-session — the warning never tells the operator
+    /// to recycle it, and never claims the head was `[focused-cycle]`.
+    #[test]
+    fn supervisor_drain_handoff_undrained_warning_never_recycles_a_ready_supervisor() {
+        let warning = super::supervisor_drain_handoff_undrained_warning(
+            std::path::Path::new("tasks/doc.md"),
+            1_860,
+            true,
+        );
+        assert_eq!(warning.code, "supervisor_drain_handoff_undrained");
+        assert!(
+            warning.message.contains("31 min ago"),
+            "{}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains("drain the head in-session"),
+            "{}",
+            warning.message
+        );
+        for forbidden in ["admin recycle", "restart-supervisor", "[focused-cycle]"] {
+            assert!(
+                !warning.message.contains(forbidden),
+                "ready-supervisor warning must not say {forbidden:?}: {}",
+                warning.message
+            );
+        }
     }
 
     #[test]

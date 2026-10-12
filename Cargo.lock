@@ -2673,6 +2673,7 @@ dependencies = [
  "lazily 0.57.1",
  "libc",
  "parking_lot",
+ "portable-pty",
  "serde",
  "serde_json",
  "tempfile",

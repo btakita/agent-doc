@@ -1095,6 +1095,29 @@ markdown file, sync must expand that one-column projection from the project
   re-list the session's windows once per `normalize_window_to_index` call, so an
   editor tab switch paid roughly a dozen redundant tmux round-trips per gesture
   to rediscover a layout that was already correct.
+- Owned-window size pins (`#stashresizerestore`, GH #244). Only the
+  agent-doc-owned windows of the repaired session (`agent-doc` and `stash*`)
+  are ever re-fit; an operator's own windows keep whatever size and
+  `window-size` option they have (`#bare-foreign-session-guard`). Two pins are
+  released, each with `resize-window -A` followed by `set-option -w -u
+  window-size`, so the window follows its client again under the global or
+  session policy:
+  - the exact 1000-row stash-join staging height left by older binaries
+    (`layout_repair_unpinned_window`);
+  - a per-window `window-size manual` that holds the window smaller than
+    **every** client attached to the session, measured against each client's
+    size less its status rows (`layout_repair_window_size_pin_released`). tmux's
+    own `resize-window -A`, commonly bound to a "fit window" key, sets that pin
+    and leaves it, so after the terminal grows the window stays at the old size
+    and tmux dot-pads the rest. The pin is kept when it is only inherited (a
+    global/session `manual` policy), when no client is attached, when any
+    client already sees the window at or below its size, or when any client's
+    size is unreadable (tmux reports no height for a control-mode client).
+  A repair that releases a pin returns `Repaired`; a pinned window that is
+  still undersized is never `AlreadyConverged`. The check costs nothing on the
+  converged path: the single window listing carries each window's width and
+  effective `window-size`, and the local option and client list are probed only
+  for an owned window whose effective policy is `manual`.
 - Both doctor-repair passes are metered as `doctor_repair_pre` and
   `doctor_repair_post` in the sync phase log. They previously sat between
   measured phases and were invisible to the phase meter, which is how that cost

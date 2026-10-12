@@ -1161,11 +1161,11 @@ Done (`a6c014f636`). The Stop hook's check for remaining prompt work counted a s
 - ~~do [#fixlazilycodex]~~
 - ~~do [#reaperciflake]~~
 - ~~do [#ridernavp6routecontended]~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/243#issuecomment-6129952007
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/243~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/243#issuecomment-6129952007~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#claimeddrainwarn]~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/244
-- 🚧 #release
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/244~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#release~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#simworldcitimeout]
 - do [#controllerforkimage]
 <!-- /agent:queue -->

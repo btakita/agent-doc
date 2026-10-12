@@ -1110,6 +1110,12 @@ pub fn exchange_text_newer_than(current_exchange: &str, anchor_exchange: &str) -
 /// Blockquote lines are the head's own echo, not the response's statement
 /// about it, so they are left out: a head whose text happens to contain a
 /// marker (`answered but still queued`) must not defer itself.
+///
+/// `#annotateddeferstrike`: an annotated head must also be answered with a
+/// `> **Operator note:** <annotation>` quote (`#qheadannotation`), which the
+/// canonical response places between the `> **Queue prompt:**` echo and the
+/// deferral paragraph. Those operator-note blocks belong to the echo, so they
+/// are skipped and the block after them is the one that states the deferral.
 fn deferral_scope_has_marker(blocks: &[&str], index: usize) -> bool {
     let prose = |block: &str| {
         block
@@ -1119,7 +1125,11 @@ fn deferral_scope_has_marker(blocks: &[&str], index: usize) -> bool {
             .join(" ")
     };
     let mut scope = prose(blocks[index]);
-    if let Some(next) = blocks.get(index + 1) {
+    let next = blocks
+        .iter()
+        .skip(index + 1)
+        .find(|block| !block_is_operator_note_quote(block));
+    if let Some(next) = next {
         scope.push(' ');
         scope.push_str(&prose(next));
     }
@@ -1127,6 +1137,21 @@ fn deferral_scope_has_marker(blocks: &[&str], index: usize) -> bool {
     FREE_TEXT_HEAD_DEFERRAL_MARKERS
         .iter()
         .any(|marker| scope.contains(marker))
+}
+
+/// True when `block` is nothing but a `> **Operator note:** ...` blockquote
+/// (`#qheadannotation` answer evidence), optionally wrapped over several
+/// quoted lines.
+fn block_is_operator_note_quote(block: &str) -> bool {
+    let mut lines = block.lines().map(str::trim).filter(|line| !line.is_empty());
+    let Some(first) = lines.next() else {
+        return false;
+    };
+    first.strip_prefix('>').is_some_and(|quoted| {
+        quoted
+            .trim_start()
+            .starts_with(crate::queue_head_annotation::OPERATOR_NOTE_LABEL)
+    }) && lines.all(|line| line.starts_with('>'))
 }
 
 /// True when `head_text`'s normalized prose prefix matches a free-text queue head

@@ -593,20 +593,32 @@ pub fn queue_consumption_allowed_for_response(
     completion_ids: &[String],
 ) -> Result<bool> {
     let has_response = !response_body.trim().is_empty();
-    let active_free_text_head = if has_response
-        && crate::queue_response::queue_head_is_free_text_prompt(current_content)?
-    {
+    let active_head = if has_response {
         crate::queue_heads::active_queue_head_text(current_content)?
     } else {
         None
     };
+    let head_is_free_text = active_head.is_some()
+        && crate::queue_response::queue_head_is_free_text_prompt(current_content)?;
+    let active_free_text_head = active_head.clone().filter(|_| head_is_free_text);
     // `#deferstrike-closeout`: deferral is a veto over every completion signal.
     // In particular, the explicit queue-prompt echo below is also the documented
     // way to quote deferred work, so it cannot authorize consumption first.
-    if active_free_text_head.as_ref().is_some_and(|head_text| {
+    if active_head.as_ref().is_some_and(|head_text| {
         crate::queue_response::response_defers_free_text_head(response_body, head_text)
     }) {
-        return Ok(false);
+        if head_is_free_text {
+            return Ok(false);
+        }
+        // `#annotateddeferstrike`: an id-backed head (`do [#id]: note`) whose
+        // echo is followed by a deferral is kept against every IMPLICIT signal
+        // (prompt diff, `### Re: #id` heading). Only an explicit closeout flag
+        // naming the head (`--done`/`--pending-gate`/`--review-resolve`)
+        // resolves it, because that flag resolves the backlog item itself.
+        return crate::queue_heads::queue_head_has_explicit_completion_signal(
+            current_content,
+            completion_ids,
+        );
     }
     if should_consume_queue_prompt_for_write(file, baseline, current_content, completion_ids)? {
         return Ok(true);
@@ -704,6 +716,18 @@ pub fn queue_targeted_completion_id_for_current_head(
     let Some(head_id) = crate::queue_response::queue_prompt_done_id(&queue_head) else {
         return Ok(None);
     };
+    // `#annotateddeferstrike`: a response that echoes the head and then defers
+    // it did not complete it, so neither its `### Re:` heading nor the prompt
+    // diff may turn into a completion id. An explicit `--done` naming the head
+    // still does.
+    if !response_body.trim().is_empty()
+        && crate::queue_response::response_defers_free_text_head(response_body, &queue_head)
+    {
+        return Ok(
+            crate::queue_heads::queue_head_matches_done_ids(current_content, pending_done)?
+                .then_some(head_id),
+        );
+    }
     if !response_body.trim().is_empty()
         && crate::queue_response::response_explicitly_targets_queue_head(response_body, &queue_head)
     {
@@ -3516,5 +3540,209 @@ Old.
             "nothing strikes: {:?}",
             projected.map(|p| p.target_content)
         );
+    }
+
+    /// `#annotateddeferstrike` live shapes (agent-doc-bugs.md 2026-10-11): an
+    /// annotated head answered with the canonical three-part shape -- the
+    /// `> **Queue prompt:**` echo, the `> **Operator note:**` quote that
+    /// `#qheadannotation` requires, then the `**Deferred:**` paragraph -- was
+    /// consumed because the operator-note quote sat between the echo and the
+    /// deferral.
+    fn annotated_defer_doc(head: &str) -> String {
+        format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {}\n",
+                "- later work\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#clearnoticeverify] [operator-verify] Eyeball the queued Clear notices\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            head
+        )
+    }
+
+    fn annotated_defer_response(head: &str, note: &str, deferred: bool) -> String {
+        let tail = if deferred {
+            "**Deferred:** this went to a background subagent (claim `subagent:clearnotice`). It will report the notice evidence.\n"
+        } else {
+            "Verified: the queued notice wording and the single `/clear` at idle both match.\n"
+        };
+        format!(
+            "### Re: #clearnoticeverify — testing it myself — opus-5.5\n\n> **Queue prompt:** {head}\n\n> **Operator note:** {note}\n\n{tail}"
+        )
+    }
+
+    #[test]
+    fn annotateddeferstrike_do_head_with_operator_note_then_deferral_is_kept() {
+        let head = "do [#clearnoticeverify]: Test yourself";
+        let doc = annotated_defer_doc(head);
+        let response = annotated_defer_response(head, "Test yourself", true);
+        assert!(
+            crate::queue_head_annotation::annotation_addressed_in(&response, "Test yourself"),
+            "the deferral paragraph still answers the operator note (#qheadannotation)"
+        );
+        assert!(
+            crate::queue_response::response_defers_free_text_head(&response, head),
+            "the deferral after the operator-note quote is recognized"
+        );
+        assert!(
+            !queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(&doc),
+                &doc,
+                &response,
+                &[],
+            )
+            .unwrap(),
+            "a deferred annotated id head is not consumed by its `### Re: #id` heading"
+        );
+        assert_eq!(
+            queue_targeted_completion_id_for_current_head(
+                Path::new("session.md"),
+                Some(&doc),
+                &doc,
+                &response,
+                &[],
+            )
+            .unwrap(),
+            None,
+            "the heading of a deferred head is not a completion id"
+        );
+        // An explicit `--done` still resolves the head: the flag closes the
+        // backlog item itself.
+        let done = vec!["clearnoticeverify".to_string()];
+        assert!(
+            queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(&doc),
+                &doc,
+                &response,
+                &done,
+            )
+            .unwrap(),
+            "an explicit --done naming the head still consumes it"
+        );
+        assert_eq!(
+            queue_targeted_completion_id_for_current_head(
+                Path::new("session.md"),
+                Some(&doc),
+                &doc,
+                &response,
+                &done,
+            )
+            .unwrap()
+            .as_deref(),
+            Some("clearnoticeverify")
+        );
+    }
+
+    #[test]
+    fn annotateddeferstrike_free_text_annotated_head_with_operator_note_then_deferral_is_kept() {
+        let head = "[#clearnoticeverify]: verified?";
+        let doc = annotated_defer_doc(head);
+        let response = annotated_defer_response(head, "verified?", true);
+        assert!(
+            crate::queue_response::queue_prompt_text_is_free_text(&doc, head)
+                || crate::queue_head_annotation::queue_head_annotation(head).is_none(),
+            "the `[#id]: note` shape is answered through the free-text quote path"
+        );
+        assert!(
+            answered_free_text_head_node_keys(&doc, &response, Some(&doc))
+                .unwrap()
+                .is_empty(),
+            "the deferred head is not auto-struck (#ftstrike)"
+        );
+        assert!(
+            !queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(&doc),
+                &doc,
+                &response,
+                &[],
+            )
+            .unwrap(),
+            "the deferred head is not consumed"
+        );
+        assert!(
+            crate::queue_response::latest_free_text_head_echo_is_deferral(&response, head),
+            "the committed exchange keeps the head out of the completed residue"
+        );
+    }
+
+    #[test]
+    fn annotateddeferstrike_plain_free_text_head_with_operator_note_then_deferral_is_kept() {
+        let head = "release + publish";
+        let doc = annotated_defer_doc(head);
+        let response = annotated_defer_response(head, "and tag it", true);
+        assert!(
+            answered_free_text_head_node_keys(&doc, &response, Some(&doc))
+                .unwrap()
+                .is_empty(),
+            "an operator-note quote between echo and deferral does not hide the deferral"
+        );
+    }
+
+    #[test]
+    fn annotateddeferstrike_operator_note_answer_without_deferral_is_still_consumed() {
+        let head = "[#clearnoticeverify]: verified?";
+        let doc = annotated_defer_doc(head);
+        let response = annotated_defer_response(head, "verified?", false);
+        assert!(!crate::queue_response::response_defers_free_text_head(
+            &response, head
+        ));
+        assert_eq!(
+            answered_free_text_head_node_keys(&doc, &response, Some(&doc))
+                .unwrap()
+                .len(),
+            1,
+            "an answered annotated free-text head still strikes"
+        );
+
+        let id_head = "do [#clearnoticeverify]: Test yourself";
+        let id_doc = annotated_defer_doc(id_head);
+        let id_response = annotated_defer_response(id_head, "Test yourself", false);
+        assert!(!crate::queue_response::response_defers_free_text_head(
+            &id_response,
+            id_head
+        ));
+        assert!(
+            queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(&id_doc),
+                &id_doc,
+                &id_response,
+                &["clearnoticeverify".to_string()],
+            )
+            .unwrap(),
+            "an answered annotated id head closed with --done is consumed"
+        );
+    }
+
+    /// The operator-note skip is narrow: the deferral of the NEXT quoted head
+    /// is not borrowed by the head before it.
+    #[test]
+    fn annotateddeferstrike_next_heads_deferral_does_not_defer_the_answered_head() {
+        let response = concat!(
+            "> **Queue prompt:** first answered head here\n\n",
+            "Done: the first head is finished.\n\n",
+            "> **Queue prompt:** second head\n\n",
+            "**Deferred:** the second head waits for review.\n",
+        );
+        assert!(!crate::queue_response::response_defers_free_text_head(
+            response,
+            "first answered head here"
+        ));
+        let quote_only_then_other_echo = concat!(
+            "> **Queue prompt:** first answered head here\n\n",
+            "> **Queue prompt:** second head\n\n",
+            "**Deferred:** the second head waits for review.\n",
+        );
+        assert!(!crate::queue_response::response_defers_free_text_head(
+            quote_only_then_other_echo,
+            "first answered head here"
+        ));
     }
 }

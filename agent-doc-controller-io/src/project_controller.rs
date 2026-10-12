@@ -1560,11 +1560,25 @@ struct PendingPaneLayoutPublication {
 }
 
 impl ControllerPaneLayoutGraph {
+    #[cfg_attr(not(test), allow(dead_code))]
     fn new_in(
         scope: &agent_doc_state_scope::ProcessScope,
         live_actor_bindings: Computed<ControllerActorStore>,
     ) -> Self {
-        let ctx = scope.ctx().clone();
+        Self::new_in_process_ctx(scope.ctx().clone(), live_actor_bindings)
+    }
+
+    /// Build a graph in an existing controller `ProcessScope` graph.
+    ///
+    /// `ctx` must be a clone of the controller `ProcessScope`'s context (the
+    /// scope itself is not `Clone`, so [`ControllerPaneLayoutLanes`] retains its
+    /// context to create lane graphs lazily). This is the same graph, never a
+    /// new island: the lane's cells derive from the same live actor bindings and
+    /// share the scope's lifetime.
+    fn new_in_process_ctx(
+        ctx: ThreadSafeContext,
+        live_actor_bindings: Computed<ControllerActorStore>,
+    ) -> Self {
         let desired = ctx.source(None::<PaneLayoutDesired>);
         let structural_receipt = ctx.source(None);
         let assignments = ctx.source(BTreeMap::<String, String>::new());
@@ -2265,6 +2279,86 @@ impl Drop for ControllerPaneLayoutGraph {
         if let Some(effect) = self.effect.get_mut().take() {
             self.ctx.dispose_effect(&effect);
         }
+    }
+}
+
+/// The controller's pane-layout graphs, one per navigation lane
+/// (`#ideriderindependentnav` P2a).
+///
+/// Each lane owns its own `desired` / `observed` / `receipt` / `assignments` /
+/// `width_memory` and published generation, so one lane's layout can never
+/// supersede, coalesce with, or cancel another's. Every lane graph joins the
+/// controller `ProcessScope` and derives from the same live actor bindings.
+///
+/// The [`NavigationLane::Shared`] entry is created eagerly and is the graph
+/// every existing caller uses, so a controller that only ever touches the
+/// shared lane behaves exactly as the single per-project graph did. Installation
+/// lanes are created lazily on first use; nothing in production creates one
+/// until per-installation navigation is configurable (P2b).
+///
+/// [`NavigationLane::Shared`]: agent_doc_editor_surface::NavigationLane::Shared
+struct ControllerPaneLayoutLanes {
+    /// A clone of the controller `ProcessScope` context, retained only so
+    /// lane graphs can be created lazily in that same graph.
+    ctx: ThreadSafeContext,
+    live_actor_bindings: Computed<ControllerActorStore>,
+    /// The shared lane, also held in `lanes`; kept here so the hot path that
+    /// every current caller takes needs no lock.
+    shared: Arc<ControllerPaneLayoutGraph>,
+    lanes:
+        Mutex<BTreeMap<agent_doc_editor_surface::NavigationLane, Arc<ControllerPaneLayoutGraph>>>,
+}
+
+impl ControllerPaneLayoutLanes {
+    fn new_in(
+        scope: &agent_doc_state_scope::ProcessScope,
+        live_actor_bindings: Computed<ControllerActorStore>,
+    ) -> Self {
+        let ctx = scope.ctx().clone();
+        let shared = Arc::new(ControllerPaneLayoutGraph::new_in_process_ctx(
+            ctx.clone(),
+            live_actor_bindings,
+        ));
+        let lanes = BTreeMap::from([(
+            agent_doc_editor_surface::NavigationLane::Shared,
+            Arc::clone(&shared),
+        )]);
+        Self {
+            ctx,
+            live_actor_bindings,
+            shared,
+            lanes: Mutex::new(lanes),
+        }
+    }
+
+    /// The shared lane's graph: the single per-project graph of the pre-lane
+    /// controller.
+    fn shared(&self) -> &ControllerPaneLayoutGraph {
+        &self.shared
+    }
+
+    /// The graph for `lane`, created in the controller scope on first use.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn lane(
+        &self,
+        lane: &agent_doc_editor_surface::NavigationLane,
+    ) -> Arc<ControllerPaneLayoutGraph> {
+        if lane.is_shared() {
+            return Arc::clone(&self.shared);
+        }
+        let mut lanes = self.lanes.lock();
+        Arc::clone(lanes.entry(lane.clone()).or_insert_with(|| {
+            Arc::new(ControllerPaneLayoutGraph::new_in_process_ctx(
+                self.ctx.clone(),
+                self.live_actor_bindings,
+            ))
+        }))
+    }
+
+    /// Lanes that currently hold a graph, in lane order (`Shared` first).
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn lane_ids(&self) -> Vec<agent_doc_editor_surface::NavigationLane> {
+        self.lanes.lock().keys().cloned().collect()
     }
 }
 
@@ -3378,7 +3472,9 @@ pub(crate) struct ControllerRuntime {
     /// that cloned an older Snapshot from publishing after a newer wake.
     captured_finalize_wake_publication: Mutex<()>,
     captured_finalize_wakes: Mutex<BTreeMap<String, rpc::CapturedFinalizeWakeProjection>>,
-    pane_layout_graph: ControllerPaneLayoutGraph,
+    /// One pane-layout graph per navigation lane; every caller today uses the
+    /// shared lane through [`ControllerRuntime::pane_layout_graph`].
+    pane_layout_lanes: ControllerPaneLayoutLanes,
     main_layout_eligibility_graph: ControllerMainLayoutEligibilityGraph,
     /// Editor facts, history-dependent intent, and tmux consequences share the
     /// controller ProcessScope. Editors retain only transport/projection caches.
@@ -7774,8 +7870,8 @@ impl ControllerRuntime {
             &scope,
             state_plane_first_version(bootstrap.controller_generation),
         );
-        let pane_layout_graph =
-            ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
+        let pane_layout_lanes =
+            ControllerPaneLayoutLanes::new_in(&scope, actor_graph.live_bindings_handle());
         let main_layout_eligibility_graph = ControllerMainLayoutEligibilityGraph::new_in(
             &scope,
             main_layout_eligibility_from_state(&memory.state_projection),
@@ -7810,7 +7906,7 @@ impl ControllerRuntime {
             state_plane_graph,
             captured_finalize_wake_publication: Mutex::new(()),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
-            pane_layout_graph,
+            pane_layout_lanes,
             main_layout_eligibility_graph,
             editor_surface_graph,
             editor_view_policy_graph,
@@ -7993,6 +8089,21 @@ impl ControllerRuntime {
         subscription
     }
 
+    /// The shared navigation lane's pane-layout graph. Every layout caller uses
+    /// this lane until per-installation navigation is configurable (P2b).
+    fn pane_layout_graph(&self) -> &ControllerPaneLayoutGraph {
+        self.pane_layout_lanes.shared()
+    }
+
+    /// The pane-layout graph for `lane`, created on first use.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn pane_layout_graph_for_lane(
+        &self,
+        lane: &agent_doc_editor_surface::NavigationLane,
+    ) -> Arc<ControllerPaneLayoutGraph> {
+        self.pane_layout_lanes.lane(lane)
+    }
+
     fn set_pane_layout_desired(
         &self,
         invocation: ControllerTmuxLayoutSyncInvocation,
@@ -8000,7 +8111,7 @@ impl ControllerRuntime {
         publication: PaneLayoutPublication,
         claim: impl Into<PaneLayoutClaim>,
     ) -> PaneLayoutDesired {
-        self.pane_layout_graph.set_desired_attributed(
+        self.pane_layout_graph().set_desired_attributed(
             invocation,
             source_plane_version,
             publication,
@@ -8011,7 +8122,7 @@ impl ControllerRuntime {
     /// Publications the layout arbiter displaced or refused since the last
     /// drain (`layoutpublisherarbiter`).
     fn drain_pane_layout_supersessions(&self) -> Vec<PaneLayoutSupersession> {
-        self.pane_layout_graph.drain_supersessions()
+        self.pane_layout_graph().drain_supersessions()
     }
 
     /// The newest `pane_layout_desired` frame version on the editor state
@@ -8023,22 +8134,22 @@ impl ControllerRuntime {
 
     /// Wait (bounded) until the layout graph has seen plane version `target`.
     fn await_pane_layout_plane_seen(&self, target: u64, timeout: Duration) -> bool {
-        self.pane_layout_graph.await_plane_seen(target, timeout)
+        self.pane_layout_graph().await_plane_seen(target, timeout)
     }
 
     fn pane_layout_desired(&self) -> Option<PaneLayoutDesired> {
-        self.pane_layout_graph.desired()
+        self.pane_layout_graph().desired()
     }
 
     /// GH #136 follow-up (a)/(d): the last layout pass's observed width and
     /// gated documents.
     pub(crate) fn pane_layout_width_memory(&self) -> PaneLayoutWidthMemory {
-        self.pane_layout_graph.width_memory()
+        self.pane_layout_graph().width_memory()
     }
 
     /// GH #136 follow-up (a)/(d): record what a layout pass gated out.
     pub(crate) fn record_pane_layout_gated(&self, generation: u64, gated_documents: Vec<String>) {
-        self.pane_layout_graph
+        self.pane_layout_graph()
             .record_gated(generation, gated_documents);
     }
 
@@ -8048,30 +8159,30 @@ impl ControllerRuntime {
         &self,
         settled_document_was_gated: &dyn Fn(&[String]) -> bool,
     ) -> bool {
-        self.pane_layout_graph
+        self.pane_layout_graph()
             .claim_recycle_republish(settled_document_was_gated)
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     fn pane_layout_projection(&self) -> PaneLayoutProjection {
-        self.pane_layout_graph.projection()
+        self.pane_layout_graph().projection()
     }
 
     fn pane_layout_state_projection(&self) -> Option<ControllerPaneLayoutStateProjection> {
-        self.pane_layout_graph.state_projection()
+        self.pane_layout_graph().state_projection()
     }
 
     fn record_pane_layout_observation(&self, observation: PaneLayoutObservation) {
-        self.pane_layout_graph.record_observation(observation);
+        self.pane_layout_graph().record_observation(observation);
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     fn record_pane_layout_effect_receipt(&self, receipt: PaneLayoutEffectReceipt) {
-        self.pane_layout_graph.record_receipt(receipt);
+        self.pane_layout_graph().record_receipt(receipt);
     }
 
     fn pane_layout_effect_file_panes(&self, generation: u64) -> Vec<(String, String)> {
-        self.pane_layout_graph.effect_file_panes(generation)
+        self.pane_layout_graph().effect_file_panes(generation)
     }
 
     fn reusable_pane_layout_structure(
@@ -8079,7 +8190,7 @@ impl ControllerRuntime {
         desired: &PaneLayoutDesired,
         actor_bindings: &[ControllerTmuxActorBinding],
     ) -> Option<PaneLayoutStructuralReceipt> {
-        self.pane_layout_graph
+        self.pane_layout_graph()
             .reusable_structural_receipt(desired, actor_bindings)
     }
 
@@ -8090,7 +8201,7 @@ impl ControllerRuntime {
         report: Option<ControllerTmuxLayoutSyncStateReport>,
         file_panes: Vec<(String, String)>,
     ) {
-        self.pane_layout_graph.record_structural_assignment(
+        self.pane_layout_graph().record_structural_assignment(
             desired,
             actor_bindings,
             report,
@@ -8099,13 +8210,13 @@ impl ControllerRuntime {
     }
 
     fn pane_layout_actor_bindings(&self) -> Vec<ControllerTmuxActorBinding> {
-        self.pane_layout_graph.actor_bindings()
+        self.pane_layout_graph().actor_bindings()
     }
 
     fn pane_layout_owned_assignments(&self) -> Vec<(String, String)> {
-        self.pane_layout_graph
+        self.pane_layout_graph()
             .ctx
-            .get(&self.pane_layout_graph.owned_assignments)
+            .get(&self.pane_layout_graph().owned_assignments)
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -8114,7 +8225,8 @@ impl ControllerRuntime {
         generation: u64,
         timeout: Duration,
     ) -> PaneLayoutProjection {
-        self.pane_layout_graph.await_generation(generation, timeout)
+        self.pane_layout_graph()
+            .await_generation(generation, timeout)
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -8123,7 +8235,7 @@ impl ControllerRuntime {
         document: &str,
         timeout: Duration,
     ) -> PaneLayoutProjection {
-        self.pane_layout_graph
+        self.pane_layout_graph()
             .await_route_document(document, timeout)
     }
 
@@ -8135,12 +8247,12 @@ impl ControllerRuntime {
         observed: &PaneLayoutProjection,
         timeout: Duration,
     ) -> PaneLayoutProjection {
-        self.pane_layout_graph
+        self.pane_layout_graph()
             .await_projection_change(observed, timeout)
     }
 
     fn release_pane_layout_route_lease(&self, generation: u64) -> Option<PaneLayoutDesired> {
-        self.pane_layout_graph.release_route_lease(generation)
+        self.pane_layout_graph().release_route_lease(generation)
     }
 
     fn try_claim_coordination(&self, scopes: &[String], owner_token: &str, owner_pid: u32) -> bool {
@@ -11615,6 +11727,114 @@ mod tests {
         }
     }
 
+    /// `#ideriderindependentnav` P2a: each navigation lane owns an independent
+    /// pane-layout graph in the controller scope, while every existing caller
+    /// still reaches the single shared-lane graph.
+    #[test]
+    fn navigation_lanes_hold_independent_pane_layout_state() {
+        use agent_doc_controller::actor::ActorState;
+        use agent_doc_editor_surface::NavigationLane;
+
+        let root = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new(test_bootstrap(&root)).unwrap();
+        let shared = NavigationLane::Shared;
+        let idea = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let rider = NavigationLane::Installation("RD.4e5f6a7b".to_string());
+
+        // Only the shared lane exists until another lane is asked for, and the
+        // runtime accessor every caller uses is that shared lane's graph.
+        assert_eq!(runtime.pane_layout_lanes.lane_ids(), vec![shared.clone()]);
+        assert!(std::ptr::eq(
+            runtime.pane_layout_graph(),
+            &*runtime.pane_layout_graph_for_lane(&shared),
+        ));
+        let idea_graph = runtime.pane_layout_graph_for_lane(&idea);
+        let rider_graph = runtime.pane_layout_graph_for_lane(&rider);
+        assert!(Arc::ptr_eq(
+            &idea_graph,
+            &runtime.pane_layout_graph_for_lane(&idea)
+        ));
+        assert_eq!(
+            runtime.pane_layout_lanes.lane_ids(),
+            vec![shared.clone(), idea.clone(), rider.clone()]
+        );
+
+        // Desired intent and its generation are per lane.
+        let mut idea_invocation = pane_layout_desired_for_test(1).invocation;
+        idea_invocation.columns = vec!["/project/tasks/idea.md".to_string()];
+        let mut rider_invocation = pane_layout_desired_for_test(1).invocation;
+        rider_invocation.columns = vec![
+            "/project/tasks/rider-a.md".to_string(),
+            "/project/tasks/rider-b.md".to_string(),
+        ];
+        let idea_desired = idea_graph.set_desired(idea_invocation.clone(), None);
+        let rider_desired = rider_graph.set_fresh_desired(rider_invocation.clone(), None);
+        let rider_again = rider_graph.set_fresh_desired(rider_invocation, None);
+        assert_eq!(idea_desired.generation, 1);
+        assert_eq!(rider_desired.generation, 1);
+        assert_eq!(rider_again.generation, 2);
+        assert_eq!(idea_graph.desired().unwrap(), idea_desired);
+        assert_eq!(
+            runtime.pane_layout_desired(),
+            None,
+            "an installation lane's intent must not reach the shared lane"
+        );
+        assert_eq!(
+            idea_graph
+                .published_generation_handle()
+                .load(Ordering::SeqCst),
+            1,
+            "a newer generation in one lane must not supersede another lane's"
+        );
+        assert_eq!(
+            rider_graph
+                .published_generation_handle()
+                .load(Ordering::SeqCst),
+            2
+        );
+
+        // Width memory and structural ownership are per lane, but every lane
+        // derives from the one controller actor store.
+        rider_graph.record_gated(2, vec!["/project/tasks/rider-b.md".to_string()]);
+        assert!(idea_graph.width_memory().gated_documents.is_empty());
+        assert!(
+            runtime
+                .pane_layout_width_memory()
+                .gated_documents
+                .is_empty()
+        );
+        let document = "/project/tasks/idea.md".to_string();
+        runtime.actor_graph.set(BTreeMap::from([(
+            document.clone(),
+            actor_record_for_test(&document, "%7", ActorState::Ready),
+        )]));
+        idea_graph.record_structural_assignment(
+            &idea_desired,
+            idea_graph.actor_bindings(),
+            None,
+            vec![(document.clone(), "%7".to_string())],
+        );
+        assert_eq!(
+            idea_graph.ctx.get(&idea_graph.owned_assignments),
+            vec![(document.clone(), "%7".to_string())]
+        );
+        assert!(
+            rider_graph
+                .ctx
+                .get(&rider_graph.owned_assignments)
+                .is_empty()
+        );
+        assert!(runtime.pane_layout_owned_assignments().is_empty());
+        runtime.actor_graph.set(BTreeMap::from([(
+            document.clone(),
+            actor_record_for_test(&document, "%8", ActorState::Ready),
+        )]));
+        assert!(
+            idea_graph.ctx.get(&idea_graph.owned_assignments).is_empty(),
+            "a lane graph joins the controller scope: an actor rebind retires its ownership"
+        );
+    }
+
     #[test]
     fn layout_ownership_survives_tab_switch_and_retires_on_actor_rebind() {
         use agent_doc_controller::actor::ActorState;
@@ -12449,7 +12669,7 @@ mod tests {
         let runs = Arc::new(Mutex::new(Vec::new()));
         let runtime = ControllerRuntime::new(test_bootstrap(&root)).unwrap();
         runtime
-            .pane_layout_graph
+            .pane_layout_graph()
             .install_sink(Arc::new(RecordingSink(runs.clone())));
         assert!(
             runs.lock().is_empty(),
@@ -12485,7 +12705,7 @@ mod tests {
         let restarted = ControllerRuntime::new(test_bootstrap(&root)).unwrap();
         let count = runs.lock().len();
         restarted
-            .pane_layout_graph
+            .pane_layout_graph()
             .install_sink(Arc::new(RecordingSink(runs.clone())));
         assert_eq!(
             runs.lock().len(),
@@ -17586,8 +17806,8 @@ agent:queue\n\
             actor_graph.document_model_states_handle(),
             document_graphs.projection_handle(),
         );
-        let pane_layout_graph =
-            ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
+        let pane_layout_lanes =
+            ControllerPaneLayoutLanes::new_in(&scope, actor_graph.live_bindings_handle());
         let main_layout_eligibility_graph =
             ControllerMainLayoutEligibilityGraph::new_in(&scope, MainLayoutEligibility::default());
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
@@ -17626,7 +17846,7 @@ agent:queue\n\
             state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),
             captured_finalize_wake_publication: Mutex::new(()),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
-            pane_layout_graph,
+            pane_layout_lanes,
             main_layout_eligibility_graph,
             editor_surface_graph,
             editor_view_policy_graph,

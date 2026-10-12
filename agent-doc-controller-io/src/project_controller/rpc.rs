@@ -27511,7 +27511,7 @@ fn spawn_pane_layout_effect_worker(
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 pub(super) fn install_pane_layout_projection_sink(runtime: &Arc<ControllerRuntime>) {
     runtime
-        .pane_layout_graph
+        .pane_layout_graph()
         .install_sink(Arc::new(ControllerPaneLayoutProjectionSink {
             runtime: Arc::downgrade(runtime),
             state: Arc::new(Mutex::new(
@@ -28155,7 +28155,7 @@ fn pane_layout_effect_worker(
         }
         agent_doc_process_owner_io::set_structural_effect_generation(
             desired.generation,
-            runtime.pane_layout_graph.published_generation_handle(),
+            runtime.pane_layout_graph().published_generation_handle(),
         );
         let _effect_cancel_guard = StructuralEffectCancelGuard;
         let effect_result = match runtime_effects() {

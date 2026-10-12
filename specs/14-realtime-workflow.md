@@ -2121,6 +2121,21 @@ handoff, or an operator-selected no-commit flow. Saving backup/audit state can
 be part of lifecycle closeout, but backup writes are not realtime authority.
 Invariant: document turn lifecycle owns commits; merge/realtime paths must not run git commit.
 
+### Merge cost bound
+
+A CRDT merge runs inside the document's serialized write owner (the session
+actor), so its cost is a liveness property: every write queued behind it waits.
+Replaying a diff onto the text CRDT must cost one visible-order projection per
+edit operation, never one per character. A deleted range is tombstoned with a
+single range deletion, which mints the same per-character tombstone ids in the
+same order as character-by-character deletion, so the merged CRDT state is
+unchanged. Character-granular deletion re-projects the whole document per
+character and is quadratic: on `tasks/tools.md` (2026-10-12) a stale
+frontmatter write rebased over a compaction that had removed ~73 KB of exchange
+history held the supervisor's session-actor thread at ~80% CPU for over ten
+minutes (`#sessionactorspin`). The same bound applies to `CrdtDoc::apply_edit`
+and to captured-editor-op replay.
+
 ## Document Projection Crate Boundary
 
 `agent-doc-document` owns pure document projections that can be computed from

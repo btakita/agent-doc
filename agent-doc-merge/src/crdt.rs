@@ -105,9 +105,7 @@ impl CrdtDoc {
         let start_char = byte_to_char(&cur, offset as usize);
         if delete_len > 0 {
             let end_char = byte_to_char(&cur, offset as usize + delete_len as usize);
-            for _ in start_char..end_char {
-                t.delete(start_char);
-            }
+            delete_char_range(&mut t, start_char, end_char);
         }
         if !insert.is_empty() {
             t.insert_str(start_char, insert);
@@ -1257,12 +1255,11 @@ fn operator_free_text_revision_gaps(
         theirs.iter().map(|child| child.key.as_str()).collect();
     let base_keys: std::collections::HashSet<&str> =
         base.iter().map(|child| child.key.as_str()).collect();
-    let shared_anchors: std::collections::HashSet<&str> =
-        ours_keys
-            .intersection(&theirs_keys)
-            .copied()
-            .filter(|key| !key.starts_with("txt:") || base_keys.contains(key))
-            .collect();
+    let shared_anchors: std::collections::HashSet<&str> = ours_keys
+        .intersection(&theirs_keys)
+        .copied()
+        .filter(|key| !key.starts_with("txt:") || base_keys.contains(key))
+        .collect();
 
     theirs
         .iter()
@@ -2605,11 +2602,26 @@ fn apply_editor_ops_lazily(t: &mut TextCrdt, ops: &[EditorOp]) {
                 let cur = t.text();
                 let start_char = byte_to_char(&cur, *offset);
                 let end_char = byte_to_char(&cur, *offset + *len);
-                for _ in start_char..end_char {
-                    t.delete(start_char);
-                }
+                delete_char_range(t, start_char, end_char);
             }
         }
+    }
+}
+
+/// Tombstone the visible characters `[start_char, end_char)` in ONE projection.
+///
+/// `#sessionactorspin`: `TextCrdt::delete` re-projects the whole origin tree
+/// (`ordered_ids`, O(n log n) over every element) on each call, so deleting a
+/// range one character at a time is quadratic in the document size. A
+/// compaction that removes ~73 KB of exchange history while a stale write is
+/// rebased over it (tasks/tools.md, 2026-10-12) turned one
+/// `merge_by_component` call into a 10+ minute CPU burn on the supervisor's
+/// session-actor thread, holding every queued document write behind it.
+/// `delete_range` projects once and mints the same per-character tombstone
+/// OpIds in the same order, so the CRDT state is identical.
+fn delete_char_range(t: &mut TextCrdt, start_char: usize, end_char: usize) {
+    if end_char > start_char {
+        t.delete_range(start_char, end_char - start_char);
     }
 }
 
@@ -2625,9 +2637,7 @@ fn apply_ops_lazily(t: &mut TextCrdt, ops: &[EditOp]) {
                 let cur = t.text();
                 let start_char = byte_to_char(&cur, byte_cursor);
                 let end_char = byte_to_char(&cur, byte_cursor + *n as usize);
-                for _ in start_char..end_char {
-                    t.delete(start_char);
-                }
+                delete_char_range(t, start_char, end_char);
                 // byte_cursor stays — content shifted left.
             }
             EditOp::Insert(s) => {
@@ -2643,6 +2653,83 @@ fn apply_ops_lazily(t: &mut TextCrdt, ops: &[EditOp]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#sessionactorspin`: run `job` on a helper thread and fail if it has not
+    /// returned within `budget`. The budget is a hang detector, not a
+    /// benchmark: the linear path finishes in well under a second even in a debug
+    /// build, while the per-character path it guards against needs hours here.
+    fn finishes_within<T: Send + 'static>(
+        budget: std::time::Duration,
+        job: impl FnOnce() -> T + Send + 'static,
+    ) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(job());
+        });
+        rx.recv_timeout(budget).unwrap_or_else(|_| {
+            panic!(
+                "CRDT range deletion did not finish within {budget:?}: a per-character \
+                 delete loop re-projects the whole document per character (#sessionactorspin)"
+            )
+        })
+    }
+
+    /// `#sessionactorspin` (tasks/tools.md, 2026-10-12): a stale frontmatter
+    /// write was rebased over a compaction that removed ~73 KB of exchange
+    /// history. The merge replayed that deletion one character at a time, each
+    /// re-projecting the whole CRDT, and pinned the supervisor's session-actor
+    /// thread at ~80% CPU for 10+ minutes. Deleting a large region must cost one
+    /// projection per edit, not one per character.
+    #[test]
+    fn merge_rebasing_over_a_large_deletion_stays_linear() {
+        let history = "- historical exchange line that the compaction removes\n".repeat(2_000);
+        let header = "---\nagent: codex\n";
+        let resume = "resume:\n  codex: stale-id\n";
+        let base = format!("{header}{resume}---\n{history}");
+        let ours = format!("{header}---\n{history}");
+        let theirs = format!("{header}{resume}---\ncompacted\n");
+        let merged = finishes_within(std::time::Duration::from_secs(60), move || {
+            let base_state = CrdtDoc::from_text(&base).encode_state();
+            merge(Some(&base_state), &ours, &theirs).expect("merge")
+        });
+        assert_eq!(merged, format!("{header}---\ncompacted\n"));
+    }
+
+    /// `#sessionactorspin`: the same quadratic loop lived in
+    /// [`CrdtDoc::apply_edit`].
+    #[test]
+    fn apply_edit_large_deletion_stays_linear() {
+        let history = "- historical exchange line that the compaction removes\n".repeat(2_000);
+        let text = finishes_within(std::time::Duration::from_secs(60), move || {
+            let doc = CrdtDoc::from_text(&format!("keep\n{history}tail\n"));
+            doc.apply_edit(5, history.len() as u32, "");
+            doc.to_text()
+        });
+        assert_eq!(text, "keep\ntail\n");
+    }
+
+    /// `#sessionactorspin`: one range deletion must leave exactly the CRDT a
+    /// character-by-character deletion would, including how a concurrent insert
+    /// from another replica merges around the tombstones.
+    #[test]
+    fn range_deletion_matches_per_character_deletion() {
+        let base = TextCrdt::from_str(BASE_PEER, "alpha beta gamma delta");
+        let mut per_char = base.fork(2);
+        for _ in 6..17 {
+            per_char.delete(6);
+        }
+        let mut ranged = base.fork(2);
+        delete_char_range(&mut ranged, 6, 17);
+        delete_char_range(&mut ranged, 3, 3);
+        assert_eq!(ranged.text(), per_char.text());
+
+        let mut concurrent = base.fork(1);
+        concurrent.insert_str(11, "INSERTED ");
+        per_char.merge(&concurrent);
+        ranged.merge(&concurrent);
+        assert_eq!(ranged.text(), per_char.text());
+        assert_eq!(ranged.tombstone_count(), per_char.tombstone_count());
+    }
 
     /// `#netadv7` fuzz crasher (minimized): a 9-byte `ADN1` container whose
     /// node count is `u32::MAX` used that count as a `Vec` capacity, asking the

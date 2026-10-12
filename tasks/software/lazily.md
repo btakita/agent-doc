@@ -62,7 +62,7 @@ No release, publish, tag, version bump, install, commit, or push was performed. 
 - do [#lzreleasepins]
 - do [#lzcorecohort]
 - do [#lzagentdocartifactrefresh]
-- #release
+- ~~#release~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

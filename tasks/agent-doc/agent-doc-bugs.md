@@ -1213,6 +1213,41 @@ The earlier admission refusal this turn was a transient: the document changed wh
 - README, docs and AGENTS.md: they will say Apache-2.0 only and link to LICENSE, and every "MIT" and "MIT or Apache-2.0" mention is removed.
 
 It merges in the next batch after v0.35.495, because `make release` is still running in `agent-doc-wt/release-0495`. So the relicense first ships in 0.35.496. `#release` is still in flight.
+
+### Re: #cleanreadmeconcise landed (Apache-2.0) — opus-5.5 · 2026-10-12T17:20-04:00
+
+> **Queue prompt:** do [#cleanreadmeconcise]: declare Apache2. Make the project Apache2.
+
+> **Operator note:** declare Apache2. Make the project Apache2.
+
+Done. agent-doc is now **Apache-2.0 only**. The work is on main as `06afd858ee` and installed locally.
+
+**README** (`032efe841b`):
+- Cut from 515 lines to 153.
+- Now says it works with JetBrains, VS Code and Zed, and directly with Claude Code, Codex, Grok Build and OpenCode.
+- The detailed material moved to `docs/reference/features.md`, `docs/reference/architecture.md` and `docs/guide/tmux-routing.md`.
+
+**Relicense** (`46d5819b78`):
+- Added a top-level `LICENSE`: the standard Apache License 2.0 text, sha256-identical to apache.org's copy.
+- Set `license = "Apache-2.0"` in all 148 Rust crates and in `pyproject.toml`.
+- Changed the VS Code `package.json`, the Zed `Cargo.toml`, `.codex-plugin/plugin.json` and the Homebrew formula generator.
+- The README and `docs/introduction.md` now link to `LICENSE`.
+- Every "MIT" / "MIT or Apache-2.0" claim is gone, except possibly in old `VERSIONS.md` history, which was not scanned.
+
+**Checks after merging onto v0.35.495:**
+- `make check` exited 0; 10,417 tests passed, 167 skipped.
+- `make tmux-ci` exited 0.
+- `make install` exited 0.
+
+This first ships in a release in 0.35.496.
+
+> **Queue prompt:** #release
+
+**Deferred:** v0.35.495 is tagged (`038ea3c9ec`), and `make release` exited 0, with 10,417 tests passing and install-full complete. The publish isn't finished:
+- The Release workflow (run 38306634090) is still building: plugins, macOS arm64 and Linux x86_64 have passed, and macOS Intel is still running.
+- The GitHub Release page and PyPI 0.35.495 don't exist yet.
+
+I'll close `#release` once both exist.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -1221,14 +1256,13 @@ It merges in the next batch after v0.35.495, because `make release` is still run
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#cleanreadmeconcise]: declare Apache2. Make the project Apache2.
+- ~~do [#cleanreadmeconcise]: declare Apache2. Make the project Apache2.~~
 - 🚧 #release
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#cleanreadmeconcise] Clean up the README.md to be more concise and appealing to humans. Explain that it works with JetBrains + VSCode + Zed + direct with Claude Code + Codex + Grok Build + OpenCode.
 <!-- /agent:backlog -->
 
 ## Review

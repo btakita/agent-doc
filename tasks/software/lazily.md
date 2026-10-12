@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a13139-f99d-7991-93ef-6f7a0c44e121
+  codex: 01a131e1-8e9a-7e71-a44e-50556bb5003d
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,6 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish'
-queue: go
 ---
 
 ## Status
@@ -95,28 +94,50 @@ Verification did not reach cross-binding traffic. The exact `make -C src/lazily-
 No commit or push was created. The queue-wide `#spec-test-commit-push` preset is undefined, so commit/push authority was not resolved. The pin item is review-gated on both a green exact gate and explicit commit/push authorization. No additional backlog follow-up is needed because `#lzinteropcoldstart` captures the remaining agent-executable verification work; the authorization decision remains on this gated item.
 
 Latest repository CI run `38306634006` (`release: v0.35.495`) was still in progress when checked; local evidence above is the closeout basis.
+
+### Re: #lzinteropcoldstart — gpt-5 · 2026-10-12T17:42-04:00
+
+The exact-revision cold-start defect is fixed and fully verified in isolated worktree `/home/brian/worktrees/agent-loop-lzinteropcoldstart-20261012`, branch `task/lzinteropcoldstart-20261012`, from base `a282bba7b853016809dc2c0c5cc51dcd4590d92e`.
+
+The gate now prepares and handshakes every active scenario peer under a generous preparation timeout before applying the existing strict 10-second protocol deadline. Deterministic coverage proves two build-on-first-launch peers are both warmed before the strict run, and a second regression pins the Makefile ordering. The five intended changed files are `src/lazily-interop/Makefile`, `README.md`, `src/main.rs`, `src/scenario.rs`, and `tests/cli.rs`; validation-only release-pin gitlinks are explicitly excluded from this fix.
+
+Verification is green: `make check` passed formatting, Clippy, 8 unit tests, 7 CLI tests, schema validation, and 11/11 mutation classes; the literal root-form `make -C src/lazily-interop network-suite-merge` passed against the intended release revisions with all nine peers prepared and every semantic, channel, timer, timeout, and revision-barrier report green; `git diff --check` passed; GitHub Actions run `38309970428` succeeded. A command-scoped `PATH` selected the healthy Dart SDK because the host `/usr/sbin/dart` wrapper loops on `unionfs failed`; no repository workaround was added.
+
+The verification blocker on `#lzreleasepins` is cleared by this evidence, but neither fix nor pins were committed or integrated because `#spec-test-commit-push` is undefined. This item is therefore review-gated solely on explicit commit/integration authorization. No additional backlog follow-up is needed because the gated item retains the exact five-file integration action and unblock condition.
+
+### Re: #lzagentdocartifactrefresh — gpt-5 · 2026-10-12T17:42-04:00
+
+> **Queue prompt:**
+>
+> do [#lzinteropcoldstart]
+>
+> do [#lzagentdocartifactrefresh]
+
+
+The expired `btakita/agent-doc` artifact-purge audit is refreshed in isolated worktree `/home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012`, branch `task/lzagentdocartifactrefresh-20261012`, from base `215dc9dc52339478da6cc90aa5c7d5808f3e54c5`. No destructive command ran and zero artifacts were deleted.
+
+The fresh handoff contains 565 verified candidates totaling 9,879,236,243 bytes and withholds 545 artifacts totaling 8,636,981,950 bytes. The full dry run accepted all 565 with zero refused, skipped, or failed. The durability-only dry run accepted 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refused exactly 535 PyPI-backed artifacts totaling 9,009,746,025 bytes as perishable. `make artifact-purge-check` and `git diff --check` passed; the initial default-cap safety probe correctly aborted at 565 candidates without deletion.
+
+The refreshed handoff expires at `2026-10-19T21:27:35Z` and becomes stale 24 hours earlier. The destructive purge remains gated on separate, explicit operator authorization, with the 30-artifact durable-only option preferred. The five tracked audit/script changes remain uncommitted because `#spec-test-commit-push` is undefined, so this refresh is review-gated solely on explicit commit/integration authorization. No additional backlog follow-up is needed because this gated item retains the exact integration action, while `#lzagentdocartifactpurge` retains the destructive operator decision.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- do [#lzinteropcoldstart]
-- ~~⏭️ do [#lzreleasepins]~~
-- do [#lzagentdocartifactrefresh]
+<!-- agent:queue subagents preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzinteropcoldstart] Fix the exact-revision interop gate cold-start path so every build-on-launch peer is prepared before the 10-second hello deadline, add deterministic regression coverage, rerun network-suite-merge, then clear the verification blocker on #lzreleasepins.
-- [ ] [#lzagentdocartifactrefresh] Regenerate the expired btakita/agent-doc artifact-purge audit/handoff, rerun both full and durability-only dry-run options, refresh counterpart-durability evidence and counts, then re-gate the destructive purge on explicit operator authorization without deleting artifacts.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzreleasepins] Prepared exactly 13 released Lazily gitlink pins in /home/brian/worktrees/agent-loop-lzreleasepins-oct12-2 on branch task/lzreleasepins-oct12-2; blocked on #lzinteropcoldstart making the exact network-suite-merge gate green and on explicit commit/push authorization because #spec-test-commit-push is undefined, then commit and push only those gitlinks.
+- [/] [#lzagentdocartifactrefresh] Fresh artifact-purge handoff and both dry-run modes are complete and verified in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 on branch task/lzagentdocartifactrefresh-20261012 from base 215dc9dc52339478da6cc90aa5c7d5808f3e54c5; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate the five tracked btakita/agent-doc audit/script files without the scratch .audit-work reports.
+- [/] [#lzinteropcoldstart] Cold-start fix and deterministic coverage are complete and verified in /home/brian/worktrees/agent-loop-lzinteropcoldstart-20261012 on branch task/lzinteropcoldstart-20261012 from base a282bba7b853016809dc2c0c5cc51dcd4590d92e; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate exactly the five src/lazily-interop code/documentation/test files and exclude the validation-only release-pin gitlinks.
+- [/] [#lzreleasepins] Prepared exactly 13 released Lazily gitlink pins in /home/brian/worktrees/agent-loop-lzreleasepins-oct12-2 on branch task/lzreleasepins-oct12-2. The cold-start verification defect is fixed and the exact network-suite-merge gate is green in /home/brian/worktrees/agent-loop-lzinteropcoldstart-20261012: all nine peers prepare before the strict deadline and semantic, channel, timer, timeout, and revision-barrier reports pass. Blocked only until the five-file #lzinteropcoldstart fix is integrated and explicit commit/push authorization is supplied because #spec-test-commit-push is undefined; then commit and push only the intended fix and 13 gitlinks.
 - [/] [#lzcorecohort] Phase 6 immutable Core cohort/BOM schema, verifier, reusable read-only publish gate, documentation, Makefile integration, and negative tests are complete in isolated worktree /home/brian/worktrees/agent-loop-lzcorecohort-20261012 on branch task/lzcorecohort-20261012; blocked until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate from base 02c20e1a71cb971fd8ad82d12b73f77acebb49ba; truthful candidate manifests and cross-repo adoption remain gated on #lzreleasepins and #lzrustpublish.
 - [/] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [/] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md: Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and module compatibility tests are complete in the listed isolated worktrees; blocked until Phase 1/3 are integrated first, explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, Zig 0.15.2/0.16.0 formatters are available, and the Rust corrected-profile divergence is resolved and validated.
@@ -128,7 +149,7 @@ Latest repository CI run `38306634006` (`release: v0.35.495`) was still in progr
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
-- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit with counterpart durability classification (commits 667eb4766, 434b32548) lives at src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-27/ and is confirmed the ONLY handoff on disk, so only one basis can be authorized. Run the plan from src/agent-doc with `python3 scripts/purge-actions-artifacts.py`; the destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000` and the 250 default cap otherwise aborts. TWO authorizable options, both re-proved by live dry run: (a) full plan — 2,666 artifacts (43.83 GB), 0 refused, 0 skipped; (b) `--durability durable` — 2,136 artifacts (34.83 GB), refusing exactly the 530 rows whose only counterpart is a PyPI file. Prefer (b): the prune floor is 0.35.113 and v0.35.119, the oldest PyPI-only-backed version, is only the THIRD live release above it, so option (a) additionally accepts that 9.01 GB rests on a thinner margin than version numbering suggests. 2,136 rows rest on GitHub release assets, which have not decayed. 571 artifacts are withheld at audit time and are never deletable. Hard deadline: the 7-day `--max-handoff-age-days` guard aborts the whole run after 2026-10-04T05:56:08Z unless the audit is regenerated or `--allow-stale-handoff` is passed; `make review-gate-status` imports that guard from the purge script and flips this gate to `evidence_stale` 24h BEFORE it expires rather than after. Blocked solely on explicit destructive authorization; no artifact has been deleted.
+- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Fresh read-only audit/handoff generated 2026-10-12T21:27:35Z in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 and verified with zero deletions. After integrating #lzagentdocartifactrefresh, two authorizable options remain: full plan deletes 565 artifacts totaling 9,879,236,243 bytes with 0 refused/skipped/failed in dry run; preferred durable-only plan deletes 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refuses exactly 535 PyPI-backed artifacts totaling 9,009,746,025 bytes as perishable. 545 artifacts totaling 8,636,981,950 bytes remain withheld and are never deletable. The 7-day handoff expires 2026-10-19T21:27:35Z and becomes evidence_stale 24 hours earlier. Blocked solely on explicit destructive authorization after the refreshed handoff is integrated; no artifact has been deleted.
 - [/] [#lzbetascope] [operator-decision] Approve final promotion of the candidate Lazily Core profile to Beta under tasks/software/plan-lazily-core-beta.md after #lzcoreprofile, #lzcoreclaims, #lzcorefacades, #lzcorecompat, #lzcoreconsumers, #lzcorecohort, #lzreleasepins, and publication blockers are green. The public promise remains: Lazily Core is Beta; Lazily Modules graduate independently.
 <!-- /agent:review -->
 

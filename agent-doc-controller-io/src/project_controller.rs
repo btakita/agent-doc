@@ -11194,7 +11194,10 @@ pub fn reap_removed_project_root_controllers_for_caller(
     }
     let mut reaped = 0;
     let mut kept = 0;
-    for pid in crate::process::project_controller_pids(project_root) {
+    // Kill-everything: the root is gone, so no later tick reaches anything left
+    // behind. Fork images are included so a persistent one is never leaked
+    // (#controllerforkimage).
+    for pid in crate::process::project_controller_pids_including_fork_images(project_root) {
         if pid == std::process::id() {
             continue;
         }
@@ -11272,13 +11275,12 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
 ) -> Result<(usize, usize)> {
     let mut reaped = 0;
     let mut kept = 0;
-    for pid in crate::process::process_pids() {
+    // One pid per controller: a fork image of the bootstrap-owned controller is
+    // not an orphan, and must not be reaped as one (#controllerforkimage).
+    for (pid, root) in crate::process::controller_serve_pids() {
         if pid == std::process::id() {
             continue;
         }
-        let Some(root) = crate::process::controller_serve_project_root(pid) else {
-            continue;
-        };
         if !crate::process::cmdline_has_preparing_handoff(pid) {
             continue;
         }
@@ -11536,6 +11538,73 @@ pub(crate) fn spawn_preparing_controller_sentinel(project_root: &Path) -> std::p
         std::thread::sleep(Duration::from_millis(10));
     }
     child
+}
+
+#[cfg(test)]
+/// A controller sentinel whose shell keeps a `( ... ) &` subshell that never
+/// execs: the subshell is the sentinel's un-exec'd fork image (command line
+/// byte-identical, parent = the sentinel), the persistent form of the window a
+/// `Command::spawn` child or a dash fork opens before its exec
+/// (#controllerforkimage). Returns the sentinel and the fork image pid; the
+/// caller kills the fork image with [`kill_test_pid`] (killing the shell
+/// leaves the subshell running).
+pub(crate) fn spawn_controller_sentinel_with_fork_image(
+    project_root: &Path,
+    extra_args: &[&str],
+) -> (std::process::Child, u32) {
+    let argv0 = project_root.join("agent-doc");
+    let child = Command::new("sh")
+        .arg("-c")
+        .arg("(while :; do sleep 1; done) & wait")
+        .arg(argv0.to_string_lossy().to_string())
+        .arg("controller")
+        .arg("serve")
+        .arg("--project-root")
+        .arg(project_root.to_string_lossy().to_string())
+        .args(extra_args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn controller sentinel with fork image");
+    let start = Instant::now();
+    let fork_image = loop {
+        let fork_image = crate::process::process_pids().into_iter().find(|pid| {
+            crate::process::process_parent_pid(*pid) == Some(child.id())
+                && is_same_project_controller_pid(project_root, *pid)
+        });
+        if fork_image.is_some() && is_same_project_controller_pid(project_root, child.id()) {
+            break fork_image;
+        }
+        if start.elapsed() >= Duration::from_secs(5) {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let Some(fork_image) = fork_image else {
+        let mut child = child;
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("controller sentinel never forked its subshell image");
+    };
+    (child, fork_image)
+}
+
+#[cfg(test)]
+pub(crate) fn kill_test_pid(pid: u32) {
+    crate::process::send_signal(pid, crate::process::ProcessSignal::Kill);
+}
+
+#[cfg(test)]
+pub(crate) fn wait_for_test_pid_exit(pid: u32, timeout: Duration) -> bool {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if !process_is_alive(pid) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    false
 }
 
 #[cfg(test)]
@@ -18937,6 +19006,62 @@ agent:queue\n\
         let _ = sentinel.wait();
     }
 
+    /// #controllerforkimage: the bootstrap-owned controller's un-exec'd fork
+    /// image carries its preparing argv but is not an orphan. Before the fix the
+    /// scan counted it as a second preparing controller and SIGTERMed it.
+    #[test]
+    fn orphan_reaper_never_reaps_the_owned_controllers_fork_image() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let (mut sentinel, fork_image) = spawn_controller_sentinel_with_fork_image(
+            dir.path(),
+            &["--handoff-state", "preparing"],
+        );
+        let pid = sentinel.id();
+        let mut bootstrap =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        bootstrap.pid = pid;
+        write_bootstrap_state(&bootstrap).unwrap();
+        // Age both processes past `stale_after = 0` so only ownership decides.
+        std::thread::sleep(Duration::from_millis(1100));
+
+        let pids = crate::process::project_controller_pids(dir.path());
+        let (reaped, kept) =
+            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false).unwrap();
+        let (sweep_reaped, _) =
+            reap_orphaned_preparing_controllers_all_projects(Duration::from_secs(0), true, "test")
+                .unwrap_or((usize::MAX, 0));
+        let fork_image_alive = process_is_alive(fork_image);
+        let swept_roots: Vec<u32> = crate::process::controller_serve_pids()
+            .into_iter()
+            .filter(|(_, root)| {
+                agent_doc_controller::command_line::canonical_path_for_command_line_compare(root)
+                    == agent_doc_controller::command_line::canonical_path_for_command_line_compare(
+                        dir.path(),
+                    )
+            })
+            .map(|(pid, _)| pid)
+            .collect();
+        kill_test_pid(fork_image);
+        let _ = sentinel.kill();
+        let _ = sentinel.wait();
+
+        assert_eq!(pids, vec![pid], "one pid per controller");
+        assert_eq!(
+            swept_roots,
+            vec![pid],
+            "cross-project scan: one pid per controller"
+        );
+        assert_eq!((reaped, kept), (0, 0));
+        assert!(
+            fork_image_alive,
+            "the owned controller's fork image must not be reaped"
+        );
+        // The cross-project sweep may see other tests' preparing sentinels; it
+        // must not have errored.
+        assert_ne!(sweep_reaped, usize::MAX);
+    }
+
     #[test]
     fn orphan_reaper_uses_the_active_handoff_clock_not_predecessor_process_age() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -18967,6 +19092,52 @@ agent:queue\n\
 
         let _ = predecessor.kill();
         let _ = predecessor.wait();
+    }
+
+    /// #controllerforkimage: reaping a removed root is kill-everything, so a
+    /// controller's persistent fork image dies with it instead of leaking.
+    #[test]
+    fn removed_project_root_reaper_also_reaps_a_controllers_fork_image() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let project_root = dir.path().to_path_buf();
+        let (sentinel, fork_image) = spawn_controller_sentinel_with_fork_image(&project_root, &[]);
+        assert_eq!(
+            crate::process::project_controller_pids(&project_root),
+            vec![sentinel.id()]
+        );
+        assert!(
+            crate::process::project_controller_pids_including_fork_images(&project_root)
+                .contains(&fork_image)
+        );
+
+        drop(dir);
+
+        let result = reap_removed_project_root_controllers_for_caller(
+            &project_root,
+            Duration::from_secs(0),
+            false,
+            "test",
+        );
+        let fork_image_exited = wait_for_test_pid_exit(fork_image, Duration::from_secs(2));
+        if !fork_image_exited {
+            kill_test_pid(fork_image);
+        }
+        let status = wait_for_test_child_exit(
+            sentinel,
+            Duration::from_secs(2),
+            "removed-root controller must be reaped",
+        );
+        let (reaped, _) = result.unwrap();
+        assert!(
+            reaped >= 2,
+            "controller and fork image both reaped: {reaped}"
+        );
+        assert!(!status.success());
+        assert!(
+            fork_image_exited,
+            "the fork image must not outlive the reap"
+        );
     }
 
     #[test]

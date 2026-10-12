@@ -51,6 +51,7 @@
 //! - reposition_boundary_removes_stale: two boundary markers in exchange → exactly one marker at end
 //! - crdt_merge_no_base: identical `ours`/`theirs` with null base → merged text equals input
 
+use crate::op_capture_refusal_coalesce::RefusalAdmission;
 use agent_doc_state_backbone::{EventLedger, StateEvent, StateFact};
 use agent_doc_sync::{
     DEFAULT_SYNC_LOCK_STALE_BOUND_MS, SyncLockDecision, sync_lock_acquire_decision,
@@ -1726,6 +1727,11 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
     }
 }
 
+/// Per-document coalescing of identical op-capture refusals (GH #242).
+static OP_CAPTURE_REFUSAL_COALESCER: std::sync::LazyLock<
+    parking_lot::Mutex<crate::op_capture_refusal_coalesce::RefusalCoalescer>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(Default::default()));
+
 /// Record why an editor refused to hand a captured operator burst to op capture.
 ///
 /// `#opcapturedormant`: every early return in the JetBrains `TypingTracker`
@@ -1738,7 +1744,13 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
 /// `reason` is a stable snake_case token (`all_ops_non_operator`,
 /// `shadow_replay_mismatch`, `doc_advanced_during_drain`,
 /// `base_hash_unavailable`); `detail` is free-form diagnostic context and may be
-/// empty. Returns `1` when the receipt was written and `0` on invalid UTF-8.
+/// empty. Returns `1` when the receipt was accepted (written, or folded into a
+/// coalesced repeat count) and `0` on invalid UTF-8.
+///
+/// Identical `(reason, detail)` refusals for one path inside
+/// `REFUSAL_COALESCE_WINDOW` are counted instead of written, and skip the
+/// `doc_advanced_during_drain` activity refresh (GH #242); the next emission
+/// carries `coalesced_repeats=<n>`.
 ///
 /// # Safety
 ///
@@ -1761,13 +1773,48 @@ pub unsafe extern "C" fn agent_doc_log_editor_op_capture_refusal(
         return 0;
     };
     let file_path_buf = std::path::PathBuf::from(file);
+    // GH #242: an editor reporter that re-refuses the same burst in a loop must not
+    // write one `ops.log` line and one Lazily actor round trip per attempt. The
+    // first refusal of a run is the receipt; identical repeats inside the window
+    // are counted and surface as `coalesced_repeats=<n>` on the next emission.
+    let admission = OP_CAPTURE_REFUSAL_COALESCER.lock().admit(
+        &file_path_buf,
+        reason,
+        detail,
+        std::time::Instant::now(),
+    );
+    let RefusalAdmission::Emit {
+        coalesced_repeats,
+        flushed,
+    } = admission
+    else {
+        return 1;
+    };
+    if let Some(run) = flushed {
+        agent_doc_ops_log_io::log_op(
+            &file_path_buf,
+            &format!(
+                "{} reason={} detail={} coalesced_repeats={} #opcapturedormant",
+                OpsLogEvent::EditorOpCaptureRefused,
+                sanitize_op_capture_refusal_field(&run.reason),
+                sanitize_op_capture_refusal_field(&run.detail),
+                run.suppressed,
+            ),
+        );
+    }
+    let repeats_field = if coalesced_repeats > 0 {
+        format!(" coalesced_repeats={coalesced_repeats}")
+    } else {
+        String::new()
+    };
     agent_doc_ops_log_io::log_op(
         &file_path_buf,
         &format!(
-            "{} reason={} detail={} #opcapturedormant",
+            "{} reason={} detail={}{} #opcapturedormant",
             OpsLogEvent::EditorOpCaptureRefused,
             sanitize_op_capture_refusal_field(reason),
             sanitize_op_capture_refusal_field(detail),
+            repeats_field,
         ),
     );
     if reason == "doc_advanced_during_drain"
@@ -4747,6 +4794,68 @@ mod tests {
         assert!(
             ops_log.contains("reason=base_hash_unavailable detail=none"),
             "an empty detail must not leave a dangling field:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn identical_op_capture_refusals_write_one_receipt_not_one_per_attempt() {
+        // GH #242: one requeued burst was refused 32,277 times in 92 minutes, each
+        // writing an ops.log line and making a Lazily actor round trip. Identical
+        // repeats inside the coalescing window must write nothing further.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+        let reason_c = CString::new("shadow_replay_mismatch").unwrap();
+        let detail_c = CString::new("ops=1 operator_ops=1").unwrap();
+        for _ in 0..50 {
+            let rc = unsafe {
+                agent_doc_log_editor_op_capture_refusal(
+                    file_c.as_ptr(),
+                    reason_c.as_ptr(),
+                    detail_c.as_ptr(),
+                )
+            };
+            assert_eq!(rc, 1, "a coalesced refusal is still accepted");
+        }
+        // A different refusal flushes the folded count for the prior run.
+        let other_c = CString::new("all_ops_non_operator").unwrap();
+        let other_detail_c = CString::new("ops=1").unwrap();
+        unsafe {
+            agent_doc_log_editor_op_capture_refusal(
+                file_c.as_ptr(),
+                other_c.as_ptr(),
+                other_detail_c.as_ptr(),
+            )
+        };
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let receipts: Vec<&str> = ops_log
+            .lines()
+            .filter(|line| OpsLogEvent::EditorOpCaptureRefused.is_line(line))
+            .collect();
+        assert_eq!(
+            receipts.len(),
+            3,
+            "first receipt + flushed count + the new reason, not 51 lines:\n{ops_log}"
+        );
+        assert!(
+            !receipts[0].contains("coalesced_repeats="),
+            "the first refusal of a run is a plain receipt: {}",
+            receipts[0]
+        );
+        assert!(
+            receipts[1].contains("reason=shadow_replay_mismatch")
+                && receipts[1].contains("coalesced_repeats=49"),
+            "the folded repeats must be counted, not lost: {}",
+            receipts[1]
+        );
+        assert!(
+            receipts[2].contains("reason=all_ops_non_operator"),
+            "{}",
+            receipts[2]
         );
     }
 

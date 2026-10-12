@@ -1363,12 +1363,24 @@ writes `editor_op_capture_refused reason=<token> detail=<fields>
 #opcapturedormant` through `agent_doc_log_editor_op_capture_refusal`, with
 stable reasons: `all_ops_non_operator` (the burst held no operator-attributable
 op), `shadow_replay_mismatch` (the recorded ops do not reconstruct the reported
-buffer), `doc_advanced_during_drain` (the buffer moved on between the snapshot
-and the drain; the burst is requeued and retried at the next quiet boundary),
+buffer), `doc_advanced_during_drain` (a later editor event landed between the
+snapshot and the drain; the burst is requeued for the quiet boundary that event
+already scheduled — the refusal schedules no retry of its own, GH #242),
 and `base_hash_unavailable` (no merge base to stamp against). `verify-op-capture`
 names these reasons when both producer markers are absent, and reports the
 absence of receipts as an unobserved reporter chain — a different diagnosis from
 a named refusal.
+
+Refusal receipts are coalesced per document in the FFI (GH #242). An identical
+`(reason, detail)` refusal for the same path inside a 2 s window writes no
+further `ops.log` line and skips the `doc_advanced_during_drain` activity
+refresh (no Lazily actor round trip); it is counted instead. The next emission
+of that refusal after the window carries `coalesced_repeats=<n>`, and a
+different refusal for the path first flushes the prior run as its own receipt
+with `coalesced_repeats=<n>`. The first refusal of every run is always written,
+so coalescing never hides that a refusal happened. The window is shorter than
+the 10 s Compact Exchange quiescence window, so an actively requeued burst still
+defers compaction.
 
 The retryable `doc_advanced_during_drain` refusal also refreshes the active
 epoch checkpoint's `updated_ms` without changing its base, epoch, or operations.
@@ -1416,10 +1428,24 @@ wrote went unnoticed.
 
 A captured burst is replayed only against a buffer snapshot it can reach. The
 reporter reads the editor text and drains the pending burst off the EDT, so each
-captured op carries the `Document` modification stamp it left behind and the
-snapshot carries the stamp it was read with, both from one read action. A stamp
-mismatch requeues the burst instead of discarding it; a burst that never reaches
-the reporter for any other reason is requeued too. An unreplayable burst and a
+captured op carries the per-document editor-event sequence number it left
+behind and the snapshot carries the sequence it was read with, both from one
+read action. The sequence counts only change events the reporter observed; it is
+not the editor's modification stamp, which an editor may rewrite without a
+change event (JetBrains restores the pre-change `modificationStamp` on undo and
+re-stamps on save or Remote Dev sync). A stamp that moves without an event
+leaves no later op that can ever re-match it, which turned one undo into 32,277
+refusals over 92 minutes (GH #242). The drain then decides by the sequence:
+equal means the snapshot reflects exactly the burst, which is replayed now; a
+burst ahead of the snapshot means a later event raced the drain, so the burst is
+requeued for the quiet boundary that event already scheduled and the reporter
+schedules no retry of its own; a snapshot ahead of every drained op is owed no
+event, so the burst is decided immediately by shadow replay against the snapshot
+text (handed over when it reconstructs the buffer, otherwise a terminal
+`shadow_replay_mismatch`) and is never requeued. Every requeue is therefore
+paired with a strictly newer editor event, so a burst cannot be refused more
+times than events arrive; a burst that never reaches the reporter for any other
+reason is requeued too. An unreplayable burst and a
 burst with no operator op are distinct outcomes and must not collapse into one
 empty result.
 

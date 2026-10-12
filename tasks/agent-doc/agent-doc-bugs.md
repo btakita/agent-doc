@@ -570,10 +570,10 @@ Done (`c2149c15f9`). Clear was stuck for about 2 minutes. Codex runs preflight a
 - ~~do [#fpeseverityparse]~~
 - ~~do [#idleclearrestart]: Yes, Idle clear should type `/clear`.~~
 - 🚧 How can we optimize the agent-doc build process + test process to reduce the turnaround time?
-- 🚧 sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/241
+- ~~sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/241~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#ideriderindependentnav]~~
-- 🚧 lazily.md issue: Run Agent Doc then Ctrl+c in the Codex terminal then Clear Session Context: Clear Session Context is wedged
+- ~~lazily.md issue: Run Agent Doc then Ctrl+c in the Codex terminal then Clear Session Context: Clear Session Context is wedged~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 tools.md: Changing agent frontmatter from claude to codex: Restart Agent: Codex session restart is wedged: ERROR: No saved session found with ID 915c25bf-68e3-4706-844d-48cb86db4cfa. Run `codex resume` without an ID to choose from existing sessions.
 - 🚧 release + publish
 - do [#ridernavp2a]

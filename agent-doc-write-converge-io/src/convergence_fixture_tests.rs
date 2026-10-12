@@ -144,43 +144,46 @@ mod core_tests {
         )
     }
 
+    /// `#flakyreceipthelpers`: served by the shared warm-controller simulated
+    /// editor, which records each receipt strictly.
     fn start_ack_mismatch_then_refresh_listener(
         project_root: &Path,
         visible_write_content: String,
-    ) -> std::thread::JoinHandle<()> {
-        let listener_root = project_root.to_path_buf();
-        std::thread::spawn(move || {
-            let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                let msg_type = v.get("type").and_then(|value| value.as_str()).unwrap_or("");
-                let patch_id = v
+    ) -> agent_doc_test_support::SimulatedEditorListener {
+        agent_doc_test_support::SimulatedEditorListener::start(
+            project_root,
+            "test_visible_write_listener",
+            move |message| {
+                let patch_id = message
                     .get("patch_id")
                     .and_then(|value| value.as_str())
-                    .unwrap_or("unknown");
-                let content = if msg_type == "refresh_content" {
-                    v.get("content")
+                    .unwrap_or("unknown")
+                    .to_string();
+                let content = if message.get("type").and_then(|value| value.as_str())
+                    == Some("refresh_content")
+                {
+                    message
+                        .get("content")
                         .and_then(|value| value.as_str())
                         .unwrap_or("")
                         .to_string()
                 } else {
                     visible_write_content.clone()
                 };
-                if let Some(file_path) = v.get("file").and_then(|value| value.as_str()) {
-                    let _ = std::fs::write(file_path, &content);
-                    let _ =
-                        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
-                            Path::new(file_path),
-                            patch_id,
-                            &content,
-                            "test_visible_write_listener",
-                        );
+                match message.get("file").and_then(|value| value.as_str()) {
+                    Some(file) => agent_doc_test_support::SimulatedEditorReply::Visible {
+                        file: std::path::PathBuf::from(file),
+                        patch_id,
+                        content,
+                        write_to_disk: true,
+                    },
+                    None => agent_doc_test_support::SimulatedEditorReply::Raw(
+                        serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                            .to_string(),
+                    ),
                 }
-                Some(
-                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
-                        .to_string(),
-                )
-            });
-        })
+            },
+        )
     }
 
     #[test]

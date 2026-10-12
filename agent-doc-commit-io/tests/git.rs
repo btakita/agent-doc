@@ -56,71 +56,50 @@ mod th {
     // cannot distinguish "file has user edits" from "file has a missed agent response" —
     // both look like "file has content snapshot doesn't have".
     // --- #73tv: repo-scoped commit serialization + full transaction retry ---
-    fn start_fake_listener_with_ack_status(
+    /// `#flakyreceipthelpers`: the simulated editor is the shared
+    /// warm-controller fixture, which records each visible-write receipt
+    /// strictly instead of dropping a cold-launch timeout.
+    pub(crate) fn start_fake_listener(
         project_root: &Path,
-        ack_status: Option<&'static str>,
-    ) -> std::thread::JoinHandle<()> {
-        let root = project_root.to_path_buf();
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-        std::thread::spawn(move || {
-            let result = agent_doc_ipc_io::start_listener(&root, move |msg| {
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                let patch_id = v
+    ) -> agent_doc_test_support::SimulatedEditorListener {
+        agent_doc_test_support::SimulatedEditorListener::start(
+            project_root,
+            "test_socket_listener",
+            |message| {
+                let patch_id = message
                     .get("patch_id")
                     .and_then(|p| p.as_str())
-                    .unwrap_or("unknown");
-                if let Some(status) = ack_status {
-                    let receipt_status = match status {
-                        "error" | "rejected" => "rejected",
-                        _ => "applied",
-                    };
-                    return Some(
-                        serde_json::json!({
-                            "type": "receipt",
-                            "id": patch_id,
-                            "status": receipt_status,
-                            "reason": "test_refresh_failed"
-                        })
-                        .to_string(),
-                    );
-                }
+                    .unwrap_or("unknown")
+                    .to_string();
                 // Model the JB plugin's behavior: refresh_content messages carry
                 // the new content in the message body (the IDE applies it to its
                 // in-memory buffer without reading disk). Other message types
                 // fall back to disk (patch files, etc.).
-                let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
-                let content = if v.get("type").and_then(|t| t.as_str()) == Some("refresh_content") {
-                    v.get("content")
-                        .and_then(|c| c.as_str())
-                        .unwrap_or("")
-                        .to_string()
-                } else if !file_path.is_empty() {
-                    std::fs::read_to_string(file_path).unwrap_or_default()
-                } else {
-                    String::new()
-                };
-                if !file_path.is_empty() {
-                    let file = Path::new(file_path);
-                    let _ =
-                        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
-                            file,
-                            patch_id,
-                            &content,
-                            "test_socket_listener",
-                        );
+                let file_path = message.get("file").and_then(|f| f.as_str()).unwrap_or("");
+                if file_path.is_empty() {
+                    return agent_doc_test_support::SimulatedEditorReply::Raw(
+                        serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                            .to_string(),
+                    );
                 }
-                Some(
-                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
-                        .to_string(),
-                )
-            });
-            if let Err(err) = result {
-                eprintln!("[test] fake listener stopped: {err:#}");
-            }
-        })
-    }
-    pub(crate) fn start_fake_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
-        start_fake_listener_with_ack_status(project_root, None)
+                let content =
+                    if message.get("type").and_then(|t| t.as_str()) == Some("refresh_content") {
+                        message
+                            .get("content")
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    } else {
+                        std::fs::read_to_string(file_path).unwrap_or_default()
+                    };
+                agent_doc_test_support::SimulatedEditorReply::Visible {
+                    file: PathBuf::from(file_path),
+                    patch_id,
+                    content,
+                    write_to_disk: false,
+                }
+            },
+        )
     }
     pub(crate) fn wait_for_listener(project_root: &Path) {
         for _ in 0..100 {

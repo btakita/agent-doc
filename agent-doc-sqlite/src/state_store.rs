@@ -5691,6 +5691,49 @@ pub fn load_controller_bootstrap_json_from_db(
     .context("failed to load controller bootstrap from sqlite")
 }
 
+/// Read the controller bootstrap of a project this process does not own,
+/// without initializing that project's ledger (`#flakyreceipthelpers` foreign bootstrap read).
+///
+/// [`open_state_db`] runs schema setup and, on a process's first open of each
+/// database, the whole `state_events` retention pass. A cross-project sweep
+/// (`reap_orphaned_preparing_controllers_all_projects`, run by every
+/// preflight's auto-gc) only needs one bootstrap row from each root that has a
+/// `--handoff-state preparing` controller, but opening through the normal
+/// initializer made every short-lived `agent-doc` process run retention over
+/// those other projects' ledgers: with five live preparing controllers on the
+/// host (one root's state.db at 380MB), each preflight/finalize in an unrelated
+/// project spent most of its time in that retention's `json_extract`
+/// self-joins, and a test project's CLI wrote to the operator's real ledgers.
+/// This read-only open never creates, migrates, or prunes; a missing database
+/// or a database without the bootstrap table reads as no bootstrap.
+pub fn load_controller_bootstrap_json_read_only(
+    project_root: &Path,
+    scope: &str,
+) -> Result<Option<String>> {
+    anyhow::ensure!(
+        !state_db_connections_forbidden_for_process(),
+        "SQLite state connections are forbidden in this process; use the Project Controller projection/command plane"
+    );
+    let path = state_db_path(project_root);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open {} read-only", path.display()))?;
+    conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
+    let has_table: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'controller_bootstrap')",
+            [],
+            |row| row.get(0),
+        )
+        .context("failed to probe controller_bootstrap table")?;
+    if !has_table {
+        return Ok(None);
+    }
+    load_controller_bootstrap_json_from_db(&conn, scope)
+}
+
 pub fn store_controller_bootstrap_json_in_db(
     conn: &Connection,
     scope: &str,
@@ -5764,6 +5807,54 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#flakyreceipthelpers` foreign bootstrap read: reading another project's bootstrap never
+    /// creates, initializes, or writes that project's ledger.
+    #[test]
+    fn foreign_bootstrap_read_never_initializes_the_ledger() -> Result<()> {
+        let missing = tempfile::tempdir()?;
+        assert_eq!(
+            load_controller_bootstrap_json_read_only(missing.path(), "controller")?,
+            None
+        );
+        assert!(
+            !state_db_path(missing.path()).exists(),
+            "a missing ledger stays missing"
+        );
+
+        let bare = tempfile::tempdir()?;
+        std::fs::create_dir_all(bare.path().join(".agent-doc"))?;
+        Connection::open(state_db_path(bare.path()))?
+            .execute_batch("CREATE TABLE unrelated (id INTEGER)")?;
+        assert_eq!(
+            load_controller_bootstrap_json_read_only(bare.path(), "controller")?,
+            None,
+            "a ledger without the bootstrap table has no bootstrap"
+        );
+        let tables: i64 = Connection::open(state_db_path(bare.path()))?.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(tables, 1, "the read must not create the schema");
+
+        let owned = tempfile::tempdir()?;
+        {
+            let conn = open_state_db(owned.path())?;
+            store_controller_bootstrap_json_in_db(&conn, "controller", "{\"pid\":7}")?;
+        }
+        let before = std::fs::read(state_db_path(owned.path()))?;
+        assert_eq!(
+            load_controller_bootstrap_json_read_only(owned.path(), "controller")?.as_deref(),
+            Some("{\"pid\":7}")
+        );
+        assert_eq!(
+            std::fs::read(state_db_path(owned.path()))?,
+            before,
+            "the read leaves the ledger byte-identical"
+        );
+        Ok(())
+    }
 
     #[test]
     fn terminal_turn_fence_loses_to_activation_at_pre_cas_barrier() -> Result<()> {

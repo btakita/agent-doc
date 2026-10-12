@@ -60,5 +60,6 @@ agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version =
 agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.490" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.490" }
 agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.490" }
+agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.490" }
 serde_json = "1"
 tempfile = "3"

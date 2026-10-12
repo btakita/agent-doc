@@ -10,19 +10,6 @@ use agent_doc_write_converge_io::{
     AlreadyAppliedSocketSnapshotContext, persist_already_applied_socket_content_ours_snapshot,
 };
 
-#[cfg(test)]
-pub(crate) fn record_test_visible_write_receipt(
-    file: &Path,
-    patch_id: &str,
-    content: &str,
-    source: &str,
-) {
-    let _ =
-        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
-            file, patch_id, content, source,
-        );
-}
-
 /// Attempt to write via IPC (socket-first, file-based fallback).
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
@@ -2501,8 +2488,6 @@ mod late_fallback_patch_guard_tests {
 
     #[test]
     fn socket_full_content_disabled_path_does_not_save_snapshot() {
-        use std::time::Duration;
-
         let tmp = TempDir::new().unwrap();
         let agent_doc_dir = tmp.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
@@ -2516,24 +2501,27 @@ mod late_fallback_patch_guard_tests {
         fs::write(&doc, source).unwrap();
 
         let root = tmp.path().to_path_buf();
-        let listener_root = root.clone();
-        let server = std::thread::spawn(move || {
-            agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
-                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
-                let patch_id = payload.get("patch_id")?.as_str()?;
-                let file_path = payload.get("file")?.as_str()?;
-                crate::ipc::transport::record_test_visible_write_receipt(
-                    Path::new(file_path),
-                    patch_id,
-                    "wrong\n",
-                    "test_socket_listener",
-                );
-                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
-            })
-            .ok();
-        });
-
-        std::thread::sleep(Duration::from_millis(100));
+        // `#flakyreceipthelpers`: the shared simulated editor records strictly
+        // on a warm controller (never reached here: delivery is disabled).
+        let _listener = agent_doc_test_support::SimulatedEditorListener::start(
+            &root,
+            "test_socket_listener",
+            |payload| {
+                let patch_id = payload.get("patch_id").and_then(|value| value.as_str());
+                let file_path = payload.get("file").and_then(|value| value.as_str());
+                match (patch_id, file_path) {
+                    (Some(patch_id), Some(file_path)) => {
+                        agent_doc_test_support::SimulatedEditorReply::Visible {
+                            file: std::path::PathBuf::from(file_path),
+                            patch_id: patch_id.to_string(),
+                            content: "wrong\n".to_string(),
+                            write_to_disk: false,
+                        }
+                    }
+                    _ => agent_doc_test_support::SimulatedEditorReply::NoReply,
+                }
+            },
+        );
         let result =
             try_ipc_full_content_operator_mutation_from_source(&doc, target, source).unwrap();
 
@@ -2557,9 +2545,6 @@ mod late_fallback_patch_guard_tests {
             ops_log.contains("full_content_ipc_disabled"),
             "disabled full-content path should be logged:\n{ops_log}"
         );
-
-        let _ = fs::remove_file(agent_doc_ipc_io::socket_path(&root));
-        drop(server);
     }
 
     fn init_git_repo(root: &Path) {
@@ -2926,48 +2911,45 @@ Implemented.
 
         // Editor listener: apply the component patch to the payload baseline and
         // publish the converged buffer as a lazily visible-write receipt, exactly
-        // like the JetBrains plugin's Document-API convergence.
-        let listener_root = tmp.path().to_path_buf();
-        let server = std::thread::spawn(move || {
-            let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
-                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+        // like the JetBrains plugin's Document-API convergence. The shared
+        // simulated editor records it strictly on a warm controller
+        // (`#flakyreceipthelpers`).
+        let _listener = agent_doc_test_support::SimulatedEditorListener::start(
+            tmp.path(),
+            "test_socket_listener",
+            |payload| {
                 let patch_id = payload
                     .get("patch_id")
                     .and_then(|value| value.as_str())
                     .unwrap_or("unknown")
                     .to_string();
-                let mut content = payload.get("baseline")?.as_str()?.to_string();
-                for patch in payload.get("patches")?.as_array()? {
-                    let name = patch.get("component")?.as_str()?;
-                    let replacement = patch.get("content")?.as_str()?;
-                    let comps = agent_doc_element::element::parse(&content).ok()?;
-                    let target = comps.iter().find(|component| component.name == name)?;
-                    content = target.replace_content(&content, replacement);
+                let converged = (|| {
+                    let mut content = payload.get("baseline")?.as_str()?.to_string();
+                    for patch in payload.get("patches")?.as_array()? {
+                        let name = patch.get("component")?.as_str()?;
+                        let replacement = patch.get("content")?.as_str()?;
+                        let comps = agent_doc_element::element::parse(&content).ok()?;
+                        let target = comps.iter().find(|component| component.name == name)?;
+                        content = target.replace_content(&content, replacement);
+                    }
+                    Some(content)
+                })();
+                let Some(content) = converged else {
+                    return agent_doc_test_support::SimulatedEditorReply::NoReply;
+                };
+                match payload.get("file").and_then(|value| value.as_str()) {
+                    Some(file_path) => agent_doc_test_support::SimulatedEditorReply::Visible {
+                        file: std::path::PathBuf::from(file_path),
+                        patch_id,
+                        content,
+                        write_to_disk: true,
+                    },
+                    None => agent_doc_test_support::SimulatedEditorReply::Raw(
+                        serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                            .to_string(),
+                    ),
                 }
-                if let Some(file_path) = payload.get("file").and_then(|value| value.as_str()) {
-                    let _ = std::fs::write(file_path, &content);
-                    crate::ipc::transport::record_test_visible_write_receipt(
-                        Path::new(file_path),
-                        &patch_id,
-                        &content,
-                        "test_socket_listener",
-                    );
-                }
-                Some(
-                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
-                        .to_string(),
-                )
-            });
-        });
-        for _ in 0..100 {
-            if agent_doc_ipc_io::is_listener_active(tmp.path()) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(
-            agent_doc_ipc_io::is_listener_active(tmp.path()),
-            "fake socket listener did not start"
+            },
         );
         agent_doc_test_support::seed_reliable_sync_editor_registration(
             &doc,
@@ -3021,9 +3003,6 @@ Implemented.
             !ops_log.contains("ipc_visible_repair_retry_required_no_disk_write"),
             "successful in-cycle convergence must not emit the retry_without_disk_write bail:\n{ops_log}"
         );
-
-        let _ = fs::remove_file(agent_doc_ipc_io::socket_path(tmp.path()));
-        drop(server);
     }
 
     /// The in-cycle convergence must stay fail-closed: with NO editor IPC

@@ -763,35 +763,218 @@ pub fn drift_content_ours() -> String {
     .to_string()
 }
 
+/// What a [`SimulatedEditorListener`] does with one editor IPC message.
+pub enum SimulatedEditorReply {
+    /// The editor made `content` visible in `file`: optionally write it to disk,
+    /// record its visible-write receipt on the warm controller (strictly), and
+    /// acknowledge the patch as applied.
+    Visible {
+        file: PathBuf,
+        patch_id: String,
+        content: String,
+        write_to_disk: bool,
+    },
+    /// Reply with this exact response line and record nothing.
+    Raw(String),
+    /// Send no response (the client reaches its receipt deadline) and record
+    /// nothing.
+    NoReply,
+}
+
+/// A simulated editor socket listener backed by a warm in-process controller
+/// (`#flakyreceipthelpers`, the `#visiblewriteloadflake` class).
+///
+/// The listeners this replaces recorded each visible-write receipt through a
+/// controller RPC and dropped the result. With no controller running, that RPC
+/// cold-launched a detached `agent-doc controller serve`; under load its
+/// startup outlived the client's 6s IPC receipt deadline, so the receipt went
+/// silently missing and the code under test took a branch the test did not
+/// mean to exercise. Pinned to one core with 64 spinners, 7 of the 8
+/// convergence tests using them failed on every run.
+///
+/// This fixture:
+/// - starts the process's warm state actor for the project root before it
+///   binds (`ensure_state_actor_for_tests`, shared with the code under test);
+/// - records every receipt strictly: a failed record is kept, answered with a
+///   rejected receipt instead of a false `applied`, printed when the fixture
+///   drops, and fails the test;
+/// - asserts on drop that no detached controller was cold-launched;
+/// - marks its endpoint known-live, so the client's 6s editor receipt deadline
+///   becomes a hang ceiling (`known_live_test_editors`): a slow receipt from an
+///   always-answering in-process editor is host load, not absence;
+/// - blocks until the socket serves, and on drop stops and joins its listener
+///   so no handler outlives the test's temporary root.
+pub struct SimulatedEditorListener {
+    root: PathBuf,
+    known_live_key: PathBuf,
+    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    record_errors: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
+}
+
+impl SimulatedEditorListener {
+    pub fn start<F>(project_root: &Path, receipt_source: &'static str, on_message: F) -> Self
+    where
+        F: Fn(&serde_json::Value) -> SimulatedEditorReply + Send + Sync + 'static,
+    {
+        let root = project_root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        agent_doc_controller_io::project_controller::ensure_state_actor_for_tests(&root)
+            .expect("the simulated editor needs a warm in-process controller");
+        let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let record_errors = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let thread = {
+            let root = root.clone();
+            let shutdown = std::sync::Arc::clone(&shutdown);
+            let record_errors = std::sync::Arc::clone(&record_errors);
+            std::thread::spawn(move || {
+                let result = agent_doc_ipc_io::start_listener_with_logger_until_ready(
+                    &root,
+                    move |msg| {
+                        let message: serde_json::Value = serde_json::from_str(msg).ok()?;
+                        simulated_editor_respond(
+                            on_message(&message),
+                            receipt_source,
+                            &record_errors,
+                        )
+                    },
+                    |_, _| {},
+                    shutdown,
+                    ready_tx,
+                );
+                if let Err(err) = result {
+                    eprintln!("[test] simulated editor listener stopped: {err:#}");
+                }
+            })
+        };
+        ready_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the simulated editor listener must bind its socket");
+        let known_live_key = agent_doc_ipc_io::known_live_test_editors::register(&root);
+        Self {
+            root,
+            known_live_key,
+            shutdown,
+            thread: Some(thread),
+            record_errors,
+        }
+    }
+}
+
+fn simulated_editor_respond(
+    reply: SimulatedEditorReply,
+    receipt_source: &str,
+    record_errors: &parking_lot::Mutex<Vec<String>>,
+) -> Option<String> {
+    let (file, patch_id, content, write_to_disk) = match reply {
+        SimulatedEditorReply::Raw(response) => return Some(response),
+        SimulatedEditorReply::NoReply => return None,
+        SimulatedEditorReply::Visible {
+            file,
+            patch_id,
+            content,
+            write_to_disk,
+        } => (file, patch_id, content, write_to_disk),
+    };
+    let started = Instant::now();
+    let recorded = (|| -> Result<(), String> {
+        if write_to_disk {
+            std::fs::write(&file, &content)
+                .map_err(|err| format!("write {}: {err}", file.display()))?;
+        }
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+            &file,
+            &patch_id,
+            &content,
+            receipt_source,
+        )
+        .map(|_| ())
+        .map_err(|err| format!("record visible-write receipt for {patch_id}: {err:#}"))
+    })();
+    eprintln!(
+        "[test] simulated editor recorded patch {patch_id} in {}ms",
+        started.elapsed().as_millis()
+    );
+    Some(match recorded {
+        Ok(()) => {
+            serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id}).to_string()
+        }
+        Err(err) => {
+            record_errors.lock().push(err.clone());
+            serde_json::json!({
+                "type": "receipt",
+                "status": "rejected",
+                "id": patch_id,
+                "reason": format!("simulated_editor_receipt_unrecorded: {err}"),
+            })
+            .to_string()
+        }
+    })
+}
+
+impl Drop for SimulatedEditorListener {
+    fn drop(&mut self) {
+        agent_doc_ipc_io::known_live_test_editors::unregister(&self.known_live_key);
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = agent_doc_ipc_io::wake_listener(&self.root);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        let errors = std::mem::take(&mut *self.record_errors.lock());
+        for err in &errors {
+            eprintln!("[test] simulated editor failed to record a receipt: {err}");
+        }
+        let log =
+            std::fs::read_to_string(self.root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        let cold_launched = log.contains("controller_detached_child_launched");
+        if cold_launched {
+            eprintln!("[test] a detached controller was cold-launched:\n{log}");
+        }
+        if std::thread::panicking() {
+            return;
+        }
+        assert!(
+            errors.is_empty(),
+            "the simulated editor must record every visible-write receipt: {errors:?}"
+        );
+        assert!(
+            !cold_launched,
+            "the simulated editor's receipts must be served by the warm in-process controller, not a cold launch"
+        );
+    }
+}
+
+/// A simulated editor that writes `visible_write_content` to every patched file
+/// and records it as that patch's visible-write receipt.
 pub fn start_live_prompt_drift_receipt_listener(
     project_root: &Path,
     visible_write_content: String,
-) -> std::thread::JoinHandle<()> {
-    let root = project_root.to_path_buf();
-    std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-    std::thread::spawn(move || {
-        let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
-            let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-            let patch_id = v
+) -> SimulatedEditorListener {
+    SimulatedEditorListener::start(
+        project_root,
+        "test_live_prompt_drift_listener",
+        move |message| {
+            let patch_id = message
                 .get("patch_id")
                 .and_then(|value| value.as_str())
-                .unwrap_or("unknown");
-            if let Some(file_path) = v.get("file").and_then(|value| value.as_str()) {
-                let _ = std::fs::write(file_path, &visible_write_content);
-                let _ =
-                    agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
-                        Path::new(file_path),
-                        patch_id,
-                        &visible_write_content,
-                        "test_live_prompt_drift_listener",
-                    );
+                .unwrap_or("unknown")
+                .to_string();
+            match message.get("file").and_then(|value| value.as_str()) {
+                Some(file) => SimulatedEditorReply::Visible {
+                    file: PathBuf::from(file),
+                    patch_id,
+                    content: visible_write_content.clone(),
+                    write_to_disk: true,
+                },
+                None => SimulatedEditorReply::Raw(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                        .to_string(),
+                ),
             }
-            Some(
-                serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
-                    .to_string(),
-            )
-        });
-    })
+        },
+    )
 }
 
 pub fn start_receipt_without_content_listener(project_root: &Path) -> std::thread::JoinHandle<()> {

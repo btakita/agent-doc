@@ -488,6 +488,20 @@ its prompt, until the operator typed `/clear` by hand.
   receipts dispatched at or before the retired lease heartbeat
   (`settle_running_dispatch_turns_started_at_or_before`). A newer dispatch
   belongs to a newer turn and is untouched.
+  `#codexclearwedge`: when no receipt was promoted, the turn ended before its
+  preflight ran. Claude Code runs preflight inside `UserPromptSubmit`, but a
+  Codex turn runs it from the model's first tool call, so Run Agent Doc
+  followed by Ctrl+C in the Codex pane left the receipt `accepted`. It then
+  read as `dispatch_turn_pending` for the whole 120s pre-turn grace, and each
+  Clear Session Context press re-queued (`session_clear_live_turn_deferred
+  evidence=dispatch_turn_pending rearmed=true`) behind a turn that was already
+  over. The retired lease proves that turn started, so the harness-ended settle
+  (`settle_harness_ended_dispatch_turn_at_or_before`) takes exactly one
+  receipt in that case: the oldest open non-operator (`session_*` excluded)
+  receipt accepted at or before the lease heartbeat
+  (`#dispatchreceiptperturn`). When a `running` receipt was settled, no
+  pending one is taken with it; a stacked trigger behind it, or a dispatch
+  accepted after the lease, stays pending.
   A NORMAL turn end settles it too (`#clearqueuedliveturn`): `turn-status
   idle` (Claude `Stop` / `SessionStart`, Codex `Stop`, OpenCode
   `session.idle`) reads the pane's lease heartbeat before clearing the lease,

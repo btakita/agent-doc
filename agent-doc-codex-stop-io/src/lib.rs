@@ -170,7 +170,24 @@ enum StopCloseAttempt {
     /// holds the intent and commits it on its own delivery edge. Not an agent
     /// action item: the Stop hook continues instead of blocking.
     DeferredToDurableOwner,
+    /// `#fixlazilycodex`: the cycle is already committed and the Stop payload
+    /// is already materialized in HEAD. The terminal closeout already owns
+    /// this exact text, so there is nothing to capture or reopen: an
+    /// idempotent no-op, never a fail-closed error.
+    AlreadyCommitted,
     NotPossible,
+}
+
+/// What [`reopen_terminal_cycle_before_stop_capture`] did before capture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopCaptureReopen {
+    /// No terminal predecessor or no replayable payload: capture proceeds on
+    /// the existing cycle state unchanged.
+    NotNeeded,
+    /// A fresh cycle was minted after the committed predecessor.
+    Reopened,
+    /// The committed predecessor's HEAD already holds the payload verbatim.
+    PayloadAlreadyCommitted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1364,6 +1381,7 @@ fn apply_bound_stop(
                     ),
                     agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
                 );
+            let mut payload_already_committed = false;
             if !input.stop_hook_active || recursive_post_commit_prompt {
                 let stop_closeout = match attempt_stop_closeout(file, state, input) {
                     Ok(stop_closeout) => stop_closeout,
@@ -1403,6 +1421,22 @@ fn apply_bound_stop(
                         settle_session_binding(file, cleanup_roots, loaded_root, state)?;
                         return Ok(StopResponse::Continue { continue_: true });
                     }
+                    StopCloseAttempt::AlreadyCommitted => {
+                        // `#fixlazilycodex`: the closing text is the committed
+                        // closeout's own; it answers nothing new, so it is
+                        // never recaptured. Session-check still reports work
+                        // behind the commit: fresh prompt work is handed back
+                        // in-pane (the `#fpestopreplay` response); any other
+                        // interruption falls through to the plain hand-back
+                        // below with capture skipped.
+                        if is_committed_prompt_diff_interruption(&reason)
+                            && let Some(response) =
+                                committed_prompt_diff_stop_response(file, &reason)?
+                        {
+                            return Ok(response);
+                        }
+                        payload_already_committed = true;
+                    }
                     StopCloseAttempt::DeferredToDurableOwner => {
                         return Ok(StopResponse::Continue { continue_: true });
                     }
@@ -1430,7 +1464,7 @@ fn apply_bound_stop(
                 }
             }
 
-            let capture_note = if input.stop_hook_active {
+            let capture_note = if input.stop_hook_active || payload_already_committed {
                 String::new()
             } else {
                 capture_assistant_text(file, state, input)
@@ -1662,6 +1696,7 @@ fn active_session_prompt_requires_writeback(
         }
     };
 
+    let mut payload_already_committed = false;
     if agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
         && matches!(
             agent_doc_template::replay_guard::classify_replay_payload(
@@ -1671,6 +1706,10 @@ fn active_session_prompt_requires_writeback(
         )
     {
         match attempt_stop_closeout(file, state, input)? {
+            // `#fixlazilycodex`: the closing text is already committed, so it
+            // is not this prompt's answer and must not be recaptured. The
+            // prompt is still real session work; hand it back in-pane below.
+            StopCloseAttempt::AlreadyCommitted => payload_already_committed = true,
             StopCloseAttempt::Closed => {
                 settle_session_binding(file, roots, loaded_root, state)?;
                 agent_doc_ops_log_io::log_op(
@@ -1705,7 +1744,7 @@ fn active_session_prompt_requires_writeback(
             StopCloseAttempt::NotPossible => {}
         }
     }
-    let capture_note = if input.stop_hook_active {
+    let capture_note = if input.stop_hook_active || payload_already_committed {
         String::new()
     } else {
         capture_assistant_text(file, state, input)
@@ -1800,13 +1839,20 @@ fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
     {
         return Ok(Some(prompt));
     }
-    Ok(first_active_queue_prompt_in_content(&content))
+    // `#fixlazilycodex`: a head a worker claimed (or the queue-level
+    // `subagents` plan holds back) is not this session's prompt debt.
+    let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &content);
+    Ok(first_active_queue_prompt_in_content(&content, &claimed))
 }
 
-fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
-    let prompt = agent_doc_queue::queue_continuation::pending_head_prompt_text(
+fn first_active_queue_prompt_in_content(
+    content: &str,
+    claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+) -> Option<String> {
+    let prompt = agent_doc_queue::queue_continuation::pending_head_prompt_text_excluding_claimed(
         content,
         agent_doc_queue::queue_continuation::DrainScope::InSessionLoop,
+        claimed,
     )?;
     if agent_doc_codex_hook_io::is_context_clear_prompt(&prompt)
         || agent_doc_queue::queue_command::slash_command_text(&prompt).is_some()
@@ -2578,7 +2624,11 @@ fn attempt_stop_closeout(
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
     );
     stop_phase("closeout_reopen_terminal_cycle");
-    reopen_terminal_cycle_before_stop_capture(file, &payload)?;
+    if reopen_terminal_cycle_before_stop_capture(file, &payload)?
+        == StopCaptureReopen::PayloadAlreadyCommitted
+    {
+        return Ok(StopCloseAttempt::AlreadyCommitted);
+    }
     invalidate_stop_document_cache();
     stop_phase("closeout_detect_bypassed_patchback");
     let has_bypassed_patchback =
@@ -2829,17 +2879,26 @@ fn repair_failure_is_binary_owned_deferral(
         && agent_doc_turn::write_ownership::is_retained_write_refusal(rendered_error)
 }
 
+/// Mint a fresh capture cycle when the Stop payload arrives after a committed
+/// predecessor.
+///
+/// `#fixlazilycodex`: a payload HEAD already holds verbatim is the committed
+/// closeout's own text — a Stop after a proven terminal closeout. That is an
+/// idempotent no-op ([`StopCaptureReopen::PayloadAlreadyCommitted`]), not a
+/// failure: refusing it as an error made the hook fail closed on a cycle that
+/// had converged and committed. A payload visible only in the uncommitted
+/// current authority, or no HEAD at all, still fails closed.
 fn reopen_terminal_cycle_before_stop_capture(
     file: &Path,
     payload: &agent_doc_template::replay_guard::ReplayPayloadClassification<'_>,
-) -> Result<()> {
+) -> Result<StopCaptureReopen> {
     let agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) =
         payload
     else {
-        return Ok(());
+        return Ok(StopCaptureReopen::NotNeeded);
     };
     let Some(previous_cycle_id) = agent_doc_flow_io::closeout::cycle_already_committed(file) else {
-        return Ok(());
+        return Ok(StopCaptureReopen::NotNeeded);
     };
     let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         anyhow::bail!(
@@ -2847,9 +2906,13 @@ fn reopen_terminal_cycle_before_stop_capture(
         );
     };
     if agent_doc_turn::response_replay::response_materialized_in_content(response.as_ref(), &head) {
-        anyhow::bail!(
-            "post-commit Stop payload is already materialized in HEAD; refusing to capture it under the terminal cycle"
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "codex_stop_post_commit_payload_already_committed cycle_id={previous_cycle_id} capture_created=false reopened=false (#fixlazilycodex)"
+            ),
         );
+        return Ok(StopCaptureReopen::PayloadAlreadyCommitted);
     }
 
     let current = current_document_content(file, "codex_stop_post_commit_cycle_baseline")?;
@@ -2884,7 +2947,7 @@ fn reopen_terminal_cycle_before_stop_capture(
             previous_cycle_id, reopened.cycle_id
         ),
     );
-    Ok(())
+    Ok(StopCaptureReopen::Reopened)
 }
 
 /// `#stoprecapturesupersede`: the open cycle already holds a live capture whose
@@ -6309,7 +6372,11 @@ Reviewed the gated items.\n\
             ("--- stop\n- do [#ready]", None),
         ] {
             assert_eq!(
-                first_active_queue_prompt_in_content(&document(queue)).as_deref(),
+                first_active_queue_prompt_in_content(
+                    &document(queue),
+                    &agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+                )
+                .as_deref(),
                 expected,
                 "queue: {queue}"
             );
@@ -8094,6 +8161,224 @@ Reviewed the gated items.\n\
         assert!(state.last_turn_id.is_empty());
     }
 
+    /// `#fixlazilycodex`: a committed status line, a verdict per payload
+    /// placement. HEAD already holds it ⇒ idempotent no-op (no fresh cycle);
+    /// visible only in the uncommitted current authority ⇒ still fails closed;
+    /// absent everywhere ⇒ a fresh cycle is minted for capture.
+    #[test]
+    fn post_commit_reopen_is_a_noop_only_for_a_payload_already_in_head() {
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        let status =
+            "Cycle `cycle-1` converged and committed successfully. No queue work is drainable.";
+        let committed = fs::read_to_string(&doc).unwrap().replace(
+            "❯ Hello\n<!-- /agent:exchange -->",
+            &format!("❯ Hello\n\n### Re: recovered response\n\n{status}\n<!-- /agent:exchange -->"),
+        );
+        fs::write(&doc, &committed).unwrap();
+        init_git_repo(dir.path(), &doc);
+        let previous =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
+                .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+
+        let in_head = agent_doc_template::replay_guard::classify_replay_payload(status);
+        assert_eq!(
+            reopen_terminal_cycle_before_stop_capture(&doc, &in_head).unwrap(),
+            StopCaptureReopen::PayloadAlreadyCommitted
+        );
+        let still = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            still.cycle_id, previous.cycle_id,
+            "no fresh cycle for a committed payload"
+        );
+        assert_eq!(still.phase.as_str(), "committed");
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_post_commit_payload_already_committed"),
+            "{ops}"
+        );
+        assert!(
+            !ops.contains("codex_stop_post_commit_prompt_cycle_reopened"),
+            "{ops}"
+        );
+
+        // Negative control: visible in current authority but NOT committed.
+        let uncommitted = "An uncommitted closing line the editor already shows.";
+        fs::write(
+            &doc,
+            committed.replace(
+                "<!-- /agent:exchange -->",
+                &format!("\n{uncommitted}\n<!-- /agent:exchange -->"),
+            ),
+        )
+        .unwrap();
+        let in_current = agent_doc_template::replay_guard::classify_replay_payload(uncommitted);
+        let err = reopen_terminal_cycle_before_stop_capture(&doc, &in_current).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("already materialized in current document authority"),
+            "{err:#}"
+        );
+        fs::write(&doc, &committed).unwrap();
+        invalidate_stop_document_cache();
+
+        // Negative control: a genuinely unrecorded payload is still captured.
+        let fresh = agent_doc_template::replay_guard::classify_replay_payload(
+            "### Re: Hello — gpt-5\n\nA genuinely new answer.\n",
+        );
+        assert_eq!(
+            reopen_terminal_cycle_before_stop_capture(&doc, &fresh).unwrap(),
+            StopCaptureReopen::Reopened
+        );
+        assert_ne!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .cycle_id,
+            previous.cycle_id
+        );
+    }
+
+    fn write_claimed_subagent_queue_doc(dir: &tempfile::TempDir, status: &str) -> PathBuf {
+        let doc = dir.path().join("task.md");
+        let content = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: recovered response\n\n\
+{status}\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+- ~~do [#done]~~\n\
+- do [#held]\n\
+<!-- /agent:queue -->\n\n\
+## Backlog\n\n\
+<!-- agent:backlog -->\n\
+- [ ] [#held] Pin the released gitlinks after the other sessions settle.\n\
+<!-- /agent:backlog -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        doc
+    }
+
+    /// `#fixlazilycodex` (tasks/software/lazily.md, cycle-1791827706347): the
+    /// only queue head was claimed by a subagent worker, the cycle had
+    /// converged and committed, and Codex's closing status was already in HEAD.
+    /// The Stop hook read the claimed head as session prompt debt, reopened the
+    /// committed cycle, and failed closed ("post-commit Stop payload is already
+    /// materialized in HEAD"); the three Stops before it had each captured a
+    /// fresh status line as a `### Re: recovered response`. Now the claimed head
+    /// is not prompt debt and the Stop is allowed with no capture.
+    #[test]
+    fn committed_stop_with_claimed_head_and_payload_in_head_allows_without_capture() {
+        let dir = setup_project();
+        let status =
+            "Cycle `cycle-1` converged and committed successfully. No queue work is drainable.";
+        let doc = write_claimed_subagent_queue_doc(&dir, status);
+        init_git_repo(dir.path(), &doc);
+        agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+        let committed_cycle = complete_run(&doc);
+        let before = fs::read_to_string(&doc).unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: status.to_string(),
+            stop_hook_active: false,
+        })
+        .expect("a Stop after a committed closeout must never fail closed");
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            before,
+            "no recovered response"
+        );
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .cycle_id,
+            committed_cycle,
+            "the committed cycle must not be reopened"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !ops.contains("codex_stop_post_commit_prompt_cycle_reopened"),
+            "{ops}"
+        );
+    }
+
+    /// `#fixlazilycodex`: the same committed closeout with an unresolved
+    /// exchange prompt is real session work. The committed status is not its
+    /// answer, so the hook neither reopens/captures nor fails closed: it hands
+    /// the prompt back in-pane.
+    #[test]
+    fn committed_stop_with_open_prompt_and_payload_in_head_hands_back_without_capture() {
+        let dir = setup_project();
+        let status =
+            "Cycle `cycle-1` converged and committed successfully. No queue work is drainable.";
+        let doc = write_claimed_subagent_queue_doc(
+            &dir,
+            &format!("{status}\n\n❯ Explain the release pin order"),
+        );
+        init_git_repo(dir.path(), &doc);
+        agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+        let committed_cycle = complete_run(&doc);
+        let before = fs::read_to_string(&doc).unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: status.to_string(),
+            stop_hook_active: false,
+        })
+        .expect("a committed payload is never a fail-closed error");
+
+        assert!(
+            matches!(&response, StopResponse::Block { reason, .. }
+                if reason.contains("Explain the release pin order")),
+            "{response:?}\n{}",
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default()
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .cycle_id,
+            committed_cycle
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_post_commit_payload_already_committed"),
+            "{ops}"
+        );
+        assert!(
+            !ops.contains("codex_stop_post_commit_prompt_cycle_reopened"),
+            "{ops}"
+        );
+    }
+
     #[test]
     fn post_commit_reopen_records_current_authority_not_head_as_file_baseline() {
         let dir = setup_project();
@@ -8117,7 +8402,10 @@ Reviewed the gated items.\n\
             "### Re: Prompt from current authority — gpt-5\n\nDone.\n",
         );
 
-        reopen_terminal_cycle_before_stop_capture(&doc, &payload).unwrap();
+        assert_eq!(
+            reopen_terminal_cycle_before_stop_capture(&doc, &payload).unwrap(),
+            StopCaptureReopen::Reopened
+        );
 
         let reopened = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_ne!(reopened.cycle_id, previous.cycle_id);

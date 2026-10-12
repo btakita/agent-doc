@@ -9932,10 +9932,12 @@ pub fn oldest_open_dispatch_turn_at_for_file(file: &Path) -> Result<Option<u64>>
     )
 }
 
-/// `#sdkclearwedge`: settle this document's `running` dispatch receipts for a
-/// turn the harness proved ended (interrupt / abandoned prompt) at or after
-/// `turn_started_at`. See
-/// [`state_store::settle_running_dispatch_turns_started_at_or_before`].
+/// `#sdkclearwedge`: settle this document's dispatch receipt for a turn the
+/// harness proved ended (interrupt / abandoned prompt) whose lease was written
+/// at `turn_started_at` — its `running` receipts, or (`#codexclearwedge`) the
+/// oldest still-`accepted` one when the turn ended before its preflight
+/// promoted it. See
+/// [`state_store::settle_harness_ended_dispatch_turn_at_or_before`].
 pub fn settle_dispatch_turn_ended_by_harness_for_file(
     file: &Path,
     turn_started_at: u64,
@@ -9948,7 +9950,7 @@ pub fn settle_dispatch_turn_ended_by_harness_for_file(
         &file.to_string_lossy(),
     );
     let conn = open_state_db(&project_root)?;
-    state_store::settle_running_dispatch_turns_started_at_or_before(
+    state_store::settle_harness_ended_dispatch_turn_at_or_before(
         &conn,
         &document_id,
         i64::try_from(turn_started_at).unwrap_or(i64::MAX),

@@ -4781,6 +4781,57 @@ pub fn settle_running_dispatch_turns_started_at_or_before(
     Ok(settled)
 }
 
+/// `#codexclearwedge`: settle the dispatch receipt of a turn the harness proved
+/// ended without a `Ready` transition (interrupt, abandoned or withdrawn
+/// prompt), bounded by `turn_started_at` (the retired lease's
+/// `UserPromptSubmit` heartbeat).
+///
+/// The `running` receipts go first
+/// ([`settle_running_dispatch_turns_started_at_or_before`]). When none was
+/// promoted, the turn ended before its preflight ran: Claude Code runs
+/// preflight inside `UserPromptSubmit`, but a Codex turn runs it from the
+/// model's first tool call, so an operator Ctrl+C one second after the prompt
+/// landed (live 2026-10-12, `tasks/software/lazily.md` pane %121) left the
+/// receipt `accepted`. That receipt kept the `dispatch_turn_pending` evidence
+/// live for the whole [`DISPATCH_PRE_TURN_GRACE_SECS`], so every Clear press
+/// re-queued behind a turn that was already over and the clear only ran when
+/// the grace expired. The lease proves that turn started, so its receipt is
+/// settled here: exactly ONE (`#dispatchreceiptperturn`), the oldest open
+/// non-operator receipt accepted at or before the lease. A second stacked
+/// trigger, or one accepted after the lease, belongs to a later turn and is
+/// untouched. Returns the number settled.
+pub fn settle_harness_ended_dispatch_turn_at_or_before(
+    conn: &Connection,
+    document_id: &str,
+    turn_started_at: i64,
+) -> Result<usize> {
+    let running =
+        settle_running_dispatch_turns_started_at_or_before(conn, document_id, turn_started_at)?;
+    if running > 0 {
+        return Ok(running);
+    }
+    let pending = conn.execute(
+        r#"
+        UPDATE dispatch_attempts
+        SET dispatch_start_proven = 1
+        WHERE id = (
+            SELECT id
+            FROM dispatch_attempts
+            WHERE document_id = ?1
+              AND failed_stage IS NULL
+              AND COALESCE(result_status, '') IN ('accepted', 'queued')
+              AND dispatch_start_proven = 0
+              AND command_kind NOT LIKE 'session\_%' ESCAPE '\'
+              AND timestamp <= ?2
+            ORDER BY timestamp ASC, id ASC
+            LIMIT 1
+          )
+        "#,
+        params![document_id, turn_started_at],
+    )?;
+    Ok(pending)
+}
+
 /// `#clearqueuedliveturn`: settle the `running` receipts of every document whose
 /// actor runs in `pane_id`, dispatched at or before `turn_started_at`, because
 /// the harness's own turn-end hook (`Stop` / `SessionStart` → `turn-status
@@ -6530,6 +6581,79 @@ mod tests {
             settle_running_dispatch_turns_started_at_or_before(&conn, "doc", lease_written)?,
             0,
             "idempotent"
+        );
+        Ok(())
+    }
+
+    /// `#codexclearwedge` replay (agent-loop `tasks/software/lazily.md`, pane
+    /// %121, 2026-10-12): Run Agent Doc's `dispatch_only_reopen` was accepted at
+    /// 09:58:08, Codex's `UserPromptSubmit` hook wrote the lease at 09:58:13 and
+    /// the operator pressed Ctrl+C at 09:58:14, before the turn's preflight
+    /// promoted the receipt. The guard retired the lease with
+    /// `settled_dispatches=0`, and the still-`accepted` receipt held
+    /// `dispatch_turn_pending` until the 120s pre-turn grace expired. The
+    /// harness-ended settle must take that receipt, and only that one.
+    #[test]
+    fn harness_ended_turn_settles_its_unpromoted_receipt() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let dispatched = 1_791_799_088i64;
+        let lease_written = dispatched + 5;
+        insert_open_dispatch(&conn, "doc", dispatched, "accepted")?;
+        // A second stacked trigger accepted before the lease, and one after.
+        insert_open_dispatch(&conn, "doc", dispatched + 1, "accepted")?;
+        insert_open_dispatch(&conn, "doc", lease_written + 1, "accepted")?;
+        // An operator command receipt is never a dispatched turn.
+        conn.execute(
+            "INSERT INTO dispatch_attempts \
+             (document_id, generation, command_kind, result_status, dispatch_start_proven, timestamp) \
+             VALUES ('doc', 1, 'session_clear', 'accepted', 0, ?1)",
+            params![dispatched - 1],
+        )?;
+        let now = lease_written + 7;
+        assert!(has_pending_dispatch_turn_as_of(&conn, "doc", now)?);
+        assert!(!has_running_dispatch_turn_as_of(&conn, "doc", now)?);
+
+        // A lease older than every dispatch belongs to an earlier turn.
+        assert_eq!(
+            settle_harness_ended_dispatch_turn_at_or_before(&conn, "doc", dispatched - 2)?,
+            0
+        );
+        assert_eq!(
+            settle_harness_ended_dispatch_turn_at_or_before(&conn, "doc", lease_written)?,
+            1,
+            "one turn settles one receipt"
+        );
+        let open: Vec<(String, i64)> = conn
+            .prepare(
+                "SELECT command_kind, timestamp FROM dispatch_attempts \
+                 WHERE document_id = 'doc' AND dispatch_start_proven = 0 ORDER BY timestamp",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            open,
+            vec![
+                ("session_clear".to_string(), dispatched - 1),
+                ("run".to_string(), dispatched + 1),
+                ("run".to_string(), lease_written + 1),
+            ],
+            "only the oldest dispatch at or before the lease is settled"
+        );
+
+        // When the turn's preflight DID promote a receipt, that receipt is the
+        // turn's and no pending one is taken with it.
+        let conn = dispatch_attempts_fixture()?;
+        insert_open_dispatch(&conn, "doc", dispatched, "accepted")?;
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        insert_open_dispatch(&conn, "doc", dispatched + 1, "accepted")?;
+        assert_eq!(
+            settle_harness_ended_dispatch_turn_at_or_before(&conn, "doc", lease_written)?,
+            1
+        );
+        assert!(!has_running_dispatch_turn_as_of(&conn, "doc", now)?);
+        assert!(
+            has_pending_dispatch_turn_as_of(&conn, "doc", now)?,
+            "the stacked trigger behind the running turn stays pending"
         );
         Ok(())
     }

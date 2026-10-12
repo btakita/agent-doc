@@ -5908,6 +5908,164 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         );
     }
 
+    /// `#codexclearwedge` replay (agent-loop `tasks/software/lazily.md`, pane
+    /// %121, Codex, 2026-10-12): Run Agent Doc accepted a `dispatch_only_reopen`
+    /// at 09:58:08, Codex's `UserPromptSubmit` hook wrote the lease at
+    /// 09:58:13, and the operator pressed Ctrl+C at 09:58:14 — before the turn's
+    /// preflight (which a Codex turn runs from its first tool call) promoted
+    /// the receipt to `running`. The guard retired the lease from the rollout's
+    /// `turn_aborted` record (`settled_dispatches=0`), but the still-`accepted`
+    /// receipt kept answering `dispatch_turn_pending`, so every Clear press
+    /// re-queued (`session_clear_live_turn_deferred
+    /// evidence=dispatch_turn_pending rearmed=true`) until the 120s pre-turn
+    /// grace expired. Retiring the lease must settle that receipt too.
+    #[test]
+    fn clear_guard_allows_clear_after_codex_ctrl_c_before_preflight() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks/software/lazily.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-1\n---\n\nBody.\n").unwrap();
+        let mut ctx = test_session_context(
+            test_actor_record(ActorState::Ready),
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            Some("ready"),
+        );
+        ctx.canonical_file = doc.clone();
+        ctx.base_dir = root.clone();
+        let idle = LivePaneEvidence {
+            pane_id: Some("%121".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveIdle,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(true),
+            tail: Some(
+                "■ Conversation interrupted - tell the model what to do differently.".to_string(),
+            ),
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let stamp = agent_doc_turn::turn_status::format_rfc3339_utc_secs;
+        let dispatched = now - 12;
+        let lease_at = dispatched + 5;
+        let interrupted_at = lease_at + 1;
+
+        let document_id =
+            agent_doc_session_actor_io::canonical_document_id_in(&root, &doc.to_string_lossy());
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        agent_doc_sqlite::state_store::insert_dispatch_attempt_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DispatchAttemptInsert {
+                document_id: &document_id,
+                generation: 300,
+                command_kind: "dispatch_only_reopen",
+                accepted_stage: Some("ready"),
+                failed_stage: None,
+                diagnostic_payload: "{}",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE dispatch_attempts SET timestamp = ?1",
+            [i64::try_from(dispatched).unwrap()],
+        )
+        .unwrap();
+
+        // The Codex rollout: prompt submitted, then interrupted. No Stop hook.
+        let transcript = root.join("rollout-lazily.jsonl");
+        let record = |at: u64, kind: &str, payload: serde_json::Value| serde_json::json!({"timestamp": stamp(at), "type": kind, "payload": payload});
+        let records = [
+            record(
+                lease_at,
+                "event_msg",
+                serde_json::json!({"type": "task_started"}),
+            ),
+            record(
+                lease_at,
+                "response_item",
+                serde_json::json!({"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": "/agent-doc tasks/software/lazily.md"}]}),
+            ),
+            record(
+                lease_at,
+                "turn_context",
+                serde_json::json!({"cwd": "/repo"}),
+            ),
+            record(
+                interrupted_at,
+                "event_msg",
+                serde_json::json!({"type": "turn_aborted", "turn_id": "t1",
+                    "reason": "interrupted", "duration_ms": 1100}),
+            ),
+        ];
+        let body: String = records.iter().map(|r| format!("{r}\n")).collect();
+        std::fs::write(&transcript, body).unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker_with_transcript_at(
+            &root,
+            "%121",
+            lease_at,
+            Some(&transcript),
+        )
+        .unwrap();
+
+        // The preflight never ran: the receipt is still pre-turn, not running.
+        assert!(
+            !agent_doc_sqlite::state_store::has_running_dispatch_turn_as_of(
+                &conn,
+                &document_id,
+                i64::try_from(now).unwrap()
+            )
+            .unwrap()
+        );
+
+        // The guard retires the interrupted lease AND the turn's receipt.
+        assert_eq!(harness_turn_live_evidence(&ctx, &idle), None);
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&idle, false, false, false, false),
+            OperatorClearInputState::IdlePrompt
+        );
+        assert!(
+            !agent_doc_controller_io::project_controller::dispatch_turn_pending_for_file(&doc)
+                .unwrap(),
+            "the interrupted turn's receipt no longer reads as a pending turn"
+        );
+        let ops = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("turn_status_projection_repaired")
+                && ops.contains("source=operator_clear_guard")
+                && ops.contains("settled_dispatches=1"),
+            "{ops}"
+        );
+
+        // A dispatch accepted AFTER the interrupted turn's lease belongs to a
+        // newer turn and still holds the clear.
+        agent_doc_sqlite::state_store::insert_dispatch_attempt_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DispatchAttemptInsert {
+                document_id: &document_id,
+                generation: 300,
+                command_kind: "dispatch_only_reopen",
+                accepted_stage: Some("ready"),
+                failed_stage: None,
+                diagnostic_payload: "{}",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            harness_turn_live_evidence(&ctx, &idle),
+            Some("dispatch_turn_pending")
+        );
+    }
+
     #[test]
     fn operator_clear_blocks_unobservable_stash_viewport() {
         let evidence = LivePaneEvidence {

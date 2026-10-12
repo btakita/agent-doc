@@ -3013,6 +3013,109 @@ Body\n\
         );
     }
 
+    const SDKRETAINED_COMMITTED: &str = concat!(
+        "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: done — gpt-5\n\n",
+        "Completed.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Queue\n\n",
+        "<!-- agent:queue -->\n",
+        "- ~~Do you approve integrating the two SDK patches?: Yes~~\n",
+        "<!-- /agent:queue -->\n",
+    );
+    const SDKRETAINED_STRUCK_LINE: &str =
+        "- ~~Do you approve integrating the two SDK patches?: Yes~~\n";
+
+    fn sdkretained_codex_promptless_operator_drift(
+        root: &Path,
+        editor_captured: bool,
+    ) -> std::path::PathBuf {
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let committed = SDKRETAINED_COMMITTED;
+        fs::write(&doc, committed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        let offset = committed.find(SDKRETAINED_STRUCK_LINE).unwrap();
+        if editor_captured {
+            agent_doc_op_capture_io::record_editor_op(
+                &doc,
+                &agent_doc_hash::content_hash(committed),
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset,
+                    len: SDKRETAINED_STRUCK_LINE.len(),
+                },
+            )
+            .unwrap();
+        }
+        fs::write(&doc, committed.replacen(SDKRETAINED_STRUCK_LINE, "", 1)).unwrap();
+        track_active_codex_session(root, &doc, &format!("agent-doc {}", doc.display()));
+        doc
+    }
+
+    /// `#sdkretained` (haiven-dev `tasks/sdk.md`, cycle-1791805221920,
+    /// 2026-10-12): after the cycle committed, the operator removed a struck
+    /// queue line in the editor. The edit carries no prompt, so the
+    /// active-session drift check skipped editor-op provenance and reported
+    /// "the active harness session changed this document". The editor's own
+    /// captured ops reproduce the drift, so it is operator work, not harness
+    /// drift.
+    #[test]
+    fn session_check_does_not_blame_harness_for_editor_proven_promptless_operator_edit() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = sdkretained_codex_promptless_operator_drift(tmp.path(), true);
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        if let SessionCheckStatus::Interrupted(message) = inspect(&doc).unwrap() {
+            assert!(
+                !message.contains("active harness session changed this document"),
+                "{message}"
+            );
+        }
+        let log =
+            fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("promptless=true") && log.contains("operator_proven=true"),
+            "the promptless provenance decision is recorded: {log}"
+        );
+    }
+
+    /// `#sdkretained` negative control: the same promptless drift without any
+    /// captured editor op is unexplained, so it stays INTERRUPTED exactly as
+    /// before — provenance is evidence, absence of it is not.
+    #[test]
+    fn session_check_still_interrupts_promptless_codex_drift_without_editor_provenance() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = sdkretained_codex_promptless_operator_drift(tmp.path(), false);
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("active harness session changed this document"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
     /// `#codexsteerinterrupt` (b): console output replayed into the document
     /// as a fake prompt has no editor-op provenance. It stays INTERRUPTED by
     /// the active-harness-session check, exactly as before.

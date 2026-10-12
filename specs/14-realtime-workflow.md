@@ -91,6 +91,14 @@ operator edits.
 | Serialized target awaiting delivery/save | Exact delivery and disk receipt within the bounded deadline | Complete the same serialized command |
 | Serialized target missing or authority advances | Deadline expiry or a different canonical hash | Preserve the original retained intent and fail closed |
 
+A consumer that pauses on a retained closeout names the holder from the same
+read that decides it (`retained_session_closeout_holder`, `#sdkretained`): a
+write intent by `intent_id`, a retained compact by `continuation_id`. A pause
+that cannot name a holder is not a pause — the Codex auto-queue gate continues
+instead of waiting on an unobserved holder, and an observed write intent that
+the shared ownership predicate proves cannot converge (`DeliveryRejected`,
+`ReplicaUnserved`, unregistered refusing endpoint) names that recovery.
+
 No terminal response may answer an identical recurring queue command introduced
 for a later task. Native save is an external editor-authority effect after exact
 visible delivery, never an admission-time disk write. Turn commit eligibility is

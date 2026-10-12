@@ -10029,6 +10029,51 @@ pub fn retained_write_blocks_new_cycle(file: &Path, source: &str) -> bool {
 }
 
 pub fn retained_write_blocks_session_closeout(file: &Path, source: &str) -> bool {
+    retained_session_closeout_holder(file, source).is_some()
+}
+
+/// The concrete durable holder that keeps a session closeout (and the Codex
+/// auto-queue continuation) from completing, named by the same single read
+/// that decides it blocks (`#sdkretained`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RetainedSessionCloseoutHolder {
+    /// A durable document-write intent whose verdict is `Unsettled`/`Unobserved`.
+    WriteIntent { intent_id: String },
+    /// The controller-held compact projection continuation.
+    CompactProjection { continuation_id: String },
+}
+
+impl RetainedSessionCloseoutHolder {
+    pub fn kind(&self) -> agent_doc_turn::write_ownership::RetainedQueueHolder {
+        match self {
+            Self::WriteIntent { .. } => {
+                agent_doc_turn::write_ownership::RetainedQueueHolder::WriteIntent
+            }
+            Self::CompactProjection { .. } => {
+                agent_doc_turn::write_ownership::RetainedQueueHolder::CompactProjection
+            }
+        }
+    }
+
+    /// The stable key the holder's terminal ops.log edge carries.
+    pub fn key(&self) -> &str {
+        match self {
+            Self::WriteIntent { intent_id } => intent_id,
+            Self::CompactProjection { continuation_id } => continuation_id,
+        }
+    }
+}
+
+/// Which durable holder, if any, blocks the session closeout for `file`.
+///
+/// `retained_write_blocks_session_closeout` is `.is_some()` of this. Callers
+/// that must *name* what they wait on read the holder from here instead of
+/// re-reading `pending_document_write`, which cannot see a compact projection
+/// and races the controller's settle effect (`#sdkretained`).
+pub fn retained_session_closeout_holder(
+    file: &Path,
+    source: &str,
+) -> Option<RetainedSessionCloseoutHolder> {
     let verdict = retained_write_settlement(file, source);
     if matches!(
         &verdict,
@@ -10046,9 +10091,34 @@ pub fn retained_write_blocks_session_closeout(file: &Path, source: &str) -> bool
             ),
         );
     }
+    if let Some(holder) = select_session_closeout_holder(&verdict, None) {
+        return Some(holder);
+    }
     let compact = pending_compact_projection(file);
-    verdict.blocks_session_closeout()
-        || retained_compact_projection_blocks(file, source, compact.as_ref())
+    if retained_compact_projection_blocks(file, source, compact.as_ref()) {
+        return select_session_closeout_holder(&verdict, compact.as_ref());
+    }
+    None
+}
+
+/// Pure holder selection (`#sdkretained`): a blocking write verdict names its
+/// own intent; otherwise a retained compact continuation names itself. A
+/// blocking verdict without an intent id, or no compact continuation, is no
+/// holder — never a placeholder.
+fn select_session_closeout_holder(
+    verdict: &agent_doc_state_backbone::retained_write::SettlementVerdict,
+    compact: Option<&agent_doc_state_backbone::DocumentCompactProjectionContinuation>,
+) -> Option<RetainedSessionCloseoutHolder> {
+    if verdict.blocks_session_closeout()
+        && let Some(intent_id) = verdict.intent_id()
+    {
+        return Some(RetainedSessionCloseoutHolder::WriteIntent {
+            intent_id: intent_id.to_string(),
+        });
+    }
+    compact.map(|continuation| RetainedSessionCloseoutHolder::CompactProjection {
+        continuation_id: continuation.continuation_id.clone(),
+    })
 }
 
 /// Read the compact continuation from the existing controller projection.
@@ -10115,6 +10185,51 @@ fn retained_compact_projection_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#sdkretained` (haiven-dev `tasks/sdk.md`, 2026-10-12): the durable
+    /// write verdict was `Satisfied` while the post-commit compact projection
+    /// still held the closeout. The holder must be the compact continuation,
+    /// named by its own id, and a satisfied write is never a holder.
+    #[test]
+    fn session_closeout_holder_names_compact_projection_when_write_is_satisfied() {
+        use agent_doc_state_backbone::retained_write::{SatisfiedProof, SettlementVerdict};
+        let satisfied = SettlementVerdict::Satisfied {
+            intent_id: "1791805765963133062-1-24db".into(),
+            retained_target_hash: "24db".into(),
+            settled_hash: "24db".into(),
+            proof: SatisfiedProof::ExactTarget,
+            intent_source: Default::default(),
+        };
+        let compact = agent_doc_state_backbone::DocumentCompactProjectionContinuation {
+            continuation_id: "compact-projection-24db-721b".into(),
+            retained_at_ms: 0,
+            file: "/p/sdk.md".into(),
+            live_content: String::new(),
+            committed_content: String::new(),
+            target_component: None,
+            commit: true,
+        };
+        assert_eq!(
+            select_session_closeout_holder(&satisfied, Some(&compact)),
+            Some(RetainedSessionCloseoutHolder::CompactProjection {
+                continuation_id: "compact-projection-24db-721b".into()
+            })
+        );
+        assert_eq!(select_session_closeout_holder(&satisfied, None), None);
+        assert_eq!(
+            select_session_closeout_holder(&SettlementVerdict::NoRetainedIntent, None),
+            None
+        );
+        let unobserved = SettlementVerdict::Unobserved {
+            intent_id: "intent-u".into(),
+        };
+        let holder = select_session_closeout_holder(&unobserved, Some(&compact)).unwrap();
+        assert_eq!(holder.key(), "intent-u");
+        assert_eq!(
+            holder.kind(),
+            agent_doc_turn::write_ownership::RetainedQueueHolder::WriteIntent
+        );
+    }
 
     /// GH #84: an editor running superseded plugin bytes refuses with the pid,
     /// the replaced jar, and a restart-free first rung — never a bare mechanism.

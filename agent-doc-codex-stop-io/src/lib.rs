@@ -2153,15 +2153,43 @@ fn auto_queue_continuation_response(
     // while the prior keyed write still owns editor authority. Gate before even
     // reading the active head, and leave the session binding untouched so the
     // same owner pane continues only after delivery becomes terminal.
-    if agent_doc_document_realtime_io::retained_write_blocks_session_closeout(
+    //
+    // `#sdkretained`: the holder is named by the SAME read that decides the
+    // gate, and the wait is derived from the shared ownership predicate. A
+    // gate that cannot name a holder does not pause the queue — waiting on an
+    // unobserved holder is a wedge, since nothing can ever release it.
+    if let Some(holder) = agent_doc_document_realtime_io::retained_session_closeout_holder(
         file,
         "codex_stop_auto_queue_continuation_gate",
     ) {
-        let pending = agent_doc_document_realtime_io::pending_document_write(file);
-        let retry_key = pending
-            .as_ref()
-            .map(|intent| intent.intent_id.clone())
-            .unwrap_or_else(|| "unobserved-retained-intent".to_string());
+        let retry_key = holder.key().to_string();
+        let gate = agent_doc_turn::write_ownership::retained_queue_gate(
+            Some(holder.kind()),
+            agent_doc_capture_io::retained_write_ownership(file),
+        );
+        if let agent_doc_turn::write_ownership::RetainedQueueGate::Recover(verdict) = gate {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "codex_stop_auto_queue_continuation_recovery intent_id={retry_key} verdict={} action=named_recovery queue_advanced=false capture_created=false (#sdkretained)",
+                    verdict.as_str(),
+                ),
+            );
+            return Ok(Some(retained_write_queue_recovery_response(
+                file,
+                &retry_key,
+                verdict,
+                input.stop_hook_active,
+            )));
+        }
+        // Only a write-intent holder has a predecessor continuation to
+        // quarantine against; a compact projection is not a response write.
+        let pending = matches!(
+            holder,
+            agent_doc_document_realtime_io::RetainedSessionCloseoutHolder::WriteIntent { .. }
+        )
+        .then(|| agent_doc_document_realtime_io::pending_document_write(file))
+        .flatten();
         if let (Some(cycle), Some(pending)) = (
             agent_doc_cycle_state_io::load_with_closeout_projection(file)?,
             pending.as_ref(),
@@ -2210,13 +2238,14 @@ fn auto_queue_continuation_response(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "codex_stop_auto_queue_continuation_deferred intent_id={} action=await_retained_write_terminal queue_advanced=false capture_created=false",
+                "codex_stop_auto_queue_continuation_deferred intent_id={} holder={} action=await_retained_write_terminal queue_advanced=false capture_created=false",
                 retry_key,
+                holder_token(&holder),
             ),
         );
         return Ok(Some(retained_write_queue_deferral_response(
             file,
-            &retry_key,
+            &holder,
             input.stop_hook_active,
         )));
     }
@@ -2316,15 +2345,78 @@ fn should_quarantine_retained_queue_child<'a>(
         && cycle_prompts.any(|prompt| prompt.trim() == last_head)
 }
 
+fn holder_token(
+    holder: &agent_doc_document_realtime_io::RetainedSessionCloseoutHolder,
+) -> &'static str {
+    match holder {
+        agent_doc_document_realtime_io::RetainedSessionCloseoutHolder::WriteIntent { .. } => {
+            "write_intent"
+        }
+        agent_doc_document_realtime_io::RetainedSessionCloseoutHolder::CompactProjection {
+            ..
+        } => "compact_projection",
+    }
+}
+
 fn retained_write_queue_deferral_response(
     file: &Path,
-    retry_key: &str,
+    holder: &agent_doc_document_realtime_io::RetainedSessionCloseoutHolder,
     stop_hook_active: bool,
 ) -> StopResponse {
+    let what = match holder {
+        agent_doc_document_realtime_io::RetainedSessionCloseoutHolder::WriteIntent {
+            intent_id,
+        } => format!(
+            "the prior binary-owned editor write is still converging (intent_id={intent_id})"
+        ),
+        agent_doc_document_realtime_io::RetainedSessionCloseoutHolder::CompactProjection {
+            continuation_id,
+        } => format!(
+            "the post-commit compact projection is still converging (continuation_id={continuation_id}; terminal edge `compact_projection_completed`)"
+        ),
+    };
     let message = format!(
-        "agent-doc Stop hook kept `agent:queue auto` paused for {} because the prior binary-owned editor write is still converging (intent_id={retry_key}). The same owner pane continues only after that retained delivery and its terminal closeout settle. The hook did not select a new prompt or create another capture. Do not resend, recapture, rerun finalize/write/repair, force disk, or recycle; wait for the existing controller state edge unless it explicitly reports `needs_operator`. Do not send the final answer yet.",
+        "agent-doc Stop hook kept `agent:queue auto` paused for {} because {what}. The same owner pane continues only after that retained delivery and its terminal closeout settle. The hook did not select a new prompt or create another capture. Do not resend, recapture, rerun finalize/write/repair, force disk, or recycle; wait for the existing controller state edge unless it explicitly reports `needs_operator`. Do not send the final answer yet.",
         file.display(),
     );
+    retained_queue_stop_response(message, stop_hook_active)
+}
+
+/// `#sdkretained`: an observed holder that the ownership predicate proves
+/// cannot converge by waiting gets its terminating recovery, never a wait.
+fn retained_write_queue_recovery_response(
+    file: &Path,
+    retry_key: &str,
+    verdict: agent_doc_turn::write_ownership::RetainedWriteVerdict,
+    stop_hook_active: bool,
+) -> StopResponse {
+    let display = file.display().to_string();
+    let ownership = match verdict {
+        agent_doc_turn::write_ownership::RetainedWriteVerdict::DeliveryRejected => {
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED
+                .with_retained_projection(true)
+                .with_delivery_rejected(true)
+        }
+        agent_doc_turn::write_ownership::RetainedWriteVerdict::ReplicaUnserved => {
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED
+                .with_retained_projection(true)
+                .with_replica_unserved(true)
+        }
+        agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded => {
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED
+                .with_editor_route_unowned(true)
+        }
+        _ => agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED,
+    };
+    let message = format!(
+        "agent-doc Stop hook kept `agent:queue auto` paused for {display}: the retained editor write (intent_id={retry_key}) cannot converge by waiting (verdict={}). {}. The hook did not select a new prompt or create another capture. Do not send the final answer yet.",
+        verdict.as_str(),
+        agent_doc_turn::write_ownership::retained_write_remedy(ownership, &display),
+    );
+    retained_queue_stop_response(message, stop_hook_active)
+}
+
+fn retained_queue_stop_response(message: String, stop_hook_active: bool) -> StopResponse {
     if stop_hook_active {
         StopResponse::Stop {
             continue_: false,
@@ -4267,6 +4359,109 @@ Done.\n\
         assert!(!rendered.contains("run `agent-doc repair"));
     }
 
+    /// `#sdkretained` (haiven-dev `tasks/sdk.md`, cycle-1791805221920,
+    /// 2026-10-12): the gate fired on the post-commit compact projection, then
+    /// re-read the WRITE intent to name it, found none, and told the agent to
+    /// wait on a placeholder id no controller edge carries. The holder is now
+    /// the one the gate observed, and a wait always names it.
+    #[test]
+    fn retained_queue_deferral_names_the_observed_holder_never_a_placeholder() {
+        use agent_doc_document_realtime_io::RetainedSessionCloseoutHolder;
+        let file = Path::new("/p/sdk.md");
+        let compact = RetainedSessionCloseoutHolder::CompactProjection {
+            continuation_id: "compact-projection-24db9b85-721b0afe".into(),
+        };
+        for stop_hook_active in [false, true] {
+            let rendered = serde_json::to_string(&retained_write_queue_deferral_response(
+                file,
+                &compact,
+                stop_hook_active,
+            ))
+            .unwrap();
+            assert!(
+                rendered.contains("continuation_id=compact-projection-24db9b85-721b0afe"),
+                "{rendered}"
+            );
+            assert!(rendered.contains("compact projection"), "{rendered}");
+            assert!(
+                rendered.contains("compact_projection_completed"),
+                "{rendered}"
+            );
+            assert!(!rendered.contains("intent_id="), "{rendered}");
+        }
+        let write = RetainedSessionCloseoutHolder::WriteIntent {
+            intent_id: "1791805765963133062-1-24db".into(),
+        };
+        let rendered =
+            serde_json::to_string(&retained_write_queue_deferral_response(file, &write, false))
+                .unwrap();
+        assert!(
+            rendered.contains("intent_id=1791805765963133062-1-24db"),
+            "{rendered}"
+        );
+
+        // The placeholder id is gone from the hook entirely.
+        let placeholder = concat!("unobserved", "-retained-intent");
+        assert!(!include_str!("lib.rs").contains(placeholder));
+    }
+
+    /// `#sdkretained`: an observed write intent the ownership predicate proves
+    /// cannot converge (the endpoint answered NO, or the editor is not serving
+    /// its replica) gets that verdict's terminating recovery, not a wait.
+    #[test]
+    fn retained_queue_gate_names_recovery_when_the_holder_cannot_converge() {
+        use agent_doc_turn::write_ownership::RetainedWriteVerdict;
+        let file = Path::new("/p/sdk.md");
+        let rejected = serde_json::to_string(&retained_write_queue_recovery_response(
+            file,
+            "intent-1",
+            RetainedWriteVerdict::DeliveryRejected,
+            true,
+        ))
+        .unwrap();
+        assert!(rejected.contains("intent_id=intent-1"), "{rejected}");
+        assert!(rejected.contains("verdict=delivery_rejected"), "{rejected}");
+        assert!(
+            rejected.contains("REJECTED the delivery receipt"),
+            "{rejected}"
+        );
+        assert!(!rejected.contains("wait for the existing controller state edge"));
+
+        let unserved = serde_json::to_string(&retained_write_queue_recovery_response(
+            file,
+            "intent-2",
+            RetainedWriteVerdict::ReplicaUnserved,
+            false,
+        ))
+        .unwrap();
+        assert!(unserved.contains("admin reload-lib"), "{unserved}");
+
+        let stranded = serde_json::to_string(&retained_write_queue_recovery_response(
+            file,
+            "intent-3",
+            RetainedWriteVerdict::Stranded,
+            false,
+        ))
+        .unwrap();
+        assert!(stranded.contains("UNREGISTERED"), "{stranded}");
+
+        // The gate consults the shared predicate before rendering a wait.
+        let source = include_str!("lib.rs");
+        let continuation = source
+            .split("fn auto_queue_continuation_response(")
+            .nth(1)
+            .unwrap();
+        let continuation = &continuation[..continuation.find("\nfn ").unwrap()];
+        let predicate = continuation
+            .find("retained_queue_gate(")
+            .expect("the gate derives from write_ownership");
+        let wait = continuation
+            .find("retained_write_queue_deferral_response(")
+            .unwrap();
+        assert!(predicate < wait);
+        assert!(continuation.contains("retained_write_ownership(file)"));
+    }
+
     /// fpe.md (2026-10-02): the response cycle committed while its exact
     /// editor-native save remained retained, and recursive Stop selected the
     /// next auto-queue prompt. The retained write must gate before queue-head
@@ -4280,7 +4475,7 @@ Done.\n\
             .unwrap();
         let continuation = &continuation[..continuation.find("\nfn ").unwrap()];
         let retained_gate = continuation
-            .find("retained_write_blocks_session_closeout(")
+            .find("retained_session_closeout_holder(")
             .expect("auto queue must inspect retained editor delivery");
         let prompt_selection = continuation
             .find("active_auto_queue_prompt(file)")
@@ -4344,7 +4539,9 @@ Done.\n\
         for stop_hook_active in [false, true] {
             let response = retained_write_queue_deferral_response(
                 Path::new("/p/fpe.md"),
-                retry_key,
+                &agent_doc_document_realtime_io::RetainedSessionCloseoutHolder::WriteIntent {
+                    intent_id: retry_key.to_string(),
+                },
                 stop_hook_active,
             );
             assert_eq!(

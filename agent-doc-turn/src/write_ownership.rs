@@ -409,6 +409,69 @@ impl RetainedWriteVerdict {
 }
 
 /// Which graph owns the retained projection a refusal is describing.
+/// The concrete durable holder the Codex Stop hook's auto-queue gate observed
+/// (`#sdkretained`).
+///
+/// The gate pauses `agent:queue auto` after a committed cycle while a
+/// binary-owned editor projection is still converging. Before `#sdkretained` it
+/// read one boolean ("something blocks") and then re-read the write intent to
+/// name it; when the blocker was the post-commit compact projection — not a
+/// write — the second read found nothing and the hook told the agent to wait on
+/// `intent_id=unobserved-retained-intent`, an id no controller edge will ever
+/// carry. Observed 2026-10-12 on haiven-dev `tasks/sdk.md`
+/// (`cycle-1791805221920`). The holder is now named by the same single read that
+/// decides the gate, so a wait always cites what it waits on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetainedQueueHolder {
+    /// A durable document-write intent whose settlement verdict is still
+    /// `Unsettled` or `Unobserved`.
+    WriteIntent,
+    /// The controller-held compact projection continuation (`agent-doc compact`
+    /// after the cycle committed); it completes on `compact_projection_completed`.
+    CompactProjection,
+}
+
+/// What the auto-queue gate does with the holder it observed (`#sdkretained`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetainedQueueGate {
+    /// A proven holder will emit the terminal state edge: keep the queue paused.
+    AwaitHolder,
+    /// A holder exists but the ownership predicate proves waiting cannot
+    /// converge it; name this verdict's terminating recovery instead of a wait.
+    Recover(RetainedWriteVerdict),
+    /// Nothing durable holds a write: the gate must not pause the queue.
+    Continue,
+}
+
+/// The Stop hook's auto-queue gate, derived from the shared ownership predicate
+/// (`#sdkretained`, `#percellconverge`, GH #131).
+///
+/// A retained-write wait must prove a holder before it forbids recovery:
+///
+/// - no observed holder → [`RetainedQueueGate::Continue`]; an unobserved holder
+///   is never a reason to wait, because nothing can ever release it;
+/// - a compact projection continuation → [`RetainedQueueGate::AwaitHolder`]; the
+///   controller owns it and completes it on its own state edge;
+/// - a write intent → the intent itself is a durable retained projection, so the
+///   predicate is asked with `retained_projection` set. `Deferred` waits; every
+///   other verdict (`DeliveryRejected`, `ReplicaUnserved`, an unregistered
+///   refusing endpoint) proves the wait cannot converge and names its recovery.
+pub const fn retained_queue_gate(
+    holder: Option<RetainedQueueHolder>,
+    ownership: RetainedWriteOwnership,
+) -> RetainedQueueGate {
+    match holder {
+        None => RetainedQueueGate::Continue,
+        Some(RetainedQueueHolder::CompactProjection) => RetainedQueueGate::AwaitHolder,
+        Some(RetainedQueueHolder::WriteIntent) => {
+            match ownership.with_retained_projection(true).verdict() {
+                RetainedWriteVerdict::Deferred => RetainedQueueGate::AwaitHolder,
+                verdict => RetainedQueueGate::Recover(verdict),
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetainedProjectionOwnership {
     /// A response write has entered closeout, so its cycle/capture facts decide
@@ -998,6 +1061,60 @@ pub fn tracked_work_mutation_failure_message(
 mod tests {
 
     /// `#addreapwitness`: 2026-09-29, `--backlog-add "id=a ..." --done a` reaped
+    /// `#sdkretained` (haiven-dev `tasks/sdk.md`, cycle-1791805221920): the
+    /// auto-queue gate never waits on a holder it did not observe, waits on a
+    /// controller-held compact projection, and turns an observed write intent
+    /// that cannot converge into its named recovery instead of a wait.
+    #[test]
+    fn retained_queue_gate_waits_only_on_an_observed_holder() {
+        use super::{
+            RetainedQueueGate, RetainedQueueHolder, RetainedWriteOwnership, RetainedWriteVerdict,
+            retained_queue_gate,
+        };
+        let committed = RetainedWriteOwnership::UNOWNED;
+        assert_eq!(
+            retained_queue_gate(None, committed),
+            RetainedQueueGate::Continue,
+            "no observed holder must never pause the queue"
+        );
+        assert_eq!(
+            retained_queue_gate(None, RetainedWriteOwnership::new(true, true)),
+            RetainedQueueGate::Continue,
+            "the queue gate is about retained projections, not the open cycle"
+        );
+        assert_eq!(
+            retained_queue_gate(Some(RetainedQueueHolder::CompactProjection), committed),
+            RetainedQueueGate::AwaitHolder
+        );
+        // A committed cycle with a durable write intent: the intent itself is
+        // the holder, so the verdict is a deferral rather than `Stranded`.
+        assert_eq!(
+            retained_queue_gate(Some(RetainedQueueHolder::WriteIntent), committed),
+            RetainedQueueGate::AwaitHolder
+        );
+        assert_eq!(
+            retained_queue_gate(
+                Some(RetainedQueueHolder::WriteIntent),
+                committed.with_delivery_rejected(true)
+            ),
+            RetainedQueueGate::Recover(RetainedWriteVerdict::DeliveryRejected)
+        );
+        assert_eq!(
+            retained_queue_gate(
+                Some(RetainedQueueHolder::WriteIntent),
+                committed.with_replica_unserved(true)
+            ),
+            RetainedQueueGate::Recover(RetainedWriteVerdict::ReplicaUnserved)
+        );
+        assert_eq!(
+            retained_queue_gate(
+                Some(RetainedQueueHolder::WriteIntent),
+                committed.with_editor_route_unowned(true)
+            ),
+            RetainedQueueGate::Recover(RetainedWriteVerdict::Stranded)
+        );
+    }
+
     /// `#a` into the done archive in the same closeout. The add witness looked
     /// for `[#a]` in the document, never found it, and the deferred closeout
     /// timed out after 30s with `unlanded=Some(true)` on a converged document.

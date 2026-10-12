@@ -50,6 +50,14 @@ corruption appears only in Codex sessions, treat it as evidence
 that the Codex invocation, hook recovery, or final-response capture bypassed the
 shared closeout path, not as permission to add a Codex-specific write-back path.
 
+When the Codex Stop hook pauses `agent:queue auto` behind a retained closeout,
+it names the durable holder it observed — a write `intent_id` or a compact
+`continuation_id` — and derives the wait from the shared
+`agent_doc_turn::write_ownership` predicate; with no observed holder it does
+not pause, and a holder that cannot converge gets its named recovery instead
+of a wait (`#sdkretained`, see
+[orchestration commands](07-orchestration-commands.md)).
+
 ### Claude-Code-Specific (Coupling Points)
 
 | Component | Coupling | Impact |

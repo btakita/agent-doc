@@ -303,7 +303,34 @@ fn detect_active_session_post_commit_drift_inner(
         .unwrap_or("agent-doc session");
     let prompt_preview = prompt_preview.trim();
 
+    let head = agent_doc_git_io::revision::show_head(file)?;
+    let mut bases = vec![snapshot.as_str()];
+    if let Some(head) = head.as_deref()
+        && head != snapshot
+    {
+        bases.push(head);
+    }
     let Some(marker) = prompt_marker else {
+        // `#sdkretained`: a promptless edit the editor's own captured ops
+        // reproduce byte-for-byte is the operator's, not the harness's. On
+        // haiven-dev `tasks/sdk.md` (2026-10-12) the operator deleted a struck
+        // queue line and typed `#actionable-review` right after the compact
+        // commit; with no steering marker this branch skipped provenance and
+        // reported "the active harness session changed this document", an
+        // INTERRUPT the agent could not act on. It is ordinary operator work
+        // the queue drain picks up, so it is not harness drift.
+        let operator_proven = editor_ops_prove_operator_drift(file, &bases, &current);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "session_check_active_session_drift_provenance file={} operator_proven={} directives=0 promptless=true (#codexsteerinterrupt #sdkretained)",
+                file.display(),
+                operator_proven,
+            ),
+        );
+        if operator_proven {
+            return Ok(None);
+        }
         return Ok(Some(ActiveSessionPostCommitDrift::Unproven {
             detail: format!(
                 "active_session={} turn={} prompt={}",
@@ -315,13 +342,6 @@ fn detect_active_session_post_commit_drift_inner(
         "{}; active_session={} turn={} prompt={}",
         marker, session.session_id, session.last_turn_id, prompt_preview
     );
-    let head = agent_doc_git_io::revision::show_head(file)?;
-    let mut bases = vec![snapshot.as_str()];
-    if let Some(head) = head.as_deref()
-        && head != snapshot
-    {
-        bases.push(head);
-    }
     let operator_proven = editor_ops_prove_operator_drift(file, &bases, &current);
     agent_doc_ops_log_io::log_op(
         file,

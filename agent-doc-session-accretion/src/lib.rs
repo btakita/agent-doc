@@ -296,9 +296,13 @@ pub fn context_reset_reason_for_report(report: &SessionAccretionReport) -> Optio
 pub fn restart_or_drain_guidance(queue_active: bool) -> String {
     if queue_active {
         "Queue is actively draining — do NOT stop to restart or defer the remaining items: \
-         keep finalizing and looping. The supervisor recycles onto a fresh binary and \
-         /clears agent context between items at idle boundaries (#drain-no-defer), so \
-         accretion/restart churn resets without stalling the drain."
+         keep finalizing the current item (#drain-no-defer). With queue auto-clear on (the \
+         default; `<!-- agent:queue disable-auto-clear -->` turns it off) the supervisor resets \
+         agent context between items at idle boundaries — follow \
+         `queue_continuation_guidance` / session-check to end the turn or keep looping; with \
+         it off, only an explicit operator Clear resets the session. Either way a context \
+         clear does not shrink the document: accretion `block` measures the exchange size, \
+         which only compaction reduces."
             .to_string()
     } else {
         "Restart cleanly from the current committed boundary before continuing.".to_string()
@@ -600,6 +604,13 @@ mod tests {
         assert!(draining.contains("do NOT stop"), "got: {draining}");
         assert!(draining.contains("#drain-no-defer"), "got: {draining}");
         assert!(!draining.contains("Restart cleanly"), "got: {draining}");
+        // `#bgclearpolicy`: the guidance names the real reset owner and never
+        // implies a clear fixes exchange-size accretion.
+        assert!(draining.contains("disable-auto-clear"), "got: {draining}");
+        assert!(
+            draining.contains("only compaction reduces"),
+            "got: {draining}"
+        );
     }
 
     #[test]

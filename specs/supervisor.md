@@ -779,17 +779,61 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   help, and clean-exit blockers still produce `SkipNotIdle`.
   - `SkipNoActiveHead` clears the dedup so a later re-enqueue of the same prompt
     text fires again.
-- Background context reset injection is disabled for queue heads: `[clean-session]`,
-  `[focused-cycle]`, and accretion/threshold reset reasons drain in pane instead
-  of causing the supervisor to submit `/clear` or `/new`. Only explicit operator
-  clears and explicit queued slash-command heads may create a context-clear
-  projection. Busy-loop operator clears first record `QueueContextClearDeferred`;
+- **Queue auto-clear (`#bgclearpolicy`).** An active `agent:queue` resets the
+  agent context between items by default. In the drain-dispatch path — after
+  every dispatch gate has proven the item boundary (dispatch-ready prompt, no
+  live turn, no route submit in flight, no `/loop` drain owner, the prior cycle
+  committed and converged) and before the next head is submitted — the watch
+  clears once when a cycle committed since its baseline AND the queue head moved
+  past the head that cycle worked on. The baseline (latest committed cycle +
+  head) is taken on the watch's first observed tick and re-taken whenever a clear
+  is sent or settles, so a boundary is cleared at most once and a failed or
+  unobserved clear is never retried into the pane. It never clears mid-turn
+  (latest cycle open), over an operator draft in the composer, while settled
+  exchange steering is unanswered, while a subagent claim on the document is in
+  flight (the coordinator's context must survive to integrate it), or when the
+  composer cannot be observed; those cases dispatch the head to the current
+  context instead (an operator draft still defers the dispatch itself). Delivery
+  follows the idle-Clear split (`#idleclearrestart`): Claude Code and OpenCode get
+  their native clear (`/clear`, `/new`) typed into the SAME live child, so
+  background agents and shells survive, with a `queue_auto_clear` context-clear
+  projection that the settle gate holds the next dispatch behind; Codex, whose
+  `/clear` exits the process, gets a supervised fresh restart whose relaunch
+  re-triggers the document. Codex is never typed `/clear`. Each decision is logged
+  to `ops.log` as `queue_auto_clear ... delivery=native_clear|restart_fresh
+  result=...` or `queue_auto_clear_skipped reason=...`.
+  `<!-- agent:queue disable-auto-clear -->` turns it off; the queue then drains in
+  one context and only an explicit operator Clear resets the session. Auto-clear
+  does not reduce session accretion: `block` measures the document's exchange
+  size, which only compaction reduces.
+  - The in-session drains hand the boundary over only when the supervisor can
+    take it (`supervisor_drain_readiness_for_doc` is ready and no earlier
+    hand-off is overdue): preflight reports `queue_auto_clear_yield: true` with
+    `queue_continuation_required: false`, session-check prints
+    `queue_continuation_required=false queue_auto_clear_yield=true`, records the
+    supervisor drain hand-off, and releases a `/loop` drain-owner lease, and the
+    Codex Stop hook allows the stop (`codex_stop_queue_continuation_yield`)
+    instead of continuing in-pane. Otherwise the in-session drain continues in
+    the same context — never a stall.
+  - Why background clears were turned off on 2026-06-30 (`45ff25f994`) and how
+    auto-clear avoids it: the old reset typed `/clear` into Codex while Codex
+    still had a task in progress, re-armed every tick from `[focused-cycle]` head
+    tags (`#qfocsup`); provenance-less markers let a restarted watch press Enter
+    on a stale `/clear` draft. Auto-clear restarts Codex instead of typing,
+    fires once per completed item, carries `queue_auto_clear` provenance, and the
+    orphan-`/clear`-draft recovery stays off.
+- The pre-`#bgclearpolicy` background reset reasons stay disabled:
+  `[clean-session]`, `[focused-cycle]`, and accretion/threshold reasons never by
+  themselves cause the supervisor to submit `/clear` or `/new`. Only explicit
+  operator clears, explicit queued slash-command heads, and queue auto-clear may
+  create a context-clear projection. Busy-loop operator clears first record `QueueContextClearDeferred`;
   the idle-watch promotes that projection to `QueueContextClearStarted` only
   after it submits the deferred clear. For explicit in-flight sources, the
   projection survives supervisor recycle/restart so the replacement watcher
   blocks drains until the clear settles, or presses the shared submit key once
   when the clear command is still visible in the composer. Legacy or
-  background-sourced projections are settled rather than submitted. Once the pane
+  background-sourced projections (no source, or the retired
+  `supervisor_background_context_reset`) are settled rather than submitted. Once the pane
   settles for `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls the projection
   records `QueueContextClearSettled`. A
   manual clear cooldown remains authoritative for a plain operator clear with no

@@ -146,6 +146,26 @@ pub fn effective_continuation_output_with_preemption(
 /// (`#queueblockquoteintent`).
 pub const EXCHANGE_PROMPT_PREEMPTION_GUIDANCE: &str = "queue continuation suppressed — drainable heads remain, but this cycle's diff carries a fresh exchange prompt that preempts the drain (`user_intent_prompt_changes` is non-empty). Answer that prompt this turn; the queue resumes on the next cycle. This is NOT a drained queue: if you cannot find an operator prompt in the exchange tail, inspect `user_intent_prompt_changes` — binary-authored bookkeeping misclassified as user intent is a defect, not a stop reason.";
 
+/// `#bgclearpolicy`: named reason for an in-session drain that hands the item
+/// boundary to the supervisor so the next head runs in a fresh agent context.
+pub const QUEUE_AUTO_CLEAR_YIELD_GUIDANCE: &str = "queue auto-clear — drainable heads remain, and this queue resets agent context between items (the default; `<!-- agent:queue disable-auto-clear -->` turns it off). After this item's proven closeout, END THIS TURN: do not schedule `/loop`, do not continue in-pane, and do not re-trigger agent-doc <FILE>. The ready supervisor clears the context at the idle boundary (Claude Code `/clear` and OpenCode `/new` typed into the live process; Codex gets a fresh restart) and dispatches the next head to the fresh context. This is NOT a drained or stalled queue. A clear does not shrink the document: session-accretion `block` measures the exchange size, which only compaction reduces.";
+
+/// `#bgclearpolicy`: apply the auto-clear hand-off to the effective
+/// continuation. A yield turns a required continuation into a named,
+/// intentional stop; every other output passes through unchanged.
+pub fn apply_auto_clear_yield(
+    output: EffectiveContinuationOutput,
+    yields: bool,
+) -> EffectiveContinuationOutput {
+    if yields && output.required {
+        return EffectiveContinuationOutput {
+            required: false,
+            guidance: Some(QUEUE_AUTO_CLEAR_YIELD_GUIDANCE.to_string()),
+        };
+    }
+    output
+}
+
 /// Named reason for an active `start` queue that belongs to the supervisor,
 /// rather than the attended in-session drain (`#queuestartscopesilent`).
 pub const SUPERVISOR_SCOPED_ACTIVATION_GUIDANCE: &str = "queue continuation is supervisor-scoped — ready queue heads remain under `queue: start`, so the supervisor idle-watch owns the drain. This is NOT a stalled or drained queue. Set `queue: go` to hand the drain to the attended in-session loop.";
@@ -1828,6 +1848,20 @@ mod tests {
             g.contains("NOT stop reasons"),
             "must say degraded IPC / stale supervisor / accretion are NOT stop reasons"
         );
+    }
+
+    #[test]
+    fn auto_clear_yield_names_an_intentional_stop_and_passes_other_outputs_through() {
+        let required = effective_continuation_output(true, false, None);
+        let yielded = apply_auto_clear_yield(required.clone(), true);
+        assert!(!yielded.required);
+        let guidance = yielded.guidance.unwrap();
+        assert!(guidance.contains("END THIS TURN"), "{guidance}");
+        assert!(guidance.contains("disable-auto-clear"), "{guidance}");
+        assert!(guidance.contains("only compaction reduces"), "{guidance}");
+        assert_eq!(apply_auto_clear_yield(required.clone(), false), required);
+        let recycle = effective_continuation_output(true, true, None);
+        assert_eq!(apply_auto_clear_yield(recycle.clone(), true), recycle);
     }
 
     #[test]

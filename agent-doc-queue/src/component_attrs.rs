@@ -10,7 +10,15 @@ use crate::document_queue::BacklogQueueSyncMode;
 
 /// Attributes that are only meaningful on the `agent:queue` component. Seeing
 /// one of these on any other component is a misplaced-attribute mistake.
-const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto", "start", "go", "stop", "id", "after"];
+const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
+    "auto",
+    "start",
+    "go",
+    "stop",
+    "id",
+    "after",
+    crate::queue_auto_clear::QUEUE_DISABLE_AUTO_CLEAR_ATTR,
+];
 
 /// Prompt defaults shared by `agent:queue` and `agent:exchange`.
 const PROMPT_COMPONENT_ATTRS: &[&str] = &["preset", "subagents", "fan-out"];
@@ -34,7 +42,7 @@ pub fn is_prompt_component_attr(key: &str) -> bool {
 pub fn is_queue_bare_flag_attr(key: &str) -> bool {
     matches!(
         key,
-        "auto" | "start" | "go" | "stop" | "subagents" | "fan-out"
+        "auto" | "start" | "go" | "stop" | "subagents" | "fan-out" | "disable-auto-clear"
     )
 }
 

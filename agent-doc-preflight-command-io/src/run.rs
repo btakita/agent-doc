@@ -2506,6 +2506,40 @@ fn run_with_options_to_writer_in_pass(
             recycle_yield_pending,
             queue_state.queue_pause_reason.as_deref(),
         );
+    // `#bgclearpolicy`: queue auto-clear (on by default) hands each item
+    // boundary to a ready supervisor, which resets the agent context before it
+    // dispatches the next head. The in-session drain therefore ends its turn
+    // instead of looping in the same context. Never during a probe, and never
+    // when the supervisor cannot take the hand-off (the drain then continues
+    // in-session, exactly as with `disable-auto-clear`).
+    let queue_auto_clear =
+        agent_doc_queue::queue_auto_clear::queue_auto_clear_setting(&model_source_content);
+    let auto_clear_yield = if options.probe {
+        None
+    } else {
+        Some(
+            agent_doc_queue_io::queue_auto_clear::in_session_auto_clear_yield(
+                file,
+                &model_source_content,
+                effective_continuation.required && supervisor_fallback.is_none(),
+            ),
+        )
+    };
+    let queue_auto_clear_yield = auto_clear_yield.is_some_and(|decision| decision.yields);
+    if let Some(decision) = auto_clear_yield.filter(|decision| decision.yields) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_auto_clear_yield source=preflight file={} supervisor_drain_readiness={} (#bgclearpolicy)",
+                file.display(),
+                decision.readiness_reason(),
+            ),
+        );
+    }
+    let effective_continuation = agent_doc_queue::queue_continuation::apply_auto_clear_yield(
+        effective_continuation,
+        queue_auto_clear_yield,
+    );
     let queue_continuation_required = effective_continuation.required;
     let queue_continuation_guidance = match supervisor_fallback {
         Some(readiness) => Some(
@@ -2730,6 +2764,8 @@ fn run_with_options_to_writer_in_pass(
             .queue
             .continuation_guidance
             .clone(),
+        queue_auto_clear,
+        queue_auto_clear_yield,
         session_accretion: projected_session_accretion,
         pipeline,
     };
@@ -5464,6 +5500,47 @@ mod tests {
         assert!(guidance.contains("supervisor idle-watch"));
         assert!(guidance.contains("NOT a stalled or drained queue"));
         assert!(guidance.contains("queue: go"));
+    }
+
+    /// `#bgclearpolicy`: preflight surfaces the queue's auto-clear setting —
+    /// on by default, off with `disable-auto-clear` — and, with no ready
+    /// supervisor to receive the boundary, keeps the in-session continuation.
+    #[test]
+    fn preflight_reports_queue_auto_clear_setting() {
+        for (marker, expected) in [
+            ("<!-- agent:queue go -->", true),
+            ("<!-- agent:queue go disable-auto-clear -->", false),
+        ] {
+            let dir = setup_project();
+            let doc = dir.path().join("session.md");
+            let content = format!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue: go\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n{marker}\n- review the release notes\n- tidy the changelog\n<!-- /agent:queue -->\n"
+            );
+            std::fs::write(&doc, &content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                &content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+
+            let mut output = Vec::new();
+            run_with_options_to_writer(
+                &doc,
+                PreflightOptions {
+                    probe: true,
+                    ..Default::default()
+                },
+                &mut output,
+            )
+            .unwrap();
+            let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
+            assert_eq!(parsed["queue_auto_clear"], expected, "{marker}: {parsed:#}");
+            assert!(
+                parsed.get("queue_auto_clear_yield").is_none(),
+                "{marker}: a probe never yields: {parsed:#}"
+            );
+        }
     }
 
     #[test]

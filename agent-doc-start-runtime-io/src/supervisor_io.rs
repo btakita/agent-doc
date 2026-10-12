@@ -846,6 +846,88 @@ mod tests {
             child.reap();
         }
     }
+    /// `#bgclearpolicy`: queue auto-clear types the native clear into the SAME
+    /// live Claude/OpenCode child (its background agents and shells survive)
+    /// and gives Codex — whose `/clear` exits the process — a supervised fresh
+    /// restart, never a typed `/clear`.
+    #[test]
+    fn queue_auto_clear_types_into_claude_and_opencode_and_restarts_codex() {
+        use agent_doc_queue::queue_auto_clear::QueueAutoClearDelivery;
+        for harness_name in ["claude", "opencode", "codex"] {
+            let shared = Arc::new(SupervisorShared::with_actor_runtime(
+                "test",
+                "test-instance".to_string(),
+                None,
+                harness_name,
+                None,
+                Some(agent_doc_controller::actor::ActorState::Ready),
+                None,
+            ));
+            let mut child = LiveTestChild::spawn();
+            let pid = child.pid();
+            shared.child_pid.store(pid, Ordering::Relaxed);
+            let written = Arc::new(Mutex::new(Vec::new()));
+            *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+                Box::new(RecordingWriter(written.clone())),
+            ))));
+            let harness = agent_doc_harness::HarnessConfig::from_agent_name(harness_name);
+            let stop = std::sync::atomic::AtomicBool::new(false);
+
+            let (delivery, effect) =
+                crate::idle_watch::deliver_queue_auto_clear_effect(&shared, &stop, &harness);
+
+            if harness_name == "codex" {
+                assert_eq!(delivery, QueueAutoClearDelivery::RestartFresh);
+                assert_eq!(
+                    effect,
+                    crate::idle_watch::QueueAutoClearEffect::RestartRequested
+                );
+                assert!(written.lock().is_empty(), "must not type /clear into Codex");
+                assert!(shared.restart_requested.load(Ordering::Relaxed));
+                let intent = agent_doc_supervisor_io::ipc::RestartIntent::decode(
+                    shared.restart_mode.lock().clone(),
+                );
+                assert_eq!(intent.mode, "fresh");
+                assert!(
+                    !intent.operator_clear,
+                    "an auto-clear restart re-triggers the document so the next head dispatches"
+                );
+                assert!(!intent.restart_agent);
+                child.reap();
+            } else {
+                assert_eq!(
+                    delivery,
+                    QueueAutoClearDelivery::TypeNativeClear,
+                    "{harness_name}"
+                );
+                assert_eq!(
+                    effect,
+                    crate::idle_watch::QueueAutoClearEffect::Typed,
+                    "{harness_name}"
+                );
+                let typed = String::from_utf8_lossy(&written.lock()).into_owned();
+                assert!(
+                    typed.starts_with(harness.context_clear_command()),
+                    "{harness_name}: typed {typed:?}"
+                );
+                assert!(
+                    !shared.restart_requested.load(Ordering::Relaxed),
+                    "{harness_name}: auto-clear must not restart the child"
+                );
+                assert!(
+                    child.running(),
+                    "{harness_name}: the same child (pid {pid}) must survive the clear"
+                );
+                assert_eq!(
+                    shared.child_pid.load(Ordering::Relaxed),
+                    pid,
+                    "{harness_name}"
+                );
+                child.reap();
+            }
+        }
+    }
+
     #[test]
     fn handle_ipc_stop_bypasses_failed_capability_proof() {
         // Stopping a session is recovery, not dispatch: it must succeed even

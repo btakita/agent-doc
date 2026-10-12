@@ -1816,10 +1816,83 @@ fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
     Some(prompt)
 }
 
-/// Background context clears are disabled, so a reset reason (session
-/// accretion, recent compaction, or Codex ctx% over threshold) never changes
-/// the continuation. It is recorded in ops.log only: the agent cannot act on it
-/// and Codex shows the Stop payload to the operator verbatim (`#codexstopterse`).
+/// `#bgclearpolicy`: hand the item boundary to the supervisor's queue
+/// auto-clear instead of continuing in this Codex context.
+///
+/// Returns the allow-stop response when the queue auto-clears (no
+/// `disable-auto-clear`) and the document's supervisor can take the hand-off;
+/// `None` keeps the in-pane continuation, which is also the fallback whenever
+/// the supervisor is missing, stale, or still owes an earlier hand-off — a
+/// yield nobody receives would stall the queue. An unreadable document keeps
+/// the in-pane continuation for the same reason.
+fn codex_stop_auto_clear_yield(file: &Path, prompt: &str, source: &str) -> Option<StopResponse> {
+    codex_stop_auto_clear_yield_with(
+        file,
+        prompt,
+        source,
+        agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc,
+    )
+}
+
+/// [`codex_stop_auto_clear_yield`] with the supervisor readiness probe injected.
+fn codex_stop_auto_clear_yield_with(
+    file: &Path,
+    prompt: &str,
+    source: &str,
+    drain_readiness: impl FnOnce(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
+) -> Option<StopResponse> {
+    let content = resolve_document_content_uncached(file, "codex_stop_queue_auto_clear").ok()?;
+    let decision = agent_doc_queue_io::queue_auto_clear::in_session_auto_clear_yield_with(
+        &content,
+        true,
+        || drain_readiness(file),
+        || {
+            agent_doc_controller_io::project_controller::undrained_supervisor_drain_handoff_age(
+                file, &content,
+            )
+            .is_some()
+        },
+    );
+    if !decision.yields {
+        if decision.enabled {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "codex_stop_queue_auto_clear_kept_in_pane file={} source={} supervisor_drain_readiness={} handoff_overdue={} (#bgclearpolicy)",
+                    file.display(),
+                    source,
+                    decision.readiness_reason(),
+                    decision.handoff_overdue,
+                ),
+            );
+        }
+        return None;
+    }
+    if let Some(head) = agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+        &content,
+        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+    ) {
+        agent_doc_controller_io::project_controller::record_supervisor_drain_handoff(file, &head);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "codex_stop_queue_continuation_yield file={} source={} result=supervisor_auto_clear supervisor_drain_readiness={} prompt_bytes={} prompt_sha256={} (#bgclearpolicy)",
+            file.display(),
+            source,
+            decision.readiness_reason(),
+            prompt.len(),
+            agent_doc_hash::content_hash(prompt),
+        ),
+    );
+    Some(StopResponse::Continue { continue_: true })
+}
+
+/// With queue auto-clear off (`disable-auto-clear`) or no ready supervisor, a
+/// reset reason (session accretion, recent compaction, or Codex ctx% over
+/// threshold) never changes the in-pane continuation. It is recorded in ops.log
+/// only: the agent cannot act on it and Codex shows the Stop payload to the
+/// operator verbatim (`#codexstopterse`).
 fn log_background_context_clear_suppressed(
     file: &Path,
     prompt: &str,
@@ -2106,6 +2179,11 @@ fn tracked_repeated_queue_recovery_response(
         });
     }
 
+    if let Some(response) =
+        codex_stop_auto_clear_yield(file, &next_prompt, "tracked_state_after_recovery")
+    {
+        return Ok(response);
+    }
     let mut next_state = state.clone();
     next_state.last_auto_queue_head = Some(next_prompt.clone());
     next_state.updated_at = now_secs();
@@ -2279,6 +2357,13 @@ fn auto_queue_continuation_response(
                 }
             },
         ));
+    }
+    // `#bgclearpolicy`: with queue auto-clear on (the default), a ready
+    // supervisor owns this item boundary — it restarts Codex fresh (Codex's
+    // `/clear` exits the process) and dispatches the next head to that fresh
+    // context. Yield instead of continuing in this already-loaded context.
+    if let Some(response) = codex_stop_auto_clear_yield(file, &prompt, "tracked_state") {
+        return Ok(Some(response));
     }
     let mut next_state = state.clone();
     next_state.last_auto_queue_head = Some(prompt.clone());
@@ -7166,8 +7251,10 @@ Reviewed the gated items.\n\
     #[test]
     fn stop_tracked_session_suppresses_background_clear_after_exchange_compaction() {
         let dir = setup_project();
-        // Background context clears are disabled even when the document opted into
-        // queue context reset. The Stop hook should keep queue continuation in-pane.
+        // The legacy `agent_doc_queue_context_reset` opt-in never clears. With
+        // no ready supervisor to take the queue auto-clear hand-off (none in
+        // this fixture, `#bgclearpolicy`), the Stop hook keeps the continuation
+        // in-pane.
         fs::write(
             dir.path().join(".agent-doc/config.toml"),
             "agent_doc_queue_context_reset = true\n",
@@ -7306,6 +7393,71 @@ Reviewed the gated items.\n\
                 && ops_log.contains("source=tracked_state")
                 && ops_log.contains("result=in_pane_continuation"),
             "tracked fresh-context continuation should be logged and kept in-pane:\n{ops_log}"
+        );
+    }
+
+    /// `#bgclearpolicy`: with queue auto-clear on (the default) and a ready
+    /// supervisor, the Codex Stop hook allows the stop so the supervisor can
+    /// restart Codex fresh and dispatch the next head, instead of continuing
+    /// the queue in the already-loaded context.
+    #[test]
+    fn stop_auto_clear_yields_queue_boundary_to_ready_supervisor() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        let response = codex_stop_auto_clear_yield_with(
+            &doc,
+            "do [#seopdp] deploy product page",
+            "tracked_state",
+            |_| agent_doc_controller::status::SupervisorDrainReadiness::Ready { supervisor_pid: 7 },
+        );
+        assert_eq!(response, Some(StopResponse::Continue { continue_: true }));
+        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("codex_stop_queue_continuation_yield")
+                && ops_log.contains("result=supervisor_auto_clear")
+                && ops_log.contains("supervisor_drain_readiness=ready"),
+            "{ops_log}"
+        );
+    }
+
+    /// `#bgclearpolicy`: `disable-auto-clear` keeps the in-pane continuation and
+    /// never probes the supervisor.
+    #[test]
+    fn stop_disable_auto_clear_keeps_in_pane_continuation() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        let content = fs::read_to_string(&doc).unwrap().replace(
+            "<!-- agent:queue auto go -->",
+            "<!-- agent:queue auto go disable-auto-clear -->",
+        );
+        fs::write(&doc, &content).unwrap();
+        let response = codex_stop_auto_clear_yield_with(
+            &doc,
+            "do [#seopdp] deploy product page",
+            "tracked_state",
+            |_| panic!("disable-auto-clear must not probe the supervisor"),
+        );
+        assert_eq!(response, None);
+    }
+
+    /// `#bgclearpolicy`: a yield nobody receives would stall the queue, so a
+    /// missing supervisor keeps the in-pane continuation and says why.
+    #[test]
+    fn stop_auto_clear_without_ready_supervisor_keeps_in_pane_continuation() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        let response = codex_stop_auto_clear_yield_with(
+            &doc,
+            "do [#seopdp] deploy product page",
+            "tracked_state",
+            |_| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor,
+        );
+        assert_eq!(response, None);
+        let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("codex_stop_queue_auto_clear_kept_in_pane")
+                && ops_log.contains("supervisor_drain_readiness=no_live_supervisor"),
+            "{ops_log}"
         );
     }
 

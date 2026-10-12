@@ -7,6 +7,7 @@ pub mod controller_pause;
 pub mod drain_owner;
 pub mod one_shot_sync;
 pub mod queue_add;
+pub mod queue_auto_clear;
 pub mod queue_claim;
 pub mod queue_cmd;
 pub mod queue_consume;

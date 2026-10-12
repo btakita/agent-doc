@@ -7,7 +7,9 @@
 //! hold the final answer. Diagnostics the agent cannot act on — such as a
 //! suppressed background context reset and its accretion/ctx% reason — belong
 //! in `.agent-doc/logs/ops.log` (`codex_background_context_clear_suppressed`),
-//! never in this payload.
+//! never in this payload. When queue auto-clear hands the item boundary to the
+//! supervisor (`#bgclearpolicy`), the hook allows the stop instead of rendering
+//! any continuation (`codex_stop_queue_continuation_yield` in ops.log).
 
 /// Upper bound for the fixed (path- and prompt-independent) part of a prompt
 /// continuation instruction. A regression past this budget means operator-pane

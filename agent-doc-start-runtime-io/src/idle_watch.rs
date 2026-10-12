@@ -594,6 +594,12 @@ fn deferred_clear_satisfied_by_harness(
         })
 }
 
+/// The pre-`#bgclearpolicy` background resets — `[clean-session]` /
+/// `[focused-cycle]` head tags and Codex accretion/threshold reasons — stay
+/// off: they fired from head tags whether or not an item had completed, typed
+/// `/clear` into Codex mid-task, and re-armed every tick (`45ff25f994`). Queue
+/// auto-clear ([`queue_auto_clear_boundary`]) replaces them with one clear per
+/// completed item, delivered per harness.
 fn supervisor_background_context_clear_enabled() -> bool {
     false
 }
@@ -607,8 +613,179 @@ fn context_clear_projection_source_allows_supervisor_action(
             CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED
                 | CONTEXT_CLEAR_SOURCE_OPERATOR_LIVE_TURN_DEFERRED
                 | CONTEXT_CLEAR_SOURCE_QUEUE_SLASH
+                | agent_doc_queue::queue_auto_clear::QUEUE_AUTO_CLEAR_SOURCE
         )
     )
+}
+
+/// `#bgclearpolicy`: the document's latest cycle as `(cycle_id, committed)`.
+/// `None` when there is no cycle or it cannot be read (fail closed: no clear).
+fn queue_auto_clear_latest_cycle(path: &Path) -> Option<(String, bool)> {
+    agent_doc_cycle_state_io::load_with_closeout_projection(path)
+        .ok()
+        .flatten()
+        .map(|state| {
+            (
+                state.cycle_id,
+                state.phase == agent_doc_turn::CyclePhase::Committed,
+            )
+        })
+}
+
+fn queue_auto_clear_baseline_now(
+    path: &Path,
+    head: Option<&str>,
+) -> agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline {
+    let latest = queue_auto_clear_latest_cycle(path);
+    agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline::observe(
+        latest.as_ref().map(|(cycle_id, committed)| {
+            agent_doc_queue::queue_auto_clear::LatestCycle {
+                cycle_id,
+                committed: *committed,
+            }
+        }),
+        head,
+    )
+}
+
+/// `#bgclearpolicy`: observe the facts for the queue auto-clear decision at a
+/// proven idle drain boundary and decide. Reads are ordered cheapest-first and
+/// the document/pane are only read once an item has actually completed in this
+/// context, so an ordinary idle tick costs one cycle-state read.
+fn queue_auto_clear_boundary(
+    path: &Path,
+    shared: &SupervisorShared,
+    harness: &agent_doc_harness::HarnessConfig,
+    baseline: &agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline,
+    head: &str,
+) -> agent_doc_queue::queue_auto_clear::QueueAutoClearDecision {
+    use agent_doc_queue::queue_auto_clear::{
+        AutoClearComposer, LatestCycle, QueueAutoClearDecision, QueueAutoClearFacts,
+        queue_auto_clear_decision,
+    };
+    let latest = queue_auto_clear_latest_cycle(path);
+    let latest_cycle = latest.as_ref().map(|(cycle_id, committed)| LatestCycle {
+        cycle_id,
+        committed: *committed,
+    });
+    let mut facts = QueueAutoClearFacts {
+        enabled: true,
+        baseline,
+        latest_cycle,
+        active_head: Some(head),
+        composer: AutoClearComposer::default(),
+        exchange_steering_pending: false,
+        claims_in_flight: false,
+    };
+    // Boundary-only skips decide without the document or the pane.
+    let preliminary = queue_auto_clear_decision(QueueAutoClearFacts {
+        composer: AutoClearComposer {
+            observed: true,
+            dispatch_ready: true,
+            busy: false,
+            operator_draft: false,
+        },
+        ..facts
+    });
+    if preliminary != QueueAutoClearDecision::Clear {
+        return preliminary;
+    }
+    let Ok(content) = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        path,
+        "idle_watch_queue_auto_clear",
+    ) else {
+        // Unreadable document: the marker cannot be checked, so never clear.
+        return QueueAutoClearDecision::SkipDisabled;
+    };
+    facts.enabled = agent_doc_queue::queue_auto_clear::queue_auto_clear_enabled(&content);
+    facts.claims_in_flight =
+        !agent_doc_queue_io::queue_claim::claimed_items_for_content(path, &content).is_empty();
+    facts.exchange_steering_pending =
+        agent_doc_session_check_io::midturn_steering::pending_steering_items(path, &content)
+            .iter()
+            .any(agent_doc_session_check_io::midturn_steering::is_exchange_item);
+    if let Some(observation) =
+        supervisor_pane_payload_observation(shared, harness.context_clear_command(), harness)
+    {
+        facts.composer = AutoClearComposer {
+            observed: observation.frame_rendered,
+            dispatch_ready: observation.dispatch_ready,
+            busy: observation.pane_busy,
+            operator_draft: agent_doc_harness::pane_composer_draft_at_cursor(
+                harness,
+                &observation.content,
+                observation.cursor_y,
+            )
+            .is_some(),
+        };
+    }
+    queue_auto_clear_decision(facts)
+}
+
+/// `#bgclearpolicy`: what the auto-clear delivery did to the harness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum QueueAutoClearEffect {
+    /// The harness-native clear was typed into the live child.
+    Typed,
+    /// Typing the clear failed; nothing is retried (one attempt per boundary).
+    TypeFailed(&'static str),
+    /// The watch was stopped while delivering.
+    Cancelled,
+    /// A supervised fresh restart was requested (Codex).
+    RestartRequested,
+    RestartFailed(String),
+}
+
+impl QueueAutoClearEffect {
+    fn result_label(&self) -> String {
+        match self {
+            Self::Typed => "sent".to_string(),
+            Self::TypeFailed(outcome) => format!("send_failed:{outcome}"),
+            Self::Cancelled => "cancelled".to_string(),
+            Self::RestartRequested => "restart_requested".to_string(),
+            Self::RestartFailed(err) => format!("restart_failed:{err:?}"),
+        }
+    }
+}
+
+/// `#bgclearpolicy`: reset the harness context the way the harness supports
+/// without losing work: Claude Code and OpenCode get their native clear typed
+/// into the SAME live process (background agents and shells survive, exactly
+/// like an idle operator Clear, `#idleclearrestart`); Codex, whose `/clear`
+/// exits the process, gets a supervised fresh restart whose relaunch
+/// re-triggers the document. Codex is never typed `/clear` — that was the
+/// June failure (`'/clear' is disabled while a task is in progress`).
+pub(crate) fn deliver_queue_auto_clear_effect(
+    shared: &SupervisorShared,
+    stop: &AtomicBool,
+    harness: &agent_doc_harness::HarnessConfig,
+) -> (
+    agent_doc_queue::queue_auto_clear::QueueAutoClearDelivery,
+    QueueAutoClearEffect,
+) {
+    use agent_doc_queue::queue_auto_clear::QueueAutoClearDelivery;
+    let delivery = agent_doc_queue::queue_auto_clear::queue_auto_clear_delivery(
+        agent_doc_supervisor::lifecycle::native_clear_keeps_harness_process(&harness.binary),
+    );
+    let effect = match delivery {
+        QueueAutoClearDelivery::TypeNativeClear => {
+            match auto_trigger_clear_command(shared, stop, harness.context_clear_command()) {
+                AutoTriggerOutcome::Sent => QueueAutoClearEffect::Typed,
+                AutoTriggerOutcome::Cancelled => QueueAutoClearEffect::Cancelled,
+                outcome => QueueAutoClearEffect::TypeFailed(outcome.as_str()),
+            }
+        }
+        QueueAutoClearDelivery::RestartFresh => {
+            match agent_doc_supervisor_io::ipc::request_supervisor_restart(
+                shared,
+                "fresh".to_string(),
+            ) {
+                Ok(()) => QueueAutoClearEffect::RestartRequested,
+                Err(err) => QueueAutoClearEffect::RestartFailed(err),
+            }
+        }
+    };
+    (delivery, effect)
 }
 
 fn idle_watch_fast_path_can_sleep(
@@ -1690,6 +1867,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // retired, so the clear lands at the turn's idle boundary rather
             // than at the next quiescent-maintenance probe.
             let mut deferred_clear_armed = false;
+            // `#bgclearpolicy`: the context state this watch last saw as fresh
+            // (latest committed cycle + queue head), taken on the first observed
+            // tick and re-taken after every clear. Queue auto-clear fires once an
+            // item completes past it.
+            let mut auto_clear_baseline: Option<
+                agent_doc_queue::queue_auto_clear::QueueAutoClearBaseline,
+            > = None;
+            let mut auto_clear_logged_key: Option<String> = None;
             // `#fbwire` Phase 2: the instant the convergence gate FIRST deferred the
             // current pending inter-item dispatch. `None` ⇒ not currently deferring;
             // set on the first `Defer`, cleared on `Dispatch`.
@@ -1853,6 +2038,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
             });
             let mut steering_recheck_at: Option<std::time::Instant> = None;
+            // `#bgclearpolicy`: a drainable head first seen inside its settle
+            // window asks for exactly one re-observation once the window can
+            // have elapsed. Without it, a quiescent document (no further edit or
+            // delivery edge — e.g. right after the closeout that advanced the
+            // queue) never re-reads the head, so it never settles and the drain
+            // the in-session loop handed over never dispatches.
+            let mut queue_head_settle_recheck_at: Option<std::time::Instant> = None;
             // `#fixthrashingbackground`: settle evidence for held steering
             // candidates. Without it a held candidate under a live editor was
             // "first seen" on every observation, never settled, and re-armed
@@ -1993,6 +2185,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
         // exactly one re-observation once its settle window can elapse.
         if steering_recheck_at.is_some_and(|at| now >= at) {
             steering_recheck_at = None;
+            document_delivery_reconcile_pending = true;
+            last_quiescent_maintenance = None;
+        }
+        if queue_head_settle_recheck_at.is_some_and(|at| now >= at) {
+            queue_head_settle_recheck_at = None;
             document_delivery_reconcile_pending = true;
             last_quiescent_maintenance = None;
         }
@@ -2767,6 +2964,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
             }
             last_dispatched =
                 rearm_queue_dispatch_dedup(last_dispatched, active_head.as_deref());
+            if auto_clear_baseline.is_none() && active_transition != IdleQueueTransition::Unresolved {
+                auto_clear_baseline =
+                    Some(queue_auto_clear_baseline_now(&path, active_head.as_deref()));
+            }
             queue_continuation_triggers.observe_head(
                 active_head.as_deref().map(agent_doc_hash::content_hash),
             );
@@ -3266,6 +3467,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
             }
             if clear_settle.settled_now {
+                // `#bgclearpolicy`: any settled clear (operator, queued `/clear`,
+                // or auto-clear) leaves a fresh context.
+                auto_clear_baseline =
+                    Some(queue_auto_clear_baseline_now(&path, active_head.as_deref()));
                 awaiting_clear_settle = false;
                 clear_settle_idle_ticks = 0;
                 shared.transition_actor_state(
@@ -4828,9 +5033,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
 
                 // Background context-reset injection used to live here for
                 // `[clean-session]`, `[focused-cycle]`, and opted-in Codex
-                // accretion/threshold resets. It is disabled: ordinary queue
-                // heads drain in pane, while only explicit operator clears and
-                // explicit queued slash commands may submit a visible clear.
+                // accretion/threshold resets. It stays disabled. Between-item
+                // resets are queue auto-clear's job (`#bgclearpolicy`, in the
+                // drain-dispatch path below): one clear per completed item, at
+                // the proven boundary, Codex restarted rather than typed into.
                 let context_reset_reason = if supervisor_background_context_clear_enabled() {
                     let forced_context_reset_reason = active_head
                         .as_deref()
@@ -5228,8 +5434,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
             }) {
                 IdleQueueDrainDecision::Dispatch => {
                     if !queue_head_settled {
+                        if queue_head_settle_recheck_at.is_none() {
+                            queue_head_settle_recheck_at = Some(
+                                std::time::Instant::now()
+                                    + queue_head_settle_duration
+                                    + std::time::Duration::from_millis(100),
+                            );
+                        }
                         continue;
                     }
+                    queue_head_settle_recheck_at = None;
                     if !queue_continuation_triggers.ready() {
                         continue;
                     }
@@ -5362,6 +5576,105 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     continue;
                                 }
                             }
+                    }
+                    // `#bgclearpolicy`: queue auto-clear. Every gate above has
+                    // proven the item boundary (idle prompt, no live turn or route
+                    // submit, prior cycle committed and converged, no `/loop` owner);
+                    // reset the agent context once before dispatching the next head.
+                    if let (Some(head), Some(baseline)) =
+                        (active_head.as_deref(), auto_clear_baseline.as_ref())
+                        && idle_queue_head_slash_command(head).is_none()
+                        && !agent_doc_supervisor::steering_wake::is_steering_wake_subject(head)
+                    {
+                        use agent_doc_queue::queue_auto_clear::QueueAutoClearDecision;
+                        let decision =
+                            queue_auto_clear_boundary(&path, &shared, &harness, baseline, head);
+                        if decision == QueueAutoClearDecision::Clear {
+                            let committed_cycle = queue_auto_clear_latest_cycle(&path)
+                                .map(|(cycle_id, _)| cycle_id)
+                                .unwrap_or_default();
+                            // At most one clear attempt per completed item: the
+                            // baseline moves before the effect, so a failed or
+                            // unobserved clear is never retried into the pane.
+                            auto_clear_baseline =
+                                Some(queue_auto_clear_baseline_now(&path, Some(head)));
+                            let head_owned = head.to_string();
+                            let (delivery, effect) =
+                                deliver_queue_auto_clear_effect(&shared, &stop, &harness);
+                            let event = format!(
+                                "queue_auto_clear file={} harness={} delivery={} result={} committed_cycle={} head_bytes={} head_sha256={} (#bgclearpolicy)",
+                                path.display(),
+                                harness.binary,
+                                delivery.as_str(),
+                                effect.result_label(),
+                                committed_cycle,
+                                head_owned.len(),
+                                agent_doc_hash::content_hash(&head_owned),
+                            );
+                            log_event(&mut session_log, &event);
+                            agent_doc_ops_log_io::log_op(&path, &event);
+                            match effect {
+                                QueueAutoClearEffect::Cancelled => return,
+                                QueueAutoClearEffect::Typed => {
+                                    let clear_cmd = harness.context_clear_command();
+                                    last_dispatched = None;
+                                    awaiting_clear_settle = true;
+                                    context_reset_in_flight = true;
+                                    clear_settle_idle_ticks = 0;
+                                    last_context_reset_head = Some(head_owned.clone());
+                                    last_context_clear_at = Some(current_epoch_secs());
+                                    record_context_clear_prompt_for_hooks(
+                                        &shared, &path, &harness, clear_cmd,
+                                    );
+                                    record_context_clear_in_flight_projection(
+                                        &path,
+                                        &shared,
+                                        &harness,
+                                        clear_cmd,
+                                        agent_doc_queue::queue_auto_clear::QUEUE_AUTO_CLEAR_SOURCE,
+                                        Some(&head_owned),
+                                    );
+                                    // Let the clear settle; the next head
+                                    // dispatches to the fresh context.
+                                    continue;
+                                }
+                                QueueAutoClearEffect::RestartRequested => {
+                                    // The relaunch re-triggers the document, which
+                                    // dispatches this head to the fresh child; hold
+                                    // this generation's drain until it exits.
+                                    last_dispatched = Some(head_owned);
+                                    awaiting_clear_settle = true;
+                                    clear_settle_idle_ticks = 0;
+                                    continue;
+                                }
+                                // A failed clear falls through: the head still
+                                // dispatches, to the current context.
+                                QueueAutoClearEffect::TypeFailed(_)
+                                | QueueAutoClearEffect::RestartFailed(_) => {}
+                            }
+                        } else if !decision.is_not_a_boundary() {
+                            // A clear is due but unsafe now (operator draft, pending
+                            // steering, subagent claim, busy or unobservable composer).
+                            // Never clear over it; the dispatch path below decides
+                            // whether the head can go to the current context.
+                            let key = format!(
+                                "{}:{}",
+                                agent_doc_hash::content_hash(head),
+                                decision.as_str()
+                            );
+                            if auto_clear_logged_key.as_deref() != Some(key.as_str()) {
+                                let event = format!(
+                                    "queue_auto_clear_skipped file={} harness={} reason={} head_sha256={} (#bgclearpolicy)",
+                                    path.display(),
+                                    harness.binary,
+                                    decision.as_str(),
+                                    agent_doc_hash::content_hash(head),
+                                );
+                                log_event(&mut session_log, &event);
+                                agent_doc_ops_log_io::log_op(&path, &event);
+                                auto_clear_logged_key = Some(key);
+                            }
+                        }
                     }
                     let head = active_head.expect("dispatch implies an active head");
                     let continuation_prompt =
@@ -7535,6 +7848,115 @@ mod tests {
             serde_json::from_str(&raw).expect("playback artifact must be loadable");
         assert_eq!(loaded.inflight, 5);
         assert!(loaded.unmet_proofs.iter().any(|p| p == "editor_converged"));
+    }
+
+    /// `#bgclearpolicy`: the auto-clear boundary is read from durable cycle
+    /// state and the document. Mid-turn never clears; once the item's cycle
+    /// commits and the head advances, every document gate passes and only the
+    /// composer is left to prove (no pane here, so the clear is withheld as
+    /// unobservable rather than typed blind); `disable-auto-clear` and an
+    /// already-taken boundary never clear.
+    #[test]
+    fn queue_auto_clear_boundary_reads_cycle_state_and_queue_marker() {
+        use agent_doc_queue::queue_auto_clear::QueueAutoClearDecision;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("task.md");
+        let both = "<!-- agent:queue go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n";
+        let advanced = "<!-- agent:queue go -->\n- do [#b]\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, both).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            both,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "claude",
+            None,
+            None,
+            None,
+        );
+        let harness = agent_doc_harness::HarnessConfig::claude();
+
+        // Item A's turn is running when the watch takes its baseline.
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(both), Some(both)).unwrap();
+        let baseline = queue_auto_clear_baseline_now(&doc, Some("do [#a]"));
+        assert_eq!(baseline.committed_cycle_id, None);
+        assert_eq!(
+            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#a]"),
+            QueueAutoClearDecision::SkipCycleOpen,
+            "never clear mid-turn"
+        );
+
+        // A commits and the queue advances to B.
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(both),
+            Some(advanced),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(advanced),
+            Some(advanced),
+        )
+        .unwrap();
+        std::fs::write(&doc, advanced).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            advanced,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert_eq!(
+            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#b]"),
+            QueueAutoClearDecision::SkipComposerUnobservable,
+            "a completed item passes every document gate; only the composer remains"
+        );
+
+        // The boundary is taken once: re-baselining (as a delivered clear does)
+        // makes the same boundary a no-op.
+        let after_clear = queue_auto_clear_baseline_now(&doc, Some("do [#b]"));
+        assert!(after_clear.committed_cycle_id.is_some());
+        assert_eq!(
+            queue_auto_clear_boundary(&doc, &shared, &harness, &after_clear, "do [#b]"),
+            QueueAutoClearDecision::SkipNoCompletedItem
+        );
+
+        // Unanswered operator steering in the exchange keeps the context.
+        let exchange = "<!-- agent:exchange -->\n### Re: a\n\ndone\n<!-- /agent:exchange -->\n";
+        let committed_with_exchange = format!("{exchange}{advanced}");
+        std::fs::write(&doc, &committed_with_exchange).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &committed_with_exchange,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let steered = committed_with_exchange.replace(
+            "done\n<!-- /agent:exchange -->",
+            "done\n\nwait, keep the cache warm for the next item\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, &steered).unwrap();
+        assert_eq!(
+            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#b]"),
+            QueueAutoClearDecision::SkipSteeringPending,
+            "never clear over unanswered operator steering"
+        );
+
+        // `disable-auto-clear` suppresses it.
+        let disabled = advanced.replace("agent:queue go", "agent:queue go disable-auto-clear");
+        std::fs::write(&doc, &disabled).unwrap();
+        assert_eq!(
+            queue_auto_clear_boundary(&doc, &shared, &harness, &baseline, "do [#b]"),
+            QueueAutoClearDecision::SkipDisabled
+        );
     }
 
     #[test]

@@ -684,6 +684,67 @@ pub fn sanitize_template_patchback_response(response: &mut String) -> Result<()>
 mod tests {
     use super::*;
 
+    /// `#inlinecodemarker` — the exact response line that a coordinator
+    /// wrote into its session document (2026-10-12), quoting an opening
+    /// `agent:queue` marker inside an inline code span. It must be landable,
+    /// must survive the escape hatch byte-for-byte, and applying it must
+    /// leave a document whose only `agent:queue` is the real one.
+    #[test]
+    fn inlinecodemarker_quoted_queue_opener_response_lands_and_keeps_doc_parseable() {
+        let line = "- **`<!-- agent:queue disable-auto-clear ... -->`** turns it off, and preflight reports the setting.\n";
+        let fenced = "```markdown\n<!-- agent:queue disable-auto-clear ... -->\n```\n";
+        for body in [line.to_string(), format!("{line}\n{fenced}")] {
+            let response = format!(
+                "<!-- patch:exchange -->\n### Re: auto-clear default — opus\n\nAgreed:\n{body}<!-- /patch:exchange -->\n"
+            );
+            assert_eq!(response_landability_refusal(&response), None, "{response}");
+            assert_eq!(requote_unlandable_marker_text(&response), response);
+
+            let doc = "<!-- agent:exchange -->\nprompt\n<!-- /agent:exchange -->\n<!-- agent:queue preset=\"#p\" priority go -->\n- do [#a]\n<!-- /agent:queue -->\n";
+            let (patches, unmatched) = crate::parse_patches(&response).unwrap();
+            let empty_str = std::collections::HashMap::new();
+            let empty_usize = std::collections::HashMap::new();
+            let applied = crate::apply_patches_pure(
+                doc,
+                &patches,
+                &unmatched,
+                None,
+                &empty_str,
+                &empty_usize,
+            )
+            .expect("quoted marker prose applies");
+            assert!(applied.contains(line), "prose kept verbatim:\n{applied}");
+            assert_eq!(
+                agent_doc_element::element::structural_corruption_reason(&applied),
+                None,
+                "{applied}"
+            );
+            let queues: Vec<_> = agent_doc_element::element::parse(&applied)
+                .unwrap()
+                .into_iter()
+                .filter(|c| c.name == "queue")
+                .collect();
+            assert_eq!(queues.len(), 1, "{applied}");
+            assert_eq!(queues[0].content(&applied), "- do [#a]\n");
+        }
+    }
+
+    /// `#inlinecodemarker` — the same marker as a standalone line (no code
+    /// span) can never land: it is refused before capture and the escape
+    /// hatch neutralizes exactly its marker bytes.
+    #[test]
+    fn inlinecodemarker_unquoted_queue_opener_response_is_refused_before_capture() {
+        let response = "<!-- patch:exchange -->\n### Re: auto-clear default — opus\n\n<!-- agent:queue disable-auto-clear -->\nturns it off.\n<!-- /patch:exchange -->\n";
+        let reason = response_landability_refusal(response)
+            .expect("a live opener in a response body can never land");
+        assert!(
+            reason.contains("payload line 4") && reason.contains("backticks"),
+            "the refusal names the offending line and the fix: {reason}"
+        );
+        let requoted = requote_unlandable_marker_text(response);
+        assert_eq!(response_landability_refusal(&requoted), None, "{requoted}");
+        assert!(requoted.contains("&lt;!-- agent:queue disable-auto-clear --&gt;"));
+    }
 
     /// GH 90 — the laptop.md payload names a marker inside backticks; it is
     /// landable and must not be refused at write time.
@@ -707,7 +768,10 @@ mod tests {
             "### Re: x — claude\n\nThe marker was <!-- /agent:queue\n",
             "<!-- patch:exchange -->\n### Re: x — claude\n\nBody\n-->\n<!-- /patch:exchange -->\n",
         ] {
-            assert!(response_landability_refusal(response).is_some(), "{response}");
+            assert!(
+                response_landability_refusal(response).is_some(),
+                "{response}"
+            );
             let requoted = requote_unlandable_marker_text(response);
             assert_eq!(
                 response_landability_refusal(&requoted),
@@ -724,7 +788,10 @@ mod tests {
             "### Re: x — claude\n\n<!-- agent:queue -->\nkeep `<!-- agent:status -->` verbatim\n",
         );
         assert!(requoted.contains("`<!-- agent:status -->`"), "{requoted}");
-        assert!(requoted.contains("&lt;!-- agent:queue --&gt;"), "{requoted}");
+        assert!(
+            requoted.contains("&lt;!-- agent:queue --&gt;"),
+            "{requoted}"
+        );
     }
 
     /// GH 90 — shapes no retry can ever land are refused from the bytes alone.
@@ -739,7 +806,8 @@ mod tests {
         let reason = response_landability_refusal(unterminated)
             .expect("an unterminated marker can never land");
         assert!(reason.contains("structurally invalid"), "{reason}");
-        let orphan = "<!-- patch:exchange -->\n### Re: x — claude\n\nBody\n-->\n<!-- /patch:exchange -->\n";
+        let orphan =
+            "<!-- patch:exchange -->\n### Re: x — claude\n\nBody\n-->\n<!-- /patch:exchange -->\n";
         assert!(
             response_landability_refusal(orphan)
                 .is_some_and(|reason| reason.contains("orphan_html_comment_terminator")),
@@ -889,7 +957,11 @@ mod tests {
                 "<!-- patch:exchange -->\\nBody without a response heading.\\n<!-- /patch:exchange -->",
             ),
         ] {
-            assert_eq!(normalize_fully_escaped_exchange_patch(response), None, "{label}");
+            assert_eq!(
+                normalize_fully_escaped_exchange_patch(response),
+                None,
+                "{label}"
+            );
         }
     }
 

@@ -32,3 +32,7 @@ The diff-based approach means you can also edit previous responses, add prompt-b
 - **Diffing**: `similar` crate (pure Rust)
 - **Serialization**: `serde` + `serde_yaml` / `serde_json` / `toml`
 - **Hashing**: `sha2` for snapshot paths
+
+## License
+
+agent-doc is licensed under the [Apache License, Version 2.0](../LICENSE) (`Apache-2.0`).

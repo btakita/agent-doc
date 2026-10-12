@@ -3,7 +3,7 @@ name = "agent-doc-work-graph"
 version = "0.35.494"
 edition = "2024"
 description = "Pure work-graph analysis and rendering for agent-doc work items"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 

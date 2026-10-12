@@ -3,7 +3,7 @@ name = "agent-doc-lint-io"
 version = "0.35.494"
 edition = "2024"
 description = "Tagpath lint gate adapter for agent-doc finalize flows"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 

@@ -3,7 +3,7 @@ name = "agent-doc-git-io"
 version = "0.35.494"
 edition = "2024"
 description = "Git command I/O adapters for agent-doc"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 

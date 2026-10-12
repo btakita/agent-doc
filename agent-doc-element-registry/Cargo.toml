@@ -3,7 +3,7 @@ name = "agent-doc-element-registry"
 version = "0.35.494"
 edition = "2024"
 description = "Built-in element registry for agent-doc document components"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 

@@ -5,7 +5,7 @@
   "version": "0.2.81",
   "publisher": "btakita",
   "icon": "icon.png",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/btakita/agent-loop"

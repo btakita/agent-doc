@@ -328,6 +328,33 @@ Done. `deferstrike2` (`6a5d171d43`) is in the same batch, installed.
 - **Tests and docs:** today's two reproductions are regression tests, and disabling either half of the fix makes them fail. The runbook and every installed harness copy document the shape: echo, then operator-note quote, then `**Deferred:**`.
 
 **Next batch:** `rcpthelpers` (`#flakyreceipthelpers`) and `thrash` (`#fixthrashingbackground`) are merged in `integrate-0499`, and its `make check` is running.
+
+### Re: background thrashing and receipt-flake fixes integrated — opus-5.5 · 2026-10-12T00:10-04:00
+
+> **Queue prompt:** do [#fixthrashingbackground]
+
+Done. `thrash` (`c7614811f4`) is merged to main as `e31a862648` and installed. The batch's `make check` passed (exit 0, 10242/10242).
+- **Main cause:** the orphaned-empty-preflight reclaim check (`#gh179`) ran every 30 ticks (about every 17s) and was always treated as urgent. So every idle supervisor did a full pass each time: queue head, steering wake, frontmatter, all full-document reads. All supervisors ran in step, because they had been recycled together. It now runs only when something can be reclaimed: an open cycle, a request in flight, or unreadable cycle state.
+- **Three more fixes:**
+  - The turn id for log lines is read only just before a dispatch, instead of a controller round trip every 500ms.
+  - The steering wake remembers when it first saw a half-typed queue item, so the item settles once instead of being re-checked forever. With an editor attached, such an item would also never have woken the session; that bug is fixed too.
+  - Cycle-state reads use a new `document_closeout_projection` command. For `fpe.md` that returns the needed 34 KB instead of 5.1 MB of history copied under the controller lock, and older controllers fall back to the full read.
+- **Smaller fixes:** queue-head checks on documents with no live editor read disk directly, and the orphan-drain sweep skips its `/proc` scan unless a dispatch is possible.
+- **Measured** (isolated tmux, 4 idle supervisors, 2 minutes): per-supervisor CPU fell from 960 to 415 ms/min, controller CPU from 2030 to 890 ms/min, and ops.log lines from 84 to 0.
+- **Memory:** the controllers' 1–1.5 GB is document history kept by design, not a leak.
+- **What's left:** mostly the supervisor's terminal-screen rendering, not document reads.
+
+> **Queue prompt:** do [#flakyreceipthelpers]
+
+Done. `rcpthelpers` (`0c7e665d41`) is in the same batch, installed.
+- **Listeners:** the simulated-editor listeners share one strict fixture, `SimulatedEditorListener`, using an already-running controller. Under one-core load with 64 busy loops they went from failing in 3 of 3 runs to passing 5 of 5.
+- **Finalize test:** it dropped from 64s to 6.5s on an idle machine. The controller now wakes as soon as a client connects instead of sleeping up to 50ms per request; this is a production change. And the cleanup sweep opens other projects' databases read-only; tests had been writing to your real databases.
+- **Corroboration:** both receipt tests that timed out on the `thrash` branch passed in this batch. The full suite also ran in 136s, down from about 290s.
+- **Left:** under very heavy load (32 busy loops on one core) the finalize test is genuinely CPU-bound, about 6.4s of CPU, and can still pass its 180s limit. I didn't raise the limit.
+
+I removed the thrash worktree, which reclaimed 2.1 GB of scratch files.
+
+`#idleclearrestart` is still yours: should Clear at an idle prompt type `/clear` instead of restarting Claude, which kills its background agents?
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -336,18 +363,16 @@ Done. `deferstrike2` (`6a5d171d43`) is in the same batch, installed.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixthrashingbackground]
+- ~~do [#fixthrashingbackground]~~
 - ~~⏭️ do [#idlecleartriggerinject]~~
 - ~~do [#annotateddeferstrike]~~
-- do [#flakyreceipthelpers]
+- ~~do [#flakyreceipthelpers]~~
 - ⏳ do [#idleclearrestart]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#fixthrashingbackground] Fix agent-doc thrashing in the background
-- [ ] [#flakyreceipthelpers] [agent-doc] Follow-up from flaky0494: simulated-editor socket listeners in agent-doc-test-support/src/lib.rs:781, agent-doc-write-converge-io/src/convergence_fixture_tests.rs:170 and agent-doc-commit-io/tests/git.rs:104 drop receipt errors the way the fixed already_applied_* tests did (may flake under load); and finalize_integration reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once hits the 180s nextest limit under load ~80 (performance, do not raise the limit). Integrate branch flaky0494 first.
 - [ ] [#idleclearrestart] [operator-verify] [agent-doc] Decide: Clear Session Context at an idle prompt restarts the Claude process (supervisor_restart_fresh) instead of typing /clear, killing running Claude background agents/shells with no report (2026-10-11 live test: agent stopped at 12/40 ticks). Queued clears type /clear. Should idle Clear type /clear too?
 <!-- /agent:backlog -->
 

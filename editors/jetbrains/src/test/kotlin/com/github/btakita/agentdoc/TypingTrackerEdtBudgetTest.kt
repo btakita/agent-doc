@@ -465,32 +465,145 @@ class TypingTrackerEdtBudgetTest {
     }
 
     @Test
-    fun `a burst the document outran is detected from the modification stamp`() {
+    fun `a burst the document outran is detected from the event sequence`() {
         // The reporter reads the buffer and drains the burst as two steps off the
         // EDT. A change landing between them produces text no replay can reach, so
-        // the stamp is what separates "requeue and retry" from a silent drop.
+        // the event sequence is what separates "requeue" from a silent drop.
         val burst = listOf(
-            PendingEditorOp(offset = 0, oldFragment = "", newFragment = "a", nonOperatorMutation = false, docStamp = 7L),
-            PendingEditorOp(offset = 1, oldFragment = "", newFragment = "b", nonOperatorMutation = false, docStamp = 8L),
+            PendingEditorOp(offset = 0, oldFragment = "", newFragment = "a", nonOperatorMutation = false, eventSeq = 7L),
+            PendingEditorOp(offset = 1, oldFragment = "", newFragment = "b", nonOperatorMutation = false, eventSeq = 8L),
         )
+        assertEquals(
+            "a quiet burst ends at the snapshot sequence",
+            BurstSnapshotRelation.CURRENT,
+            classifyBurstAgainstSnapshotUtil(burst, snapshotEventSeq = 8L),
+        )
+        assertEquals(
+            "an op recorded after the snapshot means a later event owns the retry",
+            BurstSnapshotRelation.OUTRAN_BY_LATER_EVENT,
+            classifyBurstAgainstSnapshotUtil(burst, snapshotEventSeq = 7L),
+        )
+        assertEquals(
+            "a snapshot ahead of every drained op is owed no event and must not wait",
+            BurstSnapshotRelation.SNAPSHOT_AHEAD_WITHOUT_PENDING_EVENT,
+            classifyBurstAgainstSnapshotUtil(burst, snapshotEventSeq = 9L),
+        )
+        assertEquals(
+            "an empty burst has nothing to invalidate",
+            BurstSnapshotRelation.CURRENT,
+            classifyBurstAgainstSnapshotUtil(emptyList(), snapshotEventSeq = 9L),
+        )
+        assertEquals(
+            "an op captured without a sequence must not be discarded by the guard",
+            BurstSnapshotRelation.CURRENT,
+            classifyBurstAgainstSnapshotUtil(
+                listOf(PendingEditorOp(offset = 0, oldFragment = "", newFragment = "a", nonOperatorMutation = false)),
+                snapshotEventSeq = 9L,
+            ),
+        )
+    }
+
+    @Test
+    fun `GH 242 an undo whose stamp moved without an event is handed over on the first drain`() {
+        // Operator typed 11 bytes, then one undo deleted them, returning the buffer to
+        // the pre-typing text. The platform restores the pre-typing
+        // `modificationStamp` on undo WITHOUT a DocumentEvent, so the old stamp
+        // guard never matched again and refused the same op 32,277 times. The event
+        // sequence only moves with a DocumentEvent, so the drain sees a quiet burst.
+        val preTyping = "# plan\n\nhello world\n"
+        val typed = "0123456789!"
+        val offset = preTyping.indexOf("world")
+        // Event 1..11 were the typing (already reported); event 12 is the undo.
+        val undo = PendingEditorOp(
+            offset = offset,
+            oldFragment = typed,
+            newFragment = "",
+            nonOperatorMutation = false,
+            eventSeq = 12L,
+        )
+        val snapshot = DocumentSnapshot(text = preTyping, eventSeq = 12L)
+
+        assertEquals(
+            BurstSnapshotRelation.CURRENT,
+            classifyBurstAgainstSnapshotUtil(listOf(undo), snapshot.eventSeq),
+        )
+        assertEquals(
+            "the undo replays against the post-undo buffer and reaches the ledger",
+            listOf(
+                PreparedEditorOp(
+                    opKind = "delete",
+                    byteOffset = offset.toLong(),
+                    insertText = null,
+                    deleteBytes = typed.length.toLong(),
+                ),
+            ),
+            prepareEditorOpReports(snapshot.text, listOf(undo)),
+        )
+    }
+
+    @Test
+    fun `GH 242 a requeued burst is retried only when a new event arrives`() {
+        // Model the drain loop with the tracker's own decision function: a refusal may
+        // requeue ONLY when a later event exists, and that event is what drives the
+        // next drain. With no further typing the loop must terminate on its own —
+        // the old reporter scheduled a 75 ms retry here with no bound.
+        var pending = mutableListOf(
+            PendingEditorOp(offset = 0, oldFragment = "", newFragment = "a", nonOperatorMutation = false, eventSeq = 1L),
+        )
+        var text = "a"
+        var seq = 1L
+        var snapshotSeq = 0L // the snapshot was read before event 1 landed (raced)
+        var refusals = 0
+        var handedOver = 0
+        var scheduledBoundaries = 1
+        while (scheduledBoundaries > 0) {
+            scheduledBoundaries--
+            val drained = pending.toList()
+            pending = mutableListOf()
+            when (classifyBurstAgainstSnapshotUtil(drained, snapshotSeq)) {
+                BurstSnapshotRelation.OUTRAN_BY_LATER_EVENT -> {
+                    refusals++
+                    pending.addAll(0, drained)
+                    // No scheduleFullContentReport here: only an event schedules.
+                    if (refusals == 1) {
+                        // The racing event: it lands, and ITS documentChanged schedules.
+                        seq++
+                        text += "b"
+                        pending.add(
+                            PendingEditorOp(offset = 1, oldFragment = "", newFragment = "b", nonOperatorMutation = false, eventSeq = seq),
+                        )
+                        scheduledBoundaries++
+                    }
+                }
+                else -> {
+                    assertTrue(prepareEditorOpReports(text, drained) != null)
+                    handedOver++
+                }
+            }
+            snapshotSeq = seq // the next boundary snapshots after every landed event
+        }
+        assertEquals("the race is refused once", 1, refusals)
+        assertEquals("then the requeued burst and the new op are handed over together", 1, handedOver)
+        assertTrue("nothing is left behind", pending.isEmpty())
+
+        val trackerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(trackerPath)
+        val outranBranch = source.substringAfter("if (relation == BurstSnapshotRelation.OUTRAN_BY_LATER_EVENT) {")
+            .substringBefore("return\n")
         assertTrue(
-            "a quiet burst ends at the snapshot stamp",
-            capturedBurstMatchesSnapshotUtil(burst, snapshotStamp = 8L),
+            "the raced burst is requeued for the event that outran it",
+            outranBranch.contains("requeuePendingEditorOps(filePath, drainedOps)"),
         )
         assertFalse(
-            "a snapshot taken after a later change must not be replayed against this burst",
-            capturedBurstMatchesSnapshotUtil(burst, snapshotStamp = 9L),
+            "the refusal must not schedule its own retry: no edge, no retry",
+            outranBranch.contains("scheduleFullContentReport("),
         )
-        assertTrue(
-            "an empty burst has nothing to invalidate",
-            capturedBurstMatchesSnapshotUtil(emptyList(), snapshotStamp = 9L),
-        )
-        assertTrue(
-            "an op captured without a stamp must not be discarded by the guard",
-            capturedBurstMatchesSnapshotUtil(
-                listOf(PendingEditorOp(offset = 0, oldFragment = "", newFragment = "a", nonOperatorMutation = false)),
-                snapshotStamp = 9L,
-            ),
+        assertFalse(
+            "modificationStamp moves without a DocumentEvent and must not be the race clock",
+            source.contains("docStamp") || source.contains("eventSeq = event.document.modificationStamp"),
         )
     }
 
@@ -504,11 +617,11 @@ class TypingTrackerEdtBudgetTest {
 
         assertTrue(
             "the buffer text and its stamp must come from one read action",
-            source.contains("DocumentSnapshot(document.text, document.modificationStamp)"),
+            source.contains("DocumentSnapshot(document.text, documentEventSeq(document).get())"),
         )
         assertTrue(
-            "documentChanged must stamp each captured op so the drain can detect the race",
-            source.contains("docStamp = event.document.modificationStamp"),
+            "documentChanged must sequence each captured op so the drain can detect the race",
+            source.contains("eventSeq = documentEventSeq(event.document).incrementAndGet()"),
         )
         assertTrue(
             "the burst must be drained adjacent to the snapshot it is replayed against",

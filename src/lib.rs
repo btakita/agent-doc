@@ -13,3 +13,4 @@
 
 pub mod build_info;
 pub mod ffi;
+mod op_capture_refusal_coalesce;

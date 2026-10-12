@@ -79,34 +79,73 @@ internal data class PendingEditorOp(
     val newFragment: String,
     val nonOperatorMutation: Boolean,
     /**
-     * `Document.modificationStamp` immediately after this change landed.
-     * [UNKNOWN_DOCUMENT_STAMP] when the capturing caller has no stamp (offset-math
-     * tests); the reporter always records the real stamp so the drain can tell a
-     * quiet burst from one the document outran.
+     * This document's `DocumentEvent` sequence number immediately after this change
+     * landed (GH #242). [UNKNOWN_EVENT_SEQ] when the capturing caller has no
+     * sequence (offset-math tests); the reporter always records the real one so the
+     * drain can tell a quiet burst from one a later event outran.
+     *
+     * Deliberately NOT `Document.modificationStamp`: the platform rewrites that
+     * stamp without firing a `DocumentEvent` (undo restores the pre-change stamp,
+     * save and Remote Dev sync re-stamp the buffer). A stamp that moves with no
+     * event leaves no later op to ever re-match it, which is how one 11-byte undo
+     * was refused 32,277 times in 92 minutes.
      */
-    val docStamp: Long = UNKNOWN_DOCUMENT_STAMP,
+    val eventSeq: Long = UNKNOWN_EVENT_SEQ,
 )
 
-/** Sentinel for "no document stamp was captured with this op". */
-internal const val UNKNOWN_DOCUMENT_STAMP = -1L
+/** Sentinel for "no event sequence was captured with this op". */
+internal const val UNKNOWN_EVENT_SEQ = -1L
 
 /**
- * True when [snapshotStamp] is still the stamp the last captured op left behind.
+ * How a drained burst relates to the buffer snapshot it is about to be replayed
+ * against (`#opcapturedormant`, GH #242).
  *
- * `#opcapturedormant`: the reporter reads the full buffer and drains the pending
- * burst as two separate steps off the EDT, so a change landing between them
- * produces a text that no replay of the drained ops can reach — and
- * [prepareEditorOpReports] then discards the whole burst. Comparing stamps makes
- * that race observable so the ops can be requeued for the next quiet boundary
- * instead of silently dropped.
+ * The reporter reads the buffer and drains the pending burst as two separate
+ * steps off the EDT, so a `DocumentEvent` landing between them puts an op in the
+ * burst that the snapshot text does not contain. Comparing the burst's last event
+ * sequence with the snapshot's makes that race observable.
  */
-internal fun capturedBurstMatchesSnapshotUtil(
+internal enum class BurstSnapshotRelation {
+    /** The snapshot reflects exactly the drained burst; replay it now. */
+    CURRENT,
+
+    /**
+     * A later `DocumentEvent` landed after the snapshot. That event's own
+     * `documentChanged` already scheduled a newer quiet boundary, so the burst is
+     * requeued for it and the reporter schedules NO retry of its own: the edge
+     * that can make the retry succeed is the one that caused the refusal.
+     */
+    OUTRAN_BY_LATER_EVENT,
+
+    /**
+     * The snapshot is newer than every drained op, yet no op for the difference
+     * is pending. No future event is owed to this burst, so waiting cannot help:
+     * the burst is decided now by shadow replay against the snapshot text
+     * (handed over when it reconstructs the buffer, refused as a terminal
+     * `shadow_replay_mismatch` otherwise). It is never requeued.
+     */
+    SNAPSHOT_AHEAD_WITHOUT_PENDING_EVENT,
+}
+
+/**
+ * Classify a drained burst against the event sequence read with the snapshot.
+ *
+ * Separate from the drain so the "no retry without a new edge" rule is
+ * assertable without an IDE, a native library, or a live controller.
+ */
+internal fun classifyBurstAgainstSnapshotUtil(
     ops: List<PendingEditorOp>,
-    snapshotStamp: Long,
-): Boolean {
-    val lastStamp = ops.lastOrNull()?.docStamp ?: return true
-    if (lastStamp == UNKNOWN_DOCUMENT_STAMP || snapshotStamp == UNKNOWN_DOCUMENT_STAMP) return true
-    return lastStamp == snapshotStamp
+    snapshotEventSeq: Long,
+): BurstSnapshotRelation {
+    val lastSeq = ops.lastOrNull()?.eventSeq ?: return BurstSnapshotRelation.CURRENT
+    if (lastSeq == UNKNOWN_EVENT_SEQ || snapshotEventSeq == UNKNOWN_EVENT_SEQ) {
+        return BurstSnapshotRelation.CURRENT
+    }
+    return when {
+        lastSeq == snapshotEventSeq -> BurstSnapshotRelation.CURRENT
+        lastSeq > snapshotEventSeq -> BurstSnapshotRelation.OUTRAN_BY_LATER_EVENT
+        else -> BurstSnapshotRelation.SNAPSHOT_AHEAD_WITHOUT_PENDING_EVENT
+    }
 }
 
 /** Stable `reason=` tokens for `editor_op_capture_refused` receipts. */
@@ -150,10 +189,10 @@ internal enum class ReportOutcome { TERMINAL, RETRYABLE }
 internal fun baseHashRetriesExhaustedUtil(attempts: Int): Boolean =
     attempts >= BASE_HASH_RETRY_LIMIT
 
-/** A buffer text and the modification stamp it was read with, from one read action. */
+/** A buffer text and the `DocumentEvent` sequence it was read with, from one read action. */
 internal data class DocumentSnapshot(
     val text: String,
-    val stamp: Long,
+    val eventSeq: Long,
 )
 
 internal data class PreparedEditorOp(
@@ -309,6 +348,18 @@ object TypingTracker : DocumentListener {
     // does resolve, so a transient failure never counts toward the bound.
     private val baseHashRetries = ConcurrentHashMap<String, Int>()
 
+    // GH #242: a per-Document count of the `DocumentEvent`s this listener has seen.
+    // It is the drain's race clock instead of `Document.modificationStamp`, which
+    // the platform rewrites without an event (undo, save, Remote Dev sync). It is
+    // bumped inside `documentChanged` (under the write action) and read with the
+    // text inside one read action, so a snapshot's sequence counts exactly the
+    // events its text contains. Keyed by Document, so a rename keeps the clock.
+    private val documentEventSeqs =
+        java.util.Collections.synchronizedMap(java.util.WeakHashMap<Document, java.util.concurrent.atomic.AtomicLong>())
+
+    private fun documentEventSeq(document: Document): java.util.concurrent.atomic.AtomicLong =
+        documentEventSeqs.computeIfAbsent(document) { java.util.concurrent.atomic.AtomicLong(0L) }
+
     // #falsetyping-guard: paths with an unsaved *local operator* edit ahead of
     // disk. Set only when an operator-attributable document change lands; cleared whenever
     // the document is observed clean (fully flushed to disk) or closed. The CLI
@@ -338,7 +389,7 @@ object TypingTracker : DocumentListener {
             oldFragment = event.oldFragment.toString(),
             newFragment = event.newFragment.toString(),
             nonOperatorMutation = nonOperatorMutation,
-            docStamp = event.document.modificationStamp,
+            eventSeq = documentEventSeq(event.document).incrementAndGet(),
         )
         recordPendingEditorOp(filePath, op)
         scheduleFullContentReport(filePath, event.document)
@@ -655,21 +706,21 @@ object TypingTracker : DocumentListener {
     /**
      * Read the buffer text and its modification stamp inside ONE read action.
      *
-     * `#opcapturedormant`: the stamp is only a usable race detector if it is
-     * consistent with the text it is paired with, so both have to come out of the
-     * same read action.
+     * `#opcapturedormant`: the event sequence is only a usable race detector if it
+     * is consistent with the text it is paired with, so both have to come out of
+     * the same read action (GH #242: the sequence, not `modificationStamp`).
      */
     private fun tryReadDocumentSnapshot(document: Document): DocumentSnapshot? {
         val application =
             com.intellij.openapi.application.ApplicationManager.getApplication() as? ApplicationEx
                 ?: return null
         if (application.isReadAccessAllowed) {
-            return DocumentSnapshot(document.text, document.modificationStamp)
+            return DocumentSnapshot(document.text, documentEventSeq(document).get())
         }
         val snapshotRef = AtomicReference<DocumentSnapshot?>()
         return if (
             application.tryRunReadAction {
-                snapshotRef.set(DocumentSnapshot(document.text, document.modificationStamp))
+                snapshotRef.set(DocumentSnapshot(document.text, documentEventSeq(document).get()))
             }
         ) {
             snapshotRef.get()
@@ -776,11 +827,13 @@ object TypingTracker : DocumentListener {
         drainedOps: List<PendingEditorOp>,
     ) {
         if (drainedOps.isEmpty()) return
-        if (!capturedBurstMatchesSnapshotUtil(drainedOps, snapshot.stamp)) {
-            // The buffer moved on after the snapshot: keep the ops and retry at the
-            // next quiet boundary rather than replaying them against stale text.
+        val relation = classifyBurstAgainstSnapshotUtil(drainedOps, snapshot.eventSeq)
+        if (relation == BurstSnapshotRelation.OUTRAN_BY_LATER_EVENT) {
+            // A later DocumentEvent landed after the snapshot. Keep the ops for the
+            // quiet boundary THAT event already scheduled (GH #242): scheduling a
+            // retry here would be a timer with no edge behind it, which is the
+            // unbounded 75 ms loop the old stamp check produced.
             requeuePendingEditorOps(filePath, drainedOps)
-            scheduleFullContentReport(filePath, document)
             logOpCaptureRefusal(
                 lib,
                 filePath,
@@ -789,13 +842,16 @@ object TypingTracker : DocumentListener {
             )
             return
         }
+        // CURRENT, or SNAPSHOT_AHEAD_WITHOUT_PENDING_EVENT: no event is owed to this
+        // burst, so it is decided now by replay against the snapshot text.
         val opReports = prepareEditorOpReports(snapshot.text, drainedOps)
         if (opReports == null) {
             logOpCaptureRefusal(
                 lib,
                 filePath,
                 OpCaptureRefusal.SHADOW_REPLAY_MISMATCH,
-                "ops=${drainedOps.size} operator_ops=${drainedOps.count { !it.nonOperatorMutation }}",
+                "ops=${drainedOps.size} operator_ops=${drainedOps.count { !it.nonOperatorMutation }}" +
+                    " snapshot=${relation.name.lowercase()}",
             )
             return
         }

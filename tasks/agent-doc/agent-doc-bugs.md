@@ -454,6 +454,35 @@ I checked all 3 review items against current evidence. **None can be acted on by
 - `#pypiquotarecheck` waits on an external PyPI support reply; it was rechecked 2026-10-12, headroom fine.
 
 Details are in the 05:45 response. The review list is unchanged at 3 gated items.
+❯ 🚧 Run Agent Doc + editing during the turn in infra.md resulted in duplication + corruption of the queue items:
+```
+- 🚧 do [#fpeseverityparse]
+- do - [from:actionable-review key=stggrafanaowner] do [#stggrafanaowner]
+[#sbxdeeplevers]
+- do [#stgrefreshonly]
+- do [#stggrafanaowner]do [#sbxdeeplevers]
+- do [#stgrefreshonly]
+- do [#stggrafanaowner]
+```
+
+### Re: infra.md queue duplication and corruption — opus-5-5 · 2026-10-12T06:05-04:00
+
+This report is now queue item `#fpeseverityparse`. I claimed it and handed it to a background subagent working on branch `fpeparse` in its own worktree. It will only read infra.md (its ops.log and git history) to work out which writer caused each symptom:
+- the doubled `do - do -` prefixes;
+- the `[from:actionable-review key=...]` provenance tag left visible in the queue text;
+- two items joined onto one line (`do [#stggrafanaowner]do [#sbxdeeplevers]`);
+- the repeated tail.
+
+The likely suspects are the actionable-review queue mirror, the 🚧 in-progress marker rewrite, and how queue lines are spliced when your edits land mid-turn. The subagent will fix the cause, add a regression test that replays the same interleaving, and update the spec. I'll integrate it with the next batch. Until then, infra.md's queue still holds the corrupted lines, and nothing touches that document.
+
+Other work still running:
+- **v0.35.492:** `make release` is still running its checks. Nothing is tagged yet.
+- **idleclear:** being reworked, and it will also fix the red tmux test on `main`.
+- **Build/test turnaround:** still in progress.
+- **gh241:** ready and waiting for the next batch.
+- **Rider/IDE independent navigation (`#ideriderindependentnav`):** the agent stopped while waiting on its own `make check`, so I restarted it to finish and report.
+
+The exchange is long: 433 lines across 23 responses. I'm leaving it alone while the queue is active.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -462,6 +491,7 @@ Details are in the 05:45 response. The review list is unchanged at 3 gated items
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#fpeseverityparse]
 - 🚧 do [#idleclearrestart]: Yes, Idle clear should type `/clear`.
 - 🚧 How can we optimize the agent-doc build process + test process to reduce the turnaround time?
 - 🚧 sdk.md issue: Run Agent Doc, then `/clear` in the Claude Code terminal: Clear command is not operated.
@@ -473,6 +503,15 @@ Details are in the 05:45 response. The review list is unchanged at 3 gated items
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fpeseverityparse] Run Agent Doc + editing during the turn in infra.md resulted in duplication + corruption of the queue items:
+  ```
+  - 🚧 do - do - [from:actionable-review key=stggrafanaowner] do [#stggrafanaowner]
+  [#sbxdeeplevers]
+  - do [#stgrefreshonly]
+  - do [#stggrafanaowner]do [#sbxdeeplevers]
+  - do [#stgrefreshonly]
+  - do [#stggrafanaowner]
+  ```
 - [ ] 🚧 [#idleclearrestart] [operator-verify] [agent-doc] Decide: Clear Session Context at an idle prompt restarts the Claude process (supervisor_restart_fresh) instead of typing /clear, killing running Claude background agents/shells with no report (2026-10-11 live test: agent stopped at 12/40 ticks). Queued clears type /clear. Should idle Clear type /clear too?
 <!-- /agent:backlog -->
 

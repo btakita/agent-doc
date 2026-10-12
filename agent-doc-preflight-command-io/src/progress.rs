@@ -469,10 +469,25 @@ mod tests {
     /// starts.
     #[test]
     fn crossing_the_deadline_at_a_phase_boundary_refuses_by_name() {
-        let progress = PreflightProgress::with_admission_deadline(Duration::from_millis(40));
+        // Cross the deadline by moving it, not by sleeping past it: a 40ms
+        // budget leaves a ~0ms deadline after the margin, so under suite load
+        // the FIRST phase already started late and the test failed before it
+        // reached the boundary it is about (#flakyintegrate0494).
+        let progress = PreflightProgress::with_admission_deadline(Duration::from_secs(3600));
         let _guard = install(progress.clone());
         enter("resolve_initial_document").expect("inside the deadline the phase starts");
-        std::thread::sleep(Duration::from_millis(40));
+        INSTALLED.with(|slot| {
+            let installed = slot.borrow_mut();
+            let installed = installed.as_ref().expect("installed run");
+            let deadline = installed.deadline.expect("run carries a deadline");
+            assert!(!deadline.remaining_at(Instant::now()).is_zero());
+        });
+        INSTALLED.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let installed = slot.as_mut().expect("installed run");
+            let deadline = installed.deadline.as_mut().expect("run carries a deadline");
+            deadline.at = Instant::now();
+        });
         let err = enter("settle_debounce").expect_err("the deadline has passed");
         let refusal = err
             .downcast_ref::<PreflightAdmissionRefused>()

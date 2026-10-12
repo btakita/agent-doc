@@ -724,10 +724,34 @@ pub fn drainable_head_prompt_for_scope(content: &str, scope: DrainScope) -> Opti
 /// Stop recovery uses this projection so deferred review mirrors cannot create
 /// response debt after closeout. Explicit stop/time fences still park the work.
 pub fn pending_head_prompt_text(content: &str, scope: DrainScope) -> Option<String> {
+    pending_head_prompt_text_excluding_claimed(content, scope, &ClaimedQueueItems::none())
+}
+
+/// [`pending_head_prompt_text`], skipping heads `claimed` by a worker.
+///
+/// `#fixlazilycodex`: a head a subagent owns (`agent:queue subagents`) is not
+/// session-owned prompt debt. Stop recovery that saw such a head after a
+/// committed cycle reopened a fresh cycle and captured Codex's closing status
+/// chat as its "recovered response" — every Stop, until a status repeated
+/// verbatim and the reopen failed closed against HEAD. Claimed heads are
+/// filtered out before the stop/time fences and eligibility are evaluated,
+/// exactly as [`live_drainable_head_prompt_text_excluding_claimed`] does.
+pub fn pending_head_prompt_text_excluding_claimed(
+    content: &str,
+    scope: DrainScope,
+    claimed: &ClaimedQueueItems,
+) -> Option<String> {
     if crate::queue_heads::queue_is_explicitly_stopped(content) {
         return None;
     }
     let (queue_facts, entries) = queue_component_entries(content)?;
+    let entries: Vec<QueueEntry> = entries
+        .into_iter()
+        .filter(|entry| match entry {
+            QueueEntry::Prompt(prompt) => !claimed.claims(&prompt.text),
+            _ => true,
+        })
+        .collect();
     if document_queue::has_stop_fence_at_head(&entries)
         || document_queue::time_gate_at_head(&entries).is_some()
     {
@@ -1622,6 +1646,40 @@ pub fn head_carries_operator_verdict(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#fixlazilycodex`: a worker-claimed head is not session prompt debt;
+    /// the next unclaimed head is, and a fully claimed queue has none.
+    #[test]
+    fn pending_head_prompt_text_excluding_claimed_skips_worker_owned_heads() {
+        let content = "<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n\
+                       <!-- agent:backlog -->\n- [ ] [#a] Item a.\n- [ ] [#b] Item b.\n\
+                       <!-- /agent:backlog -->\n";
+        let claim = |items: &[&str]| {
+            crate::queue_claim::ClaimedQueueItems::from_identities(
+                items
+                    .iter()
+                    .map(|item| crate::queue_claim::claim_identity(item)),
+            )
+        };
+        let scope = DrainScope::InSessionLoop;
+        assert_eq!(
+            pending_head_prompt_text(content, scope).as_deref(),
+            Some("do [#a]")
+        );
+        assert_eq!(
+            pending_head_prompt_text_excluding_claimed(content, scope, &claim(&["do [#a]"]))
+                .as_deref(),
+            Some("do [#b]")
+        );
+        assert_eq!(
+            pending_head_prompt_text_excluding_claimed(
+                content,
+                scope,
+                &claim(&["do [#a]", "do [#b]"])
+            ),
+            None
+        );
+    }
 
     /// `#qreviewdefer`: the reported `fpe.md` shape, reduced. A `priority go`
     /// queue whose only live head names an id that is a GATED `[operator-verify]`

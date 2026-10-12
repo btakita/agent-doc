@@ -58,6 +58,17 @@ not pause, and a holder that cannot converge gets its named recovery instead
 of a wait (`#sdkretained`, see
 [orchestration commands](07-orchestration-commands.md)).
 
+After a committed cycle, the Codex Stop hook treats only session-owned work as
+prompt debt: a queue head a worker claimed (or the queue-level `subagents` plan
+holds back) is excluded, exactly as the auto-queue continuation gate excludes
+it. A Stop whose payload HEAD already holds verbatim is the committed
+closeout's own text, so it is an idempotent no-op — no fresh cycle, no capture,
+logged `codex_stop_post_commit_payload_already_committed` — never a fail-closed
+error: with no other work it allows the stop, and any work session-check still
+reports is handed back in-pane without recapturing the payload. A payload that
+is new, or visible only in the uncommitted current authority, keeps the
+reopen-and-capture or fail-closed behavior (`#fixlazilycodex`).
+
 ### Claude-Code-Specific (Coupling Points)
 
 | Component | Coupling | Impact |

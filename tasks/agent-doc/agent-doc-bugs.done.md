@@ -494,3 +494,16 @@
 - 2026-10-12 [#simworldcitimeout] [agent-doc] CI run 38286493725 (aa0e9ccffe, 2026-10-12) failed with four sim_world::two_ide_navigation_model tests (per_installation and shared variants) hitting the 180s nextest TIMEOUT on the GitHub runner; locally the model search takes about 23 to 48s. The exhaustive search grew with each lane phase (now about 19 events at depth 5). Make the model check bounded and fast on a 2-4 core runner (partial-order reduction, symmetry, or splitting scenarios) without dropping any mutation it must catch; never raise the timeout.
 - 2026-10-12 [#controllerforkimage] [agent-doc] Production project_controller_pids and controller_project_roots in agent-doc-controller-io/src/process.rs match processes by command line, so under dash a controller's un-execed fork child (same cmdline as its parent) can be counted as a second controller (found by reaperciflake). Filter un-execed fork images with the new is_unexeced_fork_of_parent helper wherever controllers are counted or targeted, with tests.
 - 2026-10-12 [#cleanreadmeconcise] Clean up the README.md to be more concise and appealing to humans. Explain that it works with JetBrains + VSCode + Zed + direct with Claude Code + Codex + Grok Build + OpenCode.
+- 2026-10-12 [#fixrunturn] Fix Run Agent Doc turn rejection on infra.md
+  ```
+  • The overlapping agent-doc invocation was refused because the prior finalize was still completing. Session recovery is
+  now healthy: cycle cycle-1791841356168 is committed.
+
+  Pending queue prompt, verbatim:
+
+  > What is the merge order for my accepted PRs on haiven-infra?
+
+  No new response cycle was started.
+
+  Worked for 17m 59s • 5:43 PM
+  ```

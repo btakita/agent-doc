@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -1285,6 +1284,40 @@ What the infra.md log shows (`src/haiven-dev/.agent-doc/logs/49c08721-….log`):
 The subagent's job: find which gate refuses, then make an overlapping invocation either wait and then admit, or defer durably and re-dispatch on its own. A terminal refusal that drops the prompt is not acceptable. It also adds SimWorld regression coverage, updates the spec, and runs `make check`.
 
 Exchange is 1239 lines / 57 sections. It needs a compaction at some point, but the queue is active so I'm not stopping for it.
+
+### Re: #fixrunturn — infra.md overlapping-turn rejection fixed — opus-5-5 · 2026-10-12T18:31-04:00
+
+> **Queue prompt:** do [#fixrunturn]
+
+The subagent finished. I integrated its commit `8cbd2f5672`, a fast-forward onto `origin/main`, pushed it to main, and ran `make install` from the fixrunturn worktree (exit 0, agent-doc 0.35.495).
+
+**Root cause (from the ops log and the Codex transcript):**
+1. **21:42:20Z:** Run Agent Doc landed while Codex was 17 minutes into a turn. The queue prompt wasn't committed yet, so the route typed a bare `agent-doc <FILE>` plus Enter into the busy pane (`submit_bare_trigger`).
+2. **21:42:38Z:** Codex fed that typed line into the running turn while the turn's own finalize had cycle-1791841356168 at `write_applied`.
+   - `same_turn_admitted_invocation` in `agent-doc-codex-hook-io/src/lib.rs` only reused the turn's admission when the cycle was still at `preflight_started`.
+   - So the hook ran a fresh preflight, which refused ("previous cycle is still `write_applied`"), and it recorded `preflight_admitted=false` (`src/preflight_hook.rs`).
+3. **21:43:03Z:** the Codex Stop hook (`agent-doc-codex-stop-io/src/lib.rs`) saw that refusal, discarded the session's document binding, and ended the turn without the queue continuation. Nothing answered the prompt until you pressed Run again at 21:44:51Z.
+
+**Fix:** `classify_same_turn_repeat` now has a `CloseoutInFlight` case for cycles at `response_captured` or `write_applied`.
+- In that case the hook skips preflight and records no refusal. It tells the agent it is still admitted, and to let the closeout finish without starting a second response.
+- It logs `codex_same_turn_repeat_coalesced_into_closeout`.
+- Because the turn keeps its admission, the Stop hook's existing continuation re-sends the queued prompt once the cycle commits. No new state was added.
+
+**Tests:**
+- **Unit tests** in `agent-doc-codex-hook-io`: `exact_same_turn_trigger_during_own_closeout_is_coalesced_not_refused` and `same_turn_repeat_classification_covers_every_cycle_phase`.
+- **Stop hook regression** `same_turn_repeat_during_closeout_keeps_stop_queue_continuation`: replays the incident and asserts the queued prompt is re-sent.
+  - A companion test, `refusal_receipt_for_same_turn_repeat_strands_the_queue_prompt`, shows the old refusal path strands it.
+- **CLI integration** `codex_hook_cli_coalesces_same_turn_repeat_into_in_flight_closeout`.
+- **Results:** `make check` exit 0, 10422 passed and 167 skipped. These are unit and CLI tests rather than a SimWorld scenario, because SimWorld does not model the Codex hooks.
+- **CI:** the run for `8cbd2f5672` is still in progress.
+
+**Specs:** `specs/09-git-integration.md` and `specs/codex-support.md`.
+
+**Also open:**
+- **Second worker on the same item:** a Codex worker dispatched from `tasks/software/lazily.md` is working the other half of this incident, uncommitted, in `~/worktrees/agent-doc-fixrunturn-stack-20261012` (branch `fix/run-agent-doc-turn-rejection-20261012`). Its change is in `agent-doc-route-io`, so Run Agent Doc stops typing a bare trigger into a busy pane. The two changes touch different files. That worker owns its own integration, so I left it alone.
+- **Stale shared checkout:** the shared `src/agent-doc` checkout is behind `origin/main` and has other sessions' uncommitted edits, so I didn't move it or bump the superproject submodule pointer.
+
+The exchange is now about 1250 lines across 58 sections, so it needs a compaction at some point.
 <!-- agent:boundary:3e1f2a15 -->
 <!-- /agent:exchange -->
 
@@ -1292,26 +1325,12 @@ Exchange is 1239 lines / 57 sections. It needs a compaction at some point, but t
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixrunturn]
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#fixrunturn] Fix Run Agent Doc turn rejection on infra.md
-  ```
-  • The overlapping agent-doc invocation was refused because the prior finalize was still completing. Session recovery is
-  now healthy: cycle cycle-1791841356168 is committed.
-
-  Pending queue prompt, verbatim:
-
-  > What is the merge order for my accepted PRs on haiven-infra?
-
-  No new response cycle was started.
-
-  Worked for 17m 59s • 5:43 PM
-  ```
 <!-- /agent:backlog -->
 
 ## Review

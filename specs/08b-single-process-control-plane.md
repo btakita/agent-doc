@@ -508,6 +508,18 @@ deterministic tests.
   completed without the matching backlog mutation in the same committed cycle.
 - Actor state transitions are append-only facts in `actor_transitions`; current
   rows are materialized views over those facts for fast reads.
+- Navigation-lane cleanup is controller-owned reactive state, not a caller's
+  chore (`#ridernavp6gc`, see
+  [Session tmux commands](07-session-tmux-commands.md)). The editor surface
+  graph publishes the editor installations live on the project into
+  `NavigationLaneReconcileGraph` (controller `ProcessScope`) whenever a surface
+  joins or retires; a `Computed` derives the lane reconcile request from the
+  controller's navigation mode (fixed for its lifetime) and the seen and live
+  installation sets, and an `Effect` hands each new request to one worker that
+  runs the reconcile and publishes a receipt back into the graph. A retired
+  installation is the only liveness evidence that lets the controller close a
+  lane; an installation it never saw is treated as live, and `agent-doc gc`
+  remains the operator sweep for those.
 
 ## Controller process lifecycle
 

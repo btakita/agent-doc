@@ -206,7 +206,10 @@ banner.
   session with no document pane, no busy pane, and no attached client. Sessions without the
   `@agent_doc_navigation_lane` mark for this root are never touched. Prints
   `[gc] navigation lane <session>: ...` per planned action; `--dry-run` changes nothing. A
-  project without a `tmux_session` pin skips this step without reading tmux.
+  project without a `tmux_session` pin skips this step without reading tmux. The project
+  controller also runs this reconcile on its own when an editor installation retires and at its
+  start under `shared` (`#ridernavp6gc`), so `gc` is only needed for lanes of installations the
+  running controller never saw.
 - `preflight` runs the full orphan-file GC automatically at most once per day via a coordination throttle in `.agent-doc/state.db`; `preflight`, `start`, and `sync` still run the lightweight stale-`starting` actor cleanup every cycle.
 
 ## checkpoint

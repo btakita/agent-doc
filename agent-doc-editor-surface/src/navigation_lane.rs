@@ -518,6 +518,115 @@ pub fn plan_navigation_lane_reconcile(
     actions
 }
 
+/// Which installation lanes a lane reconcile treats as in use by a live editor
+/// installation (`#ideriderindependentnav` P5 follow-up).
+///
+/// An attached tmux client and a busy pane keep a lane in every case; this is
+/// only the editor-liveness half of [`LaneSessionObservation::live_surface`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaneLiveness {
+    /// `agent-doc gc`: exactly these installations are live, every other
+    /// installation is not. The CLI knows no editor, so it passes an empty set
+    /// and an attached terminal is its only liveness proof.
+    Live(std::collections::BTreeSet<String>),
+    /// The project controller: only these installations are proven gone (it
+    /// saw them live and then saw every one of their surfaces retire); every
+    /// other installation's lane counts as live. A controller that never saw
+    /// an installation (it quit before this controller started, or has not
+    /// reconnected yet) cannot tell it is gone, so its lane is left to `gc`.
+    RetiredOnly(std::collections::BTreeSet<String>),
+}
+
+impl LaneLiveness {
+    /// Whether `session` is the lane of an installation this evidence counts
+    /// as live, for lanes of `project_session`.
+    pub fn lane_session_live(&self, project_session: &str, session: &str) -> bool {
+        let lane_of = |installation: &String| {
+            NavigationLane::Installation(installation.clone()).tmux_session_name(project_session)
+                == session
+        };
+        match self {
+            Self::Live(live) => live.iter().any(lane_of),
+            Self::RetiredOnly(retired) => !retired.iter().any(lane_of),
+        }
+    }
+}
+
+/// The controller-side request to run the lane reconcile
+/// (`#ideriderindependentnav` P5 follow-up, `#ridernavp6gc`).
+///
+/// The controller derives it from the navigation mode it runs under and the
+/// editor installations it has seen live; its `Effect` runs the reconcile each
+/// time the derived request changes, so neither an IDE that quits nor a
+/// `per_installation` → `shared` switch waits for `agent-doc gc`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaneReconcileTrigger {
+    pub mode: NavigationMode,
+    /// Installations this controller saw live whose every surface has since
+    /// retired (a relaunched installation leaves this set again).
+    pub retired: std::collections::BTreeSet<String>,
+}
+
+impl LaneReconcileTrigger {
+    /// The liveness evidence the reconcile runs on.
+    ///
+    /// In `per_installation` mode only the retired installations' lanes may
+    /// close. In `shared` mode no installation navigates a lane any more, so
+    /// no installation keeps one: each lane folds its document panes back and
+    /// closes unless an attached terminal or a busy pane keeps it, exactly as
+    /// `agent-doc gc` does.
+    pub fn liveness(&self) -> LaneLiveness {
+        match self.mode {
+            NavigationMode::PerInstallation => LaneLiveness::RetiredOnly(self.retired.clone()),
+            NavigationMode::Shared => LaneLiveness::Live(Default::default()),
+        }
+    }
+
+    /// A short label for logs: `mode=<mode> retired=<a,b>`.
+    pub fn describe(&self) -> String {
+        format!(
+            "mode={} retired={}",
+            self.mode.as_str(),
+            self.retired
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
+}
+
+/// Derive the controller's lane reconcile request, or `None` when there is
+/// nothing a reconcile could do yet.
+///
+/// - `mode` is the mode the controller runs under. It is read once per
+///   controller start, so a mode switch reaches here as a controller start
+///   with the new mode.
+/// - `seen` are the editor installations this controller saw live, `live` the
+///   ones live now (an installation is live while any of its surfaces is).
+///
+/// `shared` always requests a reconcile: the first one is the disable
+/// migration (fold lane panes back, close the lanes), and a later retirement
+/// re-requests it so a lane an attached terminal kept is closed once that
+/// IDE goes away. `per_installation` requests one only once an installation
+/// it saw has retired: enabling moves no pane, and a newly live installation
+/// never makes a lane closable.
+pub fn derive_lane_reconcile_trigger(
+    mode: NavigationMode,
+    seen: &std::collections::BTreeSet<String>,
+    live: &std::collections::BTreeSet<String>,
+) -> Option<LaneReconcileTrigger> {
+    let retired = seen
+        .difference(live)
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    match mode {
+        NavigationMode::Shared => Some(LaneReconcileTrigger { mode, retired }),
+        NavigationMode::PerInstallation if retired.is_empty() => None,
+        NavigationMode::PerInstallation => Some(LaneReconcileTrigger { mode, retired }),
+    }
+}
+
 /// The key every layout-ownership decision is made under: one project root's
 /// one navigation lane. In shared mode every client of a root maps to the same
 /// key, so keying by it is identical to the historical per-root keying.
@@ -928,6 +1037,63 @@ mod tests {
         );
     }
 
+    fn installations(names: &[&str]) -> std::collections::BTreeSet<String> {
+        names.iter().map(|name| (*name).to_string()).collect()
+    }
+
+    #[test]
+    fn per_installation_reconciles_only_after_a_seen_installation_retires() {
+        let mode = NavigationMode::PerInstallation;
+        // Controller start: nothing seen, nothing to prove gone.
+        assert_eq!(
+            derive_lane_reconcile_trigger(mode, &installations(&[]), &installations(&[])),
+            None
+        );
+        // An installation joins: a new live installation never makes a lane
+        // closable.
+        let seen = installations(&["IU.0a", "RD.9f"]);
+        assert_eq!(derive_lane_reconcile_trigger(mode, &seen, &seen), None);
+        // Rider quits.
+        let trigger =
+            derive_lane_reconcile_trigger(mode, &seen, &installations(&["IU.0a"])).unwrap();
+        assert_eq!(trigger.retired, installations(&["RD.9f"]));
+        assert_eq!(
+            trigger.liveness(),
+            LaneLiveness::RetiredOnly(installations(&["RD.9f"]))
+        );
+        assert_eq!(trigger.describe(), "mode=per_installation retired=RD.9f");
+        // Rider relaunches: nothing is proven gone again.
+        assert_eq!(derive_lane_reconcile_trigger(mode, &seen, &seen), None);
+    }
+
+    #[test]
+    fn shared_mode_always_reconciles_and_counts_no_installation_live() {
+        let mode = NavigationMode::Shared;
+        // Controller start under `shared`: the disable migration runs at once.
+        let start =
+            derive_lane_reconcile_trigger(mode, &installations(&[]), &installations(&[])).unwrap();
+        assert_eq!(start.liveness(), LaneLiveness::Live(installations(&[])));
+        // A retirement changes the request, so the reconcile runs again (a
+        // lane an attached terminal kept can close now).
+        let seen = installations(&["IU.0a"]);
+        let retired = derive_lane_reconcile_trigger(mode, &seen, &installations(&[])).unwrap();
+        assert_ne!(retired, start);
+        assert_eq!(retired.liveness(), LaneLiveness::Live(installations(&[])));
+    }
+
+    #[test]
+    fn lane_liveness_maps_installations_to_their_lane_sessions() {
+        let live = LaneLiveness::Live(installations(&["IU.0a"]));
+        assert!(live.lane_session_live("p", "p-IU-0a"));
+        assert!(!live.lane_session_live("p", "p-RD-9f"));
+        assert!(!LaneLiveness::Live(installations(&[])).lane_session_live("p", "p-IU-0a"));
+        let retired = LaneLiveness::RetiredOnly(installations(&["RD.9f"]));
+        assert!(!retired.lane_session_live("p", "p-RD-9f"));
+        // Never seen retire: an unknown installation's lane is left alone.
+        assert!(retired.lane_session_live("p", "p-IU-0a"));
+        assert!(retired.lane_session_live("p", "p-CL-11"));
+    }
+
     use std::collections::BTreeMap;
 
     proptest! {
@@ -1058,6 +1224,26 @@ mod tests {
                 .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'));
             prop_assert!(is_lane_session_of(&project, &session));
             prop_assert_ne!(session, NavigationLane::Shared.tmux_session_name(&project));
+        }
+
+        #[test]
+        fn a_controller_trigger_never_counts_a_live_installation_gone(
+            seen in prop::collection::btree_set("[A-Z]{2}\\.[0-9a-f]{2}", 0..5),
+            live in prop::collection::btree_set("[A-Z]{2}\\.[0-9a-f]{2}", 0..5),
+        ) {
+            if let Some(trigger) =
+                derive_lane_reconcile_trigger(NavigationMode::PerInstallation, &seen, &live)
+            {
+                prop_assert!(!trigger.retired.is_empty());
+                for installation in &live {
+                    let session =
+                        NavigationLane::Installation(installation.clone()).tmux_session_name("p");
+                    prop_assert!(trigger.liveness().lane_session_live("p", &session));
+                }
+                for installation in &trigger.retired {
+                    prop_assert!(seen.contains(installation) && !live.contains(installation));
+                }
+            }
         }
     }
 }

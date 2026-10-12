@@ -1427,9 +1427,10 @@ mod multi_tmux_session_model {
 /// - every mutation below is detected.
 mod two_ide_navigation_model {
     use agent_doc_editor_surface::{
-        InstallationFocus, LaneClaim, LanePaneObservation, LaneReconcileAction,
-        LaneSessionObservation, LayoutOwnerKey, NavigationLane, NavigationMode, SurfaceAuthority,
-        editor_installation, is_lane_session_of, partition_lane_layout_columns_for_claim,
+        InstallationFocus, LaneClaim, LaneLiveness, LanePaneObservation, LaneReconcileAction,
+        LaneReconcileTrigger, LaneSessionObservation, LayoutOwnerKey, NavigationLane,
+        NavigationMode, SurfaceAuthority, derive_lane_reconcile_trigger, editor_installation,
+        is_lane_session_of, partition_lane_layout_columns_for_claim,
         plan_navigation_lane_reconcile,
     };
     use std::collections::{BTreeMap, BTreeSet};
@@ -1490,6 +1491,13 @@ mod two_ide_navigation_model {
         GcIgnoresOwnedPanes,
         /// The gc ignores a live installation's lane (P5).
         GcIgnoresLiveSurface,
+        /// The controller's own reconcile counts no installation live, so a
+        /// retirement closes every empty lane, a live IDE's included
+        /// (`#ridernavp6gc`).
+        TriggerIgnoresLiveness,
+        /// The controller's own reconcile reaps lane-named sessions without
+        /// checking the mark (`#ridernavp6gc`).
+        TriggerIgnoresMark,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1501,7 +1509,10 @@ mod two_ide_navigation_model {
         Retire(usize),
         /// The project switches `editor_navigation` (P5).
         SetMode(NavigationMode),
-        /// `agent-doc gc` runs the lane reconcile (P5).
+        /// `agent-doc gc` runs the lane reconcile (P5). The controller also
+        /// runs it on its own after every event that changes its trigger
+        /// (`#ridernavp6gc`); that is not an event, it follows `Retire` and
+        /// `SetMode`.
         Gc,
     }
 
@@ -1538,6 +1549,13 @@ mod two_ide_navigation_model {
         folded: Vec<(String, String)>,
         /// A disable's gc left a document pane in a lane session.
         unfolded_after_disable: Vec<(String, String)>,
+        /// Clients the running controller saw live (reset by a restart, after
+        /// which the live clients reconnect) (`#ridernavp6gc`).
+        seen: BTreeSet<usize>,
+        /// The controller trigger its reconcile last ran for.
+        dispatched: Option<LaneReconcileTrigger>,
+        /// How many reconciles the controller ran on its own.
+        auto_reconciles: usize,
     }
 
     struct Sim {
@@ -1548,15 +1566,52 @@ mod two_ide_navigation_model {
 
     impl Sim {
         fn new(mode: NavigationMode, mutation: Mutation) -> Self {
-            Self {
+            let mut sim = Self {
                 mode,
                 mutation,
                 world: World {
                     live: (0..CLIENTS.len()).collect(),
+                    seen: (0..CLIENTS.len()).collect(),
                     foreign_alive: true,
                     ..World::default()
                 },
+            };
+            sim.controller_reconcile();
+            sim
+        }
+
+        /// The installations of `clients` (unscoped clients have none).
+        fn installations(clients: &BTreeSet<usize>) -> BTreeSet<String> {
+            clients
+                .iter()
+                .filter_map(|client| editor_installation(CLIENTS[*client].0))
+                .map(str::to_string)
+                .collect()
+        }
+
+        /// The controller's own lane reconcile (`#ridernavp6gc`): the
+        /// production trigger over the installations it saw and the ones
+        /// live now; it runs whenever the derived request changes.
+        fn controller_reconcile(&mut self) {
+            let trigger = derive_lane_reconcile_trigger(
+                self.mode,
+                &Self::installations(&self.world.seen),
+                &Self::installations(&self.world.live),
+            );
+            let Some(trigger) = trigger else {
+                self.world.dispatched = None;
+                return;
+            };
+            if self.world.dispatched.as_ref() == Some(&trigger) {
+                return;
             }
+            self.world.dispatched = Some(trigger.clone());
+            self.world.auto_reconciles += 1;
+            let liveness = match self.mutation {
+                Mutation::TriggerIgnoresLiveness => LaneLiveness::Live(BTreeSet::new()),
+                _ => trigger.liveness(),
+            };
+            self.reconcile(&liveness, self.mutation == Mutation::TriggerIgnoresMark);
         }
 
         fn lane(&self, client: usize) -> NavigationLane {
@@ -1637,7 +1692,10 @@ mod two_ide_navigation_model {
                         }
                     }
                 }
-                Event::SetMode(mode) => self.set_mode(mode),
+                Event::SetMode(mode) => {
+                    self.set_mode(mode);
+                    self.controller_reconcile();
+                }
                 Event::Gc => self.gc(),
                 Event::Retire(client) => {
                     if !self.world.live.remove(&client) {
@@ -1659,6 +1717,7 @@ mod two_ide_navigation_model {
                             self.world.writers_since_handoff.clear();
                         }
                     }
+                    self.controller_reconcile();
                 }
             }
         }
@@ -1672,6 +1731,10 @@ mod two_ide_navigation_model {
             }
             let enabling = mode == NavigationMode::PerInstallation;
             self.mode = mode;
+            // The restarted controller has seen only the clients that
+            // reconnect to it.
+            self.world.seen = self.world.live.clone();
+            self.world.dispatched = None;
             self.world.writers.clear();
             self.world.writers_since_handoff.clear();
             self.world.deferred = 0;
@@ -1710,8 +1773,21 @@ mod two_ide_navigation_model {
                 .collect()
         }
 
-        /// `agent-doc gc`: the production lane reconcile over this world.
+        /// `agent-doc gc`: the production lane reconcile over this world. The
+        /// model's gc is told the live installations, like a controller that
+        /// knows them all.
         fn gc(&mut self) {
+            let live = if self.mode == NavigationMode::PerInstallation {
+                Self::installations(&self.world.live)
+            } else {
+                BTreeSet::new()
+            };
+            self.reconcile(&LaneLiveness::Live(live), false);
+        }
+
+        /// The production lane reconcile over this world, with the given
+        /// installation liveness.
+        fn reconcile(&mut self, liveness: &LaneLiveness, ignore_mark: bool) {
             let live = self.live_lane_sessions();
             let mut observed = self
                 .world
@@ -1720,7 +1796,7 @@ mod two_ide_navigation_model {
                 .map(|session| LaneSessionObservation {
                     session: session.clone(),
                     marked: true,
-                    live_surface: live.contains(session),
+                    live_surface: liveness.lane_session_live(PROJECT_SESSION, session),
                     panes: self
                         .world
                         .pane_session
@@ -1757,6 +1833,9 @@ mod two_ide_navigation_model {
                     }
                     Mutation::GcIgnoresLiveSurface => lane.live_surface = false,
                     _ => {}
+                }
+                if ignore_mark {
+                    lane.marked = true;
                 }
             }
             let plan = plan_navigation_lane_reconcile(self.mode, PROJECT_SESSION, true, &observed);
@@ -2181,6 +2260,89 @@ mod two_ide_navigation_model {
             violation.contains("while its installation is live"),
             "{violation}"
         );
+    }
+
+    #[test]
+    fn a_controller_reconcile_closing_a_live_lane_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::TriggerIgnoresLiveness,
+            DEPTH,
+        )
+        .expect("a retirement must not close a live installation's empty lane");
+        assert!(
+            violation.contains("while its installation is live"),
+            "{violation}"
+        );
+    }
+
+    #[test]
+    fn a_controller_reconcile_reaping_an_unmarked_session_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::TriggerIgnoresMark,
+            DEPTH,
+        )
+        .expect("the controller's reconcile must never reap an unmarked session");
+        assert!(violation.contains("never created"), "{violation}");
+    }
+
+    #[test]
+    fn an_ide_that_quits_has_its_empty_lane_closed_without_gc() {
+        let idea = "proj-IU-0a1b2c3d".to_string();
+        let rider = "proj-RD-9f8e7d6c".to_string();
+        let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        // Both IDEs provision their lanes; VS Code (shared lane) claims `a`
+        // out of IDEA's lane, and Rider claims `b`, so IDEA's lane is empty.
+        sim.step(Event::Layout(0));
+        sim.step(Event::Layout(1));
+        sim.step(Event::Claim(2));
+        sim.step(Event::Claim(1));
+        assert_eq!(sim.check(), Ok(()));
+        assert!(
+            sim.world
+                .pane_session
+                .values()
+                .all(|session| session != &idea),
+            "{:?}",
+            sim.world.pane_session
+        );
+        assert_eq!(sim.world.auto_reconciles, 0, "joins reconcile nothing");
+        assert!(sim.world.lane_sessions.contains(&idea));
+        // Rider quits: its lane still holds documents, IDEA's is live.
+        sim.step(Event::Retire(1));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.auto_reconciles, 1);
+        assert_eq!(
+            sim.world.lane_sessions,
+            BTreeSet::from([idea.clone(), rider.clone()])
+        );
+        // IDEA quits: its empty lane closes with no gc; Rider's keeps its
+        // documents.
+        sim.step(Event::Retire(0));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(sim.world.auto_reconciles, 2);
+        assert_eq!(sim.world.lane_sessions, BTreeSet::from([rider]));
+        assert!(sim.world.foreign_alive);
+    }
+
+    #[test]
+    fn a_restart_under_shared_folds_lanes_back_without_gc() {
+        let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        sim.step(Event::Layout(0));
+        sim.step(Event::Layout(1));
+        assert_eq!(sim.world.lane_sessions.len(), 2);
+        sim.step(Event::SetMode(NavigationMode::Shared));
+        assert_eq!(sim.check(), Ok(()));
+        assert!(sim.world.lane_sessions.is_empty());
+        assert!(
+            sim.world
+                .pane_session
+                .values()
+                .all(|session| session == PROJECT_SESSION)
+        );
+        assert!(sim.world.pane_count.values().all(|count| *count == 1));
+        assert!(sim.world.foreign_alive);
     }
 
     #[test]

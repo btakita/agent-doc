@@ -3,7 +3,8 @@
 Status: P1 landed on branch `ridernav`; P2a landed on branch `ridernavp2a`; P2b landed on
 branch `ridernavp2b`; P3 landed on branch `ridernavp3`; P4's explicit handoff landed on branch
 `ridernavp4`. P5's migration, lane cleanup, docs, and two-IDE end-to-end test landed on branch
-`ridernavp5`; the lane awareness carried over from P3/P4 is still open (listed under P5).
+`ridernavp5`; the controller-side reconcile trigger landed on branch `ridernavp6gc`; the lane
+awareness carried over from P3/P4 is still open (listed under P5).
 
 ## Problem
 
@@ -324,6 +325,25 @@ What landed (the original scope follows below):
   dry_run)`; `agent-doc gc` runs it after its file GC (CLI passes no live installations, so an
   attached terminal is its liveness proof) and prints each planned action; `--dry-run` changes
   nothing. ops.log: `navigation_lane_pane_folded`, `navigation_lane_session_closed`.
+- Controller trigger (`#ridernavp6gc`, LANDED): `NavigationLaneReconcileGraph` in the controller
+  `ProcessScope`. `ControllerEditorSurfaceGraph` publishes the installations with an unretired
+  surface on the project whenever a surface joins or retires (`seen` accumulates, `live` is
+  current; one `Source`). A `Computed` over the pure `derive_lane_reconcile_trigger(mode, seen,
+  live)` requests a reconcile under `per_installation` once a seen installation retired, and
+  under `shared` always (so the controller start after a switch back runs the disable migration).
+  An `Effect` hands each new request to one worker (`install_worker`, production runner
+  `reconcile_navigation_lane_sessions_in_mode` on the configured tmux with the controller's own
+  mode), which publishes a `NavigationLaneReconcileReceipt` and logs
+  `navigation_lane_reconcile_triggered`. Liveness is `LaneLiveness::RetiredOnly(retired)` under
+  `per_installation` (a lane whose installation the controller never saw counts as live and is
+  left to `gc`) and `LaneLiveness::Live({})` under `shared`. Verification: unit tests of the
+  trigger (plus a proptest that a live installation's lane is never counted gone), controller
+  unit tests (retirement fires once per retired installation; a family retirement that leaves
+  the installation's focus surface live fires nothing; `shared` fires at worker start; runtime
+  wiring), SimWorld `controller_reconcile` after `Retire`/`SetMode` with mutations
+  `TriggerIgnoresLiveness` (closes a live IDE's lane) and `TriggerIgnoresMark` (reaps the foreign
+  session), both detected, and the isolated-tmux
+  `navigation_lane_session_reconcile_is_driven_by_installation_liveness` (`make tmux-ci`).
 - Verification: unit tests and a proptest of the planner (no fold under `per_installation`; a
   closed lane never held a busy unowned or unfolded document pane; unmarked never touched).
   SimWorld `two_ide_navigation_model` gains `SetMode` (a controller restart, so no retained layout
@@ -342,9 +362,8 @@ What landed (the original scope follows below):
   `editors/jetbrains/SPEC.md`.
 - Still open: (a) route, start, and `agent-doc claim --client-id` creating panes in the
   requester's lane; (b) the `sync_tmux_layout` command and the recycle republish publishing into
-  the right lane(s); (c) a per-lane `pane_layout_status` channel; a controller-side trigger that
-  passes its live installations to the reconcile (today only `agent-doc gc` runs it). The optional
-  focus-driven handoff is not planned.
+  the right lane(s); (c) a per-lane `pane_layout_status` channel. The optional focus-driven
+  handoff is not planned.
 
 Original scope:
 

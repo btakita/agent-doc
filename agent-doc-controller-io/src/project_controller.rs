@@ -3527,6 +3527,10 @@ pub(crate) struct ControllerRuntime {
     /// Editor facts, history-dependent intent, and tmux consequences share the
     /// controller ProcessScope. Editors retain only transport/projection caches.
     editor_surface_graph: rpc::ControllerEditorSurfaceGraph,
+    /// `#ridernavp6gc`: the navigation-lane reconcile trigger, fed by
+    /// `editor_surface_graph`'s live installations and the navigation mode.
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    navigation_lane_reconcile: Arc<rpc::NavigationLaneReconcileGraph>,
     /// Complete frame-tagged Remote Dev snapshots. This graph is separate from
     /// the legacy per-surface graph because only it owns main precedence.
     editor_view_policy_graph: rpc::ControllerEditorViewPolicyGraph,
@@ -7941,6 +7945,11 @@ impl ControllerRuntime {
                 "[controller] warning: unknown editor_navigation = {rejected:?} in .agent-doc/config.toml; using \"shared\" (expected \"shared\" or \"per_installation\")"
             );
         }
+        let navigation_lane_reconcile = rpc::NavigationLaneReconcileGraph::new_in(
+            &scope,
+            &bootstrap.project_root,
+            navigation_mode,
+        );
         let editor_surface_graph =
             rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {
                 agent_doc_editor_surface::SurfaceIntent::Sync { .. }
@@ -7949,7 +7958,8 @@ impl ControllerRuntime {
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
             }))
-            .with_navigation_mode(navigation_mode);
+            .with_navigation_mode(navigation_mode)
+            .with_lane_reconcile(Arc::clone(&navigation_lane_reconcile));
         let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::new_in(
             &scope,
             editor_view_policy_bindings_from_state(&memory.state_projection),
@@ -7974,6 +7984,7 @@ impl ControllerRuntime {
             pane_layout_lanes,
             main_layout_eligibility_graph,
             editor_surface_graph,
+            navigation_lane_reconcile,
             editor_view_policy_graph,
             document_path_transition_graph,
             async_editor_commands,
@@ -8028,6 +8039,13 @@ impl ControllerRuntime {
         rpc::install_state_plane_projection_sinks(&runtime);
         #[cfg(not(any(test, feature = "test-support")))]
         rpc::install_pane_layout_projection_sink(&runtime);
+        // `#ridernavp6gc`: the controller runs the navigation-lane reconcile
+        // itself when an installation retires, and at start under `shared`
+        // (the disable migration).
+        #[cfg(not(any(test, feature = "test-support")))]
+        runtime
+            .navigation_lane_reconcile
+            .install_worker(rpc::configured_navigation_lane_reconcile_runner());
         // `gvqv`: this controller owns its project's live dashboard projection.
         #[cfg(not(any(test, feature = "test-support")))]
         crate::dashboard_refresh::start_global(
@@ -17964,6 +17982,11 @@ agent:queue\n\
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
             }));
+        let navigation_lane_reconcile = rpc::NavigationLaneReconcileGraph::new_in(
+            &scope,
+            &bootstrap.project_root,
+            agent_doc_editor_surface::NavigationMode::default(),
+        );
         let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::new_in(
             &scope,
             editor_view_policy_bindings_from_state(&state_projection),
@@ -17994,6 +18017,7 @@ agent:queue\n\
             pane_layout_lanes,
             main_layout_eligibility_graph,
             editor_surface_graph,
+            navigation_lane_reconcile,
             editor_view_policy_graph,
             document_path_transition_graph,
             async_editor_commands,

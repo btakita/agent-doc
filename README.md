@@ -131,6 +131,13 @@ pane, no running program, no attached terminal, and, after a switch back to
 for this project (marked `@agent_doc_navigation_lane`), never a session that
 just has a lane-like name. `agent-doc gc --dry-run` shows what it would do.
 
+You rarely need to run it: the project controller does the same cleanup on its
+own. When an IDE quits, its empty lane session closes; when the controller
+starts under `shared`, it moves the lanes' panes back and closes the lanes
+(`navigation_lane_reconcile_triggered` in `ops.log`). The controller only closes
+the lane of an IDE it saw quit, so a lane left over from an IDE that was closed
+while no controller ran waits for `agent-doc gc`.
+
 ## Feature Taxonomy
 
 agent-doc has a broad feature surface because the README doubles as a user guide and capability ledger. The reader-facing overview is grouped by workflow layer here; the exhaustive feature catalog is kept near the bottom so installation, architecture, editor setup, and security stay easy to scan.

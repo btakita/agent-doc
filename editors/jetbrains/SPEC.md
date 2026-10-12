@@ -270,7 +270,10 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `editor_navigation` either way needs no plugin action. Enabling moves no pane; after switching
   back to `shared`, `agent-doc gc` folds every lane's document panes into the shared session and
   closes the lane sessions. A closed lane is provisioned again by this IDE's next terminal attach
-  or layout sync, and gc never closes a lane session a terminal is still attached to.
+  or layout sync, and gc never closes a lane session a terminal is still attached to. The project
+  controller runs the same reconcile itself (`#ridernavp6gc`) when an IDE's last surface retires
+  (the plugin's existing surface forget / client-family retirement) and at its start under
+  `shared`, so no plugin action and usually no `gc` is needed.
 - An observation with no detected columns is structurally `unknown`, not a one-column layout.
   It may select the focused document's existing pane, but it cannot add, stash, reorder, or
   provision panes. A proven local single editor window publishes one column. The presence of

@@ -313,7 +313,7 @@ loses desktop focus.
   heartbeats, focus escalations, `editor_route`, `resync`, recycle republishes) is passive and
   never moves a pane. A handoff retried by the same generation is a no-op (`AlreadyInLane`).
   Shared navigation mode never resolves lane sessions, so it never hands over.
-- Lane migration and cleanup (P5, `agent-doc gc`;
+- Lane migration and cleanup (P5, `agent-doc gc` and the project controller;
   `project_controller::reconcile_navigation_lane_sessions`, planned by the pure
   `plan_navigation_lane_reconcile`). The reconcile observes every session whose name is an
   installation lane of the `tmux_session` pin (a project without a pin has no lanes and is a
@@ -353,6 +353,29 @@ loses desktop focus.
     `kill-session -t =<session>` (`navigation_lane_session_closed session=.. mode=..`), which
     takes only bare shells (the session's initial pane, its stash shell, a handoff placeholder).
     `--dry-run` reports the plan and changes nothing.
+  - Controller trigger (`#ridernavp6gc`): the project controller runs the same reconcile on its
+    own, so neither an IDE that quits nor a switch back to `shared` waits for `agent-doc gc`.
+    `NavigationLaneReconcileGraph` lives in the controller `ProcessScope`. The editor surface
+    graph publishes the installations that have at least one unretired surface on the project
+    (`editor_installation` of each client id, every lane) whenever a surface joins or retires;
+    `seen` accumulates them and `live` is the current set (one `Source`, so no transient
+    retirement is ever derived). A `Computed` derives the request with
+    `derive_lane_reconcile_trigger(mode, seen, live)`: under `per_installation` only once a seen
+    installation has retired (`retired = seen - live`; startup and joins request nothing, and a
+    relaunched installation leaves the set), under `shared` always (the first request is the
+    disable migration at controller start; a retirement re-requests it). An `Effect` hands each
+    new request to one worker thread (requests coalesce to the newest), which runs
+    `reconcile_navigation_lane_sessions_in_mode` with the controller's own mode (read at its
+    start, never a re-read of the config) and publishes a `NavigationLaneReconcileReceipt`
+    (`navigation_lane_reconcile_triggered mode=.. retired=.. folded=N closed=N failures=..`).
+    Liveness is `LaneLiveness::RetiredOnly(retired)` under `per_installation`: only a retired
+    installation's lane may close, and a lane whose installation this controller never saw (it
+    quit before the controller started, or has not reconnected) counts as live and is left to
+    `gc`. Under `shared` no installation keeps a lane (`LaneLiveness::Live({})`), exactly as
+    `gc`. Every rule above (marked sessions only, busy unowned panes and attached clients retain,
+    unreadable registry observes nothing, re-observe before close) applies unchanged.
+    `agent-doc gc` keeps running the reconcile with `LaneLiveness::Live` of the installations it
+    is given (none from the CLI).
 - The `tmux_focus_state` read projection is per lane: the request's `caller` is the editor client
   id, and the projection reports the active pane of that client's lane session (shared lane: the
   configured session). A lane reports a document only while its own session's current window is

@@ -171,6 +171,10 @@ pub(super) struct ControllerEditorSurfaceGraph {
     /// How this controller's editor installations share tmux navigation
     /// (`editor_navigation`; `Shared` unless the project opts in).
     navigation_mode: agent_doc_editor_surface::NavigationMode,
+    /// Where the installations live on the project are published, so the
+    /// controller's navigation-lane reconcile fires when one retires
+    /// (`#ridernavp6gc`). Lock order: `roots` is released before publishing.
+    lane_reconcile: Option<Arc<NavigationLaneReconcileGraph>>,
     run_intent: ControllerEditorSurfaceIntentRunner,
 }
 
@@ -556,8 +560,44 @@ impl ControllerEditorSurfaceGraph {
             terminal_ownership: Mutex::new(BTreeMap::new()),
             focus_owners: Mutex::new(BTreeMap::new()),
             navigation_mode: agent_doc_editor_surface::NavigationMode::default(),
+            lane_reconcile: None,
             run_intent,
         }
+    }
+
+    /// The same graph publishing its live editor installations into the
+    /// controller's navigation-lane reconcile trigger (`#ridernavp6gc`).
+    pub(super) fn with_lane_reconcile(
+        mut self,
+        lane_reconcile: Arc<NavigationLaneReconcileGraph>,
+    ) -> Self {
+        self.lane_reconcile = Some(lane_reconcile);
+        self
+    }
+
+    /// The editor installations with at least one live (unretired) surface
+    /// on `project_root`, in every lane.
+    fn live_installations(&self, project_root: &Path) -> BTreeSet<String> {
+        self.roots
+            .lock()
+            .iter()
+            .filter(|((root, _, _), entry)| root == project_root && !entry.retired)
+            .filter_map(|((_, client_id, _), _)| {
+                agent_doc_editor_surface::editor_installation(client_id).map(str::to_string)
+            })
+            .collect()
+    }
+
+    /// Publish the live installations to the lane reconcile trigger. Called
+    /// with `roots` unlocked, whenever a surface joins or retires.
+    fn publish_installation_liveness(&self, project_root: &Path) {
+        let Some(lane_reconcile) = &self.lane_reconcile else {
+            return;
+        };
+        if lane_reconcile.project_root() != project_root {
+            return;
+        }
+        lane_reconcile.observe_live_installations(self.live_installations(project_root));
     }
 
     /// The same graph with an explicit navigation mode
@@ -615,6 +655,7 @@ impl ControllerEditorSurfaceGraph {
                 owner.retain_live(live_by_key.get(key).unwrap_or(&empty));
             }
         }
+        self.publish_installation_liveness(project_root);
     }
 
     /// The installation currently driving `project_root`'s shared lane.
@@ -707,6 +748,7 @@ impl ControllerEditorSurfaceGraph {
         let root = project_root.to_path_buf();
         let run_intent = Arc::clone(&self.run_intent);
         let authority = focus_owner.authority_for(&observation.client_id);
+        let joined = !roots.contains_key(&key);
         let entry = roots.entry(key).or_insert_with(|| {
             let state = EditorSurfaceState::new_in_with_authority(scope, authority);
             let outcome = Arc::new(Mutex::new(None));
@@ -740,6 +782,10 @@ impl ControllerEditorSurfaceGraph {
         let intent = entry.state.intent();
         let deferred_to = entry.state.fold().deferred_to;
         let consequence = entry.outcome.lock().clone();
+        drop(roots);
+        if joined {
+            self.publish_installation_liveness(project_root);
+        }
         let (outcome, error) = match consequence {
             Some(Ok(output)) => (Some(output), None),
             Some(Err(message)) => (None, Some(message)),
@@ -28632,7 +28678,7 @@ fn observe_navigation_lane_sessions(
     tmux: &tmux_router::Tmux,
     project_root: &Path,
     project_session: &str,
-    live_lane_sessions: &BTreeSet<String>,
+    liveness: &agent_doc_editor_surface::LaneLiveness,
 ) -> Vec<agent_doc_editor_surface::LaneSessionObservation> {
     let Ok(sessions) = tmux.raw_cmd(&[
         "list-sessions",
@@ -28719,7 +28765,8 @@ fn observe_navigation_lane_sessions(
                 Vec::new()
             };
             agent_doc_editor_surface::LaneSessionObservation {
-                live_surface: attached > 0 || live_lane_sessions.contains(&session),
+                live_surface: attached > 0
+                    || liveness.lane_session_live(project_session, &session),
                 session,
                 marked,
                 panes,
@@ -28732,12 +28779,15 @@ fn observe_navigation_lane_sessions(
 /// `editor_navigation` (`#ideriderindependentnav` P5): the enable/disable
 /// migration and the cleanup of empty lane sessions agent-doc created.
 ///
-/// `agent-doc gc` runs this. The plan is
+/// `agent-doc gc` runs this with the mode configured in
+/// `.agent-doc/config.toml`; the project controller runs
+/// [`reconcile_navigation_lane_sessions_in_mode`] on its own
+/// ([`NavigationLaneReconcileGraph`]). The plan is
 /// [`agent_doc_editor_surface::plan_navigation_lane_reconcile`]:
 /// - `per_installation` (enable): no pane moves; a lane session agent-doc
 ///   created is closed only when no document pane, busy pane, attached tmux
-///   client, or live installation (`live_installations`, from a running
-///   controller; empty from the CLI) uses it.
+///   client, or live installation (`live_installations`; empty from the CLI)
+///   uses it.
 /// - `shared` (disable): each document pane of each lane folds back into the
 ///   project session's `stash` window (same pane, same actor binding), then
 ///   the lane closes unless a busy unowned pane or a live surface keeps it.
@@ -28753,8 +28803,30 @@ pub fn reconcile_navigation_lane_sessions(
     live_installations: &BTreeSet<String>,
     dry_run: bool,
 ) -> NavigationLaneReconcileReport {
-    use agent_doc_editor_surface::{LaneReconcileAction, NavigationLane};
     let (mode, _) = agent_doc_project_config_io::editor_navigation_mode_for_root(project_root);
+    reconcile_navigation_lane_sessions_in_mode(
+        tmux,
+        project_root,
+        mode,
+        &agent_doc_editor_surface::LaneLiveness::Live(live_installations.clone()),
+        dry_run,
+    )
+}
+
+/// [`reconcile_navigation_lane_sessions`] under an explicit `mode` and
+/// installation liveness.
+///
+/// The project controller passes the mode it runs under (read once at its
+/// start), never a re-read of the config: a config edit that this controller
+/// has not started under must not fold or close lanes it still routes into.
+pub fn reconcile_navigation_lane_sessions_in_mode(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    mode: agent_doc_editor_surface::NavigationMode,
+    liveness: &agent_doc_editor_surface::LaneLiveness,
+    dry_run: bool,
+) -> NavigationLaneReconcileReport {
+    use agent_doc_editor_surface::LaneReconcileAction;
     let mut report = NavigationLaneReconcileReport {
         mode,
         ..NavigationLaneReconcileReport::default()
@@ -28763,15 +28835,8 @@ pub fn reconcile_navigation_lane_sessions(
         return report;
     };
     let project_session = project_session.trim().to_string();
-    let live_lane_sessions = live_installations
-        .iter()
-        .map(|installation| {
-            NavigationLane::Installation(installation.clone()).tmux_session_name(&project_session)
-        })
-        .collect::<BTreeSet<_>>();
     tmux_router::invalidate_pane_snapshot();
-    let observed =
-        observe_navigation_lane_sessions(tmux, project_root, &project_session, &live_lane_sessions);
+    let observed = observe_navigation_lane_sessions(tmux, project_root, &project_session, liveness);
     report.actions = agent_doc_editor_surface::plan_navigation_lane_reconcile(
         mode,
         &project_session,
@@ -28832,7 +28897,7 @@ pub fn reconcile_navigation_lane_sessions(
                     tmux,
                     project_root,
                     &project_session,
-                    &live_lane_sessions,
+                    liveness,
                 )
                 .into_iter()
                 .filter(|lane| lane.session == session)
@@ -28873,6 +28938,270 @@ pub fn reconcile_navigation_lane_sessions(
     }
     tmux_router::invalidate_pane_snapshot();
     report
+}
+
+/// One controller-triggered lane reconcile, published back into
+/// [`NavigationLaneReconcileGraph`] (`#ridernavp6gc`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NavigationLaneReconcileReceipt {
+    /// The request the reconcile ran for.
+    pub trigger: agent_doc_editor_surface::LaneReconcileTrigger,
+    /// How many requests this graph has served, this one included.
+    pub sequence: u64,
+    pub actions: Vec<agent_doc_editor_surface::LaneReconcileAction>,
+    pub folded: Vec<(String, String)>,
+    pub closed: Vec<String>,
+    pub failures: Vec<String>,
+}
+
+/// The IO a [`NavigationLaneReconcileGraph`] request runs: production passes
+/// [`reconcile_navigation_lane_sessions_in_mode`] over the configured tmux
+/// server; tests pass an isolated server or a recorder.
+pub type NavigationLaneReconcileRunner = Arc<
+    dyn Fn(&Path, &agent_doc_editor_surface::LaneReconcileTrigger) -> NavigationLaneReconcileReport
+        + Send
+        + Sync,
+>;
+
+/// The project controller's trigger for the navigation-lane reconcile
+/// (`#ideriderindependentnav` P5 follow-up, `#ridernavp6gc`).
+///
+/// `agent-doc gc` can only use an attached terminal as liveness evidence. The
+/// controller knows which editor installations are live, because every editor
+/// surface registers and retires through its [`ControllerEditorSurfaceGraph`],
+/// which publishes the installations it holds live into `live` (and the union
+/// into `seen`). The request is a `Computed`
+/// ([`agent_doc_editor_surface::derive_lane_reconcile_trigger`]) over those and
+/// the controller's navigation mode, and an `Effect` hands every new request
+/// to one worker thread that runs the reconcile and publishes its receipt.
+/// So an IDE that quits has its empty lane closed, and a controller started
+/// under `shared` after lanes were in use folds their panes back, without the
+/// operator running `gc`.
+///
+/// Every P5 safety rule holds because the worker runs the same reconcile `gc`
+/// runs: only marked sessions are planned, a busy unowned pane or an attached
+/// client keeps a lane, an unreadable registry observes nothing, and each
+/// close is re-observed first. Only a retired installation's lane counts as
+/// not live ([`agent_doc_editor_surface::LaneLiveness::RetiredOnly`]), so a
+/// lane whose installation this controller never saw is left to `gc`.
+pub struct NavigationLaneReconcileGraph {
+    ctx: ThreadSafeContext,
+    project_root: PathBuf,
+    mode: agent_doc_editor_surface::NavigationMode,
+    /// `(seen, live)` as one Source, so the `Computed` never observes a
+    /// grown `seen` beside a stale `live` (a transient retirement).
+    installations: Source<(BTreeSet<String>, BTreeSet<String>)>,
+    trigger: Computed<Option<agent_doc_editor_surface::LaneReconcileTrigger>>,
+    receipt: Source<Option<NavigationLaneReconcileReceipt>>,
+    worker_ready: Source<bool>,
+    sender: Arc<OnceLock<std::sync::mpsc::Sender<agent_doc_editor_surface::LaneReconcileTrigger>>>,
+    _effect: Mutex<Option<lazily::Effect>>,
+    /// Guards `seen`/`live` read-modify-write against concurrent editor
+    /// observations.
+    publication: Mutex<()>,
+    receipts_published: Mutex<u64>,
+    receipt_waiters: Condvar,
+}
+
+impl NavigationLaneReconcileGraph {
+    pub fn new_in(
+        scope: &agent_doc_state_scope::ProcessScope,
+        project_root: &Path,
+        mode: agent_doc_editor_surface::NavigationMode,
+    ) -> Arc<Self> {
+        let ctx = scope.ctx().clone();
+        let installations = ctx.source((BTreeSet::new(), BTreeSet::new()));
+        let trigger = ctx.computed(move |ctx| {
+            let (seen, live) = ctx.get(&installations);
+            agent_doc_editor_surface::derive_lane_reconcile_trigger(mode, &seen, &live)
+        });
+        let receipt = ctx.source(None);
+        let worker_ready = ctx.source(false);
+        let sender = Arc::new(OnceLock::<
+            std::sync::mpsc::Sender<agent_doc_editor_surface::LaneReconcileTrigger>,
+        >::new());
+        let sender_for_effect = Arc::clone(&sender);
+        let dispatched = Mutex::new(None::<agent_doc_editor_surface::LaneReconcileTrigger>);
+        let effect = ctx.effect(move |ctx| {
+            // Worker availability is a lifecycle edge of its own: a request
+            // derived before the worker started must still reach it.
+            if !ctx.get(&worker_ready) {
+                return;
+            }
+            let Some(trigger) = ctx.get(&trigger) else {
+                return;
+            };
+            let Some(sender) = sender_for_effect.get() else {
+                return;
+            };
+            let mut dispatched = dispatched.lock();
+            if dispatched.as_ref() == Some(&trigger) {
+                return;
+            }
+            if let Err(error) = sender.send(trigger.clone()) {
+                eprintln!("[controller] navigation-lane reconcile enqueue failed: {error}");
+                return;
+            }
+            *dispatched = Some(trigger);
+        });
+        Arc::new(Self {
+            ctx,
+            project_root: project_root.to_path_buf(),
+            mode,
+            installations,
+            trigger,
+            receipt,
+            worker_ready,
+            sender,
+            _effect: Mutex::new(Some(effect)),
+            publication: Mutex::new(()),
+            receipts_published: Mutex::new(0),
+            receipt_waiters: Condvar::new(),
+        })
+    }
+
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
+    }
+
+    pub fn mode(&self) -> agent_doc_editor_surface::NavigationMode {
+        self.mode
+    }
+
+    /// Publish the editor installations live on this project right now.
+    /// Installations accumulate into `seen`, so one that is missing from a
+    /// later publication has retired.
+    pub fn observe_live_installations(&self, live: BTreeSet<String>) {
+        let _publication = self.publication.lock();
+        let current = self.ctx.get(&self.installations);
+        let mut seen = current.0.clone();
+        seen.extend(live.iter().cloned());
+        let next = (seen, live);
+        if next != current {
+            self.ctx.set(&self.installations, next);
+        }
+    }
+
+    /// The current derived request.
+    pub fn trigger(&self) -> Option<agent_doc_editor_surface::LaneReconcileTrigger> {
+        self.ctx.get(&self.trigger)
+    }
+
+    /// The last reconcile's receipt.
+    pub fn receipt(&self) -> Option<NavigationLaneReconcileReceipt> {
+        self.ctx.get(&self.receipt)
+    }
+
+    /// Block until the worker has published at least `sequence` receipts, or
+    /// `timeout` passes; returns the latest receipt.
+    pub fn wait_for_receipt(
+        &self,
+        sequence: u64,
+        timeout: Duration,
+    ) -> Option<NavigationLaneReconcileReceipt> {
+        let deadline = Instant::now() + timeout;
+        let mut published = self.receipts_published.lock();
+        while *published < sequence {
+            if self
+                .receipt_waiters
+                .wait_until(&mut published, deadline)
+                .timed_out()
+            {
+                break;
+            }
+        }
+        drop(published);
+        self.receipt()
+    }
+
+    /// Start the worker that runs each request. Requests derived while the
+    /// previous run was still busy coalesce to the newest one.
+    pub fn install_worker(self: &Arc<Self>, run: NavigationLaneReconcileRunner) {
+        if self.sender.get().is_some() {
+            return;
+        }
+        let (sender, receiver) =
+            std::sync::mpsc::channel::<agent_doc_editor_surface::LaneReconcileTrigger>();
+        let graph = Arc::downgrade(self);
+        let spawned = std::thread::Builder::new()
+            .name("agent-doc-navigation-lane-reconcile".to_string())
+            .spawn(move || {
+                while let Ok(mut trigger) = receiver.recv() {
+                    while let Ok(newer) = receiver.try_recv() {
+                        trigger = newer;
+                    }
+                    let Some(graph) = graph.upgrade() else {
+                        break;
+                    };
+                    let report = run(&graph.project_root, &trigger);
+                    graph.publish_receipt(trigger, report);
+                }
+            });
+        match spawned {
+            Ok(_) => {
+                if self.sender.set(sender).is_err() {
+                    eprintln!(
+                        "[controller] navigation-lane reconcile worker was installed concurrently"
+                    );
+                    return;
+                }
+                self.ctx.set(&self.worker_ready, true);
+            }
+            Err(error) => {
+                eprintln!("[controller] failed to start navigation-lane reconcile worker: {error}");
+            }
+        }
+    }
+
+    fn publish_receipt(
+        &self,
+        trigger: agent_doc_editor_surface::LaneReconcileTrigger,
+        report: NavigationLaneReconcileReport,
+    ) {
+        // Only the worker thread publishes, so the next sequence is stable
+        // between this read and the count update below.
+        let sequence = *self.receipts_published.lock() + 1;
+        agent_doc_ops_log_io::log_op(
+            &self.project_root,
+            &format!(
+                "navigation_lane_reconcile_triggered {} folded={} closed={} failures={}",
+                trigger.describe(),
+                report.folded.len(),
+                report.closed.len(),
+                report.failures.join(",")
+            ),
+        );
+        // Publish the receipt before the count, so a waiter woken by the
+        // count always reads this receipt; no lock is held across the
+        // reactive context.
+        self.ctx.set(
+            &self.receipt,
+            Some(NavigationLaneReconcileReceipt {
+                trigger,
+                sequence,
+                actions: report.actions,
+                folded: report.folded,
+                closed: report.closed,
+                failures: report.failures,
+            }),
+        );
+        *self.receipts_published.lock() = sequence;
+        self.receipt_waiters.notify_all();
+    }
+}
+
+/// The production runner: the reconcile on the configured tmux server.
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+pub(super) fn configured_navigation_lane_reconcile_runner() -> NavigationLaneReconcileRunner {
+    Arc::new(|project_root, trigger| {
+        reconcile_navigation_lane_sessions_in_mode(
+            &agent_doc_tmux_io::configured_tmux(),
+            project_root,
+            trigger.mode,
+            &trigger.liveness(),
+            false,
+        )
+    })
 }
 
 /// Republish the lane an explicit handoff took a pane from, so it re-projects
@@ -39054,6 +39383,317 @@ mod tests {
         assert!(tmux.session_alive(&rider));
         assert!(tmux.pane_alive(&operator_pane));
         assert!(tmux.pane_alive(&rider_placeholder));
+    }
+
+    /// `#ridernavp6gc`: a recording runner for the controller's lane
+    /// reconcile trigger.
+    fn recording_lane_reconcile_runner() -> (
+        NavigationLaneReconcileRunner,
+        Arc<Mutex<Vec<agent_doc_editor_surface::LaneReconcileTrigger>>>,
+    ) {
+        let runs = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&runs);
+        let runner: NavigationLaneReconcileRunner = Arc::new(move |_, trigger| {
+            recorded.lock().push(trigger.clone());
+            NavigationLaneReconcileReport::default()
+        });
+        (runner, runs)
+    }
+
+    fn lane_surface_observation(client_id: &str, sequence: u64) -> EditorSurfaceObservation {
+        EditorSurfaceObservation {
+            client_id: client_id.to_string(),
+            surface_id: "project".to_string(),
+            generation: 100,
+            sequence,
+            surface: agent_doc_editor_surface::EditorSurface {
+                focused: "/project/a.md".to_string(),
+                open: vec!["/project/a.md".to_string()],
+                visible: vec!["/project/a.md".to_string()],
+                columns: Vec::new(),
+                force_reconcile: false,
+                focus_only: true,
+                preserve_focus: false,
+            },
+        }
+    }
+
+    #[test]
+    fn navigation_lane_reconcile_fires_when_an_installation_retires() {
+        use agent_doc_editor_surface::{LaneLiveness, NavigationMode};
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let root = Path::new("/project");
+        let reconcile =
+            NavigationLaneReconcileGraph::new_in(&scope, root, NavigationMode::PerInstallation);
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(|_, _| Ok("ok".to_string())))
+            .with_navigation_mode(NavigationMode::PerInstallation)
+            .with_lane_reconcile(Arc::clone(&reconcile));
+        let (runner, runs) = recording_lane_reconcile_runner();
+        reconcile.install_worker(runner);
+        let idea = "jetbrains@IU.0a1b2c3d-pid:41";
+        let idea_focus = "jetbrains-focus@IU.0a1b2c3d-pid:41";
+        let rider = "jetbrains@RD.9f8e7d6c-pid:42";
+        let mut sequence = 0;
+        for client in [idea, idea_focus, rider, "vscode-pid:9"] {
+            sequence += 1;
+            assert!(
+                graph
+                    .observe(
+                        &scope,
+                        root,
+                        lane_surface_observation(client, sequence),
+                        None
+                    )
+                    .0
+            );
+        }
+        // Startup and joins request nothing under `per_installation`.
+        assert_eq!(reconcile.trigger(), None);
+        assert!(runs.lock().is_empty());
+
+        // IDEA retires one family but its focus surface is still live: no
+        // installation is gone.
+        assert_eq!(graph.forget_client_family(root, idea, 100), 1);
+        assert_eq!(reconcile.trigger(), None);
+
+        // Rider quits: the controller runs the reconcile on its own.
+        assert_eq!(graph.forget_client_family(root, rider, 100), 1);
+        let receipt = reconcile
+            .wait_for_receipt(1, Duration::from_secs(10))
+            .expect("the retirement runs the reconcile");
+        assert_eq!(receipt.sequence, 1);
+        assert_eq!(receipt.trigger.mode, NavigationMode::PerInstallation);
+        assert_eq!(
+            receipt.trigger.retired,
+            BTreeSet::from(["RD.9f8e7d6c".to_string()])
+        );
+        assert_eq!(
+            receipt.trigger.liveness(),
+            LaneLiveness::RetiredOnly(BTreeSet::from(["RD.9f8e7d6c".to_string()]))
+        );
+        // IDEA's remaining surface goes too: one more run, both retired.
+        assert_eq!(graph.forget_client_family(root, idea_focus, 100), 1);
+        let receipt = reconcile
+            .wait_for_receipt(2, Duration::from_secs(10))
+            .expect("the second retirement runs the reconcile again");
+        assert_eq!(
+            receipt.trigger.retired,
+            BTreeSet::from(["IU.0a1b2c3d".to_string(), "RD.9f8e7d6c".to_string()])
+        );
+        assert_eq!(runs.lock().len(), 2);
+        // A surface of another project root publishes nothing here.
+        assert!(
+            graph
+                .observe(
+                    &scope,
+                    Path::new("/other"),
+                    lane_surface_observation("jetbrains@CL.11223344-pid:43", 99),
+                    None
+                )
+                .0
+        );
+        assert_eq!(reconcile.trigger().unwrap().retired.len(), 2);
+    }
+
+    #[test]
+    fn navigation_lane_reconcile_runs_at_start_under_shared_mode() {
+        use agent_doc_editor_surface::{LaneLiveness, NavigationMode};
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let root = Path::new("/project");
+        let reconcile = NavigationLaneReconcileGraph::new_in(&scope, root, NavigationMode::Shared);
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(|_, _| Ok("ok".to_string())))
+            .with_lane_reconcile(Arc::clone(&reconcile));
+        // The request exists before the worker starts; starting the worker
+        // is the edge that delivers it (the disable migration).
+        assert!(reconcile.trigger().is_some());
+        let (runner, runs) = recording_lane_reconcile_runner();
+        reconcile.install_worker(runner);
+        let receipt = reconcile
+            .wait_for_receipt(1, Duration::from_secs(10))
+            .expect("a controller started under shared reconciles at once");
+        assert_eq!(receipt.trigger.mode, NavigationMode::Shared);
+        assert_eq!(
+            receipt.trigger.liveness(),
+            LaneLiveness::Live(BTreeSet::new())
+        );
+        // A join changes nothing; a retirement runs it again.
+        assert!(
+            graph
+                .observe(
+                    &scope,
+                    root,
+                    lane_surface_observation("jetbrains@IU.0a1b2c3d-pid:41", 1),
+                    None
+                )
+                .0
+        );
+        assert_eq!(runs.lock().len(), 1);
+        assert_eq!(
+            graph.forget_client_family(root, "jetbrains@IU.0a1b2c3d-pid:41", 100),
+            1
+        );
+        let receipt = reconcile
+            .wait_for_receipt(2, Duration::from_secs(10))
+            .expect("a retirement re-runs it");
+        assert_eq!(receipt.sequence, 2);
+        assert_eq!(
+            receipt.trigger.liveness(),
+            LaneLiveness::Live(BTreeSet::new())
+        );
+    }
+
+    #[test]
+    fn controller_runtime_wires_the_navigation_lane_reconcile_to_its_surface_graph() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new(test_bootstrap(&dir)).unwrap();
+        assert_eq!(runtime.navigation_lane_reconcile.project_root(), dir.path());
+        assert_eq!(
+            runtime.navigation_lane_reconcile.mode(),
+            runtime.editor_surface_graph.navigation_mode()
+        );
+        assert!(Arc::ptr_eq(
+            runtime
+                .editor_surface_graph
+                .lane_reconcile
+                .as_ref()
+                .expect("the surface graph publishes liveness"),
+            &runtime.navigation_lane_reconcile
+        ));
+    }
+
+    /// `#ridernavp6gc` end to end on an isolated tmux server: the controller's
+    /// own trigger closes the empty lane of an IDE that quit (keeping a live
+    /// IDE's lane, a lane whose installation it never saw, and a foreign
+    /// lane-named session), and a controller started under `shared` folds a
+    /// lane's document pane back and closes the lanes, without `agent-doc gc`.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_session_reconcile_is_driven_by_installation_liveness() {
+        use agent_doc_editor_surface::NavigationMode;
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("navlane-p6gc");
+        let root = tempfile::TempDir::new().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let shared_pane = tmux.new_session("proj", &root).unwrap();
+        tmux.raw_cmd(&["rename-window", "-t", &shared_pane, "agent-doc"])
+            .unwrap();
+        let foreign = tmux.new_session("proj-XX-55667788", &root).unwrap();
+        const IDEA: &str = "jetbrains@IU.0a1b2c3d-pid:41";
+        const RIDER: &str = "jetbrains@RD.9f8e7d6c-pid:42";
+        const CLION: &str = "jetbrains@CL.11223344-pid:43";
+        let lane = |client: &str| {
+            navigation_lane_session_for_client(&tmux, &root, client)
+                .unwrap()
+                .unwrap()
+                .session
+        };
+        let (idea, rider, clion) = (lane(IDEA), lane(RIDER), lane(CLION));
+        let server: &tmux_router::Tmux = &tmux;
+        let server = server.clone();
+        let runner = || -> NavigationLaneReconcileRunner {
+            let server = server.clone();
+            Arc::new(move |project_root, trigger| {
+                reconcile_navigation_lane_sessions_in_mode(
+                    &server,
+                    project_root,
+                    trigger.mode,
+                    &trigger.liveness(),
+                    false,
+                )
+            })
+        };
+
+        // A per_installation controller sees IDEA and Rider; CLion quit
+        // before this controller started.
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let reconcile =
+            NavigationLaneReconcileGraph::new_in(&scope, &root, NavigationMode::PerInstallation);
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(|_, _| Ok("ok".to_string())))
+            .with_navigation_mode(NavigationMode::PerInstallation)
+            .with_lane_reconcile(Arc::clone(&reconcile));
+        reconcile.install_worker(runner());
+        for (sequence, client) in [IDEA, RIDER].into_iter().enumerate() {
+            assert!(
+                graph
+                    .observe(
+                        &scope,
+                        &root,
+                        lane_surface_observation(client, sequence as u64 + 1),
+                        None
+                    )
+                    .0
+            );
+        }
+        assert_eq!(reconcile.receipt(), None, "joining reconciles nothing");
+
+        // Rider quits: its empty lane closes; nothing else is touched.
+        assert_eq!(graph.forget_client_family(&root, RIDER, 100), 1);
+        let receipt = reconcile
+            .wait_for_receipt(1, Duration::from_secs(30))
+            .expect("Rider's retirement runs the reconcile");
+        assert!(receipt.failures.is_empty(), "{:?}", receipt.failures);
+        assert_eq!(receipt.closed, vec![rider.clone()]);
+        assert!(!tmux.session_alive(&rider));
+        assert!(tmux.session_alive(&idea), "a live IDE's lane is kept");
+        assert!(
+            tmux.session_alive(&clion),
+            "a lane whose installation this controller never saw is left to gc"
+        );
+        assert!(tmux.session_alive("proj-XX-55667788"));
+        assert!(tmux.pane_alive(&foreign));
+        drop(graph);
+        drop(reconcile);
+        drop(scope);
+
+        // IDEA placed a document in its lane; then the project switches to
+        // `shared` and the controller restarts under it.
+        let idea_doc = tmux.new_window(&idea, &root).unwrap();
+        let file = root.join("tasks/idea-doc.md");
+        std::fs::write(&file, "# idea-doc\n").unwrap();
+        let pid: u32 = tmux
+            .raw_cmd(&["display-message", "-p", "-t", &idea_doc, "#{pane_pid}"])
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let window = tmux.pane_window(&idea_doc).unwrap();
+        agent_doc_session_registry_io::registration::register_full_with_cwd_in(
+            &root,
+            "idea-doc",
+            &idea_doc,
+            &file.to_string_lossy(),
+            pid,
+            &window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"shared\"\n",
+        )
+        .unwrap();
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let reconcile = NavigationLaneReconcileGraph::new_in(&scope, &root, NavigationMode::Shared);
+        reconcile.install_worker(runner());
+        let receipt = reconcile
+            .wait_for_receipt(1, Duration::from_secs(30))
+            .expect("a controller started under shared runs the disable migration");
+        assert!(receipt.failures.is_empty(), "{:?}", receipt.failures);
+        assert_eq!(receipt.folded, vec![(idea.clone(), idea_doc.clone())]);
+        let mut closed = receipt.closed.clone();
+        closed.sort();
+        let mut expected = vec![idea.clone(), clion.clone()];
+        expected.sort();
+        assert_eq!(closed, expected);
+        assert_eq!(tmux.pane_session(&idea_doc).unwrap(), "proj");
+        assert!(tmux.session_alive("proj-XX-55667788"));
+        assert!(tmux.pane_alive(&foreign));
     }
 
     #[test]

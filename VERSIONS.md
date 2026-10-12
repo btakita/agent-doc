@@ -2,6 +2,58 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.492
+
+- **Idle supervisors and controllers stop thrashing (`#fixthrashingbackground`).**
+  The orphaned-empty-preflight reclaim check ran every 30 ticks (about every 17s)
+  and was always treated as urgent, so every idle supervisor did a full
+  document-read pass each time, all of them in step. It now runs only when
+  something can be reclaimed. Also fixed:
+  - the turn id is read only before a dispatch, not on every 500ms tick;
+  - the steering wake remembers half-typed queue items so they settle once
+    instead of being re-checked forever;
+  - cycle-state reads use a closeout-only controller projection (34 KB instead
+    of the full multi-MB document state).
+
+  Measured idle CPU: per supervisor 960 to 415 ms/min, controller 2030 to
+  890 ms/min.
+- **Clear Session Context at an idle prompt types `/clear` (`#idleclearrestart`).**
+  It no longer restarts the harness process, so Claude Code background agents
+  and shells survive. OpenCode gets `/new`. A restart remains only when no child
+  is alive, the supervisor's restart/quit or a permission prompt owns the input,
+  or the harness is Codex (whose `/clear` exits); the reply and ops log name the
+  reason. A queued Clear now publishes a per-document wake so the idle watch
+  delivers it on a quiet pane instead of waiting for an unrelated edit.
+- **No unrequested turn after an idle Clear (`#idlecleartriggerinject`).** A
+  Clear restart records its origin and re-triggers the document only when a
+  cycle is open or a prompt is unanswered.
+- **Clear after Ctrl+C in Codex goes through immediately (`#codexclearwedge`).**
+  Codex runs preflight at its first tool call, so an early Ctrl+C left the
+  dispatch receipt `accepted` and Clear waited out the 120s pre-turn grace. An
+  ended turn now settles its one unpromoted receipt as well.
+- **Inbound queue lines keep their own identity (`#fpeseverityparse`).** The
+  CRDT merge keyed a `queue add` line by the first `[#id]` in it, so it collided
+  with the operator's own line for the same id and concurrent edits produced
+  `do - do -` prefixes, joined lines and duplicated tails. Inbound lines are now
+  keyed by their `[from:...]` attribution.
+- **IDE navigation lanes, phase 1 (`#ideriderindependentnav`).** Focus ownership
+  and `tmux_focus_state` are keyed by project plus navigation lane; no behavior
+  change while every editor shares the default lane.
+- **A removed duplicate editor no longer deregisters a still-open document's
+  replica (GH #241).**
+- **A deferred annotated queue head stays queued (`#annotateddeferstrike`).** A
+  deferral paragraph after the operator-note answer is now recognized for both
+  `do [#id]: note` and free-text heads, and the head's claim is kept.
+- **Controller accept loop wakes on connect.** It no longer sleeps up to 50ms
+  per request; this roughly halved the full test suite's runtime. Preflight's
+  cleanup sweep opens other projects' databases read-only.
+- **Test reliability.**
+  - `build.rs` no longer watches the workspace root, so cargo stops relinking
+    every test binary.
+  - Simulated-editor tests share one strict receipt fixture.
+  - A wall-clock admission-deadline test is now deterministic.
+  - Every `make check`/`make test` run keeps its output in `tmp/test-runs/`.
+
 ## 0.35.491
 
 - **Pane bleed: supervisor stderr never reaches the harness pane (`#perfpanebleed`).**

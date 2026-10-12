@@ -501,6 +501,15 @@ fn start_bootstrap_target(
             })?
     };
     if outcome.resolution == "navigation_lane" {
+        if outcome.created {
+            // The new lane's idle placeholder becomes a document pane: it is
+            // no longer a placeholder the lane gc may treat as idle.
+            agent_doc_controller_io::project_controller::release_navigation_lane_placeholder_pane(
+                tmux,
+                &project_root,
+                &pane_id,
+            );
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -3202,6 +3211,20 @@ mod tests {
         assert_eq!(
             tmux.pane_session(&lane.pane_id).unwrap(),
             "proj-IU-0a1b2c3d"
+        );
+        assert_eq!(
+            tmux.raw_cmd(&[
+                "show-options",
+                "-p",
+                "-qv",
+                "-t",
+                &lane.pane_id,
+                "@agent_doc_navigation_lane_placeholder",
+            ])
+            .unwrap_or_default()
+            .trim(),
+            "",
+            "the taken-over placeholder is no longer marked idle for the lane gc"
         );
         let again = start(Some(idea));
         assert!(!again.outcome.created);

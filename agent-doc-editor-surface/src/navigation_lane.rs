@@ -110,6 +110,21 @@ impl NavigationLane {
         self.installation().unwrap_or("shared")
     }
 
+    /// The state-plane channel that carries this lane's copy of the per-lane
+    /// projection published on `base_channel`.
+    ///
+    /// The shared lane is `base_channel` itself, so a shared-mode subscriber
+    /// and every unscoped client (VS Code) read exactly the pre-lane channel.
+    /// An installation lane is `<base_channel>/lane/<installation>`: a
+    /// distinct channel, so one lane's frames never reach another lane's
+    /// subscriber and never displace the shared channel's retained snapshot.
+    pub fn state_channel(&self, base_channel: &str) -> String {
+        match self {
+            Self::Shared => base_channel.to_string(),
+            Self::Installation(installation) => format!("{base_channel}/lane/{installation}"),
+        }
+    }
+
     /// The tmux session backing this lane, derived from the project's
     /// configured session.
     ///
@@ -263,6 +278,12 @@ impl LaneClaim {
 /// panes. It is passive ([`LaneClaim::for_caller_kind`]), so the republish can
 /// only drop the document, never take the pane back.
 pub const LANE_HANDOFF_CALLER_KIND: &str = "lane_handoff";
+
+/// The `caller_kind` of an installation lane's recycle-settle republish when
+/// its retained layout was an explicit claim (`#ideriderindependentnav` P6).
+/// It is passive ([`LaneClaim::for_caller_kind`]), so a background republish
+/// never hands a pane over from another lane.
+pub const RECYCLE_SETTLED_CALLER_KIND: &str = "recycle_settled";
 
 /// One lane's layout columns with every document whose pane lives in another
 /// lane removed (`cross_lane_layout_dropped`), or, for an explicit claim,
@@ -635,6 +656,33 @@ mod tests {
     }
 
     #[test]
+    fn lane_state_channel_keeps_the_shared_channel_and_separates_installations() {
+        const BASE: &str = "agent-doc/pane-layout/status/v1";
+        for mode in [NavigationMode::Shared, NavigationMode::PerInstallation] {
+            assert_eq!(
+                NavigationLane::for_client(mode, "vscode-pid:9").state_channel(BASE),
+                BASE,
+                "an unscoped client reads the pre-lane channel in {mode:?}"
+            );
+        }
+        for client in [IDEA, RIDER] {
+            assert_eq!(
+                NavigationLane::for_client(NavigationMode::Shared, client).state_channel(BASE),
+                BASE,
+                "shared mode keeps every client on the pre-lane channel"
+            );
+        }
+        let mode = NavigationMode::PerInstallation;
+        let idea = NavigationLane::for_client(mode, IDEA).state_channel(BASE);
+        let idea_focus = NavigationLane::for_client(mode, IDEA_FOCUS).state_channel(BASE);
+        let rider = NavigationLane::for_client(mode, RIDER).state_channel(BASE);
+        assert_eq!(idea, "agent-doc/pane-layout/status/v1/lane/IU.0a1b2c3d");
+        assert_eq!(idea_focus, idea, "one IDE's clients share its lane channel");
+        assert_ne!(rider, idea);
+        assert_ne!(rider, BASE);
+    }
+
+    #[test]
     fn per_installation_mode_gives_each_installation_its_own_lane() {
         let mode = NavigationMode::PerInstallation;
         let idea = NavigationLane::for_client(mode, IDEA);
@@ -789,6 +837,7 @@ mod tests {
             "projection",
             "",
             LANE_HANDOFF_CALLER_KIND,
+            RECYCLE_SETTLED_CALLER_KIND,
         ] {
             assert_eq!(
                 LaneClaim::for_caller_kind(passive),

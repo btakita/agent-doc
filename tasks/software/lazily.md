@@ -851,13 +851,24 @@ The seven-item fan-out completed its authorized in-worktree work, but none of th
 The latest lazily-spec `CI` run inspected was completed successfully (run `37258006428`). No `--done` outcomes were applied: all seven items remain open until the preset is defined (or explicit commit/push authority is supplied), the overlapping lazily-spec worktrees are reconciled in dependency order, and each phase's stated gates pass.
 
 Session accretion remains above the warning threshold; I continued the active queue without compacting it.
+
+### Re: #lzcoreprofile — gpt-5 · 2026-10-12T06:27:00-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcoreprofile]
+
+
+Phase 1 is code-complete in `/home/brian/worktrees/lazily-spec-lzcoreprofile-20261012`: the canonical nine-binding Core profile, JSON Schema, semantic and dependency-boundary validator, generated documentation, and eleven negative probes are implemented. `make check`, 277 schema tests, 4 focused profile tests, and `git diff --check` passed.
+
+I moved `#lzcoreprofile` to review because the queue's `#spec-test-commit-push` preset is undefined, and the resolved authorization explicitly forbids committing or pushing the implementation. The review gate clears when explicit commit/integration authority is supplied; the preserved worktree remains uncommitted.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- do [#lzcoreprofile]
+- ~~do [#lzcoreprofile]~~
 - do [#lzcoreclaims]
 - do [#lzcorefacades]
 - do [#lzcorecompat]
@@ -869,7 +880,6 @@ Session accretion remains above the warning threshold; I continued the active qu
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: create the canonical candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates.
 - [ ] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.
 - [ ] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
 - [ ] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
@@ -881,6 +891,7 @@ Session accretion remains above the warning threshold; I continued the active qu
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: create the canonical candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [/] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.

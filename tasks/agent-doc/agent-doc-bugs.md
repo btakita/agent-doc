@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -1269,6 +1270,21 @@ The Apache-2.0 relicense and the README rewrite are on main *after* this tag (`0
 **Releases have continued since then.** Other sessions have shipped through **v0.35.495**: it is the installed `agent-doc --version`, PyPI's latest, and its PyPI workflow is green.
 
 **Bookkeeping is already done.** `capturegatedispatched`, `visiblewritewallclock` and `editoropscheckpointfail` are in the done archive. The `refresh_memory durable_reload` lock-stall follow-up was filed and closed as `refreshmemlockstall`. The queue is empty. Nothing from the 0.35.488 batch is left open.
+
+### Re: #fixrunturn — Run Agent Doc turn rejection on infra.md dispatched — opus-5-5 · 2026-10-12T18:12-04:00
+
+> **Queue prompt:** do [#fixrunturn]
+
+**Deferred:** sent to a background subagent (`subagent:fixrunturn`, claimed). The subagent works in its own worktree, `agent-doc-wt/fixrunturn`, on the `fixrunturn` branch, under the `#spec-test-build-install-commit-push` preset. I'll do the single `make install` and close the item when it reports back.
+
+What the infra.md log shows (`src/haiven-dev/.agent-doc/logs/49c08721-….log`):
+- `cycle-1791841356168` reached `committed` at 21:42:48Z. A **second** `commit_success` for the same cycle landed at 21:45:10Z. That leaves a ~2.5-minute window where finalize/closeout is still running after `committed`.
+- An invocation that arrives inside that window is refused as "prior finalize still completing". No new cycle starts, so the pending queue prompt ("merge order for my accepted PRs on haiven-infra?") is stranded and never answered.
+- Earlier signals: `queue_auto_clear_skipped reason=composer_unobservable`, `idle_queue_watch_drain_deferred reason=defer_unrendered_frame`, and `current_transition_pending` skips.
+
+The subagent's job: find which gate refuses, then make an overlapping invocation either wait and then admit, or defer durably and re-dispatch on its own. A terminal refusal that drops the prompt is not acceptable. It also adds SimWorld regression coverage, updates the spec, and runs `make check`.
+
+Exchange is 1239 lines / 57 sections. It needs a compaction at some point, but the queue is active so I'm not stopping for it.
 <!-- agent:boundary:3e1f2a15 -->
 <!-- /agent:exchange -->
 
@@ -1277,11 +1293,25 @@ The Apache-2.0 relicense and the README rewrite are on main *after* this tag (`0
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#fixrunturn]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fixrunturn] Fix Run Agent Doc turn rejection on infra.md
+  ```
+  • The overlapping agent-doc invocation was refused because the prior finalize was still completing. Session recovery is
+  now healthy: cycle cycle-1791841356168 is committed.
+
+  Pending queue prompt, verbatim:
+
+  > What is the merge order for my accepted PRs on haiven-infra?
+
+  No new response cycle was started.
+
+  Worked for 17m 59s • 5:43 PM
+  ```
 <!-- /agent:backlog -->
 
 ## Review

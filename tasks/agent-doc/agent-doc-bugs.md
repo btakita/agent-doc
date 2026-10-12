@@ -1040,6 +1040,31 @@ It merges in the next batch.
 The subagent is diagnosing it from the haiven-dev logs and state, read-only. The fix will either make a live editor always publish the authority, or let preflight request a re-publish and retry once instead of refusing indefinitely. The authority guard stays strict.
 
 There are no new follow-up items this cycle; everything is tracked under `#runfrontendissue`.
+
+### Re: frontend.md still refused; CI flake fixes — opus-5-5 · 2026-10-12T18:30-04:00
+
+> **Chat prompt (#chatprompt):** items remain undrained.
+>
+>   Worked for 24s • 3:19 PM
+>
+>
+> › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+>
+>
+> • Admission is still refused because the live editor lacks operator_text_authority_v1. I'll run only the authorized
+>   session check and report any pending prompt without modifying the document.
+
+The 3:19 PM retry was refused for the same reason, so the missing `operator_text_authority_v1` on frontend.md's editor replica persists and does not clear on its own. I forwarded this to the `runfrontendissue` subagent. It now has two priorities:
+- why that replica has no authority record right now;
+- a self-healing path, where preflight requests an authority re-publish and retries once instead of refusing every turn.
+
+I asked it to put any safe action you can take to unblock it right now at the top of its report. I'll relay that as soon as it comes back.
+
+**`reaperciflake` is fixed** (`45e3c26ab3`), and merges in the next batch. This is the test that turned CI red on `main`. The GitHub runner's `/bin/sh` is dash, which briefly shows a forked child with the controller's exact command line, so the reaper counted one controller twice. The reaper now skips such un-execed fork copies but still kills them. In an Ubuntu container with dash under CPU contention, the old test failed 1 of 150 and 1 of 400 runs; the fixed tests pass 400 of 400.
+
+Two follow-ups are filed:
+- `controllerforkimage`: the production controller-PID lookup has the same weakness.
+- `simworldcitimeout`: an earlier CI run timed out four `two_ide_navigation_model` SimWorld tests at 180s on the 2–4 core runner. The fix is to make the search faster, not to raise the timeout.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -1057,11 +1082,15 @@ There are no new follow-up items this cycle; everything is tracked under `#runfr
 - 🚧 do [#claimeddrainwarn]
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/244
 - 🚧 #release
+- do [#simworldcitimeout]
+- do [#controllerforkimage]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#simworldcitimeout] [agent-doc] CI run 38286493725 (aa0e9ccffe, 2026-10-12) failed with four sim_world::two_ide_navigation_model tests (per_installation and shared variants) hitting the 180s nextest TIMEOUT on the GitHub runner; locally the model search takes about 23 to 48s. The exhaustive search grew with each lane phase (now about 19 events at depth 5). Make the model check bounded and fast on a 2-4 core runner (partial-order reduction, symmetry, or splitting scenarios) without dropping any mutation it must catch; never raise the timeout.
+- [ ] [#controllerforkimage] [agent-doc] Production project_controller_pids and controller_project_roots in agent-doc-controller-io/src/process.rs match processes by command line, so under dash a controller's un-execed fork child (same cmdline as its parent) can be counted as a second controller (found by reaperciflake). Filter un-execed fork images with the new is_unexeced_fork_of_parent helper wherever controllers are counted or targeted, with tests.
 - [ ] [#runfrontendissue] Run Agent Doc on frontend.md issue:
   ```
   › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md

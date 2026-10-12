@@ -22,6 +22,7 @@ agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.491" 
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.491" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.491" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.35.491" }
+agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.491" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.491" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.491" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.491" }

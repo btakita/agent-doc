@@ -1,6 +1,7 @@
 # Plan: independent tmux navigation per JetBrains installation (`#ideriderindependentnav`)
 
-Status: P1 landed on branch `ridernav`; P2a landed on branch `ridernavp2a`. P2b through P5 are open.
+Status: P1 landed on branch `ridernav`; P2a landed on branch `ridernavp2a`; P2b landed on
+branch `ridernavp2b`. P3 through P5 are open.
 
 ## Problem
 
@@ -106,7 +107,49 @@ green.
 - Open for P2b: the effect-worker sink is still installed only on the shared lane,
   and `set_structural_effect_generation` is still process-global (see Risks).
 
-### P2b: opt-in config, lane routing, and lane session provisioning
+### P2b: opt-in config, lane routing, and lane session provisioning (LANDED)
+
+What landed (the original scope follows below):
+- Config: `ProjectConfig.editor_navigation` (raw spelling) and
+  `agent_doc_project_config_io::editor_navigation_mode{,_for_root}` (unknown =>
+  `shared` plus the rejected value, which the controller logs as
+  `editor_navigation_mode_rejected`). `ControllerRuntime::new` reads it once and
+  `with_navigation_mode` is no longer test-only.
+- Effect workers: `ControllerPaneLayoutLanes` holds a sink factory; every lane graph,
+  including lanes created later, gets its own `ControllerPaneLayoutProjectionSink`
+  and latest-wins worker. The worker takes its lane and binds
+  `set_structural_effect_generation` to that lane graph's published generation, so
+  the cancellation generation is keyed by lane.
+- Routing: `handle_editor_surface_observe` publishes a `Sync` through
+  `publish_pane_layout_desired_invocation_in_lane` into the client's lane graph
+  (shared lane is byte-identical; installation lanes skip the shared durable column
+  memory and the shared status channel). The worker resolves `pane_layout_lane_route`:
+  identity in shared mode; in per-installation mode an installation lane needs a
+  pin, provisions `<pin>-<installation>` (`agent-doc` + `stash`, marked
+  `@agent_doc_navigation_lane=<root>`, unmarked same-named sessions refused) and
+  targets its `agent-doc` window id. The survey (`tmux_layout_sync_state_for_lane_invocation`)
+  and target-window fallback (`pane_layout_target_window_id_for_lane`) observe the
+  lane session. `observe_tmux_for_lane` refolds only that lane's clients.
+- Ownership: `partition_lane_layout_columns` / `LanePaneMembership` (pure, editor-surface)
+  drop other lanes' documents in the controller (`cross_lane_layout_dropped`) and again
+  in the sync body after column memory (`drop_columns_owned_by_other_navigation_lanes`).
+  Editor focus on another lane's pane is refused (`owned_by_other_lane`) and never
+  escalates; an installation lane's focus escalation republishes its own lane.
+  `TmuxSessionPolicy::with_navigation_lanes` allows lane sessions derived from an allowed
+  session under `tmux_sessions`.
+- Verification: SimWorld `two_ide_navigation_model` tracks each document's pane session
+  (every document contended by two IDEs) and checks that no pane changes session; the
+  `MoveAcrossLanes` mutation is detected. Unit tests cover config parsing, per-lane
+  sink/cancellation, lane routing, lane-only refold, policy derivation, and the sync-body
+  guard; `make tmux-ci` adds isolated-server tests for lane-session provisioning (and the
+  never-adopt refusal) and the sync-body guard. Shared mode's existing tests are unchanged.
+- Not yet covered (moved to P3/P5): an end-to-end isolated tmux test with two lanes,
+  two layouts, and alternating heartbeats through the real sync body; how the first sync treats
+  the empty shell pane a new lane session starts with (not exercised end to end yet); a per-lane
+  `pane_layout_status` wire channel; and route/start/claim lane awareness (a new pane for
+  a document selected in a lane starts in that lane only through the layout sync path).
+
+Original scope:
 
 Scope (Rust, controller and sync):
 - Config: `.agent-doc/config.toml` `editor_navigation = "shared" | "per_installation"`
@@ -183,14 +226,15 @@ Scope (Rust, controller and sync):
 
 ## Risks
 
-- `pane_layout_target_window_id` and the drift survey still read the project pin
-  (`specs/08-session-routing.md`, "Deferred"). P2 must make both lane-aware before
-  enabling the mode, or a lane's survey observes the wrong session.
+- (Resolved in P2b.) `pane_layout_target_window_id` and the drift survey read the
+  project pin; installation lanes now use `pane_layout_target_window_id_for_lane`
+  and `tmux_layout_sync_state_for_lane_invocation`.
 - An operator terminal attached to the shared session sees none of the lane
   sessions. P3's attach command is the supported path.
-- The structural-effect cancellation generation
+- (Resolved in P2b by per-lane workers and per-lane generation binding.) The
+  structural-effect cancellation generation
   (`agent_doc_process_owner_io::set_structural_effect_generation`, bound to
-  `published_generation_handle()`) is process-global, and the pane-layout effect
+  `published_generation_handle()`) was process-global, and the pane-layout effect
   worker plus its `ControllerPaneLayoutProjectionSink` are installed once per
   runtime. A newer generation in one lane must not cancel another lane's sync
   body. P2 should either key that generation by lane or drive every lane from one

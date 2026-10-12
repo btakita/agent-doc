@@ -168,9 +168,8 @@ pub(super) struct ControllerEditorSurfaceGraph {
             agent_doc_editor_surface::InstallationFocusOwner,
         >,
     >,
-    /// How this controller's editor installations share tmux navigation. The
-    /// production runtime constructs `Shared`; per-installation lanes are
-    /// enabled only together with per-lane session provisioning.
+    /// How this controller's editor installations share tmux navigation
+    /// (`editor_navigation`; `Shared` unless the project opts in).
     navigation_mode: agent_doc_editor_surface::NavigationMode,
     run_intent: ControllerEditorSurfaceIntentRunner,
 }
@@ -562,10 +561,9 @@ impl ControllerEditorSurfaceGraph {
     }
 
     /// The same graph with an explicit navigation mode
-    /// (`#ideriderindependentnav`). Test-only until per-lane tmux session
-    /// provisioning lands: enabling per-installation lanes before each lane
-    /// has its own session would let two installations drive one window.
-    #[cfg(test)]
+    /// (`#ideriderindependentnav`), from `editor_navigation` in
+    /// `.agent-doc/config.toml`. Per-installation lanes route each
+    /// installation's layout to its own lane session (P2b).
     pub(super) fn with_navigation_mode(
         mut self,
         navigation_mode: agent_doc_editor_surface::NavigationMode,
@@ -769,12 +767,15 @@ impl ControllerEditorSurfaceGraph {
     /// Publish the controller's actual tmux observation to every active editor
     /// client for a project (`#tmuxautosyncreactive`).
     ///
-    /// The background `pane_layout_effect_worker` calls this after it converges
+    /// Each lane's `pane_layout_effect_worker` now calls
+    /// [`Self::observe_tmux_for_lane`]; this every-lane form is the shared-mode
+    /// equivalent kept for tests. The worker calls it after it converges
     /// a structural effect so the surface graph's retained `tmux` `Source`
     /// refreshes without the editor socket request waiting for the survey. Each
     /// client's `EditorSurfaceState::observe_tmux` re-folds against its own
     /// editor surface, so a matching layout settles to `Idle` and a drifted one
     /// re-derives `Sync` — the decision lives in the graph, not the caller.
+    #[cfg(test)]
     pub(super) fn observe_tmux_for_project(&self, project_root: &Path, tmux: Option<TmuxLayout>) {
         let roots = self.roots.lock();
         for ((root, _client_id, _surface_id), entry) in roots.iter() {
@@ -782,6 +783,42 @@ impl ControllerEditorSurfaceGraph {
                 entry.state.observe_tmux(tmux.clone());
             }
         }
+    }
+
+    /// Publish one navigation lane's actual tmux observation to the active
+    /// editor clients of that lane only (`#ideriderindependentnav` P2b).
+    ///
+    /// Each lane's effect worker surveys its own session, so its layout is a
+    /// fact about that lane: refolding another lane's clients against it would
+    /// make them re-derive `Sync` toward a session they do not navigate. In
+    /// shared mode every client is on the shared lane, so this is exactly
+    /// [`Self::observe_tmux_for_project`].
+    pub(super) fn observe_tmux_for_lane(
+        &self,
+        project_root: &Path,
+        lane: &agent_doc_editor_surface::NavigationLane,
+        tmux: Option<TmuxLayout>,
+    ) {
+        let roots = self.roots.lock();
+        for ((root, client_id, _surface_id), entry) in roots.iter() {
+            if root == project_root
+                && !entry.retired
+                && agent_doc_editor_surface::NavigationLane::for_client(
+                    self.navigation_mode,
+                    client_id,
+                ) == *lane
+            {
+                entry.state.observe_tmux(tmux.clone());
+            }
+        }
+    }
+
+    /// The navigation lane `client_id` publishes into under this graph's mode.
+    pub(super) fn navigation_lane_for_client(
+        &self,
+        client_id: &str,
+    ) -> agent_doc_editor_surface::NavigationLane {
+        agent_doc_editor_surface::NavigationLane::for_client(self.navigation_mode, client_id)
     }
 
     fn forget(&self, project_root: &Path, client_id: &str, generation: u64) -> bool {
@@ -24502,12 +24539,16 @@ enum PaneLayoutObservationSessionSource {
     ConfiguredSession,
     LayoutEffectPane,
     RegisteredSupervisorPane,
+    /// An installation navigation lane's own session
+    /// (`#ideriderindependentnav` P2b); never the project pin.
+    NavigationLaneSession,
 }
 
 impl PaneLayoutObservationSessionSource {
     fn label(self) -> &'static str {
         match self {
             Self::ConfiguredSession => "tmux_session_pin",
+            Self::NavigationLaneSession => "navigation_lane_session",
             Self::LayoutEffectPane => "layout_effect_pane",
             Self::RegisteredSupervisorPane => "registered_supervisor_pane",
         }
@@ -25480,6 +25521,126 @@ fn record_editor_surface_effect(
     }
 }
 
+/// `#ideriderindependentnav` P2b: refuse an editor focus whose document's pane
+/// lives in another navigation lane (`owned_by_other_lane`). `None` lets the
+/// focus proceed: shared mode, no project pin, no live pane, or a pane in this
+/// lane's own session.
+fn navigation_lane_focus_refusal(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    document: &str,
+) -> Option<ControllerTmuxFocusReceipt> {
+    let (project_session, lane_session) = navigation_lane_sessions(
+        &bootstrap.project_root,
+        runtime.editor_surface_graph.navigation_mode(),
+        lane,
+    )?;
+    // The same document key the focus handler resolves the actor by.
+    let canonical = canonical_controller_request_file(bootstrap, Path::new(document));
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &bootstrap.project_root,
+        &canonical.to_string_lossy(),
+    );
+    let pane = runtime
+        .actor_store_snapshot()
+        .get(&document_id)
+        .map(|record| record.pane_id.clone())
+        .filter(|pane| !pane.is_empty())?;
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let pane_session = tmux.pane_session(&pane).ok();
+    let agent_doc_editor_surface::LanePaneMembership::OtherLane { owner_session } =
+        agent_doc_editor_surface::LanePaneMembership::classify(
+            &project_session,
+            &lane_session,
+            pane_session.as_deref(),
+        )
+    else {
+        return None;
+    };
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_editor_surface_focus_refused document={document} reason=owned_by_other_lane owner_lane={} owner_session={owner_session} navigation_lane={} pane={pane}",
+            agent_doc_editor_surface::lane_label_for_session(&project_session, &owner_session),
+            lane.label(),
+        ),
+    );
+    Some(tmux_focus_receipt(
+        false,
+        "owned_by_other_lane",
+        Some(document.to_string()),
+        Some(pane),
+        Some(owner_session),
+        None,
+        None,
+    ))
+}
+
+/// The focus escalation of an installation navigation lane: republish this
+/// lane's layout with `document` focused so its own effect worker makes the
+/// pane visible in the lane session. The basis is the editor's visible columns
+/// when it reported them, else the lane's retained desired layout extended
+/// with the document. The shared lane keeps
+/// [`escalate_focus_to_structural_layout`].
+fn escalate_focus_to_lane_layout(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    document: &str,
+    columns: &[SurfaceColumn],
+    reason: &str,
+) -> bool {
+    let document_id = canonical_layout_document_id(&bootstrap.project_root, document);
+    let holds_document = |columns: &[String]| {
+        columns.iter().any(|column| {
+            column.split(',').map(str::trim).any(|file| {
+                !file.is_empty()
+                    && canonical_layout_document_id(&bootstrap.project_root, file) == document_id
+            })
+        })
+    };
+    let surface_columns = columns
+        .iter()
+        .map(|column| column.files.join(","))
+        .filter(|column| !column.is_empty())
+        .collect::<Vec<_>>();
+    let (mut basis, source) = if surface_columns.is_empty() {
+        (
+            runtime
+                .pane_layout_graph_for_lane(lane)
+                .desired()
+                .map(|desired| desired.invocation.columns)
+                .unwrap_or_default(),
+            "lane_retained_layout",
+        )
+    } else {
+        (surface_columns, "editor_surface")
+    };
+    if !holds_document(&basis) {
+        basis.push(document.to_string());
+    }
+    let asserted = basis.len();
+    let published = publish_pane_layout_desired_invocation_in_lane(
+        bootstrap,
+        runtime,
+        lane,
+        automatic_layout_sync_invocation(basis, document, false),
+        None,
+        focus_escalation_publication(reason),
+        PaneLayoutClaim::from(PaneLayoutPublisher::Escalation).asserting(asserted),
+    );
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_editor_surface_focus_escalated document={document} reason={reason} source={source} navigation_lane={} published={}",
+            lane.label(),
+            published.is_ok(),
+        ),
+    );
+    published.is_ok()
+}
+
 fn handle_editor_surface_observe(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -25507,6 +25668,11 @@ fn handle_editor_surface_observe(
         );
     }
     let focus_client_id = observation.client_id.clone();
+    // `#ideriderindependentnav` P2b: the lane this client navigates. Shared
+    // mode (the default) puts every client on the shared lane.
+    let navigation_lane = runtime
+        .editor_surface_graph
+        .navigation_lane_for_client(&observation.client_id);
     let observed_surface = observation.surface.clone();
     let projection_identity = (
         observation.client_id.clone(),
@@ -25630,9 +25796,10 @@ fn handle_editor_surface_observe(
             } => {
                 let invocation =
                     automatic_editor_surface_sync_invocation(&columns, &document, preserve_focus);
-                let publish_result = publish_pane_layout_desired_invocation(
+                let publish_result = publish_pane_layout_desired_invocation_in_lane(
                     bootstrap,
                     runtime,
+                    &navigation_lane,
                     invocation,
                     None,
                     PaneLayoutPublication::CoalesceIdentical,
@@ -25684,6 +25851,25 @@ fn handle_editor_surface_observe(
                             window_id: None,
                             window_name: None,
                         }),
+                    )?;
+                } else if let Some(refusal) =
+                    navigation_lane_focus_refusal(bootstrap, runtime, &navigation_lane, &document)
+                {
+                    // A pane owned by another lane is that lane's to select;
+                    // selecting it would change the other IDE's view. The
+                    // refusal is a verdict, not a lost effect, and never
+                    // escalates to a structural sync (which would move it).
+                    record_editor_surface_effect(
+                        &bootstrap.project_root,
+                        &focus_client_id,
+                        &observed_surface,
+                        &effect_intent,
+                        false,
+                    );
+                    record_editor_surface_focus_outcome(
+                        &bootstrap.project_root,
+                        &mut receipt,
+                        Ok(refusal),
                     )?;
                 } else {
                     let focus_request = ControllerRequest {
@@ -25737,13 +25923,24 @@ fn handle_editor_surface_observe(
                         focus_result,
                     )?;
                     if let Some(reason) = structural_refusal {
-                        effect_failed = !escalate_focus_to_structural_layout(
-                            bootstrap,
-                            runtime,
-                            &document,
-                            &surface_columns,
-                            &reason,
-                        );
+                        effect_failed = if navigation_lane.is_shared() {
+                            !escalate_focus_to_structural_layout(
+                                bootstrap,
+                                runtime,
+                                &document,
+                                &surface_columns,
+                                &reason,
+                            )
+                        } else {
+                            !escalate_focus_to_lane_layout(
+                                bootstrap,
+                                runtime,
+                                &navigation_lane,
+                                &document,
+                                &surface_columns,
+                                &reason,
+                            )
+                        };
                     }
                     record_editor_surface_effect(
                         &bootstrap.project_root,
@@ -26700,14 +26897,37 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
     invocation: &ControllerTmuxLayoutSyncStateInvocation,
     effect_file_panes: &[(String, String)],
 ) -> Result<ControllerTmuxLayoutSyncStateReport> {
+    tmux_layout_sync_state_for_lane_invocation(
+        bootstrap,
+        runtime,
+        invocation,
+        effect_file_panes,
+        None,
+    )
+}
+
+/// The drift survey of one navigation lane (`#ideriderindependentnav` P2b).
+///
+/// `lane_session` is the installation lane's own session; `None` is the shared
+/// lane, whose survey keeps the project-pin rule unchanged. An installation
+/// lane is never surveyed through the pin, or it would observe the wrong
+/// session's `agent-doc` window.
+fn tmux_layout_sync_state_for_lane_invocation(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    invocation: &ControllerTmuxLayoutSyncStateInvocation,
+    effect_file_panes: &[(String, String)],
+    lane_session: Option<&str>,
+) -> Result<ControllerTmuxLayoutSyncStateReport> {
     let tmux = agent_doc_tmux_io::configured_tmux();
-    tmux_layout_sync_state_for_invocation_with_effect_assignment_and_tmux(
+    tmux_layout_sync_state_for_invocation_in_session(
         bootstrap,
         runtime,
         invocation,
         effect_file_panes,
         &[],
         &tmux,
+        lane_session,
     )
     .map(|(report, _)| report)
 }
@@ -26719,6 +26939,29 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment_and_tmux(
     effect_file_panes: &[(String, String)],
     registered_supervisor_file_panes: &[(String, String)],
     tmux: &tmux_router::Tmux,
+) -> Result<(
+    ControllerTmuxLayoutSyncStateReport,
+    Option<PaneLayoutObservationSessionSource>,
+)> {
+    tmux_layout_sync_state_for_invocation_in_session(
+        bootstrap,
+        runtime,
+        invocation,
+        effect_file_panes,
+        registered_supervisor_file_panes,
+        tmux,
+        None,
+    )
+}
+
+fn tmux_layout_sync_state_for_invocation_in_session(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    invocation: &ControllerTmuxLayoutSyncStateInvocation,
+    effect_file_panes: &[(String, String)],
+    registered_supervisor_file_panes: &[(String, String)],
+    tmux: &tmux_router::Tmux,
+    lane_session: Option<&str>,
 ) -> Result<(
     ControllerTmuxLayoutSyncStateReport,
     Option<PaneLayoutObservationSessionSource>,
@@ -26760,13 +27003,20 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment_and_tmux(
     // is a read-only survey, so no pane mutation invalidates the snapshot
     // mid-pass. The scope is thread-local and dropped at the function return.
     let _pane_snapshot = tmux_router::begin_pane_snapshot_scope();
-    let Some((configured_session, session_source)) = pane_layout_observation_session(
-        configured_tmux_session_for_project(&bootstrap.project_root),
-        project_is_multi_tmux_session(&bootstrap.project_root),
-        effect_file_panes,
-        registered_supervisor_file_panes,
-        |pane| tmux.pane_session(pane).ok(),
-    ) else {
+    let observed_session = match lane_session {
+        Some(lane_session) => Some((
+            lane_session.to_string(),
+            PaneLayoutObservationSessionSource::NavigationLaneSession,
+        )),
+        None => pane_layout_observation_session(
+            configured_tmux_session_for_project(&bootstrap.project_root),
+            project_is_multi_tmux_session(&bootstrap.project_root),
+            effect_file_panes,
+            registered_supervisor_file_panes,
+            |pane| tmux.pane_session(pane).ok(),
+        ),
+    };
+    let Some((configured_session, session_source)) = observed_session else {
         return Ok((
             layout_sync_state_report(
                 false,
@@ -27150,6 +27400,19 @@ pub(super) fn clear_captured_finalize_wake(runtime: &ControllerRuntime, document
     runtime.captured_finalize_wakes.lock().remove(document_hash);
 }
 
+/// Publish the pane-layout status of `lane`. The status channel carries the
+/// shared lane's projection (the wire shape predates lanes), so an
+/// installation lane's worker does not republish it; that lane's projection is
+/// read from its own graph.
+fn publish_pane_layout_lane_status(
+    runtime: &ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
+) {
+    if lane.is_shared() {
+        publish_pane_layout_status(runtime);
+    }
+}
+
 fn publish_pane_layout_status(runtime: &ControllerRuntime) {
     let Some(status) = runtime.pane_layout_state_projection() else {
         return;
@@ -27435,6 +27698,8 @@ pub(crate) fn install_state_plane_projection_sinks(runtime: &Arc<ControllerRunti
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 struct ControllerPaneLayoutProjectionSink {
     runtime: std::sync::Weak<ControllerRuntime>,
+    /// The navigation lane whose graph this sink (and its worker) serves.
+    lane: agent_doc_editor_surface::NavigationLane,
     state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
     wake: Arc<Condvar>,
     next_work_revision: AtomicU64,
@@ -27453,6 +27718,7 @@ impl PaneLayoutProjectionSink for ControllerPaneLayoutProjectionSink {
         }
         spawn_pane_layout_effect_worker(
             self.runtime.clone(),
+            self.lane.clone(),
             Arc::clone(&self.state),
             Arc::clone(&self.wake),
         );
@@ -27469,10 +27735,12 @@ impl PaneLayoutProjectionSink for ControllerPaneLayoutProjectionSink {
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn spawn_pane_layout_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
+    lane: agent_doc_editor_surface::NavigationLane,
     state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
     wake: Arc<Condvar>,
 ) {
     let worker_runtime = runtime.clone();
+    let worker_lane = lane.clone();
     let worker_state = Arc::clone(&state);
     let worker_wake = Arc::clone(&wake);
     let spawn = std::thread::Builder::new()
@@ -27482,6 +27750,7 @@ fn spawn_pane_layout_effect_worker(
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 pane_layout_effect_worker(
                     worker_runtime,
+                    worker_lane,
                     Arc::clone(&worker_state),
                     worker_wake,
                     &executing_revision,
@@ -27499,7 +27768,7 @@ fn spawn_pane_layout_effect_worker(
                 "[controller] pane-layout effect worker panicked at revision {failed_revision}; restart_pending={should_restart}"
             );
             if should_restart {
-                spawn_pane_layout_effect_worker(runtime, worker_state, wake);
+                spawn_pane_layout_effect_worker(runtime, lane, worker_state, wake);
             }
         });
     if let Err(error) = spawn {
@@ -27510,16 +27779,21 @@ fn spawn_pane_layout_effect_worker(
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 pub(super) fn install_pane_layout_projection_sink(runtime: &Arc<ControllerRuntime>) {
-    runtime
-        .pane_layout_graph()
-        .install_sink(Arc::new(ControllerPaneLayoutProjectionSink {
-            runtime: Arc::downgrade(runtime),
+    // `#ideriderindependentnav` P2b: one sink, latest-wins worker state, and
+    // structural-effect cancellation generation per navigation lane, so one
+    // lane's newer layout never supersedes or cancels another lane's sync.
+    let weak = Arc::downgrade(runtime);
+    runtime.install_pane_layout_sink_factory(Arc::new(move |lane| {
+        Arc::new(ControllerPaneLayoutProjectionSink {
+            runtime: weak.clone(),
+            lane: lane.clone(),
             state: Arc::new(Mutex::new(
                 agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
             )),
             wake: Arc::new(Condvar::new()),
             next_work_revision: AtomicU64::new(1),
-        }));
+        }) as Arc<dyn PaneLayoutProjectionSink>
+    }));
 }
 
 fn pane_layout_state_invocation(
@@ -27671,6 +27945,242 @@ fn observed_pane_window(identity: Result<(String, String)>) -> Option<(String, S
         .ok()
         .map(|(id, name)| (id.trim().to_string(), name.trim().to_string()))
         .filter(|(id, _)| !id.is_empty())
+}
+
+/// tmux user option that marks a session agent-doc created as a navigation lane
+/// (`#ideriderindependentnav` P2b). Its value is the project root. A session with
+/// the lane's name but without this mark was not started by agent-doc, so it is
+/// never adopted (`#bare-foreign-session-guard`); P5's lane GC reaps only marked
+/// sessions.
+const NAVIGATION_LANE_SESSION_OPTION: &str = "@agent_doc_navigation_lane";
+
+/// The `(project session, lane session)` pair one navigation lane arranges, when
+/// lane membership applies at all.
+///
+/// `None` in shared navigation mode (every lane check is skipped, which is the
+/// pre-lane behavior) and when the project has no `tmux_session` pin to derive
+/// lane sessions from. In per-installation mode the shared lane is
+/// `(pin, pin)`, and an installation lane is `(pin, <pin>-<installation>)`.
+fn navigation_lane_sessions(
+    project_root: &Path,
+    navigation_mode: agent_doc_editor_surface::NavigationMode,
+    lane: &agent_doc_editor_surface::NavigationLane,
+) -> Option<(String, String)> {
+    if navigation_mode != agent_doc_editor_surface::NavigationMode::PerInstallation {
+        return None;
+    }
+    let project_session = configured_tmux_session_for_project(project_root)?;
+    let lane_session = lane.tmux_session_name(&project_session);
+    Some((project_session, lane_session))
+}
+
+/// Where one lane's pane-layout effect lands (`#ideriderindependentnav` P2b).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct PaneLayoutLaneRoute {
+    /// `(project session, lane session)` when lane membership applies.
+    sessions: Option<(String, String)>,
+    /// The installation lane session's `agent-doc` window id. `None` for the
+    /// shared lane, which keeps its existing window resolution.
+    window: Option<String>,
+    /// The installation lane session was created by this pass.
+    provisioned: bool,
+}
+
+impl PaneLayoutLaneRoute {
+    /// The session an installation lane's drift survey observes. The shared
+    /// lane keeps the project-pin survey (`None`).
+    fn observation_session(&self) -> Option<&str> {
+        self.window.as_ref()?;
+        self.sessions
+            .as_ref()
+            .map(|(_, lane_session)| lane_session.as_str())
+    }
+}
+
+/// Resolve (and on first use provision) the tmux surface of `lane`.
+///
+/// Shared mode and the shared lane never provision: they return the existing
+/// route unchanged. An installation lane requires a project `tmux_session` pin
+/// to derive its session from; its session is created on its first driving
+/// layout, with the canonical `agent-doc` and `stash` windows. A failure is a
+/// terminal refusal reason, not a retry: the next editor observation re-derives.
+fn pane_layout_lane_route(
+    project_root: &Path,
+    navigation_mode: agent_doc_editor_surface::NavigationMode,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    tmux: &tmux_router::Tmux,
+) -> std::result::Result<PaneLayoutLaneRoute, String> {
+    if navigation_mode != agent_doc_editor_surface::NavigationMode::PerInstallation {
+        return Ok(PaneLayoutLaneRoute::default());
+    }
+    let sessions = navigation_lane_sessions(project_root, navigation_mode, lane);
+    if lane.is_shared() {
+        return Ok(PaneLayoutLaneRoute {
+            sessions,
+            ..PaneLayoutLaneRoute::default()
+        });
+    }
+    let Some((project_session, lane_session)) = sessions else {
+        return Err("navigation_lane_requires_tmux_session".to_string());
+    };
+    let provisioned = ensure_navigation_lane_session(tmux, project_root, &lane_session)?;
+    let Some(window) = resolve_agent_doc_window_id_for_session(tmux, &lane_session) else {
+        return Err(format!(
+            "navigation_lane_session_missing_agent_doc_window:{lane_session}"
+        ));
+    };
+    Ok(PaneLayoutLaneRoute {
+        sessions: Some((project_session, lane_session)),
+        window: Some(window),
+        provisioned,
+    })
+}
+
+/// Create `lane_session` with `agent-doc` + `stash` windows unless agent-doc
+/// already created it. Returns whether this call created it.
+///
+/// An existing session is reused only when it carries
+/// [`NAVIGATION_LANE_SESSION_OPTION`] for this project root; any other session
+/// with the lane's name is refused, never adopted or killed.
+fn ensure_navigation_lane_session(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    lane_session: &str,
+) -> std::result::Result<bool, String> {
+    let root = project_root.to_string_lossy().to_string();
+    if tmux.session_alive(lane_session) {
+        let mark = tmux
+            .cmd()
+            .args([
+                "show-options",
+                "-qv",
+                "-t",
+                &format!("{lane_session}:"),
+                NAVIGATION_LANE_SESSION_OPTION,
+            ])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
+        return if mark.as_deref() == Some(root.as_str()) {
+            Ok(false)
+        } else {
+            Err(format!("navigation_lane_session_not_owned:{lane_session}"))
+        };
+    }
+    tmux_router::invalidate_pane_snapshot();
+    let created = tmux
+        .cmd()
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            lane_session,
+            "-n",
+            "agent-doc",
+            "-c",
+            &root,
+        ])
+        .output()
+        .map_err(|error| format!("navigation_lane_session_create_failed:{error}"))?;
+    if !created.status.success() {
+        return Err(format!(
+            "navigation_lane_session_create_failed:{}",
+            String::from_utf8_lossy(&created.stderr).trim()
+        ));
+    }
+    let marked = tmux
+        .cmd()
+        .args([
+            "set-option",
+            "-q",
+            "-t",
+            &format!("{lane_session}:"),
+            NAVIGATION_LANE_SESSION_OPTION,
+            &root,
+        ])
+        .output()
+        .map_err(|error| format!("navigation_lane_session_mark_failed:{error}"))?;
+    if !marked.status.success() {
+        return Err(format!(
+            "navigation_lane_session_mark_failed:{}",
+            String::from_utf8_lossy(&marked.stderr).trim()
+        ));
+    }
+    tmux.ensure_stash_window(lane_session)
+        .map_err(|error| format!("navigation_lane_stash_create_failed:{error:#}"))?;
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!("navigation_lane_session_created session={lane_session} windows=agent-doc,stash"),
+    );
+    Ok(true)
+}
+
+/// Apply one lane's route to the desired layout it is about to project.
+///
+/// Every document whose live pane belongs to another lane of this project is
+/// dropped from this lane's columns (`cross_lane_layout_dropped`), so the
+/// structural effect can never `join-pane` it across sessions; a focus target
+/// among them is dropped too. An installation lane targets its own session's
+/// `agent-doc` window explicitly. Returns the routed layout and the dropped
+/// `(document, owner session)` pairs. Without lane sessions this is identity.
+fn route_pane_layout_desired_to_lane(
+    project_root: &Path,
+    route: &PaneLayoutLaneRoute,
+    mut desired: PaneLayoutDesired,
+    actor_bindings: &[ControllerTmuxActorBinding],
+    mut pane_session: impl FnMut(&str) -> Option<String>,
+) -> (PaneLayoutDesired, Vec<(String, String)>) {
+    let Some((project_session, lane_session)) = route.sessions.as_ref() else {
+        return (desired, Vec::new());
+    };
+    let partition = agent_doc_editor_surface::partition_lane_layout_columns(
+        &desired.invocation.columns,
+        project_session,
+        lane_session,
+        |file| {
+            let document = canonical_layout_document_id(project_root, file);
+            actor_bindings
+                .iter()
+                .find(|binding| {
+                    canonical_layout_document_id(project_root, &binding.document_path) == document
+                })
+                .and_then(|binding| pane_session(&binding.pane_id))
+        },
+    );
+    if let Some(focus) = desired.invocation.focus.as_deref() {
+        let focus_id = canonical_layout_document_id(project_root, focus);
+        if partition
+            .dropped
+            .iter()
+            .any(|(document, _)| canonical_layout_document_id(project_root, document) == focus_id)
+        {
+            desired.invocation.focus = None;
+        }
+    }
+    desired.invocation.columns = partition.kept;
+    if let Some(window) = route.window.as_ref() {
+        desired.invocation.window = Some(window.clone());
+    }
+    (desired, partition.dropped)
+}
+
+/// [`pane_layout_target_window_id`] for one navigation lane: an installation
+/// lane's fallback is its own session's `agent-doc` window, never the pin's.
+fn pane_layout_target_window_id_for_lane(
+    project_root: &Path,
+    tmux: &tmux_router::Tmux,
+    invocation_window: Option<&str>,
+    lane_session: Option<&str>,
+) -> Option<String> {
+    match lane_session {
+        Some(lane_session) => invocation_window
+            .map(str::trim)
+            .filter(|window| window.starts_with('@'))
+            .map(str::to_string)
+            .or_else(|| resolve_agent_doc_window_id_for_session(tmux, lane_session)),
+        None => pane_layout_target_window_id(project_root, tmux, invocation_window),
+    }
 }
 
 fn pane_layout_target_window_id(
@@ -27842,6 +28352,7 @@ fn apply_pane_layout_focus_effect(
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn pane_layout_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
+    lane: agent_doc_editor_surface::NavigationLane,
     state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
     wake: Arc<Condvar>,
     executing_revision: &AtomicU64,
@@ -27860,7 +28371,10 @@ fn pane_layout_effect_worker(
         // publish actor transitions directly instead of self-RPCing through the
         // controller socket.
         install_controller_request_thread_context(&runtime);
-        let Some(desired) = runtime.pane_layout_desired() else {
+        // This worker serves exactly one navigation lane's graph; the shared
+        // lane's graph is the one every non-lane caller uses.
+        let graph = runtime.pane_layout_graph_for_lane(&lane);
+        let Some(desired) = graph.desired() else {
             state.lock().deactivate();
             return;
         };
@@ -27869,19 +28383,15 @@ fn pane_layout_effect_worker(
             attempt = 0;
         }
         let already_terminal = matches!(
-            runtime.pane_layout_projection(),
+            graph.projection(),
             PaneLayoutProjection::Refused(ref terminal)
                 | PaneLayoutProjection::OperatorOwned(ref terminal)
                 | PaneLayoutProjection::Converged(ref terminal)
                 if terminal.generation == desired.generation
         );
         if already_terminal {
-            if pane_layout_effect_worker_complete(
-                &runtime,
-                &state,
-                work_revision,
-                desired.generation,
-            ) == PaneLayoutAttemptCompletion::Retire
+            if pane_layout_effect_worker_complete(&graph, &state, work_revision, desired.generation)
+                == PaneLayoutAttemptCompletion::Retire
             {
                 return;
             }
@@ -27905,17 +28415,138 @@ fn pane_layout_effect_worker(
         // Actor-store bindings and prior structural file→pane receipts are one
         // retained Computed. A receipt update invalidates this value and wakes
         // the effect; the worker does not imperatively reconstruct authority.
-        let actor_bindings = runtime.pane_layout_actor_bindings();
+        let actor_bindings = graph.actor_bindings();
+        // `#ideriderindependentnav` P2b: route this lane's layout to its own
+        // tmux session. Shared navigation mode is the identity route (no tmux
+        // reads, no provisioning). In per-installation mode an installation
+        // lane's session is provisioned on its first driving layout, and every
+        // document whose pane lives in another lane is dropped from this
+        // lane's columns so no pane ever moves across lanes.
+        let lane_tmux = agent_doc_tmux_io::configured_tmux();
+        let lane_route = match pane_layout_lane_route(
+            &bootstrap.project_root,
+            runtime.editor_surface_graph.navigation_mode(),
+            &lane,
+            &lane_tmux,
+        ) {
+            Ok(route) => route,
+            Err(reason) => {
+                graph.record_receipt(PaneLayoutEffectReceipt {
+                    generation: desired.generation,
+                    actor_bindings: actor_bindings.clone(),
+                    attempt,
+                    phase: PaneLayoutEffectPhase::Refused,
+                    reason: reason.clone(),
+                    file_panes: Vec::new(),
+                    focus_required: false,
+                    focus_applied: false,
+                });
+                publish_pane_layout_lane_status(&runtime, &lane);
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "pane_layout_projection generation={} attempt={} navigation_lane={} phase=refused reason={reason}",
+                        desired.generation,
+                        attempt,
+                        lane.label(),
+                    ),
+                );
+                match pane_layout_effect_worker_complete(
+                    &graph,
+                    &state,
+                    work_revision,
+                    desired.generation,
+                ) {
+                    PaneLayoutAttemptCompletion::Retire => return,
+                    PaneLayoutAttemptCompletion::RetryCurrent
+                    | PaneLayoutAttemptCompletion::Superseded => {
+                        attempt = 0;
+                        continue;
+                    }
+                }
+            }
+        };
+        let (desired, cross_lane_dropped) = route_pane_layout_desired_to_lane(
+            &bootstrap.project_root,
+            &lane_route,
+            desired,
+            &actor_bindings,
+            |pane| lane_tmux.pane_session(pane).ok(),
+        );
+        for (document, owner_session) in &cross_lane_dropped {
+            let project_session = lane_route
+                .sessions
+                .as_ref()
+                .map(|(project_session, _)| project_session.as_str())
+                .unwrap_or_default();
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "cross_lane_layout_dropped document={document} owner_lane={} owner_session={owner_session} navigation_lane={} generation={}",
+                    agent_doc_editor_surface::lane_label_for_session(
+                        project_session,
+                        owner_session
+                    ),
+                    lane.label(),
+                    desired.generation,
+                ),
+            );
+        }
+        if desired.invocation.columns.is_empty() && !cross_lane_dropped.is_empty() {
+            // Every column belongs to another lane: this lane has nothing it may
+            // arrange, which is exactly the converged answer for it.
+            graph.record_observation(PaneLayoutObservation {
+                generation: desired.generation,
+                actor_bindings: actor_bindings.clone(),
+                report: layout_sync_state_report(
+                    true,
+                    "all_columns_owned_by_other_lanes",
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    LayoutSyncStateTarget {
+                        window_id: desired.invocation.window.clone(),
+                        ..LayoutSyncStateTarget::default()
+                    },
+                ),
+            });
+            graph.record_receipt(PaneLayoutEffectReceipt {
+                generation: desired.generation,
+                actor_bindings: actor_bindings.clone(),
+                attempt,
+                phase: PaneLayoutEffectPhase::Converged,
+                reason: "all_columns_owned_by_other_lanes".to_string(),
+                file_panes: Vec::new(),
+                focus_required: false,
+                focus_applied: false,
+            });
+            publish_pane_layout_lane_status(&runtime, &lane);
+            match pane_layout_effect_worker_complete(
+                &graph,
+                &state,
+                work_revision,
+                desired.generation,
+            ) {
+                PaneLayoutAttemptCompletion::Retire => return,
+                PaneLayoutAttemptCompletion::RetryCurrent
+                | PaneLayoutAttemptCompletion::Superseded => {
+                    attempt = 0;
+                    continue;
+                }
+            }
+        }
+        let lane_observation_session = lane_route.observation_session().map(str::to_string);
         if desired.invocation.caller_kind == "automatic" {
             let observation_invocation = pane_layout_state_invocation(&desired);
             // Ownership is a retained join over effect receipts and live actors,
             // independent of current-layout reuse and nonempty session IDs.
-            let structural_file_panes = runtime.pane_layout_owned_assignments();
-            if let Ok(report) = tmux_layout_sync_state_for_invocation_with_effect_assignment(
+            let structural_file_panes = graph.ctx.get(&graph.owned_assignments);
+            if let Ok(report) = tmux_layout_sync_state_for_lane_invocation(
                 &bootstrap,
                 &runtime,
                 &observation_invocation,
                 &structural_file_panes,
+                lane_observation_session.as_deref(),
             ) && !report.operator_owned_documents.is_empty()
             {
                 if state.lock().is_superseded(work_revision) {
@@ -27924,12 +28555,12 @@ fn pane_layout_effect_worker(
                 }
                 let operator_owned_documents = report.operator_owned_documents.clone();
                 let surface_tmux = tmux_layout_from_sync_report(&report, &desired);
-                runtime.record_pane_layout_observation(PaneLayoutObservation {
+                graph.record_observation(PaneLayoutObservation {
                     generation: desired.generation,
                     actor_bindings: actor_bindings.clone(),
                     report,
                 });
-                runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
+                graph.record_receipt(PaneLayoutEffectReceipt {
                     generation: desired.generation,
                     actor_bindings: actor_bindings.clone(),
                     attempt,
@@ -27939,11 +28570,13 @@ fn pane_layout_effect_worker(
                     focus_required: false,
                     focus_applied: false,
                 });
-                publish_pane_layout_status(&runtime);
+                publish_pane_layout_lane_status(&runtime, &lane);
                 if let Some(layout) = surface_tmux {
-                    runtime
-                        .editor_surface_graph
-                        .observe_tmux_for_project(&bootstrap.project_root, Some(layout));
+                    runtime.editor_surface_graph.observe_tmux_for_lane(
+                        &bootstrap.project_root,
+                        &lane,
+                        Some(layout),
+                    );
                 }
                 record_pane_layout_outcome_diagnostic(
                     &bootstrap.project_root,
@@ -27964,7 +28597,7 @@ fn pane_layout_effect_worker(
                     ),
                 );
                 match pane_layout_effect_worker_complete(
-                    &runtime,
+                    &graph,
                     &state,
                     work_revision,
                     desired.generation,
@@ -27996,13 +28629,13 @@ fn pane_layout_effect_worker(
         let projected_focus = guarded_invocation.focus.clone();
         let reusable_structure =
             pane_layout_invocation_allows_structural_reuse(&desired.invocation)
-                .then(|| runtime.reusable_pane_layout_structure(&desired, &actor_bindings))
+                .then(|| graph.reusable_structural_receipt(&desired, &actor_bindings))
                 .flatten();
         let reusable_file_panes = reusable_structure
             .as_ref()
             .map(|receipt| receipt.file_panes.clone())
             .unwrap_or_default();
-        runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
+        graph.record_receipt(PaneLayoutEffectReceipt {
             generation: desired.generation,
             actor_bindings: actor_bindings.clone(),
             attempt,
@@ -28016,14 +28649,15 @@ fn pane_layout_effect_worker(
             focus_required: projected_focus.is_some(),
             focus_applied: false,
         });
-        publish_pane_layout_status(&runtime);
+        publish_pane_layout_lane_status(&runtime, &lane);
 
         if let Some(reusable) = reusable_structure {
             let tmux = agent_doc_tmux_io::configured_tmux();
-            let layout_window = pane_layout_target_window_id(
+            let layout_window = pane_layout_target_window_id_for_lane(
                 &bootstrap.project_root,
                 &tmux,
                 desired.invocation.window.as_deref(),
+                lane_observation_session.as_deref(),
             );
             let focus_receipt = apply_pane_layout_focus_effect(
                 &state,
@@ -28048,11 +28682,12 @@ fn pane_layout_effect_worker(
             let mut observation_invocation = pane_layout_state_invocation(&desired);
             observation_invocation.focus =
                 focus_required.then(|| projected_focus.clone()).flatten();
-            let fresh_report = tmux_layout_sync_state_for_invocation_with_effect_assignment(
+            let fresh_report = tmux_layout_sync_state_for_lane_invocation(
                 &bootstrap,
                 &runtime,
                 &observation_invocation,
                 &reusable.file_panes,
+                lane_observation_session.as_deref(),
             );
             if let Ok(report) = fresh_report
                 && pane_layout_projection_converged(
@@ -28069,12 +28704,12 @@ fn pane_layout_effect_worker(
                 let logged_expected_focus_pane = report.expected_focus_pane.clone();
                 let logged_active_pane = report.active_pane.clone();
                 let surface_tmux = tmux_layout_from_sync_report(&report, &desired);
-                runtime.record_pane_layout_observation(PaneLayoutObservation {
+                graph.record_observation(PaneLayoutObservation {
                     generation: desired.generation,
                     actor_bindings: actor_bindings.clone(),
                     report,
                 });
-                runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
+                graph.record_receipt(PaneLayoutEffectReceipt {
                     generation: desired.generation,
                     actor_bindings: actor_bindings.clone(),
                     attempt,
@@ -28084,11 +28719,13 @@ fn pane_layout_effect_worker(
                     focus_required,
                     focus_applied: focus_receipt.applied,
                 });
-                publish_pane_layout_status(&runtime);
+                publish_pane_layout_lane_status(&runtime, &lane);
                 if let Some(layout) = surface_tmux {
-                    runtime
-                        .editor_surface_graph
-                        .observe_tmux_for_project(&bootstrap.project_root, Some(layout));
+                    runtime.editor_surface_graph.observe_tmux_for_lane(
+                        &bootstrap.project_root,
+                        &lane,
+                        Some(layout),
+                    );
                 }
                 record_pane_layout_outcome_diagnostic(
                     &bootstrap.project_root,
@@ -28116,7 +28753,7 @@ fn pane_layout_effect_worker(
                     ),
                 );
                 match pane_layout_effect_worker_complete(
-                    &runtime,
+                    &graph,
                     &state,
                     work_revision,
                     desired.generation,
@@ -28155,7 +28792,7 @@ fn pane_layout_effect_worker(
         }
         agent_doc_process_owner_io::set_structural_effect_generation(
             desired.generation,
-            runtime.pane_layout_graph().published_generation_handle(),
+            graph.published_generation_handle(),
         );
         let _effect_cancel_guard = StructuralEffectCancelGuard;
         let effect_result = match runtime_effects() {
@@ -28188,10 +28825,10 @@ fn pane_layout_effect_worker(
             // GH #136 follow-up (a)/(d): retain what this pass gated so the
             // width bound counts it as accounted for and a recycle of one of
             // these documents republishes the layout.
-            runtime.record_pane_layout_gated(desired.generation, gated_documents.clone());
+            graph.record_gated(desired.generation, gated_documents.clone());
         }
         if effect_result.is_ok() {
-            runtime.record_pane_layout_structural_assignment(
+            graph.record_structural_assignment(
                 &desired,
                 actor_bindings.clone(),
                 None,
@@ -28211,10 +28848,11 @@ fn pane_layout_effect_worker(
         }
         let focus_receipt = if effect_result.is_ok() {
             let tmux = agent_doc_tmux_io::configured_tmux();
-            let layout_window = pane_layout_target_window_id(
+            let layout_window = pane_layout_target_window_id_for_lane(
                 &bootstrap.project_root,
                 &tmux,
                 desired.invocation.window.as_deref(),
+                lane_observation_session.as_deref(),
             );
             apply_pane_layout_focus_effect(
                 &state,
@@ -28267,11 +28905,12 @@ fn pane_layout_effect_worker(
                 },
             ))
         } else {
-            tmux_layout_sync_state_for_invocation_with_effect_assignment(
+            tmux_layout_sync_state_for_lane_invocation(
                 &bootstrap,
                 &runtime,
                 &observation_invocation,
                 &effect_file_panes,
+                lane_observation_session.as_deref(),
             )
         };
         let terminal_effect_refusal = effect_result
@@ -28332,7 +28971,7 @@ fn pane_layout_effect_worker(
         let logged_active_pane = report.active_pane.clone();
         let geometry_target = report.session_name.clone().zip(report.window_id.clone());
         if report.synced {
-            runtime.record_pane_layout_structural_assignment(
+            graph.record_structural_assignment(
                 &desired,
                 actor_bindings.clone(),
                 Some(report.clone()),
@@ -28344,12 +28983,12 @@ fn pane_layout_effect_worker(
         } else {
             None
         };
-        runtime.record_pane_layout_observation(PaneLayoutObservation {
+        graph.record_observation(PaneLayoutObservation {
             generation: desired.generation,
             actor_bindings: actor_bindings.clone(),
             report,
         });
-        runtime.record_pane_layout_effect_receipt(PaneLayoutEffectReceipt {
+        graph.record_receipt(PaneLayoutEffectReceipt {
             generation: desired.generation,
             actor_bindings,
             attempt,
@@ -28369,11 +29008,13 @@ fn pane_layout_effect_worker(
             focus_required,
             focus_applied: focus_receipt.applied,
         });
-        publish_pane_layout_status(&runtime);
+        publish_pane_layout_lane_status(&runtime, &lane);
         if let Some(layout) = surface_tmux {
-            runtime
-                .editor_surface_graph
-                .observe_tmux_for_project(&bootstrap.project_root, Some(layout));
+            runtime.editor_surface_graph.observe_tmux_for_lane(
+                &bootstrap.project_root,
+                &lane,
+                Some(layout),
+            );
         }
         record_pane_layout_outcome_diagnostic(
             &bootstrap.project_root,
@@ -28420,12 +29061,8 @@ fn pane_layout_effect_worker(
         if let Some((session, window)) = geometry_target {
             log_tmux_client_geometry(&bootstrap.project_root, &session, &window);
         }
-        match pane_layout_effect_worker_complete(
-            &runtime,
-            &state,
-            work_revision,
-            desired.generation,
-        ) {
+        match pane_layout_effect_worker_complete(&graph, &state, work_revision, desired.generation)
+        {
             PaneLayoutAttemptCompletion::Retire => return,
             PaneLayoutAttemptCompletion::Superseded => {
                 attempt = 0;
@@ -28480,15 +29117,13 @@ fn pane_layout_attempt_completion(
 }
 
 fn pane_layout_effect_worker_complete(
-    runtime: &ControllerRuntime,
+    graph: &ControllerPaneLayoutGraph,
     state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
     completed_work_revision: u64,
     completed_generation: u64,
 ) -> PaneLayoutAttemptCompletion {
-    let desired_generation = runtime
-        .pane_layout_desired()
-        .map(|desired| desired.generation);
-    let projection = runtime.pane_layout_projection();
+    let desired_generation = graph.desired().map(|desired| desired.generation);
+    let projection = graph.projection();
     let completion =
         pane_layout_attempt_completion(desired_generation, &projection, completed_generation);
     let mut worker = state.lock();
@@ -28536,7 +29171,7 @@ pub(crate) fn handle_tmux_focus_state(
 ) -> Result<ControllerTmuxFocusState> {
     // `#ideriderindependentnav`: the reverse tmux-to-editor mirror reads the
     // focus of the requesting client's own navigation lane. In shared mode (the
-    // only mode the production runtime constructs today) every client resolves
+    // default `editor_navigation`) every client resolves
     // to the shared lane, i.e. the project's configured session, exactly as
     // before lanes existed.
     let navigation_mode = runtime
@@ -29983,12 +30618,47 @@ fn log_tmux_client_geometry(project_root: &Path, session: &str, window: &str) {
 fn publish_pane_layout_desired_invocation(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
+    invocation: ControllerTmuxLayoutSyncInvocation,
+    source_plane_version: Option<u64>,
+    publication: PaneLayoutPublication,
+    claim: impl Into<PaneLayoutClaim>,
+) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
+    publish_pane_layout_desired_invocation_in_lane(
+        bootstrap,
+        runtime,
+        &agent_doc_editor_surface::NavigationLane::Shared,
+        invocation,
+        source_plane_version,
+        publication,
+        claim,
+    )
+}
+
+/// Publish a desired layout into one navigation lane's graph
+/// (`#ideriderindependentnav` P2b).
+///
+/// The shared lane is the pre-lane publication path byte for byte, including
+/// the durable `layout_state` column memory. An installation lane's desired
+/// layout, retained basis, width memory, and supersession arbitration are its
+/// own graph's; it never writes the shared lane's durable column memory, and
+/// its effect worker routes the layout to the lane session.
+fn publish_pane_layout_desired_invocation_in_lane(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
     mut invocation: ControllerTmuxLayoutSyncInvocation,
     source_plane_version: Option<u64>,
     publication: PaneLayoutPublication,
     claim: impl Into<PaneLayoutClaim>,
 ) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
     let claim = claim.into();
+    let graph = runtime.pane_layout_graph_for_lane(lane);
+    let store_lane_layout_state = |columns: &[String]| -> Result<()> {
+        if lane.is_shared() {
+            store_layout_state(&bootstrap.project_root, columns)?;
+        }
+        Ok(())
+    };
     if bootstrap.handoff_state != ControllerHandoffState::Stable {
         anyhow::bail!(
             "pane layout observation refused: controller not authoritative (handoff_state={:?})",
@@ -30016,7 +30686,7 @@ fn publish_pane_layout_desired_invocation(
     // GH #112: a publisher without a positive split-order observation (Remote
     // Dev `unknown`) lists documents focus-first, so its order is resolved
     // against the retained desired layout instead of being applied verbatim.
-    let retained = runtime.pane_layout_desired();
+    let retained = graph.desired();
     let ordered = agent_doc_tmux::order_layout_columns(
         retained
             .as_ref()
@@ -30032,6 +30702,7 @@ fn publish_pane_layout_desired_invocation(
     let ordered_columns = bound_pane_layout_publication_width(
         &bootstrap.project_root,
         runtime,
+        &graph.width_memory(),
         &claim,
         retained.as_ref(),
         ordered.columns,
@@ -30039,17 +30710,13 @@ fn publish_pane_layout_desired_invocation(
     );
     // The desired Lazily fact is durable before the effect graph sees it.
     // Tmux and crash-state sidecars are projections, never fallback inputs.
-    store_layout_state(&bootstrap.project_root, &ordered_columns)?;
+    store_lane_layout_state(&ordered_columns)?;
     invocation.columns = ordered_columns;
     invocation.column_order = ordered.order;
 
-    let desired = runtime.set_pane_layout_desired(
-        invocation.clone(),
-        source_plane_version,
-        publication,
-        claim,
-    );
-    let supersessions = runtime.drain_pane_layout_supersessions();
+    let desired =
+        graph.set_desired_attributed(invocation.clone(), source_plane_version, publication, claim);
+    let supersessions = graph.drain_supersessions();
     let refused = supersessions.iter().any(|supersession| {
         supersession.loser == claim.publisher
             && supersession.loser_generation.is_none()
@@ -30060,8 +30727,8 @@ fn publish_pane_layout_desired_invocation(
         // `layoutpublisherarbiter`: the durable column memory was written
         // ahead of the graph; a refused publication must not leave its
         // columns there in place of the retained generation's.
-        store_layout_state(&bootstrap.project_root, &desired.invocation.columns)?;
-        publish_pane_layout_status(runtime);
+        store_lane_layout_state(&desired.invocation.columns)?;
+        publish_pane_layout_lane_status(runtime, lane);
         let applied_invocation = desired.invocation.clone();
         return Ok((desired, applied_invocation));
     }
@@ -30069,7 +30736,7 @@ fn publish_pane_layout_desired_invocation(
         // GH #224: the graph may rebase a derived escalation after a newer
         // editor split wins the race into the publication critical section.
         // Keep the durable effect sink aligned with the graph-owned fact.
-        store_layout_state(&bootstrap.project_root, &desired.invocation.columns)?;
+        store_lane_layout_state(&desired.invocation.columns)?;
     }
     log_pane_layout_desired_publication(
         &bootstrap.project_root,
@@ -30081,7 +30748,7 @@ fn publish_pane_layout_desired_invocation(
     if retained.as_ref().map(|retained| retained.generation) != Some(desired.generation) {
         log_pane_layout_narrowed(&bootstrap.project_root, &desired);
     }
-    publish_pane_layout_status(runtime);
+    publish_pane_layout_lane_status(runtime, lane);
     let applied_invocation = desired.invocation.clone();
     Ok((desired, applied_invocation))
 }
@@ -30093,6 +30760,7 @@ fn publish_pane_layout_desired_invocation(
 fn bound_pane_layout_publication_width(
     project_root: &Path,
     runtime: &ControllerRuntime,
+    memory: &PaneLayoutWidthMemory,
     claim: &PaneLayoutClaim,
     retained: Option<&PaneLayoutDesired>,
     columns: Vec<String>,
@@ -30103,7 +30771,6 @@ fn bound_pane_layout_publication_width(
     };
     let eligibility = runtime.main_layout_eligibility();
     let columns = main_layout_eligible_columns(project_root, &eligibility, &columns);
-    let memory = runtime.pane_layout_width_memory();
     let retained_generation = retained.map(|desired| desired.generation);
     let retained_columns = retained
         .map(|desired| {
@@ -36517,6 +37184,293 @@ mod tests {
             SurfaceIntent::Sync { .. }
         ));
         assert_eq!(drained().len(), 1);
+    }
+
+    /// `#ideriderindependentnav` P2b: a lane's surveyed tmux layout refolds only
+    /// that lane's clients. In shared mode every client is on the shared lane,
+    /// so the lane form is the project form.
+    #[test]
+    fn observe_tmux_for_lane_refolds_only_that_lanes_clients() {
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        let root = Path::new("/project");
+        let idea = "jetbrains@IU.0a1b2c3d-pid:41";
+        let rider = "jetbrains@RD.9f8e7d6c-pid:42";
+        let idea_lane = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let columns = vec![SurfaceColumn {
+            files: vec!["/project/a.md".to_string()],
+        }];
+        let surface = agent_doc_editor_surface::EditorSurface {
+            focused: "/project/a.md".to_string(),
+            visible: vec!["/project/a.md".to_string()],
+            open: vec!["/project/a.md".to_string()],
+            columns: columns.clone(),
+            force_reconcile: false,
+            focus_only: false,
+            preserve_focus: false,
+        };
+        let matches_by_client = |mode: NavigationMode, lane: &NavigationLane| {
+            let scope = agent_doc_state_scope::ProcessScope::new();
+            let graph = ControllerEditorSurfaceGraph::new(Arc::new(|_, _| Ok("ok".to_string())))
+                .with_navigation_mode(mode);
+            for client in [idea, rider] {
+                let (accepted, _) = graph.observe(
+                    &scope,
+                    root,
+                    EditorSurfaceObservation {
+                        client_id: client.to_string(),
+                        surface_id: "project".to_string(),
+                        generation: 1,
+                        sequence: 1,
+                        surface: surface.clone(),
+                    },
+                    None,
+                );
+                assert!(accepted);
+            }
+            graph.observe_tmux_for_lane(
+                root,
+                lane,
+                Some(TmuxLayout {
+                    columns: columns.clone(),
+                }),
+            );
+            graph
+                .roots
+                .lock()
+                .iter()
+                .map(|((_, client, _), entry)| (client.clone(), entry.state.layout_matches()))
+                .collect::<BTreeMap<_, _>>()
+        };
+
+        let per_installation = matches_by_client(NavigationMode::PerInstallation, &idea_lane);
+        assert_eq!(per_installation[idea], Some(true));
+        assert_eq!(
+            per_installation[rider], None,
+            "IDEA's lane survey must not refold Rider's lane"
+        );
+        let shared = matches_by_client(NavigationMode::Shared, &NavigationLane::Shared);
+        assert_eq!(shared[idea], Some(true));
+        assert_eq!(shared[rider], Some(true));
+    }
+
+    /// `#ideriderindependentnav` P2b: routing one lane's desired layout drops
+    /// every document whose pane lives in another lane, retargets an
+    /// installation lane to its own window, and is the identity in shared mode.
+    #[test]
+    fn lane_route_drops_other_lanes_documents_and_targets_the_lane_window() {
+        let root = Path::new("/project");
+        let mut desired = super::super::tests::pane_layout_desired_for_test(3);
+        desired.invocation.columns = vec![
+            "/project/tasks/idea.md".to_string(),
+            "/project/tasks/shared.md,/project/tasks/new.md".to_string(),
+            "/project/tasks/rider.md".to_string(),
+        ];
+        desired.invocation.focus = Some("/project/tasks/rider.md".to_string());
+        let original_window = desired.invocation.window.clone();
+        let binding = |document: &str, pane: &str| ControllerTmuxActorBinding {
+            document_path: document.to_string(),
+            session_id: String::new(),
+            pane_id: pane.to_string(),
+            generation: 1,
+        };
+        let bindings = vec![
+            binding("/project/tasks/idea.md", "%1"),
+            binding("/project/tasks/shared.md", "%2"),
+            binding("/project/tasks/rider.md", "%3"),
+        ];
+        let sessions = BTreeMap::from([
+            ("%1", "proj-IU-0a1b2c3d"),
+            ("%2", "proj"),
+            ("%3", "proj-RD-9f8e7d6c"),
+        ]);
+        let pane_session = |pane: &str| sessions.get(pane).map(|session| session.to_string());
+
+        // Shared mode: identity, no tmux reads.
+        let (unchanged, dropped) = route_pane_layout_desired_to_lane(
+            root,
+            &PaneLayoutLaneRoute::default(),
+            desired.clone(),
+            &bindings,
+            |_| panic!("shared mode must not observe pane sessions"),
+        );
+        assert_eq!(unchanged, desired);
+        assert!(dropped.is_empty());
+
+        let idea_route = PaneLayoutLaneRoute {
+            sessions: Some(("proj".to_string(), "proj-IU-0a1b2c3d".to_string())),
+            window: Some("@41".to_string()),
+            provisioned: false,
+        };
+        let (routed, dropped) = route_pane_layout_desired_to_lane(
+            root,
+            &idea_route,
+            desired.clone(),
+            &bindings,
+            pane_session,
+        );
+        assert_eq!(
+            routed.invocation.columns,
+            vec!["/project/tasks/idea.md", "/project/tasks/new.md"],
+            "a document without a pane starts in this lane"
+        );
+        assert_eq!(routed.invocation.window.as_deref(), Some("@41"));
+        assert_eq!(
+            routed.invocation.focus, None,
+            "focus on another lane's document is dropped with it"
+        );
+        assert_eq!(routed.generation, desired.generation);
+        assert_eq!(
+            dropped,
+            vec![
+                ("/project/tasks/shared.md".to_string(), "proj".to_string()),
+                (
+                    "/project/tasks/rider.md".to_string(),
+                    "proj-RD-9f8e7d6c".to_string()
+                ),
+            ]
+        );
+        assert_eq!(idea_route.observation_session(), Some("proj-IU-0a1b2c3d"));
+
+        // The shared lane in per-installation mode keeps its window resolution
+        // and survey, but still never pulls an installation lane's pane in.
+        let shared_route = PaneLayoutLaneRoute {
+            sessions: Some(("proj".to_string(), "proj".to_string())),
+            ..PaneLayoutLaneRoute::default()
+        };
+        let (routed, dropped) =
+            route_pane_layout_desired_to_lane(root, &shared_route, desired, &bindings, |pane| {
+                sessions.get(pane).map(|session| session.to_string())
+            });
+        assert_eq!(
+            routed.invocation.columns,
+            vec!["/project/tasks/shared.md,/project/tasks/new.md"]
+        );
+        assert_eq!(
+            routed.invocation.window, original_window,
+            "the shared lane keeps its own window resolution"
+        );
+        assert_eq!(dropped.len(), 2);
+        assert_eq!(shared_route.observation_session(), None);
+    }
+
+    /// `#ideriderindependentnav` P2b: shared navigation mode never resolves a
+    /// lane route, and an installation lane needs a project pin.
+    #[test]
+    fn lane_route_is_identity_in_shared_mode_and_requires_a_pin_per_installation() {
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        let root = tempfile::TempDir::new().unwrap();
+        // A tmux binding that would fail loudly if it were ever invoked.
+        let tmux = tmux_router::Tmux::default_server()
+            .with_server_socket(Some("agent-doc-test-never-started".to_string()));
+        let idea = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        assert_eq!(
+            pane_layout_lane_route(root.path(), NavigationMode::Shared, &idea, &tmux),
+            Ok(PaneLayoutLaneRoute::default())
+        );
+        assert_eq!(
+            pane_layout_lane_route(
+                root.path(),
+                NavigationMode::PerInstallation,
+                &NavigationLane::Shared,
+                &tmux
+            ),
+            Ok(PaneLayoutLaneRoute::default()),
+            "no pin: the shared lane keeps its pre-lane route"
+        );
+        assert_eq!(
+            pane_layout_lane_route(root.path(), NavigationMode::PerInstallation, &idea, &tmux),
+            Err("navigation_lane_requires_tmux_session".to_string())
+        );
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            root.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            pane_layout_lane_route(
+                root.path(),
+                NavigationMode::PerInstallation,
+                &NavigationLane::Shared,
+                &tmux
+            ),
+            Ok(PaneLayoutLaneRoute {
+                sessions: Some(("proj".to_string(), "proj".to_string())),
+                ..PaneLayoutLaneRoute::default()
+            })
+        );
+        assert_eq!(
+            navigation_lane_sessions(root.path(), NavigationMode::PerInstallation, &idea),
+            Some(("proj".to_string(), "proj-IU-0a1b2c3d".to_string()))
+        );
+        assert_eq!(
+            navigation_lane_sessions(root.path(), NavigationMode::Shared, &idea),
+            None
+        );
+    }
+
+    /// `#ideriderindependentnav` P2b: an installation lane's session is created
+    /// on first use with `agent-doc` + `stash` windows and a lane mark, reused
+    /// on later passes, and a same-named session agent-doc did not create is
+    /// refused rather than adopted. Isolated tmux server only.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_session_is_provisioned_once_and_never_adopted() {
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("navlane");
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            root.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        // The operator's shared session, which the lane must never touch.
+        tmux.new_session("proj", root.path()).unwrap();
+        let shared_windows = tmux.list_window_names("proj");
+
+        let idea = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let route =
+            pane_layout_lane_route(root.path(), NavigationMode::PerInstallation, &idea, &tmux)
+                .unwrap();
+        assert!(route.provisioned);
+        assert_eq!(
+            route.sessions,
+            Some(("proj".to_string(), "proj-IU-0a1b2c3d".to_string()))
+        );
+        assert!(tmux.session_alive("proj-IU-0a1b2c3d"));
+        let mut windows = tmux.list_window_names("proj-IU-0a1b2c3d");
+        windows.sort();
+        assert_eq!(windows, vec!["agent-doc", "stash"]);
+        assert_eq!(
+            route.window,
+            resolve_agent_doc_window_id_for_session(&tmux, "proj-IU-0a1b2c3d")
+        );
+        assert_eq!(
+            tmux.list_window_names("proj"),
+            shared_windows,
+            "provisioning a lane never changes the shared session"
+        );
+
+        // Second pass reuses the marked session.
+        let again =
+            pane_layout_lane_route(root.path(), NavigationMode::PerInstallation, &idea, &tmux)
+                .unwrap();
+        assert!(!again.provisioned);
+        assert_eq!(again.window, route.window);
+
+        // A session with Rider's lane name that agent-doc did not create.
+        tmux.new_session("proj-RD-9f8e7d6c", root.path()).unwrap();
+        let rider = NavigationLane::Installation("RD.9f8e7d6c".to_string());
+        assert_eq!(
+            pane_layout_lane_route(root.path(), NavigationMode::PerInstallation, &rider, &tmux),
+            Err("navigation_lane_session_not_owned:proj-RD-9f8e7d6c".to_string())
+        );
+        assert_eq!(
+            tmux.list_window_names("proj-RD-9f8e7d6c").len(),
+            1,
+            "a foreign session is never adopted or reshaped"
+        );
     }
 
     #[test]

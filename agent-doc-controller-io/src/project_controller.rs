@@ -2307,7 +2307,19 @@ struct ControllerPaneLayoutLanes {
     shared: Arc<ControllerPaneLayoutGraph>,
     lanes:
         Mutex<BTreeMap<agent_doc_editor_surface::NavigationLane, Arc<ControllerPaneLayoutGraph>>>,
+    /// Builds the pane-layout effect sink of one lane (P2b). Installed once
+    /// per runtime; every lane graph that exists then, and every lane graph
+    /// created later, gets its own sink and therefore its own latest-wins
+    /// effect worker, so one lane's newer layout never supersedes another's.
+    sink_factory: Mutex<Option<ControllerPaneLayoutSinkFactory>>,
 }
+
+/// Creates the effect sink for one navigation lane's pane-layout graph.
+pub(crate) type ControllerPaneLayoutSinkFactory = Arc<
+    dyn Fn(&agent_doc_editor_surface::NavigationLane) -> Arc<dyn PaneLayoutProjectionSink>
+        + Send
+        + Sync,
+>;
 
 impl ControllerPaneLayoutLanes {
     fn new_in(
@@ -2328,6 +2340,17 @@ impl ControllerPaneLayoutLanes {
             live_actor_bindings,
             shared,
             lanes: Mutex::new(lanes),
+            sink_factory: Mutex::new(None),
+        }
+    }
+
+    /// Install the per-lane effect sink factory and give every existing lane
+    /// graph its sink. A lane created later gets its sink on creation.
+    fn install_sink_factory(&self, factory: ControllerPaneLayoutSinkFactory) {
+        let lanes = self.lanes.lock();
+        *self.sink_factory.lock() = Some(Arc::clone(&factory));
+        for (lane, graph) in lanes.iter() {
+            graph.install_sink(factory(lane));
         }
     }
 
@@ -2338,7 +2361,10 @@ impl ControllerPaneLayoutLanes {
     }
 
     /// The graph for `lane`, created in the controller scope on first use.
-    #[cfg_attr(not(test), allow(dead_code))]
+    ///
+    /// A new lane graph gets its own effect sink from the installed factory
+    /// before it is published, so its first desired layout already has a
+    /// worker.
     fn lane(
         &self,
         lane: &agent_doc_editor_surface::NavigationLane,
@@ -2347,12 +2373,18 @@ impl ControllerPaneLayoutLanes {
             return Arc::clone(&self.shared);
         }
         let mut lanes = self.lanes.lock();
-        Arc::clone(lanes.entry(lane.clone()).or_insert_with(|| {
-            Arc::new(ControllerPaneLayoutGraph::new_in_process_ctx(
-                self.ctx.clone(),
-                self.live_actor_bindings,
-            ))
-        }))
+        if let Some(graph) = lanes.get(lane) {
+            return Arc::clone(graph);
+        }
+        let graph = Arc::new(ControllerPaneLayoutGraph::new_in_process_ctx(
+            self.ctx.clone(),
+            self.live_actor_bindings,
+        ));
+        if let Some(factory) = self.sink_factory.lock().as_ref() {
+            graph.install_sink(factory(lane));
+        }
+        lanes.insert(lane.clone(), Arc::clone(&graph));
+        graph
     }
 
     /// Lanes that currently hold a graph, in lane order (`Shared` first).
@@ -7877,6 +7909,22 @@ impl ControllerRuntime {
             main_layout_eligibility_from_state(&memory.state_projection),
         );
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
+        // `#ideriderindependentnav` P2b: `editor_navigation` is read once per
+        // controller lifetime; changing it takes effect on the next controller
+        // start. An unknown spelling keeps the shared (pre-lane) behavior.
+        let (navigation_mode, rejected_navigation_mode) =
+            agent_doc_project_config_io::editor_navigation_mode_for_root(&bootstrap.project_root);
+        if let Some(rejected) = rejected_navigation_mode {
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "editor_navigation_mode_rejected value={rejected:?} fallback=shared expected=shared|per_installation"
+                ),
+            );
+            eprintln!(
+                "[controller] warning: unknown editor_navigation = {rejected:?} in .agent-doc/config.toml; using \"shared\" (expected \"shared\" or \"per_installation\")"
+            );
+        }
         let editor_surface_graph =
             rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {
                 agent_doc_editor_surface::SurfaceIntent::Sync { .. }
@@ -7884,7 +7932,8 @@ impl ControllerRuntime {
                     Ok("deferred_in_process".to_string())
                 }
                 _ => rpc::run_controller_editor_intent(project_root, intent),
-            }));
+            }))
+            .with_navigation_mode(navigation_mode);
         let editor_view_policy_graph = rpc::ControllerEditorViewPolicyGraph::new_in(
             &scope,
             editor_view_policy_bindings_from_state(&memory.state_projection),
@@ -8089,14 +8138,22 @@ impl ControllerRuntime {
         subscription
     }
 
-    /// The shared navigation lane's pane-layout graph. Every layout caller uses
-    /// this lane until per-installation navigation is configurable (P2b).
+    /// The shared navigation lane's pane-layout graph: the project's
+    /// configured tmux session. Every caller that is not lane-routed (manual
+    /// sync, route, recycle republish, every shared-mode editor) uses it.
     fn pane_layout_graph(&self) -> &ControllerPaneLayoutGraph {
         self.pane_layout_lanes.shared()
     }
 
+    /// Install the pane-layout effect sink factory on every lane (P2b).
+    pub(crate) fn install_pane_layout_sink_factory(
+        &self,
+        factory: ControllerPaneLayoutSinkFactory,
+    ) {
+        self.pane_layout_lanes.install_sink_factory(factory);
+    }
+
     /// The pane-layout graph for `lane`, created on first use.
-    #[cfg_attr(not(test), allow(dead_code))]
     fn pane_layout_graph_for_lane(
         &self,
         lane: &agent_doc_editor_surface::NavigationLane,
@@ -8104,6 +8161,7 @@ impl ControllerRuntime {
         self.pane_layout_lanes.lane(lane)
     }
 
+    #[cfg(test)]
     fn set_pane_layout_desired(
         &self,
         invocation: ControllerTmuxLayoutSyncInvocation,
@@ -8143,11 +8201,14 @@ impl ControllerRuntime {
 
     /// GH #136 follow-up (a)/(d): the last layout pass's observed width and
     /// gated documents.
+    #[cfg(test)]
     pub(crate) fn pane_layout_width_memory(&self) -> PaneLayoutWidthMemory {
         self.pane_layout_graph().width_memory()
     }
 
-    /// GH #136 follow-up (a)/(d): record what a layout pass gated out.
+    /// GH #136 follow-up (a)/(d): record what a layout pass gated out. The
+    /// effect worker records into its own lane's graph directly.
+    #[cfg(test)]
     pub(crate) fn record_pane_layout_gated(&self, generation: u64, gated_documents: Vec<String>) {
         self.pane_layout_graph()
             .record_gated(generation, gated_documents);
@@ -8176,43 +8237,15 @@ impl ControllerRuntime {
         self.pane_layout_graph().record_observation(observation);
     }
 
-    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
-    fn record_pane_layout_effect_receipt(&self, receipt: PaneLayoutEffectReceipt) {
-        self.pane_layout_graph().record_receipt(receipt);
-    }
-
     fn pane_layout_effect_file_panes(&self, generation: u64) -> Vec<(String, String)> {
         self.pane_layout_graph().effect_file_panes(generation)
-    }
-
-    fn reusable_pane_layout_structure(
-        &self,
-        desired: &PaneLayoutDesired,
-        actor_bindings: &[ControllerTmuxActorBinding],
-    ) -> Option<PaneLayoutStructuralReceipt> {
-        self.pane_layout_graph()
-            .reusable_structural_receipt(desired, actor_bindings)
-    }
-
-    fn record_pane_layout_structural_assignment(
-        &self,
-        desired: &PaneLayoutDesired,
-        actor_bindings: Vec<ControllerTmuxActorBinding>,
-        report: Option<ControllerTmuxLayoutSyncStateReport>,
-        file_panes: Vec<(String, String)>,
-    ) {
-        self.pane_layout_graph().record_structural_assignment(
-            desired,
-            actor_bindings,
-            report,
-            file_panes,
-        );
     }
 
     fn pane_layout_actor_bindings(&self) -> Vec<ControllerTmuxActorBinding> {
         self.pane_layout_graph().actor_bindings()
     }
 
+    #[cfg(test)]
     fn pane_layout_owned_assignments(&self) -> Vec<(String, String)> {
         self.pane_layout_graph()
             .ctx
@@ -11725,6 +11758,90 @@ mod tests {
                 new_generation: 7,
             },
         }
+    }
+
+    /// `#ideriderindependentnav` P2b: every navigation lane graph gets its own
+    /// effect sink (and therefore its own latest-wins worker), including lanes
+    /// created after the factory was installed, and the structural-effect
+    /// cancellation generation is keyed by lane: a newer layout in one lane
+    /// never cancels another lane's in-flight sync body.
+    #[test]
+    fn navigation_lanes_get_their_own_effect_sink_and_cancellation_generation() {
+        use agent_doc_editor_surface::NavigationLane;
+
+        struct LaneSink {
+            lane: NavigationLane,
+            runs: Arc<Mutex<Vec<(NavigationLane, u64)>>>,
+        }
+        impl PaneLayoutProjectionSink for LaneSink {
+            fn reconcile(&self, desired: PaneLayoutDesired) {
+                self.runs
+                    .lock()
+                    .push((self.lane.clone(), desired.generation));
+            }
+        }
+
+        let root = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new(test_bootstrap(&root)).unwrap();
+        let shared = NavigationLane::Shared;
+        let idea = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let rider = NavigationLane::Installation("RD.4e5f6a7b".to_string());
+        let idea_graph = runtime.pane_layout_graph_for_lane(&idea);
+
+        let factory_lanes = Arc::new(Mutex::new(Vec::new()));
+        let runs = Arc::new(Mutex::new(Vec::new()));
+        {
+            let factory_lanes = Arc::clone(&factory_lanes);
+            let runs = Arc::clone(&runs);
+            runtime.install_pane_layout_sink_factory(Arc::new(move |lane| {
+                factory_lanes.lock().push(lane.clone());
+                Arc::new(LaneSink {
+                    lane: lane.clone(),
+                    runs: Arc::clone(&runs),
+                }) as Arc<dyn PaneLayoutProjectionSink>
+            }));
+        }
+        assert_eq!(*factory_lanes.lock(), vec![shared.clone(), idea.clone()]);
+        let rider_graph = runtime.pane_layout_graph_for_lane(&rider);
+        assert_eq!(
+            *factory_lanes.lock(),
+            vec![shared.clone(), idea.clone(), rider.clone()],
+            "a lane created later gets its sink on creation"
+        );
+        let _ = runtime.pane_layout_graph_for_lane(&rider);
+        assert_eq!(factory_lanes.lock().len(), 3, "one sink per lane, once");
+
+        let mut invocation = pane_layout_desired_for_test(1).invocation;
+        invocation.columns = vec!["/project/tasks/idea.md".to_string()];
+        let idea_desired = idea_graph.set_fresh_desired(invocation.clone(), None);
+        assert_eq!(*runs.lock(), vec![(idea.clone(), idea_desired.generation)]);
+
+        // IDEA's sync body is in flight at its generation.
+        agent_doc_process_owner_io::set_structural_effect_generation(
+            idea_desired.generation,
+            idea_graph.published_generation_handle(),
+        );
+        rider_graph.set_fresh_desired(invocation.clone(), None);
+        rider_graph.set_fresh_desired(invocation.clone(), None);
+        assert!(
+            !agent_doc_process_owner_io::structural_effect_superseded(),
+            "Rider's newer layouts must not cancel IDEA's sync"
+        );
+        assert_eq!(
+            runs.lock()
+                .iter()
+                .filter(|(lane, _)| *lane == rider)
+                .count(),
+            2,
+            "Rider's publications reach Rider's sink only"
+        );
+        assert!(!runs.lock().iter().any(|(lane, _)| *lane == shared));
+        idea_graph.set_fresh_desired(invocation, None);
+        assert!(
+            agent_doc_process_owner_io::structural_effect_superseded(),
+            "IDEA's own newer layout still cancels IDEA's stale sync"
+        );
+        agent_doc_process_owner_io::clear_structural_effect_generation();
     }
 
     /// `#ideriderindependentnav` P2a: each navigation lane owns an independent

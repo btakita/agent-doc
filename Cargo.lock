@@ -1625,6 +1625,7 @@ name = "agent-doc-project-config-io"
 version = "0.35.491"
 dependencies = [
  "agent-doc-config",
+ "agent-doc-editor-surface",
  "agent-doc-frontmatter",
  "agent-doc-fs",
  "anyhow",
@@ -2637,6 +2638,7 @@ dependencies = [
  "agent-doc-controller-io",
  "agent-doc-cycle-state-io",
  "agent-doc-document",
+ "agent-doc-editor-surface",
  "agent-doc-element",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",

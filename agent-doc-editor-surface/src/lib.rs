@@ -50,7 +50,9 @@ pub use installation_focus::{
     claims_installation_focus, editor_installation,
 };
 pub use navigation_lane::{
-    LayoutOwnerKey, NavigationLane, NavigationMode, tmux_session_name_component,
+    LaneLayoutPartition, LanePaneMembership, LayoutOwnerKey, NavigationLane, NavigationMode,
+    is_lane_session_of, lane_label_for_session, partition_lane_layout_columns,
+    tmux_session_name_component,
 };
 pub use remote_layout::{
     RemoteClientEditors, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,

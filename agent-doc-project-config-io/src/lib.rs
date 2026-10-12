@@ -183,6 +183,48 @@ pub fn load_project_from(path: &Path) -> ProjectConfig {
     config
 }
 
+/// The project's editor navigation mode (`editor_navigation`,
+/// `#ideriderindependentnav`), plus the raw value when it was set but not
+/// recognized. An absent or unknown value is [`NavigationMode::Shared`], the
+/// pre-lane behavior, so a typo never enables per-installation lanes; the
+/// caller reports the rejected spelling.
+///
+/// [`NavigationMode::Shared`]: agent_doc_editor_surface::NavigationMode::Shared
+pub fn editor_navigation_mode(
+    config: &ProjectConfig,
+) -> (agent_doc_editor_surface::NavigationMode, Option<String>) {
+    match config
+        .editor_navigation
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None => (agent_doc_editor_surface::NavigationMode::Shared, None),
+        Some(value) => match agent_doc_editor_surface::NavigationMode::parse(value) {
+            Some(mode) => (mode, None),
+            None => (
+                agent_doc_editor_surface::NavigationMode::Shared,
+                Some(value.to_string()),
+            ),
+        },
+    }
+}
+
+/// Whether `config` opts into per-installation navigation lanes, i.e. whether
+/// installation lane sessions derived from an allowed session are allowed.
+pub fn editor_navigation_lanes(config: &ProjectConfig) -> bool {
+    editor_navigation_mode(config).0 == agent_doc_editor_surface::NavigationMode::PerInstallation
+}
+
+/// [`editor_navigation_mode`] for the project rooted at `project_root`.
+pub fn editor_navigation_mode_for_root(
+    project_root: &Path,
+) -> (agent_doc_editor_surface::NavigationMode, Option<String>) {
+    editor_navigation_mode(&load_project_from(
+        &project_root.join(".agent-doc").join("config.toml"),
+    ))
+}
+
 /// Get the project's configured tmux session (convenience helper).
 pub fn project_tmux_session() -> Option<String> {
     load_project().tmux_session
@@ -281,6 +323,56 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolved, target.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn editor_navigation_defaults_to_shared_and_reports_unknown_values() {
+        use agent_doc_editor_surface::NavigationMode;
+
+        let dir = TempDir::new().unwrap();
+        let config_path = setup_project(dir.path());
+        // Absent: shared, nothing to report.
+        assert_eq!(
+            editor_navigation_mode_for_root(dir.path()),
+            (NavigationMode::Shared, None)
+        );
+        for (raw, expected) in [
+            ("shared", NavigationMode::Shared),
+            ("per_installation", NavigationMode::PerInstallation),
+            ("per-installation", NavigationMode::PerInstallation),
+            ("", NavigationMode::Shared),
+        ] {
+            std::fs::write(
+                &config_path,
+                format!("tmux_session = \"p\"\neditor_navigation = \"{raw}\"\n"),
+            )
+            .unwrap();
+            assert_eq!(
+                editor_navigation_mode_for_root(dir.path()),
+                (expected, None),
+                "{raw}"
+            );
+        }
+        // Unknown: fall back to shared and hand the spelling back for a warning.
+        std::fs::write(&config_path, "editor_navigation = \"per_window\"\n").unwrap();
+        assert_eq!(
+            editor_navigation_mode_for_root(dir.path()),
+            (NavigationMode::Shared, Some("per_window".to_string()))
+        );
+        // The raw value round-trips through save, and is omitted when unset.
+        let cfg = load_project_from(&config_path);
+        save_project_to(&cfg, &config_path).unwrap();
+        assert!(
+            std::fs::read_to_string(&config_path)
+                .unwrap()
+                .contains("editor_navigation = \"per_window\"")
+        );
+        save_project_to(&ProjectConfig::default(), &config_path).unwrap();
+        assert!(
+            !std::fs::read_to_string(&config_path)
+                .unwrap()
+                .contains("editor_navigation")
+        );
     }
 
     #[test]

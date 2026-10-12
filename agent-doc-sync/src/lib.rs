@@ -250,6 +250,11 @@ fn ordered_layout_session_candidates(
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TmuxSessionPolicy {
     allowed: Vec<String>,
+    /// `editor_navigation = "per_installation"` (`#ideriderindependentnav`):
+    /// an installation lane session `<allowed>-<installation>` derived from an
+    /// allowed session is itself allowed, so a lane never needs its own
+    /// `tmux_sessions` entry.
+    navigation_lanes: bool,
 }
 
 impl TmuxSessionPolicy {
@@ -267,7 +272,40 @@ impl TmuxSessionPolicy {
                 names.push(name.to_string());
             }
         }
-        Self { allowed: names }
+        Self {
+            allowed: names,
+            navigation_lanes: false,
+        }
+    }
+
+    /// The same policy, additionally allowing installation lane sessions
+    /// derived from each allowed session when `navigation_lanes` is set.
+    pub fn with_navigation_lanes(mut self, navigation_lanes: bool) -> Self {
+        self.navigation_lanes = navigation_lanes;
+        self
+    }
+
+    /// Whether `session` is an installation lane session
+    /// (`<allowed>-<[A-Za-z0-9_-]+>`) of one of the allowed sessions. Mirrors
+    /// `agent_doc_editor_surface::is_lane_session_of`.
+    fn derived_lane_of(&self, session: &str) -> Option<&str> {
+        if !self.navigation_lanes {
+            return None;
+        }
+        self.allowed
+            .iter()
+            .find(|allowed| {
+                session
+                    .strip_prefix(allowed.as_str())
+                    .and_then(|rest| rest.strip_prefix('-'))
+                    .is_some_and(|component| {
+                        !component.is_empty()
+                            && component
+                                .chars()
+                                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+                    })
+            })
+            .map(String::as_str)
     }
 
     /// The single-session default policy (no allowed list).
@@ -284,7 +322,9 @@ impl TmuxSessionPolicy {
     }
 
     pub fn allows(&self, session: &str) -> bool {
-        !self.is_multi_session() || self.allowed.iter().any(|allowed| allowed == session)
+        !self.is_multi_session()
+            || self.allowed.iter().any(|allowed| allowed == session)
+            || self.derived_lane_of(session).is_some()
     }
 
     /// Fail closed when `session` is outside the allowed list.
@@ -326,7 +366,9 @@ impl TmuxSessionPolicy {
         target_session: &str,
     ) -> bool {
         self.effective_document_binding(binding)
-            .is_some_and(|binding| binding != target_session)
+            .is_some_and(|binding| {
+                binding != target_session && self.derived_lane_of(target_session) != Some(&binding)
+            })
     }
 }
 
@@ -1170,6 +1212,33 @@ mod tests {
         assert!(single.allows("anything"));
         assert_eq!(single.effective_document_binding(Some("research")), None);
         assert!(!single.column_bound_to_other_session(Some("main"), "research"));
+    }
+
+    #[test]
+    fn navigation_lanes_allow_only_sessions_derived_from_an_allowed_session() {
+        let without = TmuxSessionPolicy::new(["main", "research"]);
+        assert!(!without.allows("main-IU-0a1b2c3d"));
+
+        let policy = TmuxSessionPolicy::new(["main", "research"]).with_navigation_lanes(true);
+        assert!(policy.allows("main"));
+        assert!(policy.allows("main-IU-0a1b2c3d"));
+        assert!(policy.allows("research-RD-9f8e7d6c"));
+        assert!(!policy.allows("main-"));
+        assert!(!policy.allows("mainIU"));
+        assert!(!policy.allows("scratch-IU-0a1b2c3d"));
+        assert!(!policy.allows("main-IU.0a"));
+        // A document bound to the pin belongs in every lane of that pin, and a
+        // document bound to another allowed session still stays out.
+        assert!(!policy.column_bound_to_other_session(Some("main"), "main-IU-0a1b2c3d"));
+        assert!(policy.column_bound_to_other_session(Some("research"), "main-IU-0a1b2c3d"));
+        assert!(
+            without.column_bound_to_other_session(Some("main"), "main-IU-0a1b2c3d"),
+            "shared navigation keeps the exact-session rule"
+        );
+        // The single-session policy is unchanged.
+        let single = TmuxSessionPolicy::single_session().with_navigation_lanes(true);
+        assert!(single.allows("anything"));
+        assert!(!single.is_multi_session());
     }
 
     #[test]

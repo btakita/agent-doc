@@ -1404,11 +1404,17 @@ mod multi_tmux_session_model {
 ///   installation is the focus owner;
 /// - per-installation mode: no installation is ever deferred, and every lane
 ///   session is reshaped only by its own installation;
-/// - both mutations below are detected.
+/// - both modes (P2b): a document's pane lives in exactly one session and never
+///   changes session as a consequence of a layout sync. Each IDE shows two of
+///   three documents, so every document is contended by two lanes; a lane
+///   syncs only documents it owns or that have no pane yet
+///   (`partition_lane_layout_columns`, `cross_lane_layout_dropped`), and a new
+///   pane starts in the syncing lane's session;
+/// - every mutation below is detected.
 mod two_ide_navigation_model {
     use agent_doc_editor_surface::{
         InstallationFocus, LayoutOwnerKey, NavigationLane, NavigationMode, SurfaceAuthority,
-        editor_installation,
+        editor_installation, partition_lane_layout_columns,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -1425,6 +1431,13 @@ mod two_ide_navigation_model {
         ),
         ("vscode-pid:9", "vscode-pid:9"),
     ];
+    /// The documents each client's editor layout shows: every document is
+    /// visible in two editors, so every document is contended.
+    const LAYOUTS: [[&str; 2]; 3] = [
+        ["/project/a.md", "/project/b.md"],
+        ["/project/b.md", "/project/c.md"],
+        ["/project/c.md", "/project/a.md"],
+    ];
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Mutation {
@@ -1436,6 +1449,9 @@ mod two_ide_navigation_model {
         /// Every installation drives regardless of the focus owner (the
         /// pre-`#idefocusowner` behavior).
         IgnoreAuthority,
+        /// A lane syncs every document it shows, joining a pane that lives in
+        /// another lane's session into its own (no `cross_lane_layout_dropped`).
+        MoveAcrossLanes,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1454,6 +1470,10 @@ mod two_ide_navigation_model {
         /// session -> every client that ever reshaped it.
         writers: BTreeMap<String, BTreeSet<usize>>,
         deferred: usize,
+        /// document -> the session its pane lives in.
+        pane_session: BTreeMap<String, String>,
+        /// `(document, from, to)` for every pane a sync moved across sessions.
+        moved: Vec<(String, String, String)>,
     }
 
     struct Sim {
@@ -1529,6 +1549,7 @@ mod two_ide_navigation_model {
                         return;
                     }
                     let session = self.target_session(client);
+                    self.sync_panes(client, &session);
                     self.world
                         .writers_since_handoff
                         .entry(session.clone())
@@ -1564,8 +1585,50 @@ mod two_ide_navigation_model {
             }
         }
 
+        /// The structural sync of `client`'s layout into `session`, using the
+        /// production lane partition in per-installation mode.
+        fn sync_panes(&mut self, client: usize, session: &str) {
+            let columns = LAYOUTS[client]
+                .iter()
+                .map(|document| document.to_string())
+                .collect::<Vec<_>>();
+            let kept = if self.mode == NavigationMode::PerInstallation
+                && self.mutation != Mutation::MoveAcrossLanes
+            {
+                partition_lane_layout_columns(&columns, PROJECT_SESSION, session, |document| {
+                    self.world.pane_session.get(document).cloned()
+                })
+                .kept
+            } else {
+                columns
+            };
+            for document in kept {
+                match self.world.pane_session.get(&document).cloned() {
+                    None => {
+                        self.world
+                            .pane_session
+                            .insert(document, session.to_string());
+                    }
+                    Some(from) if from != session => {
+                        self.world
+                            .moved
+                            .push((document.clone(), from, session.to_string()));
+                        self.world
+                            .pane_session
+                            .insert(document, session.to_string());
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+
         /// The invariant this mode promises, or the violation.
         fn check(&self) -> Result<(), String> {
+            if let Some((document, from, to)) = self.world.moved.first() {
+                return Err(format!(
+                    "pane of {document} moved across sessions {from} -> {to}"
+                ));
+            }
             match self.mode {
                 NavigationMode::Shared => {
                     let shared = self
@@ -1683,6 +1746,46 @@ mod two_ide_navigation_model {
         let violation = explore(NavigationMode::Shared, Mutation::IgnoreAuthority, DEPTH)
             .expect("without the focus owner both IDEs reshape the shared session");
         assert!(violation.contains("flipped"), "{violation}");
+    }
+
+    #[test]
+    fn joining_another_lanes_pane_is_detected() {
+        let violation = explore(
+            NavigationMode::PerInstallation,
+            Mutation::MoveAcrossLanes,
+            DEPTH,
+        )
+        .expect("syncing a contended document must move its pane across lanes");
+        assert!(violation.contains("moved across sessions"), "{violation}");
+    }
+
+    #[test]
+    fn contended_documents_stay_in_the_lane_that_first_placed_them() {
+        let mut sim = Sim::new(NavigationMode::PerInstallation, Mutation::None);
+        sim.step(Event::Layout(0));
+        sim.step(Event::Layout(1));
+        sim.step(Event::Layout(2));
+        assert_eq!(sim.check(), Ok(()));
+        assert_eq!(
+            sim.world.pane_session,
+            BTreeMap::from([
+                ("/project/a.md".to_string(), "proj-IU-0a1b2c3d".to_string()),
+                ("/project/b.md".to_string(), "proj-IU-0a1b2c3d".to_string()),
+                ("/project/c.md".to_string(), "proj-RD-9f8e7d6c".to_string()),
+            ]),
+            "each document's pane stays in the first lane that started it"
+        );
+        let mut shared = Sim::new(NavigationMode::Shared, Mutation::None);
+        shared.step(Event::Focus(0));
+        shared.step(Event::Layout(0));
+        shared.step(Event::Layout(2));
+        assert!(
+            shared
+                .world
+                .pane_session
+                .values()
+                .all(|session| session == PROJECT_SESSION)
+        );
     }
 
     #[test]

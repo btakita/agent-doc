@@ -157,6 +157,11 @@ def package_args(packages: list[str]) -> list[str]:
     return [part for package in packages for part in ("-p", package)]
 
 
+def nextest_package_filter(packages: list[str]) -> str:
+    """A nextest filterset selecting exactly `packages` from a workspace run."""
+    return " | ".join(f"package({package})" for package in sorted(packages))
+
+
 def run_affected(base: str) -> None:
     current = plan(base)
     print(json.dumps(current, indent=2, sort_keys=True), flush=True)
@@ -168,18 +173,28 @@ def run_affected(base: str) -> None:
         test_env = os.environ | {
             "AGENT_DOC_BIN": str(target_dir / "debug" / ("agent-doc.exe" if os.name == "nt" else "agent-doc"))
         }
-        run(cargo_command("build", "--bin", "agent-doc", "--lib", "--quiet"))
+        # Check turnaround: build with the same `--workspace --all-targets` feature
+        # resolution as `make check`'s TEST_BUILD and nextest, then SELECT the
+        # affected packages' tests from it. Narrowing the build with `-p` resolved
+        # features differently, so every check-fast compiled a private copy of the
+        # affected crates that the following `make check` compiled again. After an
+        # edit, the stale units of the workspace build are exactly the changed
+        # packages and their reverse dependents, so this costs no more than `-p`.
+        run(cargo_command("build", "--workspace", "--all-targets", "--quiet"))
         selected = package_args(packages)
         run(cargo_command("clippy", *selected, "--all-targets", "--all-features", "--", "-D", "warnings"))
         nextest_packages = current["nextest_packages"]
         if nextest_packages:
-            args = package_args(nextest_packages)
             if shutil.which("cargo-nextest"):
                 run(
-                    cargo_command("nextest", "run", *args, "--all-targets", "--profile", "dev-fast"),
+                    cargo_command(
+                        "nextest", "run", "--workspace", "--all-targets", "--profile", "dev-fast",
+                        "-E", nextest_package_filter(nextest_packages),
+                    ),
                     env=test_env,
                 )
             else:
+                args = package_args(nextest_packages)
                 run(
                     cargo_command("test", *args, "--all-targets", "--quiet", "--", "--test-threads=2"),
                     env=test_env,
@@ -187,7 +202,11 @@ def run_affected(base: str) -> None:
         batched = current["batched_packages"]
         if batched:
             run(
-                cargo_command("test", *package_args(batched), "--all-targets", "--quiet", "--", "--test-threads=2"),
+                [
+                    sys.executable, str(ROOT / "scripts" / "run-batched-tests"),
+                    *[part for package in batched for part in ("--package", package)],
+                    "--test-threads", "2",
+                ],
                 env=test_env,
             )
         run(cargo_command("test", *selected, "--doc", "--quiet"), env=test_env)
@@ -195,7 +214,11 @@ def run_affected(base: str) -> None:
         print("check-fast: no affected Rust packages", flush=True)
 
     if current["audit_docs"]:
-        run(cargo_command("run", "--quiet", "--", "audit-docs"))
+        if packages:
+            # The workspace build above already produced the binary.
+            run([test_env["AGENT_DOC_BIN"], "audit-docs"])
+        else:
+            run(cargo_command("run", "--quiet", "--", "audit-docs"))
     if current["jetbrains"]:
         run(
             ["./gradlew", "--no-daemon", "--console=plain", "-q", "test"],
@@ -351,6 +374,7 @@ def self_test() -> None:
         assert affected_package_names(metadata, ["Cargo.lock"]) == ["app", "leaf", "middle"]
     finally:
         ROOT = real_root
+    assert nextest_package_filter(["b-io", "a"]) == "package(a) | package(b-io)"
 
     with tempfile.TemporaryDirectory() as directory:
         tmp = Path(directory)

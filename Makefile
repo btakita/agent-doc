@@ -12,7 +12,6 @@ CARGO_CLEAN_ENV = env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE
 CARGO_CMD ?= ./scripts/with-cargo-cache cargo
 NEXTEST_QUIET_FLAGS ?= --cargo-quiet --show-progress none --status-level fail --final-status-level fail --failure-output immediate-final --success-output never
 BATCHED_TEST_PACKAGES := agent-doc-controller agent-doc-controller-io agent-doc-route-io agent-doc-session-check-io agent-doc-start-runtime-io
-BATCHED_TEST_PACKAGE_ARGS := $(foreach package,$(BATCHED_TEST_PACKAGES),-p $(package))
 NEXTEST_NON_BATCHED_FILTER := not (package(agent-doc-controller) | package(agent-doc-controller-io) | package(agent-doc-route-io) | package(agent-doc-session-check-io) | package(agent-doc-start-runtime-io))
 # `#flakyintegrate0494`: every test step `make test`/`check` runs keeps its
 # output, exit status, nextest JUnit report (with the failing test's captured
@@ -24,6 +23,19 @@ ifndef TEST_RUN_DIR
 TEST_RUN_DIR := $(TEST_RUN_ARTIFACT_ROOT)/$(shell date -u +%Y%m%dT%H%M%SZ)-$(shell echo $$PPID)
 endif
 NEXTEST_JUNIT := $(CARGO_TARGET_DIR_ABS)/nextest/default/junit.xml
+# Check turnaround: ONE Cargo build serves every Rust step of `make test`/`check`.
+# `--workspace --all-targets` resolves features exactly as nextest's
+# `--workspace` test build does (dev-dependency features included), and it
+# uplifts both `target/debug/agent-doc` (AGENT_DOC_BIN) and the cdylib
+# `target/debug/libagent_doc.so`. The old `build --bin agent-doc --lib`,
+# `test -p <batched>`, and root-only `test <filter>` invocations each resolved
+# features differently, so after one core-crate edit the check recompiled
+# ~479 units instead of ~256. Steps that need a test executable select it from
+# this build (`--workspace --bin agent-doc ...`) instead of re-resolving.
+TEST_BUILD = $(CARGO_CLEAN_ENV) $(CARGO_CMD) build --workspace --all-targets --quiet
+# Concurrent batched test binaries (scripts/run-batched-tests). Each binary is
+# still one libtest process with --test-threads=$(TEST_THREADS).
+BATCHED_TEST_JOBS ?= $(shell n=$$(( $(CPU_COUNT) / 2 )); [ $$n -ge 1 ] && echo $$n || echo 1)
 TEST_RECORD = python3 scripts/test-run-record exec --run-dir "$(TEST_RUN_DIR)"
 LOCAL_INSTALL_PROFILE ?= release-local
 LOCAL_INSTALL_TARGET_DIR ?= target/local-install
@@ -97,9 +109,11 @@ release-version:
 
 # Run tests (unset git hook env vars so temp-repo tests are not confused by GIT_DIR).
 # Prefer cargo-nextest when installed; it runs ordinary test binaries
-# concurrently. Controller-heavy packages use one cargo-test process per test
+# concurrently. Controller-heavy packages use one libtest process per test
 # binary instead: nextest's one-process-per-test model repeatedly paid controller
-# initialization cost. The fallback remains one workspace-wide cargo-test run.
+# initialization cost. scripts/run-batched-tests runs those binaries from the
+# shared TEST_BUILD, concurrently. The fallback remains one
+# workspace-wide cargo-test run.
 TEST_ISOLATION_GOALS := test sim-medium sim-net cross-editor-simworld dev-harness-test editor-parity tmux-ci check
 $(TEST_ISOLATION_GOALS): export TMPDIR := $(AGENT_DOC_TEST_TMPDIR)
 
@@ -122,10 +136,10 @@ $(VSCODE_NODE_LOCK): editors/vscode/package.json editors/vscode/package-lock.jso
 test:
 	@set -e; \
 	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
-	$(CARGO_CLEAN_ENV) $(CARGO_CMD) build --bin agent-doc --lib --quiet; \
+	$(TEST_BUILD); \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
 		AGENT_DOC_BIN="$$test_agent_doc_bin" $(TEST_RECORD) --label nextest --junit "$(NEXTEST_JUNIT)" --echo -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) nextest run --workspace --all-targets -E '$(NEXTEST_NON_BATCHED_FILTER)' $(NEXTEST_QUIET_FLAGS); \
-		AGENT_DOC_BIN="$$test_agent_doc_bin" $(TEST_RECORD) --label batched -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test $(BATCHED_TEST_PACKAGE_ARGS) --all-targets --quiet -- --test-threads="$(TEST_THREADS)"; \
+		AGENT_DOC_BIN="$$test_agent_doc_bin" $(TEST_RECORD) --label batched -- $(CARGO_CLEAN_ENV) python3 scripts/run-batched-tests $(foreach package,$(BATCHED_TEST_PACKAGES),--package $(package)) --jobs "$(BATCHED_TEST_JOBS)" --test-threads "$(TEST_THREADS)" --log-dir "$(TEST_RUN_DIR)/batched"; \
 		AGENT_DOC_BIN="$$test_agent_doc_bin" $(TEST_RECORD) --label doctest -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --doc --quiet; \
 	else \
 		AGENT_DOC_BIN="$$test_agent_doc_bin" $(TEST_RECORD) --label cargo-test -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --all-targets --quiet -- --test-threads="$(TEST_THREADS)"; \
@@ -134,7 +148,7 @@ test:
 # Wider deterministic simulator budget. Kept outside normal cargo test via
 # #[ignore], but make check runs it explicitly so CI exercises more schedules.
 sim-medium:
-	@$(TEST_RECORD) --label sim-medium -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget --quiet -- --ignored --test-threads="$(TEST_THREADS)"
+	@$(TEST_RECORD) --label sim-medium -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --bin agent-doc closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget --quiet -- --ignored --test-threads="$(TEST_THREADS)"
 
 # `#netadv4`: the fast corpus schedules (seeds 0..512) under the seeded
 # `coder_zscaler` and `hostile` network profiles, each across the fixed net seeds
@@ -143,7 +157,7 @@ sim-medium:
 # KNOWN_OPEN_NET_FINDINGS fails the run. Scripted scenarios can be replayed under a
 # profile ad hoc: AGENT_DOC_SIM_NET_PROFILE=hostile AGENT_DOC_SIM_NET_SEED=3 cargo test sim_world::
 sim-net:
-	@$(TEST_RECORD) --label sim-net -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --bin agent-doc sim_world::net::tests::closeout_sim_net_ --quiet -- --ignored --test-threads="$(TEST_THREADS)"
+	@$(TEST_RECORD) --label sim-net -- $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --bin agent-doc sim_world::net::tests::closeout_sim_net_ --quiet -- --ignored --test-threads="$(TEST_THREADS)"
 
 # `#netadv6`: deterministic simulation fuzzing on FRESH seeds for FUZZ_SECS
 # seconds (src/sim_world/fuzz.rs). `make check` already runs the short fixed
@@ -170,10 +184,10 @@ sim-fuzz:
 cross-editor-simworld: $(VSCODE_NODE_LOCK)
 	@set -e; \
 	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
-	$(CARGO_CLEAN_ENV) $(CARGO_CMD) build --bin agent-doc --lib --quiet; \
+	$(TEST_BUILD); \
 	( cd editors/vscode && npm run compile ); \
 	( cd editors/jetbrains && ./gradlew --no-daemon --console=plain -q testClasses ); \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --test cross_editor_simworld native_plugin_harnesses_peer_through_real_agent_doc_controller -- --ignored --nocapture --test-threads=1
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --test cross_editor_simworld native_plugin_harnesses_peer_through_real_agent_doc_controller -- --ignored --nocapture --test-threads=1
 
 # Live tmux integration sweep. These tests are intentionally ignored in the
 # default development suite and run on CI where tmux is installed.
@@ -329,6 +343,7 @@ lean:
 dev-check-self-test:
 	@python3 scripts/dev-check.py self-test
 	@python3 scripts/test-run-record self-test
+	@python3 scripts/run-batched-tests --self-test
 
 release-driver-self-test:
 	@python3 scripts/release-driver.py --self-test
@@ -344,9 +359,19 @@ check-fast: python-compat-check plugin-version-check artifact-purge-check previe
 check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test jetbrains-repository-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-classic-check jetbrains-262-check python-bootstrap-test lean tla-runner-self-test tla
 	@AGENT_DOC_FULL_CHECK_SUCCEEDED=1 python3 scripts/dev-check.py record-full-check
 
+# Target-specific, so it reaches the `audit-docs` prerequisite of `check` only.
+check: AUDIT_DOCS_FROM_TEST_BUILD := 1
+
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
+# Inside `make check` it runs the binary the shared TEST_BUILD
+# already produced; a bare `cargo run` resolved features without dev-dependencies
+# and rebuilt the root crate's dependency chain (~100 units per core edit).
 audit-docs:
-	@$(CARGO_CMD) run --quiet -- audit-docs
+	@if [ "$(AUDIT_DOCS_FROM_TEST_BUILD)" = 1 ]; then \
+		$(TEST_BUILD) && "$(CARGO_TARGET_DIR_ABS)/debug/agent-doc" audit-docs; \
+	else \
+		$(CARGO_CMD) run --quiet -- audit-docs; \
+	fi
 
 # Translate the PlusCal concurrency model and check its TLA+ safety/liveness properties.
 tla:

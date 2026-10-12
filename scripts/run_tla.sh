@@ -187,6 +187,43 @@ if [[ "${1:-}" == "--self-test" ]]; then
 fi
 [[ $# -eq 0 ]] || die "usage: $0 [--self-test]"
 
+# --- Content receipt ----------------------------------------
+#
+# A TLC verdict is a function of the model files, this runner (module lists,
+# must-pass / must-violate obligations, pinned tools version), the JVM, and the
+# JVM option variables. When all of those are byte-identical to a run that
+# passed, rerunning every check (~125 TLC processes) proves nothing new. The
+# receipt is content-addressed and lives in the user cache, so it is shared by
+# every worktree of this repository (the same rule as sccache: only
+# content-addressed results cross worktrees). Any change to an input yields a
+# different fingerprint and a full run. AGENT_DOC_TLA_FORCE=1 always runs.
+tla_fingerprint() {
+    {
+        printf 'runner\0'
+        sha256sum "${BASH_SOURCE[0]}" | cut -d' ' -f1
+        (cd "${repo_root}/formal/tla" && find . -type f -print0 | LC_ALL=C sort -z |
+            xargs -0 sha256sum)
+        printf 'java\0'
+        java -version 2>&1 || echo "java-unavailable"
+        printf 'env\0%s\0%s\0%s\0' "${JAVA_TOOL_OPTIONS-}" "${_JAVA_OPTIONS-}" "${TLA_TOOLS_JAR-}"
+    } | sha256sum | cut -d' ' -f1
+}
+
+receipt_dir="${AGENT_DOC_CHECK_RECEIPT_DIR:-${XDG_CACHE_HOME:-${HOME:-/nonexistent}/.cache}/agent-doc/check-receipts}"
+receipt="${receipt_dir}/tla-$(tla_fingerprint)"
+
+record_receipt() {
+    mkdir -p "${receipt_dir}" 2>/dev/null || return 0
+    printf 'tla passed at %s in %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${repo_root}" >"${receipt}.tmp.$$" &&
+        mv -f "${receipt}.tmp.$$" "${receipt}" || true
+}
+
+if [[ "${AGENT_DOC_TLA_FORCE:-0}" != 1 && -f "${receipt}" ]]; then
+    echo "[tla] model files, runner, and JVM are identical to a passing run ($(cat "${receipt}"));"
+    echo "[tla] skipping. Receipt: ${receipt}. Set AGENT_DOC_TLA_FORCE=1 to rerun every check."
+    exit 0
+fi
+
 ensure_tools_jar
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
@@ -423,55 +460,144 @@ for entry in "${must_violate[@]}" "${must_pass[@]}"; do
     cp "${repo_root}/formal/tla/${entry#*:}.cfg" "${work_dir}/"
 done
 
+# Check turnaround: one TLC JVM per check, run `tla_jobs` at a time. Every check
+# was a serial JVM with `-workers auto`; most models finish in well under a
+# second, so the ~125 checks were dominated by JVM start-up (~235s in total).
+# Each job gets its own `java.io.tmpdir` (see "Run isolation" above: TLC's
+# standard-module extraction races between processes sharing one), its own
+# metadir, and its own log. Verdicts are evaluated afterwards in the original
+# order with exactly the same pass / must-violate rules, so a parallel run
+# reports the same failure a serial one would.
+tla_jobs="${TLA_JOBS:-}"
+if [[ -z "${tla_jobs}" ]]; then
+    cpus="$(nproc 2>/dev/null || echo 4)"
+    tla_jobs=$(( cpus / 4 ))
+    (( tla_jobs > 8 )) && tla_jobs=8
+fi
+(( tla_jobs >= 1 )) || tla_jobs=1
+# Workers stay `auto` (one per core) per JVM: the few large models dominate the
+# critical path, and once the short checks drain they get every core. A fixed
+# split (cores / jobs) left AgentDocCloseoutNet at 126s on 4 workers.
+tla_workers="${TLA_WORKERS:-auto}"
+# Longest-first scheduling from the previous run's wall times (ordering only;
+# it never changes which checks run or how they are judged).
+durations="${receipt_dir}/tla-durations.tsv"
+
+# run_job ID MODULE [CONFIG]: run one TLC check in the background-safe way.
+# Never fails; the exit status lands in `${ID}.status`, wall time in `${ID}.secs`.
+run_job() {
+    local id="$1" module="$2" config="${3:-}"
+    local java_tmp="${work_dir}/java-tmp-${id}"
+    mkdir -p "${java_tmp}"
+    local args=(-workers "${tla_workers}" -metadir "${work_dir}/states-${id}")
+    [[ -n "${config}" ]] && args+=(-config "${config}.cfg")
+    local start=${SECONDS} rc=0
+    tla_java tlc2.TLC "${args[@]}" "${module}.tla" >"${id}.log" 2>&1 || rc=$?
+    echo "${rc}" >"${id}.status"
+    echo $(( SECONDS - start )) >"${id}.secs"
+}
+
 (
     cd "${work_dir}"
-for module in "${modules[@]}"; do
-    if grep -Eq '\(\* --(fair )?algorithm' "${module}.tla"; then
-      tla_java pcal.trans "${module}.tla"
-    fi
-# `-metadir` is explicit because TLC otherwise derives it from the current time
-# to the SECOND, and two checks that start inside the same second collide with
-# "that directory already exists". With the same module now checked under several
-# configs that is not a rare race, it is the common case.
-check_passes "${module}.log" -workers auto \
-    -metadir "${work_dir}/states-${module}" "${module}.tla"
-done
+    for module in "${modules[@]}"; do
+        if grep -Eq '\(\* --(fair )?algorithm' "${module}.tla"; then
+            tla_java pcal.trans "${module}.tla"
+        fi
+    done
 
-for entry in "${must_pass[@]}"; do
-    module="${entry%%:*}"
-    config="${entry#*:}"
-    check_passes "${module}-${config}.log" -workers auto \
-        -metadir "${work_dir}/states-${module}-${config}" \
-        -config "${config}.cfg" "${module}.tla"
-done
+    # `-metadir` is explicit and per job because TLC otherwise derives it from
+    # the current time to the SECOND, and two checks that start inside the same
+    # second collide with "that directory already exists".
+    jobs_list=()
+    for module in "${modules[@]}"; do
+        jobs_list+=("${module}|${module}|")
+    done
+    for entry in "${must_pass[@]}" "${must_violate[@]}"; do
+        jobs_list+=("${entry%%:*}-${entry#*:}|${entry%%:*}|${entry#*:}")
+    done
 
-for entry in "${must_violate[@]}"; do
-    module="${entry%%:*}"
-    config="${entry#*:}"
-    log="${module}-${config}.log"
-    # `set -e` is active, so guard the intentionally-failing run.
-    if tla_java tlc2.TLC -workers auto \
-        -metadir "${work_dir}/states-${module}-${config}" \
-        -config "${config}.cfg" "${module}.tla" >"${log}" 2>&1; then
-        echo "[tla] NON-VACUITY FAILURE: ${module} with ${config}.cfg was expected to" >&2
-        echo "[tla] report a violation and instead passed. The recovery edge that" >&2
-        echo "[tla] config disables is no longer load-bearing, or the property no" >&2
-        echo "[tla] longer constrains it - the positive run is now vacuous." >&2
-        tail -40 "${log}" >&2
-        exit 1
+    if [[ -f "${durations}" ]]; then
+        mapfile -t jobs_list < <(
+            for job in "${jobs_list[@]}"; do
+                id="${job%%|*}"
+                secs="$(awk -F'\t' -v id="${id}" '$1 == id { print $2; exit }' "${durations}")"
+                printf '%s\t%s\n' "${secs:-0}" "${job}"
+            done | sort -t$'\t' -k1,1rn -s | cut -f2-
+        )
     fi
-    if standard_module_failure "${log}"; then
-        tail -40 "${log}" >&2
-        standard_module_diagnostic
-        die "[tla] ${module} with ${config}.cfg did not run; its non-vacuity obligation is unchecked"
+    echo "[tla] ${#jobs_list[@]} checks, ${tla_jobs} at a time, -workers ${tla_workers} each"
+    running=0
+    for job in "${jobs_list[@]}"; do
+        IFS='|' read -r id module config <<<"${job}"
+        run_job "${id}" "${module}" "${config}" &
+        running=$(( running + 1 ))
+        if (( running >= tla_jobs )); then
+            wait -n || true
+            running=$(( running - 1 ))
+        fi
+    done
+    wait || true
+
+    for job in "${jobs_list[@]}"; do
+        IFS='|' read -r id _ _ <<<"${job}"
+        [[ -f "${id}.status" ]] || die "[tla] check ${id} produced no status; the job runner lost it"
+    done
+
+    # Positive runs: every one must pass (output kept on stdout as before).
+    for module in "${modules[@]}"; do
+        cat "${module}.log"
+        if [[ "$(cat "${module}.status")" != 0 ]]; then
+            standard_module_failure "${module}.log" && standard_module_diagnostic
+            die "[tla] model check failed: tlc2.TLC ${module}.tla"
+        fi
+    done
+    for entry in "${must_pass[@]}"; do
+        module="${entry%%:*}"
+        config="${entry#*:}"
+        id="${module}-${config}"
+        cat "${id}.log"
+        if [[ "$(cat "${id}.status")" != 0 ]]; then
+            standard_module_failure "${id}.log" && standard_module_diagnostic
+            die "[tla] model check failed: tlc2.TLC -config ${config}.cfg ${module}.tla"
+        fi
+    done
+
+    for entry in "${must_violate[@]}"; do
+        module="${entry%%:*}"
+        config="${entry#*:}"
+        log="${module}-${config}.log"
+        if [[ "$(cat "${module}-${config}.status")" == 0 ]]; then
+            echo "[tla] NON-VACUITY FAILURE: ${module} with ${config}.cfg was expected to" >&2
+            echo "[tla] report a violation and instead passed. The recovery edge that" >&2
+            echo "[tla] config disables is no longer load-bearing, or the property no" >&2
+            echo "[tla] longer constrains it - the positive run is now vacuous." >&2
+            tail -40 "${log}" >&2
+            exit 1
+        fi
+        if standard_module_failure "${log}"; then
+            tail -40 "${log}" >&2
+            standard_module_diagnostic
+            die "[tla] ${module} with ${config}.cfg did not run; its non-vacuity obligation is unchecked"
+        fi
+        if ! grep -Eq 'Error: (Deadlock reached|Temporal properties were violated|Invariant .* is violated)' "${log}"; then
+            echo "[tla] NON-VACUITY FAILURE: ${module} with ${config}.cfg failed, but not" >&2
+            echo "[tla] with a deadlock / property violation - so the wedge it is meant to" >&2
+            echo "[tla] exhibit was not what TLC actually reported." >&2
+            tail -40 "${log}" >&2
+            exit 1
+        fi
+        echo "[tla] non-vacuity confirmed: ${module} with ${config}.cfg violates as required"
+    done
+
+    for job in "${jobs_list[@]}"; do
+        IFS='|' read -r id _ _ <<<"${job}"
+        printf '%s\t%s\n' "${id}" "$(cat "${id}.secs")"
+    done | sort -t$'\t' -k2,2rn >"${work_dir}/durations.tsv"
+    echo "[tla] slowest checks (wall seconds):"
+    head -8 "${work_dir}/durations.tsv"
+    if mkdir -p "${receipt_dir}" 2>/dev/null; then
+        cp "${work_dir}/durations.tsv" "${durations}.tmp.$$" && mv -f "${durations}.tmp.$$" "${durations}" || true
     fi
-    if ! grep -Eq 'Error: (Deadlock reached|Temporal properties were violated|Invariant .* is violated)' "${log}"; then
-        echo "[tla] NON-VACUITY FAILURE: ${module} with ${config}.cfg failed, but not" >&2
-        echo "[tla] with a deadlock / property violation - so the wedge it is meant to" >&2
-        echo "[tla] exhibit was not what TLC actually reported." >&2
-        tail -40 "${log}" >&2
-        exit 1
-    fi
-    echo "[tla] non-vacuity confirmed: ${module} with ${config}.cfg violates as required"
-done
 )
+
+record_receipt

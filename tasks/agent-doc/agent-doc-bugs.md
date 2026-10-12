@@ -677,6 +677,30 @@ The previous closeout committed, but `session-check` then reported the lazily.md
 Your new sdk.md item (the Stop hook holding `agent:queue auto` paused on `intent_id=unobserved-retained-intent`) was never parsed as its own queue item. It begins right after the lazily.md block without a `- ` bullet, so it was read as part of that block, and `queue claim` and `queue brief` both rejected it. I dispatched it by hand to a subagent on branch `sdkretained`, using your text verbatim plus the queue preset. The subagent will only read sdk.md and its logs. The likely defect: the hook waits on a write holder it never observed, while the cycle is already committed. Per `#percellconverge`, that wait must prove a holder or name a recovery that terminates. The subagent will also check whether the quadratic-merge stall fixed in `sessionactorspin` started it.
 
 I filed both parsing failures as `multilinequeuehead`. Since the sdk.md text isn't a head, I'll close it by hand once its fix lands. `stopreopenflake` is with a subagent too.
+
+### Re: auto-clear default, GH #242 — opus-5-5 · 2026-10-12T10:10-04:00
+
+> **Chat prompt (#chatprompt):** auto-clear should on by default and disabled with a queue element attribute. disable-auto-clear perhaps?
+
+Agreed, and `#bgclearpolicy` is with a subagent on branch `bgclearpolicy` to build it:
+- **On by default for an active queue.** After an item's closeout is proven, at the idle point before the next item is dispatched, the supervisor resets the session and then sends the next item to the fresh session.
+  - Claude Code gets `/clear` typed into the live process, so background agents and shells survive. OpenCode gets `/new`.
+  - Codex gets a fresh restart, because its `/clear` exits the process.
+  - It never clears mid-turn, over an unsent draft, or with your steering still unanswered.
+- **`<!-- agent:queue disable-auto-clear ... -->`** turns it off, and preflight reports the setting.
+- **The instructions get corrected to match.** The agent-doc skill, the session-size guidance and the Codex stop-hook continuation will describe the shipped behavior. When a clear is due, the Codex hook hands off to the supervisor instead of continuing in the same pane. The guidance will also say that only compaction shrinks an over-long exchange.
+
+The subagent will first find out why `45ff25f994` turned clearing off in June, and confirm the new design doesn't bring that failure back.
+
+**GH #242** (the JetBrains `TypingTracker` retry storm, 32,277 refusals in 92 minutes) is with a subagent on branch `gh242`. The retry will fire on the event that can actually let it succeed, instead of on an unlimited 75 ms timer. Repeated identical refusals will be logged once with a count, without a Lazily actor round trip for each one. It will be closed after merge.
+
+Also in flight:
+- IDE navigation P4;
+- the sdk.md retained-write wedge;
+- `stopreopenflake`;
+- `multilinequeuehead`.
+
+P3 is done and waiting for a plugin version bump at integration.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -725,15 +749,16 @@ for the existing controller state edge unless it explicitly reports `needs_opera
 ```
 - ~~do [#clippyworkspacegap]~~
 - ~~do [#sessionactorspin]~~
-- do [#stopreopenflake]
-- do [#multilinequeuehead]
+- 🚧 do [#stopreopenflake]
+- 🚧 do [#multilinequeuehead]
+- #gh-fix https://github.com/btakita/agent-doc/issues/242
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#multilinequeuehead] [agent-doc] Multi-line free-text queue items (a title line plus a fenced pasted block) break two ways (2026-10-12, agent-doc-bugs.md): (1) an operator item pasted directly after another multi-line item without a leading list bullet is folded into the previous head, so the sdk.md issue item never became a head and queue claim/brief rejected it; (2) quoting a multi-line head as a Queue prompt echo did not strike it, so the closeout committed and then session-check INTERRUPTED with completed free-text residue until a preflight plus commit repair wrapped it in a done fence. Parse each operator-added block as its own head and make the echo strike match multi-line heads, with regression tests.
-- [ ] [#stopreopenflake] [agent-doc] agent-doc-codex-stop-io test stop_does_not_reopen_for_done_archive_projection_after_commit fails when run in parallel with the rest of the crate (also on unmodified main, 2026-10-12) and passes alone. Find the shared state or timing dependency and fix it; do not rerun to green.
+- [ ] 🚧 [#multilinequeuehead] [agent-doc] Multi-line free-text queue items (a title line plus a fenced pasted block) break two ways (2026-10-12, agent-doc-bugs.md): (1) an operator item pasted directly after another multi-line item without a leading list bullet is folded into the previous head, so the sdk.md issue item never became a head and queue claim/brief rejected it; (2) quoting a multi-line head as a Queue prompt echo did not strike it, so the closeout committed and then session-check INTERRUPTED with completed free-text residue until a preflight plus commit repair wrapped it in a done fence. Parse each operator-added block as its own head and make the echo strike match multi-line heads, with regression tests.
+- [ ] 🚧 [#stopreopenflake] [agent-doc] agent-doc-codex-stop-io test stop_does_not_reopen_for_done_archive_projection_after_commit fails when run in parallel with the rest of the crate (also on unmodified main, 2026-10-12) and passes alone. Find the shared state or timing dependency and fix it; do not rerun to green.
 - [ ] [#bgclearpolicy] [operator-verify] [agent-doc] Decide: background context clearing between queue items has been off for every harness since 45ff25f994 (2026-06-30), but SKILL.md drain-no-defer and agent-doc-session-accretion restart_or_drain_guidance still tell agents the supervisor clears context between items. Either re-enable it (for Codex, a fresh restart at the idle boundary) or change that wording to say only an explicit operator Clear resets the session. Note that accretion block measures exchange size, which only compaction reduces.
 - [ ] 🚧 [#ridernavp3] [agent-doc] IDE navigation lanes P3 (docs/plan-ide-independent-nav.md), after ridernavp2b: FFI agent_doc_tmux_focus_state_for_client_json; agent-doc terminal attaches to its lane session; JetBrains sends its client id with tmux_focus_state and TmuxPaneFocusSync ignores other-lane focus; plugin version bump by the coordinator.
 - [ ] 🚧 [#ridernavp4] [agent-doc] IDE navigation lanes P4 (docs/plan-ide-independent-nav.md), after ridernavp3: a document open in both IDEs stays in its owning lane; Claim for Tmux Pane or Sync Tmux Layout in the other IDE hands it over; SimWorld plus isolated-tmux handoff tests.

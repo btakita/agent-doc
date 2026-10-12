@@ -292,6 +292,22 @@ Yes, v0.35.491 is fully published:
 - **Local install:** agent-doc 0.35.491 is installed, plus the later `flaky0494` merge (`8e7ef63ce6`).
 
 Not in the release yet: `deferstrike2` (the annotated-deferral fix) and `clrinject` (no auto-trigger after an idle Clear) are both finished, with `make check` green. `#flakyreceipthelpers` is still running. All three go into the next batch and release.
+
+### Re: agent-doc thrashing in the background — opus-5.5 · 2026-10-11T22:05-04:00
+
+> **Queue prompt:** do [#fixthrashingbackground]
+
+**Deferred:** this went to a background subagent (claim `subagent:thrash`, branch `thrash` off the installed `8e7ef63ce6`). What I measured at 22:01:
+- **Load and controllers:** the 1-minute load average is 32. The haiven-dev project controller sits at about 48% CPU with 1.0 GB of memory, and the agent-loop controller at about 14% with 1.5 GB.
+- **Supervisors:** about 30 route-owned supervisors each idle at 3–15% CPU; `tasks/betterstack.md`'s is at 14.6%.
+- **What drives it:** in the last 20k lines of haiven-dev's ops.log, 9577 are `controller_crdt_current_text`. That's a full-document read through the controller, and 6897 of them are `source=session-check:midturn_steering`. Every supervisor re-checks its document for mid-turn steering every ~17s even when idle and nothing changed. The rest come from the idle-queue head probe (1211) and `durable_buffer_state` (1074), spread across every open doc.
+
+The subagent will make that work driven by events and document revisions instead of a fixed timer:
+- Steering checks run only while a turn is live and the document actually changed.
+- Queue-head checks run only on queue or document change.
+- No full-text read serves as the per-tick probe.
+
+It will also check the controllers' 1–1.5 GB for unbounded growth, measure CPU before and after on an isolated harness, and add a regression test that fails if an idle supervisor starts polling full text again. It won't touch any live process.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -300,6 +316,7 @@ Not in the release yet: `deferstrike2` (the annotated-deferral fix) and `clrinje
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#fixthrashingbackground]
 - 🚧 do [#idlecleartriggerinject]
 - 🚧 do [#annotateddeferstrike]
 - 🚧 do [#flakyreceipthelpers]
@@ -309,6 +326,7 @@ Not in the release yet: `deferstrike2` (the annotated-deferral fix) and `clrinje
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fixthrashingbackground] Fix agent-doc thrashing in the background
 - [ ] 🚧 [#idlecleartriggerinject] [agent-doc] After Clear Session Context at an idle prompt (delivery=supervisor_restart_fresh), the supervisor injects an unrequested /agent-doc <file> turn (auto_trigger_inject), a no-op costing ~13s of model time each time; seen twice in the 2026-10-11 clearnotice live test (evidence: agent-doc-wt/clearnotice/tmp/evidence). Do not auto-dispatch after an operator Clear unless queue work is actually pending.
 - [ ] 🚧 [#annotateddeferstrike] [agent-doc] A deferred annotated queue head is struck anyway: for an annotated head the closeout requires the operator-note answer quote, which then sits between the queue-prompt echo and the deferral paragraph, so the deferral is not recognized, the head is consumed and its claim released (2026-10-11, twice on the clearnoticeverify heads). Recognize a deferral paragraph that follows the operator-note answer, with a regression test.
 - [ ] 🚧 [#flakyreceipthelpers] [agent-doc] Follow-up from flaky0494: simulated-editor socket listeners in agent-doc-test-support/src/lib.rs:781, agent-doc-write-converge-io/src/convergence_fixture_tests.rs:170 and agent-doc-commit-io/tests/git.rs:104 drop receipt errors the way the fixed already_applied_* tests did (may flake under load); and finalize_integration reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once hits the 180s nextest limit under load ~80 (performance, do not raise the limit). Integrate branch flaky0494 first.

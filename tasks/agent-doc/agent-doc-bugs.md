@@ -864,6 +864,38 @@ Also filed: `steeringeditmisalign`. When you delete struck queue lines, steering
 **Another flaky test, filed as `laneplaneflake`.** The P3 controller test `plugin_publications_project_into_the_publishing_clients_navigation_lane` failed under parallel load and passed 3 of 3 alone. A subagent is taking it, to fix the cause rather than rerun it until it passes.
 
 **Batch 10 (`lanegcflake` + `ridernavp6republish`)** is in `make check` / `make tmux-ci`. `ridernavp6route` is being merged with it by its own subagent to resolve conflicts.
+
+### Re: batches 10–11 landed — opus-5-5 · 2026-10-12T14:40-04:00
+
+Batches 10 and 11 are on `main` (`4f168dad62`) and installed. Each passed `make check` and `make tmux-ci`; batch 11 ran 10,362 tests.
+
+> **Queue prompt:** do [#lanegcflake]
+
+Done (`021ffcf29c`). `gc` read a lane's own shell, still running its startup files, as a running program. Panes agent-doc creates in a lane are now marked. A marked pane counts as idle until a client has ever attached to that lane, so anything you start there still keeps the lane. The test went from 12 failures in 15 runs to 45 passes in 45, including runs under heavy CPU load.
+
+> **Queue prompt:** do [#laneplaneflake]
+
+Done (`9fe499436f`). This was a real controller bug. A lane frame was marked as "seen" for the shared lane only after that lane's worker had published it, so shared-lane routes could wait out their full 500ms catch-up budget, or longer if the worker kept retrying. Frames are now marked seen when they are dispatched. Before the fix the test failed 103 of 320 runs; after it, 0 of 480.
+
+> **Queue prompt:** do [#ridernavp6status]
+
+Done (`5355e01c79`). Each lane publishes its own pane-layout status on its own channel. A client that subscribes with its id gets only its own lane's status. Shared mode is unchanged.
+
+> **Queue prompt:** do [#ridernavp6republish]
+
+Done (`e68649aec2`). The `sync_tmux_layout` command goes to the requesting client's lane. A recycle re-applies every lane's retained layout, each in its own lane, and never moves a pane across lanes.
+
+> **Queue prompt:** do [#ridernavp6switchback]
+
+Done (`78a7be20ee`). Checking this found a real bug: after switching back to `shared`, a shared sync could follow a stale lane, rearrange it, and push shared panes into it. Now every shared sync targets the shared session and adopts the layout's lane panes first, keeping the same panes so nothing is duplicated or lost.
+
+> **Queue prompt:** do [#steeringeditmisalign]
+
+Done (`b4544973ef`). Steering now pairs old and new queue lines by item identity first. Untouched items are no longer reported as edited, and the stuck "operator is still typing N more item(s)" message stops.
+
+**Up next:**
+- `ridernavp6route` is merged with all of this (`8ec61eaf7b`). One unrelated `make tmux-ci` test failed: `queued_clear_is_dropped_when_a_newer_prompt_starts_first`, which passed when run alone. It is filed as `queuedclearflake` and goes to a subagent now.
+- `ridernavp6gc` (controller-side lane cleanup) merges on top of route next.
 <!-- agent:boundary:75cf33a3 -->
 <!-- /agent:exchange -->
 
@@ -872,30 +904,26 @@ Also filed: `steeringeditmisalign`. When you delete struck queue lines, steering
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#laneplaneflake]
+- do [#queuedclearflake]
+- ~~do [#laneplaneflake]~~
 - ~~do [#infraclearsession]~~
 - 🚧 do [#ridernavp6route]
-- 🚧 do [#ridernavp6republish]
-- 🚧 do [#ridernavp6status]
+- ~~do [#ridernavp6republish]~~
+- ~~do [#ridernavp6status]~~
 - 🚧 do [#ridernavp6gc]
-- 🚧 do [#ridernavp6switchback]
-- do [#lanegcflake]
+- ~~do [#ridernavp6switchback]~~
+- ~~do [#lanegcflake]~~
 - do [#ridernavp6routecontended]
-- do [#steeringeditmisalign]
+- ~~do [#steeringeditmisalign]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#laneplaneflake] [agent-doc] agent-doc-controller-io test project_controller::rpc::tests::plugin_publications_project_into_the_publishing_clients_navigation_lane (ridernavp3) failed under make check-fast parallel load with 'the shared lane's plane catch-up counts lane frames as seen' and passed 3 of 3 alone (2026-10-12, steeringeditmisalign subagent). Find the timing or shared-state dependency and fix it; never rerun to green or lengthen a timeout.
-- [ ] [#steeringeditmisalign] [agent-doc] After the operator deletes struck queue lines, mid-turn steering reports unchanged claimed items as change=edited with a previous text taken from a different, removed item (2026-10-12 agent-doc-bugs.md: previous do [#bgclearpolicy] verbatim do [#infraclearsession]; previous do [#ridernavp4] verbatim do [#ridernavp6route]; previous do [#ridernavp3] verbatim do [#ridernavp6gc]). The queue steering diff pairs nodes by position instead of by item identity. Pair queue nodes by stable identity (tracked id or free-text key) so removals stay removals and untouched items produce no steering, with a regression test.
-- [ ] [#lanegcflake] [agent-doc] tests/cross_editor_simworld.rs two_ide_navigation_lanes_migrate_and_clean_up_end_to_end (P5, on main since d6da68546a) is nondeterministic: in make tmux-ci it kept an empty lane as a busy unowned pane instead of closing it, and failed 1 of 3 runs alone (2026-10-12, ridernavp6route subagent). Suspected cause, unverified: the fresh lane shell is still running zsh startup when gc reads pane activity. Find and fix the nondeterminism in the test or the gc busy-pane classification; never rerun to green or lengthen a timeout.
+- [ ] [#queuedclearflake] [agent-doc] tests/clear_queued_live_turn_tmux.rs queued_clear_is_dropped_when_a_newer_prompt_starts_first failed its ui_outcome=queued assertion inside make tmux-ci (2026-10-12, ridernavp6route merge run) and passed 2 of 2 alone. Find the timing dependency and fix it with an explicit readiness signal; never rerun to green or lengthen a timeout.
 - [ ] [#ridernavp6routecontended] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): Run Agent Doc counts as a passive claim, so for a document whose pane lives in another IDE's lane the route drops it from the requesting IDE's layout; what the route's layout wait does in that case is untested. Define the behavior (wait, refuse with owned_by_other_lane, or hand over) and pin it with a test.
 - [ ] 🚧 [#ridernavp6route] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): route, start and agent-doc claim --client-id create panes in the requesting IDE's lane in per_installation mode; today a new pane reaches an installation lane only through that IDE's explicit claim.
-- [ ] 🚧 [#ridernavp6republish] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): the sync_tmux_layout command and the recycle republish still publish only into the shared lane; make them lane-aware.
-- [ ] 🚧 [#ridernavp6status] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): add a per-lane pane_layout_status channel; it reports only the shared lane today.
 - [ ] 🚧 [#ridernavp6gc] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): a controller-side trigger for empty-lane cleanup and per_installation-to-shared migration that knows which IDE installations are live; today only agent-doc gc runs it, using an attached terminal as the only liveness signal.
-- [ ] 🚧 [#ridernavp6switchback] [agent-doc] IDE navigation lanes follow-up (docs/plan-ide-independent-nav.md): verify and pin with a test what the shared sync body does with a document pane still in a lane session after editor_navigation switches back to shared but before agent-doc gc migrates it; the docs and SimWorld model leave it open.
 <!-- /agent:backlog -->
 
 ## Review

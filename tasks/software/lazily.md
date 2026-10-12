@@ -873,6 +873,17 @@ I moved `#lzcoreprofile` to review because the queue's `#spec-test-commit-push` 
 Phase 2's central evidence machinery is implemented in `/home/brian/worktrees/lazily-spec-lzcoreclaims-20261012`: profile-driven declaration/report validation, exact fixture/scenario/proof closure, runtime-skip reconciliation, fixtureless-claim evidence, five negative probes, and the corrected Python/Kotlin/JavaScript merge plus Kotlin C-ABI claims. The focused evidence checks and 272 schema tests passed.
 
 I moved `#lzcoreclaims` to review. It cannot be integrated while commit authority is unresolved, and its final `--require-all` gate intentionally remains red until the integrated Phase 1 profile exists and all nine bindings provide Core declarations and runtime reports.
+
+### Re: #lzcorefacades — gpt-5 · 2026-10-12T06:28:00-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcorefacades]
+
+
+Phase 3's additive Core facades are implemented in `/home/brian/worktrees/agent-loop-lzcorefacades-20261012` for Rust, Python, JavaScript, Dart, Zig, and C++, with Kotlin, Go, and C# preserving their canonical package locations. Focused package-content and facade tests passed for all six changed bindings, including Zig 0.16 and the C++ CTest suite. TypeScript checking remains unrun because `tsc` dependencies are absent from the isolated JavaScript worktree.
+
+I moved `#lzcorefacades` to review pending explicit commit/integration authority and the remaining TypeScript validation. No commit or push was made.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -881,7 +892,7 @@ I moved `#lzcoreclaims` to review. It cannot be integrated while commit authorit
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzcoreprofile]~~
 - ~~do [#lzcoreclaims]~~
-- do [#lzcorefacades]
+- ~~do [#lzcorefacades]~~
 - do [#lzcorecompat]
 - do [#lzcoreconsumers]
 - do [#lzcorecohort]
@@ -891,7 +902,6 @@ I moved `#lzcoreclaims` to review. It cannot be integrated while commit authorit
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
 - [ ] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
 - [ ] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [ ] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
@@ -901,6 +911,7 @@ I moved `#lzcoreclaims` to review. It cannot be integrated while commit authorit
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
 - [/] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.
 - [/] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: create the canonical candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.

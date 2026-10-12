@@ -15,7 +15,9 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
+  '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
+queue: go
 ---
 
 ## Status
@@ -927,31 +929,65 @@ I moved `#lzcorecohort` to review. A real immutable manifest and cross-repositor
 Phase 7 was not executed. The required promotion conditions are not met: `#lzbetascope` and `#lzreleasepins` remain review-gated, Phases 1–6 are not integrated, no two-RC or four-week-freeze evidence exists, and the unresolved queue preset explicitly forbids publishing or announcing.
 
 I moved `#lzcorebeta1` to review with those blockers intact. No files changed, no tests beyond the clean-worktree audit were necessary, and no tag, release, publication, or announcement occurred.
+
+### Re: actionable review triage — gpt-5 · 2026-10-12T07:26-04:00
+
+> **Queue prompt:** #actionable-review: #push
+
+Moved the agent-executable review work back into the actionable backlog and queue in dependency order:
+
+1. `#lzcoreprofile`
+2. `#lzcoreclaims`
+3. `#lzcorefacades`
+4. `#lzcorecompat`
+5. `#lzcoreconsumers`
+6. `#lzreleasepins`
+7. `#lzcorecohort`
+
+I split the expired artifact-purge evidence work into a new actionable item, `#lzagentdocartifactrefresh`: regenerate the audit/handoff and both dry-run proofs, then return the destructive purge itself to its explicit operator gate. No artifact deletion is authorized or performed.
+
+I kept `#lzcorebeta1`, `#lzrustpublish`, `#lzgithubbudget20`, `#lzagentdocartifactpurge`, `#lzbetascope`, and `#lzambienttokenresolve` in review because their remaining blockers are operator decisions, external configuration/access, or destructive authorization rather than currently executable agent work.
+
+The `#push` authorization is recorded. No ordinary repository files changed and no remote push was needed for this document-only lifecycle update. The queue-wide `#spec-test-commit-push` preset is still undefined, so I did not infer commit authority or modify that preset.
+
+Verification: the delegated read-only audit independently classified all 13 review entries; `agent-doc review list` confirmed the source set. Changed paths before closeout: only this session document through the binary-owned response transaction. Confidence: high. Escalation: define the queue-wide commit preset or provide explicit commit authority before workers integrate the preserved Core implementations.
+
+Session accretion remains above the warning threshold; I continued the active queue without compaction.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
+- ~~#actionable-review: #push~~
+- do [#lzcoreprofile]
+- do [#lzcoreclaims]
+- do [#lzcorefacades]
+- do [#lzcorecompat]
+- do [#lzcoreconsumers]
+- do [#lzreleasepins]
+- do [#lzcorecohort]
+- do [#lzagentdocartifactrefresh]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: create the canonical candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates.
+- [ ] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.
+- [ ] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
+- [ ] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
+- [ ] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
+- [ ] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
+- [ ] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
+- [ ] [#lzagentdocartifactrefresh] Regenerate the expired btakita/agent-doc artifact-purge audit/handoff, rerun both full and durability-only dry-run options, refresh counterpart-durability evidence and counts, then re-gate the destructive purge on explicit operator authorization without deleting artifacts.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
-- [/] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
-- [/] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
-- [/] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
-- [/] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
-- [/] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.
-- [/] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: create the canonical candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
-- [/] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit with counterpart durability classification (commits 667eb4766, 434b32548) lives at src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-27/ and is confirmed the ONLY handoff on disk, so only one basis can be authorized. Run the plan from src/agent-doc with `python3 scripts/purge-actions-artifacts.py`; the destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000` and the 250 default cap otherwise aborts. TWO authorizable options, both re-proved by live dry run: (a) full plan — 2,666 artifacts (43.83 GB), 0 refused, 0 skipped; (b) `--durability durable` — 2,136 artifacts (34.83 GB), refusing exactly the 530 rows whose only counterpart is a PyPI file. Prefer (b): the prune floor is 0.35.113 and v0.35.119, the oldest PyPI-only-backed version, is only the THIRD live release above it, so option (a) additionally accepts that 9.01 GB rests on a thinner margin than version numbering suggests. 2,136 rows rest on GitHub release assets, which have not decayed. 571 artifacts are withheld at audit time and are never deletable. Hard deadline: the 7-day `--max-handoff-age-days` guard aborts the whole run after 2026-10-04T05:56:08Z unless the audit is regenerated or `--allow-stale-handoff` is passed; `make review-gate-status` imports that guard from the purge script and flips this gate to `evidence_stale` 24h BEFORE it expires rather than after. Blocked solely on explicit destructive authorization; no artifact has been deleted.

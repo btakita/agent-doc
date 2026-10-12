@@ -24,7 +24,7 @@ BATCHED_TEST_PACKAGES = {
     "agent-doc-session-check-io",
     "agent-doc-start-runtime-io",
 }
-DOC_SURFACES = ("SKILL.md", "AGENTS.md", "README.md", "SPEC.md", "runbooks/", "specs/")
+DOC_SURFACES = ("SKILL.md", "AGENTS.md", "README.md", "SPEC.md", "runbooks/", "specs/", "docs/reference/features.md")
 PROOFS = {
     "full-check": ("AGENT_DOC_FULL_CHECK_SUCCEEDED", ".agent-doc-full-check.json"),
     "tmux-ci": ("AGENT_DOC_TMUX_CI_SUCCEEDED", ".agent-doc-tmux-ci.json"),

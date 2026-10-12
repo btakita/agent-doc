@@ -22,8 +22,8 @@ The diff-based approach means you can also edit previous responses, add prompt-b
 - **Session continuity** — YAML frontmatter tracks session ID for multi-turn conversations
 - **Merge-safe writes** — 3-way merge if you edit during an agent response
 - **Git integration** — auto-commit for diff gutter visibility in your editor
-- **Agent-agnostic** — Claude backend included, custom backends configurable
-- **Editor integration** — JetBrains, VS Code, Vim/Neovim via hotkey
+- **Agent-agnostic** — Claude Code, Codex, Grok Build, and OpenCode harnesses; custom backends configurable
+- **Editor integration** — JetBrains (IntelliJ IDEA, Rider, and other IntelliJ-platform IDEs), VS Code, and Zed plugins; Vim/Neovim or any editor via hotkey
 
 ## Tech stack
 

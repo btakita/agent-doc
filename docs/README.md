@@ -5,8 +5,8 @@ material.
 
 ## Start Here
 
-- [README](../README.md) - project overview, install commands, quick start,
-  architecture summary, editor setup, and security model.
+- [README](../README.md) - short project overview: what agent-doc is,
+  supported editors and harnesses, install, first session, and security model.
 - [Introduction](introduction.md) - concise user-facing introduction.
 - [Quick Start](getting-started/quick-start.md) - shortest path from a markdown
   file to an agent-doc cycle.
@@ -24,13 +24,19 @@ material.
 - [Dashboard-as-Document](guide/dashboard.md) - dashboard workflow.
 - [Run Flow](guide/submit-flow.md) - normal edit, diff, response, write, and
   commit flow.
-- [Editor Integration](guide/editor-integration.md) - JetBrains, VS Code, and
-  other editor integration notes.
-- [Agent Backends](guide/agent-backends.md) - Claude, Codex, OpenCode, and
-  direct harness behavior.
+- [Editor Integration](guide/editor-integration.md) - JetBrains, VS Code, Zed,
+  and hotkey-only editor setup.
+- [Tmux Routing and Navigation Lanes](guide/tmux-routing.md) - the tmux-backed
+  CLI cycle, remote workspaces, several tmux sessions, and per-IDE lanes.
+- [Agent Backends](guide/agent-backends.md) - Claude, Codex, Grok Build,
+  OpenCode, and direct harness behavior.
 
 ## Reference
 
+- [Feature Catalog](reference/features.md) - the detailed capability ledger
+  that used to live in the README.
+- [Architecture](reference/architecture.md) - binary vs. skill
+  responsibilities, architecture diagram, and domain ontology.
 - [Specification](reference/specs.md) - includes the root functional
   specification.
 - [Flow Map](reference/flow-map.md) - FlowCore ownership map and typed event

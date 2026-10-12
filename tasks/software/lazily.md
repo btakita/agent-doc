@@ -884,6 +884,17 @@ I moved `#lzcoreclaims` to review. It cannot be integrated while commit authorit
 Phase 3's additive Core facades are implemented in `/home/brian/worktrees/agent-loop-lzcorefacades-20261012` for Rust, Python, JavaScript, Dart, Zig, and C++, with Kotlin, Go, and C# preserving their canonical package locations. Focused package-content and facade tests passed for all six changed bindings, including Zig 0.16 and the C++ CTest suite. TypeScript checking remains unrun because `tsc` dependencies are absent from the isolated JavaScript worktree.
 
 I moved `#lzcorefacades` to review pending explicit commit/integration authority and the remaining TypeScript validation. No commit or push was made.
+
+### Re: #lzcorecompat — gpt-5 · 2026-10-12T06:29:00-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcorecompat]
+
+
+Phase 4 cannot start truthfully until the Phase 1 allow-list and Phase 3 public entrypoints are integrated and stable. The audit found no current native Core API snapshot gate across the nine bindings, no structured earliest-removal metadata, and missing oldest-supported-Core endpoint tests for React and R3. It also identified the appropriate native checker matrix for each binding.
+
+I moved `#lzcorecompat` to review, blocked on integration of `#lzcoreprofile` and `#lzcorefacades` plus explicit commit authority. No snapshots were invented, no files changed, and no completion was claimed.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -893,7 +904,7 @@ I moved `#lzcorefacades` to review pending explicit commit/integration authority
 - ~~do [#lzcoreprofile]~~
 - ~~do [#lzcoreclaims]~~
 - ~~do [#lzcorefacades]~~
-- do [#lzcorecompat]
+- ~~do [#lzcorecompat]~~
 - do [#lzcoreconsumers]
 - do [#lzcorecohort]
 - do [#lzcorebeta1]
@@ -902,7 +913,6 @@ I moved `#lzcorefacades` to review pending explicit commit/integration authority
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
 - [ ] [#lzcoreconsumers] Implement Phase 5 of tasks/software/plan-lazily-core-beta.md after #lzcoreclaims and the relevant facade work: fan out clean artifact-consumer tests, supported-toolchain matrices, generated support policy, and corrected quickstarts/schema claims.
 - [ ] [#lzcorecohort] Implement Phase 6 of tasks/software/plan-lazily-core-beta.md after the profile, truth, compatibility, and consumer gates are green: build the immutable cohort/BOM verifier and reproducible pinned release workflows; require #lzreleasepins and #lzrustpublish where applicable.
 - [ ] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
@@ -911,6 +921,7 @@ I moved `#lzcorefacades` to review pending explicit commit/integration authority
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcorecompat] Implement Phase 4 of tasks/software/plan-lazily-core-beta.md after each binding's Core facade is stable: fan out Core API snapshots, native compatibility gates, negative self-tests, deprecation metadata, and oldest/latest module compatibility tests.
 - [/] [#lzcorefacades] Implement Phase 3 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: fan out additive idiomatic Core facades and package-content checks across candidate bindings while preserving root imports and dependency graphs.
 - [/] [#lzcoreclaims] Implement Phase 2 of tasks/software/plan-lazily-core-beta.md after #lzcoreprofile: make runtime skips and fixtureless claims machine-verifiable, correct overclaims, and close the pinned Core fixture set.
 - [/] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: create the canonical candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates.

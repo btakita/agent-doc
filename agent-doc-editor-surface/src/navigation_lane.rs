@@ -225,27 +225,104 @@ pub fn lane_label_for_session<'a>(project_session: &str, session: &'a str) -> &'
         .unwrap_or(session)
 }
 
+/// How a lane's layout publication treats a document whose pane lives in
+/// another lane (`#ideriderindependentnav` P4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum LaneClaim {
+    /// A passive publication (editor heartbeat, focus escalation, route,
+    /// resync, a republish): the pane stays in the lane that owns it and the
+    /// document is dropped from this lane (`cross_lane_layout_dropped`).
+    #[default]
+    Passive,
+    /// An explicit operator request from this lane (`Sync Tmux Layout`, the
+    /// layout sync that follows `Claim for Tmux Pane`): the pane is handed
+    /// over to this lane (`navigation_lane_handoff`).
+    Explicit,
+}
+
+impl LaneClaim {
+    /// The claim a layout invocation's `caller_kind` makes. Only `manual`, the
+    /// kind an operator's own sync or claim action publishes, is explicit;
+    /// every other kind (`automatic`, `editor_route`, `resync`, `projection`,
+    /// `lane_handoff`, ...) is passive, so no background publication can ever
+    /// move a pane between lanes.
+    pub fn for_caller_kind(caller_kind: &str) -> Self {
+        if caller_kind.trim() == "manual" {
+            Self::Explicit
+        } else {
+            Self::Passive
+        }
+    }
+
+    pub fn is_explicit(self) -> bool {
+        matches!(self, Self::Explicit)
+    }
+}
+
+/// The `caller_kind` of a lane republished after a handoff took one of its
+/// panes. It is passive ([`LaneClaim::for_caller_kind`]), so the republish can
+/// only drop the document, never take the pane back.
+pub const LANE_HANDOFF_CALLER_KIND: &str = "lane_handoff";
+
 /// One lane's layout columns with every document whose pane lives in another
-/// lane removed (`cross_lane_layout_dropped`).
+/// lane removed (`cross_lane_layout_dropped`), or, for an explicit claim,
+/// marked for handoff into this lane.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaneLayoutPartition {
     /// Columns (`file,file`) this lane may arrange; empty columns are removed.
     pub kept: Vec<String>,
     /// `(document, owner session)` for each document left in its own lane.
     pub dropped: Vec<(String, String)>,
+    /// `(document, owner session)` for each document whose pane an explicit
+    /// claim hands over to this lane (P4). These documents stay in `kept`.
+    pub handoffs: Vec<(String, String)>,
+}
+
+/// The lane among `lanes` whose session is `session`, for a project whose
+/// configured session is `project_session`. Used to republish the lane a
+/// handoff took a pane from.
+pub fn lane_owning_session<'a>(
+    lanes: impl IntoIterator<Item = &'a NavigationLane>,
+    project_session: &str,
+    session: &str,
+) -> Option<NavigationLane> {
+    lanes
+        .into_iter()
+        .find(|lane| lane.tmux_session_name(project_session) == session)
+        .cloned()
+}
+
+/// Partition `columns` for the lane backed by `lane_session` under a passive
+/// claim: [`partition_lane_layout_columns_for_claim`] with
+/// [`LaneClaim::Passive`].
+pub fn partition_lane_layout_columns(
+    columns: &[String],
+    project_session: &str,
+    lane_session: &str,
+    pane_session_of: impl FnMut(&str) -> Option<String>,
+) -> LaneLayoutPartition {
+    partition_lane_layout_columns_for_claim(
+        columns,
+        project_session,
+        lane_session,
+        LaneClaim::Passive,
+        pane_session_of,
+    )
 }
 
 /// Partition `columns` for the lane backed by `lane_session`.
 ///
 /// `pane_session_of(document)` reports the session of the document's live pane
 /// (`None` when it has none). A document whose pane lives in another lane of
-/// `project_session` is dropped; every other document is kept, so a document
-/// without a pane starts one in this lane and a foreign-session pane stays under
-/// the existing multi-session policy.
-pub fn partition_lane_layout_columns(
+/// `project_session` is dropped under a passive claim and kept plus listed in
+/// `handoffs` under an explicit one; every other document is kept, so a
+/// document without a pane starts one in this lane and a foreign-session pane
+/// stays under the existing multi-session policy (never handed over).
+pub fn partition_lane_layout_columns_for_claim(
     columns: &[String],
     project_session: &str,
     lane_session: &str,
+    claim: LaneClaim,
     mut pane_session_of: impl FnMut(&str) -> Option<String>,
 ) -> LaneLayoutPartition {
     let mut partition = LaneLayoutPartition::default();
@@ -258,6 +335,10 @@ pub fn partition_lane_layout_columns(
                 lane_session,
                 pane_session.as_deref(),
             ) {
+                LanePaneMembership::OtherLane { owner_session } if claim.is_explicit() => {
+                    partition.handoffs.push((file.to_string(), owner_session));
+                    kept.push(file);
+                }
                 LanePaneMembership::OtherLane { owner_session } => {
                     partition.dropped.push((file.to_string(), owner_session));
                 }
@@ -465,6 +546,81 @@ mod tests {
         );
     }
 
+    #[test]
+    fn only_a_manual_caller_makes_an_explicit_lane_claim() {
+        assert_eq!(LaneClaim::for_caller_kind("manual"), LaneClaim::Explicit);
+        assert_eq!(LaneClaim::for_caller_kind(" manual "), LaneClaim::Explicit);
+        for passive in [
+            "automatic",
+            "editor_route",
+            "resync",
+            "projection",
+            "",
+            LANE_HANDOFF_CALLER_KIND,
+        ] {
+            assert_eq!(
+                LaneClaim::for_caller_kind(passive),
+                LaneClaim::Passive,
+                "{passive:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_explicit_claim_hands_other_lanes_panes_over_and_keeps_them() {
+        let columns = vec![
+            "/r/a.md".to_string(),
+            "/r/b.md, /r/c.md".to_string(),
+            "/r/d.md".to_string(),
+            "/r/e.md".to_string(),
+        ];
+        let sessions = BTreeMap::from([
+            ("/r/a.md", "p-IU-0a"),
+            ("/r/b.md", "p"),
+            ("/r/d.md", "p-RD-9f"),
+            ("/r/e.md", "research"),
+        ]);
+        let partition = partition_lane_layout_columns_for_claim(
+            &columns,
+            "p",
+            "p-IU-0a",
+            LaneClaim::Explicit,
+            |file| sessions.get(file).map(|session| session.to_string()),
+        );
+        assert_eq!(
+            partition.kept,
+            vec!["/r/a.md", "/r/b.md,/r/c.md", "/r/d.md", "/r/e.md"]
+        );
+        assert!(partition.dropped.is_empty());
+        assert_eq!(
+            partition.handoffs,
+            vec![
+                ("/r/b.md".to_string(), "p".to_string()),
+                ("/r/d.md".to_string(), "p-RD-9f".to_string()),
+            ],
+            "only panes in another lane of this project are handed over; a foreign session's pane is not"
+        );
+        let passive = partition_lane_layout_columns(&columns, "p", "p-IU-0a", |file| {
+            sessions.get(file).map(|session| session.to_string())
+        });
+        assert!(passive.handoffs.is_empty());
+        assert_eq!(passive.dropped.len(), 2);
+    }
+
+    #[test]
+    fn the_lane_owning_a_session_is_found_among_known_lanes() {
+        let idea = NavigationLane::Installation("IU.0a".to_string());
+        let rider = NavigationLane::Installation("RD.9f".to_string());
+        let lanes = [NavigationLane::Shared, idea.clone(), rider.clone()];
+        assert_eq!(
+            lane_owning_session(&lanes, "p", "p"),
+            Some(NavigationLane::Shared)
+        );
+        assert_eq!(lane_owning_session(&lanes, "p", "p-RD-9f"), Some(rider));
+        assert_eq!(lane_owning_session(&lanes, "p", "p-XX-00"), None);
+        assert_eq!(lane_owning_session(&lanes[..1], "p", "p-IU-0a"), None);
+    }
+
     use std::collections::BTreeMap;
 
     proptest! {
@@ -493,6 +649,35 @@ mod tests {
                     .unwrap();
                 prop_assert!(placements[index] <= 1);
             }
+        }
+
+        #[test]
+        fn an_explicit_claim_never_loses_a_document_and_hands_over_only_other_lanes(
+            placements in proptest::collection::vec(0usize..5, 1..6),
+        ) {
+            let sessions = [None, Some("p-IU-0a"), Some("p"), Some("p-RD-9f"), Some("research")];
+            let columns = (0..placements.len())
+                .map(|index| format!("/r/{index}.md"))
+                .collect::<Vec<_>>();
+            let index_of = |file: &str| -> usize {
+                file.trim_start_matches("/r/").trim_end_matches(".md").parse().unwrap()
+            };
+            let partition = partition_lane_layout_columns_for_claim(
+                &columns,
+                "p",
+                "p-IU-0a",
+                LaneClaim::Explicit,
+                |file| sessions[placements[index_of(file)]].map(str::to_string),
+            );
+            prop_assert!(partition.dropped.is_empty());
+            prop_assert_eq!(partition.kept.len(), columns.len());
+            for (document, owner) in &partition.handoffs {
+                let placement = placements[index_of(document)];
+                prop_assert!(placement == 2 || placement == 3);
+                prop_assert_eq!(Some(owner.as_str()), sessions[placement]);
+            }
+            let other_lane = placements.iter().filter(|p| **p == 2 || **p == 3).count();
+            prop_assert_eq!(partition.handoffs.len(), other_lane);
         }
 
         #[test]

@@ -28220,20 +28220,7 @@ fn ensure_navigation_lane_session(
 ) -> std::result::Result<bool, String> {
     let root = project_root.to_string_lossy().to_string();
     if tmux.session_alive(lane_session) {
-        let mark = tmux
-            .cmd()
-            .args([
-                "show-options",
-                "-qv",
-                "-t",
-                &format!("{lane_session}:"),
-                NAVIGATION_LANE_SESSION_OPTION,
-            ])
-            .output()
-            .ok()
-            .filter(|output| output.status.success())
-            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
-        return if mark.as_deref() == Some(root.as_str()) {
+        return if navigation_lane_session_marked(tmux, project_root, lane_session) {
             Ok(false)
         } else {
             Err(format!("navigation_lane_session_not_owned:{lane_session}"))
@@ -28287,36 +28274,71 @@ fn ensure_navigation_lane_session(
     Ok(true)
 }
 
+/// One pane an explicit claim hands over to the requesting navigation lane
+/// (`#ideriderindependentnav` P4).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NavigationLaneHandoff {
+    /// The layout document whose pane moves.
+    pub document: String,
+    /// The document's pane (its actor binding).
+    pub pane: String,
+    /// The lane session the pane lived in when the claim was routed.
+    pub from_session: String,
+}
+
+/// One lane's desired layout after its lane route was applied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LaneRoutedLayout {
+    desired: PaneLayoutDesired,
+    /// `(document, owner session)` left in the lane that owns its pane.
+    dropped: Vec<(String, String)>,
+    /// Panes an explicit claim hands over to this lane before it projects.
+    handoffs: Vec<NavigationLaneHandoff>,
+}
+
 /// Apply one lane's route to the desired layout it is about to project.
 ///
-/// Every document whose live pane belongs to another lane of this project is
-/// dropped from this lane's columns (`cross_lane_layout_dropped`), so the
-/// structural effect can never `join-pane` it across sessions; a focus target
-/// among them is dropped too. An installation lane targets its own session's
-/// `agent-doc` window explicitly. Returns the routed layout and the dropped
-/// `(document, owner session)` pairs. Without lane sessions this is identity.
+/// A passive publication (every `caller_kind` but `manual`) drops each document
+/// whose live pane belongs to another lane of this project from this lane's
+/// columns (`cross_lane_layout_dropped`), so the structural effect can never
+/// `join-pane` it across sessions; a focus target among them is dropped too.
+/// An explicit claim (`manual`: `Sync Tmux Layout`, the sync that follows
+/// `Claim for Tmux Pane`) keeps those documents and lists their panes as
+/// handoffs for the worker to move into this lane first (P4). An installation
+/// lane targets its own session's `agent-doc` window explicitly. Without lane
+/// sessions (shared navigation mode) this is identity.
 fn route_pane_layout_desired_to_lane(
     project_root: &Path,
     route: &PaneLayoutLaneRoute,
     mut desired: PaneLayoutDesired,
     actor_bindings: &[ControllerTmuxActorBinding],
     mut pane_session: impl FnMut(&str) -> Option<String>,
-) -> (PaneLayoutDesired, Vec<(String, String)>) {
+) -> LaneRoutedLayout {
     let Some((project_session, lane_session)) = route.sessions.as_ref() else {
-        return (desired, Vec::new());
+        return LaneRoutedLayout {
+            desired,
+            dropped: Vec::new(),
+            handoffs: Vec::new(),
+        };
     };
-    let partition = agent_doc_editor_surface::partition_lane_layout_columns(
+    let claim =
+        agent_doc_editor_surface::LaneClaim::for_caller_kind(&desired.invocation.caller_kind);
+    let mut panes = BTreeMap::<String, String>::new();
+    let partition = agent_doc_editor_surface::partition_lane_layout_columns_for_claim(
         &desired.invocation.columns,
         project_session,
         lane_session,
+        claim,
         |file| {
             let document = canonical_layout_document_id(project_root, file);
-            actor_bindings
+            let pane = actor_bindings
                 .iter()
                 .find(|binding| {
                     canonical_layout_document_id(project_root, &binding.document_path) == document
                 })
-                .and_then(|binding| pane_session(&binding.pane_id))
+                .map(|binding| binding.pane_id.clone())?;
+            panes.insert(file.to_string(), pane.clone());
+            pane_session(&pane)
         },
     );
     if let Some(focus) = desired.invocation.focus.as_deref() {
@@ -28333,7 +28355,244 @@ fn route_pane_layout_desired_to_lane(
     if let Some(window) = route.window.as_ref() {
         desired.invocation.window = Some(window.clone());
     }
-    (desired, partition.dropped)
+    let handoffs = partition
+        .handoffs
+        .into_iter()
+        .filter_map(|(document, from_session)| {
+            let pane = panes.get(&document)?.clone();
+            Some(NavigationLaneHandoff {
+                document,
+                pane,
+                from_session,
+            })
+        })
+        .collect();
+    LaneRoutedLayout {
+        desired,
+        dropped: partition.dropped,
+        handoffs,
+    }
+}
+
+/// Remove `document` (and a focus on it) from a lane's routed invocation after
+/// its handoff was refused, so the structural effect never joins the pane
+/// across sessions.
+fn drop_document_from_lane_invocation(
+    project_root: &Path,
+    invocation: &mut ControllerTmuxLayoutSyncInvocation,
+    document: &str,
+) {
+    let document_id = canonical_layout_document_id(project_root, document);
+    let is_document = |file: &str| canonical_layout_document_id(project_root, file) == document_id;
+    invocation.columns = invocation
+        .columns
+        .iter()
+        .filter_map(|column| {
+            let kept = column
+                .split(',')
+                .map(str::trim)
+                .filter(|file| !file.is_empty() && !is_document(file))
+                .collect::<Vec<_>>();
+            (!kept.is_empty()).then(|| kept.join(","))
+        })
+        .collect();
+    if invocation.focus.as_deref().is_some_and(is_document) {
+        invocation.focus = None;
+    }
+}
+
+/// What one explicit handoff did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NavigationLaneHandoffOutcome {
+    /// The pane moved into the requesting lane session's `stash` window, from
+    /// where the lane's structural sync places it. `placeholder` is the empty
+    /// shell pane left behind when the pane was the last one in its lane's
+    /// `agent-doc` window, so that window survives for the old lane.
+    Moved { placeholder: Option<String> },
+    /// The pane already lives in the requesting lane (an earlier attempt of
+    /// the same claim moved it).
+    AlreadyInLane,
+}
+
+/// Whether agent-doc created `session` as a navigation lane of `project_root`
+/// (it carries [`NAVIGATION_LANE_SESSION_OPTION`] with this root).
+fn navigation_lane_session_marked(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    session: &str,
+) -> bool {
+    let root = project_root.to_string_lossy();
+    tmux.cmd()
+        .args([
+            "show-options",
+            "-qv",
+            "-t",
+            &format!("{session}:"),
+            NAVIGATION_LANE_SESSION_OPTION,
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| String::from_utf8_lossy(&output.stdout).trim() == root)
+}
+
+/// Move one pane between two lane sessions of this project for an explicit
+/// claim (`#ideriderindependentnav` P4).
+///
+/// Both sessions must be lanes agent-doc owns: the project's configured
+/// session, or an installation lane session marked for this root. A session
+/// that merely carries a lane's name is refused, never touched
+/// (`#bare-foreign-session-guard`). The pane must still live in the session
+/// the claim was routed against; if it already lives in `lane_session` this is
+/// a no-op. When the pane is the last one in its lane's `agent-doc` window, an
+/// empty shell pane is left in its place so the old lane keeps its window (its
+/// next sync stashes that shell inside its own session). The pane lands in the
+/// lane session's `stash` window and its id is unchanged, so its actor binding
+/// stays valid; ownership is where the pane lives, so no other record moves.
+pub fn hand_over_navigation_lane_pane(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    project_session: &str,
+    lane_session: &str,
+    handoff: &NavigationLaneHandoff,
+) -> std::result::Result<NavigationLaneHandoffOutcome, String> {
+    let owned = |session: &str| {
+        session == project_session
+            || (agent_doc_editor_surface::is_lane_session_of(project_session, session)
+                && navigation_lane_session_marked(tmux, project_root, session))
+    };
+    if !owned(lane_session) {
+        return Err(format!(
+            "navigation_lane_handoff_target_not_owned:{lane_session}"
+        ));
+    }
+    if !owned(&handoff.from_session) {
+        return Err(format!(
+            "navigation_lane_handoff_source_not_owned:{}",
+            handoff.from_session
+        ));
+    }
+    tmux_router::invalidate_pane_snapshot();
+    let current = tmux
+        .pane_session(&handoff.pane)
+        .map_err(|_| format!("navigation_lane_handoff_pane_missing:{}", handoff.pane))?;
+    if current == lane_session {
+        return Ok(NavigationLaneHandoffOutcome::AlreadyInLane);
+    }
+    if current != handoff.from_session {
+        return Err(format!(
+            "navigation_lane_handoff_pane_moved:{}:{current}",
+            handoff.pane
+        ));
+    }
+    let window = tmux
+        .raw_cmd(&[
+            "display-message",
+            "-p",
+            "-t",
+            &handoff.pane,
+            "#{window_panes} #{window_name}",
+        ])
+        .map_err(|error| format!("navigation_lane_handoff_window_unreadable:{error:#}"))?;
+    let (pane_count, window_name) = window.trim().split_once(' ').unwrap_or((window.trim(), ""));
+    let placeholder = if pane_count == "1" && window_name == "agent-doc" {
+        let root = project_root.to_string_lossy().to_string();
+        let placeholder = tmux
+            .raw_cmd(&[
+                "split-window",
+                "-d",
+                "-t",
+                &handoff.pane,
+                "-c",
+                &root,
+                "-P",
+                "-F",
+                "#{pane_id}",
+            ])
+            .map_err(|error| format!("navigation_lane_handoff_placeholder_failed:{error:#}"))?;
+        Some(placeholder.trim().to_string())
+    } else {
+        None
+    };
+    let moved = tmux.stash_pane(&handoff.pane, lane_session);
+    tmux_router::invalidate_pane_snapshot();
+    match tmux.pane_session(&handoff.pane) {
+        Ok(session) if session == lane_session => {
+            Ok(NavigationLaneHandoffOutcome::Moved { placeholder })
+        }
+        Ok(session) => Err(format!(
+            "navigation_lane_handoff_move_failed:{}:{session}:{}",
+            handoff.pane,
+            moved
+                .err()
+                .map(|error| format!("{error:#}"))
+                .unwrap_or_default()
+        )),
+        Err(_) => Err(format!(
+            "navigation_lane_handoff_pane_missing:{}",
+            handoff.pane
+        )),
+    }
+}
+
+/// Republish the lane an explicit handoff took a pane from, so it re-projects
+/// without that document (`#ideriderindependentnav` P4).
+///
+/// The republish is the lane's retained invocation as a fresh generation with
+/// the passive [`agent_doc_editor_surface::LANE_HANDOFF_CALLER_KIND`] and no
+/// autostart, so it can only drop the document (`cross_lane_layout_dropped`),
+/// never take the pane back or start a new one. A lane this runtime holds no
+/// retained layout for has nothing on screen to correct.
+fn republish_navigation_lane_after_handoff(
+    runtime: &ControllerRuntime,
+    project_root: &Path,
+    requester: &agent_doc_editor_surface::NavigationLane,
+    project_session: &str,
+    from_session: &str,
+    generation: u64,
+) {
+    let lanes = runtime.pane_layout_lane_ids();
+    let Some(owner) =
+        agent_doc_editor_surface::lane_owning_session(&lanes, project_session, from_session)
+    else {
+        return;
+    };
+    if &owner == requester {
+        return;
+    }
+    let Some(retained) = runtime.pane_layout_graph_for_lane(&owner).desired() else {
+        return;
+    };
+    let mut invocation = retained.invocation;
+    invocation.caller_kind = agent_doc_editor_surface::LANE_HANDOFF_CALLER_KIND.to_string();
+    invocation.no_autostart = true;
+    let result = runtime.bootstrap_snapshot().and_then(|bootstrap| {
+        publish_pane_layout_desired_invocation_in_lane(
+            &bootstrap,
+            runtime,
+            &owner,
+            invocation,
+            retained.source_plane_version,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::LaneHandoff,
+        )
+    });
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &match result {
+            Ok((republished, _)) => format!(
+                "navigation_lane_handoff_republished owner_lane={} navigation_lane={} handoff_generation={generation} generation={}",
+                owner.label(),
+                requester.label(),
+                republished.generation,
+            ),
+            Err(error) => format!(
+                "navigation_lane_handoff_republish_failed owner_lane={} navigation_lane={} handoff_generation={generation} error={error:#}",
+                owner.label(),
+                requester.label(),
+            ),
+        },
+    );
 }
 
 /// [`pane_layout_target_window_id`] for one navigation lane: an installation
@@ -28637,13 +28896,92 @@ fn pane_layout_effect_worker(
                 }
             }
         };
-        let (desired, cross_lane_dropped) = route_pane_layout_desired_to_lane(
+        let LaneRoutedLayout {
+            mut desired,
+            dropped: mut cross_lane_dropped,
+            handoffs,
+        } = route_pane_layout_desired_to_lane(
             &bootstrap.project_root,
             &lane_route,
             desired,
             &actor_bindings,
             |pane| lane_tmux.pane_session(pane).ok(),
         );
+        // `#ideriderindependentnav` P4: an explicit claim from this lane hands
+        // each contended pane over before the structural sync places it. A
+        // refused handoff leaves the pane where it is and drops the document,
+        // exactly as a passive publication would.
+        if let (false, Some((project_session, lane_session))) =
+            (handoffs.is_empty(), lane_route.sessions.as_ref())
+        {
+            let mut moved_from = BTreeSet::new();
+            for handoff in &handoffs {
+                let from_lane = agent_doc_editor_surface::lane_label_for_session(
+                    project_session,
+                    &handoff.from_session,
+                );
+                match hand_over_navigation_lane_pane(
+                    &lane_tmux,
+                    &bootstrap.project_root,
+                    project_session,
+                    lane_session,
+                    handoff,
+                ) {
+                    Ok(outcome) => {
+                        let placeholder = match &outcome {
+                            NavigationLaneHandoffOutcome::Moved {
+                                placeholder: Some(placeholder),
+                            } => placeholder.as_str(),
+                            NavigationLaneHandoffOutcome::Moved { placeholder: None } => "none",
+                            NavigationLaneHandoffOutcome::AlreadyInLane => "already_in_lane",
+                        };
+                        if matches!(outcome, NavigationLaneHandoffOutcome::Moved { .. }) {
+                            moved_from.insert(handoff.from_session.clone());
+                        }
+                        agent_doc_ops_log_io::log_op(
+                            &bootstrap.project_root,
+                            &format!(
+                                "navigation_lane_handoff document={} pane={} from_lane={from_lane} from_session={} navigation_lane={} to_session={lane_session} placeholder={placeholder} generation={}",
+                                handoff.document,
+                                handoff.pane,
+                                handoff.from_session,
+                                lane.label(),
+                                desired.generation,
+                            ),
+                        );
+                    }
+                    Err(reason) => {
+                        drop_document_from_lane_invocation(
+                            &bootstrap.project_root,
+                            &mut desired.invocation,
+                            &handoff.document,
+                        );
+                        agent_doc_ops_log_io::log_op(
+                            &bootstrap.project_root,
+                            &format!(
+                                "navigation_lane_handoff_refused document={} pane={} from_lane={from_lane} navigation_lane={} reason={reason} generation={}",
+                                handoff.document,
+                                handoff.pane,
+                                lane.label(),
+                                desired.generation,
+                            ),
+                        );
+                        cross_lane_dropped
+                            .push((handoff.document.clone(), handoff.from_session.clone()));
+                    }
+                }
+            }
+            for from_session in &moved_from {
+                republish_navigation_lane_after_handoff(
+                    &runtime,
+                    &bootstrap.project_root,
+                    &lane,
+                    project_session,
+                    from_session,
+                    desired.generation,
+                );
+            }
+        }
         for (document, owner_session) in &cross_lane_dropped {
             let project_session = lane_route
                 .sessions
@@ -37462,7 +37800,11 @@ mod tests {
         let pane_session = |pane: &str| sessions.get(pane).map(|session| session.to_string());
 
         // Shared mode: identity, no tmux reads.
-        let (unchanged, dropped) = route_pane_layout_desired_to_lane(
+        let LaneRoutedLayout {
+            desired: unchanged,
+            dropped,
+            handoffs,
+        } = route_pane_layout_desired_to_lane(
             root,
             &PaneLayoutLaneRoute::default(),
             desired.clone(),
@@ -37471,18 +37813,27 @@ mod tests {
         );
         assert_eq!(unchanged, desired);
         assert!(dropped.is_empty());
+        assert!(handoffs.is_empty());
 
         let idea_route = PaneLayoutLaneRoute {
             sessions: Some(("proj".to_string(), "proj-IU-0a1b2c3d".to_string())),
             window: Some("@41".to_string()),
             provisioned: false,
         };
-        let (routed, dropped) = route_pane_layout_desired_to_lane(
+        let LaneRoutedLayout {
+            desired: routed,
+            dropped,
+            handoffs,
+        } = route_pane_layout_desired_to_lane(
             root,
             &idea_route,
             desired.clone(),
             &bindings,
             pane_session,
+        );
+        assert!(
+            handoffs.is_empty(),
+            "a passive publication never hands over"
         );
         assert_eq!(
             routed.invocation.columns,
@@ -37513,10 +37864,17 @@ mod tests {
             sessions: Some(("proj".to_string(), "proj".to_string())),
             ..PaneLayoutLaneRoute::default()
         };
-        let (routed, dropped) =
-            route_pane_layout_desired_to_lane(root, &shared_route, desired, &bindings, |pane| {
-                sessions.get(pane).map(|session| session.to_string())
-            });
+        let LaneRoutedLayout {
+            desired: routed,
+            dropped,
+            ..
+        } = route_pane_layout_desired_to_lane(
+            root,
+            &shared_route,
+            desired.clone(),
+            &bindings,
+            |pane| sessions.get(pane).map(|session| session.to_string()),
+        );
         assert_eq!(
             routed.invocation.columns,
             vec!["/project/tasks/shared.md,/project/tasks/new.md"]
@@ -37527,6 +37885,62 @@ mod tests {
         );
         assert_eq!(dropped.len(), 2);
         assert_eq!(shared_route.observation_session(), None);
+
+        // `#ideriderindependentnav` P4: an explicit claim (`manual`) from
+        // IDEA's lane keeps every contended document and hands its pane over
+        // instead of dropping it; the focus stays.
+        let mut manual = desired.clone();
+        manual.invocation.caller_kind = "manual".to_string();
+        let LaneRoutedLayout {
+            desired: routed,
+            dropped,
+            handoffs,
+        } = route_pane_layout_desired_to_lane(root, &idea_route, manual, &bindings, |pane| {
+            sessions.get(pane).map(|session| session.to_string())
+        });
+        assert!(dropped.is_empty());
+        assert_eq!(routed.invocation.columns, desired.invocation.columns);
+        assert_eq!(
+            routed.invocation.focus.as_deref(),
+            Some("/project/tasks/rider.md")
+        );
+        assert_eq!(routed.invocation.window.as_deref(), Some("@41"));
+        assert_eq!(
+            handoffs,
+            vec![
+                NavigationLaneHandoff {
+                    document: "/project/tasks/shared.md".to_string(),
+                    pane: "%2".to_string(),
+                    from_session: "proj".to_string(),
+                },
+                NavigationLaneHandoff {
+                    document: "/project/tasks/rider.md".to_string(),
+                    pane: "%3".to_string(),
+                    from_session: "proj-RD-9f8e7d6c".to_string(),
+                },
+            ]
+        );
+        // A refused handoff drops the document (and a focus on it) again.
+        let mut refused = routed.invocation.clone();
+        drop_document_from_lane_invocation(root, &mut refused, "/project/tasks/rider.md");
+        drop_document_from_lane_invocation(root, &mut refused, "/project/tasks/shared.md");
+        assert_eq!(
+            refused.columns,
+            vec!["/project/tasks/idea.md", "/project/tasks/new.md"]
+        );
+        assert_eq!(refused.focus, None);
+
+        // The lane's own republish after a handoff is passive: it never hands
+        // a pane back.
+        let mut republish = desired;
+        republish.invocation.caller_kind =
+            agent_doc_editor_surface::LANE_HANDOFF_CALLER_KIND.to_string();
+        let routed =
+            route_pane_layout_desired_to_lane(root, &idea_route, republish, &bindings, |pane| {
+                sessions.get(pane).map(|session| session.to_string())
+            });
+        assert!(routed.handoffs.is_empty());
+        assert_eq!(routed.dropped.len(), 2);
     }
 
     /// `#ideriderindependentnav` P2b: shared navigation mode never resolves a
@@ -37748,6 +38162,119 @@ mod tests {
         );
     }
 
+    /// `#ideriderindependentnav` P4: after an explicit claim moved one of its
+    /// panes, the lane the pane came from is republished as a fresh, passive,
+    /// non-autostarting generation of its retained layout (so it re-projects
+    /// without the document and can never take the pane back). The requesting
+    /// lane and a session no known lane owns are never republished.
+    #[test]
+    fn a_handoff_republishes_the_lane_it_took_a_pane_from_passively() {
+        use agent_doc_editor_surface::{LaneClaim, NavigationLane};
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "editor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let doc = |name: &str| {
+            let path = dir.path().join(format!("{name}.md"));
+            std::fs::write(
+                &path,
+                format!("---\nagent_doc_session: {name}\nagent: codex\n---\n# {name}\n"),
+            )
+            .unwrap();
+            path.canonicalize().unwrap().display().to_string()
+        };
+        let (rider_doc, contended_doc) = (doc("rider"), doc("contended"));
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        let idea = NavigationLane::Installation("IU.0a1b2c3d".to_string());
+        let rider = NavigationLane::Installation("RD.9f8e7d6c".to_string());
+        let mut invocation = super::super::tests::pane_layout_desired_for_test(1).invocation;
+        invocation.columns = vec![rider_doc.clone(), contended_doc.clone()];
+        invocation.focus = Some(rider_doc.clone());
+        invocation.caller_kind = "manual".to_string();
+        invocation.no_autostart = false;
+        let (published, _) = publish_pane_layout_desired_invocation_in_lane(
+            &bootstrap,
+            &runtime,
+            &rider,
+            invocation,
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        let rider_desired = || {
+            runtime
+                .pane_layout_graph_for_lane(&rider)
+                .desired()
+                .unwrap()
+        };
+
+        // Not a known lane's session, and the requester's own lane: no-ops.
+        republish_navigation_lane_after_handoff(
+            &runtime,
+            dir.path(),
+            &idea,
+            "proj",
+            "proj-XX-00000000",
+            9,
+        );
+        republish_navigation_lane_after_handoff(
+            &runtime,
+            dir.path(),
+            &rider,
+            "proj",
+            "proj-RD-9f8e7d6c",
+            9,
+        );
+        assert_eq!(rider_desired().generation, published.generation);
+
+        republish_navigation_lane_after_handoff(
+            &runtime,
+            dir.path(),
+            &idea,
+            "proj",
+            "proj-RD-9f8e7d6c",
+            9,
+        );
+        let republished = rider_desired();
+        assert!(republished.generation > published.generation);
+        assert_eq!(
+            republished.invocation.columns,
+            vec![rider_doc, contended_doc],
+            "the lane keeps its retained layout; its route drops the moved document"
+        );
+        assert_eq!(
+            republished.invocation.caller_kind,
+            agent_doc_editor_surface::LANE_HANDOFF_CALLER_KIND
+        );
+        assert_eq!(
+            LaneClaim::for_caller_kind(&republished.invocation.caller_kind),
+            LaneClaim::Passive
+        );
+        assert!(republished.invocation.no_autostart);
+        assert_eq!(
+            republished.provenance.publisher,
+            PaneLayoutPublisher::LaneHandoff
+        );
+        assert!(
+            runtime
+                .pane_layout_graph_for_lane(&idea)
+                .desired()
+                .is_none(),
+            "the requesting lane is never republished"
+        );
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("navigation_lane_handoff_republished owner_lane=RD.9f8e7d6c navigation_lane=IU.0a1b2c3d handoff_generation=9"),
+            "{ops}"
+        );
+    }
+
     /// `#ideriderindependentnav` P3: the IDE terminal's lane session for a
     /// client. `shared` mode, an unscoped client, and a missing pin keep the
     /// shared attach target (`None`) and never touch tmux.
@@ -37828,6 +38355,122 @@ mod tests {
             format!("{foreign:#}").contains("navigation_lane_session_not_owned:proj-RD-9f8e7d6c"),
             "{foreign:#}"
         );
+    }
+
+    /// `#ideriderindependentnav` P4: an explicit handoff moves a pane between
+    /// lane sessions agent-doc owns, into the requesting lane's `stash`
+    /// window, leaving an empty shell in place when it was the last pane of
+    /// the old lane's `agent-doc` window. It is idempotent, refuses a pane that
+    /// moved since the claim was routed, and never touches a session that only
+    /// carries a lane's name (`#bare-foreign-session-guard`). Isolated tmux
+    /// server only.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn navigation_lane_session_handoff_moves_panes_only_between_owned_lanes() {
+        use agent_doc_editor_surface::{NavigationLane, NavigationMode};
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("navlane-handoff");
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            root.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"proj\"\neditor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let shared_pane = tmux.new_session("proj", root.path()).unwrap();
+        let route = |installation: &str| {
+            pane_layout_lane_route(
+                root.path(),
+                NavigationMode::PerInstallation,
+                &NavigationLane::Installation(installation.to_string()),
+                &tmux,
+            )
+            .unwrap()
+        };
+        let idea = route("IU.0a1b2c3d");
+        let rider = route("RD.9f8e7d6c");
+        let (idea_session, rider_session) = (
+            idea.sessions.clone().unwrap().1,
+            rider.sessions.clone().unwrap().1,
+        );
+        let rider_window = rider.window.clone().unwrap();
+        let window_name = |pane: &str| {
+            tmux.raw_cmd(&["display-message", "-p", "-t", pane, "#{window_name}"])
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        let hand_over = |pane: &str, from: &str, to: &str| {
+            hand_over_navigation_lane_pane(
+                &tmux,
+                root.path(),
+                "proj",
+                to,
+                &NavigationLaneHandoff {
+                    document: "/doc.md".to_string(),
+                    pane: pane.to_string(),
+                    from_session: from.to_string(),
+                },
+            )
+        };
+
+        // The only pane of Rider's agent-doc window moves to IDEA's stash and
+        // leaves an empty shell, so Rider's lane keeps its window.
+        let rider_pane = tmux.list_window_panes(&rider_window).unwrap()[0].clone();
+        let outcome = hand_over(&rider_pane, &rider_session, &idea_session).unwrap();
+        let NavigationLaneHandoffOutcome::Moved {
+            placeholder: Some(placeholder),
+        } = outcome
+        else {
+            panic!("expected a placeholder: {outcome:?}");
+        };
+        assert_eq!(tmux.pane_session(&rider_pane).unwrap(), idea_session);
+        assert_eq!(window_name(&rider_pane), "stash");
+        assert_eq!(
+            tmux.list_window_panes(&rider_window).unwrap(),
+            vec![placeholder.clone()],
+            "Rider's agent-doc window survives with an empty shell"
+        );
+        assert_eq!(tmux.pane_session(&placeholder).unwrap(), rider_session);
+        // A retried claim is a no-op.
+        assert_eq!(
+            hand_over(&rider_pane, &rider_session, &idea_session),
+            Ok(NavigationLaneHandoffOutcome::AlreadyInLane)
+        );
+        // A pane that left the claimed session since the claim was routed.
+        assert_eq!(
+            hand_over(&rider_pane, &rider_session, "proj"),
+            Err(format!(
+                "navigation_lane_handoff_pane_moved:{rider_pane}:{idea_session}"
+            ))
+        );
+
+        // The shared session is a lane too: a pane that is not alone in its
+        // window moves without a placeholder.
+        let shared_doc_pane = tmux.split_window(&shared_pane, root.path(), "-d").unwrap();
+        assert_eq!(
+            hand_over(&shared_doc_pane, "proj", &rider_session),
+            Ok(NavigationLaneHandoffOutcome::Moved { placeholder: None })
+        );
+        assert_eq!(tmux.pane_session(&shared_doc_pane).unwrap(), rider_session);
+        assert!(tmux.pane_alive(&shared_pane));
+
+        // A session that only carries a lane's name was not created by
+        // agent-doc: never a source, never a target, and never reshaped.
+        let foreign_pane = tmux.new_session("proj-ZZ-00000000", root.path()).unwrap();
+        assert_eq!(
+            hand_over(&foreign_pane, "proj-ZZ-00000000", &idea_session),
+            Err("navigation_lane_handoff_source_not_owned:proj-ZZ-00000000".to_string())
+        );
+        assert_eq!(
+            hand_over(&shared_pane, "proj", "proj-ZZ-00000000"),
+            Err("navigation_lane_handoff_target_not_owned:proj-ZZ-00000000".to_string())
+        );
+        assert_eq!(
+            tmux.pane_session(&foreign_pane).unwrap(),
+            "proj-ZZ-00000000"
+        );
+        assert_eq!(tmux.list_window_names("proj-ZZ-00000000").len(), 1);
+        assert_eq!(tmux.pane_session(&shared_pane).unwrap(), "proj");
     }
 
     /// `#ideriderindependentnav` P2b: an installation lane's session is created

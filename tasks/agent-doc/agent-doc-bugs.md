@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -250,6 +249,44 @@ Not fully yet.
 **Deferred:** `origin/main` and tag `v0.35.497` are pushed at `8010520d4cdd0632f3e9c0db47e64659864e6564`, and `make release` completed its tag/publish handoff and local install. However, the [GitHub Release workflow](https://github.com/btakita/agent-doc/actions/runs/38354378905) is still in progress, `gh release view v0.35.497` currently reports `release not found`, and no v0.35.497 PyPI workflow is visible yet. Book and Pages have succeeded; main CI is still in progress.
 
 I did not dispatch duplicate workers for the replayed steering: issue #247 is already fixed and closed, and the release command already ran exactly once.
+Blocked by hook error in sdk.md:
+```
+• Blocked by hook
+  └ agent-doc Stop hook retained the exact closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
+under its durable keyed retry. The latest assistant text was captured into the pending/capture ledger before auto-
+close. The hook could not finish the required commit boundary: closeout operation is already in progress for cycle
+cycle-1791902466852 by captured-finalize-resume-1069718-1791902470491047078-t1 pid=1069718
+role=captured_finalize_resume until=1791902771 [closeout_owner_retry_at=1791902771]. The retained capture or projection
+is already durable and this exact retained intent commits itself once delivery converges — this is a deferral, not a
+lost response. Wait for its controller-owned terminal state edge; do not use the document's current-cycle status as
+proof because queue continuation can advance to a different cycle. Do NOT re-send the response, force disk, or `admin
+recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own either: `admin
+reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor holding the document
+is not serving its replica, and then its remedy governs. The controller owns delivery, the editor-native save receipt,
+and the terminal commit. Do not reopen or recapture the cycle, rerun finalize/write/repair, force disk, recycle the
+supervisor, or resend the response. Wait for the existing controller state edge unless it explicitly reports
+`needs_operator`; do not send the final answer yet.
+```
+
+### Re: Idle CPU thrash — gpt-5 · 2026-10-13T10:43-04:00
+
+> **Queue prompt:** agent-doc was thrashing the CPU while idle for several hours.
+
+Fixed, verified, installed, and pushed to `main`.
+
+The active regression was in JetBrains `TmuxPaneFocusSync`: it polled controller focus state every 500 ms whenever Markdown was open, including background and inactive project states. One idle IDE generated roughly 8–11 fresh controller RPC connections per second and sustained 31–38% controller CPU. Polling now requires all three demand signals: an open Markdown document, an active project surface, and a selected active embedded agent-doc terminal. Inactive states park the poller and clear its prior observation so activation resumes immediately and correctly.
+
+The change adds a pure demand predicate, terminal-host focus evidence, four-case Kotlin regression coverage, and the architecture contract in `specs/07-session-tmux-commands.md`. It landed as `f540206695`, with package-generation commit `b788d3471e`; `origin/main` now points to `b788d3471e530cb111853b22489321dabfffc361`.
+
+Verification completed successfully: focused Kotlin tests, full JetBrains tests/build, classic/262/263 package checks, the authoritative `make check`, and the coordinator-owned `make install`. Installed packages are IntelliJ IDEA `0.2.572` and Rider 262 `0.2.574`; the installed CLI remains `0.35.497`. The latest pre-push main CI run was green.
+
+An obsolete deleted-image `.460` supervisor observed during diagnosis can retain its older polling behavior until that old process exits, but current source and the newly installed editor packages contain the fix.
+
+### Re: `sdk.md` retained closeout — gpt-5 · 2026-10-13T10:43-04:00
+
+The retained closeout completed through its existing controller-owned retry. A read-only `session-check` exited 0 and reported cycle `cycle-1791902466852` as `committed (commit_success)`, with `queue_continuation_required=false`, `ui_outcome=no_drainable_work`, and `next_action=no_agent_action`. No response was resent and no repair, force-write, recycle, or reload was attempted. No operator action is needed.
+
+The exchange is large (over the session-accretion warning threshold); because the queue is active and auto-compaction is not enabled, this cycle continued without compacting.
 <!-- agent:boundary:673547bf -->
 <!-- /agent:exchange -->
 
@@ -258,9 +295,6 @@ I did not dispatch duplicate workers for the replayed steering: issue #247 is al
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/246~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/247
-- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

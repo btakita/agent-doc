@@ -293,16 +293,34 @@ pub fn controller_project_roots(exclude_pid: u32) -> BTreeSet<PathBuf> {
         .collect()
 }
 
-/// Documents served by a live supervisor other than `exclude_pid`; fork images
-/// are excluded for the same reason as [`controller_project_roots`].
-pub fn open_supervisor_documents(exclude_pid: u32) -> BTreeSet<PathBuf> {
+/// Live supervisors other than `exclude_pid`, paired with the document path
+/// observed in each process namespace. Keeping the pid is important for
+/// lifecycle recovery when a document was renamed after the supervisor
+/// started: the stale command-line path can no longer carry a document-scoped
+/// recycle marker, but the authoritative supervisor lease can still address
+/// that exact process over IPC.
+pub fn open_supervisor_processes(exclude_pid: u32) -> Vec<(u32, PathBuf)> {
     distinct_process_images(process_pids())
         .into_iter()
         .filter(|pid| *pid != exclude_pid)
-        .filter_map(open_supervisor_document)
-        .map(|doc| {
-            agent_doc_controller::command_line::canonical_path_for_command_line_compare(&doc)
+        .filter_map(|pid| open_supervisor_document(pid).map(|document| (pid, document)))
+        .map(|(pid, document)| {
+            (
+                pid,
+                agent_doc_controller::command_line::canonical_path_for_command_line_compare(
+                    &document,
+                ),
+            )
         })
+        .collect()
+}
+
+/// Documents served by live supervisors, deduplicated for callers that do not
+/// need process identity.
+pub fn open_supervisor_documents(exclude_pid: u32) -> BTreeSet<PathBuf> {
+    open_supervisor_processes(exclude_pid)
+        .into_iter()
+        .map(|(_, document)| document)
         .collect()
 }
 

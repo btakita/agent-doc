@@ -892,6 +892,18 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   forced requests remain unconditional. The editor-health `recycle_attempted`
   bit is monotone within a session so a concurrent stale health writer cannot
   re-arm the same wedge episode after the supervisor latches it.
+- `#renamedsupervisorrecycle`: install fan-out preserves the live supervisor PID
+  alongside its `/proc` document observation. A route-owned supervisor may
+  outlive a document path transition (for example, its command line still names
+  a removed path while the controller lease names the current path). When the
+  stale startup path cannot be checkpointed and therefore cannot carry the
+  document-hash recycle marker that process polls, fan-out resolves the
+  authoritative supervisor lease by PID, verifies the socket reports that same
+  PID, and sends the existing safe-boundary `restart continue` lifecycle intent
+  over supervisor IPC. A missing lease, PID mismatch, unreachable socket, or IPC
+  refusal is counted as skipped; fan-out never signals or kills an unverified
+  process. The normal document marker remains the deduplicated primary delivery
+  for resolvable paths.
 - `#wd40` / `#supboundarylivelock` state-flush: an explicit `admin recycle`
   recycles at the first supervisor-safe checkpoint even when the installed binary
   already matches the running supervisor (`supervisor:fresh`). A checkpoint is

@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.497
+
+- **JetBrains build 263 receives current plugin fixes (GH #247).** Releases now
+  publish a third, disjoint JetBrains package for `263..263.*`, update the feed
+  and installer selector for all three package lines, and verify classic,
+  exact-262, and exact-263 artifacts independently. This lets the IDE that
+  reported GH #241 and GH #242 install their plugin-side fixes instead of
+  remaining on the old open-ended package.
+- **Claude prompt-history recalls no longer block routing (GH #246).** A
+  cursor-anchored `History n/m` entry is recognized as harness-owned recall
+  residue and cleared before route injection; genuinely typed drafts remain
+  protected and fail closed.
+- **Codex Stop recognizes captured-finalize ownership handoff.** A standardized
+  `closeout_owner_retry_at=` receipt with proven retained-capture ownership is
+  treated as a durable binary-owned deferral, so a normal finalize-worker lease
+  handoff no longer emits stale queue-loss or manual-repair guidance. The
+  free-text queue guard remains fail closed when durable ownership is absent.
+
 ## 0.35.496
 
 - **Stale native editor projections defer instead of rejecting the retained

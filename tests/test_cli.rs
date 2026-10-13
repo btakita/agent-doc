@@ -17626,7 +17626,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn clear_starting_actor_timeout_record(",
         "StateFact::StartingActorTimeoutRecorded",
         "StateFact::StartingActorTimeoutCleared",
-        "load_state_event_ledger",
+        "load_starting_actor_timeout_events_from_db",
+        "state_event_document_high_water_in_db",
         "append_state_event",
     ] {
         assert!(
@@ -17640,6 +17641,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fs2::FileExt",
         "std::fs::write",
         "std::fs::remove_file",
+        "load_state_event_ledger",
     ] {
         assert!(
             !controller_io_starting_actor_timeout_production.contains(forbidden_snippet),

@@ -3847,6 +3847,35 @@ pub fn load_state_events_for_cycle_projection_from_db(
     Ok(events)
 }
 
+/// Load only the two route facts that project a document's starting-actor
+/// timeout record.
+///
+/// Route readiness checks are frequent and need one small per-document
+/// projection. Loading the complete project ledger here makes an idle editor
+/// poll replay every document and every payload in `state_events`.
+const STARTING_ACTOR_TIMEOUT_EVENTS_QUERY: &str = r#"
+    SELECT id, event_id, document_hash, document_version, domain, fact_type, payload_json, timestamp
+    FROM state_events INDEXED BY state_events_document_hash_fact_type_id
+    WHERE document_hash = ?1
+      AND fact_type IN (
+          'starting_actor_timeout_recorded',
+          'starting_actor_timeout_cleared'
+      )
+    ORDER BY id
+"#;
+
+pub fn load_starting_actor_timeout_events_from_db(
+    conn: &Connection,
+    document_hash: &str,
+) -> Result<Vec<StateEventStatus>> {
+    let mut stmt = conn.prepare(STARTING_ACTOR_TIMEOUT_EVENTS_QUERY)?;
+    let mut events = Vec::new();
+    for row in stmt.query_map(params![document_hash], state_event_status_from_row)? {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
 /// Load a bounded newest-first window of one durable fact type for a document.
 ///
 /// This is intentionally narrower than projection replay: history-aware
@@ -5987,6 +6016,25 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starting_actor_timeout_read_uses_document_fact_type_index() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let mut stmt = conn.prepare(&format!(
+            "EXPLAIN QUERY PLAN {STARTING_ACTOR_TIMEOUT_EVENTS_QUERY}"
+        ))?;
+        let details = stmt
+            .query_map(["doc-a"], |row| row.get::<_, String>(3))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        assert!(
+            details
+                .iter()
+                .any(|detail| detail.contains("state_events_document_hash_fact_type_id")),
+            "starting-actor timeout lookup must use the document/fact-type index: {details:?}"
+        );
+        Ok(())
+    }
 
     /// `#flakyreceipthelpers` foreign bootstrap read: reading another project's bootstrap never
     /// creates, initializes, or writes that project's ledger.

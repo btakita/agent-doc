@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 use agent_doc_controller::dispatch::{ActorDispatchState, AuthoritativeActorReadyFacts};
-use agent_doc_state_backbone::{StateEvent, StateFact};
+use agent_doc_state_backbone::{EventLedger, StateEvent, StateFact};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartingActorTimeoutRecord {
@@ -35,28 +35,48 @@ fn state_identity(file_path: &str) -> Result<(PathBuf, String)> {
     Ok((project_root, document_hash))
 }
 
-pub fn record_starting_actor_timeout(
-    file_path: &str,
-    facts: &AuthoritativeActorReadyFacts,
-    log_line: &str,
-) -> Result<StartingActorTimeoutLogDecision> {
-    let (project_root, document_hash) = state_identity(file_path)?;
-    let ledger = crate::project_controller::load_state_event_ledger(&project_root)?;
-    let existing = ledger
-        .project_document(&document_hash)
+fn load_starting_actor_timeout_state(
+    project_root: &std::path::Path,
+    document_hash: &str,
+) -> Result<(Option<StartingActorTimeoutRecord>, u64)> {
+    let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
+    let document_high_water =
+        agent_doc_sqlite::state_store::state_event_document_high_water_in_db(&conn, document_hash)?;
+    let mut ledger = EventLedger::new();
+    for row in agent_doc_sqlite::state_store::load_starting_actor_timeout_events_from_db(
+        &conn,
+        document_hash,
+    )? {
+        let event: StateEvent = serde_json::from_str(&row.payload_json)
+            .context("deserialize starting-actor timeout state event")?;
+        ledger.append(event);
+    }
+    let record = ledger
+        .project_document(document_hash)
         .and_then(|projection| projection.route.starting_actor_timeout)
         .map(|projection| StartingActorTimeoutRecord {
             pane_id: projection.pane_id,
             generation: projection.generation,
             log_line: projection.log_line,
         });
+    Ok((record, document_high_water))
+}
+
+pub fn record_starting_actor_timeout(
+    file_path: &str,
+    facts: &AuthoritativeActorReadyFacts,
+    log_line: &str,
+) -> Result<StartingActorTimeoutLogDecision> {
+    let (project_root, document_hash) = state_identity(file_path)?;
+    let (existing, document_high_water) =
+        load_starting_actor_timeout_state(&project_root, &document_hash)?;
     if existing.as_ref().is_some_and(|record| {
         record.pane_id == facts.pane_id && record.generation == facts.generation
     }) {
         return Ok(StartingActorTimeoutLogDecision::DuplicateTimeout);
     }
 
-    let next_epoch = ledger.document_epoch(&document_hash).saturating_add(1);
+    let next_epoch = document_high_water.saturating_add(1);
     let event = StateEvent::new(
         format!(
             "starting-actor-timeout:{document_hash}:{}:{}:epoch-{next_epoch}",
@@ -78,16 +98,9 @@ pub fn record_starting_actor_timeout(
 
 pub fn load_starting_actor_timeout_record(file_path: &str) -> Option<StartingActorTimeoutRecord> {
     let (project_root, document_hash) = state_identity(file_path).ok()?;
-    let ledger = crate::project_controller::load_state_event_ledger(&project_root).ok()?;
-    ledger
-        .project_document(&document_hash)?
-        .route
-        .starting_actor_timeout
-        .map(|projection| StartingActorTimeoutRecord {
-            pane_id: projection.pane_id,
-            generation: projection.generation,
-            log_line: projection.log_line,
-        })
+    load_starting_actor_timeout_state(&project_root, &document_hash)
+        .ok()?
+        .0
 }
 
 pub fn starting_actor_timeout_record_matches(
@@ -120,14 +133,12 @@ fn clear_starting_actor_timeout_record_inner(
     facts: &AuthoritativeActorReadyFacts,
 ) -> Result<()> {
     let (project_root, document_hash) = state_identity(file_path)?;
-    let ledger = crate::project_controller::load_state_event_ledger(&project_root)?;
-    let has_record = ledger
-        .project_document(&document_hash)
-        .is_some_and(|projection| projection.route.starting_actor_timeout.is_some());
-    if !has_record {
+    let (record, document_high_water) =
+        load_starting_actor_timeout_state(&project_root, &document_hash)?;
+    if record.is_none() {
         return Ok(());
     }
-    let next_epoch = ledger.document_epoch(&document_hash).saturating_add(1);
+    let next_epoch = document_high_water.saturating_add(1);
     let event = StateEvent::new(
         format!("starting-actor-timeout-cleared:{document_hash}:epoch-{next_epoch}"),
         StateFact::StartingActorTimeoutCleared {
@@ -238,5 +249,50 @@ mod tests {
             record_starting_actor_timeout(&file_path, &facts, "after clear").unwrap(),
             StartingActorTimeoutLogDecision::NewTimeout
         );
+    }
+
+    #[test]
+    fn starting_actor_timeout_projection_ignores_unrelated_state_events() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "body").unwrap();
+        let file_path = doc.to_string_lossy().to_string();
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+
+        for (event_id, event_document_hash, fact_type) in [
+            (
+                "unrelated-same-document",
+                document_hash.as_str(),
+                "write_applied",
+            ),
+            (
+                "timeout-for-another-document",
+                "another-document",
+                "starting_actor_timeout_recorded",
+            ),
+        ] {
+            assert!(
+                agent_doc_sqlite::state_store::insert_state_event_in_db(
+                    &conn,
+                    &agent_doc_sqlite::state_store::StateEventInsert {
+                        event_id,
+                        document_hash: event_document_hash,
+                        domain: "test",
+                        fact_type,
+                        payload_json: "not valid state-event json",
+                    },
+                )
+                .unwrap()
+            );
+        }
+
+        let facts = ready_facts("pane-a", 7, ActorDispatchState::Starting);
+        assert_eq!(
+            record_starting_actor_timeout(&file_path, &facts, "timeout").unwrap(),
+            StartingActorTimeoutLogDecision::NewTimeout
+        );
+        assert!(starting_actor_timeout_record_matches(&file_path, &facts));
     }
 }

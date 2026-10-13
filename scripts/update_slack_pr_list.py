@@ -34,7 +34,7 @@ GITHUB_PR_RE = re.compile(
 )
 LINE_PREFIX_RE = re.compile(r"^(?P<prefix>\s*(?:\d+[.)]|[-*])\s+)(?P<body>.*)$")
 MANAGED_MARK_RE = re.compile(
-    r"(?:^|\s)(?::white_check_mark:|✅|:eyes:|👀|:warning:|⚠️?|:crown:|👑|:link:|🔗)(?=\s|$)"
+    r"(?:^|\s)(?::white_check_mark:|✅|:eyes:|👀|:warning:|⚠️?|:crown:|👑|:link:|🔗|:collision:|:boom:|💥)(?=\s|$)"
 )
 SLACK_LINK_RE = re.compile(r"/archives/(?P<channel>[A-Z0-9]+)/p(?P<stamp>[0-9]{16})(?:\b|$)")
 
@@ -43,6 +43,7 @@ ADDRESSED_MARK = ":eyes:"
 UNADDRESSED_MARK = ":warning:"
 STACK_HEAD_MARK = ":crown:"
 STACK_MEMBER_MARK = ":link:"
+MERGE_CONFLICT_MARK = ":boom:"
 
 HELP_EPILOG = """\
 COMMAND MODES
@@ -66,6 +67,7 @@ EMOJI MEANINGS
   :warning:           requested changes still target the current head
   :crown:             tip/head of a multi-PR stack
   :link:              root or intermediate member of a multi-PR stack
+  :boom:              GitHub reports a merge conflict
   (no stack emoji)    standalone PR
 
 EXAMPLES
@@ -109,6 +111,7 @@ class PullRequestStatus:
     base_ref: str = ""
     head_ref: str = ""
     head_repository: str = ""
+    merge_conflict: bool = False
 
     @property
     def closed(self) -> bool:
@@ -154,6 +157,7 @@ class ReconcileResult:
     unaddressed: tuple[PullRequestRef, ...]
     stack_heads: tuple[PullRequestRef, ...]
     stack_members: tuple[PullRequestRef, ...]
+    merge_conflicts: tuple[PullRequestRef, ...]
     unchanged: tuple[PullRequestRef, ...]
 
 
@@ -315,6 +319,10 @@ def fetch_pr_status(ref: PullRequestRef) -> PullRequestStatus:
         base_ref=str(base.get("ref") or ""),
         head_ref=str(head.get("ref") or ""),
         head_repository=str((head.get("repo") or {}).get("full_name") or ""),
+        merge_conflict=(
+            pull.get("mergeable") is False
+            or str(pull.get("mergeable_state") or "").lower() == "dirty"
+        ),
     )
 
 
@@ -439,6 +447,7 @@ def reconcile_message(
     unaddressed: list[PullRequestRef] = []
     stack_heads: list[PullRequestRef] = []
     stack_members: list[PullRequestRef] = []
+    merge_conflicts: list[PullRequestRef] = []
     unchanged: list[PullRequestRef] = []
     output_lines: list[str] = []
     head_refs, member_refs = stack_positions(statuses.values())
@@ -485,11 +494,22 @@ def reconcile_message(
                 status.ref for status in line_statuses if status.ref in member_refs
             )
 
+        conflict_mark = ""
+        if any(not status.closed and status.merge_conflict for status in line_statuses):
+            conflict_mark = MERGE_CONFLICT_MARK
+            merge_conflicts.extend(
+                status.ref
+                for status in line_statuses
+                if not status.closed and status.merge_conflict
+            )
+
         if all(status.closed for status in line_statuses):
             body = f"~{body}~"
             closed.extend(refs)
         else:
-            marks = " ".join(mark for mark in (status_mark, stack_mark) if mark)
+            marks = " ".join(
+                mark for mark in (status_mark, stack_mark, conflict_mark) if mark
+            )
             if marks:
                 body = f"{body} {marks}"
             else:
@@ -504,6 +524,7 @@ def reconcile_message(
         unaddressed=tuple(dict.fromkeys(unaddressed)),
         stack_heads=tuple(dict.fromkeys(stack_heads)),
         stack_members=tuple(dict.fromkeys(stack_members)),
+        merge_conflicts=tuple(dict.fromkeys(merge_conflicts)),
         unchanged=tuple(dict.fromkeys(unchanged)),
     )
 
@@ -567,6 +588,7 @@ def _summary(result: ReconcileResult, changed: bool) -> str:
             f"review changes still unaddressed: {labels(result.unaddressed)}",
             f"PR stack heads: {labels(result.stack_heads)}",
             f"other PR stack members: {labels(result.stack_members)}",
+            f"merge conflicts: {labels(result.merge_conflicts)}",
         )
     )
 

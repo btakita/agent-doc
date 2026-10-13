@@ -18,6 +18,7 @@ def status(
     approved: bool = False,
     base: str = "",
     branch: str = "",
+    conflict: bool = False,
 ) -> subject.PullRequestStatus:
     ref = subject.PullRequestRef("haiven-dev", "widgets", number)
     return subject.PullRequestStatus(
@@ -29,6 +30,7 @@ def status(
         base,
         branch,
         "haiven-dev/widgets" if branch else "",
+        conflict,
     )
 
 
@@ -55,6 +57,7 @@ class ParseTargetTests(unittest.TestCase):
             ":warning:",
             ":crown:",
             ":link:",
+            ":boom:",
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, help_text)
@@ -217,6 +220,30 @@ class ReconcileTests(unittest.TestCase):
         )
         self.assertEqual(result.stack_heads, (tip.ref,))
         self.assertEqual(result.stack_members, (root.ref, middle.ref))
+
+    def test_marks_merge_conflicts_and_removes_stale_conflict_markers(self) -> None:
+        conflicted = status(20, conflict=True)
+        clean = status(21)
+        closed = status(22, state="closed", conflict=True)
+        message = (
+            "1. <https://github.com/haiven-dev/widgets/pull/20|widgets #20> conflicted\n"
+            "2. <https://github.com/haiven-dev/widgets/pull/21|widgets #21> clean :collision:\n"
+            "3. <https://github.com/haiven-dev/widgets/pull/22|widgets #22> closed :boom:"
+        )
+
+        result = subject.reconcile_message(
+            message, {item.ref: item for item in (conflicted, clean, closed)}
+        )
+
+        self.assertEqual(
+            result.text,
+            (
+                "1. <https://github.com/haiven-dev/widgets/pull/20|widgets #20> conflicted :boom:\n"
+                "2. <https://github.com/haiven-dev/widgets/pull/21|widgets #21> clean\n"
+                "3. ~<https://github.com/haiven-dev/widgets/pull/22|widgets #22> closed~"
+            ),
+        )
+        self.assertEqual(result.merge_conflicts, (conflicted.ref,))
 
     def test_commonmark_strike_from_adapter_normalizes_for_slack_api(self) -> None:
         item = status(8, state="closed")

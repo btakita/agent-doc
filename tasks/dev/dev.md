@@ -5,7 +5,6 @@ agent_doc_write: crdt
 agent: codex
 resume:
   claude: c1cf43ac-1094-4ecf-8b3d-a7f7f7168edb
-queue: go
 ---
 
 ## Status
@@ -251,18 +250,22 @@ Completed the migration and opened [haiven-tools PR #21](https://github.com/haiv
 - Removed the now-migrated prototype and test from this private workspace in `fad23033a9`.
 
 PR CI is running. The queued key-wording refinements will be added to the same PR before final handoff.
+
+### Re: Make sure ~done~ is now ~merged~ in the key. — gpt-5 · 2026-10-13T19:46:45-04:00
+
+> **Queue prompt:** Make sure ~done~ is now ~merged~ in the key.
+
+Updated the legend to `Key: ~merged~ closed or merged …`. It also replaces the earlier “Emoji key” prefix idempotently, so existing live messages migrate without duplicate legends.
+
+The live Slack message was refreshed and read back with the new wording. The full `haiven-tools` portable suite passes, including all 25 updater tests.
+
+Commit `a716189 fix: clarify Slack PR status key` is pushed to [haiven-tools PR #21](https://github.com/haiven-dev/haiven-tools/pull/21).
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go priority -->
-- ~~Make the message have a key for the emojis so reads understand what each emoji means.~~
-- ~~Make the script work standalone without an agent. Are you using the Slack mcp? Can we make this work without the Slack mcp?~~
-- ~~There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`~~
-- ~~Rename "Emoji key" to "Key": Add ~merged~ to the key.~~
-- Make sure ~done~ is now ~merged~ in the key.
-- ~~Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

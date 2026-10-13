@@ -16,9 +16,20 @@ def status(
     head: str = "head",
     reviewed: str | None = None,
     approved: bool = False,
+    base: str = "",
+    branch: str = "",
 ) -> subject.PullRequestStatus:
     ref = subject.PullRequestRef("haiven-dev", "widgets", number)
-    return subject.PullRequestStatus(ref, state, head, reviewed, approved)
+    return subject.PullRequestStatus(
+        ref,
+        state,
+        head,
+        reviewed,
+        approved,
+        base,
+        branch,
+        "haiven-dev/widgets" if branch else "",
+    )
 
 
 class ParseTargetTests(unittest.TestCase):
@@ -157,6 +168,35 @@ class ReconcileTests(unittest.TestCase):
         first = subject.reconcile_message(original, {item.ref: item})
         second = subject.reconcile_message(first.text, {item.ref: item})
         self.assertEqual(second.text, first.text)
+
+    def test_marks_stack_tip_and_other_members_but_not_standalone_prs(self) -> None:
+        root = status(10, base="main", branch="stack-root")
+        middle = status(11, base="stack-root", branch="stack-middle")
+        tip = status(12, base="stack-middle", branch="stack-tip")
+        standalone = status(13, base="main", branch="standalone")
+        message = (
+            "1. <https://github.com/haiven-dev/widgets/pull/10|widgets #10> root :crown:\n"
+            "2. <https://github.com/haiven-dev/widgets/pull/11|widgets #11> middle\n"
+            "3. <https://github.com/haiven-dev/widgets/pull/12|widgets #12> tip :link:\n"
+            "4. <https://github.com/haiven-dev/widgets/pull/13|widgets #13> standalone :link:"
+        )
+
+        result = subject.reconcile_message(
+            message,
+            {item.ref: item for item in (root, middle, tip, standalone)},
+        )
+
+        self.assertEqual(
+            result.text,
+            (
+                "1. <https://github.com/haiven-dev/widgets/pull/10|widgets #10> root :link:\n"
+                "2. <https://github.com/haiven-dev/widgets/pull/11|widgets #11> middle :link:\n"
+                "3. <https://github.com/haiven-dev/widgets/pull/12|widgets #12> tip :crown:\n"
+                "4. <https://github.com/haiven-dev/widgets/pull/13|widgets #13> standalone"
+            ),
+        )
+        self.assertEqual(result.stack_heads, (tip.ref,))
+        self.assertEqual(result.stack_members, (root.ref, middle.ref))
 
     def test_commonmark_strike_from_adapter_normalizes_for_slack_api(self) -> None:
         item = status(8, state="closed")

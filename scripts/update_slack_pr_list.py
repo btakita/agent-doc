@@ -33,14 +33,16 @@ GITHUB_PR_RE = re.compile(
     r"(?P<repo>[A-Za-z0-9_.-]+)/pull/(?P<number>[0-9]+)"
 )
 LINE_PREFIX_RE = re.compile(r"^(?P<prefix>\s*(?:\d+[.)]|[-*])\s+)(?P<body>.*)$")
-REVIEW_MARK_RE = re.compile(
-    r"(?:^|\s)(?::white_check_mark:|✅|:eyes:|👀|:warning:|⚠️?)(?=\s|$)"
+MANAGED_MARK_RE = re.compile(
+    r"(?:^|\s)(?::white_check_mark:|✅|:eyes:|👀|:warning:|⚠️?|:crown:|👑|:link:|🔗)(?=\s|$)"
 )
 SLACK_LINK_RE = re.compile(r"/archives/(?P<channel>[A-Z0-9]+)/p(?P<stamp>[0-9]{16})(?:\b|$)")
 
 APPROVED_MARK = ":white_check_mark:"
 ADDRESSED_MARK = ":eyes:"
 UNADDRESSED_MARK = ":warning:"
+STACK_HEAD_MARK = ":crown:"
+STACK_MEMBER_MARK = ":link:"
 
 
 class UpdateError(RuntimeError):
@@ -69,6 +71,9 @@ class PullRequestStatus:
     head_sha: str
     active_change_request_sha: str | None
     has_active_approval: bool = False
+    base_ref: str = ""
+    head_ref: str = ""
+    head_repository: str = ""
 
     @property
     def closed(self) -> bool:
@@ -112,6 +117,8 @@ class ReconcileResult:
     approved: tuple[PullRequestRef, ...]
     addressed: tuple[PullRequestRef, ...]
     unaddressed: tuple[PullRequestRef, ...]
+    stack_heads: tuple[PullRequestRef, ...]
+    stack_members: tuple[PullRequestRef, ...]
     unchanged: tuple[PullRequestRef, ...]
 
 
@@ -259,6 +266,7 @@ def fetch_pr_status(ref: PullRequestRef) -> PullRequestStatus:
     if not isinstance(pull, dict) or not isinstance(reviews, list):
         raise UpdateError(f"unexpected GitHub response shape for {ref.label}")
     head = pull.get("head") or {}
+    base = pull.get("base") or {}
     head_sha = str(head.get("sha") or "")
     if not head_sha:
         raise UpdateError(f"GitHub response omitted the head SHA for {ref.label}")
@@ -269,6 +277,9 @@ def fetch_pr_status(ref: PullRequestRef) -> PullRequestStatus:
         head_sha=head_sha,
         active_change_request_sha=active_change_request_sha,
         has_active_approval=has_active_approval,
+        base_ref=str(base.get("ref") or ""),
+        head_ref=str(head.get("ref") or ""),
+        head_repository=str((head.get("repo") or {}).get("full_name") or ""),
     )
 
 
@@ -358,8 +369,30 @@ def _strip_outer_strike(body: str) -> str:
 
 
 def _strip_review_marks(body: str) -> str:
-    """Remove updater-owned review markers while preserving the line text."""
-    return re.sub(r"[ \t]+", " ", REVIEW_MARK_RE.sub(" ", body)).strip()
+    """Remove updater-owned status markers while preserving the line text."""
+    return re.sub(r"[ \t]+", " ", MANAGED_MARK_RE.sub(" ", body)).strip()
+
+
+def stack_positions(
+    statuses: Iterable[PullRequestStatus],
+) -> tuple[set[PullRequestRef], set[PullRequestRef]]:
+    """Return stack tips and other members for open same-repository PR chains."""
+    open_statuses = tuple(status for status in statuses if not status.closed)
+    branch_prs = {
+        (status.ref.owner, status.ref.repo, status.head_ref): status.ref
+        for status in open_statuses
+        if status.head_ref
+        and status.head_repository == f"{status.ref.owner}/{status.ref.repo}"
+    }
+    parent_by_child: dict[PullRequestRef, PullRequestRef] = {}
+    for status in open_statuses:
+        parent = branch_prs.get((status.ref.owner, status.ref.repo, status.base_ref))
+        if parent is not None and parent != status.ref:
+            parent_by_child[status.ref] = parent
+
+    members = set(parent_by_child) | set(parent_by_child.values())
+    non_heads = set(parent_by_child.values())
+    return members - non_heads, non_heads
 
 
 def reconcile_message(
@@ -369,8 +402,11 @@ def reconcile_message(
     approved: list[PullRequestRef] = []
     addressed: list[PullRequestRef] = []
     unaddressed: list[PullRequestRef] = []
+    stack_heads: list[PullRequestRef] = []
+    stack_members: list[PullRequestRef] = []
     unchanged: list[PullRequestRef] = []
     output_lines: list[str] = []
+    head_refs, member_refs = stack_positions(statuses.values())
 
     for line in text.splitlines(keepends=True):
         ending = "\n" if line.endswith("\n") else ""
@@ -389,24 +425,40 @@ def reconcile_message(
         body = _strip_review_marks(_strip_outer_strike(body).rstrip())
         line_statuses = [statuses[ref] for ref in refs]
 
-        if all(status.closed for status in line_statuses):
-            body = f"~{body}~"
-            closed.extend(refs)
-        elif any(status.review_unaddressed for status in line_statuses):
-            body = f"{body} {UNADDRESSED_MARK}"
+        status_mark = ""
+        if any(status.review_unaddressed for status in line_statuses):
+            status_mark = UNADDRESSED_MARK
             unaddressed.extend(
                 status.ref for status in line_statuses if status.review_unaddressed
             )
         elif any(status.review_addressed_by_commit for status in line_statuses):
-            body = f"{body} {ADDRESSED_MARK}"
+            status_mark = ADDRESSED_MARK
             addressed.extend(
                 status.ref for status in line_statuses if status.review_addressed_by_commit
             )
         elif any(status.approved for status in line_statuses):
-            body = f"{body} {APPROVED_MARK}"
+            status_mark = APPROVED_MARK
             approved.extend(status.ref for status in line_statuses if status.approved)
+
+        stack_mark = ""
+        if any(status.ref in head_refs for status in line_statuses):
+            stack_mark = STACK_HEAD_MARK
+            stack_heads.extend(status.ref for status in line_statuses if status.ref in head_refs)
+        elif any(status.ref in member_refs for status in line_statuses):
+            stack_mark = STACK_MEMBER_MARK
+            stack_members.extend(
+                status.ref for status in line_statuses if status.ref in member_refs
+            )
+
+        if all(status.closed for status in line_statuses):
+            body = f"~{body}~"
+            closed.extend(refs)
         else:
-            unchanged.extend(refs)
+            marks = " ".join(mark for mark in (status_mark, stack_mark) if mark)
+            if marks:
+                body = f"{body} {marks}"
+            else:
+                unchanged.extend(refs)
         output_lines.append(f"{prefix}{body}{ending}")
 
     return ReconcileResult(
@@ -415,6 +467,8 @@ def reconcile_message(
         approved=tuple(dict.fromkeys(approved)),
         addressed=tuple(dict.fromkeys(addressed)),
         unaddressed=tuple(dict.fromkeys(unaddressed)),
+        stack_heads=tuple(dict.fromkeys(stack_heads)),
+        stack_members=tuple(dict.fromkeys(stack_members)),
         unchanged=tuple(dict.fromkeys(unchanged)),
     )
 
@@ -476,6 +530,8 @@ def _summary(result: ReconcileResult, changed: bool) -> str:
             f"approved: {labels(result.approved)}",
             f"review addressed by newer commit: {labels(result.addressed)}",
             f"review changes still unaddressed: {labels(result.unaddressed)}",
+            f"PR stack heads: {labels(result.stack_heads)}",
+            f"other PR stack members: {labels(result.stack_members)}",
         )
     )
 

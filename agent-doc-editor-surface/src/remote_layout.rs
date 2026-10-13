@@ -150,6 +150,11 @@ pub struct RemoteLayoutMemory {
     pub columns: Vec<SurfaceColumn>,
     #[serde(default)]
     pub focused: Option<String>,
+    /// Columns from before a selection-only observation guessed which split
+    /// changed. The next structural visible-set observation folds against this
+    /// base instead of treating the guess as authoritative geometry (GH #250).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provisional_base_columns: Option<Vec<SurfaceColumn>>,
 }
 
 impl RemoteLayoutMemory {
@@ -157,9 +162,25 @@ impl RemoteLayoutMemory {
     pub fn advance(&self, evidence: &RemoteLayoutEvidence) -> (Self, RemoteLayoutResolution) {
         let active = active_document(evidence);
         let resolution = self.resolve(evidence, active.as_deref());
+        let provisional_base_columns = match (resolution.source, resolution.reason.as_deref()) {
+            (
+                RemoteLayoutSource::RetainedRemoteColumns,
+                Some("selected_visible_change_replaced_focus_column"),
+            ) => self
+                .provisional_base_columns
+                .clone()
+                .or_else(|| Some(self.columns.clone())),
+            (
+                RemoteLayoutSource::RemoteClientVisibleEditors
+                | RemoteLayoutSource::RemoteClientSelectedFiles,
+                _,
+            ) => None,
+            _ => self.provisional_base_columns.clone(),
+        };
         let next = Self {
             columns: resolution.columns.clone(),
             focused: active.or_else(|| self.focused.clone()),
+            provisional_base_columns,
         };
         (next, resolution)
     }
@@ -277,7 +298,20 @@ impl RemoteLayoutMemory {
     /// 6. With no survivors the order is the visible order, reported as
     ///    `Unknown`; otherwise the order is memory-derived and `Retained`.
     fn ordered_columns(&self, files: &[String]) -> (Vec<SurfaceColumn>, RemoteLayoutColumnOrder) {
-        let previous = distinct(self.columns.iter().flat_map(|column| column.files.iter()));
+        // A selection-only observation can identify the active document before
+        // Remote Dev reports which visible split changed. Its replacement is a
+        // provisional width-preserving guess, not geometry authority. When the
+        // structural visible set catches up, recover the slots from before that
+        // guess (GH #250).
+        let previous_columns = self
+            .provisional_base_columns
+            .as_ref()
+            .unwrap_or(&self.columns);
+        let previous = distinct(
+            previous_columns
+                .iter()
+                .flat_map(|column| column.files.iter()),
+        );
         let files = distinct(files.iter());
         let mut added = files
             .iter()
@@ -482,6 +516,7 @@ mod tests {
         let memory = RemoteLayoutMemory {
             columns: vec![SurfaceColumn::new([C]), SurfaceColumn::new([B])],
             focused: Some(C.to_string()),
+            provisional_base_columns: None,
         };
         let (_, resolution) = memory.advance(&evidence(vec![client(&[A, B], &[A], &[A, B])], &[A]));
 
@@ -554,7 +589,7 @@ mod tests {
     fn gh175_selected_file_does_not_extend_visible_split_set() {
         let (memory, _) = RemoteLayoutMemory::default()
             .advance(&evidence(vec![client(&[A, B], &[A], &[A, B, C])], &[A]));
-        let (_, resolution) =
+        let (memory, resolution) =
             memory.advance(&evidence(vec![client(&[A, B], &[C], &[A, B, C])], &[C]));
         assert_eq!(resolution.source, RemoteLayoutSource::RetainedRemoteColumns);
         assert_eq!(resolution.columns.len(), 2);
@@ -566,6 +601,22 @@ mod tests {
             resolution.reason.as_deref(),
             Some("selected_visible_change_replaced_focus_column")
         );
+
+        // GH #250: selection arrives before Remote Dev's visible set. The
+        // replacement above guessed that C replaced A, but the next structural
+        // observation proves that C replaced B. Fold that correction against
+        // the pre-guess [A, B] layout, not the provisional [C, B] result.
+        let (memory, resolution) =
+            memory.advance(&evidence(vec![client(&[A, C], &[C], &[A, B, C])], &[C]));
+        assert_eq!(
+            resolution.source,
+            RemoteLayoutSource::RemoteClientVisibleEditors
+        );
+        assert_eq!(
+            columns(&resolution),
+            vec![vec![A.to_string()], vec![C.to_string()]]
+        );
+        assert!(memory.provisional_base_columns.is_none());
     }
 
     /// GH #175 reproduction: one established split has an Editor/Preview tab
@@ -577,6 +628,7 @@ mod tests {
         let memory = RemoteLayoutMemory {
             columns: vec![SurfaceColumn::new([A])],
             focused: Some(A.to_string()),
+            provisional_base_columns: None,
         };
         let (_, resolution) = memory.advance(&evidence(vec![client(&[A, B], &[B], &[A, B])], &[B]));
         assert_eq!(resolution.source, RemoteLayoutSource::RetainedRemoteColumns);
@@ -718,6 +770,7 @@ mod tests {
                     .map(|file| SurfaceColumn::new([file.clone()]))
                     .collect(),
                 focused: None,
+                provisional_base_columns: None,
             };
             let (columns, order) = memory.ordered_columns(visible);
             (

@@ -436,6 +436,30 @@ mod tests {
         remote_layout_memory().remove(other);
     }
 
+    /// GH #250: the process-wide fold must preserve the layout from before a
+    /// selection-only replacement until Remote Dev's visible membership catches
+    /// up and identifies which split actually changed.
+    #[test]
+    fn gh250_visible_correction_uses_pre_guess_layout() {
+        let root = Path::new("/tmp/gh250-remote-layout-root");
+        let initial = r#"{"clients":[{"visible":["b.md","c.md"],"selected":["c.md"],"open":["a.md","b.md","c.md"]}],"focused":["c.md"]}"#;
+        let selection_first = r#"{"clients":[{"visible":["b.md","c.md"],"selected":["a.md"],"open":["a.md","b.md","c.md"]}],"focused":["a.md"]}"#;
+        let visible_catches_up = r#"{"clients":[{"visible":["a.md","c.md"],"selected":["a.md"],"open":["a.md","b.md","c.md"]}],"focused":["a.md"]}"#;
+
+        let first = resolve_remote_layout_from_json(root, initial).unwrap();
+        assert_eq!(first.columns[0].files, ["b.md"]);
+        assert_eq!(first.columns[1].files, ["c.md"]);
+
+        let guessed = resolve_remote_layout_from_json(root, selection_first).unwrap();
+        assert_eq!(guessed.columns[0].files, ["b.md"]);
+        assert_eq!(guessed.columns[1].files, ["a.md"]);
+
+        let corrected = resolve_remote_layout_from_json(root, visible_catches_up).unwrap();
+        assert_eq!(corrected.columns[0].files, ["a.md"]);
+        assert_eq!(corrected.columns[1].files, ["c.md"]);
+        remote_layout_memory().remove(root);
+    }
+
     fn mirrored(surface: &EditorSurface) -> TmuxLayout {
         TmuxLayout {
             columns: surface.columns.clone(),

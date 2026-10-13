@@ -242,8 +242,17 @@ pub fn closeout_wait_route_outcome(
 ) -> CloseoutWaitRouteOutcome {
     match classify_route_explicit_send(explicit_items, owner_turn) {
         RouteExplicitSendDecision::DeliverToLiveOwner => {
+            let delivered_fields = agent_doc_flow::outcome::user_outcome_fields(
+                agent_doc_flow::outcome::UserFacingOutcomeKind::SteeringDeliveredToOwner,
+            );
+            let update_noun = if explicit_items == 1 {
+                "update"
+            } else {
+                "updates"
+            };
+            let update_pronoun = if explicit_items == 1 { "it" } else { "them" };
             CloseoutWaitRouteOutcome::SteeringDelivered(format!(
-                "[route] explicit send for {}: delivered {explicit_items} pending steering item(s) to the owning turn (sent=explicit); its next tool call, its turn-boundary report, or the idle wake surfaces them. No second trigger was injected: the open closeout still owns the pane (blocker: {blocker}). steering_delivered={explicit_items} sent=explicit {outcome_fields}",
+                "[route] Sent {explicit_items} {update_noun} to the agent already running for {}; it will handle {update_pronoun} in this turn. No second trigger was injected. steering_delivered={explicit_items} sent=explicit {delivered_fields}",
                 file.display(),
             ))
         }
@@ -1620,9 +1629,7 @@ mod tests {
         assert!(!message.contains("nothing was dispatched"), "{message}");
         assert!(!message.contains("could not be drained"), "{message}");
         assert!(
-            message.contains(
-                "delivered 2 pending steering item(s) to the owning turn (sent=explicit)"
-            ),
+            message.contains("Sent 2 updates to the agent already running"),
             "{message}"
         );
         assert!(
@@ -1633,6 +1640,12 @@ mod tests {
             message.contains("No second trigger was injected"),
             "{message}"
         );
+        assert!(
+            message.contains("ui_outcome=steering_delivered_to_owner"),
+            "{message}"
+        );
+        assert!(!message.contains("blocker:"), "{message}");
+        assert!(!message.contains("session-check"), "{message}");
 
         // Nothing pending: the existing deferral is unchanged.
         let deferred = closeout_wait_route_outcome(

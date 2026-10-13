@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
     buildEditorRoutePayload,
     buildEditorRouteCommandMessage,
+    buildEditorRouteSuccessHint,
+    isEditorRouteSteeringDelivered,
     resolveEditorRouteTerminal,
 } from './commandPlane.js';
 
@@ -73,4 +75,15 @@ test('resolveEditorRouteTerminal throws on a rejected terminal', () => {
         },
     };
     assert.throws(() => resolveEditorRouteTerminal(data, 'cmd-1'), /boom/);
+});
+
+test('explicit steering delivered behind the owner is presented as concise success', () => {
+    const output = 'Error: [route] verbose legacy wrapper steering_delivered=1 sent=explicit '
+        + 'ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner '
+        + 'ui_outcome_class=ok next_action=owner_turn_handles_steering';
+    assert.equal(isEditorRouteSteeringDelivered(output), true);
+    assert.equal(
+        buildEditorRouteSuccessHint('tasks/agent-doc/agent-doc-bugs.md', output),
+        'Sent 1 update to the Agent Doc turn already running for tasks/agent-doc/agent-doc-bugs.md; no second turn was started.',
+    );
 });

@@ -610,6 +610,7 @@ dependencies = [
  "anyhow",
  "lazily 0.57.1",
  "parking_lot",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

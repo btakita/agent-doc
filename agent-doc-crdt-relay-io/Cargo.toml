@@ -44,4 +44,5 @@ similar = "3"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+rusqlite = { version = "0.40", features = ["bundled"] }
 tempfile = "3"

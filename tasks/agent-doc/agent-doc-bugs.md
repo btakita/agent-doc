@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a13286-03b1-7ae2-acca-8825f8f0de7a
+  codex: 01a13392-e8f3-7351-91f1-1951b3dcf8fc
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -186,14 +187,69 @@ IntelliJ is alive but caught in a sustained JavaScript/Node workspace-indexing s
 The dumps do not place agent-doc on the blocked UI path. Its authority-stream threads are waiting in socket reads, while the UI thread is busy inside IntelliJ's JavaScript workspace-model update. The recent plugin upgrade may have coincided with the rescan, but the captured freeze itself is an IntelliJ indexing/write-action problem rather than agent-doc response delivery.
 
 A restart is the practical immediate recovery. I have not killed or restarted IDEA because that could discard unsaved editor state. After restart, exclude the large generated `worktrees/haiven-dev/haiven-frontend/rebase-open-prs-*` tree (or the broader generated worktree directory) from this IDEA project's content roots so the Node plugin does not rebuild libraries for every checkout. Diagnostics are preserved under `~/.cache/JetBrains/IntelliJIdea2026.1/log/threadDumps-freeze-20261013-0027*`.
-<!-- agent:boundary:853f212a:agent-doc-bugs -->
+> **Chat prompt (#chatprompt):** Should I restart Idea now?
+
+> **Chat prompt (#chatprompt):** subagent: • Blocked by hook
+>   └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
+> dev/tasks/sdk.md. [session-check] INTERRUPTED: free-text agent:queue head(s) "#rebase-conflicts: all my open PRs." were
+> seen at preflight but have no committed response/echo or explicit deferral proof in the closeout — the prompt may have
+> been silently lost
+>     [session-check] hint: either respond to the unresolved head(s) and run `agent-doc finalize /home/brian/work/
+> btakita/agent-loop/src/haiven-dev/tasks/sdk.md`, or add `<!-- no-free-text-queue-head-guard -->` if the removal was
+> intentional (see #lr-queue-patchback-miss) The latest assistant text was captured into the pending/capture ledger
+> before auto-close. The hook could not finish the required commit boundary: closeout operation is already in progress
+> for cycle cycle-1791866878706 by captured-finalize-resume-1069718-1791859483080680892-t8 pid=1069718
+> role=captured_finalize_resume until=1791867179 [closeout_owner_retry_at=1791867179]. The retained capture or projection
+> is already durable and this exact retained intent commits itself once delivery converges — this is a deferral, not a
+> lost response. Wait for its controller-owned terminal state edge; do not use the document's current-cycle status as
+> proof because queue continuation can advance to a different cycle. Do NOT re-send the response, force disk, or `admin
+> recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own either: `admin
+> reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor holding the document
+> is not serving its replica, and then its remedy governs. Do not send the final answer yet. If the response is missing
+> from the document, run `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` first. Then
+> finish the commit boundary for this turn and end with `agent-doc session-check /home/brian/work/btakita/agent-loop/src/
+> haiven-dev/tasks/sdk.md`.
+>
+> • The stop hook caught a commit-boundary race after the queue was consumed. I’ll wait for the retained finalize
+>   controller to reach its terminal state, verify the response is present, repair only if it is missing, then run the
+>   required session check before ending.
+
+> **Chat prompt (#chatprompt):** fix the agent-doc causes of that error in a subagent
+
+> **Chat prompt (#chatprompt):** Can I restart Idea now?
+
+### Re: issues #246 and #247, Stop closeout handoff, and v0.35.497 — gpt-5 · 2026-10-13T02:14-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/246
+
+Fixed and closed. A Claude `History n/m` prompt-history recall is now recognized as harness-owned residue and cleared before route injection, while genuinely typed drafts remain protected. The worker’s focused regressions and `make check` passed; its commit was integrated as `8e4cfc65f1`.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/247
+
+Fixed and closed. Releases now build and select three disjoint JetBrains packages, including a `263..263.*` package, so the plugin-side fixes from #241 and #242 can reach IntelliJ IDEA 2026.3. Classic, exact-262, exact-263, feed-generation, installer-selection, focused Rust/Gradle, `make check-fast`, and `make check` verification passed. The fix was integrated as `436fbd7612`.
+
+The pasted `sdk.md` Stop-hook error was also fixed in the requested isolated subagent. The queue provenance guard and consume ordering were correct; the Codex Stop adapter failed to recognize the standard `closeout_owner_retry_at=` durable-owner receipt and therefore appended stale manual-repair guidance during a legitimate captured-finalize handoff. The adapter now defers to the proven retained owner without weakening the fail-closed queue guard. Focused tests, `make check-fast`, and `make check` passed; the integrated commit is `d5476b7e89`.
+
+> **Queue prompt:** release + publish
+
+Release `v0.35.497` was committed as `8010520d4c`, fast-forwarded to `origin/main`, tagged, and handed off for publication. The corrected authoritative `make check` passed with exit 0 and zero failure signatures. `make release` then completed with `tag_publish_handoff=complete` and `local_install_full=complete`; the installed CLI reports `agent-doc 0.35.497`, and the native library plus editor artifacts were installed once. At the required single observation, the GitHub Release workflow and main CI were still in progress; Book and Pages were green. No async wait is required by the closeout contract.
+
+For IDEA: once this response commits and `session-check` passes, restarting is safe. The currently running local IDE is IntelliJ IDEA 2026.1, and plugin `0.2.569` was dynamically upgraded there, so it does not require a restart. The new build-263 package is `0.2.571`; no live/local 2026.3 installation was present during the installer pass, so a future 2026.3 Remote Dev instance must install/update that package and then restart once to load it. Restarting a 2026.3 instance before installing `0.2.571` would only reload the old plugin.
+
+The unrelated live `sdk.md` retained closeout was not touched or replayed.
+
+Session-accretion warning: the exchange is large, but the active queue was drained without interrupting it for compaction.
+<!-- agent:boundary:3d301991 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/246~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/247
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

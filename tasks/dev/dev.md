@@ -212,6 +212,18 @@ The key explains approved, ready-for-re-review, changes-requested, stack-head, s
 The live Slack message was refreshed and read back with exactly one key. SDK #109 also still has exactly one `:boom:`.
 
 Ruff, all 23 focused tests, and `git diff --check` pass. Commit: `a83f713b65 feat: add Slack PR emoji key`.
+
+### Re: Make the script work standalone without an agent. Are you using the Slack mcp? Can we make this work without the Slack mcp? — gpt-5 · 2026-10-13T19:42:09-04:00
+
+> **Queue prompt:** Make the script work standalone without an agent. Are you using the Slack mcp? Can we make this work without the Slack mcp?
+
+Yes. The script itself is standalone and does not use an agent or Slack MCP.
+
+I used the Slack connector only to apply and verify the live prototype message because its credential is not exposed to the shell. The executable independently calls Slack's `conversations.replies`, `chat.update`, and `chat.postMessage` HTTPS APIs using `SLACK_USER_TOKEN` (or `--token-env`). GitHub data comes from an authenticated `gh api` process.
+
+I made that runtime contract explicit in `--help`, documented the token and `gh auth login` requirements, and added a clear setup error when `gh` is unavailable. The file remains directly executable and uses only Python's standard library.
+
+Ruff, byte-compilation, all 24 focused tests, and `git diff --check` pass. Commit: `4421dbb955 docs: clarify standalone Slack updater`.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
@@ -219,7 +231,7 @@ Ruff, all 23 focused tests, and `git diff --check` pass. Commit: `a83f713b65 fea
 
 <!-- agent:queue go priority -->
 - ~~Make the message have a key for the emojis so reads understand what each emoji means.~~
-- Make the script work standalone without an agent. Are you using the Slack mcp? Can we make this work without the Slack mcp?
+- ~~Make the script work standalone without an agent. Are you using the Slack mcp? Can we make this work without the Slack mcp?~~
 - There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`
 - Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.
 <!-- /agent:queue -->

@@ -127,7 +127,7 @@ The CLI help item and channel-ID-or-URL enhancement remain queued behind this co
 
 <!-- agent:queue go priority -->
 - 🚧 do [#helpexplaincommands]
-- Assign an icon that is the head of a PR stack and another icon for a PR that is not the head of a PR stack.
+- ~~Assign an icon that is the head of a PR stack and another icon for a PR that is not the head of a PR stack.~~ — auto-struck: answered this cycle (#ftstrike)
 - Make all the logic in a script if you have not already.
 - Make an icon for a merge conflict.
 - ~~Make the script take a gh user name(s) + repository name(s). Use the user name(s) + repository name(s) to create/edit a slack message with the status. If a message url is provided, that message will be updated...otherwise a new message will be created in a provided slack channel.~~

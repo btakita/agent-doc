@@ -14348,6 +14348,56 @@ fn supervisor_recycle_socket_for_pid(document: &Path, pid: u32) -> Result<Option
     Ok(None)
 }
 
+/// Resolve the authoritative document currently leased by `pid` when a
+/// preserved-child supervisor re-enters with a startup path that was renamed.
+///
+/// The caller supplies the reexec proof; this lookup supplies the durable
+/// ownership proof. It accepts only one non-closed actor whose current-generation
+/// lease names the same PID and whose document is still a file in the same
+/// project. Ambiguous or cross-project rows are never adopted.
+pub fn authoritative_reentry_document_for_pid(
+    startup_document: &Path,
+    pid: u32,
+) -> Result<Option<PathBuf>> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(startup_document)
+    else {
+        return Ok(None);
+    };
+    let conn = open_state_db(&project_root)?;
+    let store = load_actor_store_from_db(&conn)?;
+    let mut candidates = Vec::new();
+    for record in store.values() {
+        if record.state == agent_doc_controller::actor::ActorState::Closed {
+            continue;
+        }
+        let Some(lease) =
+            load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?
+        else {
+            continue;
+        };
+        if lease.supervisor_pid != Some(pid) {
+            continue;
+        }
+        let candidate = PathBuf::from(&record.document_id);
+        if !candidate.is_file()
+            || !agent_doc_project_root_io::project_root_containing(&candidate)
+                .is_some_and(|root| same_document_path(&root, &project_root))
+        {
+            continue;
+        }
+        candidates.push(candidate);
+    }
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [candidate] => Ok(Some(candidate.clone())),
+        _ => anyhow::bail!(
+            "supervisor pid {pid} has {} authoritative document leases in {}",
+            candidates.len(),
+            project_root.display(),
+        ),
+    }
+}
+
 fn request_supervisor_recycle_over_ipc(document: &Path, pid: u32) -> Result<()> {
     let socket = supervisor_recycle_socket_for_pid(document, pid)?.with_context(|| {
         format!(
@@ -14393,8 +14443,8 @@ fn deliver_supervisor_recycle_requests<C, M, I>(
     recycle_process: I,
 ) -> (usize, usize)
 where
-    C: Fn(&Path) -> Result<()>,
-    M: Fn(&Path) -> Result<()>,
+    C: Fn(&Path) -> Result<bool>,
+    M: Fn(&Path) -> Result<bool>,
     I: Fn(&Path, u32) -> Result<()>,
 {
     let mut by_document: BTreeMap<PathBuf, BTreeSet<u32>> = BTreeMap::new();
@@ -14405,7 +14455,18 @@ where
     let mut delivered = 0;
     let mut skipped = 0;
     for (document, pids) in by_document {
-        let document_delivery = checkpoint(&document).and_then(|()| mark_document(&document));
+        let document_delivery = checkpoint(&document)
+            .and_then(|observed| {
+                anyhow::ensure!(
+                    observed,
+                    "controller projection did not resolve a document identity"
+                );
+                mark_document(&document)
+            })
+            .and_then(|marked| {
+                anyhow::ensure!(marked, "recycle request had no document identity");
+                Ok(())
+            });
         if document_delivery.is_ok() {
             delivered += 1;
             continue;
@@ -14444,10 +14505,13 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
     Ok(deliver_supervisor_recycle_requests(
         processes,
         |document| {
-            checkpoint_route_owned_document_crdt(document, "supervisor_recycle_request").map(|_| ())
+            checkpoint_route_owned_document_crdt(document, "supervisor_recycle_request")
+                .map(|status| status.is_some())
         },
         |document| {
-            agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(document, reason)
+            agent_doc_supervisor_io::recycle_request::request_recycle_for_doc_observed(
+                document, reason,
+            )
         },
         request_supervisor_recycle_over_ipc,
     ))
@@ -53311,7 +53375,7 @@ mod tests {
             |_| anyhow::bail!("document path no longer resolves"),
             |document| {
                 marker_calls.borrow_mut().push(document.to_path_buf());
-                Ok(())
+                Ok(true)
             },
             |document, pid| {
                 ipc_calls.borrow_mut().push((document.to_path_buf(), pid));
@@ -53336,11 +53400,11 @@ mod tests {
             vec![(41, document.clone()), (42, document)],
             |_| {
                 checkpoints.set(checkpoints.get() + 1);
-                Ok(())
+                Ok(true)
             },
             |_| {
                 markers.set(markers.get() + 1);
-                Ok(())
+                Ok(true)
             },
             |_, _| {
                 ipc_calls.set(ipc_calls.get() + 1);
@@ -53360,11 +53424,54 @@ mod tests {
         let outcome = deliver_supervisor_recycle_requests(
             vec![(41, stale)],
             |_| anyhow::bail!("document path no longer resolves"),
-            |_| Ok(()),
+            |_| Ok(true),
             |_, _| anyhow::bail!("lease socket unavailable"),
         );
 
         assert_eq!(outcome, (0, 1));
+    }
+
+    #[test]
+    fn recycle_fanout_falls_back_when_checkpoint_returns_no_document() {
+        use std::cell::Cell;
+
+        // Live reproduction: a removed startup path produced `Ok(None)` from
+        // checkpointing. Mapping that to unit made the fan-out count success
+        // and never reach the PID-addressed fallback.
+        let marker_calls = Cell::new(0);
+        let ipc_calls = Cell::new(0);
+        let outcome = deliver_supervisor_recycle_requests(
+            vec![(3806401, PathBuf::from("/project/tasks/betterstack.md"))],
+            |_| Ok(false),
+            |_| {
+                marker_calls.set(marker_calls.get() + 1);
+                Ok(false)
+            },
+            |_, pid| {
+                assert_eq!(pid, 3806401);
+                ipc_calls.set(ipc_calls.get() + 1);
+                Ok(())
+            },
+        );
+
+        assert_eq!(outcome, (1, 0));
+        assert_eq!(marker_calls.get(), 0);
+        assert_eq!(ipc_calls.get(), 1);
+    }
+
+    #[test]
+    fn recycle_fanout_falls_back_when_marker_reports_identity_noop() {
+        let outcome = deliver_supervisor_recycle_requests(
+            vec![(3806401, PathBuf::from("/project/tasks/betterstack.md"))],
+            |_| Ok(true),
+            |_| Ok(false),
+            |_, pid| {
+                assert_eq!(pid, 3806401);
+                Ok(())
+            },
+        );
+
+        assert_eq!(outcome, (1, 0));
     }
 
     #[test]
@@ -53399,6 +53506,56 @@ mod tests {
             Some(PathBuf::from("/run/user/1000/agent-doc/renamed.sock"))
         );
         assert_eq!(supervisor_recycle_socket_for_pid(&stale, 42).unwrap(), None);
+        assert_eq!(
+            authoritative_reentry_document_for_pid(&stale, 41).unwrap(),
+            Some(current.clone()),
+            "same-PID current-generation lease recovers the renamed document"
+        );
+        assert_eq!(
+            authoritative_reentry_document_for_pid(&stale, 42).unwrap(),
+            None,
+            "a foreign process cannot adopt the authoritative document"
+        );
+    }
+
+    #[test]
+    fn reentry_document_rejects_closed_or_missing_authority() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let current = dir.path().join("tasks/current-name.md");
+        let stale = dir.path().join("tasks/old-name.md");
+        std::fs::write(&current, "body\n").unwrap();
+
+        let bootstrap = test_bootstrap(&dir);
+        let document_id = current.to_string_lossy().to_string();
+        let mut actor =
+            ready_actor_for_start_alias_test(&bootstrap, &document_id, "session", 2, "%1", "@1");
+        actor.state = agent_doc_controller::actor::ActorState::Closed;
+        store_actor_record(&bootstrap.project_root, None, &actor).unwrap();
+        upsert_supervisor_lease(
+            &bootstrap.project_root,
+            &actor,
+            Some(41),
+            Some("/run/user/1000/agent-doc/renamed.sock"),
+            "closed",
+        )
+        .unwrap();
+
+        assert_eq!(
+            authoritative_reentry_document_for_pid(&stale, 41).unwrap(),
+            None,
+            "closed actors are not reentry authority"
+        );
+
+        actor.state = agent_doc_controller::actor::ActorState::Ready;
+        store_actor_record(&bootstrap.project_root, Some(2), &actor).unwrap();
+        std::fs::remove_file(&current).unwrap();
+        assert_eq!(
+            authoritative_reentry_document_for_pid(&stale, 41).unwrap(),
+            None,
+            "a second removed path is not a valid recovery target"
+        );
     }
 
     #[test]

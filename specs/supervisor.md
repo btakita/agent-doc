@@ -900,10 +900,20 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   document-hash recycle marker that process polls, fan-out resolves the
   authoritative supervisor lease by PID, verifies the socket reports that same
   PID, and sends the existing safe-boundary `restart continue` lifecycle intent
-  over supervisor IPC. A missing lease, PID mismatch, unreachable socket, or IPC
-  refusal is counted as skipped; fan-out never signals or kills an unverified
-  process. The normal document marker remains the deduplicated primary delivery
-  for resolvable paths.
+  over supervisor IPC. Both rungs require positive delivery evidence:
+  checkpoint `Ok(None)` and the compatibility marker writer's absent-identity
+  `Ok(())` are no-ops, not successful scheduling. The observed marker API makes
+  that latter result explicit, and either absence enters the lease/PID fallback.
+  A missing lease, PID mismatch, unreachable socket, or IPC refusal is counted
+  as skipped; fan-out never signals or kills an unverified process. The normal
+  document marker remains the deduplicated primary delivery for resolvable paths.
+  A successful same-process `execve` also revalidates its startup document before
+  admission. If the replayed argv path was removed by a rename, a preserved-child
+  reentry may adopt exactly one existing, non-closed document whose authoritative
+  current-generation supervisor lease names its unchanged PID in the same project.
+  This lease recovery is unavailable to ordinary starts, foreign PIDs, closed
+  actors, missing replacement files, and ambiguous matches; those cases retain
+  the requested path and fail normally rather than redirecting ownership.
 - `#wd40` / `#supboundarylivelock` state-flush: an explicit `admin recycle`
   recycles at the first supervisor-safe checkpoint even when the installed binary
   already matches the running supervisor (`supervisor:fresh`). A checkpoint is

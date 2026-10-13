@@ -875,12 +875,40 @@ pub fn run_with_reap_policy_resume_and_harness(
     let preserved_child_survived = pending_adopt
         .as_ref()
         .is_some_and(|state| state.child_survived());
+    // `#reexecrenameadopt`: execve necessarily replays the outgoing argv, but
+    // the document may have been renamed while its child remained live. Only a
+    // genuine preserved-child reentry may consult the durable same-PID lease;
+    // ordinary starts keep the requested path and therefore cannot be redirected
+    // by a stale/reused PID row. The lease lookup additionally requires one
+    // non-closed, existing document in this project.
+    let reentry_file = if preserved_child_survived && !file.exists() {
+        match agent_doc_controller_io::project_controller::authoritative_reentry_document_for_pid(
+            file,
+            std::process::id(),
+        )? {
+            Some(authoritative) => {
+                agent_doc_ops_log_io::log_op(
+                    &authoritative,
+                    &format!(
+                        "supervisor_reexec_document_adopted stale_startup_path={} authoritative_document={} supervisor_pid={}",
+                        file.display(),
+                        authoritative.display(),
+                        std::process::id(),
+                    ),
+                );
+                authoritative
+            }
+            None => file.to_path_buf(),
+        }
+    } else {
+        file.to_path_buf()
+    };
     // `#perfpanebleed`: an execve hot-reload adopts a child whose TUI is
     // already live on the pane, so fd2 must leave the pane before this image
     // writes anything — not only once start admission reaches the harness-aware
     // redirect. Declared first so it is dropped last.
     let _reexec_stderr_redirect = if preserved_child_survived {
-        agent_doc_project_root_io::project_root_containing(file)
+        agent_doc_project_root_io::project_root_containing(&reentry_file)
             .map(|root| {
                 agent_doc_supervisor_process_io::SupervisorStderrRedirect::start_for_surviving_child_reexec(
                     &root,
@@ -909,7 +937,7 @@ pub fn run_with_reap_policy_resume_and_harness(
         actor_record,
         post_start_document_model_ensure,
     } = if preserved_child_survived {
-        prepare_start_runtime_reentry(file, force, route_owned)?
+        prepare_start_runtime_reentry(&reentry_file, force, route_owned)?
     } else {
         if let Some(harness_override) = harness_override.as_deref() {
             agent_doc_start_io::prepare_start_runtime_with_harness_and_purpose(
@@ -969,7 +997,7 @@ pub fn run_with_reap_policy_resume_and_harness(
     // won't match — migrate state files or bootstrap a fresh snapshot before
     // the IPC listener starts. Prevents CRDT corruption from stale state.
     match agent_doc_workflow_io::document_init::ensure_initialized(
-        file,
+        &reentry_file,
         agent_doc_commit_io::commit,
         agent_doc_ops_log_io::log_op,
     ) {

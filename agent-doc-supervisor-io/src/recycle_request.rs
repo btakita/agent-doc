@@ -19,10 +19,11 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Write (or refresh) a recycle-request for `file` with the current heartbeat.
-pub fn request_recycle(file: &str, reason: &str) -> Result<()> {
+/// Write (or refresh) a recycle-request for `file` with the current heartbeat,
+/// returning whether a document identity actually accepted the event.
+fn request_recycle_observed(file: &str, reason: &str) -> Result<bool> {
     let Some(identity) = crate::state_events::document_state_identity(Path::new(file))? else {
-        return Ok(());
+        return Ok(false);
     };
     let ledger = crate::state_events::load_document_ledger_shared(
         &identity.project_root,
@@ -47,7 +48,12 @@ pub fn request_recycle(file: &str, reason: &str) -> Result<()> {
         "recycle request generation collision for {} at epoch {recycle_epoch}",
         identity.canonical_file.display(),
     );
-    Ok(())
+    Ok(true)
+}
+
+/// Write (or refresh) a recycle-request for `file` with the current heartbeat.
+pub fn request_recycle(file: &str, reason: &str) -> Result<()> {
+    request_recycle_observed(file, reason).map(|_| ())
 }
 
 /// Compatibility ledger high-water, not the number of retained events. History
@@ -76,6 +82,16 @@ fn next_recycle_epoch(
 /// Write (or refresh) a recycle-request for a document path.
 pub fn request_recycle_for_doc(file: &Path, reason: &str) -> Result<()> {
     request_recycle(&file.to_string_lossy(), reason)
+}
+
+/// Write a recycle request and report positive delivery evidence.
+///
+/// Unlike the compatibility unit-returning API, `Ok(false)` distinguishes a
+/// removed/renamed document whose state identity is absent. Fleet fan-out uses
+/// this evidence to fall back to the PID-verified supervisor lifecycle socket
+/// instead of counting a no-op as scheduled.
+pub fn request_recycle_for_doc_observed(file: &Path, reason: &str) -> Result<bool> {
+    request_recycle_observed(&file.to_string_lossy(), reason)
 }
 
 /// Read the raw recycle-request for `file` regardless of freshness.
@@ -237,6 +253,19 @@ fn clear_recycle_request_inner(file: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn observed_request_reports_removed_document_identity_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let removed = dir.path().join("tasks/removed.md");
+
+        assert!(!removed.exists());
+        assert!(
+            !request_recycle_for_doc_observed(&removed, "install_fanout").unwrap(),
+            "an absent identity is not evidence that a recycle request was delivered"
+        );
+    }
 
     #[test]
     fn compacted_history_cannot_reuse_or_regress_recycle_generations() {

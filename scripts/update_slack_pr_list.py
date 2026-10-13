@@ -44,6 +44,41 @@ UNADDRESSED_MARK = ":warning:"
 STACK_HEAD_MARK = ":crown:"
 STACK_MEMBER_MARK = ":link:"
 
+HELP_EPILOG = """\
+COMMAND MODES
+  Create: omit --message, provide --channel and one or more repository targets.
+  Update: provide --message as a Slack timestamp or permalink. Existing entries
+          are retained, closed entries are struck, and new open PRs are appended.
+  Preview: add --dry-run to print the reconciled message without writing Slack.
+
+REPOSITORY TARGETS
+  Repeat --github-user and --repository, or comma-separate their values. Bare
+  repository names expand across every supplied GitHub owner. OWNER/REPO values
+  are accepted directly and do not require --github-user.
+
+MESSAGE FORMAT
+  Each PR is rendered as a numbered Slack link followed by its title, review
+  marker, then stack-position marker. Closed or merged entries are struck.
+
+EMOJI MEANINGS
+  :white_check_mark:  approved, with no active change-request review
+  :eyes:              changes addressed by a newer commit; ready for re-review
+  :warning:           requested changes still target the current head
+  :crown:             tip/head of a multi-PR stack
+  :link:              root or intermediate member of a multi-PR stack
+  (no stack emoji)    standalone PR
+
+EXAMPLES
+  Create a message:
+    update_slack_pr_list.py --github-user haiven-dev \\
+      --repository haiven-sdk --repository haiven-api --channel C012ABCDEF
+
+  Update a message by permalink:
+    update_slack_pr_list.py --github-user haiven-dev \\
+      --repository haiven-sdk,haiven-api \\
+      --message https://workspace.slack.com/archives/C012ABCDEF/p1234567890123456
+"""
+
 
 class UpdateError(RuntimeError):
     """A recoverable command-line failure with a concise user-facing message."""
@@ -537,7 +572,11 @@ def _summary(result: ReconcileResult, changed: bool) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=HELP_EPILOG,
+    )
     parser.add_argument("--channel", default="", help="Slack channel ID, such as C012ABCDEF")
     parser.add_argument(
         "--message",

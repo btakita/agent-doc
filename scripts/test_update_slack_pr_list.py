@@ -39,6 +39,26 @@ class ParseTargetTests(unittest.TestCase):
             ("C0C8LPQ7NS1", "1791874207.231429"),
         )
 
+    def test_help_explains_modes_arguments_format_and_emojis(self) -> None:
+        help_text = subject.build_parser().format_help()
+        for expected in (
+            "COMMAND MODES",
+            "REPOSITORY TARGETS",
+            "MESSAGE FORMAT",
+            "EMOJI MEANINGS",
+            "--github-user",
+            "--repository",
+            "--channel",
+            "--message",
+            ":white_check_mark:",
+            ":eyes:",
+            ":warning:",
+            ":crown:",
+            ":link:",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, help_text)
+
     def test_parses_permalink(self) -> None:
         self.assertEqual(
             subject.parse_target(

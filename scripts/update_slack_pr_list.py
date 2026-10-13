@@ -48,6 +48,13 @@ STACK_HEAD_MARK = ":crown:"
 STACK_MEMBER_MARK = ":link:"
 MERGE_CONFLICT_MARK = ":boom:"
 LOG = logging.getLogger("update-slack-pr-list")
+EMOJI_KEY_PREFIX = "Emoji key:"
+EMOJI_KEY_LINE_RE = re.compile(r"^\s*[*_]*Emoji key:[*_]*")
+EMOJI_KEY = (
+    f"{EMOJI_KEY_PREFIX} :white_check_mark: approved · "
+    ":eyes: ready for re-review · :warning: changes requested · "
+    ":crown: stack head · :link: stack member · :boom: merge conflict"
+)
 
 HELP_EPILOG = """\
 COMMAND MODES
@@ -64,8 +71,9 @@ REPOSITORY TARGETS
   are accepted directly and do not require --github-user.
 
 MESSAGE FORMAT
-  Each PR is rendered as a numbered Slack link followed by its title, review
-  marker, then stack-position marker. Closed or merged entries are struck.
+  An emoji key precedes numbered PR links. Each PR line contains its title,
+  review marker, then stack-position and conflict markers. Closed or merged
+  entries are struck.
 
 EMOJI MEANINGS
   :white_check_mark:  approved, with no active change-request review
@@ -398,6 +406,14 @@ def _escape_slack_text(value: str) -> str:
     return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def with_emoji_key(text: str) -> str:
+    """Place exactly one current emoji key before the pull-request list."""
+    body = "\n".join(
+        line for line in text.splitlines() if not EMOJI_KEY_LINE_RE.match(line)
+    ).strip("\n")
+    return f"{EMOJI_KEY}\n\n{body}" if body else EMOJI_KEY
+
+
 def augment_message_with_open_pull_requests(
     text: str, listings: Iterable[PullRequestListing]
 ) -> str:
@@ -713,6 +729,7 @@ def run_once(args: argparse.Namespace) -> int:
         original = "_No open pull requests._"
     if not refs and not targets:
         raise UpdateError("the Slack message contains no GitHub pull-request URLs")
+    original = with_emoji_key(original)
     result = reconcile_message(original, fetch_all_statuses(refs))
     changed = result.text != original
     if args.dry_run:

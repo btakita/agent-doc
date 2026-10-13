@@ -279,6 +279,18 @@ class ReconcileTests(unittest.TestCase):
 
 
 class GeneratedMessageTests(unittest.TestCase):
+    def test_emoji_key_is_added_once_and_replaced(self) -> None:
+        message = (
+            "_Emoji key:_ old meanings\n\n"
+            "1. <https://github.com/haiven-dev/widgets/pull/1|widgets #1> title"
+        )
+
+        updated = subject.with_emoji_key(message)
+
+        self.assertTrue(updated.startswith(subject.EMOJI_KEY + "\n\n1."))
+        self.assertEqual(updated.count(subject.EMOJI_KEY_PREFIX), 1)
+        self.assertEqual(subject.with_emoji_key(updated), updated)
+
     def test_appends_only_missing_open_pull_requests(self) -> None:
         first = subject.PullRequestListing(
             subject.PullRequestRef("haiven-dev", "widgets", 1), "already present"
@@ -345,6 +357,7 @@ class GeneratedMessageTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         create.assert_called_once()
         self.assertIn("widgets #4", create.call_args.args[2])
+        self.assertTrue(create.call_args.args[2].startswith(subject.EMOJI_KEY))
 
     def test_watch_polls_and_hot_reloads_after_source_change(self) -> None:
         args = subject.build_parser().parse_args(

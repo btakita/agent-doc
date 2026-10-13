@@ -100,16 +100,38 @@ Committed the isolated changes as `8258148a25` (`fix: distinguish Slack PR revie
 Verification passed for `python scripts/test_update_slack_pr_list.py`, `python -m py_compile scripts/update_slack_pr_list.py scripts/test_update_slack_pr_list.py`, `ruff check scripts/update_slack_pr_list.py scripts/test_update_slack_pr_list.py`, `git diff --check`, a live GitHub-backed `--dry-run` against `haiven-dev/haiven-cli`, and Slack readback. The final authoritative `make check` reached 1,528 tests: 1,527 passed and the same pre-existing development-skill bundle mismatch failed; the unrelated dirty skill files were preserved. The latest GitHub Actions CI run completed successfully.
 
 The remaining icon, event/hot-reload/logging, and eventual `haiven-tools`/`uvx`/PR requests remain queued in operator order.
+
+### Re: PR stack position icons — gpt-5 · 2026-10-13T19:32-04:00
+
+> **Queue prompt:** Assign an icon that is the head of a PR stack and another icon for a PR that is not the head of a PR stack.
+
+Completed. The updater now derives same-repository PR chains from each open pull request's base and head branches:
+
+- `:crown:` marks the tip/head of a multi-PR stack: it depends on another open PR and no open PR in the message depends on it.
+- `:link:` marks root and intermediate members of a multi-PR stack.
+- Standalone PRs receive no stack-position marker.
+
+The stack marker is independent of the review marker, so entries can show combinations such as `:eyes: :crown:` or `:white_check_mark: :link:`. Closed and merged entries are struck and have managed status markers removed.
+
+Applied the classification to the target Slack message and verified readback. Current stack tips are SDK #110, #114, #115, #131 and CLI #2. Other stack members are SDK #113, SDK #124 and CLI #1.
+
+Added regression coverage for a root → intermediate → tip chain, standalone PR handling, stale-marker replacement, and idempotent reconciliation. Committed exactly the updater and test files as `b20ed0da58` (`feat: mark pull request stack positions`).
+
+Focused tests, bytecode compilation, Ruff, diff checks, and Slack readback passed. The latest GitHub Actions CI run is green. The authoritative `make check` again reached 1,528 tests with 1,527 passing; only the pre-existing dirty development-skill bundle mismatch failed, and those unrelated edits were preserved.
+
+The CLI help item and channel-ID-or-URL enhancement remain queued behind this completed item.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue go priority -->
+- 🚧 do [#helpexplaincommands]
 - Assign an icon that is the head of a PR stack and another icon for a PR that is not the head of a PR stack.
 - Make all the logic in a script if you have not already.
 - Make an icon for a merge conflict.
-- ~~Make the script take a gh user name(s) + repository name(s). Use the user name(s) + repository name(s) to create/edit a slack message with the status. If a message url is provided, that message will be updated...otherwise a new message will be created in a provided slack channel.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Make the script take a gh user name(s) + repository name(s). Use the user name(s) + repository name(s) to create/edit a slack message with the status. If a message url is provided, that message will be updated...otherwise a new message will be created in a provided slack channel.~~
+- Make the channel cli arg take an id or url.
 - Make the script use events (preferably) or poll and support hot reloading + logs for agents + humans to see activity.
 - Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.
 <!-- /agent:queue -->
@@ -117,6 +139,7 @@ The remaining icon, event/hot-reload/logging, and eventual `haiven-tools`/`uvx`/
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#helpexplaincommands] Add a help to explain the commands + cli args + format + emoji meanings
 <!-- /agent:backlog -->
 
 ## Icebox

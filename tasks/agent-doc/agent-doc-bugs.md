@@ -314,7 +314,7 @@ Version `0.35.498` was projected, committed as `b9c80b963c`, tagged, and pushed 
 GitHub's asynchronous Release workflow remains active: plugins and five platform artifact jobs are green, while Intel Darwin is still building; main CI is also in progress. The GitHub Release object and PyPI upload therefore are not terminal yet. Homebrew automation cannot run because `HOMEBREW_TAP_TOKEN` is absent, although the current GitHub account has admin access to the tap. Follow-up `#publish498verify` records terminal publication verification and the manual tap update once `SHA256SUMS` is available.
 
 The exchange remains above the session-accretion warning threshold; the active queue was drained without compacting because auto-compaction is not enabled.
-❯ 🚧 #subagent lazily.md issue:
+❯ #subagent lazily.md issue:
 ```
 • Blocked by hook
   └ agent-doc Stop hook retained the exact closeout for /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
@@ -353,11 +353,11 @@ Concurrent queue work: GitHub issue #249 was claimed and dispatched to a fresh i
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/248~~
-- ~~agent-doc is still thrashing while idle.~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/249
+- #gh-fix https://github.com/btakita/agent-doc/issues/250
 - release + publish
 - do [#publish498verify]
+- [from:coordinator key=residual-idle-20261013] agent-doc is still thrashing while idle.
 <!-- /agent:queue -->
 
 ## Backlog

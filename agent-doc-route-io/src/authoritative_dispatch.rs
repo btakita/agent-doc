@@ -424,6 +424,15 @@ pub fn route_via_authoritative_actor(
                 let outcome = live_owner_turn_route_outcome(file, head, verdict, explicit);
                 eprintln!("{}", outcome.message());
                 outcome.record(file, explicit);
+                // A live owner can be doing the right work in an off-screen
+                // pane. The explicit-send result still succeeds, but the
+                // editor must not mistake transport delivery for visibility.
+                crate::invocation::report_pane_if_not_visible(
+                    tmux,
+                    file,
+                    &dispatch_pane,
+                    "route_live_owner_target_not_visible",
+                );
                 return Ok(dispatch_pane);
             }
             match dispatch_decision {
@@ -460,6 +469,12 @@ pub fn route_via_authoritative_actor(
                         );
                         eprintln!("{message}");
                         crate::invocation::record_route_live_owner_turn(message);
+                        crate::invocation::report_pane_if_not_visible(
+                            tmux,
+                            file,
+                            &dispatch_pane,
+                            "route_live_owner_target_not_visible",
+                        );
                         return Ok(dispatch_pane);
                     }
                     let deferral = format!(
@@ -512,6 +527,12 @@ pub fn route_via_authoritative_actor(
                     );
                     eprintln!("{}", outcome.message());
                     outcome.record(file, explicit);
+                    crate::invocation::report_pane_if_not_visible(
+                        tmux,
+                        file,
+                        &dispatch_pane,
+                        "route_closeout_wait_target_not_visible",
+                    );
                     return Ok(dispatch_pane);
                 }
                 CloseoutBlockDispatchDecision::FailClosed => {

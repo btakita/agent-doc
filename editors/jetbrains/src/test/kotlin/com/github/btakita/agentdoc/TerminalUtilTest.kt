@@ -37,7 +37,7 @@ class TerminalUtilTest {
     }
 
     @Test
-    fun `route success into a client-less tmux session surfaces the not-visible notice`() {
+    fun `route success into an off-screen tmux pane surfaces the not-visible notice`() {
         val notice = "[route] pane-not-visible: tasks/a.md runs in pane %2 of tmux session '0', " +
             "which has no attached client (attached client(s) show session(s) '1'); its harness " +
             "output is not on any screen. Attach with: tmux attach-session -t 0"
@@ -45,6 +45,17 @@ class TerminalUtilTest {
             notice,
             TerminalUtil.routePaneNotVisibleNotice(
                 "[route] dispatched via controller editor_route for tasks/a.md\n$notice",
+            ),
+        )
+        val inactiveWindowNotice =
+            "[route] pane-not-visible: tasks/a.md runs in pane %192 of inactive tmux window " +
+                "'stash' (@1) in attached session '0'; its harness output is off-screen. " +
+                "Return editor focus to this document or show it with: " +
+                "tmux select-window -t @1 \\; select-pane -t '%192'"
+        assertEquals(
+            inactiveWindowNotice,
+            TerminalUtil.routePaneNotVisibleNotice(
+                "[route] delivered steering to the live owner\n$inactiveWindowNotice",
             ),
         )
         assertNull(

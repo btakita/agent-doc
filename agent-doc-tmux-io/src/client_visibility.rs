@@ -1,4 +1,4 @@
-//! Which tmux sessions an operator can actually see (GH #243).
+//! Which tmux panes an operator can actually see (GH #243).
 //!
 //! A tmux session with no attached client is invisible: anything agent-doc
 //! starts or submits there runs on no screen. The ambient "current session"
@@ -9,7 +9,9 @@
 //! route-owned panes started there and every Submit answered off-screen.
 //!
 //! This module observes attached clients and decides, purely, which session an
-//! ambient lookup should resolve to and whether a pane is on any screen.
+//! ambient lookup should resolve to and whether a pane is on any screen. An
+//! attached session is not sufficient visibility: its client can be showing a
+//! different window, or the target pane can be hidden behind a zoomed sibling.
 
 use std::path::Path;
 
@@ -182,36 +184,127 @@ pub fn ambient_current_session_for_process(tmux: &tmux_router::Tmux) -> Option<A
     ambient_current_session(tmux, current_pane.as_deref())
 }
 
-/// A pane that lives in a tmux session no client is attached to.
+/// Why a live pane is not currently visible on an attached tmux client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneNotVisibleReason {
+    UnattachedSession,
+    InactiveWindow,
+    HiddenByZoom,
+}
+
+impl PaneNotVisibleReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UnattachedSession => "unattached_session",
+            Self::InactiveWindow => "inactive_window",
+            Self::HiddenByZoom => "hidden_by_zoom",
+        }
+    }
+}
+
+/// A live pane that is not on any attached client's screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnwatchedPane {
     pub pane: String,
     pub session: String,
+    pub window_id: Option<String>,
+    pub window_name: Option<String>,
+    pub reason: PaneNotVisibleReason,
     /// The shell command that attaches a terminal to `session`.
     pub attach_command: String,
+    /// The shell command that reveals this exact pane in its existing session.
+    pub reveal_command: String,
     /// Sessions that do have a client attached (where the operator is looking).
     pub watched_sessions: Vec<String>,
 }
 
-/// `Some` when `pane` lives in a session with no attached client: whatever
-/// runs there is on no screen. `None` when a client shows the pane's session,
-/// or the pane's session cannot be read (nothing to report).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PaneScreenObservation {
+    window_id: String,
+    window_name: String,
+    window_active: bool,
+    window_zoomed: bool,
+    pane_active: bool,
+}
+
+fn parse_pane_screen_observation(output: &str) -> Option<PaneScreenObservation> {
+    let mut fields = output.trim_end().splitn(5, '\t');
+    let window_id = fields.next()?.trim();
+    let window_name = fields.next()?.trim();
+    let window_active = fields.next()?.trim() == "1";
+    let window_zoomed = fields.next()?.trim() == "1";
+    let pane_active = fields.next()?.trim() == "1";
+    if window_id.is_empty() {
+        return None;
+    }
+    Some(PaneScreenObservation {
+        window_id: window_id.to_string(),
+        window_name: window_name.to_string(),
+        window_active,
+        window_zoomed,
+        pane_active,
+    })
+}
+
+fn observe_pane_screen(tmux: &tmux_router::Tmux, pane: &str) -> Option<PaneScreenObservation> {
+    crate::display_message_value(
+        tmux,
+        Some(pane),
+        "#{window_id}\t#{window_name}\t#{window_active}\t#{window_zoomed_flag}\t#{pane_active}",
+    )
+    .and_then(|output| parse_pane_screen_observation(&output))
+}
+
+/// `Some` when `pane` is not on an attached client's screen. That includes an
+/// unattached session, an inactive window inside an attached session, and a
+/// pane hidden behind a zoomed sibling. `None` means the pane is visible or its
+/// screen placement cannot be read (nothing to report).
 pub fn unwatched_pane(tmux: &tmux_router::Tmux, pane: &str) -> Option<UnwatchedPane> {
     let session = tmux.pane_session(pane).ok().filter(|s| !s.is_empty())?;
     let clients = attached_clients(tmux);
-    if clients.iter().any(|client| client.session == session) {
-        return None;
-    }
+    let session_is_watched = clients.iter().any(|client| client.session == session);
     let mut watched_sessions = clients
         .into_iter()
         .map(|client| client.session)
         .collect::<Vec<_>>();
     watched_sessions.sort();
     watched_sessions.dedup();
+    let attach_command = attach_session_command(tmux.server_socket.as_deref(), &session);
+    if !session_is_watched {
+        return Some(UnwatchedPane {
+            pane: pane.to_string(),
+            session,
+            window_id: None,
+            window_name: None,
+            reason: PaneNotVisibleReason::UnattachedSession,
+            reveal_command: attach_command.clone(),
+            attach_command,
+            watched_sessions,
+        });
+    }
+
+    let screen = observe_pane_screen(tmux, pane)?;
+    let reason = if !screen.window_active {
+        PaneNotVisibleReason::InactiveWindow
+    } else if screen.window_zoomed && !screen.pane_active {
+        PaneNotVisibleReason::HiddenByZoom
+    } else {
+        return None;
+    };
+    let reveal_command = reveal_pane_command(
+        tmux.server_socket.as_deref(),
+        &screen.window_id,
+        pane,
+        reason == PaneNotVisibleReason::HiddenByZoom,
+    );
     Some(UnwatchedPane {
         pane: pane.to_string(),
-        attach_command: attach_session_command(tmux.server_socket.as_deref(), &session),
         session,
+        window_id: Some(screen.window_id),
+        window_name: Some(screen.window_name),
+        reason,
+        attach_command,
+        reveal_command,
         watched_sessions,
     })
 }
@@ -219,11 +312,34 @@ pub fn unwatched_pane(tmux: &tmux_router::Tmux, pane: &str) -> Option<UnwatchedP
 /// `tmux attach-session -t <session>`, carrying the isolated server socket when
 /// agent-doc talks to one.
 pub fn attach_session_command(server_socket: Option<&str>, session: &str) -> String {
-    let prefix = server_socket.map_or_else(
+    let prefix = tmux_command_prefix(server_socket);
+    format!("{prefix} attach-session -t {}", shell_word(session))
+}
+
+fn tmux_command_prefix(server_socket: Option<&str>) -> String {
+    server_socket.map_or_else(
         || "tmux".to_string(),
         |socket| format!("tmux -L {} -f /dev/null", shell_word(socket)),
-    );
-    format!("{prefix} attach-session -t {}", shell_word(session))
+    )
+}
+
+fn reveal_pane_command(
+    server_socket: Option<&str>,
+    window_id: &str,
+    pane: &str,
+    unzoom: bool,
+) -> String {
+    let prefix = tmux_command_prefix(server_socket);
+    let unzoom = if unzoom {
+        format!(" \\; resize-pane -Z -t {}", shell_word(pane))
+    } else {
+        String::new()
+    };
+    format!(
+        "{prefix} select-window -t {} \\; select-pane -t {}{unzoom}",
+        shell_word(window_id),
+        shell_word(pane),
+    )
 }
 
 fn shell_word(value: &str) -> String {
@@ -243,26 +359,50 @@ pub const PANE_NOT_VISIBLE_MARKER: &str = "[route] pane-not-visible:";
 
 /// Operator-facing notice for a dispatch or start into an unwatched pane.
 pub fn pane_not_visible_notice(file: &Path, target: &UnwatchedPane) -> String {
-    let watched = if target.watched_sessions.is_empty() {
-        "no tmux client is attached to any session".to_string()
-    } else {
-        format!(
-            "attached client(s) show session(s) {}",
-            target
-                .watched_sessions
-                .iter()
-                .map(|session| format!("'{session}'"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-    format!(
-        "{PANE_NOT_VISIBLE_MARKER} {} runs in pane {} of tmux session '{}', which has no attached client ({watched}); its harness output is not on any screen. Attach with: {}",
-        file.display(),
-        target.pane,
-        target.session,
-        target.attach_command,
-    )
+    match target.reason {
+        PaneNotVisibleReason::UnattachedSession => {
+            let watched = if target.watched_sessions.is_empty() {
+                "no tmux client is attached to any session".to_string()
+            } else {
+                format!(
+                    "attached client(s) show session(s) {}",
+                    target
+                        .watched_sessions
+                        .iter()
+                        .map(|session| format!("'{session}'"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            format!(
+                "{PANE_NOT_VISIBLE_MARKER} {} runs in pane {} of tmux session '{}', which has no attached client ({watched}); its harness output is not on any screen. Attach with: {}",
+                file.display(),
+                target.pane,
+                target.session,
+                target.attach_command,
+            )
+        }
+        PaneNotVisibleReason::InactiveWindow | PaneNotVisibleReason::HiddenByZoom => {
+            let window_id = target.window_id.as_deref().unwrap_or("unknown");
+            let window_name = target.window_name.as_deref().unwrap_or("unknown");
+            let why = match target.reason {
+                PaneNotVisibleReason::InactiveWindow => {
+                    format!("inactive tmux window '{window_name}' ({window_id})")
+                }
+                PaneNotVisibleReason::HiddenByZoom => {
+                    format!("tmux window '{window_name}' ({window_id}), zoomed on another pane")
+                }
+                PaneNotVisibleReason::UnattachedSession => unreachable!(),
+            };
+            format!(
+                "{PANE_NOT_VISIBLE_MARKER} {} runs in pane {} of {why} in attached session '{}'; its harness output is off-screen. Return editor focus to this document or show it with: {}",
+                file.display(),
+                target.pane,
+                target.session,
+                target.reveal_command,
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -346,13 +486,42 @@ mod tests {
     }
 
     #[test]
+    fn pane_screen_observation_distinguishes_inactive_and_zoom_hidden_panes() {
+        assert_eq!(
+            parse_pane_screen_observation("@1\tstash\t0\t0\t0\n"),
+            Some(PaneScreenObservation {
+                window_id: "@1".to_string(),
+                window_name: "stash".to_string(),
+                window_active: false,
+                window_zoomed: false,
+                pane_active: false,
+            })
+        );
+        assert_eq!(
+            parse_pane_screen_observation("@2\tagent-doc\t1\t1\t0\n"),
+            Some(PaneScreenObservation {
+                window_id: "@2".to_string(),
+                window_name: "agent-doc".to_string(),
+                window_active: true,
+                window_zoomed: true,
+                pane_active: false,
+            })
+        );
+        assert_eq!(parse_pane_screen_observation("\tbad\t0\t0\t0"), None);
+    }
+
+    #[test]
     fn notice_names_session_pane_and_attach_command() {
         let notice = pane_not_visible_notice(
             Path::new("tasks/doc-a.md"),
             &UnwatchedPane {
                 pane: "%2".to_string(),
                 session: "0".to_string(),
+                window_id: None,
+                window_name: None,
+                reason: PaneNotVisibleReason::UnattachedSession,
                 attach_command: attach_session_command(None, "0"),
+                reveal_command: attach_session_command(None, "0"),
                 watched_sessions: vec!["1".to_string()],
             },
         );
@@ -366,6 +535,33 @@ mod tests {
         assert_eq!(
             attach_session_command(Some("iso sock"), "my session"),
             "tmux -L 'iso sock' -f /dev/null attach-session -t 'my session'"
+        );
+    }
+
+    #[test]
+    fn notice_names_inactive_window_and_exact_reveal_command() {
+        let notice = pane_not_visible_notice(
+            Path::new("tasks/doc-a.md"),
+            &UnwatchedPane {
+                pane: "%192".to_string(),
+                session: "0".to_string(),
+                window_id: Some("@1".to_string()),
+                window_name: Some("stash".to_string()),
+                reason: PaneNotVisibleReason::InactiveWindow,
+                attach_command: attach_session_command(None, "0"),
+                reveal_command: reveal_pane_command(None, "@1", "%192", false),
+                watched_sessions: vec!["0".to_string()],
+            },
+        );
+        assert!(notice.starts_with(PANE_NOT_VISIBLE_MARKER), "{notice}");
+        assert!(
+            notice.contains("inactive tmux window 'stash' (@1)"),
+            "{notice}"
+        );
+        assert!(notice.contains("attached session '0'"), "{notice}");
+        assert!(
+            notice.ends_with("tmux select-window -t @1 \\; select-pane -t '%192'"),
+            "{notice}"
         );
     }
 
@@ -402,9 +598,51 @@ mod tests {
 
         let unwatched = unwatched_pane(&iso, &detached_pane).unwrap();
         assert_eq!(unwatched.session, "0");
+        assert_eq!(unwatched.reason, PaneNotVisibleReason::UnattachedSession);
         assert_eq!(unwatched.watched_sessions, vec!["1".to_string()]);
         assert!(unwatched.attach_command.contains("attach-session -t 0"));
         assert_eq!(unwatched_pane(&iso, &watched_pane), None);
+
+        // An attached session can still hide a pane in an inactive window.
+        let hidden_pane = iso
+            .raw_cmd(&[
+                "new-window",
+                "-d",
+                "-t",
+                "1:",
+                "-n",
+                "stash",
+                "-P",
+                "-F",
+                "#{pane_id}",
+            ])
+            .unwrap();
+        let hidden = unwatched_pane(&iso, hidden_pane.trim()).unwrap();
+        assert_eq!(hidden.session, "1");
+        assert_eq!(hidden.reason, PaneNotVisibleReason::InactiveWindow);
+        assert_eq!(hidden.window_name.as_deref(), Some("stash"));
+        assert!(hidden.reveal_command.contains("select-window"));
+        assert!(hidden.reveal_command.contains("select-pane"));
+
+        // A non-active pane in the active window is normally visible, but a
+        // zoomed sibling hides it completely.
+        let zoom_hidden_pane = iso
+            .raw_cmd(&[
+                "split-window",
+                "-d",
+                "-t",
+                watched_pane.trim(),
+                "-P",
+                "-F",
+                "#{pane_id}",
+            ])
+            .unwrap();
+        assert_eq!(unwatched_pane(&iso, zoom_hidden_pane.trim()), None);
+        iso.raw_cmd(&["resize-pane", "-Z", "-t", watched_pane.trim()])
+            .unwrap();
+        let zoom_hidden = unwatched_pane(&iso, zoom_hidden_pane.trim()).unwrap();
+        assert_eq!(zoom_hidden.reason, PaneNotVisibleReason::HiddenByZoom);
+        assert!(zoom_hidden.reveal_command.contains("resize-pane -Z"));
 
         // A caller inside a pane keeps its own pane's session, attached or not.
         let caller = ambient_current_session(&iso, Some(&detached_pane)).unwrap();

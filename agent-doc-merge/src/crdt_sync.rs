@@ -41,6 +41,14 @@ use std::cell::{Cell, RefCell};
 /// durable pending/outbox data written by older binaries remains replayable.
 pub struct ReplicaState {
     text: RefCell<TextCrdt>,
+    /// Exact serialized causal frontier for the current operation graph.
+    ///
+    /// `TextCrdt::version_vector` walks every retained operation. Idle
+    /// supervisors ask for the same revision repeatedly, so recomputing that
+    /// frontier on every read turns an otherwise compact reply into O(history)
+    /// controller work. Preserve the wire bytes until a real local or remote
+    /// mutation invalidates them.
+    cached_state_vector: RefCell<Option<Vec<u8>>>,
     /// Materializing a lazily `TextCrdt` walks and orders its complete operation
     /// graph.  Controller idle checks ask for the same projection repeatedly, so
     /// retain it until a real replica mutation invalidates it.
@@ -404,8 +412,11 @@ impl ReplicaState {
     /// deterministically (lazily tiebreaks same-position concurrent inserts by
     /// peer).
     pub fn new(client_id: u64) -> Self {
+        let text = TextCrdt::new(client_id);
+        let state_vector = serde_json::to_vec(&text.version_vector()).unwrap_or_default();
         Self {
-            text: RefCell::new(TextCrdt::new(client_id)),
+            text: RefCell::new(text),
+            cached_state_vector: RefCell::new(Some(state_vector)),
             cached_text: RefCell::new(Some(String::new())),
             cached_text_chars: Cell::new(Some(0)),
             cached_edit_anchor: Cell::new(Some((0, 0))),
@@ -417,8 +428,11 @@ impl ReplicaState {
     /// Create a replica seeded from plain text in linear time.
     pub fn from_text(client_id: u64, text: &str) -> Self {
         let text_chars = text.chars().count();
+        let crdt = TextCrdt::from_str(client_id, text);
+        let state_vector = serde_json::to_vec(&crdt.version_vector()).unwrap_or_default();
         Self {
-            text: RefCell::new(TextCrdt::from_str(client_id, text)),
+            text: RefCell::new(crdt),
+            cached_state_vector: RefCell::new(Some(state_vector)),
             cached_text: RefCell::new(Some(text.to_owned())),
             cached_text_chars: Cell::new(Some(text_chars)),
             cached_edit_anchor: Cell::new(Some((text_chars, text.len()))),
@@ -485,6 +499,7 @@ impl ReplicaState {
                 text.insert_str(edit.offset, &edit.insert);
             }
         }
+        *self.cached_state_vector.borrow_mut() = None;
     }
 
     fn queue_local_edit(&self, edit: PendingLocalEdit) {
@@ -572,7 +587,12 @@ impl ReplicaState {
     /// [`diff`](Self::diff) carrying only the ops this frontier is missing.
     pub fn state_vector(&self) -> Vec<u8> {
         self.flush_pending_local_edits();
-        serde_json::to_vec(&self.text.borrow().version_vector()).unwrap_or_default()
+        if let Some(cached) = self.cached_state_vector.borrow().as_ref() {
+            return cached.clone();
+        }
+        let encoded = serde_json::to_vec(&self.text.borrow().version_vector()).unwrap_or_default();
+        *self.cached_state_vector.borrow_mut() = Some(encoded.clone());
+        encoded
     }
 
     /// Whether this replica already contains every operation named by `state_vector`.
@@ -618,6 +638,7 @@ impl ReplicaState {
         }
         self.flush_pending_local_edits();
         if self.text.borrow_mut().apply_delta_unprojected(&ops) {
+            *self.cached_state_vector.borrow_mut() = None;
             *self.cached_text.borrow_mut() = None;
             self.cached_text_chars.set(None);
             self.cached_edit_anchor.set(None);
@@ -859,6 +880,47 @@ mod tests {
             "an exact replay must not invalidate and rebuild the visible projection"
         );
         assert_eq!(b.text(), once, "re-applying a known update is idempotent");
+    }
+
+    #[test]
+    fn state_vector_is_cached_until_a_real_mutation() {
+        let replica = ReplicaState::from_text(1, "retained history");
+        let initial = replica.state_vector();
+        assert_eq!(
+            replica.cached_state_vector.borrow().as_deref(),
+            Some(initial.as_slice())
+        );
+
+        let repeated = replica.state_vector();
+        assert_eq!(repeated, initial);
+        assert_eq!(
+            replica.cached_state_vector.borrow().as_deref(),
+            Some(initial.as_slice()),
+            "an unchanged revision read must retain the exact serialized frontier"
+        );
+
+        replica.apply_local_edit(0, 0, "new ");
+        let advanced = replica.state_vector();
+        assert_ne!(advanced, initial);
+        assert_eq!(
+            replica.cached_state_vector.borrow().as_deref(),
+            Some(advanced.as_slice())
+        );
+
+        let remote = ReplicaState::from_text(2, "remote");
+        let update = remote.encode_state();
+        replica.apply_update(&update).unwrap();
+        assert!(
+            replica.cached_state_vector.borrow().is_none(),
+            "a novel remote update must invalidate the cached frontier"
+        );
+        let merged = replica.state_vector();
+        replica.apply_update(&update).unwrap();
+        assert_eq!(
+            replica.cached_state_vector.borrow().as_deref(),
+            Some(merged.as_slice()),
+            "an exact replay must preserve the cached frontier"
+        );
     }
 
     #[test]

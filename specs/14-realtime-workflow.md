@@ -658,6 +658,13 @@ cutover requires it. Handoff therefore cannot turn an inflated retained history
 into a repeated whole-document CPU loop that blocks the controller RPC needed to
 resume the already-owned continuation.
 
+The replica also memoizes the exact serialized current state vector. A revision
+probe is a compact wire reply and must remain O(1) while the replica is unchanged;
+it must not walk retained CRDT history on every supervisor idle-watch poll. A real
+local edit or novel remote update invalidates that memo, while an idempotent replay
+preserves it. The next state-bearing operation flushes pending local edits before
+recomputing the frontier, so memoization never exposes a stale revision.
+
 Retained delivery has an explicit reactive fixed point. When the retained
 Base→Target delta projected over the converged visible cut produces that same
 cut, the Computed classifies it as already projected and emits only the existing

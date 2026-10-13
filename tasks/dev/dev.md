@@ -168,6 +168,21 @@ Implemented and committed the merge-conflict marker.
 - Commit: `ed98ce85f5 feat: mark pull request merge conflicts`.
 
 The repository-wide `make check` reached 1,526 passing tests before the existing unrelated generated-skill parity failure (`development_claude_skill_matches_the_bundle`); the focused change is green, and the latest CI run was successful.
+
+### Re: Make the channel cli arg take an id or url. — gpt-5 · 2026-10-13T19:38:21-04:00
+
+> **Queue prompt:** Make the channel cli arg take an id or url.
+
+Implemented and committed channel URL support.
+
+- `--channel` now accepts a raw Slack channel ID, a workspace `/archives/CHANNEL` URL, or an `app.slack.com/client/TEAM/CHANNEL` URL.
+- Channel URLs are normalized to the ID used by Slack's Web API.
+- Non-Slack hosts and malformed paths are rejected.
+- Updated CLI help and added coverage for both URL forms, timestamp updates with a channel URL, and invalid hosts.
+- Ruff, byte-compilation, all 19 focused tests, and `git diff --check` pass.
+- Commit: `236e0b3b38 feat: accept Slack channel URLs`.
+
+The repository-wide check remains covered by the immediately preceding run: its only failure was the unrelated stale generated Claude-skill fixture.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
@@ -175,7 +190,7 @@ The repository-wide `make check` reached 1,526 passing tests before the existing
 
 <!-- agent:queue go priority -->
 - ~~Make an icon for a merge conflict.~~
-- Make the channel cli arg take an id or url.
+- ~~Make the channel cli arg take an id or url.~~
 - Make the script use events (preferably) or poll and support hot reloading + logs for agents + humans to see activity.
 - Make the message have a key for the emojis so reads understand what each emoji means.
 - There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`

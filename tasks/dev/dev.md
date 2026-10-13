@@ -5,6 +5,7 @@ agent_doc_write: crdt
 agent: codex
 resume:
   claude: c1cf43ac-1094-4ecf-8b3d-a7f7f7168edb
+queue: go
 ---
 
 ## Status
@@ -37,6 +38,13 @@ Fixed. GitHub confirms SDK #119 is merged, so the strike is semantically correct
 
 ### Re: GitHub check without approval — gpt-5 · 2026-10-13T19:03-04:00
 
+> **Queue prompt:**
+>
+> Leave the checkmark only for a review that is approved but unmerged. Leave another emoji for a PR with an addressed review but not yet approved.
+>
+> Leave yet another icon for a PR with unaddressed reviews.
+
+
 > **Queue prompt:** Note that some PRs were checked but not approved on gh. I believe https://github.com/haiven-dev/haiven-sdk/pull/115 is the only case.
 
 Confirmed. SDK #115 is the only manually checked-but-not-approved exception in the Slack list:
@@ -47,12 +55,63 @@ Confirmed. SDK #115 is the only manually checked-but-not-approved exception in t
 - Its current head is the newer commit `1fc25d0e`, so it also satisfies the automated “review addressed by a newer commit” signal.
 
 The updater already preserves manually positioned check marks rather than moving, duplicating, or removing them. No Slack or repository mutation was required for this verification.
+
+### Re: Slack PR review states and generated status messages — gpt-5 · 2026-10-13T19:21-04:00
+
+> **Queue prompt:** Leave the checkmark only for a review that is approved but unmerged. Leave another emoji for a PR with an addressed review but not yet approved.
+
+> **Queue prompt:** Leave yet another icon for a PR with unaddressed reviews.
+
+> **Queue prompt:** Make the script take a gh user name(s) + repository name(s). Use the user name(s) + repository name(s) to create/edit a slack message with the status. If a message url is provided, that message will be updated...otherwise a new message will be created in a provided slack channel.
+
+Completed all three requested behaviors.
+
+The updater now assigns mutually exclusive review-state markers to open PRs:
+
+- `:white_check_mark:` — approved, with no active change-request review.
+- `:eyes:` — requested changes were followed by a newer commit and are ready for re-review.
+- `:warning:` — requested changes still target the current head and remain unaddressed.
+
+Closed or merged PRs are struck and carry none of those markers. Existing updater-owned markers are normalized on every pass, so the old manually positioned check on SDK #115 is now correctly `:eyes:` rather than being preserved as an approval.
+
+I applied the new mapping to the target Slack message and verified it through a fresh readback. SDK #113 is the sole currently approved open PR and therefore the sole `:white_check_mark:` entry. Fifteen addressed-but-unapproved PRs, including SDK #115, now use `:eyes:`. No listed PR currently has an unaddressed change request, so the live message has no `:warning:` entry yet; that state is implemented and covered by tests.
+
+The same script now supports generated status lists from repeatable or comma-separated GitHub repository owners and repositories. For example:
+
+```bash
+# Create a new status message.
+python scripts/update_slack_pr_list.py \
+  --github-user haiven-dev \
+  --repository haiven-sdk \
+  --repository haiven-api \
+  --channel C0C8LPQ7NS1
+
+# Update an existing message identified by permalink.
+python scripts/update_slack_pr_list.py \
+  --github-user haiven-dev \
+  --repository haiven-sdk,haiven-api \
+  --message https://haivengroup.slack.com/archives/C0C8LPQ7NS1/p1791874207231429
+```
+
+Bare repository names are expanded across the supplied GitHub owners; explicit `OWNER/REPO` values are also accepted. Create mode posts with `chat.postMessage`. Update mode retains existing entries so closed PRs can be struck, appends newly discovered open PRs, reconciles every review state, and writes with `chat.update`. `--dry-run` remains available and does not require a Slack token when generating a new message.
+
+Committed the isolated changes as `8258148a25` (`fix: distinguish Slack PR review states`) and `0e6edd2c7f` (`feat: generate Slack PR status messages`). A concurrent `src/haiven-dev` pointer update was preserved separately as `f08a3ef7cc` after repairing an amend race; no concurrent content was discarded.
+
+Verification passed for `python scripts/test_update_slack_pr_list.py`, `python -m py_compile scripts/update_slack_pr_list.py scripts/test_update_slack_pr_list.py`, `ruff check scripts/update_slack_pr_list.py scripts/test_update_slack_pr_list.py`, `git diff --check`, a live GitHub-backed `--dry-run` against `haiven-dev/haiven-cli`, and Slack readback. The final authoritative `make check` reached 1,528 tests: 1,527 passed and the same pre-existing development-skill bundle mismatch failed; the unrelated dirty skill files were preserved. The latest GitHub Actions CI run completed successfully.
+
+The remaining icon, event/hot-reload/logging, and eventual `haiven-tools`/`uvx`/PR requests remain queued in operator order.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- Assign an icon that is the head of a PR stack and another icon for a PR that is not the head of a PR stack.
+- Make all the logic in a script if you have not already.
+- Make an icon for a merge conflict.
+- Make the script take a gh user name(s) + repository name(s). Use the user name(s) + repository name(s) to create/edit a slack message with the status. If a message url is provided, that message will be updated...otherwise a new message will be created in a provided slack channel.
+- Make the script use events (preferably) or poll and support hot reloading + logs for agents + humans to see activity.
+- Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.
 <!-- /agent:queue -->
 
 ## Backlog

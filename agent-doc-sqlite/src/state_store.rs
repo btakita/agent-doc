@@ -1748,9 +1748,9 @@ const RETIRED_BACKFILL_DOCUMENT_VERSION_MIGRATION: &str =
 /// Replay ordering is `id`, not `document_version`, so nothing depends on the
 /// correspondence. Do not introduce a dependency on it.
 fn converge_state_event_document_versions(conn: &Connection) -> Result<()> {
-    // Cheap guard: an index seek on (document_hash, document_version). The
-    // repair below is a full per-document ranking, so it must not run on the
-    // per-RPC open path unless there is actually something to repair.
+    // Cheap guard: a seek on the sparse document_version=0 index. The repair
+    // below is a full per-document ranking, so it must not run on the per-RPC
+    // open path unless there is actually something to repair.
     let needs_repair: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM state_events WHERE document_version = 0)",
@@ -2577,6 +2577,13 @@ fn ensure_canonical_indexes(conn: &Connection) -> Result<()> {
         r#"
         CREATE INDEX IF NOT EXISTS state_events_document_hash_document_version
         ON state_events(document_hash, document_version);
+
+        -- The every-open document-version convergence guard filters only by
+        -- document_version. Keep that probe proportional to the exceptional
+        -- unversioned rows instead of scanning the full event ledger.
+        CREATE INDEX IF NOT EXISTS state_events_unversioned_document_version
+        ON state_events(document_version)
+        WHERE document_version = 0;
 
         CREATE UNIQUE INDEX IF NOT EXISTS crash_recovery_markers_dedupe_key
         ON crash_recovery_markers(marker_kind, dedupe_key)
@@ -9116,6 +9123,43 @@ mod tests {
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<std::result::Result<_, _>>()?;
         assert_eq!(versions, after, "convergence is idempotent");
+        Ok(())
+    }
+
+    /// `#retentionversion`: the every-open convergence guard must be a sparse
+    /// index seek. A `(document_hash, document_version)` index cannot seek a
+    /// predicate on `document_version` alone, so the old guard scanned the full
+    /// event ledger on every controller RPC and thrashed idle processes.
+    #[test]
+    fn document_version_convergence_probe_uses_sparse_index() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+
+        let plan: Vec<String> = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN \
+                 SELECT EXISTS(SELECT 1 FROM state_events WHERE document_version = 0)",
+            )?
+            .query_map([], |row| row.get(3))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert!(
+            plan.iter().any(|detail| {
+                detail.contains("state_events_unversioned_document_version")
+                    && detail.contains("SEARCH")
+            }),
+            "unversioned-row guard must seek the sparse index, plan: {plan:?}"
+        );
+
+        let index_sql: String = conn.query_row(
+            "SELECT sql FROM sqlite_master \
+             WHERE type = 'index' AND name = 'state_events_unversioned_document_version'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(
+            index_sql.contains("WHERE document_version = 0"),
+            "guard index must stay sparse after convergence: {index_sql}"
+        );
         Ok(())
     }
 

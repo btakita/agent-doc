@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a13392-e8f3-7351-91f1-1951b3dcf8fc
+  codex: 01a1359c-17a9-76c3-8aac-bfc30b074aea
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -287,6 +288,32 @@ An obsolete deleted-image `.460` supervisor observed during diagnosis can retain
 The retained closeout completed through its existing controller-owned retry. A read-only `session-check` exited 0 and reported cycle `cycle-1791902466852` as `committed (commit_success)`, with `queue_continuation_required=false`, `ui_outcome=no_drainable_work`, and `next_action=no_agent_action`. No response was resent and no repair, force-write, recycle, or reload was attempted. No operator action is needed.
 
 The exchange is large (over the session-accretion warning threshold); because the queue is active and auto-compaction is not enabled, this cycle continued without compacting.
+
+### Re: GitHub issue #248 — gpt-5 · 2026-10-13T12:29-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/248
+
+Fixed, pushed, integrated, and closed. JetBrains 263 restart upgrades supplied a ZIP rooted at `agent-doc-jetbrains-263/`, while the Java restart stager accepts the canonical `agent-doc-jetbrains/` root. The CLI now rewrites variant entries into a temporary canonical-root archive while preserving ZIP metadata, and the UI no longer reports staging success before launcher acceptance.
+
+The fix landed on `main` as `82dbcf626a` (worker commit `887601495a`). Its targeted regression, `cargo build`, and full `make check` all passed; issue #248 is closed with evidence.
+
+### Re: Remaining idle CPU thrash — gpt-5 · 2026-10-13T12:29-04:00
+
+> **Queue prompt:** agent-doc is still thrashing while idle.
+
+The remaining current-generation CPU source was SQLite convergence startup, not the already-fixed JetBrains focus poller. Every state-database open searched for `document_version = 0`, but the existing composite index could not seek that predicate and scanned live ledgers containing 88,439 and 161,383 events despite zero matching rows. A sparse partial index now makes the guard an indexed `SEARCH`; deterministic EXPLAIN coverage rejects a regression to `SCAN`.
+
+The fix landed on `main` as `6d13b2f776` (worker commit `ba0b321672`). The pre-fix test failed as expected, then the focused test, all 108 SQLite tests, and full `make check` passed. Obsolete deleted-image processes may retain old behavior until they exit, but current installed code contains both idle-thrash fixes.
+
+### Re: Release and publish — gpt-5 · 2026-10-13T12:29-04:00
+
+> **Queue prompt:** release + publish
+
+Version `0.35.498` was projected, committed as `b9c80b963c`, tagged, and pushed to `main`. The canonical release driver reported `tag_publish_handoff=complete` and `local_install_full=complete`. Local `make check` and `make tmux-ci` passed on the exact projected bytes; the installed CLI is `0.35.498`, with IntelliJ `0.2.575`, Rider 262 `0.2.576`, and VS Code `0.2.81`.
+
+GitHub's asynchronous Release workflow remains active: plugins and five platform artifact jobs are green, while Intel Darwin is still building; main CI is also in progress. The GitHub Release object and PyPI upload therefore are not terminal yet. Homebrew automation cannot run because `HOMEBREW_TAP_TOKEN` is absent, although the current GitHub account has admin access to the tap. Follow-up `#publish498verify` records terminal publication verification and the manual tap update once `SHA256SUMS` is available.
+
+The exchange remains above the session-accretion warning threshold; the active queue was drained without compacting because auto-compaction is not enabled.
 <!-- agent:boundary:673547bf -->
 <!-- /agent:exchange -->
 
@@ -295,11 +322,16 @@ The exchange is large (over the session-accretion warning threshold); because th
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/248~~
+- agent-doc is still thrashing while idle.
+- release + publish
+- do [#publish498verify]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#publish498verify] 2026-10-13 Verify the v0.35.498 GitHub Release and PyPI publication after the active workflows finish; manually update btakita/homebrew-tap from SHA256SUMS and restore HOMEBREW_TAP_TOKEN automation.
 <!-- /agent:backlog -->
 
 ## Review

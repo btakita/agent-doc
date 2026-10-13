@@ -471,23 +471,6 @@ pub fn release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
     Ok(released)
 }
 
-/// Release only if the ledger still contains the exact claim generation the
-/// caller observed before publishing completion feedback.
-pub fn release_exact(file: &Path, expected: &QueueClaim) -> Result<Option<QueueClaim>> {
-    let released = mutate_ledger(file, |ledger| Ok(ledger.release_exact(expected)))?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "queue_claim_release_exact released={} owner={} claimed_at={} item_bytes={}",
-            released.is_some(),
-            expected.owner,
-            expected.claimed_at_secs,
-            expected.item_text.trim().len()
-        ),
-    );
-    Ok(released)
-}
-
 /// Release the claim on a head the binary itself just closed (`#claimstrike`:
 /// a finalize strike of an answered free-text head). Unlike [`release`] this
 /// never resolves `head` against the live queue: the head is no longer live,
@@ -811,11 +794,6 @@ mod tests {
         assert!(!claimed_items_for_content(&doc, &content).claims("fix issue 110 now"));
         assert!(release(&doc, "fix issue 110 now").unwrap().is_none());
 
-        let (_, old) = claim(&doc, "fix issue 110 now", "subagent:old", 60).unwrap();
-        let (_, newer) = claim(&doc, "fix issue 110 now", "subagent:new", 120).unwrap();
-        assert!(release_exact(&doc, &old).unwrap().is_none());
-        assert_eq!(load_ledger(&doc).unwrap().claims, vec![newer.clone()]);
-        assert_eq!(release_exact(&doc, &newer).unwrap(), Some(newer));
     }
 
     fn refusal(err: &anyhow::Error) -> &agent_doc_queue::queue_claim::RefreshRefusal {

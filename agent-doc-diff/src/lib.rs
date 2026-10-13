@@ -790,18 +790,7 @@ fn is_recovery_artifact_line(content: &str) -> bool {
         || trimmed.starts_with("<!-- patch:")
         || trimmed.starts_with("<!-- /patch:")
         || line_is_binary_authored_ipc_proof_diagnostic(trimmed)
-        || line_is_binary_authored_subagent_completion(trimmed)
         || line_is_binary_authored_compact_summary(trimmed)
-}
-
-/// Recognize the narrow completion artifact emitted by the binary after a
-/// coordinator observes a background subagent's result. It is status feedback,
-/// never an operator prompt or an assistant response turn.
-pub fn line_is_binary_authored_subagent_completion(line: &str) -> bool {
-    let trimmed = line.trim();
-    trimmed.starts_with("> **Subagent completed:** `subagent:")
-        || (trimmed.starts_with("<!-- agent-doc-subagent-completion key=")
-            && trimmed.ends_with(" -->"))
 }
 
 /// `#ipcproofnostall`: recognize a binary-authored interrupted-cycle IPC-proof
@@ -1497,12 +1486,6 @@ fn classify_prompt_bearing_block(
     if non_blank
         .iter()
         .any(|line| line_is_binary_authored_ipc_proof_diagnostic(line))
-    {
-        return Some(PromptBearingChangeKind::RecoveryArtifact);
-    }
-    if non_blank
-        .iter()
-        .any(|line| line_is_binary_authored_subagent_completion(line))
     {
         return Some(PromptBearingChangeKind::RecoveryArtifact);
     }

@@ -180,12 +180,14 @@ rule. This runbook carries the rest.
   6. As soon as a subagent reports back, run
      `agent-doc queue report-complete <FILE> --item <...>`. The binary appends
      immediate, deduplicated completion feedback to `agent:exchange` through
-     the editor/CRDT authority while leaving the claim active; the worker never
-     edits the session document. Then integrate the work serially: rebase or
+     its cross-process document owner and editor/CRDT authority while leaving
+     the claim active; the worker never edits the session document. Then
+     integrate the work serially: rebase or
      cherry-pick each onto main, run the preset's verification, run ONE
      `make install` per integrated batch, and push. Finally run
-     `agent-doc queue release <FILE> --item <...>` (which idempotently reports
-     completion too, for older coordinators). The next cycle answers and closes
+     `agent-doc queue release <FILE> --item <...>`. Release only ends the claim;
+     it does not report completion for abandoned, failed, or requeued work. The
+     next cycle answers and closes
      the item: `--done <id>` for an `#id` head, or quote a free-text head as
      `> **Queue prompt:**`.
   Harnesses without an in-session Agent tool (Codex, OpenCode, Grok Build,

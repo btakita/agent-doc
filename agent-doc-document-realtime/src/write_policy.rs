@@ -2501,16 +2501,6 @@ fn is_safe_historical_exchange_insert_block(block: &str) -> bool {
         return true;
     }
 
-    // `#subagentcompletionfeedback`: the coordinator can publish this exact
-    // binary-authored artifact while its response cycle remains open. The
-    // narrow marker/status shape keeps arbitrary exchange prose fail-closed.
-    if non_blank
-        .iter()
-        .all(|line| agent_doc_diff::line_is_binary_authored_subagent_completion(line))
-    {
-        return true;
-    }
-
     let Some(first_response_idx) = non_blank.iter().position(|line| {
         line.starts_with("### Re:") || line.starts_with("#### Re:") || line.starts_with("##### Re:")
     }) else {
@@ -2523,38 +2513,6 @@ fn is_safe_historical_exchange_insert_block(block: &str) -> bool {
     non_blank[..first_response_idx]
         .iter()
         .all(|line| historical_exchange_prelude_looks_like_prompt_target(line))
-}
-
-/// Accept only an additive completion artifact. Every inserted nonblank line
-/// must carry one of the two binary-owned shapes; arbitrary prose sharing an
-/// insertion block with the marker remains fail-closed.
-fn is_safe_subagent_completion_growth(snapshot_content: &str, file_content: &str) -> bool {
-    // `normalize_component_content_for_absorb` trims both bodies. Restore one
-    // comparison newline so appending after the old last line is not rendered
-    // as deleting/reinserting that unchanged line.
-    let snapshot = format!("{}\n", snapshot_content.trim_end());
-    let file = format!("{}\n", file_content.trim_end());
-    let diff = similar::TextDiff::from_lines(&snapshot, &file);
-    let mut saw_completion = false;
-    for change in diff.iter_all_changes() {
-        match change.tag() {
-            similar::ChangeTag::Equal => {}
-            similar::ChangeTag::Delete => return false,
-            similar::ChangeTag::Insert => {
-                for line in change.value().lines() {
-                    let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-                    if !agent_doc_diff::line_is_binary_authored_subagent_completion(line) {
-                        return false;
-                    }
-                    saw_completion = true;
-                }
-            }
-        }
-    }
-    saw_completion
 }
 
 fn historical_exchange_prelude_looks_like_prompt_target(line: &str) -> bool {
@@ -2853,7 +2811,6 @@ fn classify_safe_agent_doc_mutation(
             "exchange" => {
                 let safe_exchange =
                     is_safe_out_of_band_exchange_growth(&snap_content, &file_content)
-                        || is_safe_subagent_completion_growth(&snap_content, &file_content)
                         || (allow_historical_exchange_growth
                             && is_safe_historical_exchange_growth(&snap_content, &file_content))
                         || is_safe_exchange_user_prompt_insert(&snap_content, &file_content);
@@ -2907,55 +2864,6 @@ pub fn classify_committed_historical_agent_doc_mutation(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn binary_subagent_completion_is_safe_additive_exchange_growth() {
-        let before = "### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:keep -->";
-        let after = concat!(
-            "### Re: prior — gpt-5\n\nDone.\n\n",
-            "> **Subagent completed:** `subagent:sdk` returned work for queue item “sdk”. Coordinator integration and closeout are pending.\n",
-            "<!-- agent-doc-subagent-completion key=abc -->\n",
-            "<!-- agent:boundary:keep -->",
-        );
-        assert!(is_safe_subagent_completion_growth(before, after));
-
-        let before_doc = format!(
-            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{before}\n<!-- /agent:exchange -->\n\n<!-- agent:queue subagents -->\n- sdk\n<!-- /agent:queue -->\n"
-        );
-        let after_doc = format!(
-            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{after}\n<!-- /agent:exchange -->\n\n<!-- agent:queue subagents -->\n- sdk\n<!-- /agent:queue -->\n"
-        );
-        assert_eq!(
-            redact_component_contents_for_absorb(&before_doc),
-            redact_component_contents_for_absorb(&after_doc),
-        );
-        let before_components = agent_doc_element::element::parse(&before_doc).unwrap();
-        let after_components = agent_doc_element::element::parse(&after_doc).unwrap();
-        assert_eq!(
-            before_components
-                .iter()
-                .map(|component| component.name.as_str())
-                .collect::<Vec<_>>(),
-            after_components
-                .iter()
-                .map(|component| component.name.as_str())
-                .collect::<Vec<_>>(),
-        );
-        let before_exchange = normalize_component_content_for_absorb(
-            before_components[0].content(&before_doc),
-        );
-        let after_exchange = normalize_component_content_for_absorb(
-            after_components[0].content(&after_doc),
-        );
-        assert!(
-            is_safe_subagent_completion_growth(&before_exchange, &after_exchange),
-            "before={before_exchange:?}\nafter={after_exchange:?}"
-        );
-        assert_eq!(
-            classify_safe_out_of_band_agent_doc_mutation(&before_doc, &after_doc),
-            Some("exchange")
-        );
-    }
 
     #[test]
     fn semantic_repair_settlement_accepts_a_newer_canonical_editor_cut() {

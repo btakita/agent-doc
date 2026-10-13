@@ -1809,6 +1809,55 @@ pub fn agent_owned_composer_notice_at_cursor(
         .flatten()
 }
 
+fn claude_history_recall_label(line: &str) -> Option<String> {
+    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
+    let core = stripped
+        .trim()
+        .trim_matches(|ch| matches!(ch, '─' | '━' | '═' | '-' | ' '));
+    let position = core.strip_prefix("History ")?;
+    let (current, total) = position.split_once('/')?;
+    let current = current.parse::<usize>().ok()?;
+    let total = total.parse::<usize>().ok()?;
+    (current > 0 && current <= total && total > 0).then(|| format!("History {current}/{total}"))
+}
+
+/// Return Claude Code's prompt-history navigation label when the current
+/// cursor-scoped composer holds a recalled entry rather than operator-authored
+/// text. Claude renders the label immediately above the recalled composer row.
+///
+/// Callers may clear this transient UI state before routing. The adjacency and
+/// `OperatorDraft` checks keep an old `History n/m` line in scrollback from
+/// authorizing a clear of a real draft.
+pub fn claude_history_recall_at_cursor(
+    harness: &HarnessConfig,
+    content: &str,
+    cursor_y: Option<usize>,
+) -> Option<String> {
+    if harness.binary != "claude" {
+        return None;
+    }
+    let scoped = cursor_scoped_prompt_content(content, harness, cursor_y);
+    if !matches!(
+        project_pane_composer(&scoped, harness),
+        PaneComposerProjection::OperatorDraft { .. }
+    ) {
+        return None;
+    }
+    let lines = scoped.lines().collect::<Vec<_>>();
+    let prompt_row = lines
+        .iter()
+        .rposition(|line| harness.is_prompt_line(line))?;
+    lines[..prompt_row]
+        .iter()
+        .rev()
+        .find(|line| {
+            !agent_doc_turn_executor_tmux::prompt::strip_ansi(line)
+                .trim()
+                .is_empty()
+        })
+        .and_then(|line| claude_history_recall_label(line))
+}
+
 /// Cursor-aware counterpart to [`pane_composer_draft`]. For Claude and Codex,
 /// arbitrary user-configured status lines below the composer are excluded.
 pub fn pane_composer_draft_at_cursor(
@@ -3728,6 +3777,34 @@ mod tests {
             "owned residue must remain non-ready until route clears it"
         );
         assert_eq!(pane_composer_draft_at_cursor(&h, pane, Some(1)), None);
+    }
+
+    #[test]
+    fn claude_history_recall_is_cursor_anchored_non_operator_residue() {
+        let h = HarnessConfig::claude();
+        let recalled = concat!(
+            "completed response\n",
+            "\x1b[38;5;240m─── History 93/100 ───\x1b[0m\n",
+            "\x1b[38;5;153m❯\u{a0}/agent-doc /workspace/other.md\x1b[0m\n",
+            "────────\n",
+            "  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+        );
+        assert_eq!(
+            claude_history_recall_at_cursor(&h, recalled, Some(2)).as_deref(),
+            Some("History 93/100"),
+        );
+
+        let typed = concat!(
+            "─── History 93/100 ───\n",
+            "old output\n",
+            "────────\n",
+            "❯\u{a0}do not clear this operator draft\n",
+        );
+        assert_eq!(
+            claude_history_recall_at_cursor(&h, typed, Some(3)),
+            None,
+            "a stale history label in scrollback must not authorize clearing a real draft",
+        );
     }
 
     #[test]

@@ -67,7 +67,12 @@ class TmuxPaneFocusSync private constructor(
         // mirror back into the editor, so skip the socket round-trips entirely.
         val manager = FileEditorManager.getInstance(project)
         val hasMarkdownOpen = manager.openFiles.any { it.name.endsWith(".md") }
-        if (!hasMarkdownOpen) {
+        if (!shouldPollTmuxFocus(
+                hasMarkdownOpen = hasMarkdownOpen,
+                projectSurfaceActive = JetBrainsEditorSurfaces.isProjectSurfaceActive(project),
+                agentDocTerminalActive = IdeTerminalHost.isAgentDocTerminalActive(project),
+            )
+        ) {
             lastDocumentPath = null
             return
         }
@@ -207,6 +212,16 @@ class TmuxPaneFocusSync private constructor(
             documentPath: String?,
             lastDocumentPath: String?,
         ): Boolean = documentPath != null && documentPath != lastDocumentPath
+
+        /**
+         * The reverse-focus RPC is an effect of an active embedded terminal, not a liveness probe.
+         * A markdown tab alone must not keep the controller hot while the IDE is idle/backgrounded.
+         */
+        internal fun shouldPollTmuxFocus(
+            hasMarkdownOpen: Boolean,
+            projectSurfaceActive: Boolean,
+            agentDocTerminalActive: Boolean,
+        ): Boolean = hasMarkdownOpen && projectSurfaceActive && agentDocTerminalActive
 
         /**
          * Decide the single reverse-focus transition at the editor boundary.

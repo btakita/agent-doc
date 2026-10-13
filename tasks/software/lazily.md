@@ -144,20 +144,35 @@ No commit, push, install, release, or publication occurred because `#spec-test-c
 **Deferred:** investigation is complete, but this exact free-text node stays queued for the immediately following cycle so the leading `release + publish` prompt and the id-backed `#fixrunturn` lifecycle closeout can be consumed without an out-of-order multi-head strike. The queue parser preserved it because the operator authored two separate nodes around `---`; no exact promotion receipt linked the first sentence to `#fixrunturn`, and similarity-based deletion would violate operator-text preservation.
 
 The exchange is above its advisory size threshold, but the queue remains active, so draining continues without compaction.
+
+### Re: release and publish all Lazily repositories — gpt-5 · 2026-10-12T20:49-04:00
+
+> **Queue prompt:** release + publish all lazily repos
+
+No new release was cut: the current 13-repository cohort is already published, and the next Core Beta cohort is not release-ready. Releasing everything again would create unnecessary or misleading versions rather than publish new integrated work.
+
+The prepared 13-gitlink batch exactly matches the current released commits: Spec `v0.41.0`, Formal `v0.39.0`, Rust `v0.59.0`, Kotlin `v0.44.0`, Go `v0.29.0`, JavaScript `v0.35.0`, React `v0.3.0`, C# `v0.7.0`, Python `v0.43.0`, Dart `v0.33.0`, C++ `v0.31.0`, Zig `v0.37.0`, and Godot `v0.2.1`. Registry checks also confirm the current Rust/macros, PyPI, npm, pub.dev, Go proxy, and Maven packages are live. Ten repository main branches are identical to their release tags; Formal, Rust, and Go contain only later documentation, macros housekeeping, or consumer-test commits.
+
+The next cohort is blocked by unintegrated Core phases, incomplete Phase 5 consumer/support work, the uncommitted five-file interop cold-start fix and 13-pin batch, the `#lzbetascope`/RC-or-freeze gate, missing Rust Trusted Publishing, and a current Lazily Go CI failure. The Go consumer jobs themselves pass, but the workflow step invoking `make core-artifact-consumer-check` lacks a `name`, so the CI-reachability guard fails. I captured that concrete defect as actionable `#lzgocireachability`; the stale `#lzrustpublish` gate now records that `v0.59.0` is already live and only future tag-workflow publisher configuration remains.
+
+The safe next release sequence is: integrate profile/claims, then facades/compatibility/consumer work; fix Go CI and Rust publishing configuration; settle exact per-repository commits and immutable BOM; choose independent semver targets; publish dependencies before dependents (`lazily-macros` before Rust if changed, JavaScript before React); wait for registry propagation and run installed-consumer gates; then tag/finalize Spec last and publish the Beta cohort. React modules and GDScript do not inherit Core Beta automatically.
+
+Verification was read-only: all 13 GitHub releases/tags and supported registries were checked, the staged pin count is exactly 13 with `git diff --cached --check` green, the cold-start five-file diff passes `git diff --check`, and its prior full nine-peer evidence remains green. No files changed in the audit worktree, and no commit, push, install, version bump, tag, release, or publication occurred. The undefined `#spec-test-commit-push` preset still withholds integration/commit/push authority.
+
+Preflight separately reports the live JetBrains plugin at `0.2.561` while this binary ships `0.2.563`; install `0.2.563` with `agent-doc plugin install jetbrains`, then restart or reload the IDE. The semantic completion suggestion involving `#lzexpectedkeyorder` is unrelated and was not treated as evidence that this release directive was already complete. The exchange remains above its advisory size threshold, but the active queue continues without compaction.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- ~~release + publish~~
-- ~~do [#fixrunturn]~~
-- ~~agent-doc creating [#fixrunturn] leftover free-text in the queue: `- My first attempt to write the next queue item was deleted by agent-doc. The agent also restarted.`~~
+- ~~release + publish all lazily repos~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzgocireachability] Fix lazily-go main CI reachability guard by naming the workflow step that runs make core-artifact-consumer-check, add or update deterministic coverage if needed, run the full CI-equivalent checks, then clear this release blocker.
 <!-- /agent:backlog -->
 
 ## Review
@@ -176,7 +191,7 @@ The exchange is above its advisory size threshold, but the queue remains active,
 - [/] [#lzcoreprofile] Implement Phase 1 of tasks/software/plan-lazily-core-beta.md: candidate Core profile registry, schema, generated views, dependency-boundary checks, and validation gates are complete and verified in /home/brian/worktrees/lazily-spec-lzcoreprofile-20261012; blocked until explicit commit/integration authorization is supplied or the queue-wide #spec-test-commit-push preset is defined.
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
-- [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
+- [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for future lazily-rs tag-workflow releases. lazily v0.59.0 and lazily-macros v0.23.1 are already live; v0.59.0 came from descendant release commit a0f0f5327910, so the prior instruction to publish ea2910d is stale. Blocked solely on publisher configuration; no agent-executable publication remains for v0.59.0.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Fresh read-only audit/handoff generated 2026-10-12T21:27:35Z in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 and verified with zero deletions. After integrating #lzagentdocartifactrefresh, two authorizable options remain: full plan deletes 565 artifacts totaling 9,879,236,243 bytes with 0 refused/skipped/failed in dry run; preferred durable-only plan deletes 30 GitHub-Release-backed artifacts totaling 869,490,218 bytes and refuses exactly 535 PyPI-backed artifacts totaling 9,009,746,025 bytes as perishable. 545 artifacts totaling 8,636,981,950 bytes remain withheld and are never deletable. The 7-day handoff expires 2026-10-19T21:27:35Z and becomes evidence_stale 24 hours earlier. Blocked solely on explicit destructive authorization after the refreshed handoff is integrated; no artifact has been deleted.
 - [/] [#lzbetascope] [operator-decision] Approve final promotion of the candidate Lazily Core profile to Beta under tasks/software/plan-lazily-core-beta.md after #lzcoreprofile, #lzcoreclaims, #lzcorefacades, #lzcorecompat, #lzcoreconsumers, #lzcorecohort, #lzreleasepins, and publication blockers are green. The public promise remains: Lazily Core is Beta; Lazily Modules graduate independently.

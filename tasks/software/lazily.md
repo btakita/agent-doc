@@ -55,7 +55,16 @@ Both new heads are claimed and running:
 - Release readiness → `subagent:releasepublish`
 
 Because `#spec-test-commit-push` remains undefined, neither worker may commit, push, install, release, or publish. The semantic-completion warning was advisory and did not auto-close the release request.
-<!-- agent:boundary:cfd052cf -->
+> **Chat prompt (#chatprompt):** disregard the #gh-fix
+
+> **Chat prompt (#chatprompt):** wrong session
+
+### Re: correction and Run A — gpt-5 · 2026-10-13T14:07:45-04:00
+
+The Issue 249 cancellation was not applied to this session. Its queue head and claim were restored, and the existing worker resumed under the original authorization. The unrelated release-readiness worker was left unchanged.
+
+Run A is acknowledged.
+<!-- agent:boundary:dc8f8751 -->
 <!-- /agent:exchange -->
  
 ## Queue
@@ -63,8 +72,8 @@ Because `#spec-test-commit-push` remains undefined, neither worker may commit, p
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - 🚧 do [#lzcoreevidencedarttimeout]
 - 🚧 do [#lzcoreciactivationfixes]
-- #gh-fix https://github.com/btakita/agent-doc/issues/249
 - release + publish
+- [from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249
 <!-- /agent:queue -->
 
 ## Backlog

@@ -458,6 +458,22 @@ impl QueueClaimLedger {
         Some(self.claims.remove(index))
     }
 
+    /// Release exactly the claim generation the caller previously observed.
+    ///
+    /// A completion-feedback write crosses the editor/CRDT authority before
+    /// the durable claim is released. Another coordinator can reassign or
+    /// refresh the same head during that write; the older completion must not
+    /// clear that newer claim.
+    pub fn release_exact(&mut self, expected: &QueueClaim) -> Option<QueueClaim> {
+        let index = self.claims.iter().position(|claim| {
+            claim.identity == expected.identity
+                && claim.owner == expected.owner
+                && claim.claimed_at_secs == expected.claimed_at_secs
+                && claim.expires_at_secs == expected.expires_at_secs
+        })?;
+        Some(self.claims.remove(index))
+    }
+
     /// Claims that are neither expired nor closed. `live_heads` is the set of
     /// identities still present as live queue heads; `None` means the caller
     /// could not read the queue, in which case closure cannot be judged and

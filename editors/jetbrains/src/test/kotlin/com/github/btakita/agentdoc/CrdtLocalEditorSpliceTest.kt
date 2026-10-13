@@ -381,6 +381,56 @@ class CrdtLocalEditorSpliceTest {
     }
 
     @Test
+    fun `exact operator correction reconstructs a missing base after lineage is lost`() {
+        val capturedBase = """
+            ---
+            agent_doc_session: session-1
+            agent: codex
+            : resume:
+            ---
+            # Dev
+        """.trimIndent()
+        val corrected = capturedBase.replace(": resume:", "resume:")
+        val edit = singleSpliceCapturedEditUtil(capturedBase, corrected, 12)!!
+        val staleShadow = capturedBase.replace("# Dev", "old controller status\n# Dev")
+
+        assertTrue(localEditorSpliceBaseLengthMismatchUtil(staleShadow, listOf(edit)))
+        assertNull(prepareLocalEditorEditsUtil(staleShadow, listOf(edit)))
+
+        val recovered = reconstructCapturedLocalEditorBatchUtil(corrected, listOf(edit))
+
+        assertNotNull(recovered)
+        assertEquals(capturedBase, recovered!!.capturedBaseText)
+        assertEquals(corrected, recovered.batch.resultingText)
+        assertEquals(1, recovered.batch.edits.size)
+    }
+
+    @Test
+    fun `missing base reconstruction refuses a visible cut inconsistent with captured edits`() {
+        val base = ": resume:\n"
+        val corrected = "resume:\n"
+        val edit = singleSpliceCapturedEditUtil(base, corrected, 1)!!
+
+        assertNull(reconstructCapturedLocalEditorBatchUtil("different:\n", listOf(edit)))
+    }
+
+    @Test
+    fun `lineage loss recovery rebases reconstructed events through controller canonical`() {
+        val source = java.nio.file.Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt",
+        ).toFile().readText()
+        val forward = source.substringAfter("private fun forwardLocalEditsFromShadow(")
+            .substringBefore("private fun rebaseSplicesPastMissingAgentPatch(")
+        val reconstruct = forward.substringAfter("private fun reconstructSplicesFromVisibleCut(")
+
+        assertTrue(forward.contains("reconstructSplicesFromVisibleCut(filePath, beforeText, currentEdits)"))
+        assertTrue(forward.contains("capturedBaseText = reconstructedMissingBase!!"))
+        assertTrue(forward.contains("rebootstrapCanonicalAndForwardCapturedLocalEdit("))
+        assertTrue(reconstruct.contains("pendingLocalEditorEdits[filePath].orEmpty().isNotEmpty()"))
+        assertTrue(reconstruct.contains("reconstructCapturedLocalEditorBatchUtil(visible, edits)"))
+    }
+
+    @Test
     fun `an operator edit inside the agent patch cannot be rebased`() {
         val patched = agentPatched()
         val at = patched.indexOf("Nothing")

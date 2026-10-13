@@ -695,6 +695,38 @@ internal data class PreparedLocalEditorBatch(
     val resultingText: String,
 )
 
+internal data class ReconstructedLocalEditorBatch(
+    val capturedBaseText: String,
+    val batch: PreparedLocalEditorBatch,
+)
+
+/**
+ * Recover the exact base of a captured operator burst from a consistent visible-editor cut.
+ *
+ * `#agentpatchlineage` normally rebases a burst whose base is absent from the replica by using
+ * the recorded agent patch. That lineage is process-local, however, so an IDE/plugin restart can
+ * leave exact DocumentEvents whose pre-edit length differs from the restored shadow with no patch
+ * id. Holding those events forever strands the operator's corrected text in the editor and makes
+ * controller commands keep reporting an obsolete parse error (`#devtmuxfeedback`).
+ *
+ * Undoing the events newest-first proves the precise buffer they were typed into. Replaying them
+ * against that recovered base proves a batch containing operator edits only; callers must rebase
+ * that batch onto controller canonical, never apply it directly to the stale shadow.
+ */
+internal fun reconstructCapturedLocalEditorBatchUtil(
+    visible: String,
+    edits: List<CapturedLocalEditorEdit>,
+): ReconstructedLocalEditorBatch? {
+    if (edits.isEmpty()) return null
+    var base = visible
+    for (edit in edits.asReversed()) {
+        base = reconstructLocalEditorBaseTextUtil(base, edit) ?: return null
+    }
+    val batch = prepareLocalEditorEditsUtil(base, edits) ?: return null
+    if (batch.resultingText != visible) return null
+    return ReconstructedLocalEditorBatch(base, batch)
+}
+
 private enum class LocalEditorForwardResult {
     Applied,
     Fenced,
@@ -1677,10 +1709,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         val beforeText = shadows[filePath] ?: return LocalEditorForwardResult.Retry
         var rebasedPastAgentPatch = false
+        var reconstructedMissingBase: String? = null
         val batch =
             prepareLocalEditorEditsUtil(beforeText, currentEdits)
                 ?: rebaseSplicesPastMissingAgentPatch(filePath, beforeText, currentEdits)
                     ?.also { rebasedPastAgentPatch = true }
+                ?: reconstructSplicesFromVisibleCut(filePath, beforeText, currentEdits)
+                    ?.also { reconstructedMissingBase = it.capturedBaseText }
+                    ?.batch
                 ?: run {
                     log.debug(
                         "[crdt-replica] retained local splice batch for $filePath because its exact shadow range no longer matches",
@@ -1705,12 +1741,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         val replicaText = forwarder.replicaText()
         val forwarded =
-            when (localReplicaBaselineDecisionUtil(replicaText, beforeText)) {
-                LocalReplicaBaselineDecision.ForwardLocal -> {
+            when {
+                reconstructedMissingBase != null ->
+                    rebootstrapCanonicalAndForwardCapturedLocalEdit(
+                        filePath = filePath,
+                        capturedBaseText = reconstructedMissingBase!!,
+                        visibleEditorText = editorText,
+                        staleForwarder = forwarder,
+                        batch = batch,
+                    )
+                localReplicaBaselineDecisionUtil(replicaText, beforeText) ==
+                    LocalReplicaBaselineDecision.ForwardLocal -> {
                     currentEpoch == nonOperatorMutationEpoch(filePath) &&
                         forwarder.forwardLocalEdits(batch)
                 }
-                LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward ->
+                else ->
                     rebootstrapCanonicalAndForwardCapturedLocalEdit(
                         filePath = filePath,
                         capturedBaseText = beforeText,
@@ -1758,6 +1803,32 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "splices=${batch.edits.size} before_chars=${beforeText.length} after_chars=${editorText.length}",
         )
         return LocalEditorForwardResult.Applied
+    }
+
+    /**
+     * Last-resort recovery for exact editor events whose missing base predates the in-memory agent
+     * lineage. A newer pending event means [visible] is beyond [edits], so wait for the next
+     * coalesced flush instead of consuming or widening that newer edit.
+     */
+    private fun reconstructSplicesFromVisibleCut(
+        filePath: String,
+        beforeText: String,
+        edits: List<CapturedLocalEditorEdit>,
+    ): ReconstructedLocalEditorBatch? {
+        if (!localEditorSpliceBaseLengthMismatchUtil(beforeText, edits)) return null
+        val recovered =
+            withEditorCaptureCut(filePath) { visible ->
+                if (pendingLocalEditorEdits[filePath].orEmpty().isNotEmpty()) return@withEditorCaptureCut null
+                reconstructCapturedLocalEditorBatchUtil(visible, edits)
+            }
+        if (recovered == null) return null
+        log.warn(
+            "[crdt-replica] reconstructed the missing editor base for ${File(filePath).name}; " +
+                "shadow_chars=${beforeText.length} captured_base_chars=${recovered.capturedBaseText.length} " +
+                "operator_splices=${recovered.batch.edits.size} " +
+                "recovery=canonical-rebootstrap-reconstructed-local-delta (#devtmuxfeedback)",
+        )
+        return recovered
     }
 
     /**

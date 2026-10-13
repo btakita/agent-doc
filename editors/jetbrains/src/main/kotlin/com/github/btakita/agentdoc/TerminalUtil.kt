@@ -5,7 +5,9 @@ import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
@@ -13,6 +15,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.util.concurrency.AppExecutorUtil
 import java.awt.datatransfer.StringSelection
 import java.io.File
 import java.time.Instant
@@ -24,6 +27,7 @@ object TerminalUtil {
     private val agentDocProjectRoots = ConcurrentHashMap<String, String>()
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
     private const val RESTART_TELEMETRY_OPS_LOG_MAX_LINES = 400
+    private const val EDITOR_FAILURE_STATUS_SECONDS = 30L
     internal const val RUN_ROUTE_WAIT_FOR_READY_SECONDS = 120L
     private const val UI_OUTCOME_QUEUED_BEHIND_OWNER = "queued_behind_owner"
     private const val UI_OUTCOME_RECOVERED_AND_RETRIED = "recovered_and_retried"
@@ -1198,6 +1202,11 @@ object TerminalUtil {
             file = file,
             args = if (force) listOf(commandName, "--force") else listOf(commandName),
             startedMessage = startedMessage,
+            failureAction = if (commandName == "restart-agent") {
+                "restart the agent"
+            } else {
+                "restart the supervisor"
+            },
             onSuccess = { relativePath, output ->
                 val telemetry = readRestartSupervisorTelemetry(telemetryCwd, relativePath, telemetryStartLine)
                 val message = restartSessionSuccessMessage(relativePath, output, telemetry)
@@ -1434,6 +1443,7 @@ object TerminalUtil {
         file: VirtualFile,
         args: List<String>,
         startedMessage: String,
+        failureAction: String = "complete the session command",
         onSuccess: (String, String) -> Unit,
         onFailure: ((String, Int, String) -> Unit)? = null,
         onComplete: (() -> Unit)? = null,
@@ -1446,6 +1456,7 @@ object TerminalUtil {
             file = file,
             command = cmd,
             startedMessage = startedMessage,
+            failureAction = failureAction,
             onSuccess = onSuccess,
             onFailure = onFailure,
             onComplete = onComplete,
@@ -1480,6 +1491,12 @@ object TerminalUtil {
                         "[document-command] failed file=$relativePath exit=$exitCode " +
                             "command=${command.joinToString(" ")} output=${output.ifBlank { "<empty>" }}",
                     )
+                    showEditorFailureStatus(
+                        project,
+                        file.path,
+                        failureAction,
+                        buildCommandFailureMessage(failureAction, exitCode, output),
+                    )
                     onFailure?.invoke(relativePath, exitCode, output)
                         ?: notifyError(
                                 project,
@@ -1500,7 +1517,9 @@ object TerminalUtil {
                     "command=${command.joinToString(" ")}: ${e.message}",
                 e,
             )
-            notifyError(project, "Failed to run agent-doc command: ${e.message}\nLooked for: $binary")
+            val detail = "Failed to run agent-doc command: ${e.message}\nLooked for: $binary"
+            showEditorFailureStatus(project, file.path, failureAction, detail)
+            notifyError(project, detail)
         }
     }
 
@@ -2075,6 +2094,78 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
 
     fun notifyError(project: Project, content: String) {
         notify(project, content, NotificationType.ERROR)
+    }
+
+    /**
+     * Surface operator-command failures where the operator is looking: directly above the
+     * document. Event Log remains the durable detail surface, while this bounded strip prevents
+     * a failed pane/restart action from looking like a no-op (`#devtmuxfeedback`). The token fence
+     * ensures an older expiry cannot clear a newer failure.
+     */
+    internal fun showEditorFailureStatus(
+        project: Project,
+        filePath: String,
+        action: String,
+        detail: String,
+    ) {
+        val editorText =
+            try {
+                ReadAction.compute<String?, RuntimeException> {
+                    LocalFileSystem.getInstance().findFileByPath(filePath)?.let { file ->
+                        FileDocumentManager.getInstance().getDocument(file)?.text
+                    }
+                }
+            } catch (_: RuntimeException) {
+                null
+            }
+        val (label, tooltip) = editorFailurePresentation(action, detail, editorText)
+        val refresher = TurnStateBannerRefresher.getInstance(project)
+        val token = refresher.showTransientStatus(filePath, label, tooltip)
+        AppExecutorUtil.getAppScheduledExecutorService().schedule(
+            {
+                ApplicationManager.getApplication().invokeLater {
+                    if (!project.isDisposed) {
+                        refresher.clearTransientStatus(filePath, token)
+                    }
+                }
+            },
+            EDITOR_FAILURE_STATUS_SECONDS,
+            TimeUnit.SECONDS,
+        )
+    }
+
+    internal fun editorFailurePresentation(
+        action: String,
+        detail: String,
+        editorText: String? = null,
+    ): Pair<String, String> {
+        val lower = detail.lowercase()
+        val malformedFrontmatter =
+            lower.contains("invalid yaml frontmatter") ||
+                lower.contains("malformed frontmatter") ||
+                lower.contains("not_agent_doc_document")
+        val reportedSourceLine =
+            Regex("""(?m)^\s*>\s*\d+\s*\|\s?(.*)$""")
+                .find(detail)
+                ?.groupValues
+                ?.get(1)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+        val staleFrontmatterDiagnostic =
+            malformedFrontmatter &&
+                editorText != null &&
+                reportedSourceLine != null &&
+                editorText.lineSequence().none { it.trim() == reportedSourceLine }
+        val label = when {
+            staleFrontmatterDiagnostic ->
+                "⚠ agent-doc: the controller has stale frontmatter — editor sync is retrying"
+            malformedFrontmatter ->
+                "⚠ agent-doc: session frontmatter is invalid — fix YAML, then retry"
+            lower.contains("stage=missing_actor") ->
+                "⚠ agent-doc: no tmux pane exists — use Load Tmux Window"
+            else -> "⚠ agent-doc: failed to $action — open Event Log for details"
+        }
+        return label to detail
     }
 
     /**

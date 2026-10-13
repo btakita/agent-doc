@@ -1399,7 +1399,7 @@ class TerminalUtilTest {
     }
 
     @Test
-    fun `document command failures are written to the durable idea log`() {
+    fun `document command failures are written to the durable idea log and editor strip`() {
         val terminalUtilPath =
             listOf(
                     Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"),
@@ -1418,6 +1418,77 @@ class TerminalUtilTest {
         assertTrue(commandRunner.contains("exit=${'$'}exitCode"))
         assertTrue(commandRunner.contains("output=${'$'}{output.ifBlank"))
         assertTrue(commandRunner.contains("[document-command] failed to start file="))
+        assertTrue(commandRunner.contains("showEditorFailureStatus("))
+    }
+
+    @Test
+    fun `missing actor failure tells the operator how to create a tmux pane`() {
+        val (label, tooltip) = TerminalUtil.editorFailurePresentation(
+            "restart the agent",
+            "operator command `session_restart` rejected: stage=missing_actor receipt_id=1427",
+        )
+
+        assertEquals(
+            "⚠ agent-doc: no tmux pane exists — use Load Tmux Window",
+            label,
+        )
+        assertTrue(tooltip.contains("stage=missing_actor"))
+    }
+
+    @Test
+    fun `malformed frontmatter failure is actionable in the editor`() {
+        val (label, tooltip) = TerminalUtil.editorFailurePresentation(
+            "open the tmux pane",
+            "sync auto-start frontmatter: invalid YAML frontmatter at line 4 column 1",
+        )
+
+        assertEquals(
+            "⚠ agent-doc: session frontmatter is invalid — fix YAML, then retry",
+            label,
+        )
+        assertTrue(tooltip.contains("invalid YAML frontmatter"))
+    }
+
+    @Test
+    fun `fixed frontmatter is identified as a stale controller diagnostic`() {
+        val detail = """
+            invalid YAML frontmatter at line 4 column 1
+              > 4 | : resume:
+        """.trimIndent()
+        val editorText = """
+            ---
+            agent_doc_session: session-1
+            agent: codex
+            resume:
+            ---
+        """.trimIndent()
+
+        val (label, tooltip) = TerminalUtil.editorFailurePresentation(
+            "open the tmux pane",
+            detail,
+            editorText,
+        )
+
+        assertEquals(
+            "⚠ agent-doc: the controller has stale frontmatter — editor sync is retrying",
+            label,
+        )
+        assertTrue(tooltip.contains("> 4 | : resume:"))
+    }
+
+    @Test
+    fun `generic document command failure keeps exact diagnostics in the tooltip`() {
+        val detail = "socket refused the request"
+        val (label, tooltip) = TerminalUtil.editorFailurePresentation(
+            "open the tmux pane",
+            detail,
+        )
+
+        assertEquals(
+            "⚠ agent-doc: failed to open the tmux pane — open Event Log for details",
+            label,
+        )
+        assertEquals(detail, tooltip)
     }
 
     @Test

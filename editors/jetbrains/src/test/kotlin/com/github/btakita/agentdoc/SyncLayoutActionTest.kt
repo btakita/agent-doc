@@ -619,4 +619,19 @@ class SyncLayoutActionTest {
         ).toFile().readText()
         assertTrue(route.contains("columnOrder = SyncLayoutAction.syncColumnOrder(editorLayout)"))
     }
+
+    @Test
+    fun `manual tmux load failures are surfaced in the focused editor`() {
+        val source = java.nio.file.Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutAction.kt",
+        ).toFile().readText()
+
+        assertTrue(
+            source.contains(
+                "val failureAction = if (noAutostart) \"sync the tmux layout\" else \"open the tmux pane\"",
+            ),
+        )
+        assertTrue(source.contains("TerminalUtil.showEditorFailureStatus("))
+        assertTrue(source.split("TerminalUtil.showEditorFailureStatus(").size - 1 >= 4)
+    }
 }

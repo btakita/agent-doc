@@ -391,6 +391,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
                         return
                     }
             val focusedFile = focusedVFile.path
+            val failureAction = if (noAutostart) "sync the tmux layout" else "open the tmux pane"
             val visibleMdFiles = collectVisibleMarkdownFiles(
                 (listOf(focusedVFile) + manager.selectedFiles).toTypedArray(),
                 AgentDocSessionFiles::isSessionDocument,
@@ -429,7 +430,10 @@ class SyncLayoutAction : AnAction(), DumbAware {
                     val message =
                         "Editor split could not be read; the retained tmux layout was not changed."
                     LOG.warn("[sync] refusing exact-visible layout because editor columns are unknown")
-                    if (notify) TerminalUtil.notifyError(project, message)
+                    if (notify) {
+                        TerminalUtil.showEditorFailureStatus(project, focusedFile, failureAction, message)
+                        TerminalUtil.notifyError(project, message)
+                    }
                     return
                 }
             }
@@ -453,9 +457,16 @@ class SyncLayoutAction : AnAction(), DumbAware {
                 },
                 onFailure = { message ->
                     if (notify) {
+                        val detail = "Failed to prepare agent-doc tmux session: $message"
+                        TerminalUtil.showEditorFailureStatus(
+                            project,
+                            focusedFile,
+                            failureAction,
+                            detail,
+                        )
                         TerminalUtil.notifyError(
                             project,
-                            "Failed to prepare agent-doc tmux session: $message",
+                            detail,
                         )
                     }
                 },
@@ -467,10 +478,18 @@ class SyncLayoutAction : AnAction(), DumbAware {
                 try {
                     if (!NativeReloadCoordinator.awaitReady()) {
                         if (notify) {
+                            val detail =
+                                "Sync deferred because the native-generation handoff did not " +
+                                    "finish within ${NativeReloadCoordinator.USER_ACTION_AWAIT_MS / 1_000} seconds."
+                            TerminalUtil.showEditorFailureStatus(
+                                project,
+                                focusedFile,
+                                failureAction,
+                                detail,
+                            )
                             TerminalUtil.notifyError(
                                 project,
-                                "Sync deferred because the native-generation handoff did not " +
-                                    "finish within ${NativeReloadCoordinator.USER_ACTION_AWAIT_MS / 1_000} seconds.",
+                                detail,
                             )
                         }
                         return@Thread
@@ -488,16 +507,32 @@ class SyncLayoutAction : AnAction(), DumbAware {
                     if (receipt.exitCode != 0) {
                         LOG.warn("[sync] Project Controller async submit failed projectRoot=$projectRoot focus=$focusedFile columns=$exactVisibleColumns output=${receipt.output}")
                         if (notify) {
+                            val detail = syncFailureMessage(receipt.output)
+                            TerminalUtil.showEditorFailureStatus(
+                                project,
+                                focusedFile,
+                                failureAction,
+                                detail,
+                            )
                             TerminalUtil.notifyError(
                                 project,
-                                syncFailureMessage(receipt.output),
+                                detail,
                             )
                         }
                     } else {
                         LOG.info("[sync] Project Controller async submit accepted: ${receipt.output.take(500)}")
                     }
                 } catch (ex: Exception) {
-                    if (notify) TerminalUtil.notifyError(project, "Failed to sync layout: ${ex.message}")
+                    if (notify) {
+                        val detail = "Failed to sync layout: ${ex.message}"
+                        TerminalUtil.showEditorFailureStatus(
+                            project,
+                            focusedFile,
+                            failureAction,
+                            detail,
+                        )
+                        TerminalUtil.notifyError(project, detail)
+                    }
                 }
             }.start()
         }

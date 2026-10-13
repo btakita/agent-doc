@@ -229,6 +229,18 @@ for a newer disk revision when the twin-pair guard is off.
 beside a stale cut still lands. With the projection off, that property holds,
 so the projection is load-bearing for progress.
 
+`RemoteLayoutProvisional.tla` checks the recurring Coder/Remote Dev ordering
+race from GH #250. It exhausts every ordered two-column layout over four
+documents, either focused side, every selection absent from the lagging visible
+set, an optional second lagging selection, and every structural correction
+containing the selected document. `CorrectionUsesPreGuessBase` requires the
+correction to equal a fold against the layout from before the first guess;
+`ProvisionalPreservesAncestry` keeps that base stable across repeated selection
+events; and `ProvisionalClearsAfterCorrection` prevents stale ancestry from
+leaking into a later fold. `RemoteLayoutProvisionalWedge.cfg` restores the
+pre-fix behavior and must violate the correction invariant, while
+`RemoteLayoutProvisionalReach.cfg` proves the guess/correction path is reachable.
+
 `StaleColumnRecycle.tla` checks GH #136: the stale-supervisor column gate and
 the safe-boundary recycle request it depends on. The editor link is an
 adversarial channel (delay, reorder, drop, duplicate, reconnect) and the

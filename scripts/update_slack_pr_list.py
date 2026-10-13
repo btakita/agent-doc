@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Reconcile GitHub pull-request status in one Slack message.
 
-Closed or merged pull requests are struck through. Open pull requests whose
-active change-request review targets an older commit than the current head are
-marked with ``:white_check_mark:`` to show that a follow-up commit is ready for
-review.
+Closed or merged pull requests are struck through. Open pull requests are marked
+with ``:white_check_mark:`` when approved, ``:eyes:`` when requested changes have
+been followed by a newer commit, and ``:warning:`` when requested changes still
+target the current head.
 
 The Slack token must belong to the author of the message (or otherwise be able
 to edit it). By default it is read from ``SLACK_USER_TOKEN``.
@@ -26,14 +26,19 @@ import urllib.request
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-
 GITHUB_PR_RE = re.compile(
     r"https://github\.com/(?P<owner>[A-Za-z0-9_.-]+)/"
     r"(?P<repo>[A-Za-z0-9_.-]+)/pull/(?P<number>[0-9]+)"
 )
 LINE_PREFIX_RE = re.compile(r"^(?P<prefix>\s*(?:\d+[.)]|[-*])\s+)(?P<body>.*)$")
-CHECK_MARK_RE = re.compile(r"(?:^|\s)(?::white_check_mark:|✅)(?=\s|$)")
+REVIEW_MARK_RE = re.compile(
+    r"(?:^|\s)(?::white_check_mark:|✅|:eyes:|👀|:warning:|⚠️?)(?=\s|$)"
+)
 SLACK_LINK_RE = re.compile(r"/archives/(?P<channel>[A-Z0-9]+)/p(?P<stamp>[0-9]{16})(?:\b|$)")
+
+APPROVED_MARK = ":white_check_mark:"
+ADDRESSED_MARK = ":eyes:"
+UNADDRESSED_MARK = ":warning:"
 
 
 class UpdateError(RuntimeError):
@@ -61,6 +66,7 @@ class PullRequestStatus:
     state: str
     head_sha: str
     active_change_request_sha: str | None
+    has_active_approval: bool = False
 
     @property
     def closed(self) -> bool:
@@ -74,12 +80,30 @@ class PullRequestStatus:
             and self.active_change_request_sha != self.head_sha
         )
 
+    @property
+    def review_unaddressed(self) -> bool:
+        return (
+            not self.closed
+            and self.active_change_request_sha is not None
+            and self.active_change_request_sha == self.head_sha
+        )
+
+    @property
+    def approved(self) -> bool:
+        return (
+            not self.closed
+            and self.active_change_request_sha is None
+            and self.has_active_approval
+        )
+
 
 @dataclasses.dataclass(frozen=True)
 class ReconcileResult:
     text: str
     closed: tuple[PullRequestRef, ...]
+    approved: tuple[PullRequestRef, ...]
     addressed: tuple[PullRequestRef, ...]
+    unaddressed: tuple[PullRequestRef, ...]
     unchanged: tuple[PullRequestRef, ...]
 
 
@@ -136,8 +160,10 @@ def _gh_json(path: str) -> Any:
         raise UpdateError(f"gh api {path!r} returned invalid JSON: {error}") from error
 
 
-def _latest_active_change_request(reviews: Iterable[dict[str, Any]]) -> str | None:
-    """Return the commit for the latest still-active change-request review.
+def _active_review_state(
+    reviews: Iterable[dict[str, Any]],
+) -> tuple[bool, str | None]:
+    """Return active approval and change-request state.
 
     GitHub retains historical reviews. The latest formal review by each user is
     authoritative, so a later approval or dismissal supersedes that user's
@@ -164,9 +190,20 @@ def _latest_active_change_request(reviews: Iterable[dict[str, Any]]) -> str | No
         and review.get("commit_id")
     ]
     if not change_requests:
-        return None
+        return (
+            any(
+                str(review.get("state", "")).upper() == "APPROVED"
+                for review in latest_by_user.values()
+            ),
+            None,
+        )
     latest = max(change_requests, key=lambda review: str(review.get("submitted_at") or ""))
-    return str(latest["commit_id"])
+    return False, str(latest["commit_id"])
+
+
+def _latest_active_change_request(reviews: Iterable[dict[str, Any]]) -> str | None:
+    """Compatibility helper returning the active change-request commit."""
+    return _active_review_state(reviews)[1]
 
 
 def fetch_pr_status(ref: PullRequestRef) -> PullRequestStatus:
@@ -178,11 +215,13 @@ def fetch_pr_status(ref: PullRequestRef) -> PullRequestStatus:
     head_sha = str(head.get("sha") or "")
     if not head_sha:
         raise UpdateError(f"GitHub response omitted the head SHA for {ref.label}")
+    has_active_approval, active_change_request_sha = _active_review_state(reviews)
     return PullRequestStatus(
         ref=ref,
         state=str(pull.get("state") or "").lower(),
         head_sha=head_sha,
-        active_change_request_sha=_latest_active_change_request(reviews),
+        active_change_request_sha=active_change_request_sha,
+        has_active_approval=has_active_approval,
     )
 
 
@@ -209,11 +248,18 @@ def _strip_outer_strike(body: str) -> str:
     return body
 
 
+def _strip_review_marks(body: str) -> str:
+    """Remove updater-owned review markers while preserving the line text."""
+    return re.sub(r"[ \t]+", " ", REVIEW_MARK_RE.sub(" ", body)).strip()
+
+
 def reconcile_message(
     text: str, statuses: dict[PullRequestRef, PullRequestStatus]
 ) -> ReconcileResult:
     closed: list[PullRequestRef] = []
+    approved: list[PullRequestRef] = []
     addressed: list[PullRequestRef] = []
+    unaddressed: list[PullRequestRef] = []
     unchanged: list[PullRequestRef] = []
     output_lines: list[str] = []
 
@@ -231,21 +277,25 @@ def reconcile_message(
         match = LINE_PREFIX_RE.match(content)
         prefix = match.group("prefix") if match else ""
         body = match.group("body") if match else content
-        body = _strip_outer_strike(body).rstrip()
-        has_check_mark = CHECK_MARK_RE.search(body) is not None
+        body = _strip_review_marks(_strip_outer_strike(body).rstrip())
         line_statuses = [statuses[ref] for ref in refs]
 
         if all(status.closed for status in line_statuses):
             body = f"~{body}~"
             closed.extend(refs)
-        elif (
-            any(status.review_addressed_by_commit for status in line_statuses)
-            and not has_check_mark
-        ):
-            body = f"{body} :white_check_mark:"
+        elif any(status.review_unaddressed for status in line_statuses):
+            body = f"{body} {UNADDRESSED_MARK}"
+            unaddressed.extend(
+                status.ref for status in line_statuses if status.review_unaddressed
+            )
+        elif any(status.review_addressed_by_commit for status in line_statuses):
+            body = f"{body} {ADDRESSED_MARK}"
             addressed.extend(
                 status.ref for status in line_statuses if status.review_addressed_by_commit
             )
+        elif any(status.approved for status in line_statuses):
+            body = f"{body} {APPROVED_MARK}"
+            approved.extend(status.ref for status in line_statuses if status.approved)
         else:
             unchanged.extend(refs)
         output_lines.append(f"{prefix}{body}{ending}")
@@ -253,7 +303,9 @@ def reconcile_message(
     return ReconcileResult(
         text="".join(output_lines),
         closed=tuple(dict.fromkeys(closed)),
+        approved=tuple(dict.fromkeys(approved)),
         addressed=tuple(dict.fromkeys(addressed)),
+        unaddressed=tuple(dict.fromkeys(unaddressed)),
         unchanged=tuple(dict.fromkeys(unchanged)),
     )
 
@@ -304,7 +356,9 @@ def _summary(result: ReconcileResult, changed: bool) -> str:
         (
             f"message changed: {'yes' if changed else 'no'}",
             f"closed/merged: {labels(result.closed)}",
+            f"approved: {labels(result.approved)}",
             f"review addressed by newer commit: {labels(result.addressed)}",
+            f"review changes still unaddressed: {labels(result.unaddressed)}",
         )
     )
 

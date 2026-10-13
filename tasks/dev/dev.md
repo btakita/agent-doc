@@ -183,6 +183,23 @@ Implemented and committed channel URL support.
 - Commit: `236e0b3b38 feat: accept Slack channel URLs`.
 
 The repository-wide check remains covered by the immediately preceding run: its only failure was the unrelated stale generated Claude-skill fixture.
+
+### Re: Make the script use events (preferably) or poll and support hot reloading + logs for agents + humans to see activity. — gpt-5 · 2026-10-13T19:39:35-04:00
+
+> **Queue prompt:** Make the script use events (preferably) or poll and support hot reloading + logs for agents + humans to see activity.
+
+Implemented and committed a continuous polling mode. Polling is the practical fit here because the standalone CLI has no public HTTP endpoint for GitHub or Slack webhooks.
+
+- `--watch` continuously reconciles an existing `--message`; it deliberately requires an existing message so a restart cannot create duplicates.
+- `--poll-interval` controls cadence and defaults to 60 seconds.
+- `--log-level` controls timestamped activity logs. Each poll logs start, completion, update/no-change status, and recoverable failures.
+- Watch mode continues after a recoverable GitHub/Slack error and exits cleanly on Ctrl-C.
+- It watches its own source mtime and re-execs the current command when the script changes, providing hot reload during development.
+- One-shot create, update, and dry-run behavior remains available.
+- CLI help documents the mode. Ruff, byte-compilation, all 22 focused tests, and `git diff --check` pass.
+- Commit: `3e02a46eca feat: watch and hot-reload PR status updates`.
+
+The immediately preceding repository-wide run's only failure remains the unrelated stale generated Claude-skill fixture.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
@@ -191,10 +208,10 @@ The repository-wide check remains covered by the immediately preceding run: its 
 <!-- agent:queue go priority -->
 - ~~Make an icon for a merge conflict.~~
 - ~~Make the channel cli arg take an id or url.~~
-- Make the script use events (preferably) or poll and support hot reloading + logs for agents + humans to see activity.
+- ~~Make the script use events (preferably) or poll and support hot reloading + logs for agents + humans to see activity.~~
 - Make the message have a key for the emojis so reads understand what each emoji means.
+- Make the script work standalone without an agent. Are you using the Slack mcp? Can we make this work without the Slack mcp?
 - There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`
-- Make the script work standalone without an agent as well. Are you using the Slack mcp? Can we make this work without the Slack mcp?
 - Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.
 <!-- /agent:queue -->
 

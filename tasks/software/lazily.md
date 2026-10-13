@@ -53,15 +53,15 @@ The undefined `#spec-test-commit-push` preset means neither worker is authorized
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- do [#lzcoreevidencedarttimeout]
-- do [#lzcoreciactivationfixes]
+- 🚧 do [#lzcoreevidencedarttimeout]
+- 🚧 do [#lzcoreciactivationfixes]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcoreevidencedarttimeout] Reproduce and fix Dart Core evidence report generation exceeding the verifier 600000ms per-command timeout; preserve the delete-before-spawn fail-closed behavior, add deterministic timeout/freshness coverage, then regenerate all nine reports into a fresh directory and require --require-all to pass with every report freshly dated.
-- [ ] [#lzcoreciactivationfixes] Make every new Core Phase 1-5 gate CI-active and reach-pinned: add named workflow steps and exact reach mappings for profile/evidence/facade/compatibility/consumer targets, name the currently anonymous binding consumer steps, pin job activation and matrices, rerun aggregate gates in the Phase 6 reusable workflow, and add exact Phase 6 callers from all nine candidate binding release workflows.
+- [ ] 🚧 [#lzcoreevidencedarttimeout] Reproduce and fix Dart Core evidence report generation exceeding the verifier 600000ms per-command timeout; preserve the delete-before-spawn fail-closed behavior, add deterministic timeout/freshness coverage, then regenerate all nine reports into a fresh directory and require --require-all to pass with every report freshly dated.
+- [ ] 🚧 [#lzcoreciactivationfixes] Make every new Core Phase 1-5 gate CI-active and reach-pinned: add named workflow steps and exact reach mappings for profile/evidence/facade/compatibility/consumer targets, name the currently anonymous binding consumer steps, pin job activation and matrices, rerun aggregate gates in the Phase 6 reusable workflow, and add exact Phase 6 callers from all nine candidate binding release workflows.
 <!-- /agent:backlog -->
 
 ## Review

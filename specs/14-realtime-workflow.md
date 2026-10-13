@@ -172,6 +172,13 @@ side channel: current text lives in the Lazily/CP CRDT model, while open/close,
 sync epochs, editor identity, plugin version, and capabilities travel on the
 reliable-sync Lazily plane. No filesystem representation of live editor state
 is created or consulted.
+Per-document authority reads range directly over that document's contiguous
+`(document_hash, pid)` keys. They must not fold or allocate the full
+cross-document live set on every idle-watch probe. The ranged result preserves
+the authority distinction: a document with retained open/close history but no
+live pid is known closed (`Some(false)`), while a document with no open-set fact
+is a cold miss (`None`) that may require durable hydration. Per-document
+sync-in-flight reads use the same bounded-key rule.
 A routed, allocated CRDT model created by replica registration is itself
 editor-attachment proof while the separately scheduled reliable-sync `open`
 projection is delayed or being rebuilt. The controller, write convergence, and

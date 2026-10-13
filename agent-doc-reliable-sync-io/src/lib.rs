@@ -73,10 +73,7 @@ pub fn plane_editor_live_for_path(file: &str) -> Option<bool> {
     let plane = global_liveness_plane().lock();
     let projection = plane.projection();
     let document_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(file));
-    if !projection.tracks_document(&document_hash) {
-        return None;
-    }
-    Some(projection.live_docs().contains(&document_hash))
+    projection.document_live(&document_hash)
 }
 
 /// Plane-primary sync-in-flight read for one document. This compares Lazily

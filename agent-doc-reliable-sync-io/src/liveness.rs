@@ -411,8 +411,31 @@ impl LivenessProjection {
     /// known closed document from a never-hydrated cold process.
     pub fn tracks_document(&self, document_hash: &str) -> bool {
         self.open_set
-            .keys()
-            .any(|(known_document, _)| known_document == document_hash)
+            .range((document_hash.to_owned(), Pid::MIN)..=(document_hash.to_owned(), Pid::MAX))
+            .next()
+            .is_some()
+    }
+
+    /// Derived live-editor authority for one document.
+    ///
+    /// `None` is a true cold miss: this projection has never received an
+    /// open/close fact for `document_hash`. `Some(false)` includes a tracked,
+    /// known-closed document and a document held only by dead editor pids.
+    /// Because `(document_hash, pid)` is the ordered open-set key, the lookup
+    /// touches only this document's contiguous key range instead of folding the
+    /// complete cross-document set and allocating [`Self::live_docs`].
+    pub fn document_live(&self, document_hash: &str) -> Option<bool> {
+        let mut tracked = false;
+        for ((_, pid), set) in self
+            .open_set
+            .range((document_hash.to_owned(), Pid::MIN)..=(document_hash.to_owned(), Pid::MAX))
+        {
+            tracked = true;
+            if set.present() && self.pid_alive(*pid) {
+                return Some(true);
+            }
+        }
+        tracked.then_some(false)
     }
 
     /// Every document with at least one present `(doc, pid)` (open-set ground truth,
@@ -523,8 +546,7 @@ impl LivenessProjection {
     /// not count (its buffer is gone), matching the whole-editor-death cascade.
     pub fn document_in_flight(&self, document_hash: &str) -> bool {
         self.sync_state
-            .iter()
-            .filter(|((doc, _), _)| doc == document_hash)
+            .range((document_hash.to_owned(), Pid::MIN)..=(document_hash.to_owned(), Pid::MAX))
             .any(|((doc, pid), reg)| {
                 let (edit_epoch, synced_epoch) = *reg.value();
                 edit_epoch > synced_epoch && self.is_open(doc, *pid) && self.pid_alive(*pid)
@@ -1110,6 +1132,72 @@ mod tests {
         assert!(projection.tracks_document("known-closed"));
         assert!(!projection.open_docs().contains("known-closed"));
         assert!(!projection.tracks_document("never-seen"));
+    }
+
+    #[test]
+    fn document_live_ranges_one_document_and_preserves_cold_vs_closed() {
+        let mut projection = LivenessProjection::new();
+        for index in 0..1_000 {
+            open(&mut projection, &format!("other-{index:04}"), index + 100);
+        }
+        open(&mut projection, "target", 7);
+        open(&mut projection, "target-prefix", 8);
+
+        assert_eq!(projection.document_live("target"), Some(true));
+        assert_eq!(projection.document_live("target-prefix"), Some(true));
+        assert_eq!(projection.document_live("never-seen"), None);
+
+        projection.apply(&LivenessOp::Close {
+            document_hash: "target".into(),
+            pid: 7,
+            observed_tags: vec!["open-7".into()],
+        });
+        assert_eq!(
+            projection.document_live("target"),
+            Some(false),
+            "a tracked, known-closed document is authoritative false, not cold"
+        );
+        assert_eq!(
+            projection.document_live("target-prefix"),
+            Some(true),
+            "an adjacent key prefix must not bleed into the target range"
+        );
+
+        open(&mut projection, "target", 9);
+        projection.apply(&LivenessOp::Alive {
+            pid: 9,
+            value: false,
+            stamp: stamp(20, 1),
+        });
+        assert_eq!(
+            projection.document_live("target"),
+            Some(false),
+            "a dead editor keeps the document tracked without making it live"
+        );
+    }
+
+    #[test]
+    fn document_in_flight_range_does_not_adopt_an_adjacent_document() {
+        let mut projection = LivenessProjection::new();
+        open(&mut projection, "target", 7);
+        open(&mut projection, "target-prefix", 8);
+        projection.apply(&LivenessOp::Sync {
+            document_hash: "target".into(),
+            pid: 7,
+            edit_epoch: 3,
+            synced_epoch: 3,
+            stamp: stamp(10, 1),
+        });
+        projection.apply(&LivenessOp::Sync {
+            document_hash: "target-prefix".into(),
+            pid: 8,
+            edit_epoch: 4,
+            synced_epoch: 1,
+            stamp: stamp(10, 1),
+        });
+
+        assert!(!projection.document_in_flight("target"));
+        assert!(projection.document_in_flight("target-prefix"));
     }
 
     // Order independence + re-delivery no-op for the same scenario.

@@ -231,7 +231,7 @@ jobs:
           test "$(printf '%s\n' "$classic_version" "$modular_version" "$modern_version" | sort -u | wc -l)" -eq 3
           cp "editors/jetbrains/build/distributions/agent-doc-jetbrains-$classic_version.zip" editor-packages/
           cp "editors/jetbrains-262/build/distributions/agent-doc-jetbrains-262-$modular_version.zip" editor-packages/
-          cp "editors/jetbrains/build/distributions/agent-doc-jetbrains-263-$modern_version.zip" editor-packages/
+          cp "editors/jetbrains-262/build/distributions/agent-doc-jetbrains-263-$modern_version.zip" editor-packages/
           ls -la editor-packages
 
       # JetBrains' simple custom-repository format allows a plugin ID only once

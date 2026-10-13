@@ -235,9 +235,9 @@ dev-harness-test: $(VSCODE_NODE_LOCK)
 editor-parity: dev-harness-test cross-editor-simworld
 	@python3 scripts/check_editor_parity.py
 
-# The classic, exact-262 modular, and 263 ZIPs share one Marketplace plugin ID,
-# so every disjoint compatibility range and the modular role/sandbox contract
-# are release gates.
+# The classic and both modular ZIPs share one Marketplace plugin ID, so every
+# disjoint compatibility range and the modular role/sandbox contract are release
+# gates.
 jetbrains-classic-check:
 	@cd editors/jetbrains && ./gradlew --no-daemon --console=plain verifyClassicArtifact
 
@@ -248,13 +248,16 @@ jetbrains-263-check:
 	@set -e; \
 	props=editors/jetbrains-263/gradle.properties; \
 	name=$$(sed -n 's/^pluginName *= *//p' "$$props" | tr -d '[:space:]'); \
+	distribution=$$(sed -n 's/^distributionName *= *//p' "$$props" | tr -d '[:space:]'); \
 	version=$$(sed -n 's/^pluginVersion *= *//p' "$$props" | tr -d '[:space:]'); \
+	platform=$$(sed -n 's/^platformVersion *= *//p' "$$props" | tr -d '[:space:]'); \
 	since=$$(sed -n 's/^compatibilitySinceBuild *= *//p' "$$props" | tr -d '[:space:]'); \
 	until=$$(sed -n 's/^compatibilityUntilBuild *= *//p' "$$props" | tr -d '[:space:]'); \
-	cd editors/jetbrains && ./gradlew --no-daemon --console=plain \
-		-PpluginName="$$name" -PpluginVersion="$$version" \
+	cd editors/jetbrains-262 && gradle --no-daemon --console=plain \
+		-PpluginName="$$name" -PdistributionName="$$distribution" \
+		-PpluginVersion="$$version" -PplatformVersion="$$platform" \
 		-PcompatibilitySinceBuild="$$since" -PcompatibilityUntilBuild="$$until" \
-		buildPlugin verifyClassicArtifact
+		test buildPlugin verifySplitArtifact verifySplitModeSandboxes
 
 # Bump JB plugin patch versions (when their sources changed) and build all zips.
 # `#installgenskew`: the bump goes through check_plugin_versions.py so it also
@@ -487,7 +490,7 @@ install-full: editor-generation-bump
 # version, so this adds no churn to a no-op `make install`.
 # The native cdylib and editor package are separate install surfaces: updating
 # only the former leaves running turns reporting the older package generation.
-# The classic (242-261), modular (262), and classic-source (263) packages are
+# The classic (242-261) and modular (262 and 263) packages are
 # disjoint artifacts with one plugin ID. Build all three before convergence so
 # each target selects its exact range; never substitute another range.
 install-editor-plugins:

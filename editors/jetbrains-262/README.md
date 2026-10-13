@@ -1,11 +1,11 @@
-# Agent Doc JetBrains 262 split distribution
+# Agent Doc JetBrains modular distributions
 
-This build is the Plugin Model v2 distribution for IntelliJ Platform 2026.2
-(branch/build `262`) only. It keeps the existing plugin ID
-`com.github.btakita.agent-doc` and plugin version line, with
-`since-build="262" until-build="262.*"`.
-The classic source in `../jetbrains` produces the distributions for 242 through
-261 and exactly 263; the latter takes its metadata from `../jetbrains-263`.
+This source project builds the Plugin Model v2 distributions for IntelliJ
+Platform 2026.2 (`262`) and 2026.3 (`263`). Both keep the existing plugin ID
+`com.github.btakita.agent-doc`; Gradle properties select the artifact name,
+platform, and exact compatibility range. The classic source in `../jetbrains`
+produces only the distribution for 242 through 261. The 263 build takes its
+range, platform, name, and independent version from `../jetbrains-263`.
 `make release-version VERSION=...` assigns fresh, distinct versions to all three
 updates under the shared Marketplace plugin ID and records their source digests.
 Repeating the projection is idempotent; changed source bytes allocate fresh
@@ -40,7 +40,7 @@ role detector that could disagree with the module/classloader boundary.
 
 ## Build and split-mode checks
 
-IntelliJ 2026.2 requires a Java 25 toolchain for compilation in this build.
+IntelliJ 2026.2 and 2026.3 require a Java 25 toolchain for compilation in this build.
 
 ```shell
 gradle test buildPlugin verifySplitArtifact
@@ -49,8 +49,8 @@ gradle runIdeSplitMode
 ```
 
 The build sets `splitMode = true` and `pluginInstallationTarget = BOTH`.
-`runIdeSplitMode` therefore installs the same built plugin into the local
-backend and frontend sandboxes. `verifySplitArtifact` checks the 262 range,
+`runIdeSplitMode` therefore installs the same selected build-line plugin into the local
+backend and frontend sandboxes. `verifySplitArtifact` checks the selected exact range,
 the exact frontend/backend/both role-selection matrix, exact module
 JAR/descriptor pairing and dependencies, and module presence in the
 distribution. `verifySplitModeSandboxes` proves that the complete same-artifact
@@ -58,34 +58,34 @@ module set is placed in both development sandboxes.
 
 ## Distribution and installation
 
-The classic and 262 ZIPs are compatible updates of the same plugin ID with
+The classic, 262, and 263 ZIPs are compatible updates of the same plugin ID with
 non-overlapping IDE ranges. Every tag publishes one JetBrains custom-repository
 listing per range (`agent-doc-jetbrains-classic.xml`,
-`agent-doc-jetbrains-262.xml`), generated and validated by
+`agent-doc-jetbrains-262.xml`, `agent-doc-jetbrains-263.xml`), generated and validated by
 `scripts/jetbrains-custom-repository.py`; each IDE process selects the update
 whose `since-build`/`until-build` contains its build. Marketplace hosting of the
-same two ranged updates is the equivalent alternative but is not automated. See
+same three ranged updates is the equivalent alternative but is not automated. See
 [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md).
 
 This package has no restart-free dynamic upgrade entry point: unlike the
 classic plugin jar, `agent.doc-<pluginVersion>.jar` carries no
 `JetBrainsPluginUpgradeBootstrap` launcher. `agent-doc plugin install` against a
-running 262 IDE replaces the files and reports that a restart is required
+running modular IDE replaces the files and reports that a restart is required
 (`declined_by=modular_package`).
 
 Remote Dev plugin synchronization currently resolves the other side only for
 Marketplace-hosted plugins. A custom repository must be configured and the
-same update installed on both sides; installing the 262 ZIP locally on only the
+same update installed on both sides; installing a modular ZIP locally on only the
 backend or only JetBrains Client does not copy it to the other process. For
 local ZIP testing, install the same ZIP explicitly in both backend and
 Client/Gateway, or use `runIdeSplitMode`. A one-sided install is unsupported and
 the surface bridge must be treated as unavailable.
 
-Every Agent Doc tag packages the modular ZIP as
-`agent-doc-jetbrains-262-<pluginVersion>.zip` alongside the compatibility-ranged
+Every Agent Doc tag packages both modular ZIPs as
+`agent-doc-jetbrains-{262,263}-<pluginVersion>.zip` alongside the compatibility-ranged
 classic ZIP and the VS Code package. The package-generation fence tracks both
 the modular build and the classic implementation sources reused by its backend.
-`make check` builds and verifies both compatibility-ranged ZIPs plus the modular
+`make check` builds and verifies all compatibility-ranged ZIPs plus the modular
 backend/frontend sandboxes, while the tag workflow rejects equal update versions
 and copies both JetBrains artifacts by exact versioned name. The
 generic `agent-doc plugin install jetbrains` asset resolver deliberately accepts

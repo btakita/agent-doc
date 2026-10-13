@@ -10,6 +10,7 @@ dependencies {
         bundledModule("intellij.platform.kernel.backend")
         bundledModule("intellij.platform.rpc.backend")
         bundledModule("intellij.platform.backend")
+        bundledModule("intellij.platform.vcs")
         bundledPlugin("org.jetbrains.plugins.terminal")
         bundledPlugin("org.intellij.plugins.markdown")
     }
@@ -100,6 +101,7 @@ val generateBackendDescriptor by tasks.registering {
         listOf(
             "intellij.platform.backend",
             "intellij.platform.kernel.backend",
+            "intellij.platform.vcs",
             "agent.doc.shared",
         ).forEach { name ->
             dependencies.appendChild(result.createElement("module").apply { setAttribute("name", name) })

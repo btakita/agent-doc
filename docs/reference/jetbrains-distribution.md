@@ -6,8 +6,8 @@ Agent Doc ships three compatibility-ranged updates under the single plugin ID
 | Update | IDE range | Release artifact |
 |---|---|---|
 | Classic | `242` through `261.*` | `agent-doc-jetbrains-<pluginVersion>.zip` |
-| Plugin Model v2 | exactly `262` through `262.*` | `agent-doc-jetbrains-262-<pluginVersion>.zip` |
-| Classic source for 263 | exactly `263` through `263.*` | `agent-doc-jetbrains-263-<pluginVersion>.zip` |
+| Plugin Model v2 (262) | exactly `262` through `262.*` | `agent-doc-jetbrains-262-<pluginVersion>.zip` |
+| Plugin Model v2 (263) | exactly `263` through `263.*` | `agent-doc-jetbrains-263-<pluginVersion>.zip` |
 
 The update versions are distinct. The ranges do not overlap, and all ZIPs are
 built and verified before the tag workflow may create a GitHub release. A
@@ -51,10 +51,12 @@ assertion) is added.
 
 ## Remote Development and fail-closed behavior
 
-For branch 262 Remote Development, configure the 262 repository URL and install
-the same modular update on both the Remote Dev backend and JetBrains
-Client/Gateway. A custom repository does not provide Marketplace's automatic
-cross-side synchronization.
+For branch 262 or 263 Remote Development, configure the matching repository URL
+and install the same modular update on both the Remote Dev backend and JetBrains
+Client/Gateway. Both packages use the frontend-owned surface snapshot bridge, so
+documents detached with Open in New Window retain their frame identity instead
+of being flattened into the main window's split columns. A custom repository
+does not provide Marketplace's automatic cross-side synchronization.
 
 The modular surface bridge is available only after both processes load the same
 plugin generation and establish the authenticated, generation-fenced bridge. A
@@ -75,7 +77,7 @@ a refused set publishes none. `make jetbrains-repository-self-test` (part of
 - IntelliJ range semantics (prefix `since-build`, wildcard `until-build`);
 - range selection over the generated listings: 242–261 builds receive only the
   classic update, 262 builds receive only the modular update, 263 builds receive
-  only the 263 classic-source update, builds outside all three receive nothing,
+  only the 263 modular update, builds outside all three receive nothing,
   and every branch 242–263 is covered;
 - refusal, with no listing written, for equal versions, an overlapping or
   widened range, an open-ended classic range, a foreign plugin ID, a missing
@@ -88,7 +90,7 @@ glob, generates the listings, and then, as a separate assertion over the files
 it is about to upload, re-reads all listings with `--verify-listings
 <classic> <modular> <modern>`: each must carry exactly one update with the declared
 version and exact range, and a build sweep from 241 through 264 must select the
-classic update for 242–261, the modular update for 262, the classic-source update
+classic update for 242–261, the modular update for 262, the modular update
 for 263, and nothing otherwise. Finally it asserts the exact three-ZIP/three-listing
 shape. The release job depends on that plugin job and uploads all six files together,
 so an incomplete release cannot report success.
@@ -110,6 +112,8 @@ behavior, so before calling a release generally installable:
 4. On the 262 pair, downgrade or remove the plugin on one side only (or install
    a different modular version) and confirm detached-view and frontend effects
    stay unavailable with no classic fallback, and recover once both sides match.
-5. On a 263 IDE, add the 263 listing and confirm only the 263 package is offered.
+5. On a 263 Remote Dev pair, add the 263 listing to both sides, confirm only the
+   263 package is offered, and confirm a document detached with Open in New
+   Window does not become a main-window tmux pane.
 6. After the tag workflow runs, confirm the release carries all three ZIPs and
    listings, and that each listing names its tag-pinned artifact and exact range.

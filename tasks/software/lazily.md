@@ -231,6 +231,19 @@ Official Zig 0.15.2 and 0.16.0 archives were downloaded only into the worktree a
 - The prepared Phase 3/4 patch and four untracked source files exactly matched the source worktree hashes.
 
 No commit or push was created because `#spec-test-commit-push` remains undefined. The requested toolchain availability and verification evidence are complete; integration remains tracked by `#lzcoreintegration`.
+
+### Re: #lzcoreintegration — gpt-5 · 2026-10-12T21:53-04:00
+
+The integration audit is complete, but integration itself is not yet truthful or authorized.
+
+- `#spec-test-commit-push` remains undefined.
+- Phase 5 has only the Spec support/consumer contract; none of the nine binding worktrees has the required `core-artifact-consumer-check` target.
+- Phase 6 is scaffold-only, has no settled cohort manifest, and is 20 Spec commits behind the current profile base.
+- Rust provenance work is still running; Zig's three-lane verification is complete.
+
+The audit produced exact bases, overlap risks, exclusions, and a seven-step serial landing plan. Safe checks passed: Phase 1 rejected 11 negative cases and recognized nine bindings/seven symbols/16 fixtures; Phase 2 passed 15 negative probes; Phase 5 support tests passed 7/7; Phase 6 targeted tests passed 10/10; and `git diff --check` passed across 29 prepared worktrees.
+
+This item is review-gated until the authorization decision, Rust provenance work, and actual nine-binding Phase 5 consumer implementation are complete. No additional backlog follow-up is needed because existing `#lzcoreconsumers` plus this narrowed gate retain the executable work and exact unblock conditions. No source files changed and no commit, push, install, or release occurred.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -241,7 +254,7 @@ No commit or push was created because `#spec-test-commit-push` remains undefined
 - ~~do [#lzcommitpresetresolve]~~
 - do [#lzrustcoreprofiledivergence]
 - ~~do [#lzzigcoretoolchains]~~
-- do [#lzcoreintegration]
+- ~~do [#lzcoreintegration]~~
 - do [#lzcorecireachaudit]
 <!-- /agent:queue -->
 
@@ -249,13 +262,13 @@ No commit or push was created because `#spec-test-commit-push` remains undefined
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzrustcoreprofiledivergence] Using the prepared Phase 1 and Rust facade worktrees, resolve the Rust corrected-profile divergence called out by #lzcorecompat before landing the Rust Phase 4 snapshot/compatibility gate; prove the normalized snapshot is derived from the corrected candidate profile and rerun the aggregate --require-all/profile checks. Depends on #lzcoreprofile and the Rust facade work; blocks Rust Phase 4 and #lzcoreintegration.
-- [ ] [#lzcoreintegration] After #lzcommitpresetresolve, #lzrustcoreprofiledivergence, and #lzzigcoretoolchains, integrate the prepared Core work in dependency order: #lzcoreprofile, #lzcoreclaims, per-binding #lzcorefacades then #lzcorecompat, #lzcoreconsumers, and finally regenerate and revalidate #lzcorecohort from the settled exact commits. Rerun the aggregate profile gate after each batch and do not qualify a cohort from incidental worktree state.
 - [ ] [#lzcorecireachaudit] After Phases 1-5 are integrated, audit every new Core profile, claims, facade/package, compatibility, negative-self-test, and artifact-consumer gate for real CI activation and target reachability in all candidate bindings; require named workflow steps and mutation evidence, then rerun the aggregate profile gate before Phase 6 finalization.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcoreintegration] Integrate the prepared Core work only after #lzcommitpresetresolve, #lzrustcoreprofiledivergence, and #lzcoreconsumers clear: Phase 5 currently lacks core-artifact-consumer-check in all nine binding worktrees, and Phase 6 is scaffold-only with no settled cohort manifest and is 20 spec commits behind the current profile base. Then land Phases 1-5 in dependency order, replay Phase 6 from settled exact commits, and rerun aggregate profile/cohort gates after each batch.
 - [/] [#lzcommitpresetresolve] [inline] [operator-decision] Define the queue-wide #spec-test-commit-push authorization explicitly in tasks/software/lazily.md, or replace the queue preset with an already defined, intentionally equivalent authorization. Do not infer commit/push authority from the unresolved name; this is the first dependency for every completed-but-uncommitted review item.
 - [/] [#lzgocireachability] The Lazily Go CI reachability fix is complete and fully verified in /home/brian/worktrees/lzgocireachability-go-20261012 on branch task/lzgocireachability-20261012 from base e5e082a2d7638e4e274a8d8f808ccf39e349bb51; blocked only until explicit commit/push authorization is supplied or #spec-test-commit-push is defined, then land the single .github/workflows/ci.yml step-name change and confirm upstream CI.
 - [/] [#fixrunturn] Run Agent Doc route-race fix and deterministic coverage are complete and fully verified in /home/brian/worktrees/agent-doc-fixrunturn-stack-20261012/agent-doc on branch fix/run-agent-doc-turn-rejection-20261012 from base 06afd858eebc81440dbbebec6a51f0ec788391f1; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate exactly the six agent-doc-route-io files and run the single coordinator install.

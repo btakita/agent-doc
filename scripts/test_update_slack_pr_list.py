@@ -48,6 +48,8 @@ class ParseTargetTests(unittest.TestCase):
             "REPOSITORY TARGETS",
             "MESSAGE FORMAT",
             "EMOJI MEANINGS",
+            "STANDALONE RUNTIME",
+            "does not use an agent or",
             "--github-user",
             "--repository",
             "--channel",
@@ -110,6 +112,13 @@ class RepositoryTargetTests(unittest.TestCase):
     def test_bare_repository_requires_owner(self) -> None:
         with self.assertRaises(subject.UpdateError):
             subject.repository_targets([], ["widgets"])
+
+    def test_missing_github_cli_has_standalone_setup_error(self) -> None:
+        with (
+            mock.patch.object(subject.subprocess, "run", side_effect=FileNotFoundError),
+            self.assertRaisesRegex(subject.UpdateError, "gh auth login"),
+        ):
+            subject._gh_json("repos/haiven-dev/widgets/pulls/1")
 
 
 class ReviewStateTests(unittest.TestCase):

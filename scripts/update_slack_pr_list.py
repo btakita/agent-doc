@@ -70,6 +70,12 @@ REPOSITORY TARGETS
   repository names expand across every supplied GitHub owner. OWNER/REPO values
   are accepted directly and do not require --github-user.
 
+STANDALONE RUNTIME
+  This executable calls Slack's Web API directly; it does not use an agent or
+  Slack MCP. Set SLACK_USER_TOKEN (or --token-env) to a token that can read and
+  write the target message. Install and authenticate the GitHub CLI (`gh auth
+  login`) for GitHub API access. All Python imports are from the standard library.
+
 MESSAGE FORMAT
   An emoji key precedes numbered PR links. Each PR line contains its title,
   review marker, then stack-position and conflict markers. Closed or merged
@@ -277,12 +283,17 @@ def repository_targets(
 
 
 def _gh_json(path: str) -> Any:
-    completed = subprocess.run(
-        ["gh", "api", path],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            ["gh", "api", path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as error:
+        raise UpdateError(
+            "GitHub CLI `gh` was not found; install it and run `gh auth login`"
+        ) from error
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
         raise UpdateError(f"gh api {path!r} failed: {detail}")

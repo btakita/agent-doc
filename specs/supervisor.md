@@ -947,8 +947,9 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   (`predecessor_drain_lease` in `state.db`: pid, generation, deadline), written
   before the public socket is renamed (self-handoff) or by the delegating client
   while it still holds the launch claim (below). Same-project duplicate reaping
-  (`reap_stale_duplicate_controllers`, run by every adopting client) skips the
-  leased pid until the deadline (`controller_duplicate_reap_protected_draining_predecessor`);
+  (`reap_stale_duplicate_controllers`, run at promotion and launch-recovery
+  transitions) skips the leased pid until the deadline
+  (`controller_duplicate_reap_protected_draining_predecessor`);
   after it, a wedged predecessor is reaped as before. A client that finds a
   Stable controller on a stale binary no longer hands it off itself: it first
   asks it to `recycle_force` (reason `stale_binary_client`), leases it, releases
@@ -965,6 +966,13 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   route against the successor (2026-10-10 `tools.md`: dispatched after 58s
   instead of ~12s, including a stale-supervisor re-exec the original route had
   already passed).
+  `#lightweightadoption`: a client that finds an already-serving Stable
+  controller adopts it from `handoff_status`, the lightweight generation and
+  binary-identity receipt. That steady path neither requests the full operator
+  `status` projection nor runs duplicate-process discovery/reaping. This path is
+  paid by every ordinary RPC and every renewed state-plane subscription;
+  durable-store diagnostics and all-process scans are reserved for explicit
+  status commands and actual promotion/recovery transitions.
   `agent-doc admin recycle --force` is a real flag (no
   `-- ` separator needed), composes with `--all-projects`, and skips only the
   normal controller debounce.

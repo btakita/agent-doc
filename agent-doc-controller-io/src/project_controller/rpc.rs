@@ -4772,6 +4772,20 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
     }
 }
 
+/// Read only the generation receipt needed to adopt an already-serving controller.
+///
+/// Unlike [`status`], this projection does not fold durable control-plane stores or
+/// discover same-project processes. Ordinary RPC clients call this before every
+/// connection, including each renewed state-plane subscription, so adoption must
+/// not run operator diagnostics on the controller's single request path.
+fn controller_adoption_status(project_root: &Path) -> Result<ControllerStatus> {
+    let response = request(project_root, "handoff_status")?;
+    let mut status: ControllerStatus = serde_json::from_str(&response)
+        .context("failed to parse project controller adoption status response")?;
+    status.active = true;
+    Ok(status)
+}
+
 /// `#fccsupwarn2` — IO check for the route-owned HOST supervisor that serves `file`.
 ///
 /// THE GAP behind `#fccsupwarn`: `stale_supervisor_warning_for_doc` only inspected the
@@ -15409,16 +15423,15 @@ fn connect_or_launch_with_claim_wait_and_before_claim(
     launch_claim_wait: Duration,
     before_claim: impl FnOnce(),
 ) -> Result<interprocess::local_socket::Stream> {
-    if let Ok(active_status) = status(project_root)
+    if let Ok(active_status) = controller_adoption_status(project_root)
         && active_status.active
     {
         let current_binary = current_binary_identity().ok();
         if active_controller_status_is_adoptable(&active_status, current_binary.as_ref()) {
-            reap_stale_duplicate_controllers(
-                project_root,
-                active_status.pid,
-                active_status.controller_generation.unwrap_or(1),
-            );
+            // No controller transition occurred, so there cannot be a new
+            // duplicate to reap. Promotion and recovery paths below retain the
+            // transition-scoped reaper. Running it here made every ordinary RPC
+            // rescan /proc, including every renewed state-plane subscription.
             return connect(project_root);
         } else if let Some(handoff_state) =
             active_controller_status_non_stable_handoff_state(&active_status)
@@ -35874,6 +35887,44 @@ mod tests {
         assert!(
             !promotion.contains("status(&project_root)"),
             "the readiness poll must not invoke full status diagnostics"
+        );
+    }
+
+    #[test]
+    fn steady_controller_adoption_avoids_operator_status_and_duplicate_scan() {
+        let source = include_str!("rpc.rs");
+        let adoption_status = &source[source
+            .find("fn controller_adoption_status(")
+            .expect("controller adoption projection")..];
+        let adoption_status = &adoption_status[..adoption_status
+            .find("/// `#fccsupwarn2`")
+            .expect("next controller section")];
+        assert!(
+            adoption_status.contains("request(project_root, \"handoff_status\")"),
+            "steady adoption needs only the lightweight generation receipt"
+        );
+        assert!(
+            !adoption_status.contains("request(project_root, \"status\")"),
+            "steady adoption must not request operator diagnostics"
+        );
+
+        let connect = &source[source
+            .find("fn connect_or_launch_with_claim_wait_and_before_claim(")
+            .expect("connect-or-launch entry point")..];
+        let steady_path = &connect[..connect
+            .find("// A phase hook keeps the claim-contention regression deterministic")
+            .expect("end of steady adoption path")];
+        assert!(
+            steady_path.contains("controller_adoption_status(project_root)"),
+            "ordinary RPC connection must use the lightweight adoption projection"
+        );
+        assert!(
+            !steady_path.contains("if let Ok(active_status) = status(project_root)"),
+            "ordinary RPC connection must not fold the full status projection"
+        );
+        assert!(
+            !steady_path.contains("reap_stale_duplicate_controllers("),
+            "no-transition adoption must not rescan every process"
         );
     }
 

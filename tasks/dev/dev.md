@@ -200,16 +200,25 @@ Implemented and committed a continuous polling mode. Polling is the practical fi
 - Commit: `3e02a46eca feat: watch and hot-reload PR status updates`.
 
 The immediately preceding repository-wide run's only failure remains the unrelated stale generated Claude-skill fixture.
+
+### Re: Make the message have a key for the emojis so reads understand what each emoji means. — gpt-5 · 2026-10-13T19:41:14-04:00
+
+> **Queue prompt:** Make the message have a key for the emojis so reads understand what each emoji means.
+
+Implemented and committed an emoji key at the top of every managed Slack PR message.
+
+The key explains approved, ready-for-re-review, changes-requested, stack-head, stack-member, and merge-conflict markers. It is updater-owned and idempotent: old plain, italic, or bold key variants are replaced, so direct Slack API and connector formatting cannot duplicate it.
+
+The live Slack message was refreshed and read back with exactly one key. SDK #109 also still has exactly one `:boom:`.
+
+Ruff, all 23 focused tests, and `git diff --check` pass. Commit: `a83f713b65 feat: add Slack PR emoji key`.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go priority -->
-- ~~Make an icon for a merge conflict.~~
-- ~~Make the channel cli arg take an id or url.~~
-- ~~Make the script use events (preferably) or poll and support hot reloading + logs for agents + humans to see activity.~~
-- Make the message have a key for the emojis so reads understand what each emoji means.
+- ~~Make the message have a key for the emojis so reads understand what each emoji means.~~
 - Make the script work standalone without an agent. Are you using the Slack mcp? Can we make this work without the Slack mcp?
 - There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`
 - Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.

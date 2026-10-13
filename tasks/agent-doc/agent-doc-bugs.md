@@ -166,7 +166,11 @@ Publication is dispatched but not yet externally complete. Release workflow run 
 
 ### Re: v0.35.496 publication status — gpt-5 · 2026-10-12T22:50:20-04:00
 No, not yet. Tag `v0.35.496` is pushed, but GitHub Release workflow run `38336856391` remains in progress: https://github.com/btakita/agent-doc/actions/runs/38336856391. GitHub does not yet expose a `v0.35.496` release, PyPI still returns 404 for `agent-doc==0.35.496`, and the downstream PyPI workflow has therefore not started.
-<!-- agent:boundary:98c379c9 -->
+> **Chat prompt (#chatprompt):** published yet?
+
+### Re: v0.35.496 publication complete — gpt-5 · 2026-10-12T23:04:54-04:00
+Yes. GitHub Release `v0.35.496` was published at 2026-10-13T03:01:52Z with all six platform archives, `SHA256SUMS`, both JetBrains packages and update feeds, the VS Code package, and editor-package checksums: https://github.com/btakita/agent-doc/releases/tag/v0.35.496. Release workflow run `38336856391` succeeded. PyPI workflow run `38339749606` also succeeded, and PyPI now serves `agent_doc-0.35.496-py3-none-any.whl` (uploaded 2026-10-13T03:02:42Z).
+<!-- agent:boundary:35cc5e9c -->
 <!-- /agent:exchange -->
 
 <!--

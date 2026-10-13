@@ -27,6 +27,40 @@ All fields are optional and default to null. Resolution: explicit `agent_doc_for
 
 Delimited by `---\n` at file start and closing `\n---\n`. If absent, all fields default to null and entire content is the body.
 
+### Project preset defaults
+
+An optional `.agent-doc/project.md` supplies project-wide prompt preset defaults
+using the same YAML frontmatter syntax as a session document. Only its
+`prompt_presets` map (including the `presets` alias) is inherited. Its body and
+all other frontmatter fields are inert for session documents; project routing,
+session identity, harness choice, and write policy remain document-local.
+
+Project preset resolution is a read-time overlay, not template expansion or
+synchronization:
+
+1. Starting from the session document, use the established nearest
+   `.agent-doc/` project-root walk. If no project root or no
+   `.agent-doc/project.md` exists, preserve the document's current behavior.
+2. Parse the project file's frontmatter and use its resolved presets as
+   defaults. A present but unreadable project file or malformed frontmatter is
+   an error; silently ignoring it would make authorization depend on which
+   resolver happened to run.
+3. Overlay every declaration from the session document. A local declaration
+   with the same name wins, including a null/in-progress or malformed local
+   value: declaration itself shadows the inherited default and prevents an
+   older project authorization from resurfacing while the operator edits it.
+   Within either file, the existing alias rule still applies:
+   `prompt_presets` wins over `presets` on a same-file name collision.
+4. Resolve consumers from the effective overlay on every read. Changes to
+   `.agent-doc/project.md` therefore apply to existing project documents
+   without rewriting them. Ordinary parse/write and closeout paths serialize
+   only the session document's local frontmatter; inherited presets are never
+   copied into it.
+
+Structured inherited presets retain their project-relative runbook semantics.
+This is intentionally limited to presets; sharing more frontmatter requires a
+separate field-by-field contract rather than implicitly inheriting every key.
+
 ## Components
 
 Documents can contain named, re-renderable regions called components:

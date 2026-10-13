@@ -5,7 +5,6 @@ agent_doc_write: crdt
 agent: codex
 resume:
   claude: c1cf43ac-1094-4ecf-8b3d-a7f7f7168edb
-queue: go
 ---
 
 ## Status
@@ -290,9 +289,7 @@ Verification passed: the installed entry-point help exposes both new flags; all 
 
 ## Queue
 
-<!-- agent:queue subagents priority go -->
-- ~~https://github.com/haiven-dev/haiven-tools/pull/21: Provide a way for the script to give a title + description to the slack message.~~
-- Take a screenshot of the Slack message and add it to the PR description. ![img.png](img.png) works unless you can capture the entire message.
+<!-- agent:queue subagents priority -->
 <!-- /agent:queue -->
 
 ## Backlog

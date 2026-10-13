@@ -89,6 +89,7 @@ mod plugin;
 mod plugin_activation;
 mod plugin_live_owner;
 mod preflight_hook;
+mod queue_completion_feedback;
 mod queue_dispatch;
 mod queue_recovery;
 mod read;
@@ -4279,6 +4280,17 @@ enum QueueAction {
         #[arg(long)]
         refresh: bool,
     },
+    /// Publish immediate binary-owned `agent:exchange` feedback that a claimed
+    /// background subagent reported back. The claim remains active while the
+    /// coordinator integrates and verifies the result.
+    #[command(name = "report-complete")]
+    ReportComplete {
+        /// Path to the session document
+        file: PathBuf,
+        /// The claimed queue item: `#id` / `do [#id]`, or the queue line's text
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: String,
+    },
     /// Release a queue claim (`#queueclaim`) so the in-session loop can take the
     /// item again, e.g. when its subagent reports back.
     Release {
@@ -7279,7 +7291,7 @@ fn try_main() -> anyhow::Result<()> {
                 Ok(())
             }
             QueueAction::Release { file, item } => {
-                match agent_doc_queue_io::queue_claim::release(&file, &item)? {
+                match queue_completion_feedback::release_with_feedback(&file, &item)? {
                     Some(claim) => {
                         eprintln!(
                             "[queue] released {:?} (owner {})",
@@ -7287,6 +7299,20 @@ fn try_main() -> anyhow::Result<()> {
                         )
                     }
                     None => eprintln!("[queue] no claim on {item:?}; nothing to release"),
+                }
+                Ok(())
+            }
+            QueueAction::ReportComplete { file, item } => {
+                match queue_completion_feedback::report_complete(&file, &item)? {
+                    Some(outcome) => eprintln!(
+                        "[queue] subagent completion feedback {} for {:?} (owner {}); claim remains active",
+                        if outcome.appended { "appended" } else { "already present" },
+                        outcome.claim.item_text,
+                        outcome.claim.owner,
+                    ),
+                    None => eprintln!(
+                        "[queue] no subagent claim on {item:?}; no completion feedback written"
+                    ),
                 }
                 Ok(())
             }

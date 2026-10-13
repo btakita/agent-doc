@@ -177,12 +177,17 @@ rule. This runbook carries the rest.
      scratchpad or `/tmp`, and puts other temp files in its own worktree or a
      unique `mktemp` path (one subagent's commit once carried a sibling's
      message).
-  6. When subagents report back, integrate their work serially: rebase or
+  6. As soon as a subagent reports back, run
+     `agent-doc queue report-complete <FILE> --item <...>`. The binary appends
+     immediate, deduplicated completion feedback to `agent:exchange` through
+     the editor/CRDT authority while leaving the claim active; the worker never
+     edits the session document. Then integrate the work serially: rebase or
      cherry-pick each onto main, run the preset's verification, run ONE
-     `make install` per integrated batch, and push. Then run
-     `agent-doc queue release <FILE> --item <...>`. The next cycle answers and
-     closes the item: `--done <id>` for an `#id` head, or quote a free-text head
-     as `> **Queue prompt:**`.
+     `make install` per integrated batch, and push. Finally run
+     `agent-doc queue release <FILE> --item <...>` (which idempotently reports
+     completion too, for older coordinators). The next cycle answers and closes
+     the item: `--done <id>` for an `#id` head, or quote a free-text head as
+     `> **Queue prompt:**`.
   Harnesses without an in-session Agent tool (Codex, OpenCode, Grok Build,
   Cursor) claim the same items and fall back to
   `agent-doc orchestrate <FILE> --mode parallel --task "<item>" ...` over the

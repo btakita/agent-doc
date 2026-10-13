@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -163,16 +162,18 @@ No. The stale-projection fix is present on `origin/main` at `9efcd2579ddc673feb9
 Released `v0.35.496` from commit `28a28c26f4774b31f076a1e3b8822e017f116d9c` and pushed both `main` and the tag. The final version-projected gates passed: 10,426 Rust tests, 167 skipped; 196 VS Code tests; classic and exact-262 JetBrains builds/tests; cross-editor simulations; Python/bootstrap; docs/audits; TLA; and the separate tmux integration suite. `make install-full` succeeded and installed binary/native library `0.35.496`, JetBrains `0.2.565` / exact-262 `0.2.566`, and the VS Code extension.
 
 Publication is dispatched but not yet externally complete. Release workflow run `38336856391` is in progress: https://github.com/btakita/agent-doc/actions/runs/38336856391. The GitHub release and PyPI `0.35.496` endpoint were not present at the one required post-push observation. PyPI is intentionally dispatched by the Release workflow only after all release assets and checksums exist; no further local action is pending.
-<!-- agent:boundary:92c4a3e8 -->
+> **Chat prompt (#chatprompt):** published?
+
+### Re: v0.35.496 publication status — gpt-5 · 2026-10-12T22:50:20-04:00
+No, not yet. Tag `v0.35.496` is pushed, but GitHub Release workflow run `38336856391` remains in progress: https://github.com/btakita/agent-doc/actions/runs/38336856391. GitHub does not yet expose a `v0.35.496` release, PyPI still returns 404 for `agent-doc==0.35.496`, and the downstream PyPI workflow has therefore not started.
+<!-- agent:boundary:98c379c9 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#runsdkissue]~~
-- release + publish
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

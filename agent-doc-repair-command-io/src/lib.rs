@@ -1087,8 +1087,14 @@ pub fn requote_unlandable_capture(file: &Path) -> Result<CapturedFinalizeResumeO
     Ok(resume_captured_finalize(file, &key))
 }
 
-fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResumeOutcome {
-    if let Some(retry_at_secs) = reason
+/// Extract the durable closeout-owner lease deadline carried across process
+/// boundaries by write-runtime errors.
+///
+/// This is public so every recovery adapter classifies the same owner handoff
+/// as retryable instead of treating the rendered error as an unrelated
+/// closeout failure.
+pub fn captured_finalize_retry_at(reason: &str) -> Option<u64> {
+    reason
         .split_once(agent_doc_write_runtime_io::CLOSEOUT_OWNER_RETRY_AT_MARKER)
         .and_then(|(_, suffix)| {
             suffix
@@ -1097,7 +1103,10 @@ fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResu
         })
         .filter(|digits| !digits.is_empty())
         .and_then(|digits| digits.parse::<u64>().ok())
-    {
+}
+
+fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResumeOutcome {
+    if let Some(retry_at_secs) = captured_finalize_retry_at(reason) {
         return CapturedFinalizeResumeOutcome::RetryAt {
             reason: reason.to_string(),
             retry_at_secs,

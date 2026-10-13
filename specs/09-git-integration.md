@@ -85,6 +85,14 @@ Regression coverage must include the full follow-up lifecycle: a routed dispatch
 
 The Codex stop hook does not replace the documented `finalize` / `write --commit` + `session-check` path. It is a backstop for the exact Codex `session_id` that `UserPromptSubmit` durably bound to the document. When Codex reaches `Stop` with an open bound `agent-doc` cycle, the binary validates `last_assistant_message` before replay. A single assistant closeout may be captured into the existing pending/capture ledger and replayed through the normal recover/write/commit path automatically. Transcript-shaped payloads such as full `agent:exchange` dumps, prompt-target lines, or repeated response headings must not enter the replay ledger; they are captured only as diagnostics and the hook blocks or fails closed instead. If `last_assistant_message` is empty because a tool-only/authentication step ended the turn before the assistant emitted the final closeout, the hook must also fail closed, save a diagnostic record with the tracked prompt, and require the normal `finalize` / `session-check` recovery path. If the exact session has no tracked binding, the hook is a no-op even when another document in the project has a durable queue marker. If the validated auto-close succeeds, `session-check` should be green and the tracked hook state should be cleared.
 
+When capture publication wakes the `captured_finalize_resume` worker before the
+Stop hook's own repair attempt acquires the closeout lease, the resulting
+`closeout_owner_retry_at` receipt is a binary-owned deferral, not a second
+unfinished-cycle failure. The hook preserves the retained capture, leaves the
+controller as the sole delivery owner, and must not append stale queue-guard or
+manual `repair`/`finalize` guidance to that handoff. Without retained-capture
+ownership, the same lease receipt remains fail-closed.
+
 A refused UserPromptSubmit admission never binds that Codex thread to the
 document. Its refusal receipt fences the matching Stop invocation, which then
 retires the denied binding without inspecting, capturing, repairing, or

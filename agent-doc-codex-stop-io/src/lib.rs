@@ -2876,7 +2876,8 @@ fn repair_failure_is_binary_owned_deferral(
     verdict: agent_doc_turn::write_ownership::RetainedWriteVerdict,
 ) -> bool {
     verdict == agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred
-        && agent_doc_turn::write_ownership::is_retained_write_refusal(rendered_error)
+        && (agent_doc_turn::write_ownership::is_retained_write_refusal(rendered_error)
+            || agent_doc_repair_command_io::captured_finalize_retry_at(rendered_error).is_some())
 }
 
 /// Mint a fresh capture cycle when the Stop payload arrives after a committed
@@ -4516,6 +4517,46 @@ Done.\n\
         );
         assert!(rendered.contains("needs_operator"));
         assert!(!rendered.contains("run `agent-doc repair"));
+    }
+
+    #[test]
+    fn captured_finalize_owner_race_is_a_durable_deferral_not_an_unfinished_cycle() {
+        use agent_doc_turn::write_ownership::{RetainedWriteOwnership, RetainedWriteVerdict};
+
+        let refusal = format!(
+            "closeout operation is already in progress for cycle cycle-1 by captured-finalize-1 pid=7 role=captured_finalize_resume until=123456 [{}123456]",
+            agent_doc_write_runtime_io::CLOSEOUT_OWNER_RETRY_AT_MARKER,
+        );
+        let owned = RetainedWriteOwnership::new_with_phase(true, true, false);
+        assert_eq!(owned.verdict(), RetainedWriteVerdict::Deferred);
+        assert!(repair_failure_is_binary_owned_deferral(
+            &refusal,
+            owned.verdict(),
+        ));
+
+        let note = closeout_repair_retained_note(
+            &anyhow::anyhow!(refusal),
+            owned,
+            Path::new("/p/sample.md"),
+        );
+        let response =
+            durable_owner_repair_deferral_response(Path::new("/p/sample.md"), &note, false);
+        let rendered = serde_json::to_string(&response).unwrap();
+        assert!(rendered.contains("durable keyed retry"));
+        assert!(rendered.contains("Wait for the existing controller state edge"));
+        assert!(!rendered.contains("unfinished document cycle"));
+        assert!(!rendered.contains("run `agent-doc repair"));
+
+        assert!(
+            !repair_failure_is_binary_owned_deferral(
+                &format!(
+                    "closeout operation is already in progress [{}123456]",
+                    agent_doc_write_runtime_io::CLOSEOUT_OWNER_RETRY_AT_MARKER,
+                ),
+                RetainedWriteVerdict::CaptureResumeUnowned,
+            ),
+            "a lease marker without retained capture ownership must remain fail-closed",
+        );
     }
 
     /// `#sdkretained` (haiven-dev `tasks/sdk.md`, cycle-1791805221920,

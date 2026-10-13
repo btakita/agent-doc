@@ -210,6 +210,14 @@ The missing authorization cannot be resolved safely without your explicit choice
 Option 1 is the narrower change. Neither option grants install, release, publish, tag, or version-bump authority. Until you explicitly choose, no commit or push authority is inferred.
 
 The item is review-gated on that operator decision. No additional backlog follow-up is needed because the gated item retains both exact edits and the unblock condition. The analysis worktree remained clean; no files changed, no commit was created, and no tests were needed.
+
+### Re: Core review workers dispatched — gpt-5 · 2026-10-12T21:51-04:00
+
+The remaining Core review heads are owned by isolated workers. Rust has added a fail-closed candidate-profile provenance check and passed focused tests; its corrected-profile and nine-binding aggregate gates are still running, so that item remains claimed and unconsumed.
+
+Zig verification is complete across 0.15.2, 0.16.0, and the current 0.17 development lane, with formatting, package/API compatibility, negative self-test, and CI reachability all green. The integration audit is also complete and identified missing Phase 5 binding consumers plus a stale, manifest-less Phase 6 scaffold. Those completed worker results will close in queue order after the earlier Rust head.
+
+No commit, push, install, release, or publication occurred; `#spec-test-commit-push` remains undefined.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  

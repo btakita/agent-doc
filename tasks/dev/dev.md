@@ -262,7 +262,7 @@ PR CI is running. The queued key-wording refinements will be added to the same P
 - ~~There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`~~
 - ~~Rename "Emoji key" to "Key": Add ~merged~ to the key.~~
 - Make sure ~done~ is now ~merged~ in the key.
-- Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.
+- ~~Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

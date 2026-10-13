@@ -51,7 +51,7 @@
 use agent_doc_turn::op_log::OpsLogEvent;
 use parking_lot::Mutex;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
@@ -185,6 +185,17 @@ fn restore_durable_liveness(file: &Path, document_hash: &str) -> Result<()> {
         return Ok(());
     };
     let database_path = agent_doc_sqlite::state_store::state_db_path(&project_root);
+    let restore_lock = durable_liveness_restore_lock(&database_path);
+    let _restore_guard = restore_lock.lock();
+    if DURABLE_LIVENESS_HYDRATED.lock().contains(&database_path) {
+        refresh_durable_liveness(file)?;
+        let batches = load_pending_liveness_outbox(&database_path, document_hash)?;
+        let mut plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
+        for batch in &batches {
+            plane.restore_liveness(batch);
+        }
+        return Ok(());
+    }
     let snapshot = agent_doc_sqlite::reliable_sync_inbox::load(&database_path)?;
     let mut batches = snapshot
         .liveness
@@ -201,20 +212,7 @@ fn restore_durable_liveness(file: &Path, document_hash: &str) -> Result<()> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    if database_path.exists() {
-        let outbox = lazily::SqliteOutbox::open(&database_path, document_hash.to_string())?;
-        for (epoch, message) in outbox.replay_from(0) {
-            if let Some(decoded) =
-                agent_doc_reliable_sync_io::liveness::decode_liveness_frame(&message)
-            {
-                batches.push(decoded.with_context(|| {
-                    format!(
-                        "decode pending reliable-sync liveness document_hash={document_hash} epoch={epoch}"
-                    )
-                })?);
-            }
-        }
-    }
+    batches.extend(load_pending_liveness_outbox(&database_path, document_hash)?);
     let mut plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
     for batch in &batches {
         plane.restore_liveness(batch);
@@ -222,14 +220,37 @@ fn restore_durable_liveness(file: &Path, document_hash: &str) -> Result<()> {
     for cursor in &snapshot.cursors {
         plane.restore_cursor(&cursor.document_hash, cursor.ack_through);
     }
-    if let Some(rowid) = snapshot.liveness.last().map(|record| record.rowid) {
-        DURABLE_LIVENESS_ROWIDS
-            .lock()
-            .entry(database_path)
-            .and_modify(|current| *current = (*current).max(rowid))
-            .or_insert(rowid);
-    }
+    let rowid = snapshot.liveness.last().map_or(0, |record| record.rowid);
+    DURABLE_LIVENESS_ROWIDS
+        .lock()
+        .entry(database_path.clone())
+        .and_modify(|current| *current = (*current).max(rowid))
+        .or_insert(rowid);
+    DURABLE_LIVENESS_HYDRATED.lock().insert(database_path);
     Ok(())
+}
+
+fn load_pending_liveness_outbox(
+    database_path: &Path,
+    document_hash: &str,
+) -> Result<Vec<Vec<agent_doc_reliable_sync_io::liveness::LivenessOp>>> {
+    if !database_path.exists() {
+        return Ok(Vec::new());
+    }
+    let outbox = lazily::SqliteOutbox::open(database_path, document_hash.to_string())?;
+    outbox
+        .replay_from(0)
+        .into_iter()
+        .filter_map(|(epoch, message)| {
+            agent_doc_reliable_sync_io::liveness::decode_liveness_frame(&message).map(|decoded| {
+                decoded.with_context(|| {
+                    format!(
+                        "decode pending reliable-sync liveness document_hash={document_hash} epoch={epoch}"
+                    )
+                })
+            })
+        })
+        .collect()
 }
 
 /// Per-process durable journal cursor for non-controller readers.
@@ -240,6 +261,29 @@ fn restore_durable_liveness(file: &Path, document_hash: &str) -> Result<()> {
 /// route. Tracking the last restored SQLite row keeps that refresh incremental.
 static DURABLE_LIVENESS_ROWIDS: std::sync::LazyLock<Mutex<HashMap<std::path::PathBuf, i64>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// State stores whose complete durable liveness snapshot has been restored in
+/// this process. A rowid alone cannot prove this: controller pushes may advance
+/// the incremental cursor before a cold reader has restored inbox cursors and
+/// the retained outbox suffix.
+static DURABLE_LIVENESS_HYDRATED: std::sync::LazyLock<Mutex<HashSet<PathBuf>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// Serialize the one full durable restore per state store. Unknown-document
+/// probes arrive on independent controller request threads, so checking the
+/// hydrated set without this per-store gate would let every concurrent miss
+/// replay the complete journal before any one restore publishes completion.
+static DURABLE_LIVENESS_RESTORE_LOCKS: std::sync::LazyLock<
+    Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
+> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn durable_liveness_restore_lock(database_path: &Path) -> Arc<Mutex<()>> {
+    DURABLE_LIVENESS_RESTORE_LOCKS
+        .lock()
+        .entry(database_path.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
 
 fn refresh_durable_liveness(file: &Path) -> Result<()> {
     let Some(project_root) = agent_doc_fs::find_project_root(file) else {
@@ -7475,6 +7519,34 @@ mod tests {
         assert_eq!(registrations[0].pid, new_pid);
         assert_eq!(outcome.found, 1);
         assert!(outcome.dead_endpoints.is_empty());
+    }
+
+    #[test]
+    fn repeated_unknown_document_probe_does_not_replay_hydrated_liveness_history() {
+        let (dir, doc) = temp_doc("bounded-liveness-hydration.md");
+        let database_path = agent_doc_sqlite::state_store::state_db_path(dir.path());
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
+            &database_path,
+            "bounded-hydration-history",
+            1,
+            "[]",
+        )
+        .unwrap();
+
+        restore_durable_liveness(&doc, &document_hash).unwrap();
+
+        let connection = rusqlite::Connection::open(&database_path).unwrap();
+        connection
+            .execute(
+                "UPDATE reliable_sync_liveness_journal SET ops_json = 'not-json' \
+                 WHERE source_key = 'bounded-hydration-history'",
+                [],
+            )
+            .unwrap();
+
+        restore_durable_liveness(&doc, &document_hash)
+            .expect("a warm unknown-document probe must query only rows after its durable cursor");
     }
 
     #[test]

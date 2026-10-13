@@ -422,6 +422,7 @@ Confidence: high. Escalation: none.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#likewaysharing] I would like a way for sharing select frontmatter across agent-doc files in a project. The main benefit is presets. What do you recommend? Should we have something in `.agent-doc/`? Ideally it would be the same format as the frontmatter. Perhaps `.agent-doc/shared.md` or `.agent-doc/template.md`? If this were a md file, the frontmatter would apply. Another strategy is to have a project-defined template for new agent-doc files that would be generated with `Claim for Tmux Pane`. But I also want changes to the `presets` to apply on existing docs. What do you recommend? Ideally it would be 1 file. Could we have the template "sync" while allowing overrides to presets in the project agent docs? So changes to the template are automatically propagated to the project docs? How can this be done?
 - [ ] [#publish498verify] 2026-10-13 Verify the v0.35.498 GitHub Release and PyPI publication after the active workflows finish; manually update btakita/homebrew-tap from SHA256SUMS and restore HOMEBREW_TAP_TOKEN automation.
 <!-- /agent:backlog -->
 

@@ -7291,7 +7291,7 @@ fn try_main() -> anyhow::Result<()> {
                 Ok(())
             }
             QueueAction::Release { file, item } => {
-                match queue_completion_feedback::release_with_feedback(&file, &item)? {
+                match agent_doc_queue_io::queue_claim::release(&file, &item)? {
                     Some(claim) => {
                         eprintln!(
                             "[queue] released {:?} (owner {})",
@@ -7306,7 +7306,11 @@ fn try_main() -> anyhow::Result<()> {
                 match queue_completion_feedback::report_complete(&file, &item)? {
                     Some(outcome) => eprintln!(
                         "[queue] subagent completion feedback {} for {:?} (owner {}); claim remains active",
-                        if outcome.appended { "appended" } else { "already present" },
+                        if outcome.appended {
+                            "accepted"
+                        } else {
+                            "already present"
+                        },
                         outcome.claim.item_text,
                         outcome.claim.owner,
                     ),

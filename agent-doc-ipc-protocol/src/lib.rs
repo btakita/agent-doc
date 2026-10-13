@@ -401,6 +401,9 @@ pub fn callback_response_matches_request(
 /// Maintained plugins return a JSON receipt after applying a patch. `Applied`
 /// means the patch reached the editor buffer. `AlreadyApplied` means the plugin
 /// detected the response body is already present and chose not to re-apply it.
+/// `Deferred` means either that the endpoint's bounded wait elapsed while work
+/// remains live, or that the request's projection precondition changed; both
+/// outcomes are retryable from current authority rather than endpoint refusals.
 /// `Rejected` covers explicit terminal apply rejection. `Unsupported` covers
 /// legacy ACK lines and malformed/unknown responses so old plugins fail closed
 /// with an update/reinstall error instead of seeding compatibility proof.
@@ -424,6 +427,11 @@ pub enum SocketReceiptClassification {
 
 /// The receipt line for [`SocketReceiptClassification::Deferred`].
 pub const DEFERRED_RECEIPT_LINE: &str = r#"{"type":"receipt","status":"deferred"}"#;
+
+/// A terminal retryable receipt for a conditional operation whose expected
+/// editor projection is no longer current.
+pub const PROJECTION_CHANGED_RECEIPT_LINE: &str =
+    r#"{"type":"receipt","status":"deferred","reason":"projection_changed"}"#;
 
 /// Classify a plugin-sent IPC receipt line.
 pub fn classify_socket_receipt(receipt: &str) -> SocketReceiptClassification {
@@ -471,7 +479,8 @@ pub fn is_socket_receipt_timeout_error(message: impl AsRef<str>) -> bool {
 }
 
 pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
-    message.as_ref().contains("IPC receipt rejected")
+    message.as_ref().contains("IPC receipt deferred")
+        || message.as_ref().contains("IPC receipt rejected")
         || message.as_ref().contains("IPC receipt unsupported")
 }
 
@@ -614,7 +623,11 @@ pub const EDITOR_RECEIPT_DIVERGENCE_REFUSAL: &str =
 /// handshake mismatch, ...), which is not evidence about the endpoint's answer.
 pub fn classify_socket_delivery_failure(message: impl AsRef<str>) -> Option<SocketDeliveryFailure> {
     let message = message.as_ref();
-    if message.contains("IPC receipt rejected") {
+    if message.contains("IPC receipt deferred")
+        && message.contains(r#""reason":"projection_changed""#)
+    {
+        Some(SocketDeliveryFailure::ProjectionUnconverged)
+    } else if message.contains("IPC receipt rejected") {
         Some(SocketDeliveryFailure::Rejected)
     } else if message.contains(EDITOR_RECEIPT_DIVERGENCE_REFUSAL) {
         Some(SocketDeliveryFailure::VisibleWriteDiverged)
@@ -1425,6 +1438,37 @@ mod tests {
         assert_eq!(SocketDeliveryFailure::Rejected.as_str(), "rejection");
     }
 
+    #[test]
+    fn a_projection_changed_receipt_preserves_endpoint_ownership() {
+        use super::{
+            PROJECTION_CHANGED_RECEIPT_LINE, RefusalRunEffect, SocketDeliveryFailure,
+            SocketReceiptClassification, classify_socket_delivery_failure,
+            classify_socket_receipt,
+        };
+        assert_eq!(
+            classify_socket_receipt(PROJECTION_CHANGED_RECEIPT_LINE),
+            SocketReceiptClassification::Deferred
+        );
+        assert_eq!(
+            classify_socket_delivery_failure(format!(
+                "IPC receipt deferred: {PROJECTION_CHANGED_RECEIPT_LINE}"
+            )),
+            Some(SocketDeliveryFailure::ProjectionUnconverged)
+        );
+        assert_eq!(
+            classify_socket_delivery_failure(format!(
+                "IPC receipt deferred: {}",
+                super::DEFERRED_RECEIPT_LINE
+            )),
+            None,
+            "bounded work still running is not projection failure evidence"
+        );
+        assert_eq!(
+            SocketDeliveryFailure::ProjectionUnconverged.refusal_run_effect(),
+            RefusalRunEffect::Preserve
+        );
+    }
+
     /// `#gh131nonipc`: the two non-socket shapes from GH #131 are typed
     /// outcomes with a defined effect on the refusal run — a refused
     /// visible-write receipt extends it, a non-socket retention carries it.
@@ -1723,6 +1767,9 @@ mod tests {
         assert!(!is_socket_status_error("IPC receipt timeout (6s)"));
         assert!(!is_socket_status_error(
             r#"IPC receipt already_applied: {"type":"receipt","status":"applied","reason":"already_applied"}"#
+        ));
+        assert!(is_socket_status_error(
+            r#"IPC receipt deferred: {"type":"receipt","status":"deferred","reason":"projection_changed"}"#
         ));
     }
 

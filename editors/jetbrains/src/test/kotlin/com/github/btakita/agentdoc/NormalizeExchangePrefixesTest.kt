@@ -474,6 +474,8 @@ One.
         assertFalse(patchWatcher.contains("setBinaryContent("))
 
         assertTrue(patchWatcher.contains("private fun handleSocketMessageV2"))
+        assertTrue(patchWatcher.contains("PersistCurrentResult.ProjectionChanged -> APPLY_PROJECTION_CHANGED"))
+        assertTrue(patchWatcher.contains("const val APPLY_PROJECTION_CHANGED = 4"))
         assertTrue(patchWatcher.contains("StateProjectionBridge.recordEditorPatchApplied"))
         assertFalse(patchWatcher.contains("processPatchFile"))
         assertFalse(patchWatcher.contains(".agent-doc/patches"))

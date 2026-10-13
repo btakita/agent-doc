@@ -3606,6 +3606,38 @@ mod tests {
     }
 
     #[test]
+    fn projection_changed_receipt_is_retryable_projection_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, |_msg| {
+                Some(agent_doc_ipc_protocol::PROJECTION_CHANGED_RECEIPT_LINE.to_string())
+            })
+            .ok();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let msg = serde_json::json!({"type": "persist_current"});
+        let error = send_message(&root, &msg).unwrap_err();
+        assert!(is_ipc_receipt_deferred_error(&error), "{error:#}");
+        assert!(
+            !is_ipc_receipt_rejected_error(&error),
+            "projection drift must not count as an endpoint refusal: {error:#}"
+        );
+        assert_eq!(
+            agent_doc_ipc_protocol::classify_socket_delivery_failure(error.to_string()),
+            Some(agent_doc_ipc_protocol::SocketDeliveryFailure::ProjectionUnconverged)
+        );
+
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
     fn send_observe_lazily_current_waits_for_terminal_applied_receipt() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();

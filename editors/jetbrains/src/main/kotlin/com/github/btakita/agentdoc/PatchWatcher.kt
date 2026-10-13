@@ -447,6 +447,8 @@ class PatchWatcher(private val project: Project) : Disposable {
      * - 1 → receipt `{"status":"applied"}` (apply succeeded with content change)
      * - 3 → receipt `{"status":"deferred"}` (`#netadv5` R2: bounded wait elapsed,
      *   still running; not a refusal)
+     * - 4 → receipt `{"status":"deferred","reason":"projection_changed"}`
+     *   (the endpoint is live, but this request's projection precondition is stale)
      * - 2 → receipt `{"status":"applied","reason":"already_applied"}` (patch text
      *   already present in live buffer; binary skips file-IPC fallback so a
      *   duplicate response heading cannot land)
@@ -583,7 +585,8 @@ class PatchWatcher(private val project: Project) : Disposable {
                     extractStringField(json, "expected_content_hash") ?: return APPLY_FAILED
                 val expectedLen = extractIntField(json, "expected_content_len") ?: return APPLY_FAILED
                 val persistPending = java.util.concurrent.atomic.AtomicBoolean(false)
-                if (CrdtReplicaManager.persistCurrentVisibleRevision(
+                when (
+                    CrdtReplicaManager.persistCurrentVisibleRevision(
                         project,
                         file,
                         expectedHash,
@@ -591,10 +594,14 @@ class PatchWatcher(private val project: Project) : Disposable {
                         persistPending,
                     )
                 ) {
-                    recordDocumentActivity(file, "socket-persist-current")
-                    APPLY_APPLIED
-                } else {
-                    timeoutAwareReceiptUtil(pending = persistPending.get())
+                    PersistCurrentResult.Applied -> {
+                        recordDocumentActivity(file, "socket-persist-current")
+                        APPLY_APPLIED
+                    }
+                    PersistCurrentResult.Deferred ->
+                        timeoutAwareReceiptUtil(pending = persistPending.get())
+                    PersistCurrentResult.ProjectionChanged -> APPLY_PROJECTION_CHANGED
+                    PersistCurrentResult.Rejected -> APPLY_FAILED
                 }
             }
             EditorIntent.DeliverCrdtRemote.token -> {
@@ -1792,6 +1799,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         /// `#netadv5` R2: receipt `{"status":"deferred"}`. The plugin's own bounded
         /// wait elapsed while the action is still running; never a refusal.
         const val APPLY_DEFERRED = 3
+        const val APPLY_PROJECTION_CHANGED = 4
 
         /// `#netadv5` R2: the receipt for a `false` result. A bounded wait that
         /// elapsed is "slow, still trying" (deferred); only a real refusal is failed.

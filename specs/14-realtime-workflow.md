@@ -260,7 +260,7 @@ trailing refusal run (`consecutive_rejections`, GH #131):
 |---|---|---|---|
 | `Rejected` (`IPC receipt rejected`) | socket send error, `crdt_replica_notify`, or `native_editor_save_request` | +1 | extend |
 | `VisibleWriteDiverged` (receipt refused as divergent from canonical) | `socket_visible_write` adoption, after the ACK | +1 | extend |
-| `ProjectionUnconverged` (editor never projected the target) | `serialized_atomic_write` retention or `socket_already_applied` without a visible response receipt | +1 | carry unchanged |
+| `ProjectionUnconverged` (editor never projected the target, or a terminal `deferred` receipt reports a changed save projection) | `serialized_atomic_write` retention, `socket_already_applied` without a visible response receipt, or native-save compare-and-save drift | +1 | carry unchanged |
 | `Timeout` / `Unsupported` | socket send error | +1 | reset |
 
 `#gh131nonipc`: the two middle rows never reached a socket error branch, so they
@@ -305,6 +305,13 @@ The fold happens once after the bounded send loop and adds no retry or wait.
   that replacement. This per-generation transition is immediate; the broader
   transport-health refusal threshold below remains the cross-attempt endpoint
   degradation policy.
+- A native-save compare-and-save request whose expected hash, byte length, or
+  replica projection is no longer current returns a terminal `deferred` receipt
+  with `reason=projection_changed`. It ends that socket attempt and asks the
+  retained transition to retry from current authority, but it is not an
+  endpoint refusal and must not extend `consecutive_rejections`, unregister the
+  live endpoint, or prescribe an editor restart. This remains distinct from the
+  reasonless code-3 `deferred` receipt for bounded work that is still running.
 - After `EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD` (3) consecutive refusals
   the endpoint counts as **unregistered** for delivery: the row is degraded
   regardless of the failure counter (`editor_endpoint_unregistered_after_refusals`),

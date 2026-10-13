@@ -179,6 +179,13 @@ the authority distinction: a document with retained open/close history but no
 live pid is known closed (`Some(false)`), while a document with no open-set fact
 is a cold miss (`None`) that may require durable hydration. Per-document
 sync-in-flight reads use the same bounded-key rule.
+The controller's fixed-cadence process-exit watcher likewise must not refold
+every retained OR-set tag on each poll. The liveness projection maintains a
+derived count of present document memberships per pid, updated only when an
+Open/Close fold changes that key's actual OR-set presence. Idempotent replay,
+an observed-remove that misses a concurrent reopen, and hydration through the
+ordinary batch fold therefore leave or rebuild the exact same pid index. The
+watcher polls only those indexed candidate pids; the OR-set remains authority.
 A routed, allocated CRDT model created by replica registration is itself
 editor-attachment proof while the separately scheduled reliable-sync `open`
 projection is delayed or being rebuilt. The controller, write convergence, and

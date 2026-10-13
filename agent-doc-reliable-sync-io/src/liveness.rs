@@ -284,6 +284,14 @@ pub enum LivenessOp {
 pub struct LivenessProjection {
     /// `(document_hash, pid)` → observed-remove membership set.
     open_set: BTreeMap<(String, Pid), OrSet>,
+    /// Number of currently-present document memberships per pid.
+    ///
+    /// The process-exit watcher polls the distinct open pids every 500 ms. Its
+    /// candidate set changes only on an actual OR-set membership edge, so retain
+    /// this derived index instead of rescanning every document and recomputing
+    /// every tag-set difference on each idle poll. Applying the same fact again
+    /// leaves both the OR-set and this count unchanged.
+    open_pid_counts: BTreeMap<Pid, usize>,
     /// `pid` → LWW `alive` register.
     alive: BTreeMap<Pid, WireLwwRegister<bool>>,
     /// `(document_hash, pid)` → LWW `(edit_epoch, synced_epoch)` register. The
@@ -309,10 +317,16 @@ impl LivenessProjection {
                 pid,
                 tag,
             } => {
-                self.open_set
-                    .entry((document_hash.clone(), *pid))
-                    .or_default()
-                    .add(tag.clone());
+                let (was_present, is_present) = {
+                    let membership = self
+                        .open_set
+                        .entry((document_hash.clone(), *pid))
+                        .or_default();
+                    let was_present = membership.present();
+                    membership.add(tag.clone());
+                    (was_present, membership.present())
+                };
+                self.update_open_pid_count(*pid, was_present, is_present);
             }
             LivenessOp::Close {
                 document_hash,
@@ -321,10 +335,16 @@ impl LivenessProjection {
             } => {
                 // A close seen before its open still records the shadow so a late,
                 // already-observed add cannot resurrect the entry.
-                self.open_set
-                    .entry((document_hash.clone(), *pid))
-                    .or_default()
-                    .remove_observed(observed_tags.iter().cloned());
+                let (was_present, is_present) = {
+                    let membership = self
+                        .open_set
+                        .entry((document_hash.clone(), *pid))
+                        .or_default();
+                    let was_present = membership.present();
+                    membership.remove_observed(observed_tags.iter().cloned());
+                    (was_present, membership.present())
+                };
+                self.update_open_pid_count(*pid, was_present, is_present);
             }
             LivenessOp::Alive { pid, value, stamp } => match self.alive.get_mut(pid) {
                 Some(reg) => reg.set(*stamp, *value),
@@ -371,6 +391,35 @@ impl LivenessProjection {
         }
     }
 
+    /// Apply one real `(document, pid)` membership edge to the derived pid
+    /// index. Replays and stale observed-removes have `before == after` and are
+    /// deliberately no-ops.
+    fn update_open_pid_count(&mut self, pid: Pid, before: bool, after: bool) {
+        match (before, after) {
+            (false, true) => {
+                let count = self.open_pid_counts.entry(pid).or_default();
+                *count = count.checked_add(1).expect("open document count overflow");
+            }
+            (true, false) => {
+                let remove = match self.open_pid_counts.get_mut(&pid) {
+                    Some(count) if *count > 1 => {
+                        *count -= 1;
+                        false
+                    }
+                    Some(_) => true,
+                    None => {
+                        debug_assert!(false, "present open membership must have a pid count");
+                        false
+                    }
+                };
+                if remove {
+                    self.open_pid_counts.remove(&pid);
+                }
+            }
+            (false, false) | (true, true) => {}
+        }
+    }
+
     /// Is `(document_hash, pid)` currently open (some add-tag not shadowed)?
     pub fn is_open(&self, document_hash: &str, pid: Pid) -> bool {
         self.open_set
@@ -399,11 +448,7 @@ impl LivenessProjection {
     /// liveness after a crash/restart where the editor's exit watcher could not
     /// publish its terminal `Alive(false)` fact.
     pub fn all_open_pids(&self) -> BTreeSet<Pid> {
-        self.open_set
-            .iter()
-            .filter(|(_, set)| set.present())
-            .map(|((_, pid), _)| *pid)
-            .collect()
+        self.open_pid_counts.keys().copied().collect()
     }
 
     /// Whether this projection has ever received an open/close fact for the
@@ -1174,6 +1219,97 @@ mod tests {
             Some(false),
             "a dead editor keeps the document tracked without making it live"
         );
+    }
+
+    #[test]
+    fn open_pid_index_tracks_only_real_membership_edges() {
+        let mut projection = LivenessProjection::new();
+        let open_a = LivenessOp::Open {
+            document_hash: "doc-a".into(),
+            pid: 42,
+            tag: "a1".into(),
+        };
+        let open_b = LivenessOp::Open {
+            document_hash: "doc-b".into(),
+            pid: 42,
+            tag: "b1".into(),
+        };
+        projection.apply(&open_a);
+        projection.apply(&open_b);
+        projection.apply(&open_a);
+        assert_eq!(projection.open_pid_counts.get(&42), Some(&2));
+        assert_eq!(projection.all_open_pids(), [42].into_iter().collect());
+
+        projection.apply(&LivenessOp::Close {
+            document_hash: "doc-a".into(),
+            pid: 42,
+            observed_tags: vec!["older-unseen-tag".into()],
+        });
+        assert_eq!(
+            projection.open_pid_counts.get(&42),
+            Some(&2),
+            "a stale close that changes no membership must not decrement"
+        );
+
+        let close_a = LivenessOp::Close {
+            document_hash: "doc-a".into(),
+            pid: 42,
+            observed_tags: vec!["a1".into()],
+        };
+        let close_b = LivenessOp::Close {
+            document_hash: "doc-b".into(),
+            pid: 42,
+            observed_tags: vec!["b1".into()],
+        };
+        projection.apply(&close_a);
+        assert_eq!(projection.open_pid_counts.get(&42), Some(&1));
+        projection.apply(&close_b);
+        projection.apply(&close_b);
+        assert!(!projection.open_pid_counts.contains_key(&42));
+        assert!(projection.all_open_pids().is_empty());
+
+        projection.apply(&LivenessOp::Open {
+            document_hash: "doc-a".into(),
+            pid: 42,
+            tag: "a2".into(),
+        });
+        projection.apply(&close_a);
+        assert_eq!(
+            projection.all_open_pids(),
+            [42].into_iter().collect(),
+            "a fresh reopen is add-wins over a repeated close of the old tag"
+        );
+    }
+
+    #[test]
+    fn apply_batch_hydration_builds_the_open_pid_index() {
+        let mut projection = LivenessProjection::new();
+        projection.apply_batch(&[
+            LivenessOp::Open {
+                document_hash: "doc-a".into(),
+                pid: 42,
+                tag: "a1".into(),
+            },
+            LivenessOp::Open {
+                document_hash: "doc-b".into(),
+                pid: 42,
+                tag: "b1".into(),
+            },
+            LivenessOp::Open {
+                document_hash: "doc-c".into(),
+                pid: 77,
+                tag: "c1".into(),
+            },
+            LivenessOp::Close {
+                document_hash: "doc-b".into(),
+                pid: 42,
+                observed_tags: vec!["b1".into()],
+            },
+        ]);
+
+        assert_eq!(projection.open_pid_counts.get(&42), Some(&1));
+        assert_eq!(projection.open_pid_counts.get(&77), Some(&1));
+        assert_eq!(projection.all_open_pids(), [42, 77].into_iter().collect());
     }
 
     #[test]

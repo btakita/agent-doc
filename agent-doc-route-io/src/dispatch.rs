@@ -700,8 +700,12 @@ fn classify_pre_dispatch_stranded_draft_observation(
     let projection = capture.map(|content| {
         agent_doc_harness::project_pane_composer_at_cursor(content, harness, cursor_y)
     });
-    let draft_preview = match projection.as_ref() {
-        Some(agent_doc_harness::PaneComposerProjection::OperatorDraft { preview }) => {
+    let history_recall = capture.and_then(|content| {
+        agent_doc_harness::claude_history_recall_at_cursor(harness, content, cursor_y)
+    });
+    let draft_preview = match (history_recall.as_ref(), projection.as_ref()) {
+        (Some(_), _) => None,
+        (None, Some(agent_doc_harness::PaneComposerProjection::OperatorDraft { preview })) => {
             Some(preview.clone())
         }
         _ => None,
@@ -731,11 +735,11 @@ fn classify_pre_dispatch_stranded_draft_observation(
     }
 }
 
-/// GH #98: a foreground supervisor diagnostic can be echoed into the managed
-/// pane's composer when stderr shares that tty. This residue is agent-owned, so
-/// clear it before draft classification instead of asking the operator to
-/// submit or remove text they did not type.
-fn clear_agent_owned_composer_notice(
+/// GH #98/#246: clear composer text that the harness or agent-doc owns before
+/// draft classification instead of asking the operator to submit or remove
+/// text they did not type. This covers an echoed supervisor diagnostic and
+/// Claude Code's cursor-anchored prompt-history recall UI.
+fn clear_non_operator_composer_residue(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
@@ -745,21 +749,26 @@ fn clear_agent_owned_composer_notice(
         return Ok(());
     };
     let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
-    if agent_doc_harness::agent_owned_composer_notice_at_cursor(
-        harness, &capture, cursor_y,
-    )
-    .is_none()
-    {
+    let residue =
+        agent_doc_harness::agent_owned_composer_notice_at_cursor(harness, &capture, cursor_y)
+            .map(|notice| ("agent_doc_notice", notice))
+            .or_else(|| {
+                agent_doc_harness::claude_history_recall_at_cursor(harness, &capture, cursor_y)
+                    .map(|label| ("claude_history_recall", label))
+            });
+    let Some((kind, detail)) = residue else {
         return Ok(());
-    }
+    };
 
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "route_agent_owned_composer_notice file={} pane={} harness={} action=clear",
+            "route_non_operator_composer_residue file={} pane={} harness={} kind={} action=clear detail={:?}",
             file.display(),
             pane,
             harness.binary,
+            kind,
+            detail,
         ),
     );
     agent_doc_tmux_io::send_key_logged(
@@ -770,27 +779,28 @@ fn clear_agent_owned_composer_notice(
             Some(file),
             agent_doc_ops_log_io::log_op,
         ),
-        "route.clear_agent_owned_composer_notice",
+        "route.clear_non_operator_composer_residue",
     )
-    .context("clear agent-doc-owned composer diagnostic")?;
+    .context("clear non-operator composer residue")?;
 
     let deadline = Instant::now() + Duration::from_millis(500);
     loop {
         std::thread::sleep(Duration::from_millis(25));
         if let Ok(capture) = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
             let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
-            if agent_doc_harness::agent_owned_composer_notice_at_cursor(
+            let notice = agent_doc_harness::agent_owned_composer_notice_at_cursor(
                 harness, &capture, cursor_y,
-            )
-            .is_none()
-            {
+            );
+            let recall =
+                agent_doc_harness::claude_history_recall_at_cursor(harness, &capture, cursor_y);
+            if notice.is_none() && recall.is_none() {
                 return Ok(());
             }
         }
         if Instant::now() >= deadline {
             anyhow::bail!(
-                "pane {pane} still contains an agent-doc-owned composer diagnostic after \
-                 automatic clear; route refused to append another command"
+                "pane {pane} still contains non-operator composer residue after automatic \
+                 clear; route refused to append another command"
             );
         }
     }
@@ -814,7 +824,7 @@ fn try_pre_dispatch_stranded_draft_submit(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<Option<RoutedDispatchStartProof>> {
-    clear_agent_owned_composer_notice(tmux, file, pane, harness)?;
+    clear_non_operator_composer_residue(tmux, file, pane, harness)?;
     let trigger = harness.trigger_command(file_path);
     let observation = observe_pre_dispatch_stranded_draft(tmux, pane, harness, &trigger);
     let action = observation.action;
@@ -1350,6 +1360,34 @@ mod tests {
                 TRIGGER,
             ),
             PreDispatchStrandedDraftAction::DeferForeignDraft,
+        );
+    }
+
+    #[test]
+    fn claude_history_recall_is_not_a_foreign_operator_draft() {
+        let harness = HarnessConfig::claude();
+        let pane = concat!(
+            "completed response\n",
+            "\x1b[38;5;240m─── History 93/100 ───\x1b[0m\n",
+            "\x1b[38;5;153m❯\u{a0}/agent-doc /workspace/sample-app/tasks/other.md\x1b[0m\n",
+            "────────\n",
+            "  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+        );
+
+        let observation = classify_pre_dispatch_stranded_draft_observation(
+            Some(pane),
+            Some(2),
+            &harness,
+            TRIGGER,
+        );
+        assert_eq!(
+            observation.action,
+            PreDispatchStrandedDraftAction::DispatchFresh,
+        );
+        assert_eq!(observation.draft_preview, None);
+        assert_eq!(
+            agent_doc_harness::claude_history_recall_at_cursor(&harness, pane, Some(2)).as_deref(),
+            Some("History 93/100")
         );
     }
 

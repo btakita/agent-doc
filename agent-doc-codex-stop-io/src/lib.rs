@@ -1162,6 +1162,22 @@ fn apply_bound_stop(
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )? {
         agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {
+            // `#codexsubagentstop`: Codex collaboration workers can share the
+            // parent session id while owning a distinct turn id. A clean
+            // document here means the remaining work is continuation debt, not
+            // closeout recovery; only the coordinator turn recorded by the
+            // session ledger may inherit that queue handoff. Preserve legacy
+            // parked rows with no turn identity.
+            if !state.last_turn_id.trim().is_empty()
+                && !input.turn_id.trim().is_empty()
+                && state.last_turn_id != input.turn_id
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    "codex_stop_foreign_turn_passed_through source=clean_session_turn_fence",
+                );
+                return Ok(StopResponse::Continue { continue_: true });
+            }
             stop_phase("auto_queue_continuation");
             if let Some(response) =
                 auto_queue_continuation_response(file, cleanup_roots, loaded_root, state, input)?
@@ -6569,6 +6585,35 @@ Reviewed the gated items.\n\
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix1"));
+    }
+
+    /// `#codexsubagentstop`: a collaboration worker shares the coordinator's
+    /// Codex session id but has its own turn id. Its Stop must not inherit the
+    /// coordinator's ready queue head and report `Blocked by hook` as the
+    /// worker result.
+    #[test]
+    fn foreign_subagent_turn_does_not_inherit_parent_queue_continuation() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["release + publish"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "coordinator-turn");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "subagent-turn".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "branch, commit, and tests".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let root = project_root_for(dir.path()).unwrap();
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(state.last_turn_id, "coordinator-turn");
+        assert_eq!(state.last_auto_queue_head, None);
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("- release + publish"));
     }
 
     /// `#queuegodefaultdrain`: a queue with no control on either surface (the

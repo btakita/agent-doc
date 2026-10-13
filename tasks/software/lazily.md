@@ -47,6 +47,15 @@ Both queue items are claimed and running in separate isolated worktrees:
 - `#lzcoreciactivationfixes` → `subagent:ciactivation`
 
 The undefined `#spec-test-commit-push` preset means neither worker is authorized to commit, push, install, or release.
+
+### Re: recovered response
+
+Both new heads are claimed and running:
+
+- Issue 249 → `subagent:issue249`
+- Release readiness → `subagent:releasepublish`
+
+Because `#spec-test-commit-push` remains undefined, neither worker may commit, push, install, release, or publish. The semantic-completion warning was advisory and did not auto-close the release request.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -55,6 +64,8 @@ The undefined `#spec-test-commit-push` preset means neither worker is authorized
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - 🚧 do [#lzcoreevidencedarttimeout]
 - 🚧 do [#lzcoreciactivationfixes]
+- #gh-fix https://github.com/btakita/agent-doc/issues/249
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

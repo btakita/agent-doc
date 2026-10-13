@@ -564,7 +564,11 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   to stage ...`) is the upgrader's failure, so the launcher takes the
   failed-dynamic-upgrade path above: the package is replaced on disk and the
   command reports restart-required, with manual guidance to restart the IDE and
-  rerun the install or install the package from disk.
+  rerun the install or install the package from disk. Before the launcher
+  receives a platform-specific package, the installer re-roots its temporary
+  copy to the canonical `agent-doc-jetbrains/` tree (GH #248). Thus the stager's
+  verified archive and final unzip both replace that tree even when the
+  published package is rooted at `agent-doc-jetbrains-263/`.
   Rationale: a durable backup copy of the package would only cover the
   "package vanished" cause and only if something restored it before the
   restart; ordering the probe first closes the vanish AND full-disk causes at

@@ -1596,6 +1596,39 @@ fn extract_jetbrains_upgrade_launcher(zip_path: &Path) -> Result<tempfile::Named
     bail!("JetBrains package has no agent-doc plugin jar to use as the upgrade launcher")
 }
 
+/// GH #248: the restart stager always replaces the canonical
+/// `agent-doc-jetbrains/` tree, while platform-specific release archives may be
+/// rooted at `agent-doc-jetbrains-262/` or `agent-doc-jetbrains-263/`. Hand the
+/// launcher a canonical-rooted copy so its guarded restart script extracts the
+/// replacement where the IDE expects it.
+fn copy_jetbrains_package_for_upgrade_launcher(source: &Path, destination: &Path) -> Result<()> {
+    let file = fs::File::open(source).context("Failed to open JetBrains package")?;
+    let mut input = zip::ZipArchive::new(file).context("Failed to read JetBrains package")?;
+    let output = fs::File::create(destination)
+        .context("Failed to create normalized JetBrains upgrade package")?;
+    let mut output = zip::ZipWriter::new(output);
+
+    for index in 0..input.len() {
+        let entry = input.by_index(index)?;
+        let enclosed = entry
+            .enclosed_name()
+            .with_context(|| format!("Unsafe path in JetBrains package: {}", entry.name()))?;
+        let relative = jetbrains_archive_relative(&enclosed)?;
+        let normalized = Path::new(JETBRAINS_PLUGIN_DIR).join(relative);
+        let mut normalized_name = normalized.to_string_lossy().replace('\\', "/");
+        if entry.is_dir() && !normalized_name.ends_with('/') {
+            normalized_name.push('/');
+        }
+        output
+            .raw_copy_file_rename(entry, normalized_name)
+            .context("Failed to normalize JetBrains upgrade package")?;
+    }
+    output
+        .finish()
+        .context("Failed to finish normalized JetBrains upgrade package")?;
+    Ok(())
+}
+
 /// `#jb262dynupgrade`: stable prefix of the reason an exact-262 modular package
 /// gives for not attempting a restart-free upgrade. The classic launcher
 /// (`JetBrainsPluginUpgradeBootstrap`) unloads one classic plugin tree and
@@ -1857,7 +1890,7 @@ fn try_hot_upgrade_jetbrains(
         .suffix(".zip")
         .tempfile()
         .context("Failed to stage JetBrains package for dynamic install")?;
-    fs::copy(zip_path, archive.path()).context("Failed to stage JetBrains package")?;
+    copy_jetbrains_package_for_upgrade_launcher(zip_path, archive.path())?;
     let mut statuses = Vec::with_capacity(pids.len());
     for pid in pids {
         let java = java_executable_for_ide(pid)?;
@@ -3470,7 +3503,8 @@ mod tests {
     };
     use super::{
         JetbrainsLocalInstallOutcome, JetbrainsPackageRange, RELEASE_SEARCH_MAX_PAGES,
-        RELEASES_PER_PAGE, choose_plugins_dir_with_interactivity, ensure_github_api_success,
+        RELEASES_PER_PAGE, choose_plugins_dir_with_interactivity,
+        copy_jetbrains_package_for_upgrade_launcher, ensure_github_api_success,
         existing_jetbrains_agent_doc_dirs, find_asset, find_best_local_zip, find_local_vscode_vsix,
         find_local_zip, find_release_with_asset, find_release_with_asset_at_or_below,
         github_get_request, github_token_from, has_asset, install_jetbrains_local_zip_into,
@@ -3543,6 +3577,28 @@ mod tests {
             .unwrap();
         archive.write_all(plugin).unwrap();
         archive.finish().unwrap();
+    }
+
+    #[test]
+    fn upgrade_launcher_archive_normalizes_the_263_package_root() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("agent-doc-jetbrains-263-0.2.571.zip");
+        let normalized = temp.path().join("normalized.zip");
+        write_test_modern_jetbrains_zip(&source, "0.2.571", b"plugin");
+
+        copy_jetbrains_package_for_upgrade_launcher(&source, &normalized).unwrap();
+
+        let mut archive = zip::ZipArchive::new(fs::File::open(normalized).unwrap()).unwrap();
+        assert!(
+            archive
+                .by_name("agent-doc-jetbrains/lib/agent-doc-jetbrains-263-0.2.571.jar")
+                .is_ok()
+        );
+        assert!(
+            archive
+                .by_name("agent-doc-jetbrains-263/lib/agent-doc-jetbrains-263-0.2.571.jar")
+                .is_err()
+        );
     }
 
     #[test]

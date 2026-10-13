@@ -671,6 +671,23 @@ pass.
 route-owned document from exact process-tree ownership when the active pane's
 actor row is missing. The recovered path must resolve inside that controller's
 project root; a foreign-root owner remains unbound for that controller.
+- Reverse tmux-to-editor focus observation is demand-driven by the active embedded
+  agent-doc terminal. Its invariant is that an open markdown tab alone never
+  generates periodic controller RPCs: a background project surface, editor focus,
+  another tool window, or a hidden agent-doc terminal parks the 500ms observation
+  effect and clears its last-observed document. The JetBrains terminal host owns
+  the active-terminal source, and `TmuxPaneFocusSync` owns the derived poll
+  decision and socket effect. The transition table is `markdown open + project
+  surface active + agent-doc terminal selected/active -> poll`; every other input
+  combination is `park`. The evidence inputs are JetBrains project-surface focus,
+  selected terminal content, tool-window activity, and open markdown files. The
+  reactive topology is those focus/content sources -> the pure poll predicate ->
+  the existing `tmux_focus_state` effect; imperative extraction is limited to the
+  terminal-host adapter and no durable controller state is inferred from it. The
+  allowed surfaces are the JetBrains plugin and this focus contract; controller
+  handoff and tmux ownership policy are out of scope. Kotlin truth-table tests
+  verify that idle/background states do not reach the transport and that the
+  active embedded-terminal state still does.
 - Editor selection focus is a single latest-wins retained source per project.
 All tab targets share one focus generation, so a burst of selection events
 coalesces to the newest document instead of replaying older pane selections

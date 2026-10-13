@@ -8,6 +8,42 @@ import org.junit.Test
 
 class TmuxPaneFocusSyncTest {
     @Test
+    fun `idle or background editor does not poll controller focus state`() {
+        assertFalse(
+            TmuxPaneFocusSync.shouldPollTmuxFocus(
+                hasMarkdownOpen = true,
+                projectSurfaceActive = false,
+                agentDocTerminalActive = false,
+            ),
+        )
+        assertFalse(
+            TmuxPaneFocusSync.shouldPollTmuxFocus(
+                hasMarkdownOpen = true,
+                projectSurfaceActive = true,
+                agentDocTerminalActive = false,
+            ),
+        )
+        assertFalse(
+            TmuxPaneFocusSync.shouldPollTmuxFocus(
+                hasMarkdownOpen = false,
+                projectSurfaceActive = true,
+                agentDocTerminalActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `active embedded terminal polls controller focus state`() {
+        assertTrue(
+            TmuxPaneFocusSync.shouldPollTmuxFocus(
+                hasMarkdownOpen = true,
+                projectSurfaceActive = true,
+                agentDocTerminalActive = true,
+            ),
+        )
+    }
+
+    @Test
     fun `focused editor component outranks background tmux document changes`() {
         assertEquals(
             TmuxFocusMirrorDecision.PreserveFocusedEditor,

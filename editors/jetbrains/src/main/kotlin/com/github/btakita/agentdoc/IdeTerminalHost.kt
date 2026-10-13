@@ -55,6 +55,23 @@ internal object IdeTerminalHost {
     fun hasLiveAgentDocTab(project: Project): Boolean = liveTab(project) != null
 
     /**
+     * Whether the operator can currently drive tmux focus through agent-doc's embedded terminal.
+     *
+     * Reverse tmux-to-editor focus observation has no consumer while this tab is hidden or the
+     * operator is working in the editor. Keeping the transport poll behind this focus fact avoids
+     * waking every project controller merely because a markdown tab remains open.
+     */
+    fun isAgentDocTerminalActive(project: Project): Boolean {
+        val manager = TerminalToolWindowManager.getInstance(project)
+        return sequenceOf(agentToolWindow(project), manager.toolWindow)
+            .filterNotNull()
+            .any { toolWindow ->
+                val content = agentTab(toolWindow)
+                toolWindow.isActive && content != null && toolWindow.contentManager.selectedContent === content
+            }
+    }
+
+    /**
      * Focus the agent-doc terminal, reporting what it managed to do.
      *
      * Deliberately resolved through [agentTab], not [liveTab]: a tab whose shell

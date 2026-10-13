@@ -2714,7 +2714,18 @@ pub fn load_control_plane_store_counts(conn: &Connection) -> Result<ControlPlane
             "SELECT COUNT(*) FROM supervisor_leases",
             "supervisor leases",
         )?,
-        state_events: count_rows(conn, "SELECT COUNT(*) FROM state_events", "state events")?,
+        // The status surface needs a scale/high-water signal, not an exact live
+        // cardinality. `state_events` is the largest controller ledger (263 MB
+        // in the production report that motivated this bound), and repeated
+        // health/readiness probes must not scan its covering index end to end.
+        // Event ids are append-only INTEGER PRIMARY KEY values, so MAX(id) is a
+        // bounded diagnostic high-water mark. Pruning can leave gaps, exactly
+        // like the crash-recovery marker high-water below.
+        state_events: count_rows(
+            conn,
+            "SELECT COALESCE(MAX(id), 0) FROM state_events",
+            "state event high-water mark",
+        )?,
         dispatch_receipts: count_rows(
             conn,
             "SELECT COUNT(*) FROM dispatch_attempts",
@@ -8158,6 +8169,33 @@ mod tests {
         assert_eq!(
             counts.crash_recovery_markers, 2,
             "controller status should use the marker high-water mark instead of an exact full-table scan"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn control_plane_store_counts_use_state_event_high_water_mark() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        initialize_state_db(&conn)?;
+        for event_id in ["state-event-1", "state-event-2"] {
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id,
+                    document_hash: "doc-hash",
+                    domain: "document",
+                    fact_type: "file_watch_change_observed",
+                    payload_json: "{}",
+                },
+            )?;
+        }
+        conn.execute("DELETE FROM state_events WHERE id = 1", [])?;
+
+        let counts = load_control_plane_store_counts(&conn)?;
+        assert_eq!(
+            counts.state_events, 2,
+            "controller status should report the append-only event high-water mark instead of scanning the full ledger"
         );
 
         Ok(())

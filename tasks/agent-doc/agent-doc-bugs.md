@@ -122,7 +122,6 @@ The standalone `---` added to the exchange is only a Markdown separator and requ
 > ```
 > › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
 >
->
 > • Agent-doc admission is still blocked by a retained document write. I’ll run only the permitted session check and
 >   report any queued operator prompt or recovery instruction without modifying the document.
 >
@@ -178,7 +177,16 @@ Yes. GitHub Release `v0.35.496` was published at 2026-10-13T03:01:52Z with all s
 Yes through the project release channel, but not through the official IDE marketplaces. GitHub Release `v0.35.496` publishes the VS Code `0.2.81` VSIX, JetBrains classic `0.2.565` ZIP, exact-262 `0.2.566` ZIP, both JetBrains update-feed XML files, and `EDITOR-PACKAGES.sha256`: https://github.com/btakita/agent-doc/releases/tag/v0.35.496. These are the artifacts used by `agent-doc plugin install` and the project update feeds.
 
 The current release workflow has no marketplace-publish job. `vsce show btakita.agent-doc` reports the extension is not found in the official VS Code Marketplace, the JetBrains Marketplace lookup for `com.github.btakita.agent-doc` returns not found, and Open VSX still exposes the older `0.2.1`. Therefore the latest plugin packages are released and downloadable, but they have not been published to the official JetBrains/VS Code marketplaces.
-<!-- agent:boundary:b11f9a42 -->
+> **Chat prompt (#chatprompt):** Idea is non-responsive
+
+### Re: IntelliJ non-responsive diagnosis — gpt-5 · 2026-10-13T00:29-04:00
+
+IntelliJ is alive but caught in a sustained JavaScript/Node workspace-indexing storm. The live process (PID `3511101`) is using roughly 180–205% CPU and 14.4 GiB resident memory. Fresh JetBrains performance dumps show repeated 10–19 second UI freezes on the AWT event-dispatch thread in `NodeModulesEntityUtil` → workspace-model `VirtualFileIndex` → `Object2ObjectOpenCustomHashMap.find` while IDEA associates hundreds of `node_modules` roots under the generated worktree forest. The log reached about 950,000 included files and more than 500 JavaScript libraries and was still growing.
+
+The dumps do not place agent-doc on the blocked UI path. Its authority-stream threads are waiting in socket reads, while the UI thread is busy inside IntelliJ's JavaScript workspace-model update. The recent plugin upgrade may have coincided with the rescan, but the captured freeze itself is an IntelliJ indexing/write-action problem rather than agent-doc response delivery.
+
+A restart is the practical immediate recovery. I have not killed or restarted IDEA because that could discard unsaved editor state. After restart, exclude the large generated `worktrees/haiven-dev/haiven-frontend/rebase-open-prs-*` tree (or the broader generated worktree directory) from this IDEA project's content roots so the Node plugin does not rebuild libraries for every checkout. Diagnostics are preserved under `~/.cache/JetBrains/IntelliJIdea2026.1/log/threadDumps-freeze-20261013-0027*`.
+<!-- agent:boundary:853f212a:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--

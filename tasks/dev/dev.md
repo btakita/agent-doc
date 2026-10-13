@@ -5,7 +5,6 @@ agent_doc_write: crdt
 agent: codex
 resume:
   claude: c1cf43ac-1094-4ecf-8b3d-a7f7f7168edb
-queue: go
 ---
 
 ## Status
@@ -35,16 +34,25 @@ Fixed. The connector's edit field accepts CommonMark, so I now send `~~...~~` th
 > **Queue prompt:** Most of the slack strikethroughs are correct except `~sdk #119 feat(features): add developer-experience rows and an inherited mark~`
 
 Fixed. GitHub confirms SDK #119 is merged, so the strike is semantically correct; I re-applied its formatting through the connector's CommonMark path. The final fresh sweep also detected SDK #121 as newly closed/merged and struck it in the same update.
+
+### Re: GitHub check without approval — gpt-5 · 2026-10-13T19:03-04:00
+
+> **Queue prompt:** Note that some PRs were checked but not approved on gh. I believe https://github.com/haiven-dev/haiven-sdk/pull/115 is the only case.
+
+Confirmed. SDK #115 is the only manually checked-but-not-approved exception in the Slack list:
+
+- It is the only line whose `:white_check_mark:` appears inline before the title; the other 14 markers are trailing indicators added by the updater.
+- GitHub reports the PR as open with `CHANGES_REQUESTED`.
+- Its only formal review is `CHANGES_REQUESTED` on commit `da34365f`; there is no approval review.
+- Its current head is the newer commit `1fc25d0e`, so it also satisfies the automated “review addressed by a newer commit” signal.
+
+The updater already preserves manually positioned check marks rather than moving, duplicating, or removing them. No Slack or repository mutation was required for this verification.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~Go through the list in https://haivengroup.slack.com/archives/C0C8LPQ7NS1/p1791874207231429. Strike any PRs that are merged or closed. Mark any PRs with the reviews addressed with a commit with an appropriate emoji. Make a script to do this that targets an individual slack message and a channel.~~
-- Note that some PRs were checked but not approved on gh. I believe https://github.com/haiven-dev/haiven-sdk/pull/115 is the only case.
-- ~~Your script is not properly applying strikethrough on slack. It's leaving `~...~`.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Most of the slack strikethroughs are correct except `~sdk #119 feat(features): add developer-experience rows and an inherited mark~`~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

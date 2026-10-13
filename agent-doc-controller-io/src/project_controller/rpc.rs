@@ -14329,39 +14329,128 @@ pub fn checkpoint_route_owned_documents_for_project(
     Ok(summary)
 }
 
+fn supervisor_recycle_socket_for_pid(document: &Path, pid: u32) -> Result<Option<PathBuf>> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(document) else {
+        return Ok(None);
+    };
+    let conn = open_state_db(&project_root)?;
+    let store = load_actor_store_from_db(&conn)?;
+    for record in store.values() {
+        let Some(lease) =
+            load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?
+        else {
+            continue;
+        };
+        if lease.supervisor_pid == Some(pid) {
+            return Ok(lease.supervisor_socket.map(PathBuf::from));
+        }
+    }
+    Ok(None)
+}
+
+fn request_supervisor_recycle_over_ipc(document: &Path, pid: u32) -> Result<()> {
+    let socket = supervisor_recycle_socket_for_pid(document, pid)?.with_context(|| {
+        format!(
+            "no authoritative supervisor lease maps pid {pid} from stale document {}",
+            document.display()
+        )
+    })?;
+    let identity =
+        agent_doc_supervisor_io::ipc::probe_supervisor_pid(&socket, Duration::from_secs(2))?;
+    let observed_pid = identity
+        .data
+        .as_ref()
+        .and_then(|data| data.get("pid"))
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok());
+    if !identity.ok || observed_pid != Some(pid) {
+        anyhow::bail!(
+            "supervisor lease socket {} identified pid {:?}, expected {pid}",
+            socket.display(),
+            observed_pid,
+        );
+    }
+    let response = agent_doc_supervisor_io::ipc::send_command(
+        &socket,
+        &agent_doc_supervisor::ipc_protocol::IpcMethod::Restart {
+            mode: "continue".to_string(),
+        },
+    )?;
+    if !response.ok {
+        anyhow::bail!(
+            "supervisor pid {pid} refused lifecycle recycle over {}: {}",
+            socket.display(),
+            response.error.as_deref().unwrap_or("unknown refusal"),
+        );
+    }
+    Ok(())
+}
+
+fn deliver_supervisor_recycle_requests<C, M, I>(
+    processes: Vec<(u32, PathBuf)>,
+    checkpoint: C,
+    mark_document: M,
+    recycle_process: I,
+) -> (usize, usize)
+where
+    C: Fn(&Path) -> Result<()>,
+    M: Fn(&Path) -> Result<()>,
+    I: Fn(&Path, u32) -> Result<()>,
+{
+    let mut by_document: BTreeMap<PathBuf, BTreeSet<u32>> = BTreeMap::new();
+    for (pid, document) in processes {
+        by_document.entry(document).or_default().insert(pid);
+    }
+
+    let mut delivered = 0;
+    let mut skipped = 0;
+    for (document, pids) in by_document {
+        let document_delivery = checkpoint(&document).and_then(|()| mark_document(&document));
+        if document_delivery.is_ok() {
+            delivered += 1;
+            continue;
+        }
+
+        // `#renamedsupervisorrecycle`: a route-owned supervisor may outlive a
+        // document path transition. Its original command-line path can no longer
+        // be checkpointed or hashed into the marker it polls, but its durable
+        // authoritative lease still carries a PID-verified IPC endpoint. Deliver
+        // the same safe-boundary `continue` intent there instead of silently
+        // leaving an unlinked executable image alive forever.
+        for pid in pids {
+            match recycle_process(&document, pid) {
+                Ok(()) => delivered += 1,
+                Err(err) => {
+                    skipped += 1;
+                    eprintln!(
+                        "[agent-doc] warning: failed both document marker and PID-addressed supervisor recycle for {} pid={pid}: document_error={:#}; ipc_error={err:#}",
+                        document.display(),
+                        document_delivery.as_ref().unwrap_err(),
+                    );
+                }
+            }
+        }
+    }
+    (delivered, skipped)
+}
+
 pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usize)> {
-    let docs = crate::process::open_supervisor_documents(std::process::id());
+    let processes = crate::process::open_supervisor_processes(std::process::id());
     let reason = if force {
         agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT_FORCE
     } else {
         agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT
     };
-    let mut marked = 0;
-    let mut skipped = 0;
-    for doc in docs {
-        match checkpoint_route_owned_document_crdt(&doc, "supervisor_recycle_request") {
-            Ok(_) => {}
-            Err(err) => {
-                skipped += 1;
-                eprintln!(
-                    "[agent-doc] warning: not marking supervisor recycle-request for {} because controller projection observation failed: {err:#}",
-                    doc.display()
-                );
-                continue;
-            }
-        }
-        match agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(&doc, reason) {
-            Ok(()) => marked += 1,
-            Err(err) => {
-                skipped += 1;
-                eprintln!(
-                    "[agent-doc] warning: failed to mark supervisor recycle-request for {}: {err:#}",
-                    doc.display()
-                );
-            }
-        }
-    }
-    Ok((marked, skipped))
+    Ok(deliver_supervisor_recycle_requests(
+        processes,
+        |document| {
+            checkpoint_route_owned_document_crdt(document, "supervisor_recycle_request").map(|_| ())
+        },
+        |document| {
+            agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(document, reason)
+        },
+        request_supervisor_recycle_over_ipc,
+    ))
 }
 
 /// Result of a typed reload-library fan-out to live editor registrations.
@@ -53204,6 +53293,112 @@ mod tests {
         // Fail-open: the tally is well-formed; no route-owned supervisor is expected
         // in the test environment, but the walk must not panic or error.
         let _total = marked + skipped;
+    }
+
+    #[test]
+    fn recycle_fanout_uses_pid_addressed_ipc_when_stale_document_path_cannot_checkpoint() {
+        use std::cell::RefCell;
+
+        // `#renamedsupervisorrecycle`: path transitions must not strand a live
+        // supervisor on an unlinked executable. The document-scoped delivery is
+        // impossible once its startup path is gone, so every process serving
+        // that stale path gets the lease/PID-verified lifecycle delivery.
+        let stale = PathBuf::from("/project/tasks/old-name.md");
+        let marker_calls = RefCell::new(Vec::new());
+        let ipc_calls = RefCell::new(Vec::new());
+        let outcome = deliver_supervisor_recycle_requests(
+            vec![(41, stale.clone()), (42, stale.clone())],
+            |_| anyhow::bail!("document path no longer resolves"),
+            |document| {
+                marker_calls.borrow_mut().push(document.to_path_buf());
+                Ok(())
+            },
+            |document, pid| {
+                ipc_calls.borrow_mut().push((document.to_path_buf(), pid));
+                Ok(())
+            },
+        );
+
+        assert_eq!(outcome, (2, 0));
+        assert!(marker_calls.borrow().is_empty());
+        assert_eq!(*ipc_calls.borrow(), vec![(stale.clone(), 41), (stale, 42)]);
+    }
+
+    #[test]
+    fn recycle_fanout_keeps_document_marker_as_the_deduplicated_primary_path() {
+        use std::cell::Cell;
+
+        let document = PathBuf::from("/project/tasks/current.md");
+        let checkpoints = Cell::new(0);
+        let markers = Cell::new(0);
+        let ipc_calls = Cell::new(0);
+        let outcome = deliver_supervisor_recycle_requests(
+            vec![(41, document.clone()), (42, document)],
+            |_| {
+                checkpoints.set(checkpoints.get() + 1);
+                Ok(())
+            },
+            |_| {
+                markers.set(markers.get() + 1);
+                Ok(())
+            },
+            |_, _| {
+                ipc_calls.set(ipc_calls.get() + 1);
+                Ok(())
+            },
+        );
+
+        assert_eq!(outcome, (1, 0));
+        assert_eq!(checkpoints.get(), 1);
+        assert_eq!(markers.get(), 1);
+        assert_eq!(ipc_calls.get(), 0);
+    }
+
+    #[test]
+    fn recycle_fanout_reports_pid_addressed_refusal_as_skipped() {
+        let stale = PathBuf::from("/project/tasks/old-name.md");
+        let outcome = deliver_supervisor_recycle_requests(
+            vec![(41, stale)],
+            |_| anyhow::bail!("document path no longer resolves"),
+            |_| Ok(()),
+            |_, _| anyhow::bail!("lease socket unavailable"),
+        );
+
+        assert_eq!(outcome, (0, 1));
+    }
+
+    #[test]
+    fn renamed_supervisor_socket_resolves_by_authoritative_lease_pid() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let current = dir.path().join("tasks/current-name.md");
+        let stale = dir.path().join("tasks/old-name.md");
+        std::fs::write(&current, "body\n").unwrap();
+        assert!(
+            !stale.exists(),
+            "the startup-path transition is the fixture"
+        );
+
+        let bootstrap = test_bootstrap(&dir);
+        let document_id = current.to_string_lossy().to_string();
+        let actor =
+            ready_actor_for_start_alias_test(&bootstrap, &document_id, "session", 2, "%1", "@1");
+        store_actor_record(&bootstrap.project_root, None, &actor).unwrap();
+        upsert_supervisor_lease(
+            &bootstrap.project_root,
+            &actor,
+            Some(41),
+            Some("/run/user/1000/agent-doc/renamed.sock"),
+            "ready",
+        )
+        .unwrap();
+
+        assert_eq!(
+            supervisor_recycle_socket_for_pid(&stale, 41).unwrap(),
+            Some(PathBuf::from("/run/user/1000/agent-doc/renamed.sock"))
+        );
+        assert_eq!(supervisor_recycle_socket_for_pid(&stale, 42).unwrap(), None);
     }
 
     #[test]

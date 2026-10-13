@@ -18,6 +18,7 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish'
+queue: go
 ---
 
 ## Status
@@ -174,17 +175,44 @@ The new `core-artifact-consumer` job invoked `make core-artifact-consumer-check`
 Verification is green: `make ci-reach` passed with all 12 closure targets and 11 gate mappings set-equal; full `make check` passed vet/build, unit and race tests, interop, PostgreSQL barrier, module dependency, fixture/scenario coverage, assertion ordering, and CI reachability; `make core-artifact-consumer-check` passed; and `git diff --check` passed. The latest upstream main run `38302364743` remains red only because this change has not been pushed; both Go 1.24 and 1.25 consumer jobs passed.
 
 The technical release blocker is cleared locally. No commit or push occurred because `#spec-test-commit-push` is undefined, so the item is review-gated solely on explicit landing authorization. No additional backlog follow-up is needed because the gated item retains the exact one-file landing action and upstream-CI confirmation. The `tsift` review confirmed that no other tracked file remains changed.
+
+### Re: actionable review — gpt-5 · 2026-10-12T21:35-04:00
+
+Added five concrete review findings to the backlog and mirrored them into the queue in dependency order:
+
+1. `#lzcommitpresetresolve` — an inline operator decision to define or replace the missing queue-wide `#spec-test-commit-push` authorization.
+2. `#lzrustcoreprofiledivergence` — resolve and prove the Rust corrected-profile/snapshot path before Rust Phase 4 lands.
+3. `#lzzigcoretoolchains` — run the prepared Zig Core gates under the required 0.15.2, 0.16.0, and current toolchain lanes.
+4. `#lzcoreintegration` — integrate the prepared Core phases in dependency order and regenerate the cohort only from settled commits.
+5. `#lzcorecireachaudit` — verify every new Core gate is actually reachable in CI before Phase 6 finalization.
+
+The authorization decision is marked `[inline]` so it does not recurse through the same unresolved subagent preset. Existing `#lzcoreprofile`, `#lzcoreclaims`, `#lzcorefacades`, `#lzcorecompat`, `#lzcoreconsumers`, `#lzcorecohort`, `#lzreleasepins`, `#lzinteropcoldstart`, and `#lzgocireachability` entries were not duplicated.
+
+The review ran read-only in isolated worktree `/home/brian/work/btakita/agent-loop-actionable-review-1791855084182`, branch `subagent/lazily-actionable-review-1791855084182`, at `714fdeac575eff19c9397ba5f0c61aba85d9a20d`. No files changed and no tests were needed. The queue preset `#spec-test-commit-push` remains undefined, so no commit, push, install, release, publication, or other outward action was authorized or performed.
+
+The exchange remains above its advisory size threshold; the active queue continues without compaction.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
+- #actionable-review
+- do [#lzcommitpresetresolve]
+- do [#lzrustcoreprofiledivergence]
+- do [#lzzigcoretoolchains]
+- do [#lzcoreintegration]
+- do [#lzcorecireachaudit]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzcommitpresetresolve] [inline] [operator-decision] Define the queue-wide #spec-test-commit-push authorization explicitly in tasks/software/lazily.md, or replace the queue preset with an already defined, intentionally equivalent authorization. Do not infer commit/push authority from the unresolved name; this is the first dependency for every completed-but-uncommitted review item.
+- [ ] [#lzrustcoreprofiledivergence] Using the prepared Phase 1 and Rust facade worktrees, resolve the Rust corrected-profile divergence called out by #lzcorecompat before landing the Rust Phase 4 snapshot/compatibility gate; prove the normalized snapshot is derived from the corrected candidate profile and rerun the aggregate --require-all/profile checks. Depends on #lzcoreprofile and the Rust facade work; blocks Rust Phase 4 and #lzcoreintegration.
+- [ ] [#lzzigcoretoolchains] Make Zig 0.15.2 and 0.16.0 available, run the prepared Core facade/compatibility formatting and verification gates under both pinned toolchains plus the repository current third lane, and record exact results before integrating Zig Phase 3/4. Depends on #lzcoreprofile; blocks Zig integration.
+- [ ] [#lzcoreintegration] After #lzcommitpresetresolve, #lzrustcoreprofiledivergence, and #lzzigcoretoolchains, integrate the prepared Core work in dependency order: #lzcoreprofile, #lzcoreclaims, per-binding #lzcorefacades then #lzcorecompat, #lzcoreconsumers, and finally regenerate and revalidate #lzcorecohort from the settled exact commits. Rerun the aggregate profile gate after each batch and do not qualify a cohort from incidental worktree state.
+- [ ] [#lzcorecireachaudit] After Phases 1-5 are integrated, audit every new Core profile, claims, facade/package, compatibility, negative-self-test, and artifact-consumer gate for real CI activation and target reachability in all candidate bindings; require named workflow steps and mutation evidence, then rerun the aggregate profile gate before Phase 6 finalization.
 <!-- /agent:backlog -->
 
 ## Review

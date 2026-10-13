@@ -508,3 +508,20 @@
   Worked for 17m 59s • 5:43 PM
   ```
 - 2026-10-12 [#frontendlivedispatch] [operator-verify] [agent-doc] Live confirmation that Run Agent Doc on haiven-dev frontend.md dispatches (fixes 0.35.483: runfrontenddispatch 3d9fbad86, dispatchreadyselfheal 81b9e1910). Precondition met 2026-10-11: pane %166's supervisor re-registered on the current binary (pid 3851566, healthy/ready) and install_fanout recycles now settle. Remaining: the operator clicks Run Agent Doc on frontend.md; pass = route_dispatch_only_recycle_inflight_ready_after_start outcome=settled or supervisor_recycle_graph_settled reason=dispatch_ready_after_start in haiven-dev ops.log, with no refusal=recycle_ttl_elapsed_supervisor_alive.
+- 2026-10-12 [#runrestartduring] Run Agent Doc after a Restart Agent during a turn:
+  ```
+  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
+  • The agent-doc turn was not admitted because a prior document write is still reconciling. I’ll run only the permitted
+  session check to see whether an operator prompt is waiting; I will not modify the document or start a new response.
+  • Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
+  └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md total_ms=26…
+  [session-check] INTERRUPTED: binary-owned response delivery `1791849117705171624-1-738fdcec2752715c0b4c2a700049ae2…
+  + 2 lines (^t to expand)
+  • Agent-doc could not start because a retained response is awaiting editor projection. The registered editor endpoint
+  rejected the delivery receipt, so waiting alone will not resolve it.
+  Restart or reload the editor that has tasks/infra.md open. The retained response is durable—do not resend it or
+  force-write the file. Once the editor reconnects, re-trigger this request so agent-doc session-check can confirm
+  recovery.
+  No pending operator prompt was listed.
+  Worked for 14s • 8:08 PM
+  ```

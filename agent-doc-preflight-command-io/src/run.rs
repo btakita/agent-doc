@@ -1745,16 +1745,17 @@ fn run_with_options_to_writer_in_pass(
         model_source_content,
     ) = {
         let content = resolve_current_preflight_document(file, "model_tier_sources")?;
-        let (source_fm, fm_tier, env_map, fm_model, prompt_presets) = frontmatter::parse(&content)
+        let (source_fm, fm_tier, env_map, fm_model) = frontmatter::parse(&content)
             .ok()
             .map(|(fm, _)| {
                 let resolved = fm.resolve_harness_model(&harness).map(|s| s.to_string());
                 let fm_tier = fm.model_tier;
                 let env_map = fm.env.clone();
-                let prompt_presets = fm.prompt_presets.clone();
-                (fm, fm_tier, env_map, resolved, prompt_presets)
+                (fm, fm_tier, env_map, resolved)
             })
             .unwrap_or_default();
+        let prompt_presets =
+            agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&content, file)?;
         let comp_value = agent_doc_model_tier::extract_model_component(&content);
         (
             source_fm,
@@ -4180,6 +4181,48 @@ mod tests {
         assert!(
             !requires,
             "a head this cycle dispatches carries its capture to the cycle that closes it: {parsed:#}"
+        );
+    }
+
+    #[test]
+    fn preflight_expands_project_prompt_preset_for_existing_document() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\npresets:\n  '#project-check': Run project checks.\n---\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n<!-- /agent:queue -->\n"
+        );
+        let current = baseline.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue -->\n- #project-check\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        std::fs::write(&doc, &current).unwrap();
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions::default(), &mut output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(parsed["prompt_presets_requested"][0], "#project-check");
+        assert_eq!(
+            parsed["prompt_preset_expansions"][0]["body"],
+            "Run project checks."
+        );
+        assert!(
+            !std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("Run project checks.")
         );
     }
 

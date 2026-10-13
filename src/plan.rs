@@ -165,6 +165,9 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     .with_context(|| format!("failed to resolve {}", file.display()))?;
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file(&content, file)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
+    let effective_prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&content, file)
+            .with_context(|| format!("failed to resolve prompt presets for {}", file.display()))?;
 
     let doc_diff = agent_doc_diff_io::compute(
         &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
@@ -288,7 +291,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &prompt_targets,
         &added_diff_lines,
         harness_diff.is_some(),
-        &fm.prompt_presets,
+        &effective_prompt_presets,
     );
     let repo_actions = if execution_scope == ExecutionScope::PlanBacklogOnly {
         Vec::new()
@@ -305,6 +308,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &prompt_targets,
         &added_diff_lines,
         &prompt_bearing_changes,
+        &effective_prompt_presets,
     )?;
     let routing = routing_fields(
         file,
@@ -825,6 +829,7 @@ fn pending_mutations_for_doc(
     prompt_targets: &[String],
     added_diff_lines: &[String],
     prompt_bearing_changes: &[diff::PromptBearingChange],
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> Result<Vec<PendingMutationPlan>> {
     let (fm, _) = frontmatter::parse(content).context("failed to parse frontmatter")?;
     let components = element::parse(content).context("failed to parse document components")?;
@@ -870,19 +875,19 @@ fn pending_mutations_for_doc(
     if agent_doc_prompt_contract::prompt_requests_backlog_work(
         prompt_targets,
         added_diff_lines,
-        &fm.prompt_presets,
+        prompt_presets,
     ) {
         let issue_units = agent_doc_prompt_contract::ordered_issue_units_for_agent_doc_bug(
             prompt_targets,
             added_diff_lines,
-            &fm.prompt_presets,
+            prompt_presets,
             prompt_bearing_changes,
         );
         let mut target_paths = agent_doc_prompt_contract::explicit_backlog_targets(
             file,
             prompt_targets,
             added_diff_lines,
-            &fm.prompt_presets,
+            prompt_presets,
         )?;
         if target_paths.is_empty()
             && !issue_units.is_empty()

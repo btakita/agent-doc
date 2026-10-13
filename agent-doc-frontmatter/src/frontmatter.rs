@@ -958,6 +958,27 @@ impl PromptPresets {
             .map(|(key, _)| key.as_str())
     }
 
+    /// Merge project-level defaults into this document's declarations.
+    ///
+    /// Project presets are inherited at read time. A document declaration with
+    /// the same name always wins, including a declaration whose value is still
+    /// `null` while the operator is typing it. This keeps project defaults from
+    /// unexpectedly resolving through an in-progress local override.
+    ///
+    /// Defaults are ordered first and document-only names follow in document
+    /// order. Replacing a default by name preserves that name's project order.
+    pub fn inherit_defaults(&mut self, defaults: &Self) {
+        if defaults.entries.is_empty() {
+            return;
+        }
+        let local = std::mem::take(&mut self.entries);
+        self.entries = defaults.entries.clone();
+        for (name, value) in local {
+            self.entries.insert(name, value);
+        }
+        self.rebuild_resolved();
+    }
+
     fn rebuild_resolved(&mut self) {
         self.resolved = self
             .entries
@@ -4298,6 +4319,43 @@ mod tests {
         let (parsed, body2) = parse(&written).unwrap();
         assert_eq!(body2, "Body\n");
         assert_eq!(parsed.prompt_presets, fm.prompt_presets);
+    }
+
+    #[test]
+    fn prompt_presets_inherit_defaults_with_document_declarations_winning() {
+        let (defaults, _) = parse(
+            "---\npresets:\n  '#shared': project\n  '#project-only':\n    prompt: project body\n    runbook: runbooks/project.md\n---\n",
+        )
+        .unwrap();
+        let (mut document, _) = parse(
+            "---\npresets:\n  '#shared': document\n  '#project-only':\n  '#document-only': local\n---\n",
+        )
+        .unwrap();
+
+        document
+            .prompt_presets
+            .inherit_defaults(&defaults.prompt_presets);
+
+        assert_eq!(
+            document.prompt_presets.get("#shared").map(String::as_str),
+            Some("document")
+        );
+        assert!(document.prompt_presets.get("#project-only").is_none());
+        assert_eq!(
+            document.prompt_presets.unset_keys().collect::<Vec<_>>(),
+            vec!["#project-only"]
+        );
+        assert_eq!(
+            document
+                .prompt_presets
+                .get("#document-only")
+                .map(String::as_str),
+            Some("local")
+        );
+        assert_eq!(
+            document.prompt_presets.keys().cloned().collect::<Vec<_>>(),
+            vec!["#shared", "#document-only"]
+        );
     }
 
     /// `#resetclosedactor` (GH #69 §2): the invalid-frontmatter error names the

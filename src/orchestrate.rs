@@ -564,10 +564,11 @@ fn canonicalize_prompt_preset_requests(
         return Ok(());
     }
     let doc = resolve_orchestrate_current_document(file, "orchestrate_prompt_presets")?;
-    let (fm, _) = frontmatter::parse(&doc)?;
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&doc, file)?;
     let mut canonical = Vec::new();
     for preset_name in requested_presets.drain(..) {
-        let resolved = frontmatter::resolve_prompt_preset_key(&fm.prompt_presets, &preset_name)
+        let resolved = frontmatter::resolve_prompt_preset_key(&prompt_presets, &preset_name)
             .unwrap_or(preset_name);
         if !canonical.iter().any(|existing| existing == &resolved) {
             canonical.push(resolved);
@@ -717,14 +718,14 @@ fn load_prompt_preset_block(file: &Path, requested_presets: &[String]) -> Result
     }
 
     let doc = resolve_orchestrate_current_document(file, "orchestrate_prompt_preset_block")?;
-    let (fm, _) = frontmatter::parse(&doc)?;
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&doc, file)?;
     let mut block = String::new();
 
     for (idx, preset_name) in requested_presets.iter().enumerate() {
-        let preset_key = frontmatter::resolve_prompt_preset_key(&fm.prompt_presets, preset_name)
+        let preset_key = frontmatter::resolve_prompt_preset_key(&prompt_presets, preset_name)
             .ok_or_else(|| anyhow::anyhow!("unknown prompt preset `{}`", preset_name))?;
-        let preset_body = fm
-            .prompt_presets
+        let preset_body = prompt_presets
             .get(&preset_key)
             .expect("resolved prompt preset key must exist");
         if idx > 0 {
@@ -1568,6 +1569,49 @@ mod tests {
                 .as_deref(),
             Some("(preset #spec-test)\nRun checks.\n")
         );
+    }
+    #[test]
+    fn orchestrate_expands_project_prompt_preset_without_copying_it_into_document() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(dir.path().join(".agent-doc/config.toml"), "").unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\npresets:\n  '#spec-test': Run project checks.\n---\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let content = "---\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset spec-test\n- do #prep\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, content).unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(batch.requested_presets, vec!["#spec-test".to_string()]);
+        assert_eq!(
+            load_prompt_preset_block(&doc, &batch.requested_presets)
+                .unwrap()
+                .as_deref(),
+            Some("(preset #spec-test)\nRun project checks.\n")
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
     }
     #[test]
     fn resolve_task_batch_collects_active_queue_for_auto_dag() {

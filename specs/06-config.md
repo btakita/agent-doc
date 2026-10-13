@@ -56,6 +56,32 @@ exported by another checkout never replaces this one's; `#checktmpdirleak`) and 
 `TMPDIR` with an `.agent-doc` ancestor (`#testisolationtests`); a cargo test
 binary without it bounds in-process discovery at its temp root.
 
+## Project prompt presets
+
+`.agent-doc/project.md` is the single project-wide source of inherited prompt
+presets. Its YAML frontmatter uses the same `presets:` / `prompt_presets:` shape
+as a session document. Presets are resolved dynamically on every preset-aware
+operation; they are never copied into existing documents and do not require a
+template-sync command.
+
+Resolution stops at the nearest project root selected by the existing
+`.agent-doc` project-root discovery. The effective map starts with presets from
+`<project-root>/.agent-doc/project.md`, then overlays the target document's
+declarations by name. A document declaration wins, including an unset YAML
+entry (`'#name':`) that is still being typed; such an entry masks the inherited
+value. Structured preset bodies and their `runbook` metadata inherit together.
+
+A missing `project.md` means there are no project defaults. A read failure or
+malformed project frontmatter is an actionable preset-resolution error; a
+preset-aware admission must not silently continue with a stale or partial map.
+No ancestor project file is consulted beyond the nearest root. The similarly
+named `.agent-doc/config.toml` remains runtime configuration, not a prompt
+preset source, and `.agent-doc/project.yaml` is not an alternative spelling.
+
+New-document templates may reference or demonstrate these presets, but must not
+materialize inherited preset values into generated documents. A local preset is
+written only when the new document intentionally overrides the project default.
+
 ## codex_network_access
 
 Explicit Codex network policy for agent-doc-launched sessions.

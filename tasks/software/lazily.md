@@ -218,6 +218,19 @@ The remaining Core review heads are owned by isolated workers. Rust has added a 
 Zig verification is complete across 0.15.2, 0.16.0, and the current 0.17 development lane, with formatting, package/API compatibility, negative self-test, and CI reachability all green. The integration audit is also complete and identified missing Phase 5 binding consumers plus a stale, manifest-less Phase 6 scaffold. Those completed worker results will close in queue order after the earlier Rust head.
 
 No commit, push, install, release, or publication occurred; `#spec-test-commit-push` remains undefined.
+
+### Re: #lzzigcoretoolchains — gpt-5 · 2026-10-12T21:52-04:00
+
+Zig Phase 3/4 toolchain verification is complete in isolated worktree `/home/brian/worktrees/lzzigcoretoolchains-20261012`, branch `task/lzzigcoretoolchains-20261012`, from `b6951d3e5725f5ddbf2f43c379383d1b14bee078`.
+
+Official Zig 0.15.2 and 0.16.0 archives were downloaded only into the worktree and matched their published SHA-256 values. Together with the current `0.17.0-dev.892+54537285c` lane:
+
+- `make fmt` passed; both pinned releases agreed and the current lane was clean.
+- `make core-package-check core-api-check` passed in all three isolated cache lanes, including the snapshot/deprecation negative self-test.
+- `make ci-reach` passed with nine targets reached, including `core-package-check` and `core-api-check`.
+- The prepared Phase 3/4 patch and four untracked source files exactly matched the source worktree hashes.
+
+No commit or push was created because `#spec-test-commit-push` remains undefined. The requested toolchain availability and verification evidence are complete; integration remains tracked by `#lzcoreintegration`.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -227,7 +240,7 @@ No commit, push, install, release, or publication occurred; `#spec-test-commit-p
 - ~~#actionable-review~~
 - ~~do [#lzcommitpresetresolve]~~
 - do [#lzrustcoreprofiledivergence]
-- do [#lzzigcoretoolchains]
+- ~~do [#lzzigcoretoolchains]~~
 - do [#lzcoreintegration]
 - do [#lzcorecireachaudit]
 <!-- /agent:queue -->
@@ -236,7 +249,6 @@ No commit, push, install, release, or publication occurred; `#spec-test-commit-p
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzrustcoreprofiledivergence] Using the prepared Phase 1 and Rust facade worktrees, resolve the Rust corrected-profile divergence called out by #lzcorecompat before landing the Rust Phase 4 snapshot/compatibility gate; prove the normalized snapshot is derived from the corrected candidate profile and rerun the aggregate --require-all/profile checks. Depends on #lzcoreprofile and the Rust facade work; blocks Rust Phase 4 and #lzcoreintegration.
-- [ ] [#lzzigcoretoolchains] Make Zig 0.15.2 and 0.16.0 available, run the prepared Core facade/compatibility formatting and verification gates under both pinned toolchains plus the repository current third lane, and record exact results before integrating Zig Phase 3/4. Depends on #lzcoreprofile; blocks Zig integration.
 - [ ] [#lzcoreintegration] After #lzcommitpresetresolve, #lzrustcoreprofiledivergence, and #lzzigcoretoolchains, integrate the prepared Core work in dependency order: #lzcoreprofile, #lzcoreclaims, per-binding #lzcorefacades then #lzcorecompat, #lzcoreconsumers, and finally regenerate and revalidate #lzcorecohort from the settled exact commits. Rerun the aggregate profile gate after each batch and do not qualify a cohort from incidental worktree state.
 - [ ] [#lzcorecireachaudit] After Phases 1-5 are integrated, audit every new Core profile, claims, facade/package, compatibility, negative-self-test, and artifact-consumer gate for real CI activation and target reachability in all candidate bindings; require named workflow steps and mutation evidence, then rerun the aggregate profile gate before Phase 6 finalization.
 <!-- /agent:backlog -->

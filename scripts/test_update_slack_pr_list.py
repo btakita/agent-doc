@@ -346,6 +346,53 @@ class GeneratedMessageTests(unittest.TestCase):
         create.assert_called_once()
         self.assertIn("widgets #4", create.call_args.args[2])
 
+    def test_watch_polls_and_hot_reloads_after_source_change(self) -> None:
+        args = subject.build_parser().parse_args(
+            [
+                "--watch",
+                "--message",
+                "1791874207.231429",
+                "--channel",
+                "C0C8LPQ7NS1",
+                "--poll-interval",
+                "0.25",
+            ]
+        )
+        first_stat = mock.Mock(st_mtime_ns=1)
+        second_stat = mock.Mock(st_mtime_ns=2)
+        with (
+            mock.patch.object(subject.pathlib.Path, "stat", side_effect=(first_stat, second_stat)),
+            mock.patch.object(subject, "run_once", return_value=0) as run_once,
+            mock.patch.object(subject.time, "sleep") as sleep,
+            mock.patch.object(subject.os, "execv") as execv,
+        ):
+            subject.watch(args)
+
+        run_once.assert_called_once_with(args)
+        sleep.assert_called_once_with(0.25)
+        execv.assert_called_once_with(
+            subject.sys.executable,
+            [subject.sys.executable, *subject.sys.argv],
+        )
+
+    def test_watch_requires_existing_message(self) -> None:
+        with self.assertRaisesRegex(subject.UpdateError, "--watch requires --message"):
+            subject.run(
+                [
+                    "--watch",
+                    "--channel",
+                    "C0C8LPQ7NS1",
+                    "--github-user",
+                    "haiven-dev",
+                    "--repository",
+                    "widgets",
+                ]
+            )
+
+    def test_rejects_non_positive_poll_interval(self) -> None:
+        with self.assertRaisesRegex(subject.UpdateError, "greater than zero"):
+            subject.run(["--poll-interval", "0"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,10 +18,13 @@ import argparse
 import concurrent.futures
 import dataclasses
 import json
+import logging
 import os
+import pathlib
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -44,6 +47,7 @@ UNADDRESSED_MARK = ":warning:"
 STACK_HEAD_MARK = ":crown:"
 STACK_MEMBER_MARK = ":link:"
 MERGE_CONFLICT_MARK = ":boom:"
+LOG = logging.getLogger("update-slack-pr-list")
 
 HELP_EPILOG = """\
 COMMAND MODES
@@ -51,6 +55,8 @@ COMMAND MODES
   Update: provide --message as a Slack timestamp or permalink. Existing entries
           are retained, closed entries are struck, and new open PRs are appended.
   Preview: add --dry-run to print the reconciled message without writing Slack.
+  Watch: add --watch to poll an existing --message continuously. The process
+         logs every poll and restarts itself when this script changes on disk.
 
 REPOSITORY TARGETS
   Repeat --github-user and --repository, or comma-separate their values. Bare
@@ -656,17 +662,35 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print the reconciled message without updating Slack",
     )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="poll continuously; requires --message and hot-reloads on script changes",
+    )
+    parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=60.0,
+        help="seconds between watch-mode polls (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+        help="activity log verbosity (default: %(default)s)",
+    )
     return parser
 
 
-def run(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def run_once(args: argparse.Namespace) -> int:
+    """Perform one reconciliation using already-parsed CLI arguments."""
     targets = repository_targets(args.github_user, args.repository)
     token = os.environ.get(args.token_env, "")
 
     timestamp = ""
     if args.message:
         channel, timestamp = parse_target(args.channel, args.message)
+        LOG.info("reading Slack message channel=%s timestamp=%s", channel, timestamp)
         if not token:
             raise UpdateError(f"environment variable {args.token_env!r} is not set")
         original = read_message(token, channel, timestamp)
@@ -696,16 +720,58 @@ def run(argv: Sequence[str] | None = None) -> int:
         print("\n---\n" + _summary(result, changed), file=sys.stderr)
     elif timestamp and changed:
         update_message(token, channel, timestamp, result.text)
+        LOG.info("updated Slack message channel=%s timestamp=%s", channel, timestamp)
         print(_summary(result, changed))
     elif not timestamp:
         if not token:
             raise UpdateError(f"environment variable {args.token_env!r} is not set")
         timestamp = create_message(token, channel, result.text)
+        LOG.info("created Slack message channel=%s timestamp=%s", channel, timestamp)
         print(f"created message: {channel}/{timestamp}")
         print(_summary(result, True))
     else:
+        LOG.info("Slack message unchanged channel=%s timestamp=%s", channel, timestamp)
         print(_summary(result, changed))
     return 0
+
+
+def watch(args: argparse.Namespace) -> int:
+    """Poll forever and re-exec the process when its source file changes."""
+    source_path = pathlib.Path(__file__).resolve()
+    source_mtime = source_path.stat().st_mtime_ns
+    poll_number = 0
+    while True:
+        poll_number += 1
+        LOG.info("poll started number=%d", poll_number)
+        try:
+            run_once(args)
+        except UpdateError as error:
+            LOG.error("poll failed number=%d error=%s", poll_number, error)
+        LOG.info("poll finished number=%d next_poll_seconds=%s", poll_number, args.poll_interval)
+        time.sleep(args.poll_interval)
+        if source_path.stat().st_mtime_ns != source_mtime:
+            LOG.info("script changed; hot-reloading path=%s", source_path)
+            os.execv(sys.executable, [sys.executable, *sys.argv])
+            return 0
+
+
+def run(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    if args.poll_interval <= 0:
+        raise UpdateError("--poll-interval must be greater than zero")
+    if args.watch:
+        if not args.message:
+            raise UpdateError("--watch requires --message to avoid creating duplicates")
+        try:
+            return watch(args)
+        except KeyboardInterrupt:
+            LOG.info("watch stopped by operator")
+            return 0
+    return run_once(args)
 
 
 def main() -> int:

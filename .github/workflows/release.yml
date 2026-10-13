@@ -220,14 +220,18 @@ jobs:
           set -euo pipefail
           ( cd editors/jetbrains && ./gradlew --no-daemon --console=plain buildPlugin verifyClassicArtifact )
           ( cd editors/jetbrains-262 && gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes )
+          make jetbrains-263-check
           mkdir -p editor-packages
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
           modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
+          modern_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-263/gradle.properties | tr -d '[:space:]')
           test -n "$classic_version"
           test -n "$modular_version"
-          test "$classic_version" != "$modular_version"
+          test -n "$modern_version"
+          test "$(printf '%s\n' "$classic_version" "$modular_version" "$modern_version" | sort -u | wc -l)" -eq 3
           cp "editors/jetbrains/build/distributions/agent-doc-jetbrains-$classic_version.zip" editor-packages/
           cp "editors/jetbrains-262/build/distributions/agent-doc-jetbrains-262-$modular_version.zip" editor-packages/
+          cp "editors/jetbrains/build/distributions/agent-doc-jetbrains-263-$modern_version.zip" editor-packages/
           ls -la editor-packages
 
       # JetBrains' simple custom-repository format allows a plugin ID only once
@@ -236,20 +240,23 @@ jobs:
       # so a feed and the archive it names can never come from different
       # releases. The generator refuses the pair (and writes neither listing)
       # unless the ID matches, versions differ, and the ranges are exactly
-      # 242..261.* and 262..262.*. Remote Dev 262 users configure the 262 URL
-      # on both the backend and Client/Gateway.
+      # 242..261.*, 262..262.*, and 263..263.*. Remote Dev users configure the
+      # matching build-line URL on both the backend and Client/Gateway.
       - name: Build and verify JetBrains custom-repository feeds
         run: |
           set -euo pipefail
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
           modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
+          modern_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-263/gradle.properties | tr -d '[:space:]')
           python3 scripts/jetbrains-custom-repository.py \
             --classic "editor-packages/agent-doc-jetbrains-$classic_version.zip" \
             --modular "editor-packages/agent-doc-jetbrains-262-$modular_version.zip" \
+            --modern "editor-packages/agent-doc-jetbrains-263-$modern_version.zip" \
             --output-dir editor-packages \
             --download-base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
           test -f editor-packages/agent-doc-jetbrains-classic.xml
           test -f editor-packages/agent-doc-jetbrains-262.xml
+          test -f editor-packages/agent-doc-jetbrains-263.xml
 
       - name: Build VS Code extension vsix
         run: |
@@ -268,19 +275,22 @@ jobs:
           set -euo pipefail
           classic_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
           modular_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-262/gradle.properties | tr -d '[:space:]')
-          test "$classic_version" != "$modular_version"
+          modern_version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains-263/gradle.properties | tr -d '[:space:]')
+          test "$(printf '%s\n' "$classic_version" "$modular_version" "$modern_version" | sort -u | wc -l)" -eq 3
           test -f "editor-packages/agent-doc-jetbrains-$classic_version.zip"
           test -f "editor-packages/agent-doc-jetbrains-262-$modular_version.zip"
+          test -f "editor-packages/agent-doc-jetbrains-263-$modern_version.zip"
           test -f editor-packages/agent-doc-jetbrains-classic.xml
           test -f editor-packages/agent-doc-jetbrains-262.xml
+          test -f editor-packages/agent-doc-jetbrains-263.xml
           python3 scripts/jetbrains-custom-repository.py \
             --output-dir editor-packages \
-            --verify-listings "$classic_version" "$modular_version"
+            --verify-listings "$classic_version" "$modular_version" "$modern_version"
           jetbrains=$(find editor-packages -name 'agent-doc-jetbrains-*.zip' | wc -l)
           repositories=$(find editor-packages -name 'agent-doc-jetbrains-*.xml' | wc -l)
           vsix=$(find editor-packages -name '*.vsix' | wc -l)
-          if [ "$jetbrains" -ne 2 ] || [ "$repositories" -ne 2 ] || [ "$vsix" -ne 1 ]; then
-            echo "::error::expected classic + modular JetBrains zips, 2 ranged feeds, and 1 vsix; got $jetbrains zips, $repositories feeds, and $vsix vsix"
+          if [ "$jetbrains" -ne 3 ] || [ "$repositories" -ne 3 ] || [ "$vsix" -ne 1 ]; then
+            echo "::error::expected 3 ranged JetBrains zips, 3 ranged feeds, and 1 vsix; got $jetbrains zips, $repositories feeds, and $vsix vsix"
             ls -la editor-packages
             exit 1
           fi

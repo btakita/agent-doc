@@ -25,6 +25,13 @@ fn main() {
     );
     println!("cargo:rerun-if-changed={}", jb_262_props.display());
 
+    let jb_263_props = editors.join("jetbrains-263/gradle.properties");
+    emit(
+        "AGENT_DOC_EXPECTED_JETBRAINS_263_PLUGIN_VERSION",
+        read_property(&jb_263_props, "pluginVersion"),
+    );
+    println!("cargo:rerun-if-changed={}", jb_263_props.display());
+
     let vscode_pkg = editors.join("vscode/package.json");
     emit(
         "AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION",

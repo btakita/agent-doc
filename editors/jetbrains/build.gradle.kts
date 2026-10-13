@@ -12,6 +12,10 @@ plugins {
 group = providers.gradleProperty("pluginGroup").get()
 version = providers.gradleProperty("pluginVersion").get()
 
+val compatibilitySinceBuild = providers.gradleProperty("compatibilitySinceBuild").orElse("242")
+val compatibilityUntilBuild = providers.gradleProperty("compatibilityUntilBuild").orElse("261.*")
+val packageName = providers.gradleProperty("pluginName").orElse("agent-doc-jetbrains")
+
 repositories {
     // mavenLocal first so a locally-published lazily-kt (publishToMavenLocal) or the
     // composite-build substitution resolves before Maven Central / GitHub Packages
@@ -70,6 +74,10 @@ kotlin {
 
 intellijPlatform {
     buildSearchableOptions = false
+    // One source tree produces the classic 242-261 package and the separately
+    // versioned 263 package. The exact-262 split package remains isolated in
+    // editors/jetbrains-262 because it uses build-line-specific internal APIs.
+    projectName = packageName
 }
 
 tasks {
@@ -78,6 +86,7 @@ tasks {
     }
 
     jar {
+        archiveBaseName.set(packageName)
         manifest {
             attributes(
                 "Main-Class" to "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap",
@@ -90,6 +99,7 @@ tasks {
     // after bytecode instrumentation. Carry the attach-agent entry points onto
     // that final artifact too: this is the Jar shipped in buildPlugin's ZIP.
     named<org.gradle.jvm.tasks.Jar>("composedJar") {
+        archiveBaseName.set(packageName)
         manifest {
             attributes(
                 "Main-Class" to "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap",
@@ -125,8 +135,8 @@ tasks {
     }
 
     patchPluginXml {
-        sinceBuild.set("242")
-        untilBuild.set("261.*")
+        sinceBuild.set(compatibilitySinceBuild)
+        untilBuild.set(compatibilityUntilBuild)
         changeNotes.set("""
             <ul>
                 <li>Initial release</li>
@@ -137,14 +147,14 @@ tasks {
 
     register("verifyClassicArtifact") {
         group = "verification"
-        description = "Verify that the classic ZIP is limited to pre-262 IDE builds"
+        description = "Verify the selected classic-source compatibility-ranged ZIP"
         dependsOn("buildPlugin")
         doLast {
             val zip = layout.buildDirectory.dir("distributions").get().asFile
                 .listFiles()
                 .orEmpty()
                 .singleOrNull {
-                    it.name == "agent-doc-jetbrains-${project.version}.zip"
+                    it.name == "${packageName.get()}-${project.version}.zip"
                 }
                 ?: error("missing exact classic plugin distribution for ${project.version}")
             ZipFile(zip).use { archive ->
@@ -165,11 +175,11 @@ tasks {
                     }
                     content ?: error("classic root plugin JAR is missing META-INF/plugin.xml")
                 }
-                check(pluginXml.contains("since-build=\"242\"")) {
-                    "classic since-build was not patched"
+                check(pluginXml.contains("since-build=\"${compatibilitySinceBuild.get()}\"")) {
+                    "package since-build was not patched"
                 }
-                check(pluginXml.contains("until-build=\"261.*\"")) {
-                    "classic until-build must stop before the 262 modular distribution"
+                check(pluginXml.contains("until-build=\"${compatibilityUntilBuild.get()}\"")) {
+                    "package until-build was not patched"
                 }
                 check(pluginXml.contains("<id>com.github.btakita.agent-doc</id>")) {
                     "classic distribution changed the shared Marketplace plugin ID"

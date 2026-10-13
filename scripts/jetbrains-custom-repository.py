@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Build the two static JetBrains custom-repository listings for a release.
+"""Build the static JetBrains custom-repository listings for a release.
 
 JetBrains' simple custom-repository format permits a plugin ID only once per
 listing.  Agent Doc therefore publishes one listing for the classic update and
-one for the exact-262 modular update.  The generator reads the patched
-``plugin.xml`` from each distribution ZIP and refuses to publish unless the two
-artifacts have the shared ID, distinct versions, and the expected disjoint IDE
-ranges.
+one each for the classic, exact-262 modular, and 263 updates. The generator
+reads the patched ``plugin.xml`` from every distribution ZIP and refuses to
+publish unless the artifacts have the shared ID, distinct versions, and the
+expected disjoint IDE ranges.
 """
 
 from __future__ import annotations
@@ -25,8 +25,10 @@ from urllib.parse import quote, urlparse
 PLUGIN_ID = "com.github.btakita.agent-doc"
 CLASSIC_RANGE = ("242", "261.*")
 MODULAR_RANGE = ("262", "262.*")
+MODERN_RANGE = ("263", "263.*")
 CLASSIC_LISTING = "agent-doc-jetbrains-classic.xml"
 MODULAR_LISTING = "agent-doc-jetbrains-262.xml"
+MODERN_LISTING = "agent-doc-jetbrains-263.xml"
 
 
 class DistributionError(ValueError):
@@ -173,10 +175,11 @@ def select_update(build: str, updates: list[PluginUpdate]) -> PluginUpdate | Non
     return matches[0] if matches else None
 
 
-def validate_pair(classic: PluginUpdate, modular: PluginUpdate) -> None:
+def validate_updates(classic: PluginUpdate, modular: PluginUpdate, modern: PluginUpdate) -> None:
     for label, update, expected_range in (
         ("classic", classic, CLASSIC_RANGE),
         ("modular", modular, MODULAR_RANGE),
+        ("modern", modern, MODERN_RANGE),
     ):
         if update.plugin_id != PLUGIN_ID:
             raise DistributionError(
@@ -188,21 +191,21 @@ def validate_pair(classic: PluginUpdate, modular: PluginUpdate) -> None:
                 f"{label} range {actual_range!r} does not match {expected_range!r}"
             )
 
-    if ranges_overlap(classic, modular):
-        raise DistributionError(
-            "classic and modular compatibility ranges overlap under the shared plugin ID"
-        )
-
-    if classic.version == modular.version:
-        raise DistributionError(
-            "classic and modular updates must have distinct versions under the shared plugin ID"
-        )
+    updates = (classic, modular, modern)
+    for index, first in enumerate(updates):
+        for second in updates[index + 1 :]:
+            if ranges_overlap(first, second):
+                raise DistributionError("JetBrains compatibility ranges overlap under the shared plugin ID")
+    if len({update.version for update in updates}) != len(updates):
+        raise DistributionError("JetBrains updates must have distinct versions under the shared plugin ID")
 
     expected_classic = f"agent-doc-jetbrains-{classic.version}.zip"
     expected_modular = f"agent-doc-jetbrains-262-{modular.version}.zip"
+    expected_modern = f"agent-doc-jetbrains-263-{modern.version}.zip"
     for label, update, expected_name in (
         ("classic", classic, expected_classic),
         ("modular", modular, expected_modular),
+        ("modern", modern, expected_modern),
     ):
         if update.artifact.name != expected_name:
             raise DistributionError(
@@ -242,19 +245,23 @@ def listing(update: PluginUpdate, base_url: str) -> bytes:
 def generate(
     classic_path: Path,
     modular_path: Path,
+    modern_path: Path,
     output_dir: Path,
     download_base_url: str,
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, Path]:
     classic = read_update(classic_path)
     modular = read_update(modular_path)
-    validate_pair(classic, modular)
+    modern = read_update(modern_path)
+    validate_updates(classic, modular, modern)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     classic_listing = output_dir / CLASSIC_LISTING
     modular_listing = output_dir / MODULAR_LISTING
+    modern_listing = output_dir / MODERN_LISTING
     classic_listing.write_bytes(listing(classic, download_base_url))
     modular_listing.write_bytes(listing(modular, download_base_url))
-    return classic_listing, modular_listing
+    modern_listing.write_bytes(listing(modern, download_base_url))
+    return classic_listing, modular_listing, modern_listing
 
 
 def read_listing(path: Path) -> PluginUpdate:
@@ -287,10 +294,12 @@ def read_listing(path: Path) -> PluginUpdate:
 # Representative builds per branch for the published-listing sweep: the first
 # classic branch, every intermediate branch, and the exact-262 branch, plus the
 # out-of-range neighbours on both sides.
-SWEEP_BUILDS = [f"{branch}.1" for branch in range(241, 264)] + ["242", "261.99999.99", "262"]
+SWEEP_BUILDS = [f"{branch}.1" for branch in range(241, 265)] + ["242", "261.99999.99", "262", "263"]
 
 
-def verify_listings(output_dir: Path, classic_version: str, modular_version: str) -> None:
+def verify_listings(
+    output_dir: Path, classic_version: str, modular_version: str, modern_version: str
+) -> None:
     """Re-read both published listings and prove the two-sided selection.
 
     Independent of :func:`generate`: the release workflow runs this as its own
@@ -298,17 +307,24 @@ def verify_listings(output_dir: Path, classic_version: str, modular_version: str
     """
     classic = read_listing(output_dir / CLASSIC_LISTING)
     modular = read_listing(output_dir / MODULAR_LISTING)
-    validate_pair(classic, modular)
-    if (classic.version, modular.version) != (classic_version, modular_version):
+    modern = read_listing(output_dir / MODERN_LISTING)
+    validate_updates(classic, modular, modern)
+    if (classic.version, modular.version, modern.version) != (
+        classic_version,
+        modular_version,
+        modern_version,
+    ):
         raise DistributionError(
             "listings advertise versions "
             f"{(classic.version, modular.version)!r}, expected "
-            f"{(classic_version, modular_version)!r}"
+            f"{(classic_version, modular_version, modern_version)!r}"
         )
     for build in SWEEP_BUILDS:
         branch = _parse_build(build)[0]
-        chosen = select_update(build, [classic, modular])
-        expected = classic if 242 <= branch <= 261 else modular if branch == 262 else None
+        chosen = select_update(build, [classic, modular, modern])
+        expected = (
+            classic if 242 <= branch <= 261 else modular if branch == 262 else modern if branch == 263 else None
+        )
         if chosen != expected:
             raise DistributionError(
                 f"IDE build {build} would select "
@@ -343,10 +359,12 @@ def _fixture_distribution(
 BASE_URL = "https://example.invalid/releases/download/v0.0.0"
 
 
-def _expect_refusal(root: Path, label: str, needle: str, classic: Path, modular: Path) -> None:
+def _expect_refusal(
+    root: Path, label: str, needle: str, classic: Path, modular: Path, modern: Path
+) -> None:
     output = root / f"rejected-{label}"
     try:
-        generate(classic, modular, output, BASE_URL)
+        generate(classic, modular, modern, output, BASE_URL)
     except DistributionError as error:
         assert needle in str(error), f"{label}: unexpected refusal {error}"
     else:
@@ -355,6 +373,7 @@ def _expect_refusal(root: Path, label: str, needle: str, classic: Path, modular:
     # never be live without the other.
     assert not (output / CLASSIC_LISTING).exists(), label
     assert not (output / MODULAR_LISTING).exists(), label
+    assert not (output / MODERN_LISTING).exists(), label
 
 
 def self_test() -> None:
@@ -367,30 +386,39 @@ def self_test() -> None:
     assert build_in_range("262.4852.1", "262", "262.*")
     assert not build_in_range("263.1", "262", "262.*")
     assert not build_in_range("261.1", "262", "262.*")
+    assert build_in_range("263.6800.24", "263", "263.*")
+    assert not build_in_range("264.1", "263", "263.*")
 
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         classic = root / "agent-doc-jetbrains-1.2.3.zip"
         modular = root / "agent-doc-jetbrains-262-1.2.4.zip"
+        modern = root / "agent-doc-jetbrains-263-1.2.5.zip"
         _fixture_distribution(classic, version="1.2.3", since_build="242", until_build="261.*")
         _fixture_distribution(modular, version="1.2.4", since_build="262", until_build="262.*")
-        outputs = generate(classic, modular, root / "repository", BASE_URL)
-        assert tuple(path.name for path in outputs) == (CLASSIC_LISTING, MODULAR_LISTING)
+        _fixture_distribution(modern, version="1.2.5", since_build="263", until_build="263.*")
+        outputs = generate(classic, modular, modern, root / "repository", BASE_URL)
+        assert tuple(path.name for path in outputs) == (CLASSIC_LISTING, MODULAR_LISTING, MODERN_LISTING)
 
         published = [read_listing(path) for path in outputs]
         for update, version, expected_range, artifact in (
             (published[0], "1.2.3", CLASSIC_RANGE, classic.name),
             (published[1], "1.2.4", MODULAR_RANGE, modular.name),
+            (published[2], "1.2.5", MODERN_RANGE, modern.name),
         ):
             assert update.plugin_id == PLUGIN_ID
             assert update.version == version
             assert (update.since_build, update.until_build) == expected_range
             assert update.artifact.name == artifact
-        assert not ranges_overlap(published[0], published[1])
+        assert all(
+            not ranges_overlap(first, second)
+            for index, first in enumerate(published)
+            for second in published[index + 1 :]
+        )
 
         # Range selection over the published listings: 242-261 receive only
-        # the classic update, 262 receives only the modular update, and builds
-        # outside both ranges are offered nothing.
+        # the classic update, 262 receives only the modular update, 263 receives
+        # its classic-source update, and builds outside all ranges get nothing.
         for build, expected in (
             ("241.19416.15", None),
             ("242", "1.2.3"),
@@ -399,11 +427,12 @@ def self_test() -> None:
             ("261.99999.99", "1.2.3"),
             ("262", "1.2.4"),
             ("262.4852.1", "1.2.4"),
-            ("263.1", None),
+            ("263.6800.24", "1.2.5"),
+            ("264.1", None),
         ):
             chosen = select_update(build, published)
             assert (chosen.version if chosen else None) == expected, (build, chosen)
-        for branch in range(242, 263):
+        for branch in range(242, 264):
             assert select_update(f"{branch}.1", published) is not None, branch
 
         def fixture(name: str, **kwargs: object) -> Path:
@@ -415,23 +444,27 @@ def self_test() -> None:
             root, "equal-version", "distinct versions", classic,
             fixture("agent-doc-jetbrains-262-1.2.3.zip", version="1.2.3",
                     since_build="262", until_build="262.*"),
+            modern,
         )
         _expect_refusal(
             root, "modular-overlap", "modular range", classic,
             fixture("agent-doc-jetbrains-262-1.2.5.zip", version="1.2.5",
                     since_build="261", until_build="262.*"),
+            modern,
         )
         _expect_refusal(
             root, "classic-widened", "classic range",
             fixture("agent-doc-jetbrains-1.2.6.zip", version="1.2.6",
                     since_build="242", until_build="262.*"),
             modular,
+            modern,
         )
         _expect_refusal(
             root, "classic-open-ended", "until-build",
             fixture("agent-doc-jetbrains-1.2.7.zip", version="1.2.7",
                     since_build="242", until_build=None),
             modular,
+            modern,
         )
         _expect_refusal(
             root, "id-mismatch", "expected exactly one",
@@ -439,22 +472,24 @@ def self_test() -> None:
             fixture("agent-doc-jetbrains-262-1.2.8.zip", version="1.2.8",
                     since_build="262", until_build="262.*",
                     plugin_id="com.example.other"),
+            modern,
         )
         _expect_refusal(
             root, "one-sided", "does not exist",
-            classic, root / "agent-doc-jetbrains-262-9.9.9.zip",
+            classic, root / "agent-doc-jetbrains-262-9.9.9.zip", modern,
         )
-        _expect_refusal(root, "swapped", "classic range", modular, classic)
+        _expect_refusal(root, "swapped", "classic range", modular, classic, modern)
         _expect_refusal(
             root, "misnamed", "must be named",
             classic,
             fixture("agent-doc-jetbrains-1.3.0.zip", version="1.3.0",
                     since_build="262", until_build="262.*"),
+            modern,
         )
 
         # The workflow's independent listing assertion accepts the real pair and
         # refuses tampered or mismatched listings.
-        verify_listings(root / "repository", "1.2.3", "1.2.4")
+        verify_listings(root / "repository", "1.2.3", "1.2.4", "1.2.5")
         for label, mutate, needle in (
             ("wrong-version", None, "listings advertise versions"),
             ("widened", ('until-build="261.*"', 'until-build="262.*"'), "classic range"),
@@ -469,7 +504,11 @@ def self_test() -> None:
                 text = target.read_text()
                 assert mutate[0] in text, label
                 target.write_text(text.replace(mutate[0], mutate[1]))
-            expected_versions = ("1.2.3", "9.9.9") if mutate is None else ("1.2.3", "1.2.4")
+            expected_versions = (
+                ("1.2.3", "9.9.9", "1.2.5")
+                if mutate is None
+                else ("1.2.3", "1.2.4", "1.2.5")
+            )
             try:
                 verify_listings(tampered, *expected_versions)
             except DistributionError as error:
@@ -480,7 +519,7 @@ def self_test() -> None:
         missing.mkdir()
         (missing / CLASSIC_LISTING).write_bytes(outputs[0].read_bytes())
         try:
-            verify_listings(missing, "1.2.3", "1.2.4")
+            verify_listings(missing, "1.2.3", "1.2.4", "1.2.5")
         except DistributionError as error:
             assert "does not exist" in str(error)
         else:
@@ -500,7 +539,7 @@ def self_test() -> None:
             raise AssertionError("an ambiguous build must be refused")
 
         try:
-            generate(classic, modular, root / "http", "http://example.invalid/x")
+            generate(classic, modular, modern, root / "http", "http://example.invalid/x")
         except DistributionError as error:
             assert "HTTPS" in str(error)
         else:
@@ -513,13 +552,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--classic", type=Path)
     parser.add_argument("--modular", type=Path)
+    parser.add_argument("--modern", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--download-base-url")
     parser.add_argument(
         "--verify-listings",
-        nargs=2,
-        metavar=("CLASSIC_VERSION", "MODULAR_VERSION"),
-        help="re-read the listings in --output-dir and assert the two-sided selection",
+        nargs=3,
+        metavar=("CLASSIC_VERSION", "MODULAR_VERSION", "MODERN_VERSION"),
+        help="re-read the listings in --output-dir and assert range selection",
     )
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
@@ -535,13 +575,14 @@ def main() -> int:
         except DistributionError as error:
             print(f"jetbrains custom repository: {error}", file=sys.stderr)
             return 1
-        print("jetbrains custom repository: both ranged listings verified")
+        print("jetbrains custom repository: all ranged listings verified")
         return 0
     missing = [
         flag
         for flag, value in (
             ("--classic", args.classic),
             ("--modular", args.modular),
+            ("--modern", args.modern),
             ("--output-dir", args.output_dir),
             ("--download-base-url", args.download_base_url),
         )
@@ -553,6 +594,7 @@ def main() -> int:
         outputs = generate(
             args.classic,
             args.modular,
+            args.modern,
             args.output_dir,
             args.download_base_url,
         )

@@ -5603,9 +5603,8 @@ fn generation_fenced_native_save_routes(
             editor_pid: registration.pid,
         };
         // GH #236: admit by native-save protocol compatibility. Comparing with
-        // the classic package version alone fenced a 263 IDE left on 0.2.508
-        // (no package declares build 263, #233) and every release-paired 262
-        // package, whose version can never equal the classic one.
+        // the primary classic package version alone fenced the distinct
+        // release-paired 262 and 263 packages.
         let compatibility = agent_doc_reliable_sync_io::liveness::editor_native_save_compatibility(
             &registration.editor_kind,
             &registration.editor_version,
@@ -7222,9 +7221,8 @@ mod tests {
         assert_eq!(mismatches[0].reason, "below_native_save_protocol_floor");
     }
 
-    /// GH #236: a 263 IDE left on 0.2.508 (no package declares build 263,
-    /// #233), a 262 IDE on the release-paired modular package, and a classic
-    /// IDE on the matching classic package all receive the native save. Only a
+    /// GH #236: an older protocol-compatible 263 install plus each release-paired
+    /// package line receive the native save. Only a
     /// plugin below the protocol floor is fenced, and the outcome it produces
     /// still classifies as a retryable, non-failing generation mismatch.
     #[test]

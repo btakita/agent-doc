@@ -63,10 +63,8 @@ pub fn editor_plugin_generation_matches(editor_kind: &str, running: &str) -> boo
 }
 
 /// Every package version this binary's release pairs with an editor kind, one
-/// per IDE line (GH #236). JetBrains ships a classic package (242-261) and a
-/// modular 262 package under two distinct versions; the release workflow
-/// refuses a tag where they are equal, so a 262 IDE on the release-paired
-/// package can never report the classic version.
+/// per IDE line (GH #236). JetBrains ships classic-source packages for 242-261
+/// and 263 plus a modular 262 package under three distinct versions.
 pub fn release_paired_editor_plugin_versions(editor_kind: &str) -> Vec<&'static str> {
     let mut versions = Vec::new();
     if let Some(primary) = expected_editor_plugin_version(editor_kind) {
@@ -79,6 +77,14 @@ pub fn release_paired_editor_plugin_versions(editor_kind: &str) -> Vec<&'static 
         && !versions.contains(&modular)
     {
         versions.push(modular);
+    }
+    if matches!(
+        editor_kind.trim().to_ascii_lowercase().as_str(),
+        "jetbrains" | "intellij" | "idea" | "jb"
+    ) && let Some(modern) = option_env!("AGENT_DOC_EXPECTED_JETBRAINS_263_PLUGIN_VERSION")
+        && !versions.contains(&modern)
+    {
+        versions.push(modern);
     }
     versions
 }
@@ -182,9 +188,8 @@ fn dotted_version_at_least(running: &[u64], floor: &[u64]) -> bool {
 /// Whether a registration may receive a disk-writing native save (GH #236).
 ///
 /// Admission is protocol compatibility, not equality with the classic package
-/// version: a 262 IDE on the 262 package, and a 263 IDE left on an older
-/// package because no package declares its build (#233), both speak the same
-/// `persist_current` protocol as the classic package.
+/// version: the 262 and 263 ranged packages speak the same `persist_current`
+/// protocol as the primary classic package, despite distinct update versions.
 pub fn editor_native_save_compatibility(
     editor_kind: &str,
     running: &str,
@@ -735,14 +740,11 @@ mod tests {
     fn gh236_native_save_compatibility_follows_the_protocol_not_the_classic_version() {
         let classic = expected_editor_plugin_version("jetbrains")
             .expect("classic JetBrains package version baked by build.rs");
-        let modular = release_paired_editor_plugin_versions("jetbrains")
-            .into_iter()
-            .find(|version| *version != classic)
-            .expect("262 JetBrains package version baked by build.rs");
-        assert_ne!(
-            classic, modular,
-            "release.yml refuses equal IDE-line versions"
-        );
+        let paired = release_paired_editor_plugin_versions("jetbrains");
+        assert_eq!(paired.len(), 3, "all JetBrains package lines are baked in");
+        assert_eq!(paired.iter().copied().collect::<BTreeSet<_>>().len(), 3);
+        let modular = paired[1];
+        let modern = paired[2];
 
         // Matching classic package.
         assert_eq!(
@@ -759,7 +761,11 @@ mod tests {
             modular
         ));
         assert!(!editor_plugin_generation_matches("jetbrains", modular));
-        // A 263 IDE left on 0.2.508 because no package declares build 263 (#233).
+        assert_eq!(
+            editor_native_save_compatibility("jetbrains", modern),
+            NativeSaveCompatibility::ReleasePaired
+        );
+        // Older 263 installations remain protocol-compatible during rollout.
         let gh236 = editor_native_save_compatibility("jetbrains", "0.2.508");
         assert_eq!(
             gh236,

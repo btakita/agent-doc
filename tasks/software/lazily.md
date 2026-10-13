@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a13200-74b6-7423-9a27-70555c511d7f
+  codex: 01a132ff-795c-7343-b9b7-11db2db32d87
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -38,21 +38,30 @@ completed
 Compacted content:
 - Archived 22 response topic(s): release queue dispatch; #release; #lzcorecohort; 19 more
 - Prior summary/context: prior compacted content: Archived 36 response topic(s): advance review; #lzambienttokenresolve; #lzmacosrunner; 33 more
+
+### Re: recovered response
+
+Both queue items are claimed and running in separate isolated worktrees:
+
+- `#lzcoreevidencedarttimeout` → `subagent:darttimeout`
+- `#lzcoreciactivationfixes` → `subagent:ciactivation`
+
+The undefined `#spec-test-commit-push` preset means neither worker is authorized to commit, push, install, or release.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- 🚧 do [#lzcoreevidencedarttimeout]
-- 🚧 do [#lzcoreciactivationfixes]
+- do [#lzcoreevidencedarttimeout]
+- do [#lzcoreciactivationfixes]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzcoreevidencedarttimeout] Reproduce and fix Dart Core evidence report generation exceeding the verifier 600000ms per-command timeout; preserve the delete-before-spawn fail-closed behavior, add deterministic timeout/freshness coverage, then regenerate all nine reports into a fresh directory and require --require-all to pass with every report freshly dated.
-- [ ] 🚧 [#lzcoreciactivationfixes] Make every new Core Phase 1-5 gate CI-active and reach-pinned: add named workflow steps and exact reach mappings for profile/evidence/facade/compatibility/consumer targets, name the currently anonymous binding consumer steps, pin job activation and matrices, rerun aggregate gates in the Phase 6 reusable workflow, and add exact Phase 6 callers from all nine candidate binding release workflows.
+- [ ] [#lzcoreevidencedarttimeout] Reproduce and fix Dart Core evidence report generation exceeding the verifier 600000ms per-command timeout; preserve the delete-before-spawn fail-closed behavior, add deterministic timeout/freshness coverage, then regenerate all nine reports into a fresh directory and require --require-all to pass with every report freshly dated.
+- [ ] [#lzcoreciactivationfixes] Make every new Core Phase 1-5 gate CI-active and reach-pinned: add named workflow steps and exact reach mappings for profile/evidence/facade/compatibility/consumer targets, name the currently anonymous binding consumer steps, pin job activation and matrices, rerun aggregate gates in the Phase 6 reusable workflow, and add exact Phase 6 callers from all nine candidate binding release workflows.
 <!-- /agent:backlog -->
 
 ## Review

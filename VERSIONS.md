@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.498
+
+- **Idle JetBrains projects stop polling the controller.** Reverse-focus sync now
+  requires an active project surface and a selected, active embedded agent-doc
+  terminal instead of opening controller RPCs every 500 ms for any open Markdown
+  file. Inactive projects park the poller and reset its observation for a clean
+  resume.
+- **Idle state-database convergence is index-seek bounded.** A sparse partial
+  index covers the `document_version = 0` repair guard, replacing repeated full
+  scans of large `state_events` ledgers with an indexed lookup. The regression
+  test pins the SQLite query plan to `SEARCH` rather than `SCAN`.
+- **JetBrains 263 restart upgrades stage successfully (GH #248).** The CLI
+  rewrites variant package roots to canonical `agent-doc-jetbrains/` entries in
+  the temporary launcher archive, preserving ZIP metadata while satisfying the
+  Java stager's structural validation. The UI no longer claims staging success
+  before the launcher accepts the archive.
+
 ## 0.35.497
 
 - **JetBrains build 263 receives current plugin fixes (GH #247).** Releases now

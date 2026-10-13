@@ -234,6 +234,23 @@ Fixed. Slack canonicalizes the original `:collision:` alias to `:boom:`; the upd
 The live SDK #109 line now ends in exactly `:eyes: :boom:`. I added the exact reported line as a regression fixture; all 25 focused tests, Ruff, and `git diff --check` pass.
 
 Commit: `5817a43b48 test: prevent duplicate conflict markers`.
+
+### Re: Move the tested script into haiven-tools and expose it through uvx. — gpt-5 · 2026-10-13T19:45:30-04:00
+
+> **Queue prompt:** Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.
+
+Completed the migration and opened [haiven-tools PR #21](https://github.com/haiven-dev/haiven-tools/pull/21).
+
+- Moved the implementation to `src/haiven_tools/slack_pr_list.py`.
+- Moved all 25 regression tests to `tests/test_slack_pr_list.py` and registered them in the portable repository check runner.
+- Registered `update-slack-pr-list = haiven_tools.slack_pr_list:main`.
+- Verified `uvx --from . update-slack-pr-list --help` builds and runs the packaged entry point.
+- Updated README usage and CI to exercise the new `uvx` command on Linux, macOS, and Windows.
+- The complete local `scripts/check.py` suite passes; `uv lock --check` and `git diff --check` pass.
+- Pushed commit `cc2b40c feat: add Slack pull request status updater` to `feat/slack-pr-status`.
+- Removed the now-migrated prototype and test from this private workspace in `fad23033a9`.
+
+PR CI is running. The queued key-wording refinements will be added to the same PR before final handoff.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
@@ -243,6 +260,8 @@ Commit: `5817a43b48 test: prevent duplicate conflict markers`.
 - ~~Make the message have a key for the emojis so reads understand what each emoji means.~~
 - ~~Make the script work standalone without an agent. Are you using the Slack mcp? Can we make this work without the Slack mcp?~~
 - ~~There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`~~
+- ~~Rename "Emoji key" to "Key": Add ~merged~ to the key.~~
+- Make sure ~done~ is now ~merged~ in the key.
 - Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.
 <!-- /agent:queue -->
 

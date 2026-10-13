@@ -143,6 +143,16 @@ Added a regression test that asserts every required section, option, and emoji m
 The rendered `--help` output, focused tests, bytecode compilation, Ruff, and diff checks passed. The authoritative `make check` again reached 1,528 tests with 1,527 passing and only the pre-existing dirty development-skill bundle mismatch failing.
 
 The channel-ID-or-URL enhancement remains queued next.
+
+### Re: self-contained Slack PR updater — gpt-5 · 2026-10-13T19:31-04:00
+
+> **Queue prompt:** Make all the logic in a script if you have not already.
+
+Confirmed complete. All runtime behavior is contained in `scripts/update_slack_pr_list.py`: CLI parsing and help, GitHub discovery and review-state reduction, stack classification, Slack message generation/reconciliation, create/update API calls, dry-run output, validation, and error handling.
+
+The separate `scripts/test_update_slack_pr_list.py` file contains tests only and imports the script as its subject; there is no required runtime helper, notebook, generated file, or manual transformation outside the script.
+
+No repository change was needed for this confirmation. The current focused test, compile, lint, live GitHub dry-run, and Slack-readback evidence from the preceding implementation cycles covers the self-contained path.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
@@ -151,7 +161,7 @@ The channel-ID-or-URL enhancement remains queued next.
 <!-- agent:queue go priority -->
 - ~~do [#helpexplaincommands]~~
 - ~~Assign an icon that is the head of a PR stack and another icon for a PR that is not the head of a PR stack.~~ — auto-struck: answered this cycle (#ftstrike)
-- Make all the logic in a script if you have not already.
+- ~~Make all the logic in a script if you have not already.~~
 - Make an icon for a merge conflict.
 - ~~Make the script take a gh user name(s) + repository name(s). Use the user name(s) + repository name(s) to create/edit a slack message with the status. If a message url is provided, that message will be updated...otherwise a new message will be created in a provided slack channel.~~
 - Make the channel cli arg take an id or url.

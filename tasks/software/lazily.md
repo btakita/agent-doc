@@ -199,6 +199,17 @@ The exchange remains above its advisory size threshold; the active queue continu
 Completed: Add actionable review items into backlog + queue.
 
 The five reviewed items are already present as `#lzcommitpresetresolve`, `#lzrustcoreprofiledivergence`, `#lzzigcoretoolchains`, `#lzcoreintegration`, and `#lzcorecireachaudit`; this continuation adds no duplicates. Existing review work was not duplicated, and no repository or outward action was performed.
+
+### Re: #lzcommitpresetresolve — gpt-5 · 2026-10-12T21:42-04:00
+
+The missing authorization cannot be resolved safely without your explicit choice:
+
+1. Define the canonical preset by adding `'#spec-test-commit-push': update spec + tests. commit + push` under `prompt_presets:`; leave the queue marker unchanged.
+2. Intentionally broaden the existing `#push` preset to the same wording and change the queue marker to `preset="#push"`. This affects every `#push` use in this document.
+
+Option 1 is the narrower change. Neither option grants install, release, publish, tag, or version-bump authority. Until you explicitly choose, no commit or push authority is inferred.
+
+The item is review-gated on that operator decision. No additional backlog follow-up is needed because the gated item retains both exact edits and the unblock condition. The analysis worktree remained clean; no files changed, no commit was created, and no tests were needed.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -206,7 +217,7 @@ The five reviewed items are already present as `#lzcommitpresetresolve`, `#lzrus
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - ~~#actionable-review~~
-- do [#lzcommitpresetresolve]
+- ~~do [#lzcommitpresetresolve]~~
 - do [#lzrustcoreprofiledivergence]
 - do [#lzzigcoretoolchains]
 - do [#lzcoreintegration]
@@ -216,7 +227,6 @@ The five reviewed items are already present as `#lzcommitpresetresolve`, `#lzrus
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcommitpresetresolve] [inline] [operator-decision] Define the queue-wide #spec-test-commit-push authorization explicitly in tasks/software/lazily.md, or replace the queue preset with an already defined, intentionally equivalent authorization. Do not infer commit/push authority from the unresolved name; this is the first dependency for every completed-but-uncommitted review item.
 - [ ] [#lzrustcoreprofiledivergence] Using the prepared Phase 1 and Rust facade worktrees, resolve the Rust corrected-profile divergence called out by #lzcorecompat before landing the Rust Phase 4 snapshot/compatibility gate; prove the normalized snapshot is derived from the corrected candidate profile and rerun the aggregate --require-all/profile checks. Depends on #lzcoreprofile and the Rust facade work; blocks Rust Phase 4 and #lzcoreintegration.
 - [ ] [#lzzigcoretoolchains] Make Zig 0.15.2 and 0.16.0 available, run the prepared Core facade/compatibility formatting and verification gates under both pinned toolchains plus the repository current third lane, and record exact results before integrating Zig Phase 3/4. Depends on #lzcoreprofile; blocks Zig integration.
 - [ ] [#lzcoreintegration] After #lzcommitpresetresolve, #lzrustcoreprofiledivergence, and #lzzigcoretoolchains, integrate the prepared Core work in dependency order: #lzcoreprofile, #lzcoreclaims, per-binding #lzcorefacades then #lzcorecompat, #lzcoreconsumers, and finally regenerate and revalidate #lzcorecohort from the settled exact commits. Rerun the aggregate profile gate after each batch and do not qualify a cohort from incidental worktree state.
@@ -226,6 +236,7 @@ The five reviewed items are already present as `#lzcommitpresetresolve`, `#lzrus
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzcommitpresetresolve] [inline] [operator-decision] Define the queue-wide #spec-test-commit-push authorization explicitly in tasks/software/lazily.md, or replace the queue preset with an already defined, intentionally equivalent authorization. Do not infer commit/push authority from the unresolved name; this is the first dependency for every completed-but-uncommitted review item.
 - [/] [#lzgocireachability] The Lazily Go CI reachability fix is complete and fully verified in /home/brian/worktrees/lzgocireachability-go-20261012 on branch task/lzgocireachability-20261012 from base e5e082a2d7638e4e274a8d8f808ccf39e349bb51; blocked only until explicit commit/push authorization is supplied or #spec-test-commit-push is defined, then land the single .github/workflows/ci.yml step-name change and confirm upstream CI.
 - [/] [#fixrunturn] Run Agent Doc route-race fix and deterministic coverage are complete and fully verified in /home/brian/worktrees/agent-doc-fixrunturn-stack-20261012/agent-doc on branch fix/run-agent-doc-turn-rejection-20261012 from base 06afd858eebc81440dbbebec6a51f0ec788391f1; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate exactly the six agent-doc-route-io files and run the single coordinator install.
 - [/] [#lzagentdocartifactrefresh] Fresh artifact-purge handoff and both dry-run modes are complete and verified in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 on branch task/lzagentdocartifactrefresh-20261012 from base 215dc9dc52339478da6cc90aa5c7d5808f3e54c5; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate the five tracked btakita/agent-doc audit/script files without the scratch .audit-work reports.

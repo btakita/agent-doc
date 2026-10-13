@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import unittest
+from unittest import mock
 
 import update_slack_pr_list as subject
 
@@ -34,6 +36,25 @@ class ParseTargetTests(unittest.TestCase):
             ),
             ("C0C8LPQ7NS1", "1791874207.231429"),
         )
+
+
+class RepositoryTargetTests(unittest.TestCase):
+    def test_expands_repeatable_and_comma_separated_values(self) -> None:
+        self.assertEqual(
+            subject.repository_targets(
+                ["haiven-dev,octo-org"],
+                ["sdk", "explicit/widgets"],
+            ),
+            (
+                ("haiven-dev", "sdk"),
+                ("octo-org", "sdk"),
+                ("explicit", "widgets"),
+            ),
+        )
+
+    def test_bare_repository_requires_owner(self) -> None:
+        with self.assertRaises(subject.UpdateError):
+            subject.repository_targets([], ["widgets"])
 
 
 class ReviewStateTests(unittest.TestCase):
@@ -147,6 +168,75 @@ class ReconcileTests(unittest.TestCase):
             result.text,
             "8. ~<https://github.com/haiven-dev/widgets/pull/8|widgets #8> done~",
         )
+
+
+class GeneratedMessageTests(unittest.TestCase):
+    def test_appends_only_missing_open_pull_requests(self) -> None:
+        first = subject.PullRequestListing(
+            subject.PullRequestRef("haiven-dev", "widgets", 1), "already present"
+        )
+        second = subject.PullRequestListing(
+            subject.PullRequestRef("haiven-dev", "widgets", 2), "new <safe> & sound"
+        )
+        original = (
+            "1. <https://github.com/haiven-dev/widgets/pull/1|widgets #1> already present"
+        )
+
+        self.assertEqual(
+            subject.augment_message_with_open_pull_requests(original, [first, second]),
+            (
+                "1. <https://github.com/haiven-dev/widgets/pull/1|widgets #1> already present\n"
+                "2. <https://github.com/haiven-dev/widgets/pull/2|widgets #2> "
+                "new &lt;safe&gt; &amp; sound"
+            ),
+        )
+
+    def test_create_message_posts_and_returns_timestamp(self) -> None:
+        with mock.patch.object(
+            subject,
+            "_slack_request",
+            return_value={"ok": True, "ts": "1791874207.231429"},
+        ) as request:
+            timestamp = subject.create_message("token", "C0C8LPQ7NS1", "message")
+
+        self.assertEqual(timestamp, "1791874207.231429")
+        request.assert_called_once_with(
+            "token",
+            "chat.postMessage",
+            {"channel": "C0C8LPQ7NS1", "text": "message"},
+        )
+
+    def test_run_creates_message_from_repository_targets(self) -> None:
+        listing = subject.PullRequestListing(
+            subject.PullRequestRef("haiven-dev", "widgets", 4), "new pull request"
+        )
+        item_status = status(4)
+        with (
+            mock.patch.dict(os.environ, {"SLACK_USER_TOKEN": "token"}),
+            mock.patch.object(
+                subject, "fetch_open_pull_requests", return_value=(listing,)
+            ),
+            mock.patch.object(
+                subject, "fetch_all_statuses", return_value={listing.ref: item_status}
+            ),
+            mock.patch.object(
+                subject, "create_message", return_value="1791874207.231429"
+            ) as create,
+        ):
+            exit_code = subject.run(
+                [
+                    "--channel",
+                    "C0C8LPQ7NS1",
+                    "--github-user",
+                    "haiven-dev",
+                    "--repository",
+                    "widgets",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        create.assert_called_once()
+        self.assertIn("widgets #4", create.call_args.args[2])
 
 
 if __name__ == "__main__":

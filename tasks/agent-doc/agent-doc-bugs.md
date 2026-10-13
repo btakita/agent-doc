@@ -142,7 +142,11 @@ The standalone `---` added to the exchange is only a Markdown separator and requ
 > ```
 
 This was the same `visible_length_mismatch` incident, not a second defect. The installed typed-deferral fix covers it, and `infra.md` has resumed on a fresh cycle after the guarded interrupt-clear.
-<!-- agent:boundary:fee8505a:agent-doc-bugs -->
+> **Chat prompt (#chatprompt):** did you release + publish?
+
+### Re: release status — gpt-5 · 2026-10-12T20:54:44-04:00
+No. I pushed fix commit `9efcd2579ddc673feb95092bee53a9248330b4be` to `main` and installed it locally, but I did not cut a new version/tag or publish release artifacts containing it. The latest published release is `v0.35.495` (published 2026-10-12T21:19:58Z), whose release commit predates the fix; no release tag contains the fix commit. The `release + publish` queue item therefore remains pending, and its existing worker claim belongs to an ended session.
+<!-- agent:boundary:c4f2c84e -->
 <!-- /agent:exchange -->
 
 <!--

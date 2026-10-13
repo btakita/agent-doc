@@ -258,6 +258,21 @@ The pre-integration CI audit is complete and found real activation defects:
 I captured the Dart evidence timeout and the cross-phase workflow/reachability repairs as separate actionable backlog+queue items. The final audit is review-gated until those fixes and Phases 1–5 are integrated, at which point its supplied per-binding command matrix must run against the settled tree.
 
 The audit worktree remained clean; no commit, push, install, release, or publication occurred.
+
+### Re: #lzrustcoreprofiledivergence — gpt-5 · 2026-10-12T21:57-04:00
+
+> **Queue prompt:**
+>
+> do [#lzrustcoreprofiledivergence]
+
+
+The Rust corrected-profile provenance gap is fixed in isolated worktree `/home/brian/worktrees/lzrustcoreprofiledivergence-rs-20261012`, branch `task/lzrustcoreprofiledivergence-20261012`, from `87da9e7494f6cec0cc5deb981361519f5af9eedf`.
+
+The compatibility gate now derives committed snapshot rows and lifecycle metadata from the selected candidate profile and rejects a mutated Rust Context mapping. Intended files are `src/lib.rs`, `src/core.rs`, `api/core-v1.tsv`, `tests/core_facade.rs`, and `tests/core_api_compat.rs`.
+
+Verification is green for the Rust-owned scope: 4/4 profile-derived compatibility tests, `make core-profile-check` with 11 negative cases and nine bindings/seven symbols/16 fixtures, 30/30 full reactive-graph runs (90 tests), full `cargo test --locked --features async`, and `git diff --check`. The historical AsyncContext churn divergence did not reproduce.
+
+The nine-binding aggregate stopped at the same exact 600-second Dart timeout now tracked by `#lzcoreevidencedarttimeout`; Rust, Python, Kotlin, and JavaScript reports completed before Dart produced no report. This item is review-gated on a green post-fix aggregate rerun and explicit commit/integration authorization. No additional backlog follow-up is needed because the Dart item and this gate retain both remaining actions. No commit or push occurred.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -266,7 +281,7 @@ The audit worktree remained clean; no commit, push, install, release, or publica
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - ~~#actionable-review~~
 - ~~do [#lzcommitpresetresolve]~~
-- do [#lzrustcoreprofiledivergence]
+- ~~do [#lzrustcoreprofiledivergence]~~
 - ~~do [#lzzigcoretoolchains]~~
 - ~~do [#lzcoreintegration]~~
 - ~~do [#lzcorecireachaudit]~~
@@ -277,7 +292,6 @@ The audit worktree remained clean; no commit, push, install, release, or publica
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzrustcoreprofiledivergence] Using the prepared Phase 1 and Rust facade worktrees, resolve the Rust corrected-profile divergence called out by #lzcorecompat before landing the Rust Phase 4 snapshot/compatibility gate; prove the normalized snapshot is derived from the corrected candidate profile and rerun the aggregate --require-all/profile checks. Depends on #lzcoreprofile and the Rust facade work; blocks Rust Phase 4 and #lzcoreintegration.
 - [ ] [#lzcoreevidencedarttimeout] Reproduce and fix Dart Core evidence report generation exceeding the verifier 600000ms per-command timeout; preserve the delete-before-spawn fail-closed behavior, add deterministic timeout/freshness coverage, then regenerate all nine reports into a fresh directory and require --require-all to pass with every report freshly dated.
 - [ ] [#lzcoreciactivationfixes] Make every new Core Phase 1-5 gate CI-active and reach-pinned: add named workflow steps and exact reach mappings for profile/evidence/facade/compatibility/consumer targets, name the currently anonymous binding consumer steps, pin job activation and matrices, rerun aggregate gates in the Phase 6 reusable workflow, and add exact Phase 6 callers from all nine candidate binding release workflows.
 <!-- /agent:backlog -->
@@ -285,6 +299,7 @@ The audit worktree remained clean; no commit, push, install, release, or publica
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzrustcoreprofiledivergence] Rust corrected-profile provenance is implemented and verified in /home/brian/worktrees/lzrustcoreprofiledivergence-rs-20261012 on branch task/lzrustcoreprofiledivergence-20261012 from base 87da9e7494f6cec0cc5deb981361519f5af9eedf; profile-derived compatibility, 30 reactive-graph runs, full async tests, profile checks, and diff checks pass. Blocked only on #lzcoreevidencedarttimeout for a green nine-binding --require-all rerun and explicit commit/integration authorization because #spec-test-commit-push is undefined.
 - [/] [#lzcorecireachaudit] After #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1-5 integration are complete, run the supplied per-binding post-integration CI audit matrix against settled commits; require every standalone Core target to have a named workflow step, exact reach mapping, mutation evidence, Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates before Phase 6 finalization.
 - [/] [#lzcoreintegration] Integrate the prepared Core work only after #lzcommitpresetresolve, #lzrustcoreprofiledivergence, and #lzcoreconsumers clear: Phase 5 currently lacks core-artifact-consumer-check in all nine binding worktrees, and Phase 6 is scaffold-only with no settled cohort manifest and is 20 spec commits behind the current profile base. Then land Phases 1-5 in dependency order, replay Phase 6 from settled exact commits, and rerun aggregate profile/cohort gates after each batch.
 - [/] [#lzcommitpresetresolve] [inline] [operator-decision] Define the queue-wide #spec-test-commit-push authorization explicitly in tasks/software/lazily.md, or replace the queue preset with an already defined, intentionally equivalent authorization. Do not infer commit/push authority from the unresolved name; this is the first dependency for every completed-but-uncommitted review item.

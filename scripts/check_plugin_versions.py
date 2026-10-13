@@ -56,7 +56,7 @@ TARGETS = (
     ),
     Target(
         "JetBrains 263",
-        ("editors/jetbrains/src/", "editors/jetbrains/build.gradle.kts"),
+        ("editors/jetbrains-262/", "editors/jetbrains/src/"),
         (".kt", ".java", ".xml", ".kts"),
         "editors/jetbrains-263/gradle.properties",
         ("editors/jetbrains-263/gradle.properties",),
@@ -269,8 +269,8 @@ def self_test() -> int:
     assert "editors/jetbrains/src/" in jb262.source_prefixes, (
         "the modular backend compiles classic implementation sources, so they must fence both generations"
     )
+    assert "editors/jetbrains-262/" in jb263.source_prefixes
     assert "editors/jetbrains/src/" in jb263.source_prefixes
-    assert "editors/jetbrains/build.gradle.kts" in jb263.source_prefixes
 
     # bump_gradle_patch increments only the patch and leaves the file otherwise intact.
     with tempfile.TemporaryDirectory() as tmp:
@@ -419,6 +419,12 @@ def self_test() -> int:
     assert "jetbrains-classic-check" in check_header, check_header
     assert "jetbrains-262-check" in check_header, check_header
     assert "jetbrains-263-check" in check_header, check_header
+    modern_recipe = recipe("jetbrains-263-check")
+    assert "cd editors/jetbrains-262" in modern_recipe, (
+        "JetBrains 263 must build the modular frame-aware source line"
+    )
+    assert "verifySplitArtifact" in modern_recipe, modern_recipe
+    assert "verifyClassicArtifact" not in modern_recipe, modern_recipe
     assert "--bump JetBrains" in recipe("editor-generation-bump")
 
     release_workflow_path = os.path.join(
@@ -553,13 +559,19 @@ def check() -> int:
                 )
 
     modular_build = open("editors/jetbrains-262/build.gradle.kts", encoding="utf-8").read()
+    modular_properties = open("editors/jetbrains-262/gradle.properties", encoding="utf-8").read()
     classic_properties = open("editors/jetbrains/gradle.properties", encoding="utf-8").read()
     if (
         "compatibilitySinceBuild = 242" not in classic_properties
         or "compatibilityUntilBuild = 261.*" not in classic_properties
     ):
         failures.append("JetBrains: classic artifact must be compatibility-ranged to 242..261.*")
-    if 'sinceBuild.set("262")' not in modular_build or 'untilBuild.set("262.*")' not in modular_build:
+    if (
+        "compatibilitySinceBuild = 262" not in modular_properties
+        or "compatibilityUntilBuild = 262.*" not in modular_properties
+        or 'sinceBuild.set(compatibilitySinceBuild)' not in modular_build
+        or 'untilBuild.set(compatibilityUntilBuild)' not in modular_build
+    ):
         failures.append("JetBrains 262: modular artifact must be compatibility-ranged to 262..262.*")
     modern_properties = open("editors/jetbrains-263/gradle.properties", encoding="utf-8").read()
     if (

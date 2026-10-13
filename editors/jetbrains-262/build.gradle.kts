@@ -39,6 +39,12 @@ group = providers.gradleProperty("pluginGroup").get()
 version = providers.gradleProperty("pluginVersion").get()
 
 val platformVersion = providers.gradleProperty("platformVersion")
+val distributionName = providers.gradleProperty("distributionName")
+    .orElse("agent-doc-jetbrains-262")
+val compatibilitySinceBuild = providers.gradleProperty("compatibilitySinceBuild")
+    .orElse("262")
+val compatibilityUntilBuild = providers.gradleProperty("compatibilityUntilBuild")
+    .orElse("262.*")
 
 subprojects {
     apply(plugin = "org.jetbrains.intellij.platform.module")
@@ -81,7 +87,7 @@ kotlin {
 }
 
 intellijPlatform {
-    projectName = "agent-doc-jetbrains-262"
+    projectName = distributionName
     buildSearchableOptions = false
     splitMode = true
     pluginInstallationTarget = SplitModeAware.PluginInstallationTarget.BOTH
@@ -106,13 +112,13 @@ intellijPlatform {
 
 tasks {
     patchPluginXml {
-        sinceBuild.set("262")
-        untilBuild.set("262.*")
+        sinceBuild.set(compatibilitySinceBuild)
+        untilBuild.set(compatibilityUntilBuild)
     }
 
     register("verifySplitArtifact") {
         group = "verification"
-        description = "Verify that the 262 ZIP contains all split plugin modules and range metadata"
+        description = "Verify that the compatibility-ranged ZIP contains all split plugin modules and range metadata"
         dependsOn("buildPlugin")
         doLast {
             val frontendSources = projectDir.resolve("frontend/src/main/kotlin")
@@ -129,7 +135,7 @@ tasks {
                 }
                 .toList()
             check(internalImports.all { (path, _) -> path.endsWith("Exact262DetachedPresentationAdapter.kt") }) {
-                "exact-262 internal UI imports escaped the designated adapter: $internalImports"
+                "build-line-specific internal UI imports escaped the designated adapter: $internalImports"
             }
             val zip = layout.buildDirectory.dir("distributions").get().asFile
                 .listFiles()
@@ -169,8 +175,14 @@ tasks {
                     }
                     content ?: error("root plugin jar is missing META-INF/plugin.xml")
                 }
-                check(pluginXml.contains("since-build=\"262\"")) { "262 since-build was not patched" }
-                check(pluginXml.contains("until-build=\"262.*\"")) { "262 until-build was not clamped" }
+                val sinceBuild = compatibilitySinceBuild.get()
+                val untilBuild = compatibilityUntilBuild.get()
+                check(pluginXml.contains("since-build=\"$sinceBuild\"")) {
+                    "$sinceBuild since-build was not patched"
+                }
+                check(pluginXml.contains("until-build=\"$untilBuild\"")) {
+                    "$sinceBuild until-build was not clamped to $untilBuild"
+                }
                 check(pluginXml.contains("<id>com.github.btakita.agent-doc</id>")) {
                     "split distribution changed the existing plugin ID"
                 }

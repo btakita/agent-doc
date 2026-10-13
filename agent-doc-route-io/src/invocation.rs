@@ -75,10 +75,11 @@ pub fn take_route_pane_not_visible() -> Option<String> {
     ROUTE_PANE_NOT_VISIBLE.with(|cell| cell.borrow_mut().take())
 }
 
-/// GH #243: when `pane` lives in a tmux session no client is attached to, log
-/// `event`, print the operator notice, and record it for the editor route's
-/// result. Returns the notice. A visible pane (or an unreadable one) records
-/// nothing.
+/// GH #243: when `pane` is not on an attached client's screen, log `event`,
+/// print the operator notice, and record it for the editor route's result. An
+/// attached session can still be invisible when the pane is in an inactive
+/// window or hidden behind a zoomed sibling. Returns the notice. A visible pane
+/// (or an unreadable one) records nothing.
 pub fn report_pane_if_not_visible(
     tmux: &Tmux,
     file: &Path,
@@ -89,10 +90,12 @@ pub fn report_pane_if_not_visible(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "{event} file={} pane={} session={} clients=0 watched_sessions=[{}]",
+            "{event} file={} pane={} session={} reason={} window={} watched_sessions=[{}]",
             file.display(),
             target.pane,
             target.session,
+            target.reason.as_str(),
+            target.window_id.as_deref().unwrap_or("none"),
             target.watched_sessions.join(","),
         ),
     );
@@ -526,12 +529,12 @@ mod tests {
         assert!(!layout_owned_by_controller());
     }
 
-    /// GH #243: a dispatch into a pane whose session no client is attached to
-    /// is reported (ops log + recorded notice for the editor route); once a
-    /// client shows that session, nothing is reported.
+    /// GH #243: a dispatch into a pane no client can currently see is reported
+    /// (ops log + recorded notice for the editor route). Attaching its session
+    /// makes the active pane visible, while an inactive window still reports.
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn dispatch_into_a_client_less_session_reports_the_pane_not_visible() {
+    fn dispatch_into_an_off_screen_pane_reports_the_pane_not_visible() {
         use super::{report_pane_if_not_visible, take_route_pane_not_visible};
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -567,7 +570,7 @@ mod tests {
         let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops.contains(&format!(
-                "route_dispatch_target_not_visible file={} pane={pane} session=0 clients=0 watched_sessions=[1]",
+                "route_dispatch_target_not_visible file={} pane={pane} session=0 reason=unattached_session window=none watched_sessions=[1]",
                 doc.display()
             )),
             "{ops}"
@@ -586,5 +589,42 @@ mod tests {
             None
         );
         assert_eq!(take_route_pane_not_visible(), None);
+
+        let hidden_pane = tmux
+            .raw_cmd(&[
+                "new-window",
+                "-d",
+                "-t",
+                "0:",
+                "-n",
+                "stash",
+                "-P",
+                "-F",
+                "#{pane_id}",
+            ])
+            .unwrap();
+        let hidden_pane = hidden_pane.trim();
+        let notice = report_pane_if_not_visible(
+            &tmux,
+            &doc,
+            hidden_pane,
+            "route_live_owner_target_not_visible",
+        )
+        .expect("inactive window in an attached session must be reported");
+        assert!(notice.contains("inactive tmux window 'stash'"), "{notice}");
+        assert!(notice.contains("select-window"), "{notice}");
+        assert!(notice.contains("select-pane"), "{notice}");
+        assert_eq!(
+            take_route_pane_not_visible().as_deref(),
+            Some(notice.as_str())
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains(&format!(
+                "route_live_owner_target_not_visible file={} pane={hidden_pane} session=0 reason=inactive_window",
+                doc.display()
+            )),
+            "{ops}"
+        );
     }
 }

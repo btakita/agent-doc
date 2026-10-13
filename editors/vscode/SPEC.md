@@ -21,6 +21,7 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 - Before Run dispatch and an autostarting layout sync, VS Code calls `agent-doc tmux ensure <relative-path> --json`. A live `agent-doc` terminal is focused or reused, a detached session is attached in a new `agent-doc` terminal rooted at the project, and a session already attached by an external client is left alone. Terminal API failures keep dispatch alive and offer the exact attach command for copying. Every CLI subprocess reports `vscode.env.remoteName` through `AGENT_DOC_VSCODE_REMOTE_NAME` for terminal-host diagnostics.
 - A route failure is persisted in the Agent Doc Route Failures output channel with the exact stage-specific output and surfaced as an error notification.
 - An explicit send already delivered to the owning turn (`ui_outcome=steering_delivered_to_owner`) is successful even if a legacy transport wrapped the text in an error. VS Code records the route as proven and shows a concise status hint; it does not open the route-failure channel or emit an error notification.
+- A successful route into an off-screen authoritative pane still includes the binary's `[route] pane-not-visible:` notice in route output, including its attach or exact reveal command. This covers an unattached session, an inactive window in an attached session, and a target hidden behind a zoomed sibling; VS Code does not mutate tmux layout to compensate.
 
 ## Session Operator Actions
 

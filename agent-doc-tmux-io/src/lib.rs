@@ -10,8 +10,9 @@ pub mod observation_cache;
 
 pub use client_visibility::{
     AmbientSession, AmbientSessionResolution, AttachedTmuxClient, PANE_NOT_VISIBLE_MARKER,
-    UnwatchedPane, ambient_current_session, ambient_current_session_for_process, attached_clients,
-    choose_ambient_session, pane_not_visible_notice, session_attached_client_count, unwatched_pane,
+    PaneNotVisibleReason, UnwatchedPane, ambient_current_session,
+    ambient_current_session_for_process, attached_clients, choose_ambient_session,
+    pane_not_visible_notice, session_attached_client_count, unwatched_pane,
 };
 
 pub use isolated_test_server::{

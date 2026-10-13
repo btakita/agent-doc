@@ -47,7 +47,6 @@ Both queue items are claimed and running in separate isolated worktrees:
 - `#lzcoreciactivationfixes` → `subagent:ciactivation`
 
 The undefined `#spec-test-commit-push` preset means neither worker is authorized to commit, push, install, or release.
-
 ### Re: recovered response
 
 Both new heads are claimed and running:

@@ -83,11 +83,14 @@ pub fn reference_queue_for_dispatch(file: &Path) -> Result<Option<Vec<String>>> 
 /// Live, unclaimed queue lines with subagent intent that are new since the
 /// previous cycle's seed, in queue order.
 pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Result<Vec<String>> {
-    if let Some(plan) = queue_attr_subagent_plan(file, content) {
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
+    if let Some(plan) = queue_attr_subagent_plan_with_presets(file, content, &prompt_presets) {
         return Ok(plan.dispatch);
     }
     let reference = reference_queue_for_dispatch(file)?;
-    let heads = core::subagent_dispatch_heads(content, reference.as_deref());
+    let heads =
+        core::subagent_dispatch_heads_with_presets(content, reference.as_deref(), &prompt_presets);
     if heads.is_empty() {
         return Ok(heads);
     }
@@ -107,7 +110,18 @@ pub fn queue_attr_subagent_plan(
     file: &Path,
     content: &str,
 ) -> Option<agent_doc_queue::subagent_intent::QueueSubagentPlan> {
-    let (mode, eligible, live) = core::queue_attr_subagent_heads(content)?;
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file).ok()?;
+    queue_attr_subagent_plan_with_presets(file, content, &prompt_presets)
+}
+
+fn queue_attr_subagent_plan_with_presets(
+    file: &Path,
+    content: &str,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> Option<agent_doc_queue::subagent_intent::QueueSubagentPlan> {
+    let (mode, eligible, live) =
+        core::queue_attr_subagent_heads_with_presets(content, prompt_presets)?;
     let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content);
     let after_deps = agent_doc_element::element::parse(content)
         .map(|components| agent_doc_queue::backlog_sync::collect_after_deps(&components, content))
@@ -165,10 +179,20 @@ pub fn subagent_authorization_for_content(
     content: &str,
     item: &str,
 ) -> agent_doc_queue::subagent_brief::SubagentAuthorization {
-    agent_doc_queue::subagent_brief::subagent_authorization(
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)
+            .unwrap_or_else(|_| {
+                agent_doc_frontmatter::frontmatter::parse(content)
+                    .map(|(fm, _)| fm.prompt_presets)
+                    .unwrap_or_default()
+            });
+    let components = agent_doc_element::element::parse(content).unwrap_or_default();
+    agent_doc_queue::subagent_brief::subagent_authorization_with_presets(
         &file.display().to_string(),
         content,
         item,
+        &components,
+        &prompt_presets,
     )
 }
 
@@ -205,7 +229,18 @@ pub fn subagent_authorization_for_item(
     let head = agent_doc_document::queue_projection::strip_priority_markers(&head)
         .trim()
         .to_string();
-    Ok(subagent_authorization_for_content(file, &content, &head))
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&content, file)?;
+    let components = agent_doc_element::element::parse(&content).unwrap_or_default();
+    Ok(
+        agent_doc_queue::subagent_brief::subagent_authorization_with_presets(
+            &file.display().to_string(),
+            &content,
+            &head,
+            &components,
+            &prompt_presets,
+        ),
+    )
 }
 
 /// Whether `prompt` is one of the `dispatch` lines (marker-invariant identity).
@@ -276,6 +311,37 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "a claimed item is already dispatched"
+        );
+    }
+
+    #[test]
+    fn project_preset_drives_dispatch_and_authorization_without_local_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join(".agent-doc/config.toml"), "").unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\npresets:\n  '#delegate': run this item in a subagent\n---\n",
+        )
+        .unwrap();
+        let file = dir.path().join("task.md");
+        let content = doc(&["#delegate do [#work]"]);
+        std::fs::write(&file, &content).unwrap();
+
+        let listed = pending_subagent_dispatch_for_content(&file, &content).unwrap();
+        assert_eq!(listed, vec!["#delegate do [#work]".to_string()]);
+        let authorization =
+            subagent_authorization_for_content(&file, &content, "#delegate do [#work]");
+        assert_eq!(authorization.presets.len(), 1);
+        assert_eq!(authorization.presets[0].name, "#delegate");
+        assert_eq!(
+            authorization.presets[0].body.as_deref(),
+            Some("run this item in a subagent")
+        );
+        assert!(
+            !std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("run this item in a subagent")
         );
     }
 

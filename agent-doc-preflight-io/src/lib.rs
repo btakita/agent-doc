@@ -3953,6 +3953,11 @@ pub fn run_queue_maintenance_with_coin_gate(
     // while obscuring which authority maintenance actually mutated.
     let authority_baseline = content.clone();
     let mut current_content = content.clone();
+    let effective_prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(
+            &current_content,
+            file,
+        )?;
     let mut mutated = false;
     let mut components = match agent_doc_element::element::parse(&current_content) {
         Ok(cs) => cs,
@@ -4925,7 +4930,11 @@ pub fn run_queue_maintenance_with_coin_gate(
     // precedence when an id intentionally names both a preset and open work.
     eligible_ids.retain(|id| {
         !done_ids.contains(id)
-            || !agent_doc_queue::queue_response::head_id_is_registered_preset(&current_content, id)
+            || !agent_doc_queue::queue_response::head_id_is_registered_preset_with_presets(
+                &current_content,
+                id,
+                &effective_prompt_presets,
+            )
     });
     // `activation.entries_after` already reflects start-fence consumption and
     // the duplicate-prompt collapse above, so it is the authoritative current
@@ -7756,6 +7765,43 @@ mod tests {
             vec!["#upgrade".to_string()],
         );
         agent_doc_queue_io::queue_claim::claim(&doc, "#upgrade", "subagent:test", 600).unwrap();
+    }
+
+    #[test]
+    fn archived_done_id_does_not_complete_project_preset_head() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\npresets:\n  '#upgrade': Upgrade the sample application.\n---\n",
+        )
+        .unwrap();
+        let archive_rel = "tasks/session.done.md";
+        let archive = dir.path().join(archive_rel);
+        std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        std::fs::write(&archive, "- [x] [#upgrade] Older completed upgrade\n").unwrap();
+        let doc = dir.path().join("session.md");
+        let content = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n- #upgrade\n<!-- /agent:queue -->\n\n",
+                "<!-- agent:done archive=\"{}\" -->\n<!-- /agent:done -->\n"
+            ),
+            archive_rel
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(state.queue_prompts, vec!["#upgrade".to_string()]);
+        let authoritative = state.authoritative_content.as_deref().unwrap();
+        assert!(authoritative.contains("#upgrade"), "{authoritative}");
+        assert!(!authoritative.contains("~~#upgrade~~"), "{authoritative}");
     }
 
     /// GH #161: downstream dispatch consumes maintenance's settled projection,

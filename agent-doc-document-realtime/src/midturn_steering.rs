@@ -352,10 +352,35 @@ pub fn observe_with_mode(
     ctx: &ObserveContext<'_>,
     mode: ObserveMode,
 ) -> Observation {
+    let presets = agent_doc_frontmatter::frontmatter::parse(current)
+        .map(|(fm, _)| fm.prompt_presets)
+        .unwrap_or_default();
+    observe_with_mode_and_presets(watermark, current, ctx, mode, &presets)
+}
+
+/// [`observe_with_mode`] with caller-resolved effective presets.
+pub fn observe_with_mode_and_presets(
+    watermark: &SteeringWatermark,
+    current: &str,
+    ctx: &ObserveContext<'_>,
+    mode: ObserveMode,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> Observation {
     let boundary = mode == ObserveMode::Boundary;
     let mut candidates: Vec<Candidate> = Vec::new();
-    candidates.extend(exchange_candidates(watermark, current, boundary));
-    let queue = queue_alignment(watermark, current, ctx.binary_owned_queue_ids, boundary);
+    candidates.extend(exchange_candidates(
+        watermark,
+        current,
+        boundary,
+        prompt_presets,
+    ));
+    let queue = queue_alignment(
+        watermark,
+        current,
+        ctx.binary_owned_queue_ids,
+        boundary,
+        prompt_presets,
+    );
     candidates.extend(queue.candidates.iter().cloned());
 
     use agent_doc_debounce::edit_settle::{
@@ -574,8 +599,10 @@ fn exchange_candidates(
     watermark: &SteeringWatermark,
     current: &str,
     boundary: bool,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> Vec<Candidate> {
-    let presets = PresetContext::new(current, &watermark.session_presets);
+    let presets =
+        PresetContext::new_with_presets(current, &watermark.session_presets, prompt_presets);
     let without_agent_responses = strip_new_response_sections(&watermark.baseline, current);
     let set = exchange_steering_set_between(&watermark.baseline, &without_agent_responses);
     let mut out = Vec::new();
@@ -826,6 +853,7 @@ fn queue_alignment(
     current: &str,
     binary_owned_ids: &BTreeSet<String>,
     boundary: bool,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> QueueAlignment {
     let old = &watermark.acknowledged_queue;
     let new = queue_items(current);
@@ -845,7 +873,8 @@ fn queue_alignment(
             .position(|key| key == &identity)
             .or_else(|| old.iter().position(|norm| norm == current_item))
     });
-    let presets = PresetContext::new(current, &watermark.session_presets);
+    let presets =
+        PresetContext::new_with_presets(current, &watermark.session_presets, prompt_presets);
     let mut alignment = QueueAlignment {
         candidates: Vec::new(),
         events: Vec::new(),
@@ -1115,8 +1144,8 @@ fn binary_owned_line(norm: &str, owned: &BTreeSet<String>) -> bool {
     }
 }
 
-struct PresetContext<'a> {
-    current: &'a str,
+struct PresetContext {
+    prompt_presets: agent_doc_frontmatter::frontmatter::PromptPresets,
     cycle: Vec<PresetIntent>,
     queue: Vec<PresetIntent>,
     exchange: Vec<PresetIntent>,
@@ -1128,8 +1157,12 @@ struct PresetContext<'a> {
     exchange_subagents: bool,
 }
 
-impl<'a> PresetContext<'a> {
-    fn new(current: &'a str, session_presets: &[String]) -> Self {
+impl PresetContext {
+    fn new_with_presets(
+        current: &str,
+        session_presets: &[String],
+        prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+    ) -> Self {
         let mut cycle = Vec::new();
         let mut queue_intents = Vec::new();
         let mut exchange_intents = Vec::new();
@@ -1169,7 +1202,10 @@ impl<'a> PresetContext<'a> {
         ] {
             for name in names {
                 let resolved =
-                    agent_doc_queue::queue_response::queue_prompt_preset_expansions(current, name);
+                    agent_doc_queue::queue_response::queue_prompt_preset_expansions_with_presets(
+                        name,
+                        prompt_presets,
+                    );
                 if resolved.is_empty() {
                     // Unregistered names still carry literal intent.
                     target.push(PresetIntent {
@@ -1184,7 +1220,7 @@ impl<'a> PresetContext<'a> {
             }
         }
         Self {
-            current,
+            prompt_presets: prompt_presets.clone(),
             cycle,
             queue: queue_intents,
             exchange: exchange_intents,
@@ -1197,14 +1233,17 @@ impl<'a> PresetContext<'a> {
     /// uses (`queue_prompt_preset_expansions`) and classify its dispatch.
     fn classify(&self, raw: &str, source: SteeringSource) -> (SteeringDispatch, Vec<PresetIntent>) {
         let mut intents: Vec<PresetIntent> =
-            agent_doc_queue::queue_response::queue_prompt_preset_expansions(self.current, raw)
-                .into_iter()
-                .map(|(name, body)| PresetIntent {
-                    name,
-                    body,
-                    scope: PresetScope::Item,
-                })
-                .collect();
+            agent_doc_queue::queue_response::queue_prompt_preset_expansions_with_presets(
+                raw,
+                &self.prompt_presets,
+            )
+            .into_iter()
+            .map(|(name, body)| PresetIntent {
+                name,
+                body,
+                scope: PresetScope::Item,
+            })
+            .collect();
         let literal_subagent_tag =
             agent_doc_queue::subagent_intent::carries_subagent_intent_tag(raw);
         let scoped = match source {
@@ -1441,7 +1480,16 @@ pub fn carry_unsurfaced_claimed_edits(
         baseline: seed.baseline.clone(),
         ..SteeringWatermark::default()
     };
-    let alignment = queue_alignment(&prior, &seed.baseline, &BTreeSet::new(), true);
+    let prompt_presets = agent_doc_frontmatter::frontmatter::parse(&seed.baseline)
+        .map(|(fm, _)| fm.prompt_presets)
+        .unwrap_or_default();
+    let alignment = queue_alignment(
+        &prior,
+        &seed.baseline,
+        &BTreeSet::new(),
+        true,
+        &prompt_presets,
+    );
     let mut carried = 0;
     for event in &alignment.events {
         if let QueueEvent::Edit { old, new, .. } = event
@@ -1677,12 +1725,26 @@ pub fn queue_attr_subagent_heads(
     Vec<String>,
     Vec<String>,
 )> {
+    let prompt_presets = agent_doc_frontmatter::frontmatter::parse(content)
+        .map(|(fm, _)| fm.prompt_presets)
+        .unwrap_or_default();
+    queue_attr_subagent_heads_with_presets(content, &prompt_presets)
+}
+
+pub fn queue_attr_subagent_heads_with_presets(
+    content: &str,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> Option<(
+    agent_doc_queue::subagent_intent::QueueSubagentsMode,
+    Vec<String>,
+    Vec<String>,
+)> {
     let components = agent_doc_element::element::parse(content).ok()?;
     let queue = agent_doc_queue::queue_set::selected_component(content, &components)
         .ok()
         .flatten()?;
     let mode = agent_doc_queue::subagent_intent::queue_subagents_mode(&queue.attrs)?;
-    let presets = PresetContext::new(content, &[]);
+    let presets = PresetContext::new_with_presets(content, &[], prompt_presets);
     let items = executable_queue_items(content);
     let awaiting_operator =
         agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
@@ -1712,7 +1774,18 @@ pub fn queue_attr_subagent_heads(
 /// subagent intent (`#subagents: <url>` -> `#subagents: #gh-fix <url>`) is the
 /// same dispatch, not a new one.
 pub fn subagent_dispatch_heads(content: &str, reference_queue: Option<&[String]>) -> Vec<String> {
-    let presets = PresetContext::new(content, &[]);
+    let prompt_presets = agent_doc_frontmatter::frontmatter::parse(content)
+        .map(|(fm, _)| fm.prompt_presets)
+        .unwrap_or_default();
+    subagent_dispatch_heads_with_presets(content, reference_queue, &prompt_presets)
+}
+
+pub fn subagent_dispatch_heads_with_presets(
+    content: &str,
+    reference_queue: Option<&[String]>,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> Vec<String> {
+    let presets = PresetContext::new_with_presets(content, &[], prompt_presets);
     let reference: Option<(BTreeSet<&str>, BTreeMap<String, bool>)> =
         reference_queue.map(|queue| {
             let mut identities: BTreeMap<String, bool> = BTreeMap::new();

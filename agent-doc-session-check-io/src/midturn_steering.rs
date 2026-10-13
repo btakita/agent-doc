@@ -657,7 +657,10 @@ fn prepare_with_gate(
             max_hold_ms,
         ),
     };
-    let mut observation = core::observe_with_mode(&watermark, &content, &ctx, mode);
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&content, file)?;
+    let mut observation =
+        core::observe_with_mode_and_presets(&watermark, &content, &ctx, mode, &prompt_presets);
     if !boundary && !observation.ready.is_empty() {
         // Rare path: confirm the cycle is still open before handing anything
         // to the agent, and exclude this cycle's own queue bookkeeping.
@@ -669,13 +672,15 @@ fn prepare_with_gate(
             Some(cycle) if cycle_accepts_steering(&cycle, &watermark.cycle_id) => {
                 let owned = binary_owned_ids(&cycle);
                 if !owned.is_empty() {
-                    observation = core::observe(
+                    observation = core::observe_with_mode_and_presets(
                         &watermark,
                         &content,
                         &ObserveContext {
                             binary_owned_queue_ids: &owned,
                             ..ctx
                         },
+                        core::ObserveMode::InTurn,
+                        &prompt_presets,
                     );
                 }
             }
@@ -685,7 +690,7 @@ fn prepare_with_gate(
                 // next cycle), excluding the closed cycle's own bookkeeping.
                 boundary = true;
                 let owned = closed.as_ref().map(binary_owned_ids).unwrap_or_default();
-                observation = core::observe_with_mode(
+                observation = core::observe_with_mode_and_presets(
                     &watermark,
                     &content,
                     &ObserveContext {
@@ -693,6 +698,7 @@ fn prepare_with_gate(
                         ..ctx
                     },
                     core::ObserveMode::Boundary,
+                    &prompt_presets,
                 );
             }
             Some(_) => {
@@ -704,11 +710,12 @@ fn prepare_with_gate(
                 // whose head can outrank the boundary. Preserve the legacy
                 // committed-baseline fallback for polling-only consumers.
                 boundary = true;
-                observation = core::observe_with_mode(
+                observation = core::observe_with_mode_and_presets(
                     &watermark,
                     &content,
                     &ctx,
                     core::ObserveMode::Boundary,
+                    &prompt_presets,
                 );
             }
         }
@@ -1102,8 +1109,21 @@ pub fn pending_steering_items(file: &Path, current: &str) -> Vec<SteeringItem> {
         classifier: &deterministic,
         median_pause_ms: None,
     };
-    let mut ready =
-        core::observe_with_mode(&base, current, &ctx, core::ObserveMode::Boundary).ready;
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(current, file)
+            .unwrap_or_else(|_| {
+                agent_doc_frontmatter::frontmatter::parse(current)
+                    .map(|(fm, _)| fm.prompt_presets)
+                    .unwrap_or_default()
+            });
+    let mut ready = core::observe_with_mode_and_presets(
+        &base,
+        current,
+        &ctx,
+        core::ObserveMode::Boundary,
+        &prompt_presets,
+    )
+    .ready;
     route_claimed_items(file, current, &mut ready);
     crate::absorbed_steering::drop_consumed(file, &mut ready);
     ready

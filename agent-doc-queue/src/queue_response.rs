@@ -156,14 +156,22 @@ pub fn head_id_names_tracked_directive_item(content: &str, head_id: &str) -> boo
 /// True when `head_id` matches a registered `prompt_presets` key in the
 /// document frontmatter and does NOT also name a tracked directive item.
 pub fn head_id_is_registered_preset(content: &str, head_id: &str) -> bool {
-    if head_id_names_tracked_directive_item(content, head_id) {
-        return false;
-    }
     let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(content) else {
         return false;
     };
-    agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(&fm.prompt_presets, head_id)
-        .is_some()
+    head_id_is_registered_preset_with_presets(content, head_id, &fm.prompt_presets)
+}
+
+/// [`head_id_is_registered_preset`] with a caller-resolved preset map.
+pub fn head_id_is_registered_preset_with_presets(
+    content: &str,
+    head_id: &str,
+    presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> bool {
+    if head_id_names_tracked_directive_item(content, head_id) {
+        return false;
+    }
+    agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(presets, head_id).is_some()
 }
 
 /// Resolve every prompt preset referenced by a queue head.
@@ -171,12 +179,21 @@ pub fn queue_prompt_preset_expansions(content: &str, text: &str) -> Vec<(String,
     let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(content) else {
         return Vec::new();
     };
+    queue_prompt_preset_expansions_with_presets(text, &fm.prompt_presets)
+}
+
+/// Resolve every prompt preset referenced by a queue head using a
+/// caller-resolved map (including project-inherited defaults).
+pub fn queue_prompt_preset_expansions_with_presets(
+    text: &str,
+    presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> Vec<(String, String)> {
     let text = strip_priority_markers(text);
     let referenced = text
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
         .filter(|token| token.starts_with('#'))
         .collect::<Vec<_>>();
-    fm.prompt_presets
+    presets
         .iter()
         .filter(|(name, _)| {
             referenced

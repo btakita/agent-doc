@@ -154,27 +154,39 @@ pub fn subagent_authorization(document: &str, content: &str, item: &str) -> Suba
     let frontmatter = agent_doc_frontmatter::frontmatter::parse(content)
         .ok()
         .map(|(fm, _)| fm);
-    let presets_map = frontmatter.as_ref().map(|fm| &fm.prompt_presets);
+    let presets = frontmatter
+        .as_ref()
+        .map(|fm| fm.prompt_presets.clone())
+        .unwrap_or_default();
+    subagent_authorization_with_presets(document, content, item, &components, &presets)
+}
 
+/// Resolve subagent authorization with caller-provided effective presets.
+pub fn subagent_authorization_with_presets(
+    document: &str,
+    content: &str,
+    item: &str,
+    components: &[element::Component],
+    presets_map: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> SubagentAuthorization {
     let mut presets: Vec<PresetAuthorization> = Vec::new();
     let mut push_preset = |requested: &str, source: PresetSource| {
         let requested = requested.trim().trim_matches(|c| c == '"' || c == '\'');
         if requested.is_empty() {
             return;
         }
-        let key = presets_map.and_then(|map| {
-            agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(map, requested)
-        });
+        let key =
+            agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(presets_map, requested);
         let name = key.clone().unwrap_or_else(|| requested.to_string());
         if presets.iter().any(|p| p.name.eq_ignore_ascii_case(&name)) {
             return;
         }
-        let (body, runbook) = match (&key, presets_map) {
-            (Some(key), Some(map)) => (
-                map.get(key.as_str()).cloned(),
-                map.runbook(key).map(str::to_string),
+        let (body, runbook) = match &key {
+            Some(key) => (
+                presets_map.get(key.as_str()).cloned(),
+                presets_map.runbook(key).map(str::to_string),
             ),
-            _ => (None, None),
+            None => (None, None),
         };
         presets.push(PresetAuthorization {
             name,
@@ -184,10 +196,12 @@ pub fn subagent_authorization(document: &str, content: &str, item: &str) -> Suba
             runbook,
         });
     };
-    for (name, source) in queue_preset_names(content, &components) {
+    for (name, source) in queue_preset_names(content, components) {
         push_preset(&name, source);
     }
-    for (name, _) in crate::queue_response::queue_prompt_preset_expansions(content, item) {
+    for (name, _) in
+        crate::queue_response::queue_prompt_preset_expansions_with_presets(item, presets_map)
+    {
         push_preset(&name, PresetSource::Item);
     }
 
@@ -205,7 +219,7 @@ pub fn subagent_authorization(document: &str, content: &str, item: &str) -> Suba
     let mut tracked_items = Vec::new();
     let mut unresolved_ids = Vec::new();
     for id in ids {
-        match tracked_item(content, &components, &id) {
+        match tracked_item(content, components, &id) {
             Some(found) => tracked_items.push(found),
             None => {
                 // A preset-only id (`#gh-fix`) is a command, not missing work.

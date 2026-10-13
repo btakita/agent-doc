@@ -4973,7 +4973,12 @@ fn stale_supervisor_condition_for_doc(file: &Path) -> Option<String> {
         return None;
     }
     let project_root = agent_doc_project_root_io::project_root_containing(file)?;
-    if let Ok(controller_status) = status(&project_root) {
+    // This warning needs only the serving pid and binary identity. It runs at
+    // command/turn boundaries across every live document, so keep it off the
+    // operator `status` projection: that path scans /proc, reads store counts,
+    // and clones the full control-plane category projection. `handoff_status`
+    // carries the same freshness proof without those diagnostics.
+    if let Ok(controller_status) = controller_adoption_status(&project_root) {
         let current_binary = current_binary_identity().ok();
         if let Some(message) =
             status::supervisor_stale_warning_message(&controller_status, current_binary.as_ref())

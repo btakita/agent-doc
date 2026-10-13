@@ -24,7 +24,11 @@ shown by the CLI-entry check or by a turn-stage check suppresses the same
 supervisor's line in the session-check report that follows (logged as
 `stale_supervisor_warning_deduped`). Raw message builders stay private to the
 controller crates; a workspace source-shape test enforces that no other path
-shows a raw remedy.
+shows a raw remedy. The shared stale-supervisor freshness probe reads the
+controller's lightweight `handoff_status` receipt because it needs only the
+serving pid and binary identity. Full operator `status` diagnostics — duplicate
+process discovery, durable-store counts, and control-plane category snapshots —
+remain reserved for explicit status commands and actual recovery transitions.
 
 ## run
 

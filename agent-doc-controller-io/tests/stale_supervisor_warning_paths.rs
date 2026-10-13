@@ -165,6 +165,27 @@ fn session_check_report_uses_the_recycle_aware_deduping_reporter() {
 }
 
 #[test]
+fn stale_supervisor_probe_uses_lightweight_controller_status() {
+    let rpc = fs::read_to_string(
+        workspace_root().join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    let (_, body) = top_level_items(&rpc)
+        .into_iter()
+        .find(|(head, _)| head.starts_with("fn stale_supervisor_condition_for_doc("))
+        .expect("stale-supervisor condition builder");
+
+    assert!(
+        body.contains("controller_adoption_status(&project_root)"),
+        "the cross-document stale-supervisor probe must use the lightweight handoff status"
+    );
+    assert!(
+        !body.contains("= status(&project_root)"),
+        "the stale-supervisor probe must not request the heavyweight operator status projection"
+    );
+}
+
+#[test]
 fn every_rpc_path_that_shows_a_raw_warning_formats_it_first() {
     let rpc = fs::read_to_string(
         workspace_root().join("agent-doc-controller-io/src/project_controller/rpc.rs"),

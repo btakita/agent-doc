@@ -172,9 +172,34 @@ def pr_refs(text: str) -> tuple[PullRequestRef, ...]:
     )
 
 
+def parse_channel(channel: str) -> str:
+    """Normalize a Slack channel ID or browser URL to its channel ID."""
+    value = channel.strip()
+    if re.fullmatch(r"[A-Z0-9]+", value):
+        return value
+
+    parsed = urllib.parse.urlparse(value)
+    hostname = (parsed.hostname or "").lower()
+    if parsed.scheme not in {"http", "https"} or not (
+        hostname == "slack.com" or hostname.endswith(".slack.com")
+    ):
+        raise UpdateError(f"invalid Slack channel ID or URL: {channel!r}")
+
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "archives":
+        channel_id = parts[1]
+    elif len(parts) >= 3 and parts[0] == "client":
+        channel_id = parts[2]
+    else:
+        raise UpdateError(f"invalid Slack channel ID or URL: {channel!r}")
+    if not re.fullmatch(r"[A-Z0-9]+", channel_id):
+        raise UpdateError(f"invalid Slack channel ID in URL: {channel!r}")
+    return channel_id
+
+
 def parse_target(channel: str, message: str) -> tuple[str, str]:
     """Normalize a channel ID and a Slack timestamp or permalink."""
-    channel_id = channel.strip()
+    channel_id = parse_channel(channel) if channel.strip() else ""
     message_value = message.strip()
     link_match = SLACK_LINK_RE.search(message_value)
     if link_match:
@@ -186,8 +211,8 @@ def parse_target(channel: str, message: str) -> tuple[str, str]:
         stamp = link_match.group("stamp")
         return link_channel, f"{stamp[:10]}.{stamp[10:]}"
 
-    if not re.fullmatch(r"[A-Z0-9]+", channel_id):
-        raise UpdateError(f"invalid Slack channel ID: {channel_id!r}")
+    if not channel_id:
+        raise UpdateError("a Slack channel ID or URL is required")
     if re.fullmatch(r"[0-9]{16}", message_value):
         message_value = f"{message_value[:10]}.{message_value[10:]}"
     if not re.fullmatch(r"[0-9]+\.[0-9]+", message_value):
@@ -599,7 +624,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=HELP_EPILOG,
     )
-    parser.add_argument("--channel", default="", help="Slack channel ID, such as C012ABCDEF")
+    parser.add_argument(
+        "--channel",
+        default="",
+        help="Slack channel ID or URL, such as C012ABCDEF or a /archives/C012ABCDEF URL",
+    )
     parser.add_argument(
         "--message",
         default="",
@@ -642,9 +671,9 @@ def run(argv: Sequence[str] | None = None) -> int:
             raise UpdateError(f"environment variable {args.token_env!r} is not set")
         original = read_message(token, channel, timestamp)
     else:
-        channel = args.channel.strip()
-        if not re.fullmatch(r"[A-Z0-9]+", channel):
+        if not args.channel.strip():
             raise UpdateError("--channel is required when --message is omitted")
+        channel = parse_channel(args.channel)
         if not targets:
             raise UpdateError(
                 "creating a message requires --github-user/--repository targets"

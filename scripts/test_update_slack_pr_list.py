@@ -71,6 +71,27 @@ class ParseTargetTests(unittest.TestCase):
             ("C0C8LPQ7NS1", "1791874207.231429"),
         )
 
+    def test_parses_channel_urls(self) -> None:
+        for channel_url in (
+            "https://haivengroup.slack.com/archives/C0C8LPQ7NS1",
+            "https://app.slack.com/client/T0123456789/C0C8LPQ7NS1",
+        ):
+            with self.subTest(channel_url=channel_url):
+                self.assertEqual(subject.parse_channel(channel_url), "C0C8LPQ7NS1")
+
+    def test_parse_target_accepts_channel_url_with_timestamp(self) -> None:
+        self.assertEqual(
+            subject.parse_target(
+                "https://haivengroup.slack.com/archives/C0C8LPQ7NS1",
+                "1791874207.231429",
+            ),
+            ("C0C8LPQ7NS1", "1791874207.231429"),
+        )
+
+    def test_rejects_non_slack_channel_url(self) -> None:
+        with self.assertRaises(subject.UpdateError):
+            subject.parse_channel("https://example.com/archives/C0C8LPQ7NS1")
+
 
 class RepositoryTargetTests(unittest.TestCase):
     def test_expands_repeatable_and_comma_separated_values(self) -> None:

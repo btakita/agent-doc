@@ -275,6 +275,19 @@ class ReconcileTests(unittest.TestCase):
         )
         self.assertEqual(result.merge_conflicts, (conflicted.ref,))
 
+    def test_collapses_duplicate_canonical_conflict_markers(self) -> None:
+        conflicted = status(109, reviewed="old", head="new", conflict=True)
+        message = (
+            "17. <https://github.com/haiven-dev/widgets/pull/109|sdk #109> "
+            "feat(unreal): add standalone chat starter :boom: :eyes: :boom:"
+        )
+
+        result = subject.reconcile_message(message, {conflicted.ref: conflicted})
+
+        self.assertEqual(result.text.count(":boom:"), 1)
+        self.assertEqual(result.text.count(":eyes:"), 1)
+        self.assertTrue(result.text.endswith(":eyes: :boom:"))
+
     def test_commonmark_strike_from_adapter_normalizes_for_slack_api(self) -> None:
         item = status(8, state="closed")
         original = (

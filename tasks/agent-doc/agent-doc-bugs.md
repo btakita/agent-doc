@@ -239,7 +239,18 @@ For IDEA: once this response commits and `session-check` passes, restarting is s
 The unrelated live `sdk.md` retained closeout was not touched or replayed.
 
 Session-accretion warning: the exchange is large, but the active queue was drained without interrupting it for compaction.
-<!-- agent:boundary:3d301991 -->
+> **Chat prompt (#chatprompt):** have you published the release?
+
+### Re: v0.35.497 publication status — gpt-5 · 2026-10-13T02:23-04:00
+
+Not fully yet.
+
+> **Queue prompt:** release + publish
+
+**Deferred:** `origin/main` and tag `v0.35.497` are pushed at `8010520d4cdd0632f3e9c0db47e64659864e6564`, and `make release` completed its tag/publish handoff and local install. However, the [GitHub Release workflow](https://github.com/btakita/agent-doc/actions/runs/38354378905) is still in progress, `gh release view v0.35.497` currently reports `release not found`, and no v0.35.497 PyPI workflow is visible yet. Book and Pages have succeeded; main CI is still in progress.
+
+I did not dispatch duplicate workers for the replayed steering: issue #247 is already fixed and closed, and the release command already ran exactly once.
+<!-- agent:boundary:673547bf -->
 <!-- /agent:exchange -->
 
 <!--

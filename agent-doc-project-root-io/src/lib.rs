@@ -328,6 +328,24 @@ mod tests {
     }
 
     #[test]
+    fn project_root_or_file_parent_prefers_nearest_nested_agent_doc_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer = dir.path();
+        let nested = outer.join("packages/child");
+        std::fs::create_dir_all(outer.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        let doc = nested.join("docs/session.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\n---\n").unwrap();
+
+        assert_eq!(
+            project_root_or_file_parent(&doc).unwrap(),
+            nested.canonicalize().unwrap(),
+            "project-scoped readers must not inherit configuration from an outer project"
+        );
+    }
+
+    #[test]
     fn project_root_or_file_parent_falls_back_to_file_parent() {
         let dir = tempdir_without_agent_doc_ancestor();
         let doc = dir.path().join("nested/session.md");

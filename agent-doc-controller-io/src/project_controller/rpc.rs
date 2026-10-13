@@ -15667,7 +15667,11 @@ pub fn ensure_serving_controller(project_root: &Path, launch_mode: LaunchMode) -
     // a retryable "busy" error; the editor retries on its next request.
     ensure_serving_controller_with(
         project_root,
-        || request(project_root, "status"),
+        // Serving readiness needs only a receipt from the controller bound at
+        // the public socket. Full `status` also scans `/proc` for duplicates and
+        // reads durable diagnostic counts; an editor recovery retry must not
+        // turn those operator diagnostics into an idle health-poll workload.
+        || request(project_root, "handoff_status"),
         || {
             for pid in discover_stale_duplicate_pids(project_root, None) {
                 reap_verified_controller_pid(project_root, pid, 0);
@@ -20124,8 +20128,11 @@ fn schedule_editor_replica_rebuild_after_promotion(
     std::thread::spawn(move || {
         let deadline = Instant::now() + HANDOFF_CONNECT_WAIT;
         loop {
-            if status(&project_root).is_ok_and(|status| {
-                public_controller_matches_generation(&status, expected_pid, expected_generation)
+            let status = request(&project_root, "handoff_status")
+                .ok()
+                .and_then(|response| serde_json::from_str::<ControllerStatus>(&response).ok());
+            if status.as_ref().is_some_and(|status| {
+                public_controller_matches_generation(status, expected_pid, expected_generation)
             }) {
                 agent_doc_ops_log_io::log_op(
                     &project_root,
@@ -35834,6 +35841,40 @@ mod tests {
         .unwrap();
         assert!(reconnected.get());
         assert_eq!(reaped.get(), 0);
+    }
+
+    #[test]
+    fn serving_readiness_uses_the_lightweight_status_projection() {
+        let source = include_str!("rpc.rs");
+        let ensure = &source[source
+            .find("pub fn ensure_serving_controller(")
+            .expect("serving ensure entry point")..];
+        let ensure = &ensure[..ensure
+            .find("pub(crate) enum ServingProbe")
+            .expect("serving probe definition")];
+        assert!(
+            ensure.contains("request(project_root, \"handoff_status\")"),
+            "editor readiness must not request the full operator diagnostic projection"
+        );
+        assert!(
+            !ensure.contains("request(project_root, \"status\")"),
+            "editor readiness must not scan durable ledgers or discover duplicate processes"
+        );
+
+        let promotion = &source[source
+            .find("fn schedule_editor_replica_rebuild_after_promotion(")
+            .expect("post-promotion readiness poll")..];
+        let promotion = &promotion[..promotion
+            .find("/// `#ctrlkillreregister`")
+            .expect("next controller section")];
+        assert!(
+            promotion.contains("request(&project_root, \"handoff_status\")"),
+            "the 50ms post-promotion poll must use the lightweight generation receipt"
+        );
+        assert!(
+            !promotion.contains("status(&project_root)"),
+            "the readiness poll must not invoke full status diagnostics"
+        );
     }
 
     /// `#netadv5` R8 / `#netadv4` SIM-F3: a dispatch request whose ACK was lost

@@ -18,6 +18,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   the temporary launcher archive, preserving ZIP metadata while satisfying the
   Java stager's structural validation. The UI no longer claims staging success
   before the launcher accepts the archive.
+- **Codex subagent results no longer inherit coordinator queue continuations.**
+  Stop handling now matches both session and turn identity, so a background
+  worker sharing the parent session passes through instead of surfacing the
+  coordinator's normal queue handoff as `Blocked by hook`.
 
 ## 0.35.497
 

@@ -150,30 +150,6 @@ This was the same `visible_length_mismatch` incident, not a second defect. The i
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#runrestartduring]~~
-~~~done
-Run Agent Doc on infra.md issue
-```
-› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
-
-
-• Agent-doc admission is still blocked by a retained document write. I’ll run only the permitted session check and
-  report any queued operator prompt or recovery instruction without modifying the document.
-
-• Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
-  └ [perf] run_context.read label=head_content elapsed_ms=36
-    [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md total_ms=35…
-    [session-check] INTERRUPTED: binary-owned response delivery `1791849117705171624-1-738fdcec2752715c0b4c2a700049ae2…
-    + 2 lines (^t to expand)
-
-• Agent-doc remains blocked because the editor endpoint is rejecting the retained write. Restart or reload the editor
-  containing tasks/infra.md, then re-trigger this request.
-
-  The response remains durable—do not resend or force-write it. No pending operator prompt was listed.
-
-  Worked for 13s • 8:24 PM
-```
-~~~
 - 🚧 release + publish
 <!-- /agent:queue -->
 

@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.496
+
+- **Stale native editor projections defer instead of rejecting the retained
+  response.** JetBrains save callbacks now distinguish projection drift from a
+  hard endpoint refusal with a typed `deferred/projection_changed` receipt, so a
+  restart-era response remains durable while the editor catches up instead of
+  wedging Run Agent Doc behind a false rejection. The IPC protocol, FFI mapping,
+  classic and exact-262 plugins, and regression coverage share the contract.
+- **Concurrent operations-log records remain intact.** Each `ops.log` and
+  `cycles.jsonl` record, including its terminating newline, is assembled before
+  one append write so concurrent writers cannot interleave record bodies and
+  separators.
+- **Repeated Codex Stop triggers coalesce into the active closeout.** A same-turn
+  trigger joins the in-flight captured-finalize work rather than starting a
+  competing closeout or replaying the response.
+- **Documentation and licensing refresh.** The README and reference guide now
+  provide a concise user-facing introduction, installation and routing guides,
+  and architecture/feature references. The project is licensed Apache-2.0-only.
+
 ## 0.35.495
 
 - **A wedged editor liveness channel drains itself (`#runfrontendissue`).** A

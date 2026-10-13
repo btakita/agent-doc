@@ -224,6 +224,16 @@ I used the Slack connector only to apply and verify the live prototype message b
 I made that runtime contract explicit in `--help`, documented the token and `gh auth login` requirements, and added a clear setup error when `gh` is unavailable. The file remains directly executable and uses only Python's standard library.
 
 Ruff, byte-compilation, all 24 focused tests, and `git diff --check` pass. Commit: `4421dbb955 docs: clarify standalone Slack updater`.
+
+### Re: There are multiple :boom: icons in a line. — gpt-5 · 2026-10-13T19:42:52-04:00
+
+> **Queue prompt:** There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`
+
+Fixed. Slack canonicalizes the original `:collision:` alias to `:boom:`; the updater now treats both spellings and the rendered emoji as managed markers, removes all stale copies, and appends exactly one canonical `:boom:` when the PR is currently conflicted.
+
+The live SDK #109 line now ends in exactly `:eyes: :boom:`. I added the exact reported line as a regression fixture; all 25 focused tests, Ruff, and `git diff --check` pass.
+
+Commit: `5817a43b48 test: prevent duplicate conflict markers`.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
@@ -232,7 +242,7 @@ Ruff, byte-compilation, all 24 focused tests, and `git diff --check` pass. Commi
 <!-- agent:queue go priority -->
 - ~~Make the message have a key for the emojis so reads understand what each emoji means.~~
 - ~~Make the script work standalone without an agent. Are you using the Slack mcp? Can we make this work without the Slack mcp?~~
-- There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`
+- ~~There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`~~
 - Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.
 <!-- /agent:queue -->
 

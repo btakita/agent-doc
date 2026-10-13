@@ -120,13 +120,36 @@ Added regression coverage for a root → intermediate → tip chain, standalone 
 Focused tests, bytecode compilation, Ruff, diff checks, and Slack readback passed. The latest GitHub Actions CI run is green. The authoritative `make check` again reached 1,528 tests with 1,527 passing; only the pre-existing dirty development-skill bundle mismatch failed, and those unrelated edits were preserved.
 
 The CLI help item and channel-ID-or-URL enhancement remain queued behind this completed item.
+
+### Re: #helpexplaincommands — gpt-5 · 2026-10-13T19:30-04:00
+
+> **Queue prompt:**
+>
+> do [#helpexplaincommands]
+
+
+Completed. `python scripts/update_slack_pr_list.py --help` now documents:
+
+- Create, update, and dry-run/preview modes.
+- Every CLI argument and the Slack token environment variable.
+- Repeatable and comma-separated GitHub owners/repositories, including explicit `OWNER/REPO` targets.
+- The generated Slack message format and marker order.
+- Review meanings for `:white_check_mark:`, `:eyes:`, and `:warning:`.
+- Stack meanings for `:crown:`, `:link:`, and the no-marker standalone state.
+- Copyable create and permalink-update examples.
+
+Added a regression test that asserts every required section, option, and emoji meaning remains present. Committed exactly the updater and test files as `48b2676fc2` (`docs: explain Slack PR updater CLI`).
+
+The rendered `--help` output, focused tests, bytecode compilation, Ruff, and diff checks passed. The authoritative `make check` again reached 1,528 tests with 1,527 passing and only the pre-existing dirty development-skill bundle mismatch failing.
+
+The channel-ID-or-URL enhancement remains queued next.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go priority -->
-- 🚧 do [#helpexplaincommands]
+- ~~do [#helpexplaincommands]~~
 - ~~Assign an icon that is the head of a PR stack and another icon for a PR that is not the head of a PR stack.~~ — auto-struck: answered this cycle (#ftstrike)
 - Make all the logic in a script if you have not already.
 - Make an icon for a merge conflict.
@@ -139,10 +162,15 @@ The CLI help item and channel-ID-or-URL enhancement remain queued behind this co
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#helpexplaincommands] Add a help to explain the commands + cli args + format + emoji meanings
 <!-- /agent:backlog -->
 
 ## Icebox
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-10-13 [#helpexplaincommands] Add a help to explain the commands + cli args + format + emoji meanings
+<!-- /agent:done -->

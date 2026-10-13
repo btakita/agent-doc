@@ -96,3 +96,20 @@ export function resolveEditorRouteTerminal(data: any, commandId: string): string
     }
     return output;
 }
+
+const STEERING_DELIVERED_OUTCOME = 'ui_outcome=steering_delivered_to_owner';
+const STEERING_DELIVERED_COUNT = /\bsteering_delivered=(\d+)\b/;
+
+export function isEditorRouteSteeringDelivered(output: string): boolean {
+    const count = STEERING_DELIVERED_COUNT.exec(output)?.[1];
+    return output.includes(STEERING_DELIVERED_OUTCOME) && Number(count) > 0;
+}
+
+export function buildEditorRouteSuccessHint(relativePath: string, output: string): string {
+    if (isEditorRouteSteeringDelivered(output)) {
+        const count = Number(STEERING_DELIVERED_COUNT.exec(output)?.[1] ?? 0);
+        const noun = count === 1 ? 'update' : 'updates';
+        return `Sent ${count} ${noun} to the Agent Doc turn already running for ${relativePath}; no second turn was started.`;
+    }
+    return output.trim() || `Routed ${relativePath}`;
+}

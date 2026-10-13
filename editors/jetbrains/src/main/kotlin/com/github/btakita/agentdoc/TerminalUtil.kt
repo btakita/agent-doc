@@ -30,6 +30,7 @@ object TerminalUtil {
     private const val EDITOR_FAILURE_STATUS_SECONDS = 30L
     internal const val RUN_ROUTE_WAIT_FOR_READY_SECONDS = 120L
     private const val UI_OUTCOME_QUEUED_BEHIND_OWNER = "queued_behind_owner"
+    private const val UI_OUTCOME_STEERING_DELIVERED_TO_OWNER = "steering_delivered_to_owner"
     private const val UI_OUTCOME_RECOVERED_AND_RETRIED = "recovered_and_retried"
     private const val SUPERVISOR_RESTART_REDIRECT_MARKER = "supervisor_restart_redirect"
     private val BUSY_CLEAR_REFUSAL_HEADER_REGEX = Regex(
@@ -272,6 +273,7 @@ object TerminalUtil {
         PERSISTENT,
         STARTUP_NOT_READY,
         BUSY_RUNNING,
+        STEERING_DELIVERED,
         QUEUED_PENDING,
         QUEUE_PAUSED,
         AGENT_SWITCH_DEFERRED,
@@ -574,6 +576,16 @@ object TerminalUtil {
                         notifyRunAgentDocStillRunning(project, relativePath, output)
                         finalStage = "route_startup_not_ready"
                         finalError = routeAttemptError(exitCode, failureKind, output)
+                    } else if (failureKind == RunAgentDocRouteFailureKind.STEERING_DELIVERED) {
+                        LOG.warn("[route] steering delivered to active owner for $relativePath: $output")
+                        clearPersistedRouteFailureOutput(project, cwd, relativePath)
+                        notifyRunAgentDocSteeringDelivered(project, relativePath, output)
+                        StateProjectionBridge.recordRouteDispatchProven(
+                            documentPath,
+                            routeGeneration,
+                            "jetbrains:${routeKey.hashCode()}:steering-delivered",
+                        )
+                        finalStage = "route_steering_delivered"
                     } else if (failureKind == RunAgentDocRouteFailureKind.QUEUED_PENDING) {
                         LOG.warn("[route] queued behind active turn for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
@@ -639,7 +651,11 @@ object TerminalUtil {
                 } finally {
                     finalStage?.let { stage ->
                         attempt?.finishIfCurrent(stage, command = cmd, error = finalError)
-                        if (stage != "route_success" && stage != "route_superseded") {
+                        if (
+                            stage != "route_success" &&
+                            stage != "route_steering_delivered" &&
+                            stage != "route_superseded"
+                        ) {
                             StateProjectionBridge.recordRouteBlocked(
                                 documentPath,
                                 routeGeneration,
@@ -1964,6 +1980,7 @@ object TerminalUtil {
 
     internal fun classifyRunAgentDocRouteFailure(output: String): RunAgentDocRouteFailureKind {
         return when {
+            isRunAgentDocSteeringDelivered(output) -> RunAgentDocRouteFailureKind.STEERING_DELIVERED
             isRunAgentDocRouteQueued(output) -> RunAgentDocRouteFailureKind.QUEUED_PENDING
             parseRunAgentDocQueuePaused(output) != null -> RunAgentDocRouteFailureKind.QUEUE_PAUSED
             parseRunAgentDocAgentSwitchDeferred(output) != null -> RunAgentDocRouteFailureKind.AGENT_SWITCH_DEFERRED
@@ -2035,6 +2052,12 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         return hasUserFacingOutcome(lower, UI_OUTCOME_QUEUED_BEHIND_OWNER) ||
             lower.contains("queued pending dispatch") &&
             (lower.contains("active agent:queue") || lower.contains("agent:queue auto"))
+    }
+
+    private fun isRunAgentDocSteeringDelivered(output: String): Boolean {
+        val lower = output.lowercase()
+        return hasUserFacingOutcome(lower, UI_OUTCOME_STEERING_DELIVERED_TO_OWNER) &&
+            lower.contains("steering_delivered=")
     }
 
     internal fun parseRunAgentDocQueuePaused(output: String): RunAgentDocQueuePaused? {
@@ -2479,6 +2502,11 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             "It should run when that turn drains."
     }
 
+    internal fun buildRunAgentDocSteeringDeliveredMessage(relativePath: String): String {
+        return "Sent your update to the Agent Doc turn already running for $relativePath.\n" +
+            "That turn will handle it; no second turn was started."
+    }
+
     internal fun buildRunAgentDocQueuePausedMessage(
         relativePath: String,
         paused: RunAgentDocQueuePaused,
@@ -2747,6 +2775,22 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             notification.addAction(NotificationAction.createSimple("Copy details") {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
                 showHint(project, "Copied queued route details for $relativePath")
+            })
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
+    private fun notifyRunAgentDocSteeringDelivered(project: Project, relativePath: String, routeOutput: String) {
+        val summary = buildRunAgentDocSteeringDeliveredMessage(relativePath)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(notificationHtml(summary), NotificationType.INFORMATION)
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
+                showHint(project, "Copied steering delivery details for $relativePath")
             })
             notification.notify(project)
         } catch (_: Exception) {

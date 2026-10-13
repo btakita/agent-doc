@@ -27,7 +27,13 @@ import {
     parseCrossSessionReject,
     CrossSessionReject,
 } from './crossSession.js';
-import { buildEditorRoutePayload, buildEditorRouteCommandMessage, resolveEditorRouteTerminal } from './commandPlane.js';
+import {
+    buildEditorRoutePayload,
+    buildEditorRouteCommandMessage,
+    buildEditorRouteSuccessHint,
+    isEditorRouteSteeringDelivered,
+    resolveEditorRouteTerminal,
+} from './commandPlane.js';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition.js';
 import {
     buildBusySessionRestartBlockedMessage,
@@ -1363,10 +1369,15 @@ routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
                 + `epoch=${native.mirrorEpochForFile(filePath) ?? '-'} file=${rel}`,
             );
         }
-        showHint(output || `Routed ${rel}`);
+        showHint(buildEditorRouteSuccessHint(rel, output));
     } catch (err: any) {
         if (isCliCancelled(err)) {
             showHint(`Run cancelled before Clear Session Context for ${rel}`);
+            return;
+        }
+        if (routeGeneration !== null && isEditorRouteSteeringDelivered(err.message)) {
+            native.recordRouteDispatchProven(filePath, routeGeneration, `vscode:${routeKey}:steering-delivered`, cwd);
+            showHint(buildEditorRouteSuccessHint(rel, err.message));
             return;
         }
         native.recordRouteBlocked(filePath, routeGeneration, err.message, cwd);

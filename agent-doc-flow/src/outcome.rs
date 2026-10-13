@@ -34,6 +34,10 @@ impl fmt::Display for BinaryOutcomeClass {
 #[serde(rename_all = "snake_case")]
 pub enum UserFacingOutcomeKind {
     QueuedBehindOwner,
+    /// An explicit editor send reached the turn that already owns the document.
+    /// The route is complete: the owner will observe the steering without a
+    /// duplicate harness trigger.
+    SteeringDeliveredToOwner,
     RecoveredAndRetried,
     DeferredForOperatorProof,
     /// The in-session loop has no drainable head, but a `[focused-cycle]` head
@@ -64,6 +68,7 @@ impl UserFacingOutcomeKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::QueuedBehindOwner => "queued_behind_owner",
+            Self::SteeringDeliveredToOwner => "steering_delivered_to_owner",
             Self::RecoveredAndRetried => "recovered_and_retried",
             Self::DeferredForOperatorProof => "deferred_for_operator_proof",
             Self::DeferredForSupervisorDrain => "deferred_for_supervisor_drain",
@@ -78,6 +83,7 @@ impl UserFacingOutcomeKind {
     pub const fn class(self) -> BinaryOutcomeClass {
         match self {
             Self::QueuedBehindOwner
+            | Self::SteeringDeliveredToOwner
             | Self::NoDrainableWork
             | Self::DeferredForSupervisorDrain
             | Self::DeferredForRecycle => BinaryOutcomeClass::Ok,
@@ -93,6 +99,7 @@ impl UserFacingOutcomeKind {
     pub const fn next_action(self) -> &'static str {
         match self {
             Self::QueuedBehindOwner => "wait_for_owner_turn_to_drain",
+            Self::SteeringDeliveredToOwner => "owner_turn_handles_steering",
             Self::RecoveredAndRetried => "continue_after_recovery_retry",
             Self::DeferredForOperatorProof => "operator_proof_required",
             Self::DeferredForSupervisorDrain => "yield_to_supervisor_clear_and_continue",
@@ -391,6 +398,12 @@ mod tests {
                 "queued_behind_owner",
                 BinaryOutcomeClass::Ok,
                 "wait_for_owner_turn_to_drain",
+            ),
+            (
+                Kind::SteeringDeliveredToOwner,
+                "steering_delivered_to_owner",
+                BinaryOutcomeClass::Ok,
+                "owner_turn_handles_steering",
             ),
             (
                 Kind::RecoveredAndRetried,

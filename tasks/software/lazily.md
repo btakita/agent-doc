@@ -18,7 +18,6 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish'
-queue: go
 ---
 
 ## Status
@@ -160,25 +159,38 @@ The safe next release sequence is: integrate profile/claims, then facades/compat
 Verification was read-only: all 13 GitHub releases/tags and supported registries were checked, the staged pin count is exactly 13 with `git diff --cached --check` green, the cold-start five-file diff passes `git diff --check`, and its prior full nine-peer evidence remains green. No files changed in the audit worktree, and no commit, push, install, version bump, tag, release, or publication occurred. The undefined `#spec-test-commit-push` preset still withholds integration/commit/push authority.
 
 Preflight separately reports the live JetBrains plugin at `0.2.561` while this binary ships `0.2.563`; install `0.2.563` with `agent-doc plugin install jetbrains`, then restart or reload the IDE. The semantic completion suggestion involving `#lzexpectedkeyorder` is unrelated and was not treated as evidence that this release directive was already complete. The exchange remains above its advisory size threshold, but the active queue continues without compaction.
+
+### Re: #lzgocireachability — gpt-5 · 2026-10-12T20:55-04:00
+
+> **Queue prompt:**
+>
+> do [#lzgocireachability]
+
+
+The Lazily Go CI reachability defect is fixed in isolated worktree `/home/brian/worktrees/lzgocireachability-go-20261012`, branch `task/lzgocireachability-20261012`, from base `e5e082a2d7638e4e274a8d8f808ccf39e349bb51`.
+
+The new `core-artifact-consumer` job invoked `make core-artifact-consumer-check` from an unnamed workflow step. `scripts/check-ci-reach.sh` intentionally maps required gates by step identity, so it rejected that anchor-bearing unnamed step. The entire intended diff is in `.github/workflows/ci.yml`: the step is now named `Core artifact consumer`. Existing reachability coverage already pins this failure mode, so no additional test code was necessary.
+
+Verification is green: `make ci-reach` passed with all 12 closure targets and 11 gate mappings set-equal; full `make check` passed vet/build, unit and race tests, interop, PostgreSQL barrier, module dependency, fixture/scenario coverage, assertion ordering, and CI reachability; `make core-artifact-consumer-check` passed; and `git diff --check` passed. The latest upstream main run `38302364743` remains red only because this change has not been pushed; both Go 1.24 and 1.25 consumer jobs passed.
+
+The technical release blocker is cleared locally. No commit or push occurred because `#spec-test-commit-push` is undefined, so the item is review-gated solely on explicit landing authorization. No additional backlog follow-up is needed because the gated item retains the exact one-file landing action and upstream-CI confirmation. The `tsift` review confirmed that no other tracked file remains changed.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- do [#lzgocireachability]
-- ~~release + publish all lazily repos~~
+<!-- agent:queue subagents preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgocireachability] Fix lazily-go main CI reachability guard by naming the workflow step that runs make core-artifact-consumer-check, add or update deterministic coverage if needed, run the full CI-equivalent checks, then clear this release blocker.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzgocireachability] The Lazily Go CI reachability fix is complete and fully verified in /home/brian/worktrees/lzgocireachability-go-20261012 on branch task/lzgocireachability-20261012 from base e5e082a2d7638e4e274a8d8f808ccf39e349bb51; blocked only until explicit commit/push authorization is supplied or #spec-test-commit-push is defined, then land the single .github/workflows/ci.yml step-name change and confirm upstream CI.
 - [/] [#fixrunturn] Run Agent Doc route-race fix and deterministic coverage are complete and fully verified in /home/brian/worktrees/agent-doc-fixrunturn-stack-20261012/agent-doc on branch fix/run-agent-doc-turn-rejection-20261012 from base 06afd858eebc81440dbbebec6a51f0ec788391f1; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate exactly the six agent-doc-route-io files and run the single coordinator install.
 - [/] [#lzagentdocartifactrefresh] Fresh artifact-purge handoff and both dry-run modes are complete and verified in /home/brian/worktrees/agent-loop-lzagentdocartifactrefresh-20261012 on branch task/lzagentdocartifactrefresh-20261012 from base 215dc9dc52339478da6cc90aa5c7d5808f3e54c5; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate the five tracked btakita/agent-doc audit/script files without the scratch .audit-work reports.
 - [/] [#lzinteropcoldstart] Cold-start fix and deterministic coverage are complete and verified in /home/brian/worktrees/agent-loop-lzinteropcoldstart-20261012 on branch task/lzinteropcoldstart-20261012 from base a282bba7b853016809dc2c0c5cc51dcd4590d92e; blocked only until explicit commit/integration authorization is supplied or #spec-test-commit-push is defined, then integrate exactly the five src/lazily-interop code/documentation/test files and exclude the validation-only release-pin gitlinks.

@@ -153,19 +153,33 @@ Confirmed complete. All runtime behavior is contained in `scripts/update_slack_p
 The separate `scripts/test_update_slack_pr_list.py` file contains tests only and imports the script as its subject; there is no required runtime helper, notebook, generated file, or manual transformation outside the script.
 
 No repository change was needed for this confirmation. The current focused test, compile, lint, live GitHub dry-run, and Slack-readback evidence from the preceding implementation cycles covers the self-contained path.
+
+### Re: Make an icon for a merge conflict. — gpt-5 · 2026-10-13T19:37:21-04:00
+
+> **Queue prompt:** Make an icon for a merge conflict.
+
+Implemented and committed the merge-conflict marker.
+
+- Open PRs that GitHub reports as `mergeable: false` or `mergeable_state: dirty` now receive `:boom:`.
+- The updater owns and normalizes both Slack's canonical `:boom:` and its `:collision:` alias, so repeated runs remain idempotent and remove stale conflict markers.
+- Closed PRs are struck through without retaining a conflict marker.
+- The live Slack message was refreshed and read back: eight open PRs have one `:boom:` each, including SDK #109, and closed contracts #149 has none.
+- Added focused coverage for applying, removing, deduplicating, and excluding closed conflicts. Ruff, byte-compilation, all 16 script tests, and `git diff --check` pass.
+- Commit: `ed98ce85f5 feat: mark pull request merge conflicts`.
+
+The repository-wide `make check` reached 1,526 passing tests before the existing unrelated generated-skill parity failure (`development_claude_skill_matches_the_bundle`); the focused change is green, and the latest CI run was successful.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go priority -->
-- ~~do [#helpexplaincommands]~~
-- ~~Assign an icon that is the head of a PR stack and another icon for a PR that is not the head of a PR stack.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Make all the logic in a script if you have not already.~~
-- Make an icon for a merge conflict.
-- ~~Make the script take a gh user name(s) + repository name(s). Use the user name(s) + repository name(s) to create/edit a slack message with the status. If a message url is provided, that message will be updated...otherwise a new message will be created in a provided slack channel.~~
+- ~~Make an icon for a merge conflict.~~
 - Make the channel cli arg take an id or url.
 - Make the script use events (preferably) or poll and support hot reloading + logs for agents + humans to see activity.
+- Make the message have a key for the emojis so reads understand what each emoji means.
+- There are multiple :boom: icons in a line. `sdk #109 feat(unreal): add standalone chat starter :boom: :eyes: :boom:`
+- Make the script work standalone without an agent as well. Are you using the Slack mcp? Can we make this work without the Slack mcp?
 - Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.
 <!-- /agent:queue -->
 

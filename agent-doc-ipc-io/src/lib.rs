@@ -616,6 +616,9 @@ fn send_message_with_timeout_inner_with_identity(
                     SocketReceiptClassification::AlreadyApplied => {
                         return Err(anyhow::anyhow!("IPC receipt already_applied: {}", receipt));
                     }
+                    SocketReceiptClassification::Deferred => {
+                        return Err(anyhow::anyhow!("IPC receipt deferred: {}", receipt));
+                    }
                     SocketReceiptClassification::Rejected => {
                         return Err(anyhow::anyhow!(
                             "{}: {}",
@@ -762,6 +765,9 @@ fn send_legacy_reload_to_pid(
                 SocketReceiptClassification::Pending => Err(anyhow::anyhow!(
                     "legacy reload returned non-terminal receipt: {receipt}"
                 )),
+                SocketReceiptClassification::Deferred => {
+                    Err(anyhow::anyhow!("legacy reload deferred: {receipt}"))
+                }
                 SocketReceiptClassification::Rejected
                 | SocketReceiptClassification::Unsupported => Err(anyhow::anyhow!(
                     "legacy reload rejected or unsupported: {receipt}"
@@ -2967,6 +2973,48 @@ mod tests {
         assert!(
             is_ipc_receipt_rejected_error(&error),
             "a live listener's rejection must be recognizable as definitive, got: {err}"
+        );
+
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
+    fn socket_deferred_receipt_is_retryable_projection_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, |_msg| {
+                Some(
+                    serde_json::json!({
+                        "type": "receipt",
+                        "status": "deferred",
+                        "reason": "projection_changed",
+                    })
+                    .to_string(),
+                )
+            })
+            .ok();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let msg = serde_json::json!({"type": "persist_current"});
+        let error = send_message(&root, &msg).unwrap_err();
+        assert!(
+            error.to_string().contains("IPC receipt deferred"),
+            "deferred receipt should end this attempt without waiting: {error:#}"
+        );
+        assert!(
+            !is_ipc_receipt_rejected_error(&error),
+            "projection drift must not count as an endpoint refusal: {error:#}"
+        );
+        assert_eq!(
+            agent_doc_ipc_protocol::classify_socket_delivery_failure(error.to_string()),
+            Some(agent_doc_ipc_protocol::SocketDeliveryFailure::ProjectionUnconverged)
         );
 
         let _ = std::fs::remove_file(socket_path(&root));

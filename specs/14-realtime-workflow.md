@@ -250,7 +250,7 @@ trailing refusal run (`consecutive_rejections`, GH #131):
 |---|---|---|---|
 | `Rejected` (`IPC receipt rejected`) | socket send error | +1 | extend |
 | `VisibleWriteDiverged` (receipt refused as divergent from canonical) | `socket_visible_write` adoption, after the ACK | +1 | extend |
-| `ProjectionUnconverged` (editor never projected the target) | `serialized_atomic_write` retention, no socket | +1 | carry unchanged |
+| `ProjectionUnconverged` (editor never projected the target, or terminal `deferred` receipt reports a changed save projection) | non-socket retention or socket save precondition drift | +1 | carry unchanged |
 | `Timeout` / `Unsupported` | socket send error | +1 | reset |
 
 `#gh131nonipc`: the two middle rows never reached a socket error branch, so they
@@ -268,6 +268,12 @@ retention is evidence of neither refusal nor acceptance, so it carries the run.
   `socket_visible_write` (`socket_visible_write_proven`), an editor-convergence
   writeback, or a `serialized_atomic_write` whose exact editor projection was
   natively saved.
+- A native-save compare-and-save request whose expected hash, byte length, or
+  replica projection is no longer current returns a terminal `deferred`
+  receipt. It ends that socket attempt and asks the retained transition to
+  retry from current authority, but it is not an endpoint refusal and must not
+  extend `consecutive_rejections`, unregister the live endpoint, or prescribe
+  an editor restart.
 - After `EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD` (3) consecutive refusals
   the endpoint counts as **unregistered** for delivery: the row is degraded
   regardless of the failure counter (`editor_endpoint_unregistered_after_refusals`),

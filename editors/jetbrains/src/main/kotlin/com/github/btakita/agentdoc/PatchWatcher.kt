@@ -448,6 +448,8 @@ class PatchWatcher(private val project: Project) : Disposable {
      * - 2 → receipt `{"status":"applied","reason":"already_applied"}` (patch text
      *   already present in live buffer; binary skips file-IPC fallback so a
      *   duplicate response heading cannot land)
+     * - 3 → receipt `{"status":"deferred","reason":"projection_changed"}`
+     *   (the endpoint is live, but this request's projection precondition is stale)
      *
      * Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
      * `#ipcpluginalready`.
@@ -580,17 +582,20 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val expectedHash =
                     extractStringField(json, "expected_content_hash") ?: return APPLY_FAILED
                 val expectedLen = extractIntField(json, "expected_content_len") ?: return APPLY_FAILED
-                if (CrdtReplicaManager.persistCurrentVisibleRevision(
+                when (
+                    CrdtReplicaManager.persistCurrentVisibleRevision(
                         project,
                         file,
                         expectedHash,
                         expectedLen,
                     )
                 ) {
-                    recordDocumentActivity(file, "socket-persist-current")
-                    APPLY_APPLIED
-                } else {
-                    APPLY_FAILED
+                    PersistCurrentResult.Applied -> {
+                        recordDocumentActivity(file, "socket-persist-current")
+                        APPLY_APPLIED
+                    }
+                    PersistCurrentResult.Deferred -> APPLY_DEFERRED
+                    PersistCurrentResult.Rejected -> APPLY_FAILED
                 }
             }
             EditorIntent.DeliverCrdtRemote.token -> {
@@ -1760,6 +1765,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         const val APPLY_FAILED = 0
         const val APPLY_APPLIED = 1
         const val APPLY_ALREADY_APPLIED = 2
+        const val APPLY_DEFERRED = 3
 
         /** Compute SHA256 hex of content bytes — mirrors debounce::content_hash in the Rust binary. */
         fun contentHash(content: String): String {

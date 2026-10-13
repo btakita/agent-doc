@@ -48,6 +48,12 @@ private const val CRDT_WORKER_WARN_MS = 100L
  */
 internal const val CRDT_OFF_EDT_WARN_FLOOR_MS = 1_000L
 
+internal enum class PersistCurrentResult {
+    Applied,
+    Deferred,
+    Rejected,
+}
+
 /**
  * Whether a `[crdt-perf]` timing line is a warning. On the EDT the caller's threshold
  * stands, because any UI-thread stall is user-visible; off the EDT it is raised to
@@ -2568,13 +2574,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         filePath: String,
         expectedContentHash: String,
         expectedContentLen: Int,
-    ): Boolean {
-        fun reject(reason: String, detail: String = ""): Boolean {
+    ): PersistCurrentResult {
+        fun reject(
+            reason: String,
+            detail: String = "",
+            result: PersistCurrentResult = PersistCurrentResult.Rejected,
+        ): PersistCurrentResult {
             log.warn(
                 "[crdt-replica] native persist-current rejected reason=$reason file=$filePath " +
                     "expected_hash=$expectedContentHash expected_len=$expectedContentLen$detail",
             )
-            return false
+            return result
         }
 
         if (disposed.get()) return reject("manager_disposed")
@@ -2595,6 +2605,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return reject(
                 "visible_length_mismatch",
                 " visible_hash=$visibleHash visible_len=$visibleLen replica_hash=$replicaHash",
+                PersistCurrentResult.Deferred,
             )
         }
         if (!visibleHash.equals(expectedContentHash, ignoreCase = true)) {
@@ -2603,6 +2614,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return reject(
                 "visible_hash_mismatch",
                 " visible_hash=$visibleHash visible_len=$visibleLen replica_hash=$replicaHash",
+                PersistCurrentResult.Deferred,
             )
         }
         if (replicaText != visibleText) {
@@ -2611,6 +2623,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return reject(
                 "replica_visible_mismatch",
                 " visible_hash=$visibleHash visible_len=$visibleLen replica_hash=$replicaHash",
+                PersistCurrentResult.Deferred,
             )
         }
         return try {
@@ -2629,6 +2642,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     " visible_hash=${contentHash(document.text)} " +
                         "replica_hash=${forwarder.replicaText()?.let { contentHash(it) } ?: "missing"} " +
                         "disk_hash=${diskText?.let { contentHash(it) } ?: "missing"}",
+                    PersistCurrentResult.Deferred,
                 )
             }
             documentWorkers.forDocument(filePath).execute {
@@ -2644,10 +2658,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     requestRemoteDrain(filePath, "persist-current-receipt-retry")
                 }
             }
-            true
+            PersistCurrentResult.Applied
         } catch (failure: RuntimeException) {
             log.warn("[crdt-replica] native persist-current failed for $filePath", failure)
-            false
+            PersistCurrentResult.Rejected
         }
     }
 
@@ -4206,32 +4220,32 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return chosen
         }
 
-        fun persistCurrentVisibleRevision(
+        internal fun persistCurrentVisibleRevision(
             project: Project,
             filePath: String,
             expectedContentHash: String,
             expectedContentLen: Int,
-        ): Boolean {
+        ): PersistCurrentResult {
             val manager = managerForFile(project, filePath) ?: run {
                 com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaManager::class.java).warn(
                     "[crdt-replica] native persist-current rejected reason=no_replica_manager " +
                         "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen",
                 )
-                return false
+                return PersistCurrentResult.Rejected
             }
             if (SwingUtilities.isEventDispatchThread()) {
                 manager.log.warn(
                     "[crdt-replica] native persist-current rejected reason=edt_cannot_wait_for_document_lane " +
                         "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen",
                 )
-                return false
+                return PersistCurrentResult.Rejected
             }
             return try {
                 // Native save is an operation on the same per-document lane as
                 // accepted local and remote CRDT updates. FIFO submission makes
                 // the save observe every update accepted before this command.
-                manager.documentWorkers.forDocument(filePath).submit<Boolean> {
-                    val result = AtomicBoolean(false)
+                manager.documentWorkers.forDocument(filePath).submit<PersistCurrentResult> {
+                    val result = AtomicReference(PersistCurrentResult.Rejected)
                     ApplicationManager.getApplication().invokeAndWait {
                         result.set(
                             manager.persistCurrentVisibleRevision(
@@ -4249,27 +4263,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen " +
                         "timeout_ms=$CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS",
                 )
-                false
+                PersistCurrentResult.Deferred
             } catch (_: RejectedExecutionException) {
                 manager.log.warn(
                     "[crdt-replica] native persist-current rejected reason=document_lane_unavailable " +
                         "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen",
                 )
-                false
+                PersistCurrentResult.Rejected
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
                 manager.log.warn(
                     "[crdt-replica] native persist-current rejected reason=document_lane_interrupted " +
                         "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen",
                 )
-                false
+                PersistCurrentResult.Deferred
             } catch (failure: RuntimeException) {
                 manager.log.warn(
                     "[crdt-replica] native persist-current rejected reason=document_lane_failure " +
                         "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen",
                     failure,
                 )
-                false
+                PersistCurrentResult.Rejected
             }
         }
 

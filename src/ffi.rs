@@ -714,13 +714,16 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
 
 /// V2 of [`agent_doc_start_ipc_listener`] with extended receipt-result encoding.
 ///
-/// The callback returns one of three values:
+/// The callback returns one of four values:
 /// - `0` → receipt `{"type":"receipt","status":"rejected"}` (apply failed)
 /// - `1` → receipt `{"type":"receipt","status":"applied"}` (apply succeeded)
 /// - `2` → receipt `{"type":"receipt","status":"applied","reason":"already_applied"}`
 ///   (plugin detected the patch is already in the live buffer and chose NOT
 ///   to re-apply; binary skips redundant CP delivery so a duplicate response
 ///   heading cannot land).
+/// - `3` → receipt `{"type":"receipt","status":"deferred","reason":"projection_changed"}`
+///   (the endpoint is live, but the request's expected projection is stale;
+///   caller retries from current authority without degrading the endpoint).
 ///
 /// Plugins should prefer v2 when available.
 ///
@@ -752,14 +755,17 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener_v2(
                 return Some(r#"{"type":"receipt","status":"rejected"}"#.to_string());
             }
         };
-        match callback(c_msg.as_ptr()) {
-            1 => Some(r#"{"type":"receipt","status":"applied"}"#.to_string()),
-            2 => Some(
-                r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#.to_string(),
-            ),
-            _ => Some(r#"{"type":"receipt","status":"rejected"}"#.to_string()),
-        }
+        Some(v2_callback_receipt(callback(c_msg.as_ptr())).to_string())
     })
+}
+
+fn v2_callback_receipt(outcome: i32) -> &'static str {
+    match outcome {
+        1 => r#"{"type":"receipt","status":"applied"}"#,
+        2 => r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#,
+        3 => r#"{"type":"receipt","status":"deferred","reason":"projection_changed"}"#,
+        _ => r#"{"type":"receipt","status":"rejected"}"#,
+    }
 }
 
 fn spawn_ipc_listener<F>(root_str: String, label: &'static str, handler: F) -> i32
@@ -5675,6 +5681,18 @@ mod ack_content_tests {
 #[cfg(test)]
 mod ipc_listener_handler_swap_tests {
     use super::*;
+
+    #[test]
+    fn v2_callback_projection_change_is_deferred_not_rejected() {
+        assert_eq!(
+            v2_callback_receipt(3),
+            r#"{"type":"receipt","status":"deferred","reason":"projection_changed"}"#
+        );
+        assert_eq!(
+            agent_doc_ipc_protocol::classify_socket_receipt(v2_callback_receipt(3)),
+            agent_doc_ipc_protocol::SocketReceiptClassification::Deferred
+        );
+    }
 
     #[test]
     fn dispatch_uses_the_handler_installed_last() {

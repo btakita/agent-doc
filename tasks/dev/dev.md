@@ -43,8 +43,8 @@ Fixed. GitHub confirms SDK #119 is merged, so the strike is semantically correct
 <!-- agent:queue go -->
 - ~~Go through the list in https://haivengroup.slack.com/archives/C0C8LPQ7NS1/p1791874207231429. Strike any PRs that are merged or closed. Mark any PRs with the reviews addressed with a commit with an appropriate emoji. Make a script to do this that targets an individual slack message and a channel.~~
 - Note that some PRs were checked but not approved on gh. I believe https://github.com/haiven-dev/haiven-sdk/pull/115 is the only case.
-- Your script is not properly applying strikethrough on slack. It's leaving `~...~`.
-- Most of the slack strikethroughs are correct except `~sdk #119 feat(features): add developer-experience rows and an inherited mark~`
+- ~~Your script is not properly applying strikethrough on slack. It's leaving `~...~`.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Most of the slack strikethroughs are correct except `~sdk #119 feat(features): add developer-experience rows and an inherited mark~`~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

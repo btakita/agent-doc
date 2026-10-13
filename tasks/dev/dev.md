@@ -109,7 +109,7 @@ The remaining icon, event/hot-reload/logging, and eventual `haiven-tools`/`uvx`/
 - Assign an icon that is the head of a PR stack and another icon for a PR that is not the head of a PR stack.
 - Make all the logic in a script if you have not already.
 - Make an icon for a merge conflict.
-- Make the script take a gh user name(s) + repository name(s). Use the user name(s) + repository name(s) to create/edit a slack message with the status. If a message url is provided, that message will be updated...otherwise a new message will be created in a provided slack channel.
+- ~~Make the script take a gh user name(s) + repository name(s). Use the user name(s) + repository name(s) to create/edit a slack message with the status. If a message url is provided, that message will be updated...otherwise a new message will be created in a provided slack channel.~~ — auto-struck: answered this cycle (#ftstrike)
 - Make the script use events (preferably) or poll and support hot reloading + logs for agents + humans to see activity.
 - Make sure the script has tests. Move the script into haiven-tools. Make a PR. Make sure it is executable using `uvx`. This can happen once we fully prototype the script.
 <!-- /agent:queue -->

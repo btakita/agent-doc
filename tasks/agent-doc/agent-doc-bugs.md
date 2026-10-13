@@ -314,6 +314,37 @@ Version `0.35.498` was projected, committed as `b9c80b963c`, tagged, and pushed 
 GitHub's asynchronous Release workflow remains active: plugins and five platform artifact jobs are green, while Intel Darwin is still building; main CI is also in progress. The GitHub Release object and PyPI upload therefore are not terminal yet. Homebrew automation cannot run because `HOMEBREW_TAP_TOKEN` is absent, although the current GitHub account has admin access to the tap. Follow-up `#publish498verify` records terminal publication verification and the manual tap update once `SHA256SUMS` is available.
 
 The exchange remains above the session-accretion warning threshold; the active queue was drained without compacting because auto-compaction is not enabled.
+❯ 🚧 #subagent lazily.md issue:
+```
+• Blocked by hook
+  └ agent-doc Stop hook retained the exact closeout for /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
+under its durable keyed retry. The latest assistant text was captured into the pending/capture ledger before auto-close.
+The hook could not finish the required commit boundary: closeout operation is already in progress for cycle cycle-
+1791914660270 by captured-finalize-resume-53582-1791914732564333154-t1 pid=53582 role=captured_finalize_resume
+until=1791915032 [closeout_owner_retry_at=1791915032]. The retained capture or projection is already durable and this
+exact retained intent commits itself once delivery converges — this is a deferral, not a lost response. Wait for its
+controller-owned terminal state edge; do not use the document's current-cycle status as proof because queue continuation
+can advance to a different cycle. Do NOT re-send the response, force disk, or `admin recycle`, which disturb the capture
+being awaited. Do not reach for `admin reload-lib` on your own either: `admin reload-lib` is the sanctioned recovery
+only when `agent-doc session-check` reports that the editor holding the document is not serving its replica, and then
+its remedy governs. The controller owns delivery, the editor-native save receipt, and the terminal commit. Do not reopen
+or recapture the cycle, rerun finalize/write/repair, force disk, recycle the supervisor, or resend the response. Wait
+for the existing controller state edge unless it explicitly reports `needs_operator`; do not send the final answer yet.
+```
+
+### Re: lazily.md retained closeout — gpt-5 · 2026-10-13T14:08:27-04:00
+
+The retained closeout for `/home/brian/work/btakita/agent-loop/tasks/software/lazily.md` converged successfully. Cycle `cycle-1791914660270` is terminal as `committed (commit_success)`; commit `01e55ca8bac15409d36f3cffe392e5cfcda60e71` contains the recovered response and queue additions.
+
+Verification:
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily.md` exited 0 and reported `queue_continuation_required=false`, `ui_outcome=no_drainable_work`, and `next_action=no_agent_action`.
+- Terminal proof recorded `did_commit=true`, `agreement=file_snapshot_head`, and `response_materialized_in_head=true`.
+- The captured-finalize owner released with `foreground_closeout_finished`.
+- No `needs_operator` state or sanctioned `admin reload-lib` remedy was reported.
+
+Changed paths: none in this verification cycle. No response was resent and no finalize/write/repair, force-disk, recycle, or reload operation was run. Confidence is high; escalation is not required.
+
+Concurrent queue work: GitHub issue #249 was claimed and dispatched to a fresh isolated subagent. The previously claimed idle-thrash investigation remains active and is tracing full-status polling and bounded diagnostic counts.
 <!-- agent:boundary:673547bf -->
 <!-- /agent:exchange -->
 
@@ -323,7 +354,8 @@ The exchange remains above the session-accretion warning threshold; the active q
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/248~~
-- agent-doc is still thrashing while idle.
+- ~~agent-doc is still thrashing while idle.~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/249
 - release + publish
 - do [#publish498verify]
 <!-- /agent:queue -->

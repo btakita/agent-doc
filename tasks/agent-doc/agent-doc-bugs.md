@@ -370,6 +370,40 @@ Verification:
 Confidence: high. Escalation: none.
 
 The exchange is above the session-accretion warning threshold; queue auto-clear remains active, so compaction is deferred unless explicitly opted in.
+
+### Re: release + publish — gpt-5 · 2026-10-13T16:51:10-04:00
+
+> **Chat prompt (#chatprompt):** subagent fix: • Blocked by hook
+>   └ Queue continuation, not an error: Codex labels it `Blocked by hook`. Next `agent:queue auto` prompt for /home/brian/
+> work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md: "release + publish". Continue THIS turn in-pane via the
+> configured `agent-doc` MCP server (`agent_doc_admit` → `agent_doc_plan` → `agent_doc_finalize` →
+> `agent_doc_session_check`), or `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-
+> bugs.md` if the MCP tools are unavailable. Do NOT run `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+> agent-doc-bugs.md` (recursive self-invocation) and do not send the final answer yet.
+
+> **Queue prompt:** release + publish
+
+Preset expansion honored:
+
+- `#spec-test-build-install-commit-push`: “update spec + tests. build + install for local testing. commit + push”
+
+Completed and freshly re-verified; no duplicate release or publication was triggered.
+
+Release `v0.35.498` remains public at commit `b9c80b963c19c98786f0d8219fca91b647e58e32`. It contains all 15 expected assets: five native archives, the VS Code package, three JetBrains ZIPs, three JetBrains update feeds, `SHA256SUMS`, and `EDITOR-PACKAGES.sha256`.
+
+Publication verification:
+
+- Main CI run `38426442068`: completed successfully; the check job passed.
+- Release run `38426442396`: completed successfully; all 10 jobs passed.
+- PyPI run `38431402471`: build, publish, and clean-install verification all passed.
+- PyPI `agent-doc==0.35.498` remains live with `agent_doc-0.35.498-py3-none-any.whl`.
+- The release tag still resolves to the expected commit.
+
+Changed paths: none in this verification cycle; the release changes are already committed at `b9c80b963c19c98786f0d8219fca91b647e58e32`. Commands/evidence included fresh GitHub release, workflow/job, asset-manifest, and PyPI package checks. The detached verification checkout is clean.
+
+The subagent-facing “Blocked by hook” behavior is captured as queue item `[from:coordinator key=subagent-blocked-hook-20261013] Fix subagent reporting queue continuation as Blocked by hook.` for isolated implementation after this release closeout.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:673547bf -->
 <!-- /agent:exchange -->
 
@@ -378,11 +412,11 @@ The exchange is above the session-accretion warning threshold; queue auto-clear 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/249~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/250
-- release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#publish498verify]
 - 🚧 [from:coordinator key=residual-idle-20261013] agent-doc is still thrashing while idle.
+- [from:coordinator key=subagent-blocked-hook-20261013] Fix subagent reporting queue continuation as Blocked by hook.
 <!-- /agent:queue -->
 
 ## Backlog

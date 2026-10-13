@@ -166,6 +166,7 @@ Preflight separately reports the live JetBrains plugin at `0.2.561` while this b
 ## Queue
 
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
+- do [#lzgocireachability]
 - ~~release + publish all lazily repos~~
 <!-- /agent:queue -->
 

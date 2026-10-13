@@ -152,7 +152,18 @@ No. I pushed fix commit `9efcd2579ddc673feb95092bee53a9248330b4be` to `main` and
 
 ### Re: release and publication status — gpt-5 · 2026-10-12T22:03:10-04:00
 No. The stale-projection fix is present on `origin/main` at `9efcd2579ddc673feb95092bee53a9248330b4be`, but there is no newer tag and no published release containing it. GitHub still reports `v0.35.495` as the latest published release, and that tag predates the fix. The previous release-worker claim has ended; `release + publish` remains queued and incomplete.
-<!-- agent:boundary:149ddf02 -->
+> **Queue prompt:** do [#runsdkissue]
+
+> **Queue prompt:** release + publish
+
+### Re: sdk.md recovery and v0.35.496 release — gpt-5 · 2026-10-12T22:35:07-04:00
+
+`sdk.md` recovered without repair. `agent-doc session-check` confirmed cycle `cycle-1791856800306` committed successfully, the retained response is visible, the document queue is drained, and session commit `2524f90f409185bb5fc6d22921496f6f995414b4` is clean.
+
+Released `v0.35.496` from commit `28a28c26f4774b31f076a1e3b8822e017f116d9c` and pushed both `main` and the tag. The final version-projected gates passed: 10,426 Rust tests, 167 skipped; 196 VS Code tests; classic and exact-262 JetBrains builds/tests; cross-editor simulations; Python/bootstrap; docs/audits; TLA; and the separate tmux integration suite. `make install-full` succeeded and installed binary/native library `0.35.496`, JetBrains `0.2.565` / exact-262 `0.2.566`, and the VS Code extension.
+
+Publication is dispatched but not yet externally complete. Release workflow run `38336856391` is in progress: https://github.com/btakita/agent-doc/actions/runs/38336856391. The GitHub release and PyPI `0.35.496` endpoint were not present at the one required post-push observation. PyPI is intentionally dispatched by the Release workflow only after all release assets and checksums exist; no further local action is pending.
+<!-- agent:boundary:92c4a3e8 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -160,7 +171,8 @@ No. The stale-projection fix is present on `origin/main` at `9efcd2579ddc673feb9
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 release + publish
+- ~~do [#runsdkissue]~~
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

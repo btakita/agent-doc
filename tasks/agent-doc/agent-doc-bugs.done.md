@@ -525,3 +525,23 @@
   No pending operator prompt was listed.
   Worked for 14s • 8:08 PM
   ```
+- 2026-10-12 [#runsdkissue] Run Agent Doc on sdk.md issue:
+  ```
+  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
+  intentional (see #lr-queue-patchback-miss) The latest assistant text was captured into the pending/capture ledger
+  before auto-close. The hook could not finish the required commit boundary: closeout operation is already in progress
+  for cycle cycle-1791856800306 by captured-finalize-resume-1069718-1791853136688603982-t4 pid=1069718
+  role=captured_finalize_resume until=1791857101 [closeout_owner_retry_at=1791857101]. The retained capture or projection
+  is already durable and this exact retained intent commits itself once delivery converges — this is a deferral, not a
+  lost response. Wait for its controller-owned terminal state edge; do not use the document's current-cycle status as
+  proof because queue continuation can advance to a different cycle. Do NOT re-send the response, force disk, or `admin
+  recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own either: `admin
+  reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor holding the document
+  is not serving its replica, and then its remedy governs. Do not send the final answer yet. If the response is missing
+  from the document, run `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` first. Then
+  finish the commit boundary for this turn and end with `agent-doc session-check /home/brian/work/btakita/agent-loop/src/
+  haiven-dev/tasks/sdk.md`.
+
+  • The Stop hook found the response capture still converging at the commit boundary. I’m waiting for that controller-
+  owned closeout to finish, then I’ll repair only if the response is missing and run the required final session check.
+  ```

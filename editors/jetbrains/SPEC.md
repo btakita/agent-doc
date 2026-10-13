@@ -483,6 +483,20 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - When the same `agent-doc <FILE>` reopen is already drafted in a Codex/Claude composer, the binary must press one bare `Enter` instead of appending a duplicate trigger. A visible trigger with a later idle prompt below it is stale scrollback and must not receive an Enter.
 - A delayed direct-pane resubmit may press `Enter` only while the pane still exposes a recognizable harness surface. It must preserve the draft and refuse injection after the harness has exited to a bare shell.
 - The action is silent on route progress/success. Failures are logged to the IDE Event Log / notification tool window instead of showing bottom-right balloon popups.
+- Operator-triggered document-command and manual tmux-load failures also show a bounded top-of-editor
+  strip for the affected markdown file. The strip keeps the complete binary diagnostic in its
+  tooltip and uses recovery-specific summaries for invalid session frontmatter and a missing actor
+  (`Load Tmux Window`); it expires after 30 seconds, and an older expiry cannot clear a newer
+  failure. If the binary's diagnostic source line is no longer present in the live editor buffer,
+  the strip identifies it as stale controller frontmatter while editor sync retries. Event Log
+  remains the durable diagnostic surface.
+- An exact operator splice whose recorded pre-edit length differs from the CRDT shadow normally
+  rebases through its recorded agent-patch lineage. If that process-local lineage was lost but the
+  captured edits can be reversed exactly from one consistent visible-editor cut, the replica must
+  reconstruct their pre-edit base and rebase only those operator edits onto controller canonical.
+  It must not apply the reconstructed batch directly to the stale shadow or consume newer pending
+  editor events. This recovery prevents a corrected frontmatter line from remaining editor-only
+  while pane-open commands repeatedly parse an obsolete controller generation.
 - A failed route persists the exact `editor_route` output under `.agent-doc/state/editor-route-errors/` and the notification exposes copy/open actions so startup-miss and pending-drift diagnostics remain inspectable after the toast moment. Typed recovery states such as queued, paused, protected prompt input, dispatch-start-unproven, busy/running, and actor-switch defer do not persist generic route-error files. A later successful `Run Agent Doc`, binary route, or focused sync for that document deletes the saved route-error file so the editor cannot keep showing an obsolete startup/proof failure after route recovery.
 - Route session targeting follows the same root-aware chooser as sync: a nested document reroute uses that file's nearest `.agent-doc` root, while a mixed-root visible layout stays pinned to the shared workspace root instead of the focused child repo.
 

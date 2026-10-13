@@ -345,6 +345,31 @@ Verification:
 Changed paths: none in this verification cycle. No response was resent and no finalize/write/repair, force-disk, recycle, or reload operation was run. Confidence is high; escalation is not required.
 
 Concurrent queue work: GitHub issue #249 was claimed and dispatched to a fresh isolated subagent. The previously claimed idle-thrash investigation remains active and is tracing full-status polling and bounded diagnostic counts.
+
+### Re: GitHub #249 — gpt-5 · 2026-10-13T16:50:23-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/249
+
+Preset expansions honored:
+
+- `#gh-fix`: “fix then close”
+- `#spec-test-build-install-commit-push`: “update spec + tests. build + install for local testing. commit + push”
+
+Completed. GitHub issue #249 is closed as `COMPLETED`, and the JetBrains 263 modular-source fix is integrated on `origin/main` as `9489effed33a3d7f5f293e3435d3f837b0f93e89`. The original isolated worker commit is `250d5ae05772d0acb903061a2e1bef5022ee7e7a`.
+
+Changed paths: `.github/workflows/release.yml`, `Makefile`, `docs/reference/jetbrains-distribution.md`, the JetBrains 262 modular build metadata/resources, `editors/jetbrains-263/gradle.properties`, and `scripts/check_plugin_versions.py` (11 files total).
+
+Verification:
+
+- Focused plugin-version self-test passed.
+- `make jetbrains-263-check` and `make jetbrains-262-check` passed.
+- `git diff --check` and Python byte-compilation passed.
+- Coordinator `make check` passed at the current integration head: 10,438 Rust tests passed, 196 VS Code tests passed, both JetBrains modular builds succeeded, bootstrap tests passed, and the TLA receipt remained valid.
+- Fresh recheck confirmed the issue is closed, the evidence comment is intact, the integration commit is reachable from `origin/main`, and the worker worktree is clean.
+
+Confidence: high. Escalation: none.
+
+The exchange is above the session-accretion warning threshold; queue auto-clear remains active, so compaction is deferred unless explicitly opted in.
 <!-- agent:boundary:673547bf -->
 <!-- /agent:exchange -->
 
@@ -353,11 +378,11 @@ Concurrent queue work: GitHub issue #249 was claimed and dispatched to a fresh i
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/249
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/249~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/250
 - release + publish
 - do [#publish498verify]
-- [from:coordinator key=residual-idle-20261013] agent-doc is still thrashing while idle.
+- 🚧 [from:coordinator key=residual-idle-20261013] agent-doc is still thrashing while idle.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -170,7 +170,15 @@ No, not yet. Tag `v0.35.496` is pushed, but GitHub Release workflow run `3833685
 
 ### Re: v0.35.496 publication complete — gpt-5 · 2026-10-12T23:04:54-04:00
 Yes. GitHub Release `v0.35.496` was published at 2026-10-13T03:01:52Z with all six platform archives, `SHA256SUMS`, both JetBrains packages and update feeds, the VS Code package, and editor-package checksums: https://github.com/btakita/agent-doc/releases/tag/v0.35.496. Release workflow run `38336856391` succeeded. PyPI workflow run `38339749606` also succeeded, and PyPI now serves `agent_doc-0.35.496-py3-none-any.whl` (uploaded 2026-10-13T03:02:42Z).
-<!-- agent:boundary:35cc5e9c -->
+> **Chat prompt (#chatprompt):** Have you released the plugins?
+
+> **Chat prompt (#chatprompt):** and published the plugins?
+
+### Re: plugin release and publication channels — gpt-5 · 2026-10-12T23:48:13-04:00
+Yes through the project release channel, but not through the official IDE marketplaces. GitHub Release `v0.35.496` publishes the VS Code `0.2.81` VSIX, JetBrains classic `0.2.565` ZIP, exact-262 `0.2.566` ZIP, both JetBrains update-feed XML files, and `EDITOR-PACKAGES.sha256`: https://github.com/btakita/agent-doc/releases/tag/v0.35.496. These are the artifacts used by `agent-doc plugin install` and the project update feeds.
+
+The current release workflow has no marketplace-publish job. `vsce show btakita.agent-doc` reports the extension is not found in the official VS Code Marketplace, the JetBrains Marketplace lookup for `com.github.btakita.agent-doc` returns not found, and Open VSX still exposes the older `0.2.1`. Therefore the latest plugin packages are released and downloadable, but they have not been published to the official JetBrains/VS Code marketplaces.
+<!-- agent:boundary:b11f9a42 -->
 <!-- /agent:exchange -->
 
 <!--

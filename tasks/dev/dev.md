@@ -5,6 +5,7 @@ agent_doc_write: crdt
 agent: codex
 resume:
   claude: c1cf43ac-1094-4ecf-8b3d-a7f7f7168edb
+queue: go
 ---
 
 ## Status
@@ -260,12 +261,38 @@ Updated the legend to `Key: ~merged~ closed or merged …`. It also replaces the
 The live Slack message was refreshed and read back with the new wording. The full `haiven-tools` portable suite passes, including all 25 updater tests.
 
 Commit `a716189 fix: clarify Slack PR status key` is pushed to [haiven-tools PR #21](https://github.com/haiven-dev/haiven-tools/pull/21).
+
+### Re: Slack message title, description, and PR screenshot — gpt-5 · 2026-10-13T19:59:21-04:00
+
+> **Queue prompt:** https://github.com/haiven-dev/haiven-tools/pull/21: Provide a way for the script to give a title + description to the slack message.
+
+> **Queue prompt:** Take a screenshot of the Slack message and add it to the PR description. ![img.png](img.png) works unless you can capture the entire message.
+
+> **Chat prompt (#chatprompt):** subagents
+
+Used the required dispatched screenshot subagent in an isolated worktree. It captured and visually validated the complete rendered message before the status-changing rebases: title, description, key, all 39 PR entries, and footer are visible without clipping.
+
+> **Chat prompt (#chatprompt):** has the full screenshot been captured yet? I want to continue with pushing rebases which will change the status.
+
+Yes. The full 1338×1473 screenshot was captured and validated before the rebases, so subsequent PR-state changes do not affect this frozen snapshot.
+
+> **Chat prompt (#chatprompt):** how much latency is there between gh pr state and the message?
+
+With `--watch` at its default 60-second polling interval, the Slack message normally trails GitHub by 0–60 seconds plus GitHub-query and Slack-update time, so practical worst case is about a minute. `--poll-seconds N` lowers the polling portion; a one-shot run reflects state fetched during that run.
+
+Implemented optional `--title` and `--description` arguments for `update-slack-pr-list`. Both values are Slack-escaped and rendered above the key; reruns replace the complete managed header idempotently instead of duplicating it. Updated command help, README usage, and focused regression coverage. The live message now begins with “Haiven pull requests” and “Live review, stack, merge, and conflict status across Haiven repositories.”
+
+Added `docs/assets/slack-pr-list-example.png`, pushed commit `f8754db30d541c4b7b956f3cc0ee58376aba395b` (`feat: configure Slack message heading`) to `feat/slack-pr-status`, and embedded the commit-pinned full screenshot in [haiven-tools PR #21](https://github.com/haiven-dev/haiven-tools/pull/21). GitHub API readback confirms the 401,172-byte asset and the PR-body image link.
+
+Verification passed: the installed entry-point help exposes both new flags; all 25 focused updater tests pass; the complete portable `scripts/check.py` suite passes (including 59 integration tests with 4 skips); `uv lock --check` and `git diff --check` pass. The new CI run has passed on Ubuntu and macOS; Windows was still running at closeout.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go priority -->
+<!-- agent:queue subagents priority go -->
+- ~~https://github.com/haiven-dev/haiven-tools/pull/21: Provide a way for the script to give a title + description to the slack message.~~
+- Take a screenshot of the Slack message and add it to the PR description. ![img.png](img.png) works unless you can capture the entire message.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -1533,12 +1533,12 @@ mod tests {
     }
 
     /// GH #233: a live IDE whose platform build no published package declares
-    /// (263, past the classic 261 cap and the modular 262 range) must not be
+    /// (264, past the published 242-263 ranges) must not be
     /// told to "install {expected} first": no package can be installed there.
     #[test]
     fn stale_plugin_on_unsupported_platform_build_names_no_unreachable_install() {
         let tmp = TempDir::new().unwrap();
-        let live = tmp.path().join("data/IntelliJIdea2026.3");
+        let live = tmp.path().join("data/IntelliJIdea2026.4");
         let lib = live.join("agent-doc-jetbrains/lib");
         std::fs::create_dir_all(&lib).unwrap();
         let live_jar = lib.join("agent-doc-jetbrains-0.2.508.jar");
@@ -1549,7 +1549,7 @@ mod tests {
         };
         let state = plugin_install_state_for_mapped_jar("jetbrains", "0.2.517", &mapped, &[]);
         assert_eq!(state.installed.as_deref(), Some("0.2.508"));
-        assert_eq!(state.unsupported_platform_build, Some(263));
+        assert_eq!(state.unsupported_platform_build, Some(264));
 
         let status = LivePluginGenerationStatus {
             editor_id: Some("e".to_string()),
@@ -1565,9 +1565,10 @@ mod tests {
         assert_eq!(warnings[0].code, "stale_plugin");
         let message = &warnings[0].message;
         for needle in [
-            "platform build 263",
+            "platform build 264",
             "242-261 (agent-doc-jetbrains-<version>.zip)",
             "262 (agent-doc-jetbrains-262-<version>.zip)",
+            "263 (agent-doc-jetbrains-263-<version>.zip)",
             "plugin 0.2.508 stays installed",
             "ADVISORY",
         ] {
@@ -1598,7 +1599,7 @@ mod tests {
             "0.2.517",
             Some("0.2.520"),
             false,
-            Some(263),
+            Some(264),
         );
         assert!(binary.starts_with("stale agent-doc binary"), "{binary}");
     }

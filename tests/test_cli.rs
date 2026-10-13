@@ -14372,9 +14372,10 @@ fn test_every_release_publishes_the_editor_packages() {
         "scripts/jetbrains-custom-repository.py",
         "agent-doc-jetbrains-classic.xml",
         "agent-doc-jetbrains-262.xml",
-        "--verify-listings \"$classic_version\" \"$modular_version\"",
+        "agent-doc-jetbrains-263.xml",
+        "--verify-listings \"$classic_version\" \"$modular_version\" \"$modern_version\"",
         "npm run package --prefix editors/vscode",
-        "expected classic + modular JetBrains zips, 2 ranged feeds, and 1 vsix",
+        "expected 3 ranged JetBrains zips, 3 ranged feeds, and 1 vsix",
     ] {
         assert!(
             plugins.contains(required),
@@ -14387,11 +14388,12 @@ fn test_every_release_publishes_the_editor_packages() {
     assert!(
         plugins.contains("agent-doc-jetbrains-$classic_version.zip")
             && plugins.contains("agent-doc-jetbrains-262-$modular_version.zip")
+            && plugins.contains("agent-doc-jetbrains-263-$modern_version.zip")
             && plugins.contains("agent-doc-$version.vsix"),
         "editor packages must be copied by declared version, never globbed"
     );
     assert!(
-        plugins.contains("test \"$classic_version\" != \"$modular_version\"")
+        plugins.contains("sort -u | wc -l)\" -eq 3")
             && plugins.contains(
                 "--download-base-url \"https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}\""
             ),

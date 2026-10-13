@@ -507,13 +507,14 @@ pub(crate) use agent_doc_fs::jetbrains_install::jetbrains_plugin_dirs;
 #[cfg(test)]
 use agent_doc_fs::jetbrains_install::jetbrains_plugin_dirs_in_roots;
 
-/// The two published JetBrains packages share a plugin ID but have disjoint
+/// The three published JetBrains packages share a plugin ID but have disjoint
 /// compatibility ranges. Artifact selection therefore belongs to the target
 /// IDE, never to release-asset ordering or whichever local ZIP was built last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum JetbrainsPackageRange {
     Classic242To261,
     Modular262,
+    Classic263,
 }
 
 impl JetbrainsPackageRange {
@@ -521,13 +522,22 @@ impl JetbrainsPackageRange {
         match self {
             Self::Classic242To261 => "agent-doc-jetbrains",
             Self::Modular262 => "agent-doc-jetbrains-262",
+            Self::Classic263 => "agent-doc-jetbrains-263",
         }
     }
 
-    fn project_dir(self) -> &'static str {
+    fn build_project_dir(self) -> &'static str {
+        match self {
+            Self::Classic242To261 | Self::Classic263 => "editors/jetbrains",
+            Self::Modular262 => "editors/jetbrains-262",
+        }
+    }
+
+    fn properties_dir(self) -> &'static str {
         match self {
             Self::Classic242To261 => "editors/jetbrains",
             Self::Modular262 => "editors/jetbrains-262",
+            Self::Classic263 => "editors/jetbrains-263",
         }
     }
 
@@ -535,6 +545,7 @@ impl JetbrainsPackageRange {
         match self {
             Self::Classic242To261 => "./gradlew buildPlugin",
             Self::Modular262 => "gradle buildPlugin verifySplitArtifact",
+            Self::Classic263 => "make jetbrains-263-check",
         }
     }
 
@@ -551,13 +562,14 @@ fn jetbrains_package_range(target_dir: &Path) -> Result<JetbrainsPackageRange> {
     let label = jetbrains_target_label(target_dir);
     let build = jetbrains_platform_build(target_dir).with_context(|| {
         format!(
-            "Cannot prove the JetBrains platform build for {}. Expected a versioned IDE data directory such as ~/.local/share/JetBrains/IntelliJIdea2026.2 or its plugins child; refusing to choose between the classic 242-261 and modular 262 artifacts. Re-run with `--plugins-dir <versioned IDE data dir>/plugins`, or install the matching ZIP manually (agent-doc-jetbrains-<version>.zip for 242-261, agent-doc-jetbrains-262-<version>.zip for 262)",
+            "Cannot prove the JetBrains platform build for {}. Expected a versioned IDE data directory such as ~/.local/share/JetBrains/IntelliJIdea2026.3 or its plugins child; refusing to choose among the classic 242-261, modular 262, and classic-source 263 artifacts. Re-run with `--plugins-dir <versioned IDE data dir>/plugins`, or install the matching ZIP manually",
             target_dir.display()
         )
     })?;
     match build {
         242..=261 => Ok(JetbrainsPackageRange::Classic242To261),
         262 => Ok(JetbrainsPackageRange::Modular262),
+        263 => Ok(JetbrainsPackageRange::Classic263),
         // GH #233: no remedy this binary can offer installs into such a build,
         // so the message names none; the installed plugin is left alone.
         _ => bail!(
@@ -580,31 +592,39 @@ fn jetbrains_release_asset_for_target<'a>(
 }
 
 /// Which compatibility line an installed tree holds, read from its plugin jar:
-/// the classic package ships `agent-doc-jetbrains-<v>.jar`, the modular 262
+/// the classic packages ship `agent-doc-jetbrains[-263]-<v>.jar`, the modular 262
 /// package ships `agent.doc-<v>.jar` (its module JARs are unversioned).
 fn installed_jetbrains_package(target_dir: &Path) -> Option<(JetbrainsPackageRange, String)> {
-    [JETBRAINS_PLUGIN_DIR, JETBRAINS_MODULAR_PLUGIN_DIR]
+    [
+        JETBRAINS_PLUGIN_DIR,
+        JETBRAINS_MODULAR_PLUGIN_DIR,
+        JETBRAINS_MODERN_PLUGIN_DIR,
+    ]
+    .into_iter()
+    .filter_map(|plugin_dir| fs::read_dir(target_dir.join(plugin_dir).join("lib")).ok())
+    .flat_map(|entries| entries.flatten())
+    .filter_map(|entry| {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        [
+            (
+                JetbrainsPackageRange::Classic242To261,
+                "agent-doc-jetbrains-",
+            ),
+            (JetbrainsPackageRange::Modular262, "agent.doc-"),
+            (
+                JetbrainsPackageRange::Classic263,
+                "agent-doc-jetbrains-263-",
+            ),
+        ]
         .into_iter()
-        .filter_map(|plugin_dir| fs::read_dir(target_dir.join(plugin_dir).join("lib")).ok())
-        .flat_map(|entries| entries.flatten())
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            [
-                (
-                    JetbrainsPackageRange::Classic242To261,
-                    "agent-doc-jetbrains-",
-                ),
-                (JetbrainsPackageRange::Modular262, "agent.doc-"),
-            ]
-            .into_iter()
-            .find_map(|(range, prefix)| {
-                let version = name.strip_prefix(prefix)?.strip_suffix(".jar")?;
-                let key = numeric_dot_version(version)?;
-                Some((key, range, version.to_string()))
-            })
+        .find_map(|(range, prefix)| {
+            let version = name.strip_prefix(prefix)?.strip_suffix(".jar")?;
+            let key = numeric_dot_version(version)?;
+            Some((key, range, version.to_string()))
         })
-        .max_by(|left, right| left.0.cmp(&right.0))
-        .map(|(_, range, version)| (range, version))
+    })
+    .max_by(|left, right| left.0.cmp(&right.0))
+    .map(|(_, range, version)| (range, version))
 }
 
 /// What a release reconciliation must do with one target.
@@ -1165,7 +1185,7 @@ fn jetbrains_plugin_version(
     package_range: JetbrainsPackageRange,
 ) -> Result<String> {
     let properties = project_root
-        .join(package_range.project_dir())
+        .join(package_range.properties_dir())
         .join("gradle.properties");
     let content = fs::read_to_string(&properties)
         .with_context(|| format!("Failed to read {}", properties.display()))?;
@@ -1181,7 +1201,7 @@ fn jetbrains_plugin_version(
 
 fn local_jetbrains_zip_in(project_root: &Path, target_dir: &Path) -> Result<PathBuf> {
     let package_range = jetbrains_package_range(target_dir)?;
-    let plugin_project = project_root.join(package_range.project_dir());
+    let plugin_project = project_root.join(package_range.build_project_dir());
     let dist_dir = plugin_project.join("build/distributions");
     let version = jetbrains_plugin_version(project_root, package_range).with_context(|| {
         format!(
@@ -1214,6 +1234,7 @@ fn local_jetbrains_zip_version(zip_path: &Path) -> Result<String> {
         .and_then(|name| name.to_str())
         .context("Local JetBrains build has a non-UTF-8 filename")?;
     [
+        JetbrainsPackageRange::Classic263,
         JetbrainsPackageRange::Modular262,
         JetbrainsPackageRange::Classic242To261,
     ]
@@ -1604,6 +1625,11 @@ fn jetbrains_zip_package_range(zip_path: &Path) -> Result<JetbrainsPackageRange>
         if agent_doc_fs::plugin_jar::plugin_jar_version(file_name, &["agent.doc-"]).is_some() {
             return Ok(JetbrainsPackageRange::Modular262);
         }
+        if agent_doc_fs::plugin_jar::plugin_jar_version(file_name, &["agent-doc-jetbrains-263-"])
+            .is_some()
+        {
+            return Ok(JetbrainsPackageRange::Classic263);
+        }
         if agent_doc_fs::plugin_jar::plugin_jar_version(file_name, &["agent-doc-jetbrains-"])
             .is_some()
         {
@@ -1626,11 +1652,13 @@ fn jetbrains_dynamic_upgrade_entry_point_refusal(
         JetbrainsPackageRange::Modular262 => Ok(Some(format!(
             "{JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE} (v{expected_version} is a Plugin Model v2 split-mode package whose agent.doc-{expected_version}.jar carries no upgrade launcher), so a running 262 IDE keeps its current plugin generation until it restarts"
         ))),
-        JetbrainsPackageRange::Classic242To261 => Ok((!launcher_has_main()?).then(|| {
+        JetbrainsPackageRange::Classic242To261 | JetbrainsPackageRange::Classic263 => {
+            Ok((!launcher_has_main()?).then(|| {
             format!(
                 "JetBrains package v{expected_version} predates restart-free dynamic upgrade support (its plugin JAR has no Main-Class); refusing to replace a package owned by a live IDE. Restart the IDE before installing this legacy package, or install a current local build with `agent-doc plugin install jetbrains --local`."
             )
-        })),
+            }))
+        }
     }
 }
 
@@ -1948,23 +1976,32 @@ fn jetbrains_zip_plugin_version(zip_path: &Path) -> Result<String> {
 const JETBRAINS_INSTALL_WORK_DIR: &str = ".agent-doc-jetbrains-install";
 const JETBRAINS_PLUGIN_DIR: &str = "agent-doc-jetbrains";
 const JETBRAINS_MODULAR_PLUGIN_DIR: &str = "agent-doc-jetbrains-262";
+const JETBRAINS_MODERN_PLUGIN_DIR: &str = "agent-doc-jetbrains-263";
 
 fn jetbrains_plugin_jar_version(file_name: &str) -> Option<String> {
-    ["agent-doc-jetbrains-", "agent.doc-"]
-        .into_iter()
-        .find_map(|prefix| {
-            let version = file_name.strip_prefix(prefix)?.strip_suffix(".jar")?;
-            numeric_dot_version(version).map(|_| version.to_string())
-        })
+    [
+        "agent-doc-jetbrains-263-",
+        "agent-doc-jetbrains-",
+        "agent.doc-",
+    ]
+    .into_iter()
+    .find_map(|prefix| {
+        let version = file_name.strip_prefix(prefix)?.strip_suffix(".jar")?;
+        numeric_dot_version(version).map(|_| version.to_string())
+    })
 }
 
 fn jetbrains_archive_relative(enclosed: &Path) -> Result<PathBuf> {
-    [JETBRAINS_PLUGIN_DIR, JETBRAINS_MODULAR_PLUGIN_DIR]
+    [
+        JETBRAINS_PLUGIN_DIR,
+        JETBRAINS_MODULAR_PLUGIN_DIR,
+        JETBRAINS_MODERN_PLUGIN_DIR,
+    ]
         .into_iter()
         .find_map(|root| enclosed.strip_prefix(root).ok().map(Path::to_path_buf))
         .with_context(|| {
             format!(
-                "Unexpected JetBrains package root: {} (expected {JETBRAINS_PLUGIN_DIR}/ or {JETBRAINS_MODULAR_PLUGIN_DIR}/)",
+                "Unexpected JetBrains package root: {} (expected {JETBRAINS_PLUGIN_DIR}/, {JETBRAINS_MODULAR_PLUGIN_DIR}/, or {JETBRAINS_MODERN_PLUGIN_DIR}/)",
                 enclosed.display()
             )
         })
@@ -2064,15 +2101,17 @@ fn replace_jetbrains_plugin_tree_with(
                 .unwrap_or_else(|| "; the previous plugin was restored".to_string())
         )));
     }
-    let legacy_modular = target_dir.join(JETBRAINS_MODULAR_PLUGIN_DIR);
-    if legacy_modular.exists() {
-        fs::remove_dir_all(&legacy_modular).with_context(|| {
-            format!(
-                "Installed the selected package at {}, but failed to remove the obsolete modular plugin tree {}; remove it before restarting the IDE to avoid duplicate plugin IDs",
-                dest.display(),
-                legacy_modular.display()
-            )
-        })?;
+    for legacy_name in [JETBRAINS_MODULAR_PLUGIN_DIR, JETBRAINS_MODERN_PLUGIN_DIR] {
+        let legacy = target_dir.join(legacy_name);
+        if legacy.exists() {
+            fs::remove_dir_all(&legacy).with_context(|| {
+                format!(
+                    "Installed the selected package at {}, but failed to remove the obsolete package-root tree {}; remove it before restarting the IDE to avoid duplicate plugin IDs",
+                    dest.display(),
+                    legacy.display()
+                )
+            })?;
+        }
     }
     let _ = fs::remove_dir_all(&staging);
     if had_old && let Err(error) = fs::remove_dir_all(&backup) {
@@ -2682,7 +2721,11 @@ fn collect_installed_plugin_files(
 
 fn jetbrains_local_zip_matches_installation(zip_path: &Path, target_dir: &Path) -> Result<bool> {
     let installed_root = target_dir.join("agent-doc-jetbrains");
-    if !installed_root.is_dir() || target_dir.join(JETBRAINS_MODULAR_PLUGIN_DIR).exists() {
+    if !installed_root.is_dir()
+        || [JETBRAINS_MODULAR_PLUGIN_DIR, JETBRAINS_MODERN_PLUGIN_DIR]
+            .into_iter()
+            .any(|name| target_dir.join(name).exists())
+    {
         return Ok(false);
     }
 
@@ -2810,18 +2853,22 @@ fn find_local_vscode_vsix(dist_dir: &std::path::Path) -> Result<PathBuf> {
 }
 
 fn installed_jetbrains_plugin_version(target_dir: &std::path::Path) -> Option<String> {
-    [JETBRAINS_PLUGIN_DIR, JETBRAINS_MODULAR_PLUGIN_DIR]
-        .into_iter()
-        .filter_map(|plugin_dir| fs::read_dir(target_dir.join(plugin_dir).join("lib")).ok())
-        .flat_map(|entries| entries.flatten())
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let version = jetbrains_plugin_jar_version(&name)?;
-            let key = numeric_dot_version(&version)?;
-            Some((key, version))
-        })
-        .max_by(|left, right| left.0.cmp(&right.0))
-        .map(|(_, version)| version)
+    [
+        JETBRAINS_PLUGIN_DIR,
+        JETBRAINS_MODULAR_PLUGIN_DIR,
+        JETBRAINS_MODERN_PLUGIN_DIR,
+    ]
+    .into_iter()
+    .filter_map(|plugin_dir| fs::read_dir(target_dir.join(plugin_dir).join("lib")).ok())
+    .flat_map(|entries| entries.flatten())
+    .filter_map(|entry| {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let version = jetbrains_plugin_jar_version(&name)?;
+        let key = numeric_dot_version(&version)?;
+        Some((key, version))
+    })
+    .max_by(|left, right| left.0.cmp(&right.0))
+    .map(|(_, version)| version)
 }
 
 fn numeric_dot_version(version: &str) -> Option<Vec<u32>> {
@@ -3484,6 +3531,20 @@ mod tests {
         archive.finish().unwrap();
     }
 
+    fn write_test_modern_jetbrains_zip(path: &std::path::Path, version: &str, plugin: &[u8]) {
+        let file = fs::File::create(path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        archive
+            .start_file(
+                format!("agent-doc-jetbrains-263/lib/agent-doc-jetbrains-263-{version}.jar"),
+                options,
+            )
+            .unwrap();
+        archive.write_all(plugin).unwrap();
+        archive.finish().unwrap();
+    }
+
     #[test]
     fn installed_vscode_parser_matches_only_the_agent_doc_extension() {
         let output = "unrelated.agent-doc-helper@9.9.9\nbtakita.agent-doc@0.2.475\n";
@@ -4080,6 +4141,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     fn jetbrains_target_build_selects_only_its_compatibility_range() {
         let classic = PathBuf::from("/tmp/JetBrains/IntelliJIdea2026.1/plugins");
         let modular = PathBuf::from("/tmp/JetBrains/IntelliJIdea2026.2/plugins");
+        let modern = PathBuf::from("/tmp/JetBrains/IntelliJIdea2026.3/plugins");
         assert_eq!(jetbrains_platform_build(&classic), Some(261));
         assert_eq!(jetbrains_platform_build(&modular), Some(262));
         assert_eq!(
@@ -4090,21 +4152,25 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             jetbrains_package_range(&modular).unwrap(),
             JetbrainsPackageRange::Modular262
         );
+        assert_eq!(
+            jetbrains_package_range(&modern).unwrap(),
+            JetbrainsPackageRange::Classic263
+        );
 
         let unknown = PathBuf::from("/opt/jetbrains/plugins");
         let error = jetbrains_package_range(&unknown).unwrap_err().to_string();
         assert!(error.contains("Cannot prove the JetBrains platform build"));
 
-        let future = PathBuf::from("/tmp/JetBrains/IntelliJIdea2026.3/plugins");
+        let future = PathBuf::from("/tmp/JetBrains/IntelliJIdea2026.4/plugins");
         let error = jetbrains_package_range(&future).unwrap_err().to_string();
-        assert!(error.contains("unsupported platform build 263"));
+        assert!(error.contains("unsupported platform build 264"));
         // GH #233: the explicit-install refusal names no remedy that cannot
         // succeed on the newest release.
         assert!(error.contains("left in place"), "{error}");
         assert!(!error.contains("Upgrade agent-doc"), "{error}");
         assert_eq!(
             agent_doc_fs::jetbrains_install::jetbrains_unsupported_platform_build(&future),
-            Some(263)
+            Some(264)
         );
         assert_eq!(
             agent_doc_fs::jetbrains_install::jetbrains_unsupported_platform_build(&modular),
@@ -4128,8 +4194,10 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let classic_dist = jetbrains.join("build/distributions");
         let modular = tmp.path().join("editors/jetbrains-262");
         let modular_dist = modular.join("build/distributions");
+        let modern = tmp.path().join("editors/jetbrains-263");
         fs::create_dir_all(&classic_dist).unwrap();
         fs::create_dir_all(&modular_dist).unwrap();
+        fs::create_dir_all(&modern).unwrap();
         fs::write(
             jetbrains.join("gradle.properties"),
             "pluginGroup = example.agentdoc\npluginName = agent-doc-jetbrains\npluginVersion = 0.2.91\n",
@@ -4138,6 +4206,11 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         fs::write(
             modular.join("gradle.properties"),
             "pluginGroup = example.agentdoc\npluginName = agent-doc-jetbrains\npluginVersion = 0.2.92\n",
+        )
+        .unwrap();
+        fs::write(
+            modern.join("gradle.properties"),
+            "pluginGroup = example.agentdoc\npluginName = agent-doc-jetbrains-263\npluginVersion = 0.2.93\n",
         )
         .unwrap();
         fs::write(
@@ -4153,6 +4226,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
 
         let classic_target = Path::new("/tmp/JetBrains/IntelliJIdea2026.1/plugins");
         let modular_target = Path::new("/tmp/JetBrains/IntelliJIdea2026.2/plugins");
+        let modern_target = Path::new("/tmp/JetBrains/IntelliJIdea2026.3/plugins");
 
         let error = local_jetbrains_zip_in(tmp.path(), classic_target)
             .unwrap_err()
@@ -4162,11 +4236,17 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             .unwrap_err()
             .to_string();
         assert!(error.contains("pluginVersion 0.2.92"));
+        let error = local_jetbrains_zip_in(tmp.path(), modern_target)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("pluginVersion 0.2.93"));
 
         let classic = classic_dist.join("agent-doc-jetbrains-0.2.91.zip");
         let modular = modular_dist.join("agent-doc-jetbrains-262-0.2.92.zip");
+        let modern = classic_dist.join("agent-doc-jetbrains-263-0.2.93.zip");
         fs::write(&classic, b"classic").unwrap();
         fs::write(&modular, b"modular").unwrap();
+        fs::write(&modern, b"modern").unwrap();
         assert_eq!(
             local_jetbrains_zip_in(tmp.path(), classic_target).unwrap(),
             classic
@@ -4175,15 +4255,20 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             local_jetbrains_zip_in(tmp.path(), modular_target).unwrap(),
             modular
         );
+        assert_eq!(
+            local_jetbrains_zip_in(tmp.path(), modern_target).unwrap(),
+            modern
+        );
     }
 
-    fn dual_range_release() -> serde_json::Value {
+    fn triple_range_release() -> serde_json::Value {
         // Deliberately interleaved and including signed variants: selection
         // must depend on the target's range, never on API order.
         json!({
             "tag_name": "v0.35.481",
             "assets": [
                 {"name": "agent-doc-jetbrains-262-0.2.511.zip", "browser_download_url": "https://example.invalid/m.zip"},
+                {"name": "agent-doc-jetbrains-263-0.2.512.zip", "browser_download_url": "https://example.invalid/n.zip"},
                 {"name": "agent-doc-jetbrains-0.2.510.zip", "browser_download_url": "https://example.invalid/c.zip"},
                 {"name": "agent-doc-jetbrains-262-0.2.511-signed.zip", "browser_download_url": "https://example.invalid/ms.zip"},
                 {"name": "agent-doc-jetbrains-0.2.510-signed.zip", "browser_download_url": "https://example.invalid/cs.zip"},
@@ -4199,9 +4284,10 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
 
     #[test]
     fn mixed_261_and_262_targets_choose_distinct_exact_release_assets() {
-        let release = dual_range_release();
+        let release = triple_range_release();
         let classic = Path::new("/home/u/.local/share/JetBrains/IntelliJIdea2026.1/plugins");
         let modular = Path::new("/home/u/.local/share/JetBrains/IntelliJIdea2026.2/plugins");
+        let modern = Path::new("/home/u/.local/share/JetBrains/IntelliJIdea2026.3/plugins");
         let oldest = Path::new("/home/u/.local/share/JetBrains/PyCharm2024.2");
 
         let (range, asset) = super::jetbrains_release_asset_for_target(&release, classic).unwrap();
@@ -4210,6 +4296,9 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let (range, asset) = super::jetbrains_release_asset_for_target(&release, modular).unwrap();
         assert_eq!(range, JetbrainsPackageRange::Modular262);
         assert_eq!(asset.name, "agent-doc-jetbrains-262-0.2.511-signed.zip");
+        let (range, asset) = super::jetbrains_release_asset_for_target(&release, modern).unwrap();
+        assert_eq!(range, JetbrainsPackageRange::Classic263);
+        assert_eq!(asset.name, "agent-doc-jetbrains-263-0.2.512.zip");
         let (range, asset) = super::jetbrains_release_asset_for_target(&release, oldest).unwrap();
         assert_eq!(range, JetbrainsPackageRange::Classic242To261);
         assert_eq!(asset.name, "agent-doc-jetbrains-0.2.510-signed.zip");
@@ -4224,6 +4313,12 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             {"name": "agent-doc-jetbrains-262-0.2.511.zip", "browser_download_url": "https://example.invalid/m.zip"},
         ]});
         assert!(super::jetbrains_release_asset_for_target(&modular_only, classic).is_err());
+        assert!(super::jetbrains_release_asset_for_target(&modular_only, modern).is_err());
+        let modern_only = json!({"assets": [
+            {"name": "agent-doc-jetbrains-263-0.2.512.zip", "browser_download_url": "https://example.invalid/n.zip"},
+        ]});
+        assert!(super::jetbrains_release_asset_for_target(&modern_only, classic).is_err());
+        assert!(super::jetbrains_release_asset_for_target(&modern_only, modular).is_err());
     }
 
     #[test]
@@ -4258,7 +4353,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             ],
             |prefix| {
                 fetched.push(prefix.to_string());
-                Ok(dual_range_release())
+                Ok(triple_range_release())
             },
         );
         fetched.sort();
@@ -4356,7 +4451,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let tmp = TempDir::new().unwrap();
         let supported = tmp.path().join("IntelliJIdea2026.2/plugins");
         install_test_jar(&supported, "agent.doc-0.2.509.jar");
-        let future = tmp.path().join("IntelliJIdea2026.3/plugins");
+        let future = tmp.path().join("IntelliJIdea2026.4/plugins");
         install_test_jar(&future, "agent-doc-jetbrains-0.2.508.jar");
 
         let mut fetched = Vec::new();
@@ -4364,12 +4459,12 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             vec![supported.clone(), future.clone()],
             |prefix| {
                 fetched.push(prefix.to_string());
-                Ok(dual_range_release())
+                Ok(triple_range_release())
             },
         );
 
         assert!(plan.errors.is_empty(), "{:?}", plan.errors);
-        assert_eq!(plan.unsupported, vec![(future.clone(), 263)]);
+        assert_eq!(plan.unsupported, vec![(future.clone(), 264)]);
         assert!(plan.entries.iter().all(|entry| entry.target != future));
         assert_eq!(plan.entries.len(), 1);
         assert_eq!(plan.entries[0].target, supported);
@@ -4391,9 +4486,9 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 reconcile_target(JetBrains, "IntelliJIdea2026.2", "0.2.518", O::Unchanged),
                 reconcile_target(
                     JetBrains,
-                    "IntelliJIdea2026.3",
+                    "IntelliJIdea2026.4",
                     "0.2.508",
-                    O::UnsupportedPlatform { build: 263 },
+                    O::UnsupportedPlatform { build: 264 },
                 ),
             ],
         };
@@ -4413,10 +4508,11 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert_eq!(warnings.len(), 1, "{summary}");
         let warning = warnings[0];
         for needle in [
-            "IntelliJIdea2026.3",
-            "platform build 263",
+            "IntelliJIdea2026.4",
+            "platform build 264",
             "242-261",
             "262 (agent-doc-jetbrains-262-<version>.zip)",
+            "263 (agent-doc-jetbrains-263-<version>.zip)",
             "left plugin v0.2.508 installed",
             "not an install failure",
         ] {
@@ -4451,10 +4547,11 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
     }
 
-    fn write_local_dual_build(project: &Path, classic: &str, modular: &str) {
+    fn write_local_builds(project: &Path, classic: &str, modular: &str, modern: &str) {
         for (dir, version) in [
             ("editors/jetbrains", classic),
             ("editors/jetbrains-262", modular),
+            ("editors/jetbrains-263", modern),
         ] {
             let dist = project.join(dir).join("build/distributions");
             fs::create_dir_all(&dist).unwrap();
@@ -4478,18 +4575,27 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             modular,
             b"modular",
         );
+        write_test_modern_jetbrains_zip(
+            &project.join(format!(
+                "editors/jetbrains/build/distributions/agent-doc-jetbrains-263-{modern}.zip"
+            )),
+            modern,
+            b"modern",
+        );
     }
 
     #[test]
     fn local_all_installs_each_target_from_its_own_compatible_package() {
         let tmp = TempDir::new().unwrap();
         let project = tmp.path().join("checkout");
-        write_local_dual_build(&project, "0.2.510", "0.2.511");
+        write_local_builds(&project, "0.2.510", "0.2.511", "0.2.512");
         let root = tmp.path().join("JetBrains");
         let classic = root.join("IntelliJIdea2026.1/plugins");
         install_test_jar(&classic, "agent-doc-jetbrains-0.2.500.jar");
         let modular = root.join("IntelliJIdea2026.2/plugins");
         install_test_jar(&modular, "agent.doc-0.2.501.jar");
+        let modern = root.join("IntelliJIdea2026.3/plugins");
+        install_test_jar(&modern, "agent-doc-jetbrains-0.2.502.jar");
         // A 262 IDE holding a newer-numbered classic package must still be
         // converged to the modular line, never kept or refreshed as classic.
         let classic_in_262 = root.join("WebStorm2026.2/plugins");
@@ -4497,7 +4603,12 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
 
         let resolved = super::resolve_local_jetbrains_targets(
             &project,
-            vec![classic.clone(), modular.clone(), classic_in_262.clone()],
+            vec![
+                classic.clone(),
+                modular.clone(),
+                modern.clone(),
+                classic_in_262.clone(),
+            ],
         )
         .unwrap();
         let zip_name = |target: &Path| {
@@ -4513,6 +4624,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         };
         assert_eq!(zip_name(&classic), "agent-doc-jetbrains-0.2.510.zip");
         assert_eq!(zip_name(&modular), "agent-doc-jetbrains-262-0.2.511.zip");
+        assert_eq!(zip_name(&modern), "agent-doc-jetbrains-263-0.2.512.zip");
         assert_eq!(
             zip_name(&classic_in_262),
             "agent-doc-jetbrains-262-0.2.511.zip"
@@ -4543,13 +4655,17 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                     .is_file()
             );
         }
+        assert_eq!(
+            super::installed_jetbrains_package(&modern),
+            Some((JetbrainsPackageRange::Classic263, "0.2.512".into()))
+        );
     }
 
     #[test]
     fn local_all_refuses_every_target_when_any_cannot_prove_its_range() {
         let tmp = TempDir::new().unwrap();
         let project = tmp.path().join("checkout");
-        write_local_dual_build(&project, "0.2.510", "0.2.511");
+        write_local_builds(&project, "0.2.510", "0.2.511", "0.2.512");
         let classic = tmp.path().join("JetBrains/IntelliJIdea2026.1/plugins");
         install_test_jar(&classic, "agent-doc-jetbrains-0.2.500.jar");
         let unknown = tmp.path().join("portable-ide/plugins");
@@ -4578,7 +4694,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     fn local_262_target_without_a_modular_build_never_falls_back_to_classic() {
         let tmp = TempDir::new().unwrap();
         let project = tmp.path().join("checkout");
-        write_local_dual_build(&project, "0.2.510", "0.2.511");
+        write_local_builds(&project, "0.2.510", "0.2.511", "0.2.512");
         fs::remove_dir_all(project.join("editors/jetbrains-262")).unwrap();
         let modular = tmp.path().join("JetBrains/IntelliJIdea2026.2/plugins");
 
@@ -5680,8 +5796,10 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let tmp = TempDir::new().unwrap();
         let classic = tmp.path().join("classic.zip");
         let modular = tmp.path().join("modular.zip");
+        let modern = tmp.path().join("modern.zip");
         write_test_jetbrains_zip(&classic, "0.2.513", b"classic");
         write_test_modular_jetbrains_zip(&modular, "0.2.514", b"modular");
+        write_test_modern_jetbrains_zip(&modern, "0.2.515", b"modern");
         assert_eq!(
             super::jetbrains_zip_package_range(&classic).unwrap(),
             JetbrainsPackageRange::Classic242To261
@@ -5689,6 +5807,10 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert_eq!(
             super::jetbrains_zip_package_range(&modular).unwrap(),
             JetbrainsPackageRange::Modular262
+        );
+        assert_eq!(
+            super::jetbrains_zip_package_range(&modern).unwrap(),
+            JetbrainsPackageRange::Classic263
         );
     }
 

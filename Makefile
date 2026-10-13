@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test jetbrains-repository-self-test python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test jetbrains-repository-self-test python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -235,25 +235,40 @@ dev-harness-test: $(VSCODE_NODE_LOCK)
 editor-parity: dev-harness-test cross-editor-simworld
 	@python3 scripts/check_editor_parity.py
 
-# The classic and 262 modular ZIPs share one Marketplace plugin ID, so both
-# compatibility ranges and the modular role/sandbox contract are release gates.
+# The classic, exact-262 modular, and 263 ZIPs share one Marketplace plugin ID,
+# so every disjoint compatibility range and the modular role/sandbox contract
+# are release gates.
 jetbrains-classic-check:
 	@cd editors/jetbrains && ./gradlew --no-daemon --console=plain verifyClassicArtifact
 
 jetbrains-262-check:
 	@cd editors/jetbrains-262 && gradle --no-daemon --console=plain test buildPlugin verifySplitArtifact verifySplitModeSandboxes
 
-# Bump JB plugin patch version (when its sources changed) and build both zips.
+jetbrains-263-check:
+	@set -e; \
+	props=editors/jetbrains-263/gradle.properties; \
+	name=$$(sed -n 's/^pluginName *= *//p' "$$props" | tr -d '[:space:]'); \
+	version=$$(sed -n 's/^pluginVersion *= *//p' "$$props" | tr -d '[:space:]'); \
+	since=$$(sed -n 's/^compatibilitySinceBuild *= *//p' "$$props" | tr -d '[:space:]'); \
+	until=$$(sed -n 's/^compatibilityUntilBuild *= *//p' "$$props" | tr -d '[:space:]'); \
+	cd editors/jetbrains && ./gradlew --no-daemon --console=plain \
+		-PpluginName="$$name" -PpluginVersion="$$version" \
+		-PcompatibilitySinceBuild="$$since" -PcompatibilityUntilBuild="$$until" \
+		buildPlugin verifyClassicArtifact
+
+# Bump JB plugin patch versions (when their sources changed) and build all zips.
 # `#installgenskew`: the bump goes through check_plugin_versions.py so it also
 # records `pluginSourceDigest`. A bare `sed` bump left the digest stale, and the
 # next install then bumped AGAIN after the binary had been built, shipping plugin
 # 0.2.443 beside a binary that expected 0.2.442 (plugin_generation_mismatch).
 bump-plugin:
 	@python3 scripts/check_plugin_versions.py --bump JetBrains
+	@python3 scripts/check_plugin_versions.py --bump "JetBrains 263"
 	@cd editors/jetbrains && \
 	new=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
 	./gradlew buildPlugin signPlugin && \
 	ls -1 build/distributions/agent-doc-jetbrains-$$new*.zip
+	@$(MAKE) jetbrains-263-check
 
 bump-plugin-262:
 	@python3 scripts/check_plugin_versions.py --bump "JetBrains 262"
@@ -269,6 +284,7 @@ bump-plugin-262:
 editor-generation-bump:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
 		python3 scripts/check_plugin_versions.py --bump JetBrains || exit 1; \
+		python3 scripts/check_plugin_versions.py --bump "JetBrains 263" || exit 1; \
 	fi
 
 # Check staged changes and committed history since each target's last package
@@ -369,7 +385,7 @@ jetbrains-repository-self-test:
 check-fast: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test jetbrains-repository-self-test
 	@python3 scripts/dev-check.py run
 
-check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test jetbrains-repository-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-classic-check jetbrains-262-check python-bootstrap-test lean tla-runner-self-test tla
+check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test jetbrains-repository-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check python-bootstrap-test lean tla-runner-self-test tla
 	@AGENT_DOC_FULL_CHECK_SUCCEEDED=1 python3 scripts/dev-check.py record-full-check
 
 # Target-specific, so it reaches the `audit-docs` prerequisite of `check` only.
@@ -471,13 +487,13 @@ install-full: editor-generation-bump
 # version, so this adds no churn to a no-op `make install`.
 # The native cdylib and editor package are separate install surfaces: updating
 # only the former leaves running turns reporting the older package generation.
-# The classic (242-261) and modular (262) packages are disjoint artifacts with
-# one plugin ID. Build both before the all-installed convergence command so each
-# target can select its own range; never let a classic-only build replace 262.
-# Without the modular project, 262 targets fail closed in the Rust selector.
+# The classic (242-261), modular (262), and classic-source (263) packages are
+# disjoint artifacts with one plugin ID. Build all three before convergence so
+# each target selects its exact range; never substitute another range.
 install-editor-plugins:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
 		python3 scripts/check_plugin_versions.py --bump JetBrains || exit 1; \
+		python3 scripts/check_plugin_versions.py --bump "JetBrains 263" || exit 1; \
 		( cd editors/jetbrains && ./gradlew buildPlugin ) || { \
 			echo "JetBrains classic plugin build failed. Its Gradle daemon is pinned to Temurin 21 (gradle/gradle-daemon-jvm.properties); check that Gradle can detect or download it. Refusing to install a stale package." >&2; \
 			exit 1; \
@@ -491,6 +507,10 @@ install-editor-plugins:
 		else \
 			echo "WARNING: this checkout has no editors/jetbrains-262 project; any build-262 IDE target is refused rather than given the classic package." >&2; \
 		fi; \
+		$(MAKE) jetbrains-263-check || { \
+			echo "JetBrains 263 plugin build failed. Refusing to install another compatibility line into a 263 IDE." >&2; \
+			exit 1; \
+		}; \
 		agent-doc plugin install jetbrains --local --all-installed; \
 	else \
 		echo "No existing JetBrains agent-doc package; editor package sync skipped."; \

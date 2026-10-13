@@ -8,7 +8,7 @@ Extends `editors/SPEC.md` with JetBrains-specific behavior.
 - **Name:** Agent Doc
 - **Restart:** Required for every package upgrade on builds with asynchronous classloader retirement; compatible builds may upgrade dynamically
 - **Native upgrades:** Safe in-process generation handoff
-- **Distribution:** The classic and exact-262 updates share this ID but use distinct versions, disjoint compatibility ranges, and separate validated custom-repository listings; see [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md)
+- **Distribution:** The 242-261 classic, exact-262 modular, and 263 classic-source updates share this ID but use distinct versions, disjoint compatibility ranges, and separate validated custom-repository listings; see [`docs/reference/jetbrains-distribution.md`](../../docs/reference/jetbrains-distribution.md)
 
 ## Implementation Details
 
@@ -107,13 +107,18 @@ compatible build.
 Package selection is per target IDE. The classic package
 (`agent-doc-jetbrains-<version>.zip`, `editors/jetbrains`) covers builds
 242-261; the modular package (`agent-doc-jetbrains-262-<version>.zip`,
-`editors/jetbrains-262`) covers exactly 262. `agent-doc plugin install|update
+`editors/jetbrains-262`) covers exactly 262; and the 263 package
+(`agent-doc-jetbrains-263-<version>.zip`) reuses the classic source/build with
+metadata from `editors/jetbrains-263` and covers exactly 263. The exact-262
+source stays isolated because it relies on build-line-specific internal APIs.
+All three update versions, artifact names, repository listings, and ranges are
+distinct. `agent-doc plugin install|update
 jetbrains`, the `agent-doc upgrade` installed-plugin reconciliation, and `plugin install jetbrains --local
 --all-installed` derive each target's platform build from its versioned IDE data
-directory (`IntelliJIdea2026.2` -> 262) and select only that range's asset or
-local ZIP. A target whose build cannot be proven, or is outside both ranges, is
+directory (`IntelliJIdea2026.3` -> 263) and select only that range's asset or
+local ZIP. A target whose build cannot be proven, or is outside all ranges, is
 refused with guidance. During `agent-doc upgrade` reconciliation (GH #233) a
-target whose proven build is outside both ranges is instead reported as
+target whose proven build is outside all ranges is instead reported as
 `UnsupportedPlatform`: nothing is installed, its plugin stays in place, the
 summary prints one `WARNING:` line naming the build, the supported ranges and
 the installed version (no retry, `plugin install`, or "upgrade agent-doc"
@@ -123,10 +128,10 @@ change for the `--auto` watcher. The `stale_plugin` warning likewise drops its
 "install {expected} first" remedy when the live IDE's mapped plugin tree sits
 in such a data directory and names the build, the ranges and the plugin left
 installed instead; `--local --all-installed` resolves every target before
-replacing any, so one unprovable target or a missing modular build changes
-nothing. Both archive roots install into the canonical `agent-doc-jetbrains/`
-tree, and a stale `agent-doc-jetbrains-262/` tree is removed so one plugin ID
-never has two on-disk roots. `make install-editor-plugins` builds both packages
+replacing any, so one unprovable target or a missing ranged build changes
+nothing. All archive roots install into the canonical `agent-doc-jetbrains/`
+tree, and stale ranged roots are removed so one plugin ID
+never has two on-disk roots. `make install-editor-plugins` builds all packages
 before the all-installed convergence.
 
 Restart-free dynamic upgrade is a classic-line capability
@@ -478,7 +483,7 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 ### Patch Application Safety
 
 - JetBrains defers socket and file-watch patch application until the target markdown document has been idle long enough for the typing debounce. If the bounded wait times out, the plugin logs the timeout, does not mutate the document, and retries file-watch patches after another debounce window. Socket patches fail closed so the CLI can retry or fall back through the binary-owned closeout path.
-- JetBrains has no broad `save_document` or save-all command. The generation-fenced `persist_current` intent enters the same per-document FIFO worker lane as accepted local and remote CRDT updates, so it cannot overtake an earlier update signal. After the lane reaches the command, the intent is accepted only when the post-registration IntelliJ `Document` still matches the requested hash/byte length and its active replica. It calls `saveDocument` without replacing the buffer, verifies the same bytes on disk, and publishes `disk_persisted`; if IntelliJ defers the write behind File Cache Conflict, the later VFS content event publishes the receipt after the user-approved overwrite, provided disk, editor, and the same replica remain exact. A mismatch requests CRDT redelivery and never replaces the editor from disk. Every rejection records a typed reason plus the expected and observed revision evidence so a retained latest-durable intent can retry or be superseded without treating operator typing as an error. The controller admits the intent for the classic package, the release-paired modular 262 package, and any build at or above the native-save protocol floor `0.2.497` (GH #236, `editors/PLUGIN-SPEC.md` §6), so a 263 IDE left on an older package (#233) still saves natively; a build below the floor is fenced and its retained write falls back to the exact-disk proof without failing closeout.
+- JetBrains has no broad `save_document` or save-all command. The generation-fenced `persist_current` intent enters the same per-document FIFO worker lane as accepted local and remote CRDT updates, so it cannot overtake an earlier update signal. After the lane reaches the command, the intent is accepted only when the post-registration IntelliJ `Document` still matches the requested hash/byte length and its active replica. It calls `saveDocument` without replacing the buffer, verifies the same bytes on disk, and publishes `disk_persisted`; if IntelliJ defers the write behind File Cache Conflict, the later VFS content event publishes the receipt after the user-approved overwrite, provided disk, editor, and the same replica remain exact. A mismatch requests CRDT redelivery and never replaces the editor from disk. Every rejection records a typed reason plus the expected and observed revision evidence so a retained latest-durable intent can retry or be superseded without treating operator typing as an error. The controller admits the intent for all three release-paired JetBrains packages and any build at or above the native-save protocol floor `0.2.497` (GH #236, `editors/PLUGIN-SPEC.md` §6); a build below the floor is fenced and its retained write falls back to the exact-disk proof without failing closeout.
 - Replica refresh registers from the controller bootstrap, reports reconnect propagation, and schedules an ordinary canonical-projection drain. The observed editor cut is only a swap fence; it is never seeded or published as a whole-document recovery baseline.
 - A successful `replica_pull` with `refused=true, reason=missing_replica` means the cached client belongs to a prior controller generation. JetBrains must classify it as transport invalidation, atomically replace the cached forwarder through registration, and then resume pull/projection. It must not treat that typed refusal as an idle empty update list.
 - Ordinary dirty `DocumentEvent`s retain their exact UTF-16 range and old/new fragments, validate that splice against the current replica shadow, translate it to CRDT code-point units, and publish a bounded splice batch. The debounce may batch transport publication but may not reread the whole `Document` and infer one replacement. Whole-text events and clean incremental cache reloads are non-operator projections: they advance the projection epoch, fence queued operator splices, and enter the explicit refresh/recovery path.

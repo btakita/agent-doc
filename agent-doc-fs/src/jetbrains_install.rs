@@ -26,30 +26,38 @@ pub fn newest_installed_artifact(plugins_dirs: &[PathBuf]) -> Option<InstalledPl
 }
 
 pub fn installed_artifacts_in(plugins_dir: &Path) -> Vec<InstalledPluginArtifact> {
-    ["agent-doc-jetbrains", "agent-doc-jetbrains-262"]
+    [
+        "agent-doc-jetbrains",
+        "agent-doc-jetbrains-262",
+        "agent-doc-jetbrains-263",
+    ]
+    .into_iter()
+    .filter_map(|plugin_dir| std::fs::read_dir(plugins_dir.join(plugin_dir).join("lib")).ok())
+    .flat_map(|entries| entries.flatten())
+    .filter_map(|entry| {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let version = [
+            "agent-doc-jetbrains-263-",
+            "agent-doc-jetbrains-",
+            "agent.doc-",
+        ]
         .into_iter()
-        .filter_map(|plugin_dir| std::fs::read_dir(plugins_dir.join(plugin_dir).join("lib")).ok())
-        .flat_map(|entries| entries.flatten())
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let version = ["agent-doc-jetbrains-", "agent.doc-"]
-                .into_iter()
-                .find_map(|prefix| name.strip_prefix(prefix)?.strip_suffix(".jar"))?;
-            if version.is_empty()
-                || !version
-                    .split('.')
-                    .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
-            {
-                return None;
-            }
-            let modified = entry.metadata().ok()?.modified().ok()?;
-            Some(InstalledPluginArtifact {
-                path: entry.path(),
-                version: version.to_string(),
-                modified,
-            })
+        .find_map(|prefix| name.strip_prefix(prefix)?.strip_suffix(".jar"))?;
+        if version.is_empty()
+            || !version
+                .split('.')
+                .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
+        {
+            return None;
+        }
+        let modified = entry.metadata().ok()?.modified().ok()?;
+        Some(InstalledPluginArtifact {
+            path: entry.path(),
+            version: version.to_string(),
+            modified,
         })
-        .collect()
+    })
+    .collect()
 }
 
 pub fn jetbrains_plugin_dirs() -> Vec<PathBuf> {
@@ -120,12 +128,11 @@ pub fn is_jetbrains_ide_data_dir(name: &str) -> bool {
 /// The operator-facing ranges every published JetBrains package covers. Kept
 /// beside [`jetbrains_platform_build`] so the installer refusal, the upgrade
 /// summary and the `stale_plugin` warning name the same ranges (GH #233).
-pub const JETBRAINS_SUPPORTED_RANGES: &str =
-    "242-261 (agent-doc-jetbrains-<version>.zip) and 262 (agent-doc-jetbrains-262-<version>.zip)";
+pub const JETBRAINS_SUPPORTED_RANGES: &str = "242-261 (agent-doc-jetbrains-<version>.zip), 262 (agent-doc-jetbrains-262-<version>.zip), and 263 (agent-doc-jetbrains-263-<version>.zip)";
 
 /// Whether any published agent-doc JetBrains package declares `build`.
 pub fn jetbrains_platform_build_supported(build: u32) -> bool {
-    matches!(build, 242..=262)
+    matches!(build, 242..=263)
 }
 
 /// The JetBrains platform build (`262` for `IntelliJIdea2026.2`) a versioned
@@ -851,22 +858,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn installed_artifacts_include_classic_and_modular_package_layouts() {
+    fn installed_artifacts_include_all_package_layouts() {
         let tmp = tempfile::tempdir().unwrap();
         let classic = tmp.path().join("agent-doc-jetbrains/lib");
         let modular = tmp.path().join("agent-doc-jetbrains-262/lib");
+        let modern = tmp.path().join("agent-doc-jetbrains-263/lib");
         std::fs::create_dir_all(&classic).unwrap();
         std::fs::create_dir_all(&modular).unwrap();
+        std::fs::create_dir_all(&modern).unwrap();
         std::fs::write(classic.join("agent-doc-jetbrains-0.2.510.jar"), b"classic").unwrap();
         std::fs::write(modular.join("agent.doc-0.2.511.jar"), b"modular").unwrap();
         std::fs::write(modular.join("agent.doc.backend.jar"), b"module").unwrap();
+        std::fs::write(
+            modern.join("agent-doc-jetbrains-263-0.2.512.jar"),
+            b"modern",
+        )
+        .unwrap();
 
         let mut versions = installed_artifacts_in(tmp.path())
             .into_iter()
             .map(|artifact| artifact.version)
             .collect::<Vec<_>>();
         versions.sort();
-        assert_eq!(versions, ["0.2.510", "0.2.511"]);
+        assert_eq!(versions, ["0.2.510", "0.2.511", "0.2.512"]);
     }
 
     #[test]

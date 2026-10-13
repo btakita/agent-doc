@@ -559,10 +559,15 @@ router input while the recycle is pending, because gating it out would itself
 stash a visible live session during an install. The focused document's stale
 pane outside the target window is admitted
 (`layout_column_pane_stale_focus_admitted`) only when realising it stashes no
-pane in the target window that holds a fresh turn-active lease — a live agent
-pane is never stashed in favour of a stale-supervisor pane (GH #124,
-`admission=excluded_focused_live_turn_protected:<panes>`). When every column is
-gated out the current layout is preserved.
+pane in the target window that holds a fresh turn-active lease — an inactive
+stale-supervisor pane never replaces a live agent pane (GH #124,
+`admission=excluded_focused_live_turn_protected:<panes>`). The tie changes when
+the requested stale pane itself has a fresh turn-active proof: a newer explicit
+editor focus may replace a visible live-turn peer because tmux only moves that
+peer to `stash`; neither process nor turn is interrupted. That path records
+`admission=admitted_focused_active_turn_over_live_turn_peers:<panes>`, preserves
+the editor-observed column count, and makes the newly focused turn visible.
+When every column is gated out the current layout is preserved.
 - The focus exception is bounded (GH #136). It is granted on the strength of
 the safe-boundary recycle that will make the pane fresh, so it is decided by a
 total transition function (`layout_column_audit::stale_focus_admission`) over

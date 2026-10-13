@@ -456,7 +456,10 @@ pub struct StaleFocusFacts {
     pub realised_columns: usize,
     /// Panes currently in the target window, when observed.
     pub window_panes: Option<usize>,
-    /// Some live-turn pane in the target window would be stashed for it.
+    /// Some live-turn pane in the target window would be stashed for it while
+    /// the focused stale pane has no live turn of its own. When both panes are
+    /// turn-active, changing which peer is visible does not interrupt either
+    /// turn, so the operator's newer focus intent wins.
     pub displaces_live_turn: bool,
 }
 
@@ -492,6 +495,8 @@ pub fn stale_focus_admission(facts: StaleFocusFacts) -> ColumnAdmission {
 
 /// GH #124: panes running a live turn that the layout would stash — live-turn
 /// panes currently in the target window that realise none of the columns.
+/// Moving one of these panes to `stash` changes visibility only; it does not
+/// stop the process or interrupt its turn.
 pub fn live_turn_panes_displaced(
     live_turn_window_panes: &[String],
     column_panes: &[String],
@@ -503,14 +508,18 @@ pub fn live_turn_panes_displaced(
         .collect()
 }
 
-/// GH #124: the focus exception never displaces a live turn. A stale focused
-/// pane is admitted only when no live-turn pane would be stashed for it.
+/// GH #124: an inactive stale focused pane never displaces a live turn. A
+/// focused stale pane with a fresh live-turn proof may replace a visible peer:
+/// both turns continue running and the newer operator focus owns visibility.
 pub fn protect_live_turn_from_stale_focus(
     admission: ColumnAdmission,
+    focused_turn_active: bool,
     displaced_live_turn_panes: &[String],
 ) -> ColumnAdmission {
     match admission {
-        ColumnAdmission::AdmitStaleFocused if !displaced_live_turn_panes.is_empty() => {
+        ColumnAdmission::AdmitStaleFocused
+            if !focused_turn_active && !displaced_live_turn_panes.is_empty() =>
+        {
             ColumnAdmission::ExcludeStaleFocusedLiveTurn
         }
         other => other,
@@ -556,10 +565,12 @@ pub struct ColumnGateFacts {
 /// displaced) per column fact, in order.
 ///
 /// GH #124: the focused-document exception is decided LAST, against the panes
-/// the layout will actually realise. A stale focused pane is admitted only when
-/// no pane in the target window running a live turn would be stashed for it —
-/// a live agent pane is never stashed in favour of a stale-supervisor pane.
-/// `live_turn_window_panes` is consulted only when a stale focused column exists.
+/// the layout will actually realise. An inactive stale focused pane is admitted
+/// only when no pane in the target window running a live turn would be stashed
+/// for it. If the stale focused pane is itself turn-active, the newer explicit
+/// focus may exchange which live-turn peer is visible: tmux only moves the old
+/// peer to `stash`, so neither turn is interrupted. `live_turn_window_panes` is
+/// consulted only when a stale focused column exists.
 ///
 /// GH #136: the exception is further bounded by [`stale_focus_admission`].
 /// `window_pane_count` (the target window's current pane count) is likewise
@@ -629,7 +640,7 @@ pub fn plan_column_admissions(
                 recycle_overdue: fact.recycle.is_overdue(),
                 realised_columns: realised.len(),
                 window_panes,
-                displaces_live_turn: !displaced.is_empty(),
+                displaces_live_turn: !fact.turn_active && !displaced.is_empty(),
             });
             (admission, displaced)
         })
@@ -836,7 +847,14 @@ pub fn gate_stale_column_panes(
             }
             ColumnAdmission::AdmitStaleFocused => (
                 "layout_column_pane_stale_focus_admitted",
-                "admitted_focused_document_sole_owner".to_string(),
+                if fact.turn_active && !displaced.is_empty() {
+                    format!(
+                        "admitted_focused_active_turn_over_live_turn_peers:{}",
+                        displaced.join("+")
+                    )
+                } else {
+                    "admitted_focused_document_sole_owner".to_string()
+                },
             ),
             ColumnAdmission::ExcludeStaleFocusedLiveTurn => {
                 excluded.push(file.clone());
@@ -1509,6 +1527,47 @@ mod tests {
         assert_eq!(outcome.window, vec!["%32".to_string()]);
         assert!(!outcome.window.contains(&"%33".to_string()));
         assert_eq!(outcome.active.as_deref(), Some("%32"));
+    }
+
+    #[test]
+    fn active_stale_focused_turn_replaces_visible_live_turn_peer_without_widening() {
+        // Live recurrence (2026-10-13): `%33` is a stale-binary supervisor in
+        // `stash`, but its harness still owns a fresh turn. `%434` is another
+        // live turn in the one-column target window. Reselecting `%33` must
+        // change which peer is visible; stashing `%434` does not stop it.
+        let mut world = Gh124World::issue_124();
+        world.live_turn = vec!["%434", "%33"];
+        let outcome = world.sync(
+            &["tasks/pmt2/mr/1061.md".to_string()],
+            "tasks/pmt2/mr/1061.md",
+        );
+        assert_eq!(outcome.window, vec!["%33".to_string()]);
+        assert_eq!(outcome.stashed, vec!["%434".to_string()]);
+        assert_eq!(outcome.active.as_deref(), Some("%33"));
+        assert_eq!(outcome.window.len(), world.window.len());
+        assert!(world.live_turn.contains(&"%434"));
+        assert!(world.live_turn.contains(&"%33"));
+    }
+
+    #[test]
+    fn active_stale_focused_turn_replaces_only_its_column_in_two_column_layout() {
+        // Exact shape from agent-doc-bugs.md: a stale, turn-active requested
+        // pane replaces the left live-turn peer while the right column remains
+        // fixed. The admission must neither widen nor collapse the layout.
+        let mut world = Gh124World::issue_124();
+        world.window = vec!["%434", "%32"];
+        world.live_turn = vec!["%434", "%33"];
+        let outcome = world.sync(
+            &[
+                "tasks/pmt2/mr/1061.md".to_string(),
+                "tasks/laptop/laptop.md".to_string(),
+            ],
+            "tasks/pmt2/mr/1061.md",
+        );
+        assert_eq!(outcome.window, vec!["%33".to_string(), "%32".to_string()]);
+        assert_eq!(outcome.stashed, vec!["%434".to_string()]);
+        assert_eq!(outcome.active.as_deref(), Some("%33"));
+        assert_eq!(outcome.window.len(), world.window.len());
     }
 
     #[test]

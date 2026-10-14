@@ -9,8 +9,29 @@ use agent_doc_element::element;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromptComponentAttrs {
+    /// The trimmed `preset=` value exactly as parsed from the marker. Consumers
+    /// must use [`Self::preset_names`] so a quoted value may carry more than one
+    /// whitespace-separated preset reference.
     pub preset: Option<String>,
     pub subagents: bool,
+}
+
+impl PromptComponentAttrs {
+    /// Preset references declared by `preset=`, in source order.
+    ///
+    /// The component parser removes the quotes around the whole attribute
+    /// value. Split the remaining value on whitespace and also tolerate quote
+    /// characters around individual references. Empty tokens are ignored;
+    /// canonicalization, duplicate removal, and missing-preset handling belong
+    /// to the resolver because bare aliases need the effective preset map.
+    pub fn preset_names(&self) -> impl Iterator<Item = &str> {
+        self.preset
+            .as_deref()
+            .into_iter()
+            .flat_map(str::split_whitespace)
+            .map(|name| name.trim_matches(|ch| ch == '\'' || ch == '"'))
+            .filter(|name| !name.is_empty())
+    }
 }
 
 /// The component's `preset` value, or `None` when there is no preset.
@@ -78,6 +99,33 @@ mod tests {
                 preset: Some("#review".to_string()),
                 subagents: true,
             }
+        );
+    }
+
+    #[test]
+    fn quoted_preset_attribute_exposes_every_reference_in_source_order() {
+        let content = concat!(
+            "<!-- agent:queue preset=\"#push  '#auth' #push\" -->\n",
+            "- release\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let attrs = prompt_component_attrs(content, "queue");
+        assert_eq!(attrs.preset.as_deref(), Some("#push  '#auth' #push"));
+        assert_eq!(
+            attrs.preset_names().collect::<Vec<_>>(),
+            vec!["#push", "#auth", "#push"]
+        );
+
+        let single_quoted = concat!(
+            "<!-- agent:queue preset='#push #auth' -->\n",
+            "- release\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            prompt_component_attrs(single_quoted, "queue")
+                .preset_names()
+                .collect::<Vec<_>>(),
+            vec!["#push", "#auth"]
         );
     }
 

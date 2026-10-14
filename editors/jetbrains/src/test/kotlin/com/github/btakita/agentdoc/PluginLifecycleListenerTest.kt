@@ -88,7 +88,7 @@ class PluginLifecycleListenerTest {
         assertTrue(source.contains("ProjectManager.getInstance().openProjects"))
         assertTrue(source.contains("initializeOpenProjectsAfterDynamicLoad"))
         assertTrue(source.contains("fun disposeOpenProjectsForDynamicUnload(): Int"))
-        assertTrue(source.contains("projects.forEach(::disposeProjectResources)"))
+        assertTrue(source.contains("EditorSurfaceShutdownPolicy.PreserveForDynamicReplacement"))
         assertTrue(source.contains("ensureOpenDocumentReplicasAndWait"))
         assertTrue(source.contains("beginInitialization()"))
         assertTrue(source.contains("disposeProjectResources"))

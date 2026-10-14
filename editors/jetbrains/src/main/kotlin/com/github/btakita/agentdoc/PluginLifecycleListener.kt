@@ -231,7 +231,12 @@ class PluginLifecycleListener : ProjectManagerListener {
                 "dynamic plugin cleanup must run on the EDT"
             }
             val projects = ProjectManager.getInstance().openProjects.filterNot { it.isDisposed }
-            projects.forEach(::disposeProjectResources)
+            projects.forEach { project ->
+                disposeProjectResources(
+                    project,
+                    EditorSurfaceShutdownPolicy.PreserveForDynamicReplacement,
+                )
+            }
             // GH #94: also end each project's initialization scope, so the
             // listeners bound to it stop too and, if the upgrade then aborts with this generation
             // still loaded, initializeOpenProjectsAfterDynamicLoad can rebuild the project rather
@@ -242,7 +247,11 @@ class PluginLifecycleListener : ProjectManagerListener {
             return projects.size
         }
 
-        internal fun disposeProjectResources(project: Project) {
+        internal fun disposeProjectResources(
+            project: Project,
+            editorSurfaceShutdownPolicy: EditorSurfaceShutdownPolicy =
+                EditorSurfaceShutdownPolicy.RetireControllerProjection,
+        ) {
             ReliableSyncLivenessListener.disposeProject(project)
             TurnStateBannerRefresher.disposeProject(project)
             CrdtReplicaManager.disposeProject(project)
@@ -252,7 +261,7 @@ class PluginLifecycleListener : ProjectManagerListener {
             // Stop feeding focus events before releasing the surface graph, so a
             // late observation cannot re-create the root we are about to forget.
             EditorFocusSyncListener.disposeProject(project)
-            EditorTabSyncListener.disposeProject(project)
+            EditorTabSyncListener.disposeProject(project, editorSurfaceShutdownPolicy)
             TmuxPaneFocusSync.disposeProject(project)
             IdeTerminalHost.disposeProject(project)
         }

@@ -26,6 +26,20 @@ presets:
 This body may explain the project's presets, but is not inherited.
 ```
 
+## User setup contract
+
+After `agent-doc init` establishes a project root, the user defines shared
+presets by creating or editing `<project-root>/.agent-doc/project.md`; they do
+not put prompt presets in `.agent-doc/config.toml`. The project file may contain
+only YAML frontmatter or may include an explanatory Markdown body. Preset names
+that start with `#` must be quoted so YAML does not parse them as comments.
+
+Both `presets:` and `prompt_presets:` are valid map keys. A scalar map value is
+the prompt body. A structured value uses `prompt:` plus an optional `runbook:`
+whose relative path is anchored at the project root. Users invoke a shared
+preset exactly as they invoke a document-local preset: `#name` in prompt text,
+`preset name`, or the corresponding queue reference.
+
 ## Resolution
 
 For a session document under a discovered project root:

@@ -180,6 +180,37 @@ Location: `.agent-doc/config.toml` (relative to project root).
 | `documents.include` | Project-relative globs for session document opt-in |
 | `documents.auto_session_for_all_md` | Legacy escape hatch (default `false`) |
 
+## Project-wide prompt presets
+
+Project-wide prompt presets do not go in `.agent-doc/config.toml`. After
+initializing the project with `agent-doc init`, create or edit
+`.agent-doc/project.md` and define presets in its YAML frontmatter:
+
+```markdown
+---
+presets:
+  "#review": Review the change and run focused tests.
+  "#release":
+    prompt: Prepare and publish the release.
+    runbook: runbooks/release.md
+---
+
+# Agent Doc project defaults
+```
+
+Quote names that begin with `#`; otherwise YAML treats the rest of the key as
+a comment. `prompt_presets:` is accepted as an alias for `presets:`.
+
+Invoke a preset by adding its name to a session prompt or queue, for example
+`#review` in `agent:exchange` or `- #review` in `agent:queue`. The nearest
+`.agent-doc/project.md` supplies live defaults to every session under that
+project root. A session document can override a preset by defining the same
+exact name in its own frontmatter. Relative `runbook` paths resolve from the
+project root and are loaded only when the preset is invoked.
+
+See [Document Format](../guide/document-format.md#prompt-presets) for the full
+inheritance and masking rules.
+
 To publish each newly created closeout commit to the current branch's configured
 upstream, opt in explicitly:
 

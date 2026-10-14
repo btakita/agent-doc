@@ -2017,8 +2017,31 @@ fn test_cli_help() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("Interactive document sessions"))
+        .stdout(predicate::str::contains("choice-checkpoint"))
         .stdout(predicate::str::contains("repair"))
         .stdout(predicate::str::contains("fix"));
+}
+
+#[test]
+fn choice_checkpoint_rejects_an_unstructured_native_prompt_record() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let doc = dir.path().join("session.md");
+    fs::write(
+        &doc,
+        "<!-- agent:exchange -->\nNeed a decision.\n<!-- /agent:exchange -->\n",
+    )
+    .unwrap();
+
+    agent_doc_cmd()
+        .args(["choice-checkpoint", doc.to_str().unwrap()])
+        .write_stdin(
+            r#"{"context":"Public context","question":"Pick one","choices":[{"label":"Only","description":"Not enough choices"}]}"#,
+        )
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "choice checkpoint requires 2 to 5 choices",
+        ));
 }
 
 #[test]

@@ -28,6 +28,19 @@ and upserts a cycle-scoped `Live response (not final)` exchange node. The node i
 controller/CRDT materialized, never proves that queue work was answered, never
 commits, and is removed by final response application, including replay cleanup.
 
+`choice-checkpoint <FILE>` is the structured native-question adapter for that
+same non-final node. It reads JSON containing only a concise public `context`, a
+`question`, and 2–5 `choices` with unique `label` / `description` pairs. Every
+field must be a bounded single line, protocol-like HTML comments are refused,
+and Markdown punctuation is escaped before rendering. The resulting `Awaiting
+developer choice` body is therefore assistant-authored display state, not an
+operator prompt, queue-answer evidence, authorization, or hidden reasoning.
+Repeated calls in one cycle replace the same salient node through the existing
+controller/CRDT mutation. The harness must show the identical ordered choices
+in its native UI and preserve the context, choices, and eventual selection in
+the cumulative final response, because final response application removes the
+non-final node.
+
 `respond` is the primary spelling for the binary-owned seal transition;
 `finalize` remains a compatibility alias. The seal
 captures the complete cumulative response, records the durable response-cell

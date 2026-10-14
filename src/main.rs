@@ -2775,6 +2775,11 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Show a structured native-tool choice prompt in the live agent:exchange
+    ChoiceCheckpoint {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Persist the complete response and resolve the cycle to a committed state
     #[command(name = "respond", visible_alias = "finalize")]
     Finalize {
@@ -5724,6 +5729,18 @@ fn try_main() -> anyhow::Result<()> {
             std::io::stdin()
                 .read_to_string(&mut response)
                 .context("failed to read salient response from stdin")?;
+            agent_doc_write_runtime_io::checkpoint_salient_response(&file, &response)
+        }
+        Commands::ChoiceCheckpoint { file } => {
+            let mut payload = String::new();
+            std::io::stdin()
+                .read_to_string(&mut payload)
+                .context("failed to read choice checkpoint JSON from stdin")?;
+            let input: agent_doc_turn::choice_prompt::ChoiceCheckpointInput =
+                serde_json::from_str(&payload).context(
+                    "invalid choice checkpoint JSON; expected context, question, and choices with label/description",
+                )?;
+            let response = agent_doc_turn::choice_prompt::render_choice_checkpoint(input)?;
             agent_doc_write_runtime_io::checkpoint_salient_response(&file, &response)
         }
         Commands::Write { args, commit } => {

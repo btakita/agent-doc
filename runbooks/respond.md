@@ -9,6 +9,42 @@ and the pending granular-flags-only rule. This runbook carries the rest.
 
 - Address the user's changes naturally in the console; that response is the
   document response.
+- **Native choice prompts are document-visible (`#choicecheckpoint`).** Before
+  invoking a harness-native choice UI (Claude Code `AskUserQuestion`, Codex
+  `request_user_input`, or the active harness's equivalent), materialize the
+  exact public prompt in `agent:exchange`:
+
+  ```bash
+  cat <<'JSON' | agent-doc choice-checkpoint <FILE>
+  {
+    "context": "The user-visible facts and tradeoff that make this decision necessary.",
+    "question": "Which option should the agent use?",
+    "choices": [
+      {"label": "First (Recommended)", "description": "Effect of the first choice."},
+      {"label": "Second", "description": "Effect of the second choice."}
+    ]
+  }
+  JSON
+  ```
+
+  The native UI MUST present the same question, labels, descriptions, ordering,
+  and recommendation marker. Include an automatically added free-form/Other
+  choice in the checkpoint when the harness shows one. `context` is a concise
+  operator-facing summary of relevant facts and tradeoffs, not analysis,
+  scratch work, hidden chain-of-thought, or tool output. The command accepts
+  only single-line bounded fields, 2–5 uniquely labelled choices, and no HTML
+  comments; it Markdown-escapes every value before using the existing
+  controller/CRDT salient-response path. Therefore the live record is visibly
+  assistant-authored, is not a new operator prompt, is not answer evidence, and
+  cannot consume queue/backlog work or commit the cycle. If no native choice UI
+  exists, write the same checkpoint before yielding the question in the
+  harness's ordinary final channel.
+
+  Once the operator answers, retain a compact decision record in the cumulative
+  final response: the context, question, choices presented, and selected/free-
+  form answer. Final response application removes the non-final checkpoint; the
+  decision record preserves what the operator saw and chose. Do not close or
+  abandon the response cycle merely because the native UI paused the turn.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest
   question; answer or group each unresolved prompt in that tail and each
   unresolved `prompt_target`; treat `content_edit` items as user corrections.

@@ -91,6 +91,16 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 
 **Exchange-tail node granularity (`#loop-guard-exchange-node-granularity`):** the `exchange` component is whole-component in `read_set`/`write_set`, but only its *active tail* affects the turn. `TurnScope::for_driver_with_exchange_tail` records `exchange_tail_floor` = the count of `exchange` item nodes present at turn start (computed by preflight from the document). An incoming `exchange` op affects the turn only when its within-component node index is at or above the floor — a tail append (a genuine mid-loop user prompt, which lands at index ≥ floor) or a tail edit. An edit to an OLD exchange block (index below the floor — committed history) classifies `independent` and must not preempt the auto-loop drain. The classifier receives each op's index via `DocumentOp::node_index` (after-index for inserts/replaces, before-index for removes; preflight fills it from the semantic node event). When no `exchange` nodes exist the floor is `null` and the classifier keeps its coarse whole-component behavior.
 
+**Native choice records (`#choicecheckpoint`).** A harness question UI is mirrored
+into `agent:exchange` before it opens by `agent-doc choice-checkpoint`. The record
+uses the cycle-keyed `agent:salient-response` node and renders only a bounded,
+single-line public context, the exact question, and 2–5 uniquely labelled
+choices. It is an assistant-authored non-final node: exchange parsing must never
+classify it as an operator prompt, and prompt/queue completion logic must never
+use it as answer evidence or authorization. Final response insertion removes the
+node; the normal response retains the presented choices and selected answer as
+the durable decision record.
+
 **Affectedness classifier (`#op-scoped-drift-3`):** Phase 3 replaces the coarse "any divergence affects the turn" assumption with a scope-intersection router, surfaced in preflight output as `op_affectedness`. `Address::overlaps` is the `conflict` primitive: two addresses overlap when they share a component **name** and either side is component-level (a whole-component address) or both name the same node key. The `occurrence` field is informational and is intentionally not part of the match — a node key already encodes the component index (`comp:index:id:n`), and the canonical write-set members built by `TurnScope::for_driver` are whole-component addresses that must match the component wherever it sits in the document (`#nm1x`). `classify_op(actor, op_kind, address, node_index, scope)` routes one op into the 5-class taxonomy — `affects(O,S) = conflict(O.target, read_set) ∨ conflict(O.target, write_set)`, with the exchange-tail floor narrowing `exchange` membership to the active tail (above):
 
 1. **independent** — target ∉ scope: integrate + persist, no drift (a queue item inserted beside the running one, a comment/icebox edit).

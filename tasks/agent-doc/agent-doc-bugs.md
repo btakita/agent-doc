@@ -118,6 +118,20 @@ The same verified batch also integrated realtime steering continuation after an 
 
 This is the same defect already assigned to `subagent:retained_closeout_owner`. I kept that single owner rather than dispatching duplicate repository work. The worker remains constrained to read-only evidence from the retained `sdk.md` operation and an isolated Agent Doc worktree; it will not resubmit, force-write, recycle, reload, or otherwise disturb the durable capture.
 
+### Re: retained closeout owner wait fixed — gpt-5 · 2026-10-14T03:46-04:00
+
+Implemented, integrated, installed, and pushed the retained-closeout fix to `main` as `01cedcd3ba` (worker source `01af085925`).
+
+The root cause was premature Stop-adapter handling: a durable controller-owned `Deferred` repair receipt was immediately converted into `Blocked by hook`, even though the exact cycle was still progressing and reached write, commit, terminal proof, and owner release roughly twelve seconds later. Stop now subscribes to that exact cycle through the existing reactive closeout projection:
+
+- terminal or superseded state invalidates the cached observation and re-inspects;
+- owner release permits one exact keyed resume, then re-inspects;
+- timeout, observation failure, or a missing key retains the bounded fail-closed response.
+
+No polling loop, duplicate state owner, forced write, recycle, reload, or live `sdk.md` mutation was introduced. The historical SDK retained cycle had already completed normally and was inspected read-only.
+
+Verification on the integrated commit passed: 10,472 Rust tests (167 skipped), 202 VS Code tests, native cross-editor SimWorld, JetBrains classic/262/263 builds, eight bootstrap tests, docs/version audits, and the matching TLA receipt. The release-local CLI/library and editor packages installed successfully. The preceding `main` CI run was still in progress when checked; local authoritative verification is complete.
+
 <!-- agent:boundary:cc9a9855 -->
 <!-- /agent:exchange -->
 

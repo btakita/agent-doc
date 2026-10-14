@@ -162,6 +162,30 @@ A separate `tools.md` Stop-hook regression is claimed by `subagent:tools_md_issu
 Fixed, integrated, pushed, installed, and closed. Integrated commit `73f94f2d32` repairs both causes of the four-hour editor convergence wedge: repeated refused native-save receipts now request an idempotent editor-replica re-registration every third refusal, independently of replica pull traffic, and a structurally valid complete live editor observation now outranks a partial stale op-epoch replay that could otherwise manufacture garbled operator text.
 
 The realtime workflow specification and incident-shaped regressions cover both rules. Focused verification passed 688 controller tests, 185 realtime tests, controller clippy, the JetBrains local-splice suite, and `buildPlugin`; the worker's final `make check-fast` passed 3,808 nextest tests. After serial integration, the coordinator's authoritative `make check` exited 0 with zero detected failures, and the single batch `make install` completed for the CLI/library and editor packages. The fix is on `origin/main` as part of `10fb137c24`; issue #254 is closed.
+
+### Re: project-wide prompt presets — gpt-5 · 2026-10-14T13:37-04:00
+
+> **Queue prompt:** Is the project-wide agent-doc template (i.e. presets) released + published? How do I use it?
+
+No—not in a public release yet. The latest published Agent Doc version is `0.35.498` on GitHub Releases, PyPI, and Homebrew; crates.io is historical at `0.34.65`. Project-wide preset inheritance landed on `main` in `d89a6db234`, 17 commits after tag `v0.35.498`, and no tag contains it. Therefore there is no first released version yet, and a stock `0.35.498` installation cannot use project-wide inheritance. The locally installed build from current `main` can.
+
+Create `<project-root>/.agent-doc/project.md` manually with YAML frontmatter:
+
+```markdown
+---
+presets:
+  "#review": Review the change and run focused tests.
+  "#release":
+    prompt: Prepare and publish the release.
+    runbook: runbooks/release.md
+---
+
+# Agent Doc project defaults
+```
+
+Then invoke `#review` in a session exchange or add `- #review` to an active `agent:queue`. Both `presets:` and `prompt_presets:` are accepted. The nearest `.agent-doc/project.md` supplies live defaults to sessions below it; edits apply without copying or syncing. An exact-name session-local declaration overrides the project value, while an unfinished or null local declaration masks it. Only presets inherit; other project frontmatter and body content do not.
+
+User-facing setup and inheritance documentation is now on `main` in `48eeb06782` (`docs/guide/document-format.md` and `docs/reference/features.md`), included in integrated head `10fb137c24`. Verification passed three focused inheritance tests, `make check-fast`, and the authoritative full suite with 10,473 Rust tests plus the remaining checks.
 <!-- agent:boundary:b66994af -->
 <!-- /agent:exchange -->
 
@@ -172,7 +196,7 @@ The realtime workflow specification and incident-shaped regressions cover both r
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/243~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/254~~
-- Is the project-wide agent-doc template (i.e. presets) released + published? How do I use it?
+- ~~Is the project-wide agent-doc template (i.e. presets) released + published? How do I use it?~~
 ---
 tools.md issue
 ```

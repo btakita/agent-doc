@@ -72,7 +72,45 @@ The two Core heads are reclaimed by their original workers, who are validating t
 ### Re: recovered response
 
 Core revalidations passed and their completion feedback is now visible in the document. Issue 249 and release-readiness workers are running under active claims. The stale JetBrains plugin warning remains advisory; no install or reload was attempted.
-<!-- agent:boundary:dc8f8751 -->
+
+### Re: Subagent completed — agent-doc: `subagent:releasepublish` returned work for queue item “release + publish”; coordinator integration and closeout are pending.
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=8228de7270eac41254ca04f1c6bfd6ac50070835345719fbd96f84182896a47c -->
+
+### Re: Subagent completed — agent-doc: `subagent:issue249` returned work for queue item “[from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249”; coordinator integration and closeout are pending.
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=75235aa224755921f744e7f7b03e497b04b612712d7c30eac9cf9d7259780857 -->
+> **Chat prompt (#chatprompt):** did 501 go out?
+
+> **Chat prompt (#chatprompt):** is it published?
+
+### Re: agent-doc 0.35.501 publication — gpt-5 · 2026-10-14T18:48:54-04:00
+
+Yes. [GitHub release v0.35.501](https://github.com/btakita/agent-doc/releases/tag/v0.35.501) was published on 2026-10-14 at 22:44:32 UTC. Its release assets include platform CLI archives, the VSIX, and JetBrains packages for classic, 262, and 263.
+
+It is not published to crates.io as `agent-doc@0.35.501`; the registry query returned no such version. The local CLI is 0.35.501. The live JetBrains installation is still 0.2.593, while the release contains newer JetBrains artifacts, so publication succeeded but that IDE installation has not yet been upgraded.
+
+The completed Core work remains unintegrated, and its tracked heads remain open, because `#spec-test-commit-push` is still undefined.
+
+### Re: release worker authorization handback — gpt-5 · 2026-10-14T18:48:54-04:00
+
+The release worker returned this blocking request verbatim:
+
+```text
+[agent-doc] subagent operator request (#waypostrequest)
+kind: permission
+blocking: true
+request: Define `prompt_presets.'#spec-test-commit-push'` and explicitly authorize the integration commits/pushes, version bumps, annotated tags, GitHub releases, and registry publications for the Lazily Core cohort; also confirm whether `release + publish` means an ordinary pre-1.0 cohort release or Core Beta promotion.
+context: Revalidation on 2026-10-14 found public versions unchanged, the audited superproject pins still roughly two releases behind, prepared Core/CI/pin work not present in public release commits, Go `main` still red at CI-reachability, and the Rust v0.59.0 release workflow still failed crates.io OIDC. Publishing now would use a non-immutable/incomplete candidate. The unresolved preset expressly withholds every required outward action.
+choices:
+- Authorize pre-1.0 cohort release: define the preset with commit/push/version/tag/release/publish authority, select exact candidate versions after integration, and do not promote Core Beta.
+- Authorize Core Beta promotion: grant the same authority, explicitly approve `#lzbetascope`, and require the RC/freeze and publication gates to pass before publishing.
+- Keep audit-only: authorize no outward changes and leave the release item blocked.
+```
+
+Please choose the intended handling before that worker can continue.
+- [ ] Choose release handling: pre-1.0 cohort, Core Beta promotion, or audit-only.
+<!-- agent:boundary:74d7308e -->
 <!-- /agent:exchange -->
  
 ## Queue

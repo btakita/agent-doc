@@ -47,7 +47,8 @@ pub fn existing_session_pane_action(
 /// the bypassed owner running, so one document had two live harness processes.
 /// A pane is retired only when its process tree *proves* it is agent-doc's
 /// supervisor for this document (`#bare-foreign-session-guard`: ownership is
-/// proven, never assumed).
+/// proven, never assumed) and live safety evidence proves it has no active
+/// turn, protected input, or attached client displaying it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SupersededOwnerAction {
     /// The pane runs `agent-doc` as the owner of this document: retire it.
@@ -55,11 +56,76 @@ pub enum SupersededOwnerAction {
         pane: String,
         supervisor_pid: String,
     },
+    /// The pane is a proven duplicate, but retiring it now could destroy
+    /// operator work. Leave it alive until a later safe-boundary observation.
+    Defer {
+        pane: String,
+        supervisor_pid: String,
+        protection: SupersededOwnerProtection,
+    },
     /// The pane runs a bare harness agent-doc did not start: leave it alone.
     LeaveForeignHarness { pane: String },
     /// Nothing in the pane proves agent-doc owns this document there (a stale
     /// registry row, a shell): leave it alone; `--force` only bypasses it.
     LeaveUnproven { pane: String },
+}
+
+/// Safety evidence that prevents immediate duplicate-owner retirement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupersededOwnerProtection {
+    pub active_turn: bool,
+    pub protected_input_reason: Option<String>,
+    /// `true` also covers an unreadable screen placement: destructive actions
+    /// fail closed when tmux cannot prove that no client displays the pane.
+    pub client_visible_or_unobservable: bool,
+}
+
+impl SupersededOwnerProtection {
+    pub fn is_protected(&self) -> bool {
+        self.active_turn
+            || self.protected_input_reason.is_some()
+            || self.client_visible_or_unobservable
+    }
+
+    pub fn reason(&self) -> String {
+        let mut reasons = Vec::new();
+        if self.active_turn {
+            reasons.push("active_turn".to_string());
+        }
+        if let Some(reason) = &self.protected_input_reason {
+            reasons.push(format!("protected_input:{reason}"));
+        }
+        if self.client_visible_or_unobservable {
+            reasons.push("client_visible_or_unobservable".to_string());
+        }
+        reasons.join(",")
+    }
+}
+
+/// Decision made by a duplicate supervisor when it observes a durable
+/// retirement request in its idle watcher.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeferredDuplicateRetirementAction {
+    /// The named authoritative owner changed or disappeared; the request is
+    /// stale and must not retire this supervisor.
+    CancelAuthorityChanged,
+    /// The request still applies, but a destructive protection remains live.
+    Wait(SupersededOwnerProtection),
+    /// The authority still matches and every protection is clear.
+    Retire,
+}
+
+pub fn deferred_duplicate_retirement_action(
+    authority_matches: bool,
+    protection: SupersededOwnerProtection,
+) -> DeferredDuplicateRetirementAction {
+    if !authority_matches {
+        DeferredDuplicateRetirementAction::CancelAuthorityChanged
+    } else if protection.is_protected() {
+        DeferredDuplicateRetirementAction::Wait(protection)
+    } else {
+        DeferredDuplicateRetirementAction::Retire
+    }
 }
 
 /// Facts about the bypassed owner pane's process tree.
@@ -70,6 +136,9 @@ pub struct SupersededOwnerFacts<'a> {
     pub runs_unmanaged_harness: bool,
     /// Pid of the tree's `agent-doc` process bound to this document, if any.
     pub agent_doc_owner_pid: Option<&'a str>,
+    pub active_turn: bool,
+    pub protected_input_reason: Option<&'a str>,
+    pub client_visible_or_unobservable: bool,
 }
 
 pub fn superseded_owner_action(facts: SupersededOwnerFacts<'_>) -> SupersededOwnerAction {
@@ -78,10 +147,26 @@ pub fn superseded_owner_action(facts: SupersededOwnerFacts<'_>) -> SupersededOwn
         return SupersededOwnerAction::LeaveForeignHarness { pane };
     }
     match facts.agent_doc_owner_pid {
-        Some(pid) if !pid.trim().is_empty() => SupersededOwnerAction::Retire {
-            pane,
-            supervisor_pid: pid.trim().to_string(),
-        },
+        Some(pid) if !pid.trim().is_empty() => {
+            let supervisor_pid = pid.trim().to_string();
+            let protection = SupersededOwnerProtection {
+                active_turn: facts.active_turn,
+                protected_input_reason: facts.protected_input_reason.map(str::to_string),
+                client_visible_or_unobservable: facts.client_visible_or_unobservable,
+            };
+            if protection.is_protected() {
+                SupersededOwnerAction::Defer {
+                    pane,
+                    supervisor_pid,
+                    protection,
+                }
+            } else {
+                SupersededOwnerAction::Retire {
+                    pane,
+                    supervisor_pid,
+                }
+            }
+        }
         _ => SupersededOwnerAction::LeaveUnproven { pane },
     }
 }
@@ -161,6 +246,9 @@ mod tests {
                 pane: "%2",
                 runs_unmanaged_harness: false,
                 agent_doc_owner_pid: Some("41630"),
+                active_turn: false,
+                protected_input_reason: None,
+                client_visible_or_unobservable: false,
             }),
             SupersededOwnerAction::Retire {
                 pane: "%2".to_string(),
@@ -173,6 +261,9 @@ mod tests {
                 pane: "%2",
                 runs_unmanaged_harness: true,
                 agent_doc_owner_pid: Some("41630"),
+                active_turn: true,
+                protected_input_reason: Some("typed prompt input"),
+                client_visible_or_unobservable: true,
             }),
             SupersededOwnerAction::LeaveForeignHarness {
                 pane: "%2".to_string()
@@ -185,10 +276,80 @@ mod tests {
                     pane: "%2",
                     runs_unmanaged_harness: false,
                     agent_doc_owner_pid: pid,
+                    active_turn: true,
+                    protected_input_reason: Some("typed prompt input"),
+                    client_visible_or_unobservable: true,
                 }),
                 SupersededOwnerAction::LeaveUnproven {
                     pane: "%2".to_string()
                 }
+            );
+        }
+    }
+
+    #[test]
+    fn proven_owner_defers_for_every_destructive_protection() {
+        for (active_turn, protected_input_reason, client_visible_or_unobservable, expected) in [
+            (true, None, false, "active_turn"),
+            (
+                false,
+                Some("typed prompt input"),
+                false,
+                "protected_input:typed prompt input",
+            ),
+            (false, None, true, "client_visible_or_unobservable"),
+        ] {
+            let action = superseded_owner_action(SupersededOwnerFacts {
+                pane: "%2",
+                runs_unmanaged_harness: false,
+                agent_doc_owner_pid: Some("41630"),
+                active_turn,
+                protected_input_reason,
+                client_visible_or_unobservable,
+            });
+            let SupersededOwnerAction::Defer { protection, .. } = action else {
+                panic!("protected owner must defer: {action:?}");
+            };
+            assert_eq!(protection.reason(), expected);
+        }
+    }
+
+    #[test]
+    fn deferred_retirement_revalidates_authority_and_every_protection() {
+        let safe = SupersededOwnerProtection {
+            active_turn: false,
+            protected_input_reason: None,
+            client_visible_or_unobservable: false,
+        };
+        assert_eq!(
+            deferred_duplicate_retirement_action(false, safe.clone()),
+            DeferredDuplicateRetirementAction::CancelAuthorityChanged,
+        );
+        assert_eq!(
+            deferred_duplicate_retirement_action(true, safe),
+            DeferredDuplicateRetirementAction::Retire,
+        );
+
+        for protection in [
+            SupersededOwnerProtection {
+                active_turn: true,
+                protected_input_reason: None,
+                client_visible_or_unobservable: false,
+            },
+            SupersededOwnerProtection {
+                active_turn: false,
+                protected_input_reason: Some("typed prompt input".to_string()),
+                client_visible_or_unobservable: false,
+            },
+            SupersededOwnerProtection {
+                active_turn: false,
+                protected_input_reason: None,
+                client_visible_or_unobservable: true,
+            },
+        ] {
+            assert_eq!(
+                deferred_duplicate_retirement_action(true, protection.clone()),
+                DeferredDuplicateRetirementAction::Wait(protection),
             );
         }
     }

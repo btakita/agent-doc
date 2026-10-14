@@ -6,6 +6,7 @@ pub use state_events::{StateLedgerScope, begin_state_ledger_scope};
 pub mod config;
 pub mod cwd;
 pub mod detection;
+pub mod duplicate_retirement;
 pub mod env;
 pub mod intentional_exit;
 pub mod ipc;

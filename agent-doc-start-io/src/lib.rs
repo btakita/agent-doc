@@ -1745,13 +1745,31 @@ fn prepare_start_runtime_with_admission(
         if let Some(ExistingSessionPaneAction::Refuse(superseded_pane)) =
             existing_session_pane_action(&tmux, &session_id, file, &pane_id)?
         {
-            agent_doc_sync_io::superseded_owner::retire_superseded_owner_pane(
+            let action = agent_doc_sync_io::superseded_owner::retire_superseded_owner_pane(
                 &tmux,
                 file,
                 &superseded_pane,
+                &pane_id,
                 agent_doc_sync_io::superseded_owner::SUPERSEDED_OWNER_EXIT_GRACE,
                 "start_force_superseded_owner",
             )?;
+            if let agent_doc_supervisor::session_owner::SupersededOwnerAction::Defer {
+                protection,
+                ..
+            } = action
+            {
+                let window = tmux
+                    .pane_window(&superseded_pane)
+                    .unwrap_or_else(|_| "unknown".to_string());
+                anyhow::bail!(
+                    "[start] --force deferred for {}: duplicate owner pane {} in window {} is protected ({}); requested owner pane {} was not started. Retry after the duplicate reaches an idle, input-free boundary or move focus away from it.",
+                    file.display(),
+                    superseded_pane,
+                    window,
+                    protection.reason(),
+                    pane_id,
+                );
+            }
         }
     }
 

@@ -1762,6 +1762,37 @@ fn idle_queue_resubmit_pending_payload(
     }
 }
 
+fn duplicate_retirement_authority_still_matches(file: &Path, authoritative_owner: &str) -> bool {
+    agent_doc_project_root_io::project_root_or_file_parent(file)
+        .ok()
+        .and_then(|root| {
+            agent_doc_controller_io::project_controller::authoritative_actor_binding(&root, file)
+                .ok()
+                .flatten()
+        })
+        .is_some_and(|record| record.pane_id == authoritative_owner)
+}
+
+fn duplicate_retirement_protection(
+    pane: &str,
+    harness: &agent_doc_harness::HarnessConfig,
+    turn_boundary: bool,
+) -> agent_doc_supervisor::session_owner::SupersededOwnerProtection {
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let capture = agent_doc_tmux_io::capture_pane(&tmux, pane).ok();
+    let protected_input_reason = capture
+        .as_deref()
+        .and_then(|text| harness.protected_prompt_input_reason(text));
+    agent_doc_supervisor::session_owner::SupersededOwnerProtection {
+        active_turn: !turn_boundary,
+        protected_input_reason,
+        // Both input capture and client placement must be positively readable
+        // before a destructive boundary effect is allowed.
+        client_visible_or_unobservable: capture.is_none()
+            || agent_doc_tmux_io::unwatched_pane(&tmux, pane).is_none(),
+    }
+}
+
 pub(super) fn spawn_idle_queue_watch_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
@@ -3586,6 +3617,99 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // never trips it.
                 turn_boundary = prompt_visible && !turn_active;
                 head_pending = active_head.is_some();
+                // GH #243: a route that finds a protected duplicate supervisor
+                // leaves a process-targeted request for this exact pid/pane. The
+                // existing idle watcher is the lifecycle boundary that can safely
+                // consume it: revalidate the authoritative owner and every live
+                // protection before tearing down the harness and exiting. No route
+                // retry or new polling loop is required.
+                if let Some(pane) = shared.inject_pane.as_deref()
+                    && let Some(request) = agent_doc_supervisor_io::duplicate_retirement::duplicate_retirement_request_for_current_process(
+                        &path,
+                        pane,
+                    )
+                {
+                    let authority_matches = request.authoritative_owner != pane
+                        && duplicate_retirement_authority_still_matches(
+                            &path,
+                            &request.authoritative_owner,
+                        );
+                    let protection =
+                        duplicate_retirement_protection(pane, &harness, turn_boundary);
+                    match agent_doc_supervisor::session_owner::deferred_duplicate_retirement_action(
+                        authority_matches,
+                        protection,
+                    ) {
+                        agent_doc_supervisor::session_owner::DeferredDuplicateRetirementAction::CancelAuthorityChanged => {
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "{}_deferred_cancelled file={} pane={} window={} owner={} reason=authoritative_owner_changed",
+                                    request.event,
+                                    path.display(),
+                                    pane,
+                                    request.window,
+                                    request.authoritative_owner,
+                                ),
+                            );
+                            agent_doc_supervisor_io::duplicate_retirement::clear_duplicate_retirement_request(
+                                &path,
+                                shared.supervisor_pid,
+                            );
+                        }
+                        agent_doc_supervisor::session_owner::DeferredDuplicateRetirementAction::Wait(_) => {}
+                        agent_doc_supervisor::session_owner::DeferredDuplicateRetirementAction::Retire => {
+                            let child_pid = shared.child_pid.load(Ordering::Relaxed);
+                            let event = format!(
+                                "{}_closed file={} pane={} window={} owner={} supervisor_pid={} boundary=idle child_pid={}",
+                                request.event,
+                                path.display(),
+                                pane,
+                                request.window,
+                                request.authoritative_owner,
+                                shared.supervisor_pid,
+                                child_pid,
+                            );
+                            log_event(&mut session_log, &event);
+                            agent_doc_ops_log_io::log_op(&path, &event);
+                            eprintln!(
+                                "[agent-doc] closing duplicate supervisor pane {pane} (window {}) for {} at its safe idle boundary; authoritative owner pane {}",
+                                request.window,
+                                path.display(),
+                                request.authoritative_owner,
+                            );
+                            agent_doc_supervisor_io::duplicate_retirement::clear_duplicate_retirement_request(
+                                &path,
+                                shared.supervisor_pid,
+                            );
+                            if let Some(identity) = shared.intentional_exit_identity() {
+                                let marker = match agent_doc_supervisor_io::intentional_exit::record_intentional_exit(
+                                    &identity,
+                                    "duplicate_supervisor_retirement",
+                                ) {
+                                    Ok(()) => "recorded".to_string(),
+                                    Err(err) => format!(
+                                        "failed error={}",
+                                        format!("{err:#}").replace('\n', "\\n")
+                                    ),
+                                };
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "supervisor_intentional_exit signal=duplicate_supervisor_retirement marker={marker}"
+                                    ),
+                                );
+                            }
+                            #[cfg(unix)]
+                            if child_pid > 0 {
+                                unsafe {
+                                    libc::kill(child_pid as libc::pid_t, libc::SIGTERM);
+                                }
+                            }
+                            std::process::exit(0);
+                        }
+                    }
+                }
                 // `#supkill-a` — graceful, idle-gated self-kill. An external driver
                 // (the CP / `admin kill-supervisor`) records a per-document request;
                 // the supervisor honors it at a turn boundary by tearing down its

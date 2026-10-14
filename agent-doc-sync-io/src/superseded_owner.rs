@@ -16,8 +16,11 @@
 //! the newest actor generation, the queue claims, and the route target. A
 //! duplicate is retired only when its process tree *proves* it is agent-doc's
 //! supervisor for this document (`#bare-foreign-session-guard`: ownership is
-//! proven, never assumed). A bare harness, or a pane without that proof, is
-//! never touched.
+//! proven, never assumed) and the pane is idle, input-free, and not displayed
+//! by a client. Protected route duplicates are reported and receive a targeted
+//! request that their own idle watcher consumes at the first safe boundary;
+//! protected force-start owners remain live and require an operator retry. A
+//! bare harness, or a pane without ownership proof, is never touched.
 
 use agent_doc_supervisor::session_owner::{
     SupersededOwnerAction, SupersededOwnerFacts, superseded_owner_action,
@@ -59,6 +62,17 @@ fn superseded_owner_facts(tmux: &Tmux, file: &Path, pane: &str) -> (bool, Option
     )
 }
 
+fn active_turn_for_pane(file: &Path, pane: &str) -> bool {
+    agent_doc_project_root_io::project_root_or_file_parent(file)
+        .ok()
+        .is_some_and(|root| agent_doc_turn_status_io::turn_active_for_pane(&root, pane))
+}
+
+fn protected_input_reason(tmux: &Tmux, file: &Path, pane: &str) -> Option<String> {
+    crate::sync::pane_repair::protected_registered_pane_state(tmux, file, pane)
+        .map(|state| state.reason)
+}
+
 /// Decide, without acting, what retiring `pane` as `file`'s superseded owner
 /// would do.
 pub fn superseded_owner_decision(tmux: &Tmux, file: &Path, pane: &str) -> SupersededOwnerAction {
@@ -67,11 +81,18 @@ pub fn superseded_owner_decision(tmux: &Tmux, file: &Path, pane: &str) -> Supers
         pane,
         runs_unmanaged_harness,
         agent_doc_owner_pid: owner_pid.as_deref(),
+        active_turn: active_turn_for_pane(file, pane),
+        protected_input_reason: protected_input_reason(tmux, file, pane).as_deref(),
+        // `unwatched_pane` returns `Some` only when tmux positively proves the
+        // pane is absent from every attached client's screen. Its `None` case
+        // deliberately fails closed for both visible and unreadable placement.
+        client_visible_or_unobservable: agent_doc_tmux_io::unwatched_pane(tmux, pane).is_none(),
     })
 }
 
 /// Retire `pane` as a superseded owner of `file` when its process tree proves
-/// it is agent-doc's supervisor for that document.
+/// it is agent-doc's supervisor and live evidence proves destructive retirement
+/// is safe. Otherwise return [`SupersededOwnerAction::Defer`] and report why.
 ///
 /// SIGTERMs the supervisor (its handler records an intentional exit, so the
 /// controller watchdog does not respawn it), escalates to SIGKILL after
@@ -82,10 +103,70 @@ pub fn retire_superseded_owner_pane(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
+    authoritative_owner: &str,
     grace: Duration,
     event: &str,
 ) -> Result<SupersededOwnerAction> {
     let action = superseded_owner_decision(tmux, file, pane);
+    let window = tmux
+        .pane_window(pane)
+        .unwrap_or_else(|_| "unknown".to_string());
+    if let SupersededOwnerAction::Defer {
+        supervisor_pid,
+        protection,
+        ..
+    } = &action
+    {
+        let reason = protection.reason();
+        let retirement_scheduled = event == "route_duplicate_owner"
+            && supervisor_pid.parse::<u32>().ok().is_some_and(|pid| {
+                match agent_doc_supervisor_io::duplicate_retirement::request_duplicate_retirement(
+                    file,
+                    pane,
+                    pid,
+                    authoritative_owner,
+                    &window,
+                    event,
+                ) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "{event}_defer_request_failed file={} pane={} window={} owner={} error={}",
+                                file.display(),
+                                pane,
+                                window,
+                                authoritative_owner,
+                                format!("{error:#}").replace('\n', "\\n"),
+                            ),
+                        );
+                        false
+                    }
+                }
+            });
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{event}_deferred file={} pane={} window={} owner={} reason={} idle_retirement_scheduled={retirement_scheduled}",
+                file.display(),
+                pane,
+                window,
+                authoritative_owner,
+                reason.replace(' ', "_")
+            ),
+        );
+        eprintln!(
+            "[agent-doc] deferred retirement of duplicate supervisor pane {pane} (window {window}) for {}; authoritative owner pane {authoritative_owner}; reason={reason}. {}",
+            file.display(),
+            if retirement_scheduled {
+                "Its supervisor will close the pane at the first idle, input-free, unwatched boundary."
+            } else {
+                "The duplicate remains alive; retry after it reaches an idle, input-free, unwatched boundary."
+            },
+        );
+        return Ok(action);
+    }
     let SupersededOwnerAction::Retire {
         pane,
         supervisor_pid,
@@ -93,6 +174,7 @@ pub fn retire_superseded_owner_pane(
     else {
         let reason = match &action {
             SupersededOwnerAction::LeaveForeignHarness { .. } => "foreign_harness",
+            SupersededOwnerAction::Defer { .. } => unreachable!("handled above"),
             _ => "unproven_owner",
         };
         agent_doc_ops_log_io::log_op(
@@ -131,6 +213,11 @@ pub fn retire_superseded_owner_pane(
         }
     }
     let pane_closed = agent_doc_tmux_io::kill_pane(tmux, pane).is_ok();
+    if let Ok(pid) = supervisor_pid.parse::<u32>() {
+        agent_doc_supervisor_io::duplicate_retirement::clear_duplicate_retirement_request(
+            file, pid,
+        );
+    }
     tmux_router::invalidate_pane_snapshot();
     agent_doc_ops_log_io::log_op(
         file,
@@ -145,9 +232,11 @@ pub fn retire_superseded_owner_pane(
         ),
     );
     eprintln!(
-        "[agent-doc] retired the superseded supervisor for {} in pane {} (pid {})",
-        file.display(),
+        "[agent-doc] closed superseded supervisor pane {} (window {}) for {}; authoritative owner pane {} (pid {})",
         pane,
+        window,
+        file.display(),
+        authoritative_owner,
         supervisor_pid,
     );
     Ok(action)
@@ -168,7 +257,7 @@ pub fn duplicate_owner_panes(tmux: &Tmux, file: &Path, owner: &str) -> Vec<Strin
         .filter(|pane| {
             matches!(
                 superseded_owner_decision(tmux, file, pane),
-                SupersededOwnerAction::Retire { .. }
+                SupersededOwnerAction::Retire { .. } | SupersededOwnerAction::Defer { .. }
             )
         })
         .map(str::to_string)
@@ -186,6 +275,7 @@ pub fn retire_duplicate_owner_panes(tmux: &Tmux, file: &Path, owner: &str) -> Ve
             tmux,
             file,
             &duplicate,
+            owner,
             SUPERSEDED_OWNER_EXIT_GRACE,
             "route_duplicate_owner",
         ) {
@@ -387,7 +477,8 @@ mod tests {
         let grace = Duration::from_secs(2);
         wait_for_children(agent_doc_tmux_io::pane_pid(&tmux, &transient_pane).unwrap());
         assert_eq!(
-            retire_superseded_owner_pane(&tmux, &fx.doc, &transient_pane, grace, "t").unwrap(),
+            retire_superseded_owner_pane(&tmux, &fx.doc, &transient_pane, "%owner", grace, "t",)
+                .unwrap(),
             SupersededOwnerAction::LeaveUnproven {
                 pane: transient_pane.clone()
             }
@@ -395,7 +486,8 @@ mod tests {
         assert!(tmux.pane_alive(&transient_pane));
         // The operator's own `claude` is never ours to retire.
         assert_eq!(
-            retire_superseded_owner_pane(&tmux, &fx.doc, &foreign_pane, grace, "t").unwrap(),
+            retire_superseded_owner_pane(&tmux, &fx.doc, &foreign_pane, "%owner", grace, "t",)
+                .unwrap(),
             SupersededOwnerAction::LeaveForeignHarness {
                 pane: foreign_pane.clone()
             }
@@ -407,7 +499,8 @@ mod tests {
         let other_doc = fx.dir.path().join("doc-b.md");
         std::fs::write(&other_doc, "---\nagent_doc_session: other\n---\n").unwrap();
         assert_eq!(
-            retire_superseded_owner_pane(&tmux, &other_doc, &owner_pane, grace, "t").unwrap(),
+            retire_superseded_owner_pane(&tmux, &other_doc, &owner_pane, "%owner", grace, "t",)
+                .unwrap(),
             SupersededOwnerAction::LeaveUnproven {
                 pane: owner_pane.clone()
             }
@@ -415,7 +508,8 @@ mod tests {
         assert!(tmux.pane_alive(&owner_pane));
 
         assert_eq!(
-            retire_superseded_owner_pane(&tmux, &fx.doc, &owner_pane, grace, "t").unwrap(),
+            retire_superseded_owner_pane(&tmux, &fx.doc, &owner_pane, "%owner", grace, "t",)
+                .unwrap(),
             SupersededOwnerAction::Retire {
                 pane: owner_pane.clone(),
                 supervisor_pid: owner_pid.to_string(),

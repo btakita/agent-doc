@@ -4346,7 +4346,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     || stale_capture_resume_latched)
                     && at_safe_checkpoint)
                     || captured_cycle_refresh;
-                let live_child_handoff_ready = shared.reexec_preserve_child_refusal().is_none();
+                // Only Unix can preserve the harness PTY child across the
+                // supervisor's execve recycle. Non-Unix supervisors must not
+                // advertise continuity that their replacement path cannot
+                // provide (`reexec_preserve_child_refusal` is Unix-only).
+                #[cfg(unix)]
+                let live_child_handoff_ready =
+                    shared.reexec_preserve_child_refusal().is_none();
+                #[cfg(not(unix))]
+                let live_child_handoff_ready = false;
                 let generation_continuity = if write_wedged || capture_backed_refresh {
                     GenerationContinuity::CapturedResponse
                 } else if effective_cycle_open && live_child_handoff_ready {

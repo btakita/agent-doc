@@ -1238,10 +1238,18 @@ JetBrains, VS Code, and Zed publish their current full-buffer projection after
 visible apply and again after native save, with `disk_persisted` distinguishing
 those two observed states. There is no retained per-update ACK sidecar or ACK
 replay request. A missing or mismatched projection leaves that exact canonical
-revision pending and re-projects it to the editor;
-it never requests an editor full state, force-refreshes, or re-registers from the
-editor buffer. In particular, a stale native baseline quarantines the local
-delta and schedules a pull of the current controller canonical projection.
+revision pending and re-projects it to the editor. A single miss never requests
+an editor full state, force-refreshes, or re-registers from the editor buffer.
+If the same retained native-save epoch is refused three times without a newer
+delivery edge, however, the persistence Effect emits an
+`EditorReplicaReregister` recovery signal before continuing its capped retries,
+and repeats that signal every third refusal until exact persistence is proved.
+Those recovery edges are independent of replica pull traffic, so a
+`projection_changed` endpoint that answers every save request cannot remain in
+a 30-second save-only retry loop indefinitely. A new epoch restarts the refusal
+cadence. In
+particular, a stale native baseline quarantines the local delta and schedules a
+pull of the current controller canonical projection.
 
 Captured-splice recovery rebases the quarantined operator delta onto the current
 controller canonical (`#steerreplicachurn`). The rebase works on the operator's
@@ -1258,6 +1266,15 @@ only the insertions canonical lacks, so no canonical code point is deleted and
 the ingested burst is never inserted a second time. Every other overlap —
 controller text the operator never typed, a canonical deletion beside the edit, a
 whitespace-only insertion — still refuses and keeps the delta retained.
+
+Before reaching that semantic overlap gate, an exact JetBrains event batch whose
+base disappeared from the replica may reconstruct its base by reversing the
+captured events from the current visible cut. This fallback runs even when an
+in-memory agent lineage exists but does not match the batch. It reboots from the
+current controller canonical and forwards only the reconstructed operator delta;
+a newer unexamined editor event prevents reconstruction. Thus a canonical queue
+deletion cannot leave a fully witnessed operator batch in `await-missing-base`
+forever.
 
 The rebase diffs by line first and refines only small changed hunks by code
 point. Char-level Myers is O((N+M)·D), and a compaction makes D approach N: on a
@@ -1333,6 +1350,15 @@ replaying captured editor ops over the intent's expected base, validates that
 cut, and then replays the deferred agent-intent journal. Thus an operator-only
 `queue: pause` survives while duplicated agent content is discarded. This repair
 is automatic and does not require or authorize a force-disk reset.
+
+A structurally valid complete live editor observation outranks an independently
+replayed op epoch. An epoch can be cleared for a non-operator projection that is
+subsequently refused, leaving the next captured burst anchored to the earlier
+base while the visible buffer still contains the full operator cut. Replacing
+that valid buffer with the partial replay can manufacture valid-looking garble.
+Op replay may replace the observed buffer only as recovery from a structurally
+invalid non-operator projection; otherwise the observed buffer is the operator
+branch supplied to the agent-intent rebase.
 
 Editor-op capture is epoch-scoped. Immediately before JetBrains applies any
 remote or agent-authored text mutation, it closes the native op-capture epoch.
@@ -1944,6 +1970,13 @@ balanced component markers, and at most one live exchange boundary marker.
   that exact editor revision to perform its native save, then re-observes
   authority and disk equality before checkpoint, commit, and the durable
   compact-settled receipt. Compact admission itself never issues this save.
+- Repeated refusal of one immutable retained native-save projection is an
+  Effect receipt, not a second polling authority. On every third refusal the
+  existing persistence Effect requests an idempotent editor-replica rebuild for
+  that epoch; an unreachable first signal therefore does not latch recovery.
+  The ordinary idempotent persistence retry remains responsible for the final
+  exact-disk proof. This extracts recovery from the pull-only imperative path.
+  The capped retry timer remains the one-shot wall-clock adapter.
 - Native-save admission is native-save protocol compatibility, not equality
   with the classic plugin package version (GH #236). A registration receives
   `persist_current` when its plugin is a package this release ships for any

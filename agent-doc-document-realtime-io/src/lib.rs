@@ -3694,7 +3694,6 @@ pub fn apply_canonical_replace_if_attached(
                                 expected_current,
                                 &relay_text,
                                 source,
-                                true,
                             );
                             let settled_target = rebase_agent_candidate_over_editor_cut(
                                 file,
@@ -3773,7 +3772,6 @@ pub fn apply_canonical_replace_if_attached(
                                 expected_current,
                                 &relay_text,
                                 source,
-                                agent_projection_may_be_visible,
                             );
                             let merged = rebase_agent_candidate_over_editor_cut(
 file,
@@ -4333,7 +4331,7 @@ fn recover_concatenated_document_generations(
         return Ok(Some(target.to_string()));
     }
     let editor_cut =
-        editor_operator_cut_for_agent_rebase(file, expected, editor_generation, source, false);
+        editor_operator_cut_for_agent_rebase(file, expected, editor_generation, source);
     let merged = rebase_agent_candidate_over_editor_cut(file, expected, target, &editor_cut)?;
     let canonical = canonicalize_and_validate_agent_rebase(&merged, target, file, source)?;
     Ok((canonical != content).then_some(canonical))
@@ -4656,17 +4654,23 @@ fn editor_operator_cut_for_agent_rebase(
     expected_base: &str,
     observed_editor: &str,
     source: &str,
-    prefer_operator_ops: bool,
 ) -> String {
+    // A structurally valid live editor is already the newest complete operator
+    // cut. An op epoch can lag it when a non-operator projection was fenced but
+    // never reached the visible buffer; replaying only the next epoch against
+    // the old base then manufactures a valid-looking but garbled replacement.
+    // Op replay is recovery evidence only when the observed projection itself
+    // is structurally unusable.
+    if canonical_document_target_is_valid(observed_editor) {
+        return observed_editor.to_string();
+    }
     let Ok(Some(ops)) = agent_doc_op_capture_io::editor_ops_for_base(file, expected_base) else {
         return observed_editor.to_string();
     };
     let Some(operator_cut) = agent_doc_merge::crdt::replay_editor_ops(expected_base, &ops) else {
         return observed_editor.to_string();
     };
-    if operator_cut == observed_editor
-        || (!prefer_operator_ops && canonical_document_target_is_valid(observed_editor))
-    {
+    if operator_cut == observed_editor {
         return observed_editor.to_string();
     }
     if !canonical_document_target_is_valid(&operator_cut) {
@@ -4680,11 +4684,7 @@ fn editor_operator_cut_for_agent_rebase(
             ops.len(),
             agent_doc_hash::content_hash(observed_editor),
             agent_doc_hash::content_hash(&operator_cut),
-            if prefer_operator_ops {
-                "post_agent_projection_race"
-            } else {
-                "invalid_non_operator_editor_projection"
-            },
+            "invalid_non_operator_editor_projection",
         ),
     );
     operator_cut
@@ -5576,7 +5576,6 @@ pub fn deferred_document_write_reconnect_content(
                 &merge_base,
                 &merged,
                 "editor_reconnect",
-                false,
             );
         }
         let merged_hash = agent_doc_hash::content_hash(&merged);
@@ -11319,7 +11318,7 @@ mod tests {
             &orphan_comment_terminator
         ));
         let recovered =
-            editor_operator_cut_for_agent_rebase(&file, base, &poisoned, "test_reconnect", false);
+            editor_operator_cut_for_agent_rebase(&file, base, &poisoned, "test_reconnect");
         assert_eq!(recovered, operator_cut);
         assert!(recovered.contains("queue: stop"));
         assert_eq!(recovered.matches("agent:boundary:").count(), 1);
@@ -11329,7 +11328,6 @@ mod tests {
                 base,
                 &unclosed_exchange,
                 "test_reconnect",
-                false,
             ),
             operator_cut
         );
@@ -11339,14 +11337,13 @@ mod tests {
                 base,
                 &orphan_comment_terminator,
                 "test_reconnect",
-                false,
             ),
             operator_cut
         );
     }
 
     #[test]
-    fn post_projection_race_replays_progressive_queue_typing_once() {
+    fn post_projection_race_keeps_collapsed_progressive_queue_typing_once() {
         let base = concat!(
             "---\nqueue: go\n---\n\n",
             "<!-- agent:queue go -->\n",
@@ -11382,7 +11379,6 @@ mod tests {
             base,
             &collapsed,
             "test_progressive_queue_race",
-            true,
         );
         assert_eq!(recovered.matches(full_prompt.trim_end()).count(), 1);
         assert!(
@@ -11402,6 +11398,59 @@ mod tests {
                 .any(|line| line == "- Does the API return the generic")
         );
         assert!(merged.contains("The generic message is returned."));
+    }
+
+    #[test]
+    fn valid_visible_cut_outranks_a_later_op_epoch_anchored_before_a_refused_projection() {
+        // GH #254: the first operator epoch was cleared for a projection that
+        // the IDE then refused. A later epoch was consequently stamped on the
+        // old HEAD base. Replaying only that later epoch produced the exact
+        // valid-looking garble below and replaced the correct visible buffer.
+        let base = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- reopened? If yes, reopen.: #auth\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n\nDone.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, file, _) = temp_doc(base);
+        let removed = " If yes, reopen.";
+        let offset = base.find(removed).unwrap();
+        let base_hash = agent_doc_hash::content_hash(base);
+        agent_doc_op_capture_io::record_editor_op(
+            &file,
+            &base_hash,
+            agent_doc_merge::crdt::EditorOp::Delete {
+                offset,
+                len: removed.len(),
+            },
+        )
+        .unwrap();
+        let stale_replay = agent_doc_merge::crdt::replay_editor_ops(
+            base,
+            &agent_doc_op_capture_io::editor_ops_for_base(&file, base)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(stale_replay.contains("reopened?: #auth"));
+        assert!(canonical_document_target_is_valid(&stale_replay));
+
+        let visible = base.replacen(
+            "<!-- agent:boundary:abc123 -->",
+            "### Re: current\n\nClosed.\n<!-- agent:boundary:abc123 -->",
+            1,
+        );
+        assert!(canonical_document_target_is_valid(&visible));
+
+        assert_eq!(
+            editor_operator_cut_for_agent_rebase(&file, base, &visible, "test_gh254"),
+            visible,
+            "a valid complete editor observation must not be replaced by a partial stale epoch",
+        );
     }
 
     #[test]

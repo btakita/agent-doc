@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a1359c-17a9-76c3-8aac-bfc30b074aea
+  codex: 01a138be-f42a-71f1-9164-e2992fb43c04
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -38,7 +38,7 @@ Review pass done. frontendlivedispatch closed on live evidence. Two review items
 Compacted content:
 - Archived 30 response topic(s): #actionable-review; GitHub issue #245; Restart Agent retained projection and infra.md recovery; 27 more
 - Prior summary/context: prior compacted content: Archived 59 response topic(s): dispatched GH #240 to a subagent; Clear Session Context on sd...
-❯ 🚧 What this mean? Is this a bug?
+❯ What this mean? Is this a bug?
 ```
 • Failed (exit 1) agent-doc respond /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md --template --done …
   └ This exchange is already above the legibility target, but the active queue takes precedence; no repository or prod…
@@ -52,8 +52,29 @@ Compacted content:
 The shown `respond --template` failure is not an Agent Doc core bug. That call supplied plain Markdown even though preflight had explicitly required matching `<!-- patch:exchange -->` and `<!-- /patch:exchange -->` markers and disallowed plain stdin. Strict template mode rejected it before capture or mutation, as designed. The retry added both markers and succeeded with the same response, so no answer or `--done` mutation was lost. The realtime-routing line was informational, and `--done` was unrelated.
 
 The later stall is a separate issue. The committed response was followed by new realtime steering, but the continuation stopped with an abandoned prior cycle instead of admitting the new prompt automatically. That behavior should continue without manual re-entry. The queue item describing it is now claimed by `subagent:steering_stall` for a spec, regression-test, and implementation fix; two isolated investigators are also checking why the pasted queue diagnostic was classified and split into extra exchange prompts. The existing GitHub issue workers remain active.
+> **Chat prompt (#chatprompt):** subagent: fix: • Blocked by hook
+>   └ agent-doc Stop hook retained the exact closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
+> under its durable keyed retry. The latest assistant text was captured into the pending/capture ledger before auto-
+> close. The hook could not finish the required commit boundary: closeout operation is already in progress for cycle
+> cycle-1791959659836 by captured-finalize-resume-3600622-1791956809940749262-t13 pid=3600622
+> role=captured_finalize_resume until=1791962084 [closeout_owner_retry_at=1791962084]. The retained capture or projection
+> is already durable and this exact retained intent commits itself once delivery converges — this is a deferral, not a
+> lost response. Wait for its controller-owned terminal state edge; do not use the document's current-cycle status as
+> proof because queue continuation can advance to a different cycle. Do NOT re-send the response, force disk, or `admin
+> recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own either: `admin
+> reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor holding the document
+> is not serving its replica, and then its remedy governs. The controller owns delivery, the editor-native save receipt,
+> and the terminal commit. Do not reopen or recapture the cycle, rerun finalize/write/repair, force disk, recycle the
+> supervisor, or resend the response. Wait for the existing controller state edge unless it explicitly reports
+> `needs_operator`; do not send the final answer yet.
 
-<!-- agent:boundary:df975275 -->
+### Re: retained closeout and SDK queue continuation — gpt-5 · 2026-10-14T03:10-04:00
+
+Dispatched the retained-closeout ownership failure to `subagent:retained_closeout_owner` in an isolated worktree. It will preserve the durable `sdk.md` capture, use only read-only evidence from that session, and fix the controller/Stop-hook behavior with specs and deterministic tests.
+
+A second document-queue report showed a distinct in-pane queue-continuation failure for `do [#sdkreleasecontrolreset]`. I claimed that queue head and dispatched `subagent:sdk_queue_continuation` separately so it can fix continuation behavior without executing or modifying the live SDK session. Neither worker will resubmit, force-write, recycle, reload, or otherwise disturb `sdk.md`.
+
+<!-- agent:boundary:713dace6 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -92,6 +113,18 @@ live buffer).
 ---
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/251
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/252
+---
+fix sdk.md issue
+```
+› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
+
+• Blocked by hook
+  └ Queue continuation, not an error: Codex labels it `Blocked by hook`. Next `agent:queue auto` prompt for /home/
+brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md: "do [#sdkreleasecontrolreset]". Continue THIS turn in-pane:
+answer it, then persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md`. Do
+NOT run `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` (recursive self-invocation) and do
+not send the final answer yet.
+```
 <!-- /agent:queue -->
 
 ## Backlog

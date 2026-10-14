@@ -226,6 +226,82 @@ Yes. Agent-doc can define a harness-neutral escalation envelope so a background 
 The implementation must map that common contract onto each harness honestly: use native subagent messaging or permission surfaces where Claude Code, Codex, Grok Build, or OpenCode expose them, and use an agent-doc coordinator relay where they do not. It must preserve the request verbatim, identify the originating worker and queue item, deduplicate retries, keep the worker paused, and route the operator’s answer back to that worker without converting it into authorization for sibling work.
 
 I have claimed this item and dispatched a dedicated isolated worker with the authorized specification, implementation, regression-test, build, commit, and push scope. It is explicitly covering all four named harnesses and distinguishing native capabilities from protocol fallbacks. The item remains open until the coordinator reviews, integrates, tests, installs, and releases the result.
+
+### Re: published release and completed integration batch — gpt-5 · 2026-10-14T16:17-04:00
+
+Agent-doc `v0.35.500` is published and independently verified on all intended public channels:
+
+- GitHub release: https://github.com/btakita/agent-doc/releases/tag/v0.35.500
+- PyPI: https://pypi.org/project/agent-doc/0.35.500/
+- Homebrew: `btakita/homebrew-tap` now serves formula version `0.35.500`.
+
+The hosted Release workflow completed successfully across every platform, including the corrected Windows build. The post-release integration batch is also complete on `btakita/agent-doc` main through `840625b9c0`: `make check` passed all 10,495 tests, `make tmux-ci` passed, `make install-full` installed the CLI/native library and editor packages, and the verified commits were pushed.
+
+The `#actionfileshuman` backlog item is complete. Agent-doc now has the repository-locked `admin issue` action with explicit `human-only` and `agent-assisted` handling, while the generic issue path remains available for caller-owned repositories.
+
+> **Queue prompt:** tools.md issue
+> ```
+> › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md
+> queue or backlog line the live buffer has and the disk projection does not). It is either operator steering or an
+> earlier `agent-doc write` whose own commit refused; this check compares components and cannot tell which, so it does
+> not guess. Either way it is not a failed closeout. Answer it: run `agent-doc /home/brian/work/btakita/agent-loop/src/
+> haiven-dev/tasks/tools.md` to open the next cycle, which reads that edit as its prompt and commits it. Do NOT run
+> `agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` — every commit path refuses a
+> fresh unanswered edit on purpose, because committing it would swallow the next turn's prompt — and do NOT force disk,
+> which clobbers the live edits. Do not recapture the response or rerun finalize/write. Run `agent-doc session-check /
+> home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` and let the binary-owned keyed retry finish.
+> ```
+
+This cross-document closeout issue was already resolved in its owning session. This row is a stale completion echo; no recursive agent-doc invocation is performed from this owner pane.
+
+> **Queue prompt:** Allow preset to recognize the entire text and support multiple presets in the text. Attribute was `preset="#push #auth"`. See tools.md:
+> ```
+> • The #push preset itself is now defined, but the queue attribute is preset="#push #auth", which the document engine
+>   treats as one undefined preset name. I’ll follow the generated contract exactly and dispatch a fresh verifier; I
+>   won’t reinterpret the combined preset string or perform an unauthorized push.
+> ```
+
+The multiple-preset parsing work was already resolved and verified earlier; this row is likewise a stale completion echo.
+
+> **Queue prompt:** Add a `agent:todo` to store todo items for the operator to act on. Unpublished drafts are a common todo item. Add `agent:todo` into the agent document template for Claim for Tmux Pane command. The agents should be instructed to make a brief TODO item. It can refer to `agent:review` + `agent:backlog` items, draft files, etc.
+
+Completed in `cac7c4a211` and included in `v0.35.500`: the authoring contract now defines brief operator TODO entries and permits references to review/backlog IDs and draft paths.
+
+> **Queue prompt:** release + publish
+
+Completed. Version `0.35.500` is public on GitHub, PyPI, and Homebrew, with the full hosted workflow green.
+
+> **Queue prompt:** When the agent prompts the developer, show the prompt choices with context in the agent:exchange.
+
+Completed in `ca95a2777a`. The bounded `choice-checkpoint` path mirrors the public context, question, and two-to-five choices through the existing salient-response CRDT path without treating a displayed choice as authorization or answer evidence.
+
+> **Queue prompt:** During a hot-reload, tmux pane auto-sync is temporarily not operational.
+
+Completed in `9fa63104ae`. Dynamic JetBrains replacement now preserves the controller-owned editor surface and focus across reload, while an actual terminal close still retires it.
+
+> **Queue prompt:** Can we guide subagents to surface prompts + permission requests to the user across all supported agent harnesses (Claude Code + Codex + Grok Build + OpenCode)? If yes, add the functionality to agent-doc.
+
+Yes; completed in `1953755617`. Agent-doc now defines a deterministic `#waypostrequest` packet carrying the exact request kind, request text, context, and choices, and routes it through the coordinator exchange on Claude Code, Codex, Grok Build, and OpenCode. Conversational approval remains distinct from a native tool permission grant.
+
+> **Queue prompt:** Fix agent-doc causes of agent-doc-bugs.md Stop hook issue:
+> ```
+> • Blocked by hook
+>   └ agent-doc Stop hook found fresh unresolved exchange work for /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+> agent-doc-bugs.md after the previous cycle was already committed. Continue THIS turn in-pane: answer "Can we guide
+> subagents to surface prompts + permission requests to the user across all supported agent harnesses (Claude Code + Codex
+> + Grok Build + OpenCode)? If yes, add the functionality to agent-doc." in /home/brian/work/btakita/agent-loop/tasks/
+> agent-doc/agent-doc-bugs.md and persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+> agent-doc-bugs.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-
+> bugs.md`). Do NOT send the final answer yet.
+>
+> • The newly admitted prompt is already claimed by the dedicated cross-harness worker. I’m persisting that answer in its
+>   own agent-doc cycle now: yes, the intended design is to surface subagent prompts and permission requests through the
+>   coordinator with exact context, while preserving each harness’s native permission boundary.
+> ```
+
+Completed in `6f5149960f`. The Codex Stop path now recomputes authoritative pending steering: a diff fully owned by `forward_to_owner` continues with its existing worker, while mixed or genuinely unclaimed steering still blocks closeout.
+
+All five isolated worker results were integrated serially, centrally verified, installed once, pushed, and their claims released.
 <!-- agent:boundary:403f486c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -283,7 +359,6 @@ bugs.md`). Do NOT send the final answer yet.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#actionfileshuman] Does agent-doc have an `admin issue` or `issue` action which files a human-only or agent-assisted gh issue in the btakita/agent-doc repo? Should we leave `issue` open for people who want to file issues in their own repos? Would operator repo or PM tool issue filing be in the scope of agent-doc or should this be left for the agents + harness themselves?
 <!-- /agent:backlog -->
 
 ## Review

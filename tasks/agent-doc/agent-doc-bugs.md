@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -312,6 +313,68 @@ Agent-doc `v0.35.500` is published:
 - Homebrew: `btakita/homebrew-tap` formula version `0.35.500`
 
 The hosted release workflow is green across all target platforms, including Windows. The verified post-release integration batch is installed locally and pushed to `btakita/agent-doc` main through `840625b9c0`.
+
+### Re: v0.35.501 publication, project presets, and nested overrides — gpt-5 · 2026-10-14T18:54:55-04:00
+
+> **Queue prompt:** do [#defineprojectwide]
+
+Project-wide presets are defined in the YAML frontmatter of the nearest `.agent-doc/project.md`. Both `presets:` and `prompt_presets:` are accepted, names beginning with `#` must be quoted, and existing sessions resolve changes on their next read without copying the values or restarting agent-doc. An exact-name session declaration overrides the project value; a null or incomplete local declaration masks it and fails closed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/255
+
+Completed and published in `v0.35.501`. Published archive roots and the installed IDE compatibility range now distinguish the shared JetBrains 262/263 layout, so a current 263 install is not misclassified as exact-262 or another compatibility line.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/256
+
+Completed, published in `v0.35.501`, and closed. Atomic-swap backup mappings now resolve to the live IDE data root, select the correct platform generation, recognize the replacement already installed, and give restart-only guidance instead of requesting a classic-line update.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/257
+
+Completed, published in `v0.35.501`, and closed. Editor-route recovery and byte-identical installs now honor the recorded restart-required verdict rather than prescribing an ineffective restart-free reinstall.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/258
+
+Completed and published in `v0.35.501`. The modular 262/263 backend embeds its private Lazily runtime in the isolated content-module JAR, with artifact and prepared-sandbox checks proving the runtime classes resolve.
+
+> **Queue prompt:** release + publish
+
+Agent-doc `v0.35.501` is published and publicly verified:
+
+- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.35.501
+- PyPI: https://pypi.org/project/agent-doc/0.35.501/
+- Homebrew: `btakita/homebrew-tap` formula `0.35.501`
+
+The corrected hosted Release run is green across six native targets and the editor-package job. The GitHub Release contains all 15 expected assets; `SHA256SUMS` verifies all six native archives and `EDITOR-PACKAGES.sha256` verifies the VS Code and JetBrains artifacts. A clean public-index install reports `agent-doc 0.35.501`. The release helper regression found during the first attempt was repaired in `c1e6ca379f`; the tag and `main` both pointed to that exact commit at publication. The absent Homebrew workflow token caused its reusable step to skip, so the generated formula was published directly and verified at tap commit `8fc2ae3`.
+
+> **Chat prompt (#chatprompt):** does the agent:queue presets now allow multiple presets to be defined in the value?
+
+Yes. `preset=` accepts a whitespace-separated list. Quote the whole attribute when it contains more than one reference:
+
+```markdown
+<!-- agent:queue preset="#push #auth" -->
+```
+
+References resolve independently in source order, duplicate canonical names collapse at their first occurrence, hashed and bare aliases may be mixed, structured runbooks remain associated with their presets, and any unresolved reference makes the combined authorization fail closed. `preset=""` explicitly means no preset.
+
+> **Chat prompt (#chatprompt):** Do I need to restart agent-doc after editing .agent-doc/project.md?
+
+No. Project presets are resolved on every read, so edits apply to existing session documents at the next preflight or queue resolution. No restart or document rewrite is required. Malformed project frontmatter fails closed instead of retaining stale authorization.
+
+> **Chat prompt (#chatprompt):** Are project.md prompt presets overridable and can the overridden presets apply to presets defined in project.md?
+
+Yes. Session-local exact-name declarations override project defaults before nested preset values are expanded.
+
+> **Chat prompt (#chatprompt):** For example: '#generic-preset': 'Check JIRA tickets for #project'
+
+That example is now supported on `main`. If the effective map declares `#project`, invoking `#generic-preset` substitutes the session override of `#project`. Recursive chains work; undeclared ordinary hashtags remain literal. The explicit form `{{#project}}` requires a definition, and missing values or cycles fail closed.
+
+> **Chat prompt (#chatprompt):** subagent: support preset value overrides accessible to other presets in project.md
+
+Implemented, reviewed, fully tested, and pushed to `main` as `c842672e4c`. Expansion happens after the project/session overlay on every read and does not rewrite either frontmatter source. Structured runbook metadata remains on the preset that declares it; nested composition substitutes prompt text only. The post-rebase full `make check` passed with zero failures. This commit landed after the `v0.35.501` tag and will be included in the next release.
+
+> **Chat prompt (#chatprompt):** Is the linux release + plugin releases visible?
+
+Yes. The public `v0.35.501` release now exposes the GNU x86_64, GNU AArch64, and musl x86_64 Linux archives; the classic, exact-262, and 263 JetBrains ZIPs and feeds; and the VS Code VSIX. All published checksums passed.
 <!-- agent:boundary:3599dd10 -->
 <!-- /agent:exchange -->
 
@@ -319,7 +382,13 @@ The hosted release workflow is green across all target platforms, including Wind
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#defineprojectwide]~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/255
+- #gh-fix https://github.com/btakita/agent-doc/issues/256
+- #gh-fix https://github.com/btakita/agent-doc/issues/257
+- #gh-fix https://github.com/btakita/agent-doc/issues/258
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

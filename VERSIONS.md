@@ -2,6 +2,34 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.501
+
+- **JetBrains 262/263 modular packages load their private runtime correctly
+  (GH #258).** Lazily classes are embedded in the isolated backend content
+  module instead of relying on the root plugin classloader. Artifact and
+  prepared-sandbox checks now prove the backend can resolve representative
+  runtime classes on both modular compatibility lines.
+- **JetBrains package detection and restart guidance follow the installed IDE
+  generation (GH #255–#257).** Published archive roots and the IDE's proven
+  platform range distinguish the shared 262/263 JAR layout, atomic-swap backup
+  mappings resolve to the replacement installation and restart marker, and
+  editor-route refusals plus byte-identical installs honor a recorded
+  restart-required verdict instead of prescribing an ineffective reinstall.
+- **Hot plugin replacement preserves tmux auto-sync continuity.** Native-library
+  and plugin generation handoff retains controller-owned editor surface and
+  focus state until the replacement publishes its successor; only actual
+  editor or plugin termination retires those observations.
+- **Subagent questions and permission requests surface through the coordinator
+  on every supported harness.** Claude Code, Codex, Grok Build, and OpenCode
+  share a deterministic waypost request packet, preserve operator choices in
+  the exchange, and keep chat answers distinct from harness permission grants.
+- **Queue and repository operations keep their proven owner and scope.** Codex
+  Stop retains newly claimed steering with its active worker, while repository
+  admin issue actions are locked to the repository authorized by the operator.
+- **Project-wide prompt preset setup is documented and contract-tested.** A
+  copy-paste `.agent-doc/project.md` example explains quoted `#name` keys,
+  structured runbooks, live inheritance, and session-local overrides.
+
 ## 0.35.500
 
 - **Windows release builds compile the supervisor idle watcher.** The

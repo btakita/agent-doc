@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -404,7 +403,231 @@ Changed paths: none in this verification cycle; the release changes are already 
 The subagent-facing “Blocked by hook” behavior is captured as queue item `[from:coordinator key=subagent-blocked-hook-20261013] Fix subagent reporting queue continuation as Blocked by hook.` for isolated implementation after this release closeout.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:673547bf -->
+
+> **Subagent completed:** `subagent:subagent_completion_feedback` returned work for queue item “In sdk.md, I have a long list of subagents. When a subagent completes, there's no feedback. agent-doc should immediately write to the `agent:exchange` when the subagent completes.”. Coordinator integration and closeout are pending.
+<!-- agent-doc-subagent-completion key=d688a0f356b1a9c1c7560b64d2957a5af2a066e4ada273984b68b7296d4c213a -->
+
+### Re: Subagent completed — agent-doc: `subagent:dev_tmux_feedback` returned work for queue item “What is wrong with dev.md? I cannot open the tmux pane. There needs to be feedback in the editor. `> 4 | : resume:` was fixed but still not opening and has the error message saying `> 4 | : resume:` is broken.”; coordinator integration and closeout are pending.
+<!-- agent-doc-subagent-completion key=0ad17090bf998c7ddbe0b08e5cf2354bbbe1d51305084533da3a305e12cdfb50 -->
+
+### Re: Subagent completed — agent-doc: `subagent:steering_delivery_feedback` returned work for queue item “Error in this session: [route] explicit send for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md: delivered 1 pending steering item(s) to the owning turn (sent=explicit); its next tool call, its turn-boundary report, or the idle wake surfaces them. No second trigger was injected: the open closeout still owns the pane (blocker: [session-check] IN PROGRESS: cycle `cycle-1791930737701` remains `preflight_started` (preflight_started) while owning pane `%192` has a fresh active-turn lease — the response turn is still running, so no response capture or terminal commit exists yet. This is not abandoned closeout evidence. Do not recover or abandon this cycle, rerun finalize/write, or restart/clear the owner from another pane. Re-run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` only after the owning turn reaches its terminal boundary.). steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain”; coordinator integration and closeout are pending.
+<!-- agent-doc-subagent-completion key=15425ea8539c2321243f2fd81889fab7376872c30fe5fc0b9aed444d4266000c -->
+
+### Re: Subagent completed — agent-doc: `subagent:subagent_completion_feedback` returned work for queue item “In sdk.md, I have a long list of subagents. When a subagent completes, there's no feedback. agent-doc should immediately write to the `agent:exchange` when the subagent completes.”; coordinator integration and closeout are pending.
+<!-- agent-doc-subagent-completion key=7680f31d88e549d062fb58307569aa82370c0135e8f06a360e5b9acb899640e6 -->
+
+### Re: Subagent completed — agent-doc: `subagent:this_doc_pane_visibility` returned work for queue item “Now this document's tmux pane is not visible.”; coordinator integration and closeout are pending.
+<!-- agent-doc-subagent-completion key=47c22e67b3236b9d85d78a52c0cbfa076c200cadb743a95d9d7f32ef3c88e2c5 -->
+
+### Re: Subagent completed — agent-doc: `subagent:this_doc_pane_recurrence` returned work for queue item “This document's tmux pane was visible for a bit...now it is not visible. Please fix in agent-doc + this session.”; coordinator integration and closeout are pending.
+<!-- agent-doc-subagent-completion key=5594d9bd2705023c994fc1b67a3fc18a319c1606389c62b2e192105494a30b3e -->
+
+### Re: Subagent completed — agent-doc: `subagent:midturn_recycle_recovery` returned work for queue item “See ad.md: "A recycle can only happen at a turn boundary": Make recycle occur during a turn so the session can immediately recover.”; coordinator integration and closeout are pending.
+<!-- agent-doc-subagent-completion key=67ec9dcfa805a1e1ceb88f6b38e4dc64246de8d1c193aa153292fc9507afd914 -->
+> **Chat prompt (#chatprompt):** cont
+
+### Re: integrated agent-doc fixes and live verification — gpt-5 · 2026-10-13T20:30:08-04:00
+
+> **Queue prompt:**
+>
+> do [#likewaysharing]
+>
+> do [#publish498verify]
+
+
+Completed, pushed, installed, and live-verified on `main` at `e61d247c3a510c23d6c8a3c4d31ea10798384a2a`. No additional release was created; the published release remains `v0.35.498`.
+
+**Project-wide presets**
+
+The recommended and implemented model is one canonical `.agent-doc/project.md`. Its YAML frontmatter supplies live, read-time `presets` / `prompt_presets` defaults to every existing session document under the nearest `.agent-doc` project root. Values are never copied or synchronized into documents. Document-local exact-key declarations win, including null, in-progress, or malformed local declarations that intentionally mask inheritance. Only presets inherit; the project document body and unrelated frontmatter are inert. Missing project files preserve local-only behavior, while an unreadable or malformed present project file fails closed with an actionable error.
+
+> **Queue prompt:** Another thought on the project `presets`. We have `.agent-doc/project.md`, which has the project frontmatter `presets` which are not copied onto project docs. But the project docs fallback to `.agent-doc/project.md` and can override presets set in `.agent-doc/project.md`.
+
+That is now the implemented contract: `.agent-doc/project.md` is a dynamic fallback, and each project document can override individual preset keys without materializing the inherited values.
+
+> **Queue prompt:** Another alternative is to use yaml, which has a similar format to frontmatter. So `.agent-doc/project.yaml` would have a `presets` key which is an key/value object.
+
+I rejected `.agent-doc/project.yaml`. It would duplicate configuration discovery and migration surfaces while losing the useful Markdown body. `.agent-doc/project.md` already provides the same YAML shape in frontmatter and remains the single source of truth.
+
+**GitHub issue #250 and formal validation**
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/250: Use formal logic to validate this class of error does not happen anymore. This has been a reoccurring issue in Coder environments.
+
+Preset expansions honored:
+
+- `#gh-fix`: “fix then close”
+- `#spec-test-build-install-commit-push`: “update spec + tests. build + install for local testing. commit + push”
+
+Issue #250 is fixed and closed. Remote layout correction now preserves the pre-guess base columns through repeated lagging selection guesses. The TLA+ model proves `CorrectionUsesPreGuessBase`, `ProvisionalPreservesAncestry`, and `ProvisionalClearsAfterCorrection`; a deliberately broken configuration violates the core invariant, and a reachability configuration proves the correction path is non-vacuous. The production refinement exhaustively checked 576 traces, including 288 repeated-lagging-selection traces. Evidence is recorded at https://github.com/btakita/agent-doc/issues/250#issuecomment-6155866522.
+
+**Release publication**
+
+`v0.35.498` is fully published at `b9c80b963c19c98786f0d8219fca91b647e58e32`: GitHub Release has all 15 expected assets, its release workflow and main CI succeeded, and PyPI serves `agent-doc==0.35.498`. The Homebrew tap was manually updated at `fea81d6`; `HOMEBREW_TAP_TOKEN` is still absent, so restoring automated tap publication remains an external secret/configuration escalation rather than something I can truthfully claim was restored. I did not create a duplicate tag or publication.
+
+**Idle CPU/read thrash**
+
+> **Queue prompt:** [from:coordinator key=residual-idle-20261013] agent-doc is still thrashing while idle.
+
+Resolved. The remaining causes were SQLite convergence scans plus stale renamed-document supervisor lifecycle handling. Recycle fanout now requires positive checkpoint/marker evidence, renamed-document reexec can adopt exactly one same-project current-generation lease for the unchanged supervisor PID, and missing/ambiguous/closed/foreign targets remain fail-closed.
+
+The recovered `observability.md` actor preserved its original session and pane. Two raw-event-stable 20-second samples measured 2.897% CPU / 0.072 MB/s and 4.597% CPU / 3.615 MB/s, down 68–80% CPU and 86.8–99.7% read throughput from the prior clean 14.4% / 27.4 MB/s baseline. No deleted-image agent-doc process remains in the affected `haiven-dev` project.
+
+**Subagent Stop-hook continuation**
+
+> **Queue prompt:** [from:coordinator key=subagent-blocked-hook-20261013] Fix subagent reporting queue continuation as Blocked by hook.
+
+Fixed. A clean-session continuation now requires both the coordinator session and the exact admitted turn identity. A foreign background collaboration turn sharing the coordinator session returns normal continuation instead of inheriting the queue owner’s `Blocked by hook`; open-cycle drift and refused-admission behavior remain fail-closed.
+
+**dev.md stale frontmatter and editor feedback**
+
+> **Queue prompt:** What is wrong with dev.md? I cannot open the tmux pane. There needs to be feedback in the editor. `> 4 | : resume:` was fixed but still not opening and has the error message saying `> 4 | : resume:` is broken.
+
+The affected file was `tasks/dev/dev.md`. Its valid correction was trapped behind 92 pending local editor splices while controller canonical still held the malformed generation; the prior pane had exited, so restart also reported `missing_actor`. The JetBrains replica path now reconstructs the exact captured pre-edit buffer, rebases only captured operator edits through controller canonical, and never consumes newer pending edits. Pane-open and document-command failures appear in a bounded editor-top status strip, and an absent reported source line is explicitly identified as stale controller frontmatter.
+
+**Explicit steering delivery feedback**
+
+> **Queue prompt:** Error in this session: [route] explicit send for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md: delivered 1 pending steering item(s) to the owning turn (sent=explicit); its next tool call, its turn-boundary report, or the idle wake surfaces them. No second trigger was injected: the open closeout still owns the pane (blocker: [session-check] IN PROGRESS: cycle `cycle-1791930737701` remains `preflight_started` (preflight_started) while owning pane `%192` has a fresh active-turn lease — the response turn is still running, so no response capture or terminal commit exists yet. This is not abandoned closeout evidence. Do not recover or abandon this cycle, rerun finalize/write, or restart/clear the owner from another pane. Re-run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` only after the owning turn reaches its terminal boundary.). steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
+
+Fixed. Explicit steering delivered to the current owner now emits typed `ui_outcome=steering_delivered_to_owner`, concise informational success, and no route-blocked projection. JetBrains and VS Code also recover legacy `Error:` wrappers as success while preserving the no-second-trigger invariant.
+
+**Immediate subagent completion feedback**
+
+> **Queue prompt:** In sdk.md, I have a long list of subagents. When a subagent completes, there's no feedback. agent-doc should immediately write to the `agent:exchange` when the subagent completes.
+
+Implemented `agent-doc queue report-complete`. The coordinator immediately writes a deduplicated, N−1-compatible inert `### Re: Subagent completed` artifact through document authority while retaining the claim for integration. Cross-process invocations serialize per document and recompute under authority; attached editors receive a durable retained intent and the CLI returns immediately, while detached documents use CAS. Ordinary `queue release` no longer claims completion.
+
+Live validation against this active session exposed and then fixed the first implementation’s unbounded convergence wait. The final six completion reports returned in 0.65–0.80 seconds each; the four-process regression completes in 0.33 seconds with every distinct notice exactly once. Refresh-stable dedupe, mixed-prompt classification, strict timeout, and old-controller compatibility are covered.
+
+**This document’s pane visibility**
+
+> **Queue prompt:** Now this document's tmux pane is not visible.
+
+> **Queue prompt:** This document's tmux pane was visible for a bit...now it is not visible. Please fix in agent-doc + this session.
+
+The pane was healthy but off-screen in tmux session `0`: `%192` sat in inactive stash window `@1` while the client viewed `@2`. A later editor-focus generation selected `dev` and restashed it. Successful routes now report typed `unattached_session`, `inactive_window`, or `hidden_by_zoom` visibility warnings with exact attach/reveal commands instead of silently succeeding.
+
+The recurrence had a second cause: explicit focus on stale `%192` was rejected merely because visible peer `%199` had a live turn, even though `%192` also had fresh active-turn proof. Layout admission now permits the explicitly focused active pane to replace/stash the peer without interrupting either turn; inactive stale panes and overdue/widening cases remain excluded. The live session was safely restored with the normal blocking focus path. `%192` is currently the visible active pane, while peer turns remain alive.
+
+**Mid-turn recycle recovery**
+
+> **Queue prompt:** See ad.md: "A recycle can only happen at a turn boundary": Make recycle occur during a turn so the session can immediately recover.
+
+Implemented an adopt-only mid-turn supervisor generation handoff. The supervisor locks child reap, all supervisor IPC effects, and PTY I/O; waits for any current effect and complete PTY transaction; verifies an empty terminal-filter boundary; then execs only its own image. The exact child PID, PTY, session, and open-cycle ownership survive without kill, replay, or duplicate dispatch. Failed exec resumes the old image, and a lost adopt-only child uses spawn-without-redispatch.
+
+The final install occurred while this already-running supervisor was on the pre-fix image, so that image cannot retroactively execute the new path during this same turn. It remains healthy with the same Codex child and will adopt the installed image at this turn boundary; subsequent stale generations can recycle during an open turn under the new fenced handoff.
+
+**Changed paths and verification**
+
+The combined changes span project-preset resolution/specs, remote-layout TLA/refinement tests, Codex Stop-hook identity, controller/supervisor recycle and start-runtime I/O, queue completion feedback, tmux visibility/layout admission, JetBrains/VS Code feedback, and all three JetBrains package-generation manifests.
+
+Coordinator verification on the exact pushed bytes:
+
+- `make check`: exit 0; 10,466 Rust tests passed, 167 skipped; VS Code, cross-editor, JetBrains classic/262/263, Python bootstrap, docs/audits, and all 135 TLA checks passed.
+- `make tmux-ci`: exit 0; the seven long queue-clear tests and all route/layout/cross-editor checks passed.
+- `make install`: exit 0; binary/native library installed, IntelliJ plugin dynamically upgraded, Rider package installed for next start, and VS Code extension installed.
+- Completion-feedback live smoke: six reports accepted in under one second each while the active turn remained intact.
+- GitHub CI run `38490233533` for `e61d247c3a` is still in progress; local authoritative gates are the closeout proof.
+
+Confidence: high. Escalation: only the missing `HOMEBREW_TAP_TOKEN` secret remains external. The exchange remains above the session-accretion warning threshold; the active queue was completed without interrupting it for compaction.
+> **Chat prompt (#chatprompt):** cont
+
+### Re: integrated agent-doc fixes and live verification — gpt-5 · 2026-10-13T20:30:08-04:00
+
+Completed, pushed, installed, and live-verified on `main` at `e61d247c3a510c23d6c8a3c4d31ea10798384a2a`. No additional release was created; the published release remains `v0.35.498`.
+
+**Project-wide presets**
+
+The recommended and implemented model is one canonical `.agent-doc/project.md`. Its YAML frontmatter supplies live, read-time `presets` / `prompt_presets` defaults to every existing session document under the nearest `.agent-doc` project root. Values are never copied or synchronized into documents. Document-local exact-key declarations win, including null, in-progress, or malformed local declarations that intentionally mask inheritance. Only presets inherit; the project document body and unrelated frontmatter are inert. Missing project files preserve local-only behavior, while an unreadable or malformed present project file fails closed with an actionable error.
+
+> **Queue prompt:** Another thought on the project `presets`. We have `.agent-doc/project.md`, which has the project frontmatter `presets` which are not copied onto project docs. But the project docs fallback to `.agent-doc/project.md` and can override presets set in `.agent-doc/project.md`.
+
+That is now the implemented contract: `.agent-doc/project.md` is a dynamic fallback, and each project document can override individual preset keys without materializing the inherited values.
+
+> **Queue prompt:** Another alternative is to use yaml, which has a similar format to frontmatter. So `.agent-doc/project.yaml` would have a `presets` key which is an key/value object.
+
+I rejected `.agent-doc/project.yaml`. It would duplicate configuration discovery and migration surfaces while losing the useful Markdown body. `.agent-doc/project.md` already provides the same YAML shape in frontmatter and remains the single source of truth.
+
+**GitHub issue #250 and formal validation**
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/250: Use formal logic to validate this class of error does not happen anymore. This has been a reoccurring issue in Coder environments.
+
+Preset expansions honored:
+
+- `#gh-fix`: “fix then close”
+- `#spec-test-build-install-commit-push`: “update spec + tests. build + install for local testing. commit + push”
+
+Issue #250 is fixed and closed. Remote layout correction now preserves the pre-guess base columns through repeated lagging selection guesses. The TLA+ model proves `CorrectionUsesPreGuessBase`, `ProvisionalPreservesAncestry`, and `ProvisionalClearsAfterCorrection`; a deliberately broken configuration violates the core invariant, and a reachability configuration proves the correction path is non-vacuous. The production refinement exhaustively checked 576 traces, including 288 repeated-lagging-selection traces. Evidence is recorded at https://github.com/btakita/agent-doc/issues/250#issuecomment-6155866522.
+
+**Release publication**
+
+`v0.35.498` is fully published at `b9c80b963c19c98786f0d8219fca91b647e58e32`: GitHub Release has all 15 expected assets, its release workflow and main CI succeeded, and PyPI serves `agent-doc==0.35.498`. The Homebrew tap was manually updated at `fea81d6`; `HOMEBREW_TAP_TOKEN` is still absent, so restoring automated tap publication remains an external secret/configuration escalation rather than something I can truthfully claim was restored. I did not create a duplicate tag or publication.
+
+**Idle CPU/read thrash**
+
+> **Queue prompt:** [from:coordinator key=residual-idle-20261013] agent-doc is still thrashing while idle.
+
+Resolved. The remaining causes were SQLite convergence scans plus stale renamed-document supervisor lifecycle handling. Recycle fanout now requires positive checkpoint/marker evidence, renamed-document reexec can adopt exactly one same-project current-generation lease for the unchanged supervisor PID, and missing/ambiguous/closed/foreign targets remain fail-closed.
+
+The recovered `observability.md` actor preserved its original session and pane. Two raw-event-stable 20-second samples measured 2.897% CPU / 0.072 MB/s and 4.597% CPU / 3.615 MB/s, down 68–80% CPU and 86.8–99.7% read throughput from the prior clean 14.4% / 27.4 MB/s baseline. No deleted-image agent-doc process remains in the affected `haiven-dev` project.
+
+**Subagent Stop-hook continuation**
+
+> **Queue prompt:** [from:coordinator key=subagent-blocked-hook-20261013] Fix subagent reporting queue continuation as Blocked by hook.
+
+Fixed. A clean-session continuation now requires both the coordinator session and the exact admitted turn identity. A foreign background collaboration turn sharing the coordinator session returns normal continuation instead of inheriting the queue owner’s `Blocked by hook`; open-cycle drift and refused-admission behavior remain fail-closed.
+
+**dev.md stale frontmatter and editor feedback**
+
+> **Queue prompt:** What is wrong with dev.md? I cannot open the tmux pane. There needs to be feedback in the editor. `> 4 | : resume:` was fixed but still not opening and has the error message saying `> 4 | : resume:` is broken.
+
+The affected file was `tasks/dev/dev.md`. Its valid correction was trapped behind 92 pending local editor splices while controller canonical still held the malformed generation; the prior pane had exited, so restart also reported `missing_actor`. The JetBrains replica path now reconstructs the exact captured pre-edit buffer, rebases only captured operator edits through controller canonical, and never consumes newer pending edits. Pane-open and document-command failures appear in a bounded editor-top status strip, and an absent reported source line is explicitly identified as stale controller frontmatter.
+
+**Explicit steering delivery feedback**
+
+> **Queue prompt:** Error in this session: [route] explicit send for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md: delivered 1 pending steering item(s) to the owning turn (sent=explicit); its next tool call, its turn-boundary report, or the idle wake surfaces them. No second trigger was injected: the open closeout still owns the pane (blocker: [session-check] IN PROGRESS: cycle `cycle-1791930737701` remains `preflight_started` (preflight_started) while owning pane `%192` has a fresh active-turn lease — the response turn is still running, so no response capture or terminal commit exists yet. This is not abandoned closeout evidence. Do not recover or abandon this cycle, rerun finalize/write, or restart/clear the owner from another pane. Re-run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` only after the owning turn reaches its terminal boundary.). steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
+
+Fixed. Explicit steering delivered to the current owner now emits typed `ui_outcome=steering_delivered_to_owner`, concise informational success, and no route-blocked projection. JetBrains and VS Code also recover legacy `Error:` wrappers as success while preserving the no-second-trigger invariant.
+
+**Immediate subagent completion feedback**
+
+> **Queue prompt:** In sdk.md, I have a long list of subagents. When a subagent completes, there's no feedback. agent-doc should immediately write to the `agent:exchange` when the subagent completes.
+
+Implemented `agent-doc queue report-complete`. The coordinator immediately writes a deduplicated, N−1-compatible inert `### Re: Subagent completed` artifact through document authority while retaining the claim for integration. Cross-process invocations serialize per document and recompute under authority; attached editors receive a durable retained intent and the CLI returns immediately, while detached documents use CAS. Ordinary `queue release` no longer claims completion.
+
+Live validation against this active session exposed and then fixed the first implementation’s unbounded convergence wait. The final six completion reports returned in 0.65–0.80 seconds each; the four-process regression completes in 0.33 seconds with every distinct notice exactly once. Refresh-stable dedupe, mixed-prompt classification, strict timeout, and old-controller compatibility are covered.
+
+**This document’s pane visibility**
+
+> **Queue prompt:** Now this document's tmux pane is not visible.
+
+> **Queue prompt:** This document's tmux pane was visible for a bit...now it is not visible. Please fix in agent-doc + this session.
+
+The pane was healthy but off-screen in tmux session `0`: `%192` sat in inactive stash window `@1` while the client viewed `@2`. A later editor-focus generation selected `dev` and restashed it. Successful routes now report typed `unattached_session`, `inactive_window`, or `hidden_by_zoom` visibility warnings with exact attach/reveal commands instead of silently succeeding.
+
+The recurrence had a second cause: explicit focus on stale `%192` was rejected merely because visible peer `%199` had a live turn, even though `%192` also had fresh active-turn proof. Layout admission now permits the explicitly focused active pane to replace/stash the peer without interrupting either turn; inactive stale panes and overdue/widening cases remain excluded. The live session was safely restored with the normal blocking focus path. `%192` is currently the visible active pane, while peer turns remain alive.
+
+**Mid-turn recycle recovery**
+
+> **Queue prompt:** See ad.md: "A recycle can only happen at a turn boundary": Make recycle occur during a turn so the session can immediately recover.
+
+Implemented an adopt-only mid-turn supervisor generation handoff. The supervisor locks child reap, all supervisor IPC effects, and PTY I/O; waits for any current effect and complete PTY transaction; verifies an empty terminal-filter boundary; then execs only its own image. The exact child PID, PTY, session, and open-cycle ownership survive without kill, replay, or duplicate dispatch. Failed exec resumes the old image, and a lost adopt-only child uses spawn-without-redispatch.
+
+The final install occurred while this already-running supervisor was on the pre-fix image, so that image cannot retroactively execute the new path during this same turn. It remains healthy with the same Codex child and will adopt the installed image at this turn boundary; subsequent stale generations can recycle during an open turn under the new fenced handoff.
+
+**Changed paths and verification**
+
+The combined changes span project-preset resolution/specs, remote-layout TLA/refinement tests, Codex Stop-hook identity, controller/supervisor recycle and start-runtime I/O, queue completion feedback, tmux visibility/layout admission, JetBrains/VS Code feedback, and all three JetBrains package-generation manifests.
+
+Coordinator verification on the exact pushed bytes:
+
+- `make check`: exit 0; 10,466 Rust tests passed, 167 skipped; VS Code, cross-editor, JetBrains classic/262/263, Python bootstrap, docs/audits, and all 135 TLA checks passed.
+- `make tmux-ci`: exit 0; the seven long queue-clear tests and all route/layout/cross-editor checks passed.
+- `make install`: exit 0; binary/native library installed, IntelliJ plugin dynamically upgraded, Rider package installed for next start, and VS Code extension installed.
+- Completion-feedback live smoke: six reports accepted in under one second each while the active turn remained intact.
+- GitHub CI run `38490233533` for `e61d247c3a` is still in progress; local authoritative gates are the closeout proof.
+
+Confidence: high. Escalation: only the missing `HOMEBREW_TAP_TOKEN` secret remains external. The exchange remains above the session-accretion warning threshold; the active queue was completed without interrupting it for compaction.
+<!-- agent:boundary:5be64bbf -->
 <!-- /agent:exchange -->
 
 <!--
@@ -412,18 +635,11 @@ Confidence: high. Escalation: none.
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/250
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#publish498verify]
-- 🚧 [from:coordinator key=residual-idle-20261013] agent-doc is still thrashing while idle.
-- [from:coordinator key=subagent-blocked-hook-20261013] Fix subagent reporting queue continuation as Blocked by hook.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#likewaysharing] I would like a way for sharing select frontmatter across agent-doc files in a project. The main benefit is presets. What do you recommend? Should we have something in `.agent-doc/`? Ideally it would be the same format as the frontmatter. Perhaps `.agent-doc/shared.md` or `.agent-doc/template.md`? If this were a md file, the frontmatter would apply. Another strategy is to have a project-defined template for new agent-doc files that would be generated with `Claim for Tmux Pane`. But I also want changes to the `presets` to apply on existing docs. What do you recommend? Ideally it would be 1 file. Could we have the template "sync" while allowing overrides to presets in the project agent docs? So changes to the template are automatically propagated to the project docs? How can this be done?
-- [ ] [#publish498verify] 2026-10-13 Verify the v0.35.498 GitHub Release and PyPI publication after the active workflows finish; manually update btakita/homebrew-tap from SHA256SUMS and restore HOMEBREW_TAP_TOKEN automation.
 <!-- /agent:backlog -->
 
 ## Review

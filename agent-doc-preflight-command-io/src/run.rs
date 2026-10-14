@@ -1788,12 +1788,10 @@ fn run_with_options_to_writer_in_pass(
         &added_diff_lines,
         &frontmatter_prompt_presets,
     );
-    if has_exchange_prompt_target
-        && let Some(marker_preset) = exchange_prompt_attrs.preset.as_deref()
-    {
+    if has_exchange_prompt_target {
         agent_doc_prompt_contract::extend_prompt_preset_resolution(
             &mut prompt_preset_resolution,
-            [marker_preset.to_string()],
+            exchange_prompt_attrs.preset_names().map(str::to_string),
             &frontmatter_prompt_presets,
         );
     }
@@ -4223,6 +4221,43 @@ mod tests {
             !std::fs::read_to_string(&doc)
                 .unwrap()
                 .contains("Run project checks.")
+        );
+    }
+
+    #[test]
+    fn preflight_expands_every_exchange_marker_preset_in_source_order() {
+        let dir = setup_project();
+        let make_doc = |tail: &str| {
+            capture_scope_doc("", "", tail)
+                .replace(
+                    "  '#actionable-review': Add actionable review items into backlog + queue\n",
+                    concat!(
+                        "  '#actionable-review': Add actionable review items into backlog + queue\n",
+                        "  '#push': Commit and push.\n",
+                        "  '#auth': Authenticate before publishing.\n",
+                    ),
+                )
+                .replace(
+                    "<!-- agent:exchange patch=append -->",
+                    "<!-- agent:exchange patch=append preset=\"#push auth #push\" -->",
+                )
+        };
+        let baseline = make_doc("");
+        let current = make_doc("\nPublish the release.\n");
+        let (parsed, _) = capture_scope_preflight(&dir, &baseline, None, &current);
+        assert_eq!(
+            parsed["prompt_presets_requested"],
+            serde_json::json!(["#push", "#auth"]),
+            "{parsed:#}"
+        );
+        assert_eq!(
+            parsed["prompt_preset_expansions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|expansion| expansion["body"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["Commit and push.", "Authenticate before publishing."]
         );
     }
 

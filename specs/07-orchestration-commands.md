@@ -581,6 +581,8 @@ Before emitting queue state, preflight may:
 
 ### Post-commit queue consumption
 
+Queue subagent authorization accepts multiple whitespace-separated references in a quoted queue `preset=` value, for example `preset="#push #auth"`. `queue brief` resolves them independently in source order, collapses duplicate canonical names at their first occurrence, preserves each structured preset's runbook, and reports every result in `authorization.presets`. Mixed resolved and unresolved references produce `status: unresolved_preset`; resolved details remain visible, but authorization still fails closed.
+
 - **Completed multiline row residue drains with its row (`#queuemultilineclear`).** An indented Markdown continuation at or beyond a completed inline row's content column belongs to that row and drains with it. Unindented, shallow, or otherwise unowned freeform operator text remains a lossless-cleanup blocker.
 
 - After a successful response closeout, required closeouts mark the first prompt complete in the queue in the same locked read/parse/write cycle. If a manual closeout resolves multiple contiguous queued `do #id` prompts with repeated `--done <id>` flags, it may consume that contiguous done-backed head batch in one closeout; it must stop before the first unresolved queued prompt.

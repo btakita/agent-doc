@@ -2,6 +2,44 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.499
+
+- **Prompt presets now compose at project and component scope.** Sessions inherit
+  project-wide prompt presets dynamically, and a quoted `preset=` attribute may
+  name multiple whitespace-separated presets (for example `preset="#push
+  #auth"`). Preflight, realtime steering, and subagent briefs resolve them in
+  source order, canonicalize duplicates, preserve structured runbooks, and fail
+  closed when any reference is missing.
+- **Claim for Tmux Pane now scaffolds an operator-owned `agent:todo`
+  checklist.** The shared Claim/Sync template adds an empty Todo section for
+  operator actions such as publishing drafts. Todo edits are informational and
+  do not start agent turns or enter queue scheduling; the existing destructive
+  checklist replacement guard remains in force.
+- **Editor replicas converge after missed or reordered updates (GH #254).** A
+  lagging editor replica now recovers to the authoritative document instead of
+  remaining indefinitely behind after a dropped generation, with regression
+  coverage across the editor synchronization path.
+- **Duplicate supervisor retirement is safe during active work (GH #243).** A
+  protected live owner is no longer killed while another pane is being adopted;
+  retirement is deferred until ownership can move without interrupting the
+  active turn.
+- **Codex Stop keeps fresh post-commit prompts with their successor cycle.** A
+  predecessor summary is no longer captured as the answer to queue work typed
+  after that predecessor committed; continuation opens a fresh cycle and only
+  its own response may be captured.
+- **Queue and closeout ownership are more durable.** Subagent completion
+  feedback is bounded and structurally valid, steering survives abandoned Stop
+  preflights, committed closeout owners are awaited, and queue continuations are
+  fenced to the turn that owns them.
+- **Supervisor and routing recovery is tighter.** Recycle preserves promoted
+  sockets, renamed documents are adopted after re-exec, stale route-owned
+  processes are retired, active panes remain focused across live peers, and
+  off-screen owners are reported instead of silently stealing navigation.
+- **Hot-path state work is bounded and JetBrains projections are current.**
+  Liveness hydration, starting-actor reads, idle status diagnostics, CRDT
+  frontier work, and stale probes avoid unbounded scans; JetBrains 263 packaging
+  and provisional remote-layout correction carry the current fixes.
+
 ## 0.35.498
 
 - **Idle JetBrains projects stop polling the controller.** Reverse-focus sync now

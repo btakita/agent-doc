@@ -1163,9 +1163,9 @@ impl PresetContext {
         session_presets: &[String],
         prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
     ) -> Self {
-        let mut cycle = Vec::new();
-        let mut queue_intents = Vec::new();
-        let mut exchange_intents = Vec::new();
+        let mut cycle: Vec<PresetIntent> = Vec::new();
+        let mut queue_intents: Vec<PresetIntent> = Vec::new();
+        let mut exchange_intents: Vec<PresetIntent> = Vec::new();
         let mut queue_attrs =
             agent_doc_queue::prompt_component_attrs::PromptComponentAttrs::default();
         let mut queue_names = Vec::new();
@@ -1175,7 +1175,7 @@ impl PresetContext {
         {
             queue_attrs =
                 agent_doc_queue::prompt_component_attrs::prompt_component_attrs_for(queue, "queue");
-            queue_names.extend(queue_attrs.preset.clone());
+            queue_names.extend(queue_attrs.preset_names().map(str::to_string));
             if let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(current)) {
                 for entry in entries {
                     if let agent_doc_queue::document_queue::QueueEntry::Preset(name) = entry {
@@ -1186,7 +1186,8 @@ impl PresetContext {
         }
         let exchange_attrs =
             agent_doc_queue::prompt_component_attrs::prompt_component_attrs(current, "exchange");
-        let exchange_names: Vec<String> = exchange_attrs.preset.clone().into_iter().collect();
+        let exchange_names: Vec<String> =
+            exchange_attrs.preset_names().map(str::to_string).collect();
         for (names, scope, target) in [
             (
                 queue_names.as_slice(),
@@ -1201,21 +1202,32 @@ impl PresetContext {
             (session_presets, PresetScope::Cycle, &mut cycle),
         ] {
             for name in names {
-                let resolved =
-                    agent_doc_queue::queue_response::queue_prompt_preset_expansions_with_presets(
-                        name,
-                        prompt_presets,
-                    );
-                if resolved.is_empty() {
+                let requested = name.trim();
+                let resolved = agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(
+                    prompt_presets,
+                    requested,
+                );
+                if let Some(name) = resolved {
+                    if !target
+                        .iter()
+                        .any(|intent| intent.name.eq_ignore_ascii_case(&name))
+                    {
+                        target.push(PresetIntent {
+                            body: prompt_presets.get(&name).cloned().unwrap_or_default(),
+                            name,
+                            scope,
+                        });
+                    }
+                } else if !target
+                    .iter()
+                    .any(|intent| intent.name.eq_ignore_ascii_case(requested))
+                {
                     // Unregistered names still carry literal intent.
                     target.push(PresetIntent {
-                        name: name.trim().to_string(),
+                        name: requested.to_string(),
                         body: String::new(),
                         scope,
                     });
-                }
-                for (name, body) in resolved {
-                    target.push(PresetIntent { name, body, scope });
                 }
             }
         }
@@ -2071,6 +2083,25 @@ mod tests {
                 && preset.body == "fix the github issue"
                 && preset.scope == PresetScope::Exchange
         }));
+    }
+
+    #[test]
+    fn exchange_component_attr_applies_multiple_presets_once_in_source_order() {
+        let owned = BTreeSet::new();
+        let marker = "<!-- agent:exchange subagents preset=\"#gh-fix subagents #gh-fix\" -->";
+        let baseline = doc("", EX).replace("<!-- agent:exchange -->", marker);
+        let current = doc("", &format!("{EX}\nfix the newly reported issue\n"))
+            .replace("<!-- agent:exchange -->", marker);
+        let obs = observe(&seeded(&baseline, None), &current, &quiet_ctx(&owned));
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        assert_eq!(
+            obs.ready[0]
+                .presets
+                .iter()
+                .map(|preset| preset.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["#gh-fix", "#subagents"]
+        );
     }
 
     /// `#steerbacklogsource` (agent-doc-bugs.md, 2026-10-04): the operator

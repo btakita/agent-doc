@@ -4694,6 +4694,13 @@ enum RetainedTransitionCompletion {
 /// the refused epoch is still the desired one
 /// (`formal/tla/VisibleDeliveryReceiptNet.tla`, `SaveOneShot` wedge).
 const RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES: u32 = 8;
+const RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS: u32 = 3;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RetainedPersistenceRetryDecision {
+    delay: Duration,
+    request_replica_rebuild: bool,
+}
 
 /// Backoff before re-claim attempt `attempt` (1-based): 1s doubling, capped at 30s.
 fn retained_persistence_retry_delay(attempt: u32) -> Duration {
@@ -4710,7 +4717,7 @@ fn retained_persistence_retry_step(
     epoch: u64,
     applied: bool,
     newer_pending: bool,
-) -> Option<Duration> {
+) -> Option<RetainedPersistenceRetryDecision> {
     if applied || newer_pending {
         retries.remove(key);
         return None;
@@ -4720,9 +4727,21 @@ fn retained_persistence_retry_step(
         *entry = (epoch, 0);
     }
     entry.1 = entry.1.saturating_add(1);
-    Some(retained_persistence_retry_delay(
-        entry.1.min(RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES),
-    ))
+    Some(RetainedPersistenceRetryDecision {
+        delay: retained_persistence_retry_delay(
+            entry.1.min(RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES),
+        ),
+        // A projection-changed refusal does not produce a replica pull, so the
+        // pull-driven nonconvergence detector cannot fire. Escalate from the
+        // existing persistence Effect completion instead of creating a second
+        // polling loop. Repeat on this slower cadence because an unreachable
+        // first signal is not an acknowledgement; later save receipts are the
+        // fresh edges that re-arm recovery until exact persistence is proved.
+        request_replica_rebuild: entry.1 >= RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS
+            && entry
+                .1
+                .is_multiple_of(RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS),
+    })
 }
 
 /// Wait out the backoff off every lock, then re-claim the refused epoch.
@@ -5821,16 +5840,47 @@ impl ControllerDocumentGraphs {
                         };
                         let document_hash = command.document_hash.clone();
                         let epoch = command.envelope.epoch;
+                        let generation = command.envelope.generation;
+                        let file = command.envelope.value.file.clone();
                         let retry = runtime
                             .document_graphs
                             .complete_retained_persistence(command, applied);
                         drop(runtime);
-                        if let Some(delay) = retry {
+                        if let Some(retry) = retry {
+                            if retry.request_replica_rebuild {
+                                match agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
+                                    &file,
+                                    agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
+                                    1,
+                                ) {
+                                    Ok(outcome) => agent_doc_ops_log_io::log_op(
+                                        &file,
+                                        &format!(
+                                            "retained_persistence_replica_rebuild_requested document_hash={} generation={} epoch={} found={} notified={} diagnosis={} source=repeated_native_save_refusal",
+                                            document_hash,
+                                            generation,
+                                            epoch,
+                                            outcome.found,
+                                            outcome.notified,
+                                            outcome.diagnosis(),
+                                        ),
+                                    ),
+                                    Err(error) => agent_doc_ops_log_io::log_op(
+                                        &file,
+                                        &format!(
+                                            "retained_persistence_replica_rebuild_deferred document_hash={} generation={} epoch={} source=repeated_native_save_refusal error={error:#}",
+                                            document_hash,
+                                            generation,
+                                            epoch,
+                                        ),
+                                    ),
+                                }
+                            }
                             schedule_refused_retained_persistence_retry(
                                 worker_sink.runtime.clone(),
                                 document_hash,
                                 epoch,
-                                delay,
+                                retry.delay,
                             );
                         }
                     }
@@ -6986,7 +7036,7 @@ impl ControllerDocumentGraphs {
         &self,
         command: RetainedPersistenceCommand,
         applied: bool,
-    ) -> Option<Duration> {
+    ) -> Option<RetainedPersistenceRetryDecision> {
         let key = command.document_hash;
         let envelope = command.envelope;
         let mut superseding_command = None;
@@ -23244,28 +23294,53 @@ mod retained_persistence_retry_tests {
             .map(|_| retained_persistence_retry_step(&mut retries, "doc", 7, false, false))
             .collect();
         assert!(delays.iter().all(Option::is_some));
-        assert_eq!(delays[0], Some(Duration::from_secs(1)));
-        assert_eq!(delays[1], Some(Duration::from_secs(2)));
         assert_eq!(
-            delays.last().copied().flatten(),
+            delays[0].map(|decision| decision.delay),
+            Some(Duration::from_secs(1))
+        );
+        assert_eq!(
+            delays[1].map(|decision| decision.delay),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            delays
+                .last()
+                .copied()
+                .flatten()
+                .map(|decision| decision.delay),
             Some(Duration::from_secs(30)),
             "the backoff is capped"
+        );
+        assert_eq!(
+            delays
+                .iter()
+                .enumerate()
+                .filter_map(|(index, decision)| {
+                    decision
+                        .is_some_and(|value| value.request_replica_rebuild)
+                        .then_some(index + 1)
+                })
+                .collect::<Vec<_>>(),
+            vec![3, 6],
+            "the save-receipt stream re-arms replica recovery after an unreachable signal"
         );
         // `#netadv3` F13: past the growing phase the retry stays at the cap
         // for as long as the epoch is still refused; it never gives up and
         // waits for an edge an idle document will not produce.
-        for _ in 0..32 {
+        for attempt in 9u32..=40 {
+            let decision = retained_persistence_retry_step(&mut retries, "doc", 7, false, false)
+                .expect("a refused current epoch keeps retrying");
+            assert_eq!(decision.delay, Duration::from_secs(30));
             assert_eq!(
-                retained_persistence_retry_step(&mut retries, "doc", 7, false, false),
-                Some(Duration::from_secs(30)),
-                "a refused current epoch keeps retrying at the capped delay"
+                decision.request_replica_rebuild,
+                attempt.is_multiple_of(RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS),
+                "rebuild attempts follow the slower refusal cadence"
             );
         }
-        assert_eq!(
-            retained_persistence_retry_step(&mut retries, "doc", 8, false, false),
-            Some(Duration::from_secs(1)),
-            "a new epoch restarts the budget"
-        );
+        let restarted = retained_persistence_retry_step(&mut retries, "doc", 8, false, false)
+            .expect("a new epoch restarts the budget");
+        assert_eq!(restarted.delay, Duration::from_secs(1));
+        assert!(!restarted.request_replica_rebuild);
     }
 
     #[test]

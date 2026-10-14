@@ -639,6 +639,38 @@ mod tests {
         );
     }
 
+    /// GH #253: the GH #175 one-column replacement is provisional too. If the
+    /// same two-file visible set arrives again as structural evidence, order it
+    /// against the pre-guess [A] ancestry instead of the provisional [B].
+    #[test]
+    fn gh253_repeated_visible_set_restores_one_column_provisional_base_order() {
+        let memory = RemoteLayoutMemory {
+            columns: vec![SurfaceColumn::new([A])],
+            focused: Some(A.to_string()),
+            provisional_base_columns: None,
+        };
+
+        let (memory, provisional) =
+            memory.advance(&evidence(vec![client(&[A, B], &[B], &[A, B])], &[B]));
+        assert_eq!(columns(&provisional), vec![vec![B.to_string()]]);
+        assert_eq!(
+            memory.provisional_base_columns,
+            Some(vec![SurfaceColumn::new([A])])
+        );
+
+        let (memory, corrected) =
+            memory.advance(&evidence(vec![client(&[A, B], &[B], &[A, B])], &[B]));
+        assert_eq!(
+            corrected.source,
+            RemoteLayoutSource::RemoteClientVisibleEditors
+        );
+        assert_eq!(
+            columns(&corrected),
+            vec![vec![A.to_string()], vec![B.to_string()]]
+        );
+        assert!(memory.provisional_base_columns.is_none());
+    }
+
     /// A closed tab leaves the retained layout.
     #[test]
     fn gh134_retained_columns_drop_closed_documents() {

@@ -129,10 +129,15 @@ the built-in registry is `agent-doc-element-registry`. Each descriptor owns an
 explicit turn role. Unknown components remain turn triggers by default so an
 unregistered prompt cannot be silently ignored; `notes` and `todo` are the
 built-in informational exceptions. `todo` is not runnable agent work: it has
-no scheduling role and is never promoted into `queue` or `backlog`. Template
-patches may update it, but the write path rejects replacements that reduce its
-Markdown checklist-item count so an agent cannot silently discard an operator
-todo such as publishing an unpublished draft.
+no scheduling role and is never promoted into `queue` or `backlog`. When a turn
+leaves a concrete operator action, the agent MUST add a brief, action-first
+Markdown checklist item to `todo` in the same cycle (`#operatortodo`). The item
+MAY refer to an existing `agent:review` or `agent:backlog` item by `#id`, or to a
+draft file path, instead of duplicating its details; publishing an unpublished
+draft is the canonical example. Such a reference does not transfer ownership or
+scheduling out of the referenced component. Template patches may update `todo`,
+but the write path rejects replacements that reduce its checklist-item count, so
+an agent MUST preserve every existing item when emitting `patch:todo`.
 
 **Exchange prompt defaults.** `<!-- agent:exchange preset="#review" -->` applies
 the named frontmatter prompt preset to each new exchange prompt, including the

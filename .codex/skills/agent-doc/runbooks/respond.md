@@ -1,9 +1,9 @@
 # Respond / pending detail
 
-Detail for SKILL.md Workflow **step 1 (Respond)** and **step 1b (Update
-pending)**. The spine in SKILL.md keeps the reconcile-oldest-first rule, the
-`### Re:` header + model-attribution format, and the pending granular-flags-only
-rule. This runbook carries the rest.
+Detail for SKILL.md Workflow **step 1 (Respond)**, **step 1b (Update pending)**,
+and **step 1c (Record operator TODOs)**. The spine in SKILL.md keeps the
+reconcile-oldest-first rule, the `### Re:` header + model-attribution format,
+and the pending granular-flags-only rule. This runbook carries the rest.
 
 ## Step 1 — Respond
 
@@ -447,3 +447,22 @@ not `agent:review`. Keep `agent:review` small (target < 10); convert stale/satis
 gated items to `--done` or actionable backlog items rather than letting them
 accumulate. See [pending-ops.md](pending-ops.md) for the full review-discipline
 rule.
+
+## Step 1c — Record operator TODOs (template mode, `#operatortodo`)
+
+`agent:todo` records concrete actions that the operator, rather than the agent,
+must perform. When the work creates one, add one brief checklist item
+in the same cycle. Start with the action and keep only the context needed to act:
+
+- Prefer a compact reference to an existing `agent:review` or `agent:backlog`
+  `#id` over restating that tracked item's description.
+- A draft file path is a valid reference. Publishing an unpublished draft is the
+  canonical example: `- [ ] Publish draft docs/launch-note.md`.
+- A reference does not change ownership or scheduling. Agent-runnable work stays
+  in `agent:backlog`; a human gate stays in `agent:review`; `agent:todo` only
+  records the operator action.
+
+Emit the updated component through `<!-- patch:todo -->` in the response. The
+patch is a guarded replacement, so reproduce every existing checklist item plus
+the brief new or updated item. Never use it to prune operator TODOs; the write
+path rejects any replacement that lowers the checklist-item count.

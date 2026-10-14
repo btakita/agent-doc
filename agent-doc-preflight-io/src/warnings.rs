@@ -749,17 +749,33 @@ fn jetbrains_plugins_dir_from_mapped_jar(mapped: &MappedPluginJar) -> Option<Pat
     };
     let lib_dir = path.parent()?;
     let plugin_dir = lib_dir.parent()?;
-    // Every published line may install into the canonical tree; older 262/263
-    // installs may still sit in their package-specific plugin directory.
-    if lib_dir.file_name()? != "lib"
-        || !matches!(
-            plugin_dir.file_name()?.to_str()?,
-            "agent-doc-jetbrains" | "agent-doc-jetbrains-262" | "agent-doc-jetbrains-263"
-        )
-    {
+    if lib_dir.file_name()? != "lib" {
         return None;
     }
-    plugin_dir.parent().map(Path::to_path_buf)
+    // Every published line may install into the canonical tree; older 262/263
+    // installs may still sit in their package-specific plugin directory.
+    if matches!(
+        plugin_dir.file_name()?.to_str()?,
+        "agent-doc-jetbrains" | "agent-doc-jetbrains-262" | "agent-doc-jetbrains-263"
+    ) {
+        return plugin_dir.parent().map(Path::to_path_buf);
+    }
+
+    // GH #256: an atomic plugin replacement moves the live tree under this
+    // transaction directory before deleting it. Linux keeps the mapped JAR's
+    // deleted pathname in /proc, so recover the same IDE data root from the
+    // installer-owned backup shape and inspect the replacement now on disk.
+    let backup_name = plugin_dir.file_name()?.to_str()?;
+    let install_work_dir = plugin_dir.parent()?;
+    if backup_name
+        .strip_prefix("backup-")
+        .is_some_and(|suffix| !suffix.is_empty())
+        && install_work_dir.file_name()? == ".agent-doc-jetbrains-install"
+    {
+        return install_work_dir.parent().map(Path::to_path_buf);
+    }
+
+    None
 }
 
 /// Shared tail of both `stale_plugin` entry points: one deduplicated warning per
@@ -1606,6 +1622,70 @@ mod tests {
         );
         assert!(message.contains("ALREADY STAGED"), "{message}");
         assert!(message.contains(modern), "{message}");
+    }
+
+    /// GH #256: atomic replacement moves the JAR mapped by a running IDE into
+    /// the install transaction's deleted backup tree. That path still identifies
+    /// the IDE data root, whose replacement package determines the generation
+    /// and whether the operator needs only a restart.
+    #[test]
+    fn stale_plugin_install_state_resolves_a_deleted_swap_backup_mapping() {
+        let tmp = TempDir::new().unwrap();
+        let live = tmp.path().join("data/IntelliJIdea2026.3");
+        let installed_lib = live.join("agent-doc-jetbrains/lib");
+        std::fs::create_dir_all(&installed_lib).unwrap();
+        let modern = agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version_for_platform_build(
+            "jetbrains",
+            Some(263),
+        )
+        .unwrap();
+        std::fs::write(
+            installed_lib.join(format!("agent.doc-{modern}.jar")),
+            b"replacement",
+        )
+        .unwrap();
+
+        let deleted_jar = live
+            .join(".agent-doc-jetbrains-install/backup-2095041-1792008622073994402/lib")
+            .join("agent-doc-jetbrains-263-0.2.577.jar");
+        let mapped = MappedPluginJar::Deleted {
+            path: deleted_jar.to_string_lossy().into_owned(),
+        };
+
+        assert_eq!(
+            jetbrains_plugins_dir_from_mapped_jar(&mapped).as_deref(),
+            Some(live.as_path())
+        );
+        let expected =
+            expected_plugin_version_for_mapped_jar("jetbrains", "classic-fallback", &mapped);
+        assert_eq!(expected, modern);
+        let state = plugin_install_state_for_mapped_jar("jetbrains", &expected, &mapped, &[]);
+        assert_eq!(state.installed.as_deref(), Some(modern));
+        assert!(!state.staged_for_restart);
+
+        let message = stale_plugin_message(
+            "jetbrains",
+            "0.2.577",
+            &expected,
+            state.installed.as_deref(),
+            state.staged_for_restart,
+        );
+        assert!(message.contains("ALREADY installed on disk"), "{message}");
+        assert!(message.contains("restart/reload"), "{message}");
+        assert!(message.contains("do not reinstall"), "{message}");
+        assert!(!message.contains("update to"), "{message}");
+
+        let unrelated_backup = MappedPluginJar::Deleted {
+            path: live
+                .join("other/backup-2095041/lib/agent.doc-0.2.577.jar")
+                .to_string_lossy()
+                .into_owned(),
+        };
+        assert_eq!(
+            jetbrains_plugins_dir_from_mapped_jar(&unrelated_backup),
+            None,
+            "backup paths outside the installer transaction directory are not trusted"
+        );
     }
 
     /// GH #233: a live IDE whose platform build no published package declares

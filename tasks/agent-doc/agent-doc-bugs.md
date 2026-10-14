@@ -194,11 +194,8 @@ User-facing setup and inheritance documentation is now on `main` in `48eeb06782`
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/243~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/254~~
-- ~~Is the project-wide agent-doc template (i.e. presets) released + published? How do I use it?~~
 ---
-tools.md issue
+🚧 tools.md issue
 ```
 › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md
 queue or backlog line the live buffer has and the disk projection does not). It is either operator steering or an
@@ -210,11 +207,22 @@ fresh unanswered edit on purpose, because committing it would swallow the next t
 which clobbers the live edits. Do not recapture the response or rerun finalize/write. Run `agent-doc session-check /
 home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` and let the binary-owned keyed retry finish.
 ```
+---
+Allow preset to recognize the entire text and support multiple presets in the text. Attribute was `preset="#push #auth"`. See tools.md:
+```
+• The #push preset itself is now defined, but the queue attribute is preset="#push #auth", which the document engine
+  treats as one undefined preset name. I’ll follow the generated contract exactly and dispatch a fresh verifier; I
+  won’t reinterpret the combined preset string or perform an unauthorized push.
+```
+---
+- Add a `agent:todo` to store todo items for the operator to act on. Unpublished drafts are a common todo item. Add `agent:todo` into the agent document template for Claim for Tmux Pane command.
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#toolspresetmultiname] Diagnose and fix multi-preset queue authorization in haiven-dev/tasks/tools.md:  is parsed as one undefined preset name for authorization, even though the same dispatch separately reports item preset  expanded to . Specify whether preset attributes accept whitespace-delimited preset references and recursive preset expansion; add a regression covering this contradictory resolution, preserve explicit operator authorization, and provide a migration/diagnostic if combined names are invalid.
 <!-- /agent:backlog -->
 
 ## Review

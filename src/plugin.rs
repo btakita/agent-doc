@@ -514,7 +514,7 @@ use agent_doc_fs::jetbrains_install::jetbrains_plugin_dirs_in_roots;
 enum JetbrainsPackageRange {
     Classic242To261,
     Modular262,
-    Classic263,
+    Modular263,
 }
 
 impl JetbrainsPackageRange {
@@ -522,13 +522,13 @@ impl JetbrainsPackageRange {
         match self {
             Self::Classic242To261 => "agent-doc-jetbrains",
             Self::Modular262 => "agent-doc-jetbrains-262",
-            Self::Classic263 => "agent-doc-jetbrains-263",
+            Self::Modular263 => "agent-doc-jetbrains-263",
         }
     }
 
     fn build_project_dir(self) -> &'static str {
         match self {
-            Self::Classic242To261 | Self::Classic263 => "editors/jetbrains",
+            Self::Classic242To261 | Self::Modular263 => "editors/jetbrains",
             Self::Modular262 => "editors/jetbrains-262",
         }
     }
@@ -537,7 +537,7 @@ impl JetbrainsPackageRange {
         match self {
             Self::Classic242To261 => "editors/jetbrains",
             Self::Modular262 => "editors/jetbrains-262",
-            Self::Classic263 => "editors/jetbrains-263",
+            Self::Modular263 => "editors/jetbrains-263",
         }
     }
 
@@ -545,7 +545,7 @@ impl JetbrainsPackageRange {
         match self {
             Self::Classic242To261 => "./gradlew buildPlugin",
             Self::Modular262 => "gradle buildPlugin verifySplitArtifact",
-            Self::Classic263 => "make jetbrains-263-check",
+            Self::Modular263 => "make jetbrains-263-check",
         }
     }
 
@@ -558,7 +558,7 @@ impl JetbrainsPackageRange {
     /// this decision (GH #255).
     fn from_archive_path(path: &Path) -> Option<Self> {
         let root = path.components().next()?.as_os_str().to_str()?;
-        [Self::Classic242To261, Self::Modular262, Self::Classic263]
+        [Self::Classic242To261, Self::Modular262, Self::Modular263]
             .into_iter()
             .find(|range| range.asset_prefix() == root)
     }
@@ -579,7 +579,7 @@ fn jetbrains_package_range(target_dir: &Path) -> Result<JetbrainsPackageRange> {
     match build {
         242..=261 => Ok(JetbrainsPackageRange::Classic242To261),
         262 => Ok(JetbrainsPackageRange::Modular262),
-        263 => Ok(JetbrainsPackageRange::Classic263),
+        263 => Ok(JetbrainsPackageRange::Modular263),
         // GH #233: no remedy this binary can offer installs into such a build,
         // so the message names none; the installed plugin is left alone.
         _ => bail!(
@@ -610,7 +610,7 @@ fn installed_jetbrains_package(
     target_range: JetbrainsPackageRange,
 ) -> Option<(JetbrainsPackageRange, String)> {
     let canonical_shared_range = match target_range {
-        JetbrainsPackageRange::Classic263 => JetbrainsPackageRange::Classic263,
+        JetbrainsPackageRange::Modular263 => JetbrainsPackageRange::Modular263,
         _ => JetbrainsPackageRange::Modular262,
     };
     [
@@ -630,7 +630,7 @@ fn installed_jetbrains_package(
         let name = entry.file_name().to_string_lossy().into_owned();
         let shared_range = match plugin_dir {
             JETBRAINS_MODULAR_PLUGIN_DIR => JetbrainsPackageRange::Modular262,
-            JETBRAINS_MODERN_PLUGIN_DIR => JetbrainsPackageRange::Classic263,
+            JETBRAINS_MODERN_PLUGIN_DIR => JetbrainsPackageRange::Modular263,
             _ => canonical_shared_range,
         };
         [
@@ -639,7 +639,7 @@ fn installed_jetbrains_package(
                 "agent-doc-jetbrains-",
             ),
             (
-                JetbrainsPackageRange::Classic263,
+                JetbrainsPackageRange::Modular263,
                 "agent-doc-jetbrains-263-",
             ),
             (shared_range, "agent.doc-"),
@@ -1263,7 +1263,7 @@ fn local_jetbrains_zip_version(zip_path: &Path) -> Result<String> {
         .and_then(|name| name.to_str())
         .context("Local JetBrains build has a non-UTF-8 filename")?;
     [
-        JetbrainsPackageRange::Classic263,
+        JetbrainsPackageRange::Modular263,
         JetbrainsPackageRange::Modular262,
         JetbrainsPackageRange::Classic242To261,
     ]
@@ -1672,17 +1672,17 @@ fn copy_jetbrains_package_for_upgrade_launcher(source: &Path, destination: &Path
     Ok(())
 }
 
-/// `#jb262dynupgrade`: stable prefix of the reason an exact-262 modular package
+/// `#jbmodulardynupgrade`: stable substring of the reason a modular package
 /// gives for not attempting a restart-free upgrade. The classic launcher
 /// (`JetBrainsPluginUpgradeBootstrap`) unloads one classic plugin tree and
-/// installs a ZIP rooted at `agent-doc-jetbrains/`; the 262 package is a Plugin
-/// Model v2 split-mode distribution (root `agent-doc-jetbrains-262/`, a
-/// descriptor-only `agent.doc-<v>.jar` plus `lib/modules/agent.doc.*.jar`, with a
-/// frontend half that may live in a separate JetBrains Client process), and it
-/// ships no upgrade launcher at all. That is a property of the package line, not
-/// a legacy build, so it must never read as "predates restart-free support".
+/// installs a ZIP rooted at `agent-doc-jetbrains/`; the 262 and 263 packages are
+/// Plugin Model v2 split-mode distributions (a descriptor-only
+/// `agent.doc-<v>.jar` plus `lib/modules/agent.doc.*.jar`, with a frontend half
+/// that may live in a separate JetBrains Client process), and they ship no
+/// upgrade launcher at all. That is a property of these package lines, not a
+/// legacy build, so it must never read as "predates restart-free support".
 const JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE: &str =
-    "the exact-262 modular JetBrains package has no restart-free dynamic upgrade entry point";
+    "modular JetBrains package has no restart-free dynamic upgrade entry point";
 
 /// Which compatibility line a package ZIP holds. The published archive root is
 /// authoritative because exact-262 and 263 share `agent.doc-<v>.jar` (GH #255).
@@ -1707,20 +1707,27 @@ fn jetbrains_zip_package_range(zip_path: &Path) -> Result<JetbrainsPackageRange>
     bail!("JetBrains package has no versioned agent-doc plugin jar")
 }
 
-/// `#jb262dynupgrade`: why a live IDE cannot be upgraded restart-free from a
+/// `#jbmodulardynupgrade`: why a live IDE cannot be upgraded restart-free from a
 /// package of `package_range`, or `None` when the package carries a usable
 /// upgrade launcher. `launcher_has_main` is consulted only for the classic line;
-/// the modular 262 package has no launcher to inspect.
+/// the modular 262 and 263 packages have no launcher to inspect.
 fn jetbrains_dynamic_upgrade_entry_point_refusal(
     package_range: JetbrainsPackageRange,
     expected_version: &str,
     launcher_has_main: impl FnOnce() -> Result<bool>,
 ) -> Result<Option<String>> {
     match package_range {
-        JetbrainsPackageRange::Modular262 => Ok(Some(format!(
-            "{JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE} (v{expected_version} is a Plugin Model v2 split-mode package whose agent.doc-{expected_version}.jar carries no upgrade launcher), so a running 262 IDE keeps its current plugin generation until it restarts"
-        ))),
-        JetbrainsPackageRange::Classic242To261 | JetbrainsPackageRange::Classic263 => {
+        JetbrainsPackageRange::Modular262 | JetbrainsPackageRange::Modular263 => {
+            let build = match package_range {
+                JetbrainsPackageRange::Modular262 => 262,
+                JetbrainsPackageRange::Modular263 => 263,
+                JetbrainsPackageRange::Classic242To261 => unreachable!(),
+            };
+            Ok(Some(format!(
+                "the exact-{build} {JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE} (v{expected_version} is a Plugin Model v2 split-mode package whose agent.doc-{expected_version}.jar carries no upgrade launcher), so a running {build} IDE keeps its current plugin generation until it restarts"
+            )))
+        }
+        JetbrainsPackageRange::Classic242To261 => {
             Ok((!launcher_has_main()?).then(|| {
             format!(
                 "JetBrains package v{expected_version} predates restart-free dynamic upgrade support (its plugin JAR has no Main-Class); refusing to replace a package owned by a live IDE. Restart the IDE before installing this legacy package, or install a current local build with `agent-doc plugin install jetbrains --local`."
@@ -2706,9 +2713,13 @@ fn dynamic_upgrade_fallback_warning(reason: &str, fallback: &str) -> String {
     let cause = if agent_doc_declined_dynamic_upgrade(reason) {
         "agent-doc declined the restart-free upgrade: this JetBrains build retires plugin classloaders asynchronously, so there is no safe synchronous swap point"
     } else if reason.contains(JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE) {
-        // `#jb262dynupgrade`: an expected property of the 262 package line, not
-        // a failure and not a legacy build.
-        "the exact-262 modular plugin package has no restart-free upgrade entry point, so the running IDE keeps its current plugin generation until restart"
+        // `#jbmodulardynupgrade`: an expected property of the modular package
+        // lines, not a failure and not a legacy build.
+        if reason.contains("exact-263") {
+            "the exact-263 modular plugin package has no restart-free upgrade entry point, so the running IDE keeps its current plugin generation until restart"
+        } else {
+            "the exact-262 modular plugin package has no restart-free upgrade entry point, so the running IDE keeps its current plugin generation until restart"
+        }
     } else if reason.contains(JETBRAINS_DYNAMIC_UNLOAD_REFUSED) {
         "the IDE refused the restart-free upgrade"
     } else {
@@ -4290,7 +4301,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
         assert_eq!(
             jetbrains_package_range(&modern).unwrap(),
-            JetbrainsPackageRange::Classic263
+            JetbrainsPackageRange::Modular263
         );
 
         let unknown = PathBuf::from("/opt/jetbrains/plugins");
@@ -4433,7 +4444,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert_eq!(range, JetbrainsPackageRange::Modular262);
         assert_eq!(asset.name, "agent-doc-jetbrains-262-0.2.511-signed.zip");
         let (range, asset) = super::jetbrains_release_asset_for_target(&release, modern).unwrap();
-        assert_eq!(range, JetbrainsPackageRange::Classic263);
+        assert_eq!(range, JetbrainsPackageRange::Modular263);
         assert_eq!(asset.name, "agent-doc-jetbrains-263-0.2.512.zip");
         let (range, asset) = super::jetbrains_release_asset_for_target(&release, oldest).unwrap();
         assert_eq!(range, JetbrainsPackageRange::Classic242To261);
@@ -4568,8 +4579,8 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             Some((JetbrainsPackageRange::Modular262, "0.2.592".into()))
         );
         assert_eq!(
-            super::installed_jetbrains_package(&modern, JetbrainsPackageRange::Classic263),
-            Some((JetbrainsPackageRange::Classic263, "0.2.592".into()))
+            super::installed_jetbrains_package(&modern, JetbrainsPackageRange::Modular263),
+            Some((JetbrainsPackageRange::Modular263, "0.2.592".into()))
         );
         assert_eq!(
             super::jetbrains_release_decision_for(
@@ -4583,7 +4594,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert_eq!(
             super::jetbrains_release_decision_for(
                 &modern,
-                JetbrainsPackageRange::Classic263,
+                JetbrainsPackageRange::Modular263,
                 "0.2.592",
             )
             .unwrap(),
@@ -4592,7 +4603,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert_eq!(
             super::jetbrains_release_decision_for(
                 &modern_newer,
-                JetbrainsPackageRange::Classic263,
+                JetbrainsPackageRange::Modular263,
                 "0.2.592",
             )
             .unwrap(),
@@ -4843,8 +4854,8 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             );
         }
         assert_eq!(
-            super::installed_jetbrains_package(&modern, JetbrainsPackageRange::Classic263),
-            Some((JetbrainsPackageRange::Classic263, "0.2.512".into()))
+            super::installed_jetbrains_package(&modern, JetbrainsPackageRange::Modular263),
+            Some((JetbrainsPackageRange::Modular263, "0.2.512".into()))
         );
     }
 
@@ -5987,7 +5998,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     /// GH #255: the package line is read from the ZIP root because the exact-262
     /// and 263 packages now share the `agent.doc-<version>.jar` root-jar stem.
     #[test]
-    fn jetbrains_zip_package_range_reads_the_archive_root() {
+    fn jetbrains_zip_package_range_reads_the_archive_root_and_treats_263_as_modular() {
         let tmp = TempDir::new().unwrap();
         let classic = tmp.path().join("classic.zip");
         let modular = tmp.path().join("modular.zip");
@@ -6005,17 +6016,30 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
         assert_eq!(
             super::jetbrains_zip_package_range(&modern).unwrap(),
-            JetbrainsPackageRange::Classic263
+            JetbrainsPackageRange::Modular263
         );
         let refusal = super::jetbrains_dynamic_upgrade_entry_point_refusal(
             super::jetbrains_zip_package_range(&modern).unwrap(),
             "0.2.515",
-            || Ok(false),
+            || panic!("the modular 263 package has no launcher to inspect"),
         )
         .unwrap()
         .expect("the test package has no upgrade launcher");
-        assert!(!refusal.contains("exact-262"), "{refusal}");
-        assert!(!refusal.contains("running 262 IDE"), "{refusal}");
+        assert!(
+            refusal.contains(super::JETBRAINS_MODULAR_NO_DYNAMIC_UPGRADE),
+            "{refusal}"
+        );
+        assert!(refusal.contains("exact-263"), "{refusal}");
+        assert!(refusal.contains("running 263 IDE"), "{refusal}");
+        assert!(!refusal.contains("predates"), "{refusal}");
+        assert!(!refusal.contains("legacy"), "{refusal}");
+        assert!(!refusal.contains("refusing to replace"), "{refusal}");
+        assert_eq!(super::dynamic_upgrade_decliner(&refusal), "modular_package");
+        let warning =
+            super::dynamic_upgrade_fallback_warning(&refusal, "replacing the plugin files instead");
+        assert!(warning.contains("exact-263 modular"), "{warning}");
+        assert!(!warning.contains("failed"), "{warning}");
+        assert!(!warning.contains("refused"), "{warning}");
     }
 
     /// `#jb262dynupgrade`: a 262 package is refused for an accurate reason --

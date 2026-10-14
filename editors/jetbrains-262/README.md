@@ -52,9 +52,11 @@ The build sets `splitMode = true` and `pluginInstallationTarget = BOTH`.
 `runIdeSplitMode` therefore installs the same selected build-line plugin into the local
 backend and frontend sandboxes. `verifySplitArtifact` checks the selected exact range,
 the exact frontend/backend/both role-selection matrix, exact module
-JAR/descriptor pairing and dependencies, and module presence in the
-distribution. `verifySplitModeSandboxes` proves that the complete same-artifact
-module set is placed in both development sandboxes.
+JAR/descriptor pairing and dependencies, module presence, and that the isolated
+backend module embeds its private Lazily runtime instead of relying on a root
+plugin-library classloader. `verifySplitModeSandboxes` proves that the complete
+same-artifact module set, including those backend runtime classes, is placed in
+both development sandboxes.
 
 ## Distribution and installation
 

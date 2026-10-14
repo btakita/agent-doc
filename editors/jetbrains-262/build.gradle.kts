@@ -242,6 +242,26 @@ tasks {
                 check(descriptorDependencies.getValue("agent.doc.backend").containsAll(
                     setOf("intellij.platform.backend", "agent.doc.shared"),
                 )) { "backend descriptor lost its side/shared dependencies: $descriptorDependencies" }
+
+                val backendJar = archive.entries().asSequence()
+                    .single { it.name.endsWith("/lib/modules/agent.doc.backend.jar") }
+                val backendEntries = JarInputStream(archive.getInputStream(backendJar)).use { jar ->
+                    generateSequence { jar.nextJarEntry }.map { it.name }.toSet()
+                }
+                val embeddedLazilyClasses = setOf(
+                    "io/github/lazily/ThreadSafeContext.class",
+                    "io/github/lazily/MergePolicy.class",
+                    "io/github/lazily/OrSet.class",
+                )
+                check(backendEntries.containsAll(embeddedLazilyClasses)) {
+                    "backend content module must embed its private Lazily runtime: " +
+                        "missing=${embeddedLazilyClasses - backendEntries}"
+                }
+                check(names.none { entry ->
+                    entry.substringAfterLast('/').startsWith("lazily-") && entry.endsWith(".jar")
+                }) {
+                    "Lazily must not be packaged as a root plugin library outside the backend module"
+                }
             }
         }
     }
@@ -267,6 +287,16 @@ tasks {
                 check(jarNames.containsAll(expectedModuleJars)) {
                     "$taskName did not receive the complete single-distribution module set: " +
                         "missing=${expectedModuleJars - jarNames}"
+                }
+                val backendJars = jars.filter { it.name == "agent.doc.backend.jar" }
+                check(backendJars.isNotEmpty()) { "$taskName is missing agent.doc.backend.jar" }
+                backendJars.forEach { backendJar ->
+                    val backendEntries = JarInputStream(backendJar.inputStream()).use { jar ->
+                        generateSequence { jar.nextJarEntry }.map { it.name }.toSet()
+                    }
+                    check("io/github/lazily/ThreadSafeContext.class" in backendEntries) {
+                        "$taskName backend module cannot resolve its embedded Lazily runtime"
+                    }
                 }
                 check(jars.any { jarFile ->
                     JarInputStream(jarFile.inputStream()).use { jar ->

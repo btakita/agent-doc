@@ -496,6 +496,28 @@ def self_test() -> int:
             f"{workflow_name} must publish lazily-kt to mavenLocal before the JetBrains 262 build"
         )
 
+    # GH #258 embeds Lazily from a dedicated Gradle configuration, while the
+    # release helper still has to discover the shared pin. Exercise the helper
+    # itself so a future dependency-configuration rename cannot silently make
+    # tag-triggered releases fail after all local plugin builds pass.
+    repo_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    pin_probe = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "source scripts/publish-pinned-lazily-kt.sh; "
+            "pin editors/jetbrains-262/backend/build.gradle.kts; "
+            "pin editors/jetbrains/build.gradle.kts",
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    pins = pin_probe.stdout.splitlines()
+    assert len(pins) == 2 and pins[0] == pins[1], pins
+    assert re.fullmatch(r"\d+\.\d+\.\d+", pins[0]), pins[0]
+
     print("[self-test] check_plugin_versions: ok")
     return 0
 

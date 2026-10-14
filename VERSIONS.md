@@ -29,6 +29,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **Project-wide prompt preset setup is documented and contract-tested.** A
   copy-paste `.agent-doc/project.md` example explains quoted `#name` keys,
   structured runbooks, live inheritance, and session-local overrides.
+- **The tag release helper accepts dedicated Lazily dependency
+  configurations.** Its pin resolver now reads the exact coordinate across
+  `compileOnly`, test, and embedded configurations, requires one unique
+  version, and is exercised by the plugin-version self-test. This repairs the
+  first `v0.35.501` workflow attempt after the modular backend began embedding
+  its private Lazily runtime.
 
 ## 0.35.500
 

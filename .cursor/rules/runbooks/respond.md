@@ -181,7 +181,12 @@ rule. This runbook carries the rest.
      `agent-doc queue report-complete <FILE> --item <...>`. The binary appends
      immediate, deduplicated completion feedback to `agent:exchange` through
      its cross-process document owner and editor/CRDT authority while leaving
-     the claim active; the worker never edits the session document. Then
+     the claim active; the worker never edits the session document. The
+     feedback is a structurally complete, N−1-inert response cell (heading,
+     non-empty status body, binary marker). If an earlier v0.34 binary wrote
+     bodyless completion headings, migrate those exact artifacts with
+     `agent-doc queue repair-completion-feedback <FILE>`; this does not replay
+     the committed closeout or change cycle/claim state. Then
      integrate the work serially: rebase or
      cherry-pick each onto main, run the preset's verification, run ONE
      `make install` per integrated batch, and push. Finally run

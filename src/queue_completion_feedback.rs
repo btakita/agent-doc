@@ -15,11 +15,20 @@ use anyhow::{Context, Result, bail};
 
 const SOURCE: &str = "queue_subagent_completion_feedback";
 const COMPLETION_LOCK_WAIT: Duration = Duration::from_secs(5);
+const COMPLETION_HEADING_PREFIX: &str = "### Re: Subagent completed — agent-doc:";
+const COMPLETION_BODY: &str = "Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.";
+const COMPLETION_MARKER_PREFIX: &str = "<!-- agent-doc-subagent-completion key=";
 
 #[derive(Debug)]
 pub(crate) struct CompletionFeedbackOutcome {
     pub claim: QueueClaim,
     pub appended: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct CompletionFeedbackRepairOutcome {
+    pub repaired: usize,
+    pub accepted: bool,
 }
 
 pub(crate) fn report_complete(
@@ -72,8 +81,14 @@ fn append_completion_feedback(file: &Path, current: &str, claim: &QueueClaim) ->
     let marker = format!("<!-- agent-doc-subagent-completion key={key} -->");
     let item = one_line(&claim.item_text).replace(['“', '”'], "'");
     let owner = claim.owner.replace('`', "'");
+    // Keep the heading, body, and marker contiguous. The existing N-1 diff
+    // classifier treats a block beginning with `### Re:` as a recovery
+    // artifact, while the structural/session-check gate requires substantive
+    // body text after every response heading. A blank line here would split
+    // the old controller's annotated diff block and make the body look like a
+    // new operator prompt during a rolling upgrade.
     let note = format!(
-        "### Re: Subagent completed — agent-doc: `{owner}` returned work for queue item “{item}”; coordinator integration and closeout are pending.\n{marker}"
+        "{COMPLETION_HEADING_PREFIX} `{owner}` returned work for queue item “{item}”; coordinator integration and closeout are pending.\n{COMPLETION_BODY}\n{marker}"
     );
     let pending_target = agent_doc_document_realtime_io::pending_document_write(file)
         .map(|pending| pending.target_content);
@@ -95,26 +110,7 @@ fn append_completion_feedback(file: &Path, current: &str, claim: &QueueClaim) ->
     // its reactive projector applies the target without keeping this one-shot
     // CLI process alive through typing/native-save backpressure. Detached files
     // still use the ordinary synchronous CAS write.
-    let retained_intent = if agent_doc_crdt_relay_io::crdt_authority_for_file(file)
-        .editor_attached()
-    {
-        Some(with_component_write_scope(scope, || {
-            agent_doc_document_realtime_io::retain_deferred_document_write_target(
-                file,
-                current,
-                &updated,
-                SOURCE,
-                agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorProjectionPending,
-            )
-        })?)
-    } else {
-        with_component_write_scope(scope, || {
-            agent_doc_document_realtime_io::atomic_write_rebased_through_authority(
-                file, current, &updated, SOURCE,
-            )
-        })?;
-        None
-    };
+    let retained_intent = publish_exchange_update(file, current, &updated, scope)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -135,6 +131,130 @@ fn append_completion_feedback(file: &Path, current: &str, claim: &QueueClaim) ->
         ),
     );
     Ok(true)
+}
+
+/// Repair the short-lived v0.34 rolling-upgrade artifact that put all visible
+/// status in a `### Re:` heading and only an HTML marker beneath it. The
+/// integrity gate correctly ignores comments as response bodies, so those
+/// artifacts strand session-check even though the closeout itself committed.
+///
+/// This migration rewrites only the exact binary-owned heading+marker pair. It
+/// neither replays a response nor changes cycle/queue state.
+pub(crate) fn repair_legacy_completion_feedback(
+    file: &Path,
+) -> Result<CompletionFeedbackRepairOutcome> {
+    let lock_path = completion_lock_path(file)?;
+    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
+    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
+        bail!(
+            "timed out after {}ms waiting to repair subagent completion feedback for {}; no document mutation was attempted",
+            COMPLETION_LOCK_WAIT.as_millis(),
+            file.display(),
+        );
+    };
+    let current =
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
+    let (updated, repaired) = repair_legacy_completion_feedback_content(&current);
+    if repaired == 0 {
+        return Ok(CompletionFeedbackRepairOutcome {
+            repaired,
+            accepted: false,
+        });
+    }
+    let scope = changed_component_scope(&current, &updated)
+        .context("completion feedback repair must change only agent:exchange")?;
+    if !scope.contains("exchange", 0) || scope.components().len() != 1 {
+        bail!("completion feedback repair escaped the first agent:exchange component");
+    }
+    let retained_intent = publish_exchange_update(file, &current, &updated, scope)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "subagent_completion_feedback_repair_accepted repaired={} delivery={}{}",
+            repaired,
+            if retained_intent.is_some() {
+                "retained_controller_projection"
+            } else {
+                "detached_materialized"
+            },
+            retained_intent
+                .as_deref()
+                .map(|intent| format!(" intent_id={intent}"))
+                .unwrap_or_default(),
+        ),
+    );
+    Ok(CompletionFeedbackRepairOutcome {
+        repaired,
+        accepted: true,
+    })
+}
+
+fn publish_exchange_update(
+    file: &Path,
+    current: &str,
+    updated: &str,
+    scope: agent_doc_element::component_scope::ComponentWriteScope,
+) -> Result<Option<String>> {
+    if agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached() {
+        Ok(Some(with_component_write_scope(scope, || {
+            agent_doc_document_realtime_io::retain_deferred_document_write_target(
+                file,
+                current,
+                updated,
+                SOURCE,
+                agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorProjectionPending,
+            )
+        })?))
+    } else {
+        with_component_write_scope(scope, || {
+            agent_doc_document_realtime_io::atomic_write_rebased_through_authority(
+                file, current, updated, SOURCE,
+            )
+        })?;
+        Ok(None)
+    }
+}
+
+fn repair_legacy_completion_feedback_content(content: &str) -> (String, usize) {
+    let mut output = String::with_capacity(content.len());
+    let mut lines = content.split_inclusive('\n').peekable();
+    let mut repaired = 0;
+
+    while let Some(line) = lines.next() {
+        let bare = line.trim_end_matches(['\r', '\n']);
+        let Some(_detail) = bare
+            .strip_prefix(COMPLETION_HEADING_PREFIX)
+            .map(str::trim)
+            .filter(|detail| !detail.is_empty())
+        else {
+            output.push_str(line);
+            continue;
+        };
+        let Some(next) = lines.peek() else {
+            output.push_str(line);
+            continue;
+        };
+        if !is_completion_marker_line(next) {
+            output.push_str(line);
+            continue;
+        }
+
+        let newline = if line.ends_with("\r\n") { "\r\n" } else { "\n" };
+        output.push_str(bare);
+        output.push_str(newline);
+        output.push_str(COMPLETION_BODY);
+        output.push_str(newline);
+        repaired += 1;
+    }
+    (output, repaired)
+}
+
+fn is_completion_marker_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed
+        .strip_prefix(COMPLETION_MARKER_PREFIX)
+        .and_then(|rest| rest.strip_suffix(" -->"))
+        .is_some_and(|key| !key.is_empty() && !key.chars().any(char::is_whitespace))
 }
 
 fn completion_lock_path(file: &Path) -> Result<PathBuf> {
@@ -187,7 +307,7 @@ mod tests {
         ));
         let marker = format!("<!-- agent-doc-subagent-completion key={key} -->");
         let note = format!(
-            "### Re: Subagent completed — agent-doc: `{}` returned work for queue item “{}”; coordinator integration and closeout are pending.\n{marker}",
+            "{COMPLETION_HEADING_PREFIX} `{}` returned work for queue item “{}”; coordinator integration and closeout are pending.\n{COMPLETION_BODY}\n{marker}",
             claim.owner,
             one_line(&claim.item_text)
         );
@@ -229,6 +349,92 @@ mod tests {
             Some("exchange"),
             "an open coordinator cycle must accept the binary completion artifact"
         );
+        agent_doc_lint_io::validate_structure_on_content(Path::new("sdk.md"), &after)
+            .expect("the session-check integrity classifier must see a non-empty response body");
+    }
+
+    #[test]
+    fn legacy_bodyless_completion_feedback_repair_is_narrow_idempotent_and_integrity_safe() {
+        let legacy_one = concat!(
+            "### Re: Subagent completed — agent-doc: `subagent:sdk` returned work for queue item “finish sdk”; coordinator integration and closeout are pending.\n",
+            "<!-- agent-doc-subagent-completion key=one -->\n",
+        );
+        let legacy_two = concat!(
+            "### Re: Subagent completed — agent-doc: `subagent:dev` returned work for queue item “finish dev”; coordinator integration and closeout are pending.\n",
+            "<!-- agent-doc-subagent-completion key=two -->\n",
+        );
+        let before = format!(
+            concat!(
+                "<!-- agent:exchange patch=append subagents -->\n",
+                "{}",
+                "{}",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+            legacy_one, legacy_two,
+        );
+        let error = agent_doc_lint_io::validate_structure_on_content(Path::new("sdk.md"), &before)
+            .expect_err(
+                "the historical bodyless form must reproduce the live session-check failure",
+            );
+        assert!(error.to_string().contains("has no response body"));
+
+        let (repaired, count) = repair_legacy_completion_feedback_content(&before);
+        assert_eq!(count, 2);
+        assert_eq!(repaired.matches(COMPLETION_HEADING_PREFIX).count(), 2);
+        assert_eq!(repaired.matches(COMPLETION_BODY).count(), 2);
+        assert!(repaired.contains("`subagent:sdk` returned work"));
+        assert!(repaired.contains("`subagent:dev` returned work"));
+        agent_doc_lint_io::validate_structure_on_content(Path::new("sdk.md"), &repaired)
+            .expect("one or more repaired artifacts must pass the actual integrity classifier");
+
+        let diff = agent_doc_diff::unified_diff_from_contents(
+            concat!(
+                "<!-- agent:exchange patch=append subagents -->\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+            &repaired,
+        )
+        .unwrap();
+        let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff);
+        assert!(
+            changes.iter().all(|change| matches!(
+                change.kind,
+                agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
+                    | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact
+            )),
+            "the pre-existing N-1 `### Re:` classifier must keep migrated artifacts inert: {changes:?}"
+        );
+
+        let (again, second_count) = repair_legacy_completion_feedback_content(&repaired);
+        assert_eq!(second_count, 0);
+        assert_eq!(again, repaired);
+    }
+
+    #[test]
+    fn repair_does_not_reclassify_or_hide_a_mixed_operator_prompt() {
+        let content = concat!(
+            "<!-- agent:exchange patch=append subagents -->\n",
+            "Please investigate the completion failure.\n",
+            "<!-- agent-doc-subagent-completion key=not-an-artifact-pair -->\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (after, count) = repair_legacy_completion_feedback_content(content);
+        assert_eq!(count, 0);
+        assert_eq!(after, content);
+        let before = concat!(
+            "<!-- agent:exchange patch=append subagents -->\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let diff = agent_doc_diff::unified_diff_from_contents(before, &after).unwrap();
+        let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff);
+        assert!(changes.iter().any(|change| {
+            change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                && change.text.contains("Please investigate")
+        }));
     }
 
     #[test]
@@ -423,6 +629,8 @@ mod tests {
                 .count(),
             items.len()
         );
+        agent_doc_lint_io::validate_structure_on_content(&doc, &pending.target_content)
+            .expect("multiple concurrent completion artifacts must pass session-check integrity");
         assert_eq!(
             fs::read_to_string(&doc)
                 .unwrap()

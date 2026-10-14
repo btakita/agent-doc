@@ -4291,6 +4291,15 @@ enum QueueAction {
         #[arg(long, value_name = "ID_OR_TEXT")]
         item: String,
     },
+    /// Repair the v0.34 rolling-upgrade completion notices whose binary marker
+    /// was written directly beneath a bodyless `### Re:` heading. Rewrites
+    /// only those exact heading+marker pairs; does not replay a response,
+    /// release a claim, or change cycle state.
+    #[command(name = "repair-completion-feedback")]
+    RepairCompletionFeedback {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Release a queue claim (`#queueclaim`) so the in-session loop can take the
     /// item again, e.g. when its subagent reports back.
     Release {
@@ -7318,6 +7327,20 @@ fn try_main() -> anyhow::Result<()> {
                         "[queue] no subagent claim on {item:?}; no completion feedback written"
                     ),
                 }
+                Ok(())
+            }
+            QueueAction::RepairCompletionFeedback { file } => {
+                let outcome = queue_completion_feedback::repair_legacy_completion_feedback(&file)?;
+                eprintln!(
+                    "[queue] completion feedback repair {} ({} artifact{} repaired); cycle and claims unchanged",
+                    if outcome.accepted {
+                        "accepted"
+                    } else {
+                        "not needed"
+                    },
+                    outcome.repaired,
+                    if outcome.repaired == 1 { "" } else { "s" },
+                );
                 Ok(())
             }
             QueueAction::Brief { file, item, json } => {

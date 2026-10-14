@@ -18702,6 +18702,7 @@ agent:queue\n\
         assert!(
             !controller_self_watchdog_should_suicide(
                 &runtime,
+                false,
                 None,
                 &socket_path(dir.path()),
                 Duration::ZERO,
@@ -18726,6 +18727,7 @@ agent:queue\n\
         assert!(
             !controller_self_watchdog_should_suicide(
                 &runtime,
+                false,
                 None,
                 &socket_path(dir.path()),
                 Duration::from_secs(600),
@@ -18734,6 +18736,67 @@ agent:queue\n\
             "the old public controller must serve until its replacement is promoted"
         );
     }
+
+    #[test]
+    fn self_watchdog_does_not_reap_predecessor_owned_by_outgoing_handoff() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let stale = timestamp_secs().saturating_sub(600);
+        let runtime = runtime_for_bootstrap(preparing_runtime_bootstrap(
+            dir.path(),
+            ControllerHandoffState::Preparing,
+            Some(stale),
+        ));
+
+        assert!(
+            !controller_self_watchdog_should_suicide(
+                &runtime,
+                true,
+                None,
+                &socket_path(dir.path()),
+                Duration::from_secs(600),
+                Duration::from_secs(45),
+            ),
+            "the outgoing handoff worker owns completion and drain; the predecessor watchdog must stay disarmed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn promoted_handoff_predecessor_drop_preserves_successor_socket() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let public = dir.path().join("controller.sock");
+        let temp = dir.path().join("controller-handoff.sock");
+        let public_name = public.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let mut predecessor = ListenerOptions::new()
+            .name(public_name)
+            .create_sync()
+            .unwrap();
+        let temp_name = temp.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let successor = ListenerOptions::new()
+            .name(temp_name)
+            .create_sync()
+            .unwrap();
+
+        std::fs::remove_file(&public).unwrap();
+        std::fs::rename(&temp, &public).unwrap();
+        retire_controller_listener(&mut predecessor, &public, true);
+        drop(predecessor);
+
+        assert!(
+            public.exists(),
+            "dropping the predecessor must not reclaim the successor's promoted pathname"
+        );
+        let public_name = public.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let stream = interprocess::local_socket::ConnectOptions::new()
+            .name(public_name)
+            .connect_sync()
+            .unwrap();
+        drop(stream);
+        drop(successor);
+        std::fs::remove_file(public).unwrap();
+    }
+
     #[test]
     fn self_watchdog_keeps_stable() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -18746,6 +18809,7 @@ agent:queue\n\
         assert!(
             !controller_self_watchdog_should_suicide(
                 &runtime,
+                false,
                 None,
                 &socket_path(dir.path()),
                 Duration::ZERO,
@@ -18767,6 +18831,7 @@ agent:queue\n\
         assert!(
             controller_self_watchdog_should_suicide(
                 &runtime,
+                false,
                 None,
                 &socket_path(dir.path()),
                 Duration::ZERO,
@@ -18805,6 +18870,7 @@ agent:queue\n\
         ));
         assert!(controller_self_watchdog_should_suicide(
             &runtime,
+            false,
             Some(temp.as_path()),
             &socket_path(dir.path()),
             Duration::from_secs(600),
@@ -18829,6 +18895,7 @@ agent:queue\n\
         assert!(
             !controller_self_watchdog_should_suicide(
                 &runtime,
+                false,
                 Some(temp.as_path()),
                 &socket_path(dir.path()),
                 Duration::from_secs(600),
@@ -18867,6 +18934,7 @@ agent:queue\n\
         assert!(
             controller_self_watchdog_should_suicide(
                 &runtime,
+                false,
                 Some(temp.as_path()),
                 &socket_path(dir.path()),
                 Duration::from_secs(25_080),

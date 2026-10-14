@@ -16938,7 +16938,7 @@ pub(crate) fn serve_with_options(
     let reliable_sync_recovery = hydrate_reliable_sync_liveness(&durable_project_root)?;
     let name = sock.clone().to_fs_name::<GenericFilePath>()?;
     let listener_bound_at = Instant::now();
-    let listener = ListenerOptions::new()
+    let mut listener = ListenerOptions::new()
         .name(name)
         .create_sync()
         .with_context(|| format!("failed to listen on {}", sock.display()))?;
@@ -17184,6 +17184,7 @@ pub(crate) fn serve_with_options(
                 }
                 if controller_self_watchdog_should_suicide(
                     &runtime,
+                    recycle_handoff_in_flight.load(Ordering::SeqCst),
                     handoff_temp_socket.as_deref(),
                     &public_sock,
                     controller_launched_at.elapsed(),
@@ -17444,10 +17445,39 @@ pub(crate) fn serve_with_options(
             Err(err) => return Err(err).context("failed to accept project controller client"),
         }
     }
-    if !recycle_handoff_promoted.load(Ordering::SeqCst) {
-        let _ = std::fs::remove_file(&sock);
-    }
+    retire_controller_listener(
+        &mut listener,
+        &sock,
+        recycle_handoff_promoted.load(Ordering::SeqCst),
+    );
     Ok(())
+}
+
+/// Release the listener after the serve loop without letting a draining
+/// predecessor unlink the promoted successor's public socket.
+///
+/// `interprocess` listeners reclaim the pathname they originally bound when
+/// dropped. After `temp -> controller.sock` promotion, that default is correct
+/// for the successor (its guard still names the vanished temp path) but wrong
+/// for a predecessor that originally bound `controller.sock`: dropping that
+/// predecessor would unlink the successor's live pathname.
+pub(crate) fn retire_controller_listener(
+    listener: &mut interprocess::local_socket::Listener,
+    sock: &Path,
+    handoff_promoted: bool,
+) {
+    if handoff_promoted {
+        listener.do_not_reclaim_name_on_drop();
+        return;
+    }
+    if let Err(err) = std::fs::remove_file(sock)
+        && err.kind() != ErrorKind::NotFound
+    {
+        eprintln!(
+            "[controller] warning: failed to remove controller socket {}: {err}",
+            sock.display()
+        );
+    }
 }
 
 /// `#handoffrouteforward`: how long a predecessor that handed off keeps running
@@ -18404,11 +18434,20 @@ fn supervisor_watchdog_pane_stashed(tmux: &tmux_router::Tmux, pane: &str) -> Opt
 /// external reaper pass still covers it).
 pub(crate) fn controller_self_watchdog_should_suicide(
     runtime: &ControllerRuntime,
+    outgoing_handoff_in_flight: bool,
     handoff_temp_socket: Option<&Path>,
     public_sock: &Path,
     launched_elapsed: Duration,
     threshold: Duration,
 ) -> bool {
+    // A self-recycle changes the public predecessor's in-memory state to
+    // `Preparing`, but the worker that owns that outgoing handoff is also the
+    // only actor allowed to finish or abort it. Once promotion succeeds the
+    // same worker drains accepted clients before stopping the predecessor.
+    // The stranded-replacement watchdog must not race that owned lifecycle.
+    if outgoing_handoff_in_flight {
+        return false;
+    }
     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
         return false;
     };
@@ -54884,7 +54923,7 @@ mod tests {
             .find("pub(crate) fn serve_with_options(")
             .expect("controller serve entrypoint")..];
         let listener_bound = serve
-            .find("let listener = ListenerOptions::new()")
+            .find("let mut listener = ListenerOptions::new()")
             .expect("controller listener bind");
         let listener_nonblocking = serve
             .find("set_nonblocking(ListenerNonblockingMode::Accept)")

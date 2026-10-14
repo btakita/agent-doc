@@ -2,8 +2,8 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 03da93b9-58a8-4aa3-b530-ca5405b2ea0b
-  codex: 01a116e6-b3cf-7583-bc3b-1c09741a8848
-agent: codex
+  codex: 01a11754-12ab-7700-8938-4ec9298bb945
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -21,6 +21,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -109,12 +110,24 @@ Released and published tsift v0.1.105 successfully.
 - Local CLI: `tsift 0.1.105` installed from the locked release tree using the repository-documented `cargo install --path . --locked` path (the project has no `make install` target).
 - Verification passed: focused package-skill regression, all 27 workspace version/package checks, npm publish check, locked all-languages release build, worker and coordinator full `make check` gates, main CI run 37658875282, and Release run 37658906350.
 - The Release workflow completed successfully across input validation, all three platform builds, crates.io OIDC publication, GitHub release publication, and npm OIDC publication.
+
+### Re: #fixsdkrun dispatched — opus-5.5 · 2026-10-14T17:20-04:00
+
+**Deferred:** `do [#fixsdkrun]` is claimed by `subagent:fixsdkrun`. The worker is running in its own tsift worktree under the `#spec-test-build-install-commit-push` preset. I'll do one `make install` and close the item once it reports back.
+
+> **Operator note:** Why is the agent searching for symbols that are not in files?
+
+The two failures have different causes:
+
+1. **`parse_args`: the agent guessed.** `scripts/check-godot.py` never defines `parse_args`. It only calls `parser.parse_args()` (argparse) at line 344. The agent took a name from a call site and assumed it was defined in the file. tsift made this worse, because its error says only "no indexed symbol matched". It doesn't mention the call site or list the symbols the file does define, so the agent has nothing to correct with. The fix makes the error do both and suggests a `source-read` window instead.
+2. **`main`: a real tsift bug.** `main` is in the file, at line 164 in the `actionable-review-20261014-2` haiven-sdk worktree. That worktree's `.tsift/index.db` holds `main|163`, but `tsift status` still reports the index as `fresh` with 0 stale files. Either the symbol rows are stale while freshness says fresh, or symbol-read rejects a row that drifted and reports that as "not matched". The same command succeeds in `src/haiven-dev/src/haiven-sdk`. The worker is finding which of the two it is, fixing it so a drifted file is re-parsed when requested, and adding regression tests for both cases.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue subagents=3 preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- do [#fixsdkrun]: Why is the agent searching for symbols that are not in files?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -123,6 +136,14 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fixsdkrun] Fix from sdk.md run:
+  ```
+  • Failed (exit 1) tsift --envelope symbol-read main --file scripts/check-godot.py --budget normal
+  └ Error: no indexed symbol matched "main" in scripts/check-godot.py; searched: <root>
+
+  • Failed (exit 1) tsift --envelope symbol-read parse_args --file scripts/check-godot.py --budget normal
+  └ Error: no indexed symbol matched "parse_args" in scripts/check-godot.py; searched: <root>
+  ```
 <!-- /agent:backlog -->
 
 ## Review

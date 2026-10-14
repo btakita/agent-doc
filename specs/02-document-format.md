@@ -118,6 +118,7 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 | `review` | replace | Code-complete tracked work awaiting human review; mutated through review/pending flags |
 | `icebox` | replace | Project icebox — items parked outside active backlog |
 | `notes` | merge/preserve | Operator-owned informational context — preserved for real turns but content-only edits never start a turn |
+| `todo` | replace (guarded) | Operator-owned action checklist — unpublished drafts are a common item; content-only edits never start a turn or enter the agent queue |
 | `output` | replace | Latest agent response only |
 | `input` | replace | User prompt area |
 | unregistered `agent:*` | merge/preserve | Unknown/pluginless components use the `agent-doc-element-unknown` fallback: preserve operator-visible content and do not perform semantic mutations until a descriptor is registered. |
@@ -126,8 +127,12 @@ Per-component behavior is configured in `.agent-doc/components.toml` (see §7.21
 Built-in element descriptors live in the `agent-doc-element-*` crate family;
 the built-in registry is `agent-doc-element-registry`. Each descriptor owns an
 explicit turn role. Unknown components remain turn triggers by default so an
-unregistered prompt cannot be silently ignored; `notes` is the built-in
-informational exception.
+unregistered prompt cannot be silently ignored; `notes` and `todo` are the
+built-in informational exceptions. `todo` is not runnable agent work: it has
+no scheduling role and is never promoted into `queue` or `backlog`. Template
+patches may update it, but the write path rejects replacements that reduce its
+Markdown checklist-item count so an agent cannot silently discard an operator
+todo such as publishing an unpublished draft.
 
 **Exchange prompt defaults.** `<!-- agent:exchange preset="#review" -->` applies
 the named frontmatter prompt preset to each new exchange prompt, including the

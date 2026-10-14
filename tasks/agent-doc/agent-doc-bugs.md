@@ -375,6 +375,34 @@ Implemented, reviewed, fully tested, and pushed to `main` as `c842672e4c`. Expan
 > **Chat prompt (#chatprompt):** Is the linux release + plugin releases visible?
 
 Yes. The public `v0.35.501` release now exposes the GNU x86_64, GNU AArch64, and musl x86_64 Linux archives; the classic, exact-262, and 263 JetBrains ZIPs and feeds; and the VS Code VSIX. All published checksums passed.
+
+### Re: verified queue completion — gpt-5 · 2026-10-14T18:58:28-04:00
+
+The completion verifiers applied the queue's resolved authorization:
+
+> **Resolved preset `#spec-test-build-install-commit-push`:** update spec + tests. build + install for local testing. commit + push
+
+> **Resolved preset `#gh-fix`:** fix then close
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/255
+
+Verified closed, fixed by `60a7757933`, contained in `v0.35.501`, and covered by shared 262/263 archive and root-JAR classification regressions.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/256
+
+Verified closed, fixed by `63f1ba37d7`, contained in `v0.35.501`, and covered by the 263 atomic-swap backup-path regression plus full CI and tmux-CI.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/257
+
+Verified closed, fixed by `2d41ca8fdd`, contained in `v0.35.501`, and covered by verdict-aware route, backup mapping, and unchanged-install regressions.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/258
+
+Verified closed, fixed by `03cf491b4f`, contained in `v0.35.501`, and covered by modular backend artifact and split-sandbox checks proving embedded Lazily resolution.
+
+> **Queue prompt:** release + publish
+
+Verified complete. GitHub `v0.35.501` is public with 15 assets and matching checksums; PyPI `0.35.501` installs successfully; Homebrew serves formula `0.35.501`; the release workflow is green. The tag points to `c1e6ca379f`, and current `main` is one tested nested-preset commit ahead at `c842672e4c`.
 <!-- agent:boundary:3599dd10 -->
 <!-- /agent:exchange -->
 
@@ -384,7 +412,7 @@ Yes. The public `v0.35.501` release now exposes the GNU x86_64, GNU AArch64, and
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#defineprojectwide]~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/255
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/255~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/256
 - #gh-fix https://github.com/btakita/agent-doc/issues/257
 - #gh-fix https://github.com/btakita/agent-doc/issues/258

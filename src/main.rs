@@ -43,6 +43,7 @@
 //! - dispatch_skill_install_reload: skill updated + `--reload compact` → prints `SKILL_RELOAD=compact`
 //! - dispatch_lib_path_missing: library absent → exits with code 1
 
+mod admin_issue;
 mod agent_dashboard;
 mod annotate;
 mod audit_docs;
@@ -3539,6 +3540,30 @@ enum TmuxAction {
 
 #[derive(Subcommand)]
 enum AdminAction {
+    /// File an issue in btakita/agent-doc with an explicit handling policy
+    Issue {
+        /// Issue title
+        #[arg(long)]
+        title: String,
+        /// Issue body text (defaults to an empty body)
+        #[arg(long, conflicts_with = "body_file")]
+        body: Option<String>,
+        /// Read the issue body from a file, or `-` for stdin
+        #[arg(long, value_name = "FILE", conflicts_with = "body")]
+        body_file: Option<PathBuf>,
+        /// Whether the issue is human-only or may be agent-assisted
+        #[arg(long, value_enum)]
+        handling: admin_issue::IssueHandling,
+        /// Apply a repository label (repeat for multiple labels)
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        /// Print the exact payload without contacting GitHub
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit structured JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Inspect one actor and its controller receipts
     Inspect {
         /// Document to inspect
@@ -6500,6 +6525,23 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Admin { action } => {
             let admin_effects = CliAdminControllerEffects::default();
             match action {
+                AdminAction::Issue {
+                    title,
+                    body,
+                    body_file,
+                    handling,
+                    labels,
+                    dry_run,
+                    json,
+                } => admin_issue::run(admin_issue::IssueOptions {
+                    title,
+                    body,
+                    body_file,
+                    handling,
+                    labels,
+                    dry_run,
+                    json,
+                }),
                 AdminAction::Inspect {
                     document,
                     session,

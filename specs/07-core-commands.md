@@ -30,6 +30,29 @@ serving pid and binary identity. Full operator `status` diagnostics — duplicat
 process discovery, durable-store counts, and control-plane category snapshots —
 remain reserved for explicit status commands and actual recovery transitions.
 
+## admin issue
+
+`agent-doc admin issue --title <TEXT> [--body <TEXT>|--body-file <PATH|->]
+--handling <human-only|agent-assisted> [--label <LABEL>...] [--dry-run]
+[--json]` files a GitHub issue in the fixed `btakita/agent-doc` repository.
+
+- `admin issue` is the package-maintainer action. Its repository is not
+  configurable and every issue carries a visible handling policy plus the
+  machine-readable `agent-doc-admin-issue` marker.
+- `--handling` is required. `human-only` forbids autonomous-agent dispatch;
+  `agent-assisted` permits agents to investigate or implement under human
+  review. The command does not create repository labels or infer policy from a
+  label.
+- The body may be inline, loaded from a file, or read from stdin with
+  `--body-file -`. `--dry-run` never invokes `gh`; with `--json`, it emits the
+  exact repository, title, body, labels, and handling value that would be sent.
+- Filing uses the authenticated GitHub CLI and feeds the body through stdin.
+  The command returns the created issue URL, or a structured result with
+  `--json`.
+- The top-level `agent-doc issue` name remains unimplemented and reserved for a
+  future caller-repository action; it is not an alias for this repo-locked
+  admin command.
+
 ## run
 
 `agent-doc [run] <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`

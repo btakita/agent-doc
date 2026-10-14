@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -99,59 +98,34 @@ Fixed and integrated on `main` as `b709dc7065`. Self-recycle handoff now preserv
 The foreign-subagent inheritance defect was already fixed on `origin/main` by `3e21e1a24e`, which fences queue continuation by the tracked Codex turn ID. Read-only session evidence confirms `#sdkreleasecontrolreset` continued and committed successfully. The current integrated build, including that fix, is now installed; no live `sdk.md` response was resubmitted or modified.
 
 The same verified batch also integrated realtime steering continuation after an abandoned empty Stop preflight as `5af7f40b1f`. Coordinator verification passed: 10,471 Rust tests, 202 VS Code tests, cross-editor SimWorld, JetBrains classic/262/263, bootstrap, docs/version audits, and TLA receipt. The batch was pushed to `main` and installed locally.
+> **Chat prompt (#chatprompt):** subagent: fix: • Blocked by hook
+>   └ agent-doc Stop hook retained the exact closeout for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
+> under its durable keyed retry. The latest assistant text was captured into the pending/capture ledger before auto-
+> close. The hook could not finish the required commit boundary: closeout operation is already in progress for cycle
+> cycle-1791959659836 by captured-finalize-resume-3600622-1791956809940749262-t13 pid=3600622
+> role=captured_finalize_resume until=1791962084 [closeout_owner_retry_at=1791962084]. The retained capture or projection
+> is already durable and this exact retained intent commits itself once delivery converges — this is a deferral, not a
+> lost response. Wait for its controller-owned terminal state edge; do not use the document's current-cycle status as
+> proof because queue continuation can advance to a different cycle. Do NOT re-send the response, force disk, or `admin
+> recycle`, which disturb the capture being awaited. Do not reach for `admin reload-lib` on your own either: `admin
+> reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports that the editor holding the document
+> is not serving its replica, and then its remedy governs. The controller owns delivery, the editor-native save receipt,
+> and the terminal commit. Do not reopen or recapture the cycle, rerun finalize/write/repair, force disk, recycle the
+> supervisor, or resend the response. Wait for the existing controller state edge unless it explicitly reports
+> `needs_operator`; do not send the final answer yet.
 
-<!-- agent:boundary:713dace6 -->
+### Re: retained closeout fix remains in flight — gpt-5 · 2026-10-14T03:31-04:00
+
+This is the same defect already assigned to `subagent:retained_closeout_owner`. I kept that single owner rather than dispatching duplicate repository work. The worker remains constrained to read-only evidence from the retained `sdk.md` operation and an isolated Agent Doc worktree; it will not resubmit, force-write, recycle, reload, or otherwise disturb the durable capture.
+
+<!-- agent:boundary:cc9a9855 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-~~~done
-The last turn stalled. It should not stall. The real-time steering should continue:
-```
-• Hook stopped
-  └ agent-doc Stop hook already continued once for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-
-bugs.md, but the cycle is still open. [session-check] INTERRUPTED: cycle `cycle-1791953414683` is `abandoned`
-(cancel_preflight_cycle_abandoned), but the document still has unresolved prompt-bearing user changes with no new agent-
-doc cycle started: prompt_target: What this mean? Is this a bug?
-    ```
-    • Failed (exit 1) agent-doc respond /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md --template
---done …
-      └ This exchange is already above the legibility target, but the active queue takes precedence; no repository or
-prod…
-        [write] template write requested for realtime document; routing through stream document-model write path
-        Error: strict template closeout response must wrap its response in matching `<!-- patch:exchange -->` and
-`<!-- /p…
-        + 33 lines (^t to expand)
-    ```
-    This is pending operator steering, not a failed closeout: your prior response is already committed in HEAD. Handle
-each item by its `dispatch`: `address_now` is the next cycle's prompt (`agent-doc /home/brian/work/btakita/agent-loop/
-tasks/agent-doc/agent-doc-bugs.md` admits it to continue), `drain_after_current` runs in operator queue order through
-the normal drain, and `subagent` goes to a new background subagent (claim it first with `agent-doc queue claim /home/
-brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md --item <id-or-line> --owner subagent:<label>`). Do NOT
-re-run finalize on the prior response, do NOT use `--force-disk` (that clobbers the operator's live edits), and do NOT
-re-answer any prompt already committed in HEAD (the realtime replica reconciles your committed response back into the
-live buffer).
-
-  Worked for 5m 10s • 12:55 AM
-```
-~~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/251~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/252
----
-fix sdk.md issue
-```
-› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
-
-• Blocked by hook
-  └ Queue continuation, not an error: Codex labels it `Blocked by hook`. Next `agent:queue auto` prompt for /home/
-brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md: "do [#sdkreleasecontrolreset]". Continue THIS turn in-pane:
-answer it, then persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md`. Do
-NOT run `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` (recursive self-invocation) and do
-not send the final answer yet.
-```
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

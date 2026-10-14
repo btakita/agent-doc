@@ -165,11 +165,41 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      one checkout. Heads that `agent-doc plan` gives the same repo
      `write_scope` still get separate worktrees, but they are integrated one at a
      time. A head marked `parallelizable: false` runs alone.
-  4. While a subagent runs past a cycle, keep its claim alive with
+  4. Treat `[agent-doc] subagent operator request (#waypostrequest)` as a
+     blocking handback, not worker completion. Copy the entire packet verbatim
+     into `agent:exchange` so the exact request, why it is needed, target/scope,
+     risk or effect, and every offered choice remain visible. Present that same
+     request from the coordinator's main harness session, then send the
+     operator's answer verbatim to the same worker when continuation is
+     available. Do not infer an answer from the task, choose on the operator's
+     behalf, or convert a chat reply into a tool permission: a protected action
+     may be retried only after the harness permission system grants that exact
+     action.
+
+     Harness transport is capability-specific:
+
+     - Claude Code natively passes foreground and background tool-permission
+       prompts to the main session, but removes `AskUserQuestion` from
+       subagents. Use `SendMessage`/`SubagentHandback` for the packet when
+       available and the completed-result handback otherwise; native permission
+       UI remains the grant authority.
+     - Codex subagents use `send_message` to deliver the packet to the parent and
+       `followup_task` to resume after the answer. If messaging is unavailable,
+       return the packet as the final handback. The Codex approval UI, not an
+       inter-agent message, authorizes a protected tool call.
+     - Grok Build documents child-summary return to the parent but no portable
+       mid-run question channel. Stop and return the packet in the summary; the
+       coordinator asks and redispatches or resumes only if the running harness
+       exposes a supported continuation.
+     - OpenCode background children notify the parent with their result, and the
+       built-in `general` subagent denies questions by default. Return the packet
+       as the child result; after the coordinator asks, continue the same child
+       session ID when available. Child permissions remain independent.
+  5. While a subagent runs past a cycle, keep its claim alive with
      `agent-doc queue claim <FILE> --item <...> --owner subagent:<label> --refresh`
      (the heartbeat; the default TTL is 2h). Under the attribute, an expired claim
      is offered for dispatch again and never drained inline.
-  5. A subagent commits and pushes its branch (fast-forward only, never force).
+  6. A subagent commits and pushes its branch (fast-forward only, never force).
      It never runs `make install`, a release build, a version bump, a tag, or a
      release. Concurrent subagents share the coordinator's scratchpad, so a
      subagent passes its commit message through `git commit -F -` (a stdin
@@ -177,7 +207,7 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      scratchpad or `/tmp`, and puts other temp files in its own worktree or a
      unique `mktemp` path (one subagent's commit once carried a sibling's
      message).
-  6. As soon as a subagent reports back, run
+  7. As soon as a subagent reports back, run
      `agent-doc queue report-complete <FILE> --item <...>`. The binary appends
      immediate, deduplicated completion feedback to `agent:exchange` through
      its cross-process document owner and editor/CRDT authority while leaving

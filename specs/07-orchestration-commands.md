@@ -579,6 +579,47 @@ Before emitting queue state, preflight may:
   converges, preserves disk byte-for-byte throughout, and refuses to start a
   response if the retry budget expires.
 
+### Subagent operator-request handback (`#waypostrequest`)
+
+Every `agent-doc queue brief` preamble MUST tell a dispatched worker how to
+surface a blocking question or permission request through its coordinator. A
+worker MUST NOT guess, silently deny the request, or treat the queue item's
+authorization as its answer. Before stopping, it sends or returns this packet
+without paraphrase:
+
+```text
+[agent-doc] subagent operator request (#waypostrequest)
+kind: question | permission
+blocking: true
+request: <exact question or exact tool/action requiring permission>
+context: <why it is needed, current state, target/scope, and risk or effect>
+choices:
+- <label>: <effect>
+```
+
+The packet MUST include every offered choice with its effect. `choices: []` is
+valid only when the harness supplied no choices. The coordinator MUST copy the
+complete packet verbatim into `agent:exchange`, present the same request from
+the main harness session, and send the operator's answer verbatim to the same
+worker when the harness supports continuation. The claim remains live while
+the request is pending; a packet is not worker completion.
+
+Permission safety is stricter than question routing: a conversational answer is
+context, not a tool permission grant. The worker may retry a protected action
+only after the harness permission system records a grant for that exact action.
+The coordinator MUST NOT broaden the requested target, duration, command
+prefix, filesystem scope, or external side effect.
+
+The transport contract distinguishes documented native behavior from the
+portable agent-doc fallback:
+
+| Harness | Native behavior | agent-doc fallback |
+| --- | --- | --- |
+| Claude Code | Foreground and background subagent tool-permission prompts surface in the main session. `AskUserQuestion` is removed from subagents; background workers can retain `SendMessage` and `SubagentHandback`. | Send the packet through `SendMessage`/`SubagentHandback` when available, otherwise return it as the worker result. The native permission UI remains authoritative. |
+| Codex | Multi-agent runs provide inter-agent `send_message`; the parent can resume a worker with `followup_task`. | Send the packet to the parent, or return it as the final handback when messaging is unavailable. A protected tool call still requires Codex's approval path. |
+| Grok Build | Documented subagents are child sessions that return a summary to the parent; no portable mid-run question channel is part of the documented contract. | Stop and return the packet in the summary. The coordinator asks and redispatches or resumes only when the active Grok version exposes a supported continuation. |
+| OpenCode | Background children notify the parent with their result; the built-in `general` subagent denies questions by default, and each child uses its own configured permissions. | Return the packet as the child result. The coordinator asks, then continues the same child session ID when available; parent permission does not replace child permission. |
+
 ### Post-commit queue consumption
 
 Queue subagent authorization accepts multiple whitespace-separated references in a quoted queue `preset=` value, for example `preset="#push #auth"`. `queue brief` resolves them independently in source order, collapses duplicate canonical names at their first occurrence, preserves each structured preset's runbook, and reports every result in `authorization.presets`. Mixed resolved and unresolved references produce `status: unresolved_preset`; resolved details remain visible, but authorization still fails closed.

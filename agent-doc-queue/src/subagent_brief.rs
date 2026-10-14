@@ -290,6 +290,35 @@ pub const SUBAGENT_SCRATCH_ISOLATION_RULE: &str = subagent_scratch_isolation_rul
 pub const SUBAGENT_PREAMBLE_MARKER: &str =
     "[agent-doc] operator authorization for a dispatched queue item (#waypostauthorization)";
 
+/// Marker that opens a blocking request a worker routes through its coordinator.
+pub const SUBAGENT_OPERATOR_REQUEST_MARKER: &str =
+    "[agent-doc] subagent operator request (#waypostrequest)";
+
+/// Cross-harness fallback for questions and permission requests that a background
+/// worker cannot present to the operator itself. The field names are deliberately
+/// stable so the coordinator can preserve the complete request in `agent:exchange`.
+pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
+    "If a blocking question or permission request arises, do not guess, silently deny it, or ",
+    "treat prior authorization as the answer. Send the coordinator this exact packet before ",
+    "stopping; use the harness's native parent-message mechanism when available, otherwise ",
+    "return the packet as your result:\n\n",
+    "[agent-doc] subagent operator request (#waypostrequest)\n",
+    "kind: question | permission\n",
+    "blocking: true\n",
+    "request: <exact question or exact tool/action requiring permission>\n",
+    "context: <why it is needed, current state, target/scope, and risk or effect>\n",
+    "choices:\n",
+    "- <label>: <effect>\n\n",
+    "Include every offered choice; write `choices: []` only when the harness supplied none. ",
+    "Claude Code may surface a background worker's tool-permission prompt natively, and Codex ",
+    "provides inter-agent messaging; Grok Build and OpenCode may require returning the packet ",
+    "through the child result. In every harness, the coordinator records the packet verbatim in ",
+    "`agent:exchange`, presents the request from the main session, and sends the operator's answer ",
+    "back to the same worker when continuation is available. A chat reply is context, not a tool ",
+    "permission grant: retry a protected action only after the harness permission system records ",
+    "the grant for that exact action.\n"
+);
+
 /// Marker line present exactly when the authorization failed closed.
 pub const UNRESOLVED_AUTHORIZATION_MARKER: &str = "AUTHORIZATION NOT RESOLVED";
 
@@ -390,6 +419,8 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
          authorization above includes commit/push.\n\
          - Report back: branch, commit SHA, files changed, and exact test results.\n",
     );
+    out.push('\n');
+    out.push_str(SUBAGENT_OPERATOR_REQUEST_PROTOCOL);
     out
 }
 
@@ -440,6 +471,10 @@ mod tests {
             p.contains("Write command output, logs, and scratch files inside your own worktree")
         );
         assert!(p.contains("covers only the queue item above"));
+        assert!(p.contains(SUBAGENT_OPERATOR_REQUEST_MARKER));
+        assert!(p.contains("kind: question | permission"));
+        assert!(p.contains("context: <why it is needed, current state, target/scope"));
+        assert!(p.contains("A chat reply is context, not a tool permission grant"));
         assert!(!p.contains(UNRESOLVED_AUTHORIZATION_MARKER));
     }
 
@@ -635,5 +670,33 @@ mod tests {
             SUBAGENT_SCRATCH_ISOLATION_RULE.contains("never a file in a shared scratchpad or /tmp")
         );
         assert!(SUBAGENT_SCRATCH_ISOLATION_RULE.contains("unique `mktemp` path"));
+    }
+
+    #[test]
+    fn every_status_carries_the_cross_harness_operator_request_protocol() {
+        let resolved = doc(
+            PRESETS,
+            "subagents preset=\"#spec-test-build-install-commit-push\"",
+            &["do [#abc]"],
+            &["[ ] [#abc] x"],
+        );
+        let unresolved = doc("", "subagents preset=\"#nosuch\"", &["do [#abc]"], &[]);
+        let item_only = doc("", "subagents", &["look at foo"], &[]);
+        for (content, item) in [
+            (&resolved, "do [#abc]"),
+            (&unresolved, "do [#abc]"),
+            (&item_only, "look at foo"),
+        ] {
+            let preamble = subagent_authorization("doc.md", content, item).subagent_prompt_preamble;
+            assert!(
+                preamble.contains(SUBAGENT_OPERATOR_REQUEST_MARKER),
+                "{preamble}"
+            );
+            assert!(preamble.contains("request: <exact question or exact tool/action"));
+            assert!(preamble.contains("choices:\n- <label>: <effect>"));
+            for harness in ["Claude Code", "Codex", "Grok Build", "OpenCode"] {
+                assert!(preamble.contains(harness), "missing {harness}: {preamble}");
+            }
+        }
     }
 }

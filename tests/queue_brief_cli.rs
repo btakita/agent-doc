@@ -45,6 +45,15 @@ fn brief_prints_preset_and_backlog_authorization_for_an_id_head() {
         ))
         .stdout(predicate::str::contains(format!("> {PRESET_BODY}")))
         .stdout(predicate::str::contains("Never run `make install`"))
+        .stdout(predicate::str::contains("#waypostrequest"))
+        .stdout(predicate::str::contains("kind: question | permission"))
+        .stdout(predicate::str::contains(
+            "context: <why it is needed, current state, target/scope, and risk or effect>",
+        ))
+        .stdout(predicate::str::contains("choices:\n- <label>: <effect>"))
+        .stdout(predicate::str::contains(
+            "A chat reply is context, not a tool permission grant",
+        ))
         .stdout(predicate::str::contains(format!(
             "- {}\n",
             agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE

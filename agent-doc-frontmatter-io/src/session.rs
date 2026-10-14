@@ -276,6 +276,40 @@ mod tests {
     }
 
     #[test]
+    fn documented_project_wide_preset_example_resolves() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\n",
+                "presets:\n",
+                "  \"#review\": Review the change and run focused tests.\n",
+                "  \"#release\":\n",
+                "    prompt: Prepare and publish the release.\n",
+                "    runbook: runbooks/release.md\n",
+                "---\n\n",
+                "# Agent Doc project defaults\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("tasks/work.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# Work\n").unwrap();
+
+        let effective = effective_prompt_presets_for_file("# Work\n", &doc).unwrap();
+        assert_eq!(
+            effective.get("#review").map(String::as_str),
+            Some("Review the change and run focused tests.")
+        );
+        assert_eq!(
+            effective.get("#release").map(String::as_str),
+            Some("Prepare and publish the release.")
+        );
+        assert_eq!(effective.runbook("#release"), Some("runbooks/release.md"));
+    }
+
+    #[test]
     fn local_null_declaration_suppresses_inherited_preset() {
         let dir = TempDir::new().unwrap();
         setup_project(dir.path());

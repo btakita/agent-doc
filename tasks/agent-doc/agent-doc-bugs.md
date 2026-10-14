@@ -151,6 +151,7 @@ Verification passed: touched-file rustfmt, the focused regression, `make check-f
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- #gh-fix https://github.com/btakita/agent-doc/issues/254
 <!-- /agent:queue -->
 
 ## Backlog

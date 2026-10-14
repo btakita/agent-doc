@@ -123,8 +123,8 @@ fn tracked_item(
         })
 }
 
-/// Preset names the selected queue declares: its `preset=` attr, then any
-/// body-level `preset <name>` lines.
+/// Preset names the selected queue declares: every whitespace-separated
+/// reference in its `preset=` attr, then any body-level `preset <name>` lines.
 fn queue_preset_names(
     content: &str,
     components: &[element::Component],
@@ -134,8 +134,8 @@ fn queue_preset_names(
         return names;
     };
     let attrs = crate::prompt_component_attrs::prompt_component_attrs_for(queue, "queue");
-    if let Some(preset) = attrs.preset {
-        names.push((preset, PresetSource::QueueAttr));
+    for preset in attrs.preset_names() {
+        names.push((preset.to_string(), PresetSource::QueueAttr));
     }
     if let Ok(entries) = crate::document_queue::parse(queue.content(content)) {
         for entry in entries {
@@ -548,6 +548,45 @@ mod tests {
             auth.presets[0].body.as_deref(),
             Some("review only, no commits")
         );
+    }
+
+    #[test]
+    fn multi_preset_attr_preserves_order_deduplicates_and_fails_closed() {
+        let fm = concat!(
+            "prompt_presets:\n",
+            "  \"#push\": \"commit and push\"\n",
+            "  \"#auth\":\n",
+            "    prompt: \"use the release credentials\"\n",
+            "    runbook: \"runbooks/release-auth.md\"\n",
+        );
+        let content = doc(
+            fm,
+            "subagents preset=\"#push '#auth' #push #missing\"",
+            &["publish the release"],
+            &[],
+        );
+        let auth = subagent_authorization("doc.md", &content, "publish the release");
+        assert_eq!(auth.status, AuthorizationStatus::UnresolvedPreset);
+        assert_eq!(
+            auth.presets
+                .iter()
+                .map(|preset| preset.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["#push", "#auth", "#missing"]
+        );
+        assert!(auth.presets[..2].iter().all(|preset| preset.resolved));
+        assert!(!auth.presets[2].resolved);
+        assert_eq!(
+            auth.presets[1].runbook.as_deref(),
+            Some("runbooks/release-auth.md")
+        );
+        let preamble = &auth.subagent_prompt_preamble;
+        let push = preamble.find("queue preset `#push`").unwrap();
+        let auth_preset = preamble.find("queue preset `#auth`").unwrap();
+        let missing = preamble.find("`#missing`").unwrap();
+        assert!(push < auth_preset && auth_preset < missing, "{preamble}");
+        assert!(preamble.contains("agent-doc runbook show 'doc.md' #auth"));
+        assert!(preamble.contains(UNRESOLVED_AUTHORIZATION_MARKER));
     }
 
     #[test]

@@ -8,8 +8,12 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(unix)]
+use std::os::fd::{AsRawFd, OwnedFd};
+
 use agent_doc_harness::HarnessConfig;
 
+use crate::io_handoff::IoHandoffGate;
 use crate::shared_writer::{SharedPtyWriter, lock_writer_interruptibly};
 
 pub trait PtyReaderObserver: Send + Sync + 'static {
@@ -31,6 +35,8 @@ pub fn spawn_reader_thread<T>(
     observer: Arc<T>,
     harness: HarnessConfig,
     mut reader: Box<dyn Read + Send>,
+    #[cfg(unix)] poll_fd: Option<OwnedFd>,
+    handoff: Arc<IoHandoffGate>,
 ) -> std::thread::JoinHandle<()>
 where
     T: PtyReaderObserver,
@@ -44,6 +50,22 @@ where
             let debug_filter = std::env::var("AGENT_DOC_DEBUG_FILTER").is_ok();
             let mut pty_filter = crate::pty::PtyFilter::for_harness(&harness);
             loop {
+                #[cfg(unix)]
+                if let Some(fd) = poll_fd.as_ref()
+                    && !wait_for_readable(fd.as_raw_fd(), -1)
+                {
+                    break;
+                }
+                let _transaction = handoff.forwarding();
+                // Readiness can change while waiting for a concurrent forwarding
+                // transaction. Re-check under the gate so this read cannot block
+                // the supervisor handoff.
+                #[cfg(unix)]
+                if let Some(fd) = poll_fd.as_ref()
+                    && !wait_for_readable(fd.as_raw_fd(), 0)
+                {
+                    continue;
+                }
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
@@ -63,6 +85,7 @@ where
                         }
                         filtered.clear();
                         pty_filter.filter(&buf[..n], &mut filtered);
+                        handoff.set_output_filter_at_boundary(pty_filter.at_sequence_boundary());
                         if debug_filter {
                             let mut display = String::new();
                             for &b in &filtered {
@@ -93,6 +116,27 @@ where
             }
         })
         .expect("spawn pty->stdout thread")
+}
+
+#[cfg(unix)]
+fn wait_for_readable(fd: std::os::fd::RawFd, timeout_ms: i32) -> bool {
+    loop {
+        let mut poll_fd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let result = unsafe { libc::poll(&mut poll_fd, 1, timeout_ms) };
+        if result > 0 {
+            return poll_fd.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0;
+        }
+        if result == 0 {
+            return false;
+        }
+        if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return false;
+        }
+    }
 }
 
 /// Spawn the stdin-to-master forwarding thread using a shared writer.
@@ -147,6 +191,27 @@ where
                     break;
                 }
                 if fds[0].revents & libc::POLLIN != 0 {
+                    // Lock order is writer -> handoff everywhere. Holding both
+                    // from before stdin consumption through the PTY write means
+                    // execve observes either all or none of an input transaction.
+                    let Some(mut w) = lock_writer_interruptibly(&writer, stop.as_ref()) else {
+                        break;
+                    };
+                    let handoff = w.handoff_gate();
+                    let _transaction = handoff.forwarding();
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let mut stdin_ready = libc::pollfd {
+                        fd: libc::STDIN_FILENO,
+                        events: libc::POLLIN,
+                        revents: 0,
+                    };
+                    if unsafe { libc::poll(&mut stdin_ready, 1, 0) } <= 0
+                        || stdin_ready.revents & libc::POLLIN == 0
+                    {
+                        continue;
+                    }
                     let n = unsafe {
                         libc::read(
                             libc::STDIN_FILENO,
@@ -247,13 +312,7 @@ where
                         }
                         flag.store(true, Ordering::Relaxed);
                     }
-                    let Some(mut w) = lock_writer_interruptibly(&writer, stop.as_ref()) else {
-                        if debug {
-                            eprintln!("[stdin->pty] stop requested while waiting for writer");
-                        }
-                        break;
-                    };
-                    if let Err(err) = w.write_all_interruptibly(data, stop.as_ref()) {
+                    if let Err(err) = w.write_all_interruptibly_handoff_held(data, stop.as_ref()) {
                         if debug {
                             eprintln!("[stdin->pty] pty write failed, exiting: {err}");
                         }
@@ -502,7 +561,13 @@ mod tests {
         }
 
         let reader: Box<dyn Read + Send> = Box::new(FdReader(fds[0]));
-        let handle = spawn_reader_thread(Arc::new(NoopObserver), HarnessConfig::codex(), reader);
+        let handle = spawn_reader_thread(
+            Arc::new(NoopObserver),
+            HarnessConfig::codex(),
+            reader,
+            None,
+            Arc::new(IoHandoffGate::default()),
+        );
 
         unsafe { libc::close(fds[1]) };
 

@@ -3,14 +3,15 @@ EXTENDS Naturals, TLC
 
 (***************************************************************************
 This finite model checks the supervisor-generation topology gate. An open
-document cycle may cross generations only through the captured-recovery path;
-ordinary install, stale-binary, and restart requests have no replay authority.
-IPC drain is independent and always required. Cycle close and IPC drain are
-environment edges, not timeouts.
+document cycle may cross generations only through captured-response replay or
+exact live-child transport continuity. IPC drain is independent and always
+required. Cycle close, continuity proof, and IPC drain are environment edges,
+not timeouts.
 ***************************************************************************)
 
 VARIABLES cycleOpen,
           replayCheckpoint,
+          liveChildContinuity,
           ipcDrained,
           cause,
           phase,
@@ -18,7 +19,7 @@ VARIABLES cycleOpen,
           unsafeReplacements,
           uncheckpointedOpenReplacements
 
-vars == <<cycleOpen, replayCheckpoint, ipcDrained, cause, phase,
+vars == <<cycleOpen, replayCheckpoint, liveChildContinuity, ipcDrained, cause, phase,
           replacements, unsafeReplacements,
           uncheckpointedOpenReplacements>>
 
@@ -26,9 +27,12 @@ CapturedRecovery ==
     /\ cause = "captured_recovery"
     /\ replayCheckpoint
 
+GenerationContinuity == CapturedRecovery \/ liveChildContinuity
+
 Init ==
     /\ cycleOpen \in BOOLEAN
     /\ replayCheckpoint \in BOOLEAN
+    /\ liveChildContinuity \in BOOLEAN
     /\ ipcDrained \in BOOLEAN
     /\ cause \in {"install", "stale", "restart", "captured_recovery"}
     /\ phase = "requested"
@@ -40,7 +44,7 @@ CloseCycle ==
     /\ phase = "requested"
     /\ cycleOpen
     /\ cycleOpen' = FALSE
-    /\ UNCHANGED <<replayCheckpoint, ipcDrained, cause, phase,
+    /\ UNCHANGED <<replayCheckpoint, liveChildContinuity, ipcDrained, cause, phase,
                     replacements, unsafeReplacements,
                     uncheckpointedOpenReplacements>>
 
@@ -48,7 +52,7 @@ DrainIpc ==
     /\ phase = "requested"
     /\ ~ipcDrained
     /\ ipcDrained' = TRUE
-    /\ UNCHANGED <<cycleOpen, replayCheckpoint, cause, phase,
+    /\ UNCHANGED <<cycleOpen, replayCheckpoint, liveChildContinuity, cause, phase,
                     replacements, unsafeReplacements,
                     uncheckpointedOpenReplacements>>
 
@@ -57,26 +61,35 @@ PublishCapturedReplay ==
     /\ cause = "captured_recovery"
     /\ ~replayCheckpoint
     /\ replayCheckpoint' = TRUE
-    /\ UNCHANGED <<cycleOpen, ipcDrained, cause, phase, replacements,
+    /\ UNCHANGED <<cycleOpen, liveChildContinuity, ipcDrained, cause, phase, replacements,
                     unsafeReplacements, uncheckpointedOpenReplacements>>
+
+ProveLiveChildContinuity ==
+    /\ phase = "requested"
+    /\ ~liveChildContinuity
+    /\ liveChildContinuity' = TRUE
+    /\ UNCHANGED <<cycleOpen, replayCheckpoint, ipcDrained, cause, phase,
+                    replacements, unsafeReplacements,
+                    uncheckpointedOpenReplacements>>
 
 Replace ==
     /\ phase = "requested"
     /\ ipcDrained
-    /\ (~cycleOpen \/ CapturedRecovery)
+    /\ (~cycleOpen \/ GenerationContinuity)
     /\ phase' = "replaced"
     /\ replacements' = replacements + 1
     /\ unsafeReplacements' = unsafeReplacements
         + IF ipcDrained THEN 0 ELSE 1
     /\ uncheckpointedOpenReplacements' = uncheckpointedOpenReplacements
-        + IF cycleOpen /\ ~CapturedRecovery THEN 1 ELSE 0
-    /\ UNCHANGED <<cycleOpen, replayCheckpoint, ipcDrained, cause>>
+        + IF cycleOpen /\ ~GenerationContinuity THEN 1 ELSE 0
+    /\ UNCHANGED <<cycleOpen, replayCheckpoint, liveChildContinuity, ipcDrained, cause>>
 
 Done ==
     /\ phase = "replaced"
     /\ UNCHANGED vars
 
-Next == CloseCycle \/ DrainIpc \/ PublishCapturedReplay \/ Replace \/ Done
+Next == CloseCycle \/ DrainIpc \/ PublishCapturedReplay
+        \/ ProveLiveChildContinuity \/ Replace \/ Done
 
 Spec ==
     /\ Init
@@ -86,6 +99,7 @@ Spec ==
 TypeOK ==
     /\ cycleOpen \in BOOLEAN
     /\ replayCheckpoint \in BOOLEAN
+    /\ liveChildContinuity \in BOOLEAN
     /\ ipcDrained \in BOOLEAN
     /\ cause \in {"install", "stale", "restart", "captured_recovery"}
     /\ phase \in {"requested", "replaced"}
@@ -99,8 +113,8 @@ UnsafeCheckpointNeverReplaced == unsafeReplacements = 0
 
 AtMostOneReplacement == replacements <= 1
 
-OnlyCapturedRecoveryCrossesOpenCycle ==
-    (phase = "replaced" /\ cycleOpen) => CapturedRecovery
+OnlyProvenContinuityCrossesOpenCycle ==
+    (phase = "replaced" /\ cycleOpen) => GenerationContinuity
 
 TerminalRequestEventuallyReplaced ==
     [](phase = "requested" /\ ~cycleOpen /\ ipcDrained

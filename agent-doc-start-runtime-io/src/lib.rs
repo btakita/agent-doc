@@ -1713,13 +1713,14 @@ fn supervisor_reexec_candidates() -> Vec<(PathBuf, &'static str)> {
 /// `run_with_reap_policy`, re-runs all supervisor setup (IPC, sessions, controller,
 /// watchers) for free, and calls [`PtySession::adopt`] instead of spawning.
 ///
-/// Returns `Err` if it could not even begin the exec (no live child/master fd, or
-/// `exec` itself failed). On success it never returns. The caller falls back to a
-/// clean `process::exit(0)` so a recycle still happens (the child restarts) rather
-/// than wedging on the stale binary.
+/// Returns `Err` if it could not safely begin the exec (active IPC/PTY transfer,
+/// partial terminal sequence, no live child/master fd, or `exec` itself failed).
+/// On success it never returns. On failure the old image keeps serving the same
+/// child; an uncaptured open turn is never killed or re-dispatched.
 #[cfg(unix)]
 fn supervisor_perform_reexec(
     shared: &SupervisorShared,
+    redispatch_if_child_died: bool,
 ) -> Result<std::convert::Infallible, SupervisorReexecError> {
     use std::os::unix::process::CommandExt;
     // `#reexecdeadchild`: hold the reap gate from the liveness check through the
@@ -1728,6 +1729,25 @@ fn supervisor_perform_reexec(
     // the image swap. A successful exec never returns (the gate dies with the old
     // image); a failed one drops it on return.
     let _reap_gate = shared.child_reap_gate.lock();
+    // Freeze supervisor effects before PTY forwarding. A handler that already
+    // started completes before this point; one accepted afterward cannot begin
+    // a write/capture/lifecycle mutation in the outgoing image.
+    let _ipc_handoff = shared.ipc_handoff.lock();
+    // Freeze complete PTY forwarding transactions before inspecting handoff
+    // evidence. Workers poll outside this gate and consume/write bytes only
+    // while holding it, so a successful exec cannot discard operator input,
+    // child output, or stateful terminal-filter carryover in userspace.
+    let _io_handoff = shared.io_handoff.freeze();
+    if !shared.io_handoff.output_filter_at_boundary() {
+        return Err(SupervisorReexecError::UnsafeIoHandoff(
+            "partial_terminal_filter_sequence",
+        ));
+    }
+    if agent_doc_ipc_io::inflight_connection_handlers() > 0 {
+        return Err(SupervisorReexecError::UnsafeIoHandoff(
+            "supervisor_ipc_inflight",
+        ));
+    }
     if let Some(refusal) = shared.reexec_preserve_child_refusal() {
         return Err(SupervisorReexecError::Refused(refusal));
     }
@@ -1757,6 +1777,7 @@ fn supervisor_perform_reexec(
     let state = ReexecState {
         child_pid,
         master_fd: inherited,
+        redispatch_if_child_died,
     };
     // Try every candidate in order. `exec()` replaces the current process image and
     // only returns on failure, so a returning call means this candidate could not
@@ -1816,6 +1837,9 @@ enum SupervisorReexecError {
     /// or about to be replaced). Nothing was attempted; this is a deferral, not
     /// an exec failure, and must not disable recycling or escalate.
     Refused(agent_doc_controller::recycle::ReexecPreserveChildRefusal),
+    /// The final atomic handoff gate found bytes or IPC owned by the outgoing
+    /// image. Nothing was attempted; the next watch edge may retry.
+    UnsafeIoHandoff(&'static str),
     /// The exec could not start.
     Io(std::io::Error),
 }
@@ -1832,6 +1856,7 @@ impl std::fmt::Display for SupervisorReexecError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Refused(refusal) => write!(f, "reexec refused: preserved child {refusal}"),
+            Self::UnsafeIoHandoff(reason) => write!(f, "reexec deferred: {reason}"),
             Self::Io(err) => write!(f, "{err}"),
         }
     }
@@ -2259,7 +2284,11 @@ fn durable_prompt_dispatch_key_path(project_root: &Path, session_id: &str) -> Pa
 
 /// A prompt inject is a duplicate when its key matches the in-memory
 /// admission or the durable one that survived a re-exec.
-fn prompt_dispatch_key_is_duplicate(memory: Option<&str>, durable: Option<&str>, key: &str) -> bool {
+fn prompt_dispatch_key_is_duplicate(
+    memory: Option<&str>,
+    durable: Option<&str>,
+    key: &str,
+) -> bool {
     memory == Some(key) || durable == Some(key)
 }
 
@@ -2444,6 +2473,17 @@ pub(crate) struct SupervisorShared {
     /// unpublishes `child_pid` before releasing it on exit; the reexec holds it
     /// from its liveness check through the exec.
     child_reap_gate: Mutex<()>,
+    /// Serializes complete PTY input/output transactions against a
+    /// child-preserving supervisor `execve`. The replacement image may be
+    /// installed mid-turn only after this gate proves no userspace byte buffer
+    /// or partial terminal-filter sequence belongs to the outgoing image.
+    io_handoff: Arc<agent_doc_supervisor_process::io_handoff::IoHandoffGate>,
+    /// Serializes complete supervisor-IPC effects against `execve`. The accept
+    /// thread may enqueue a fresh connection after the recycle decision, but
+    /// its handler cannot begin an input/capture/lifecycle effect once the
+    /// handoff owns this gate; that client observes disconnect and retries
+    /// against the replacement socket.
+    ipc_handoff: Mutex<()>,
     /// Flag: IPC requested a restart.
     restart_requested: AtomicBool,
     /// A child-replacement restart accepted during an open document cycle. The
@@ -2551,6 +2591,10 @@ impl SupervisorShared {
             child_pid: AtomicU32::new(0),
             master_fd: AtomicI32::new(-1),
             child_reap_gate: Mutex::new(()),
+            io_handoff: Arc::new(
+                agent_doc_supervisor_process::io_handoff::IoHandoffGate::default(),
+            ),
+            ipc_handoff: Mutex::new(()),
             restart_requested: AtomicBool::new(false),
             restart_deferred_until_boundary: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
@@ -3487,7 +3531,7 @@ mod tests {
             shared.reexec_preserve_child_refusal(),
             Some(Refusal::ChildExited)
         );
-        match supervisor_perform_reexec(&shared) {
+        match supervisor_perform_reexec(&shared, false) {
             Err(SupervisorReexecError::Refused(Refusal::ChildExited)) => {}
             other => panic!("reexec must refuse a reaped child, got {other:?}"),
         }

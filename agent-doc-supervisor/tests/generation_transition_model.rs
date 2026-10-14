@@ -19,7 +19,7 @@
 //! invariants.
 
 use agent_doc_supervisor::lifecycle::{
-    DurableReplayCheckpoint, GenerationTransitionAdmission, generation_transition_admission,
+    GenerationContinuity, GenerationTransitionAdmission, generation_transition_admission,
 };
 use proptest::prelude::*;
 use std::collections::{HashSet, VecDeque};
@@ -52,6 +52,7 @@ enum Phase {
 struct State {
     cycle_open: bool,
     replay_checkpoint: bool,
+    live_child_continuity: bool,
     ipc_drained: bool,
     cause: Cause,
     phase: Phase,
@@ -65,13 +66,15 @@ enum Action {
     CloseCycle,
     DrainIpc,
     PublishCapturedReplay,
+    ProveLiveChildContinuity,
     Replace,
 }
 
-const ACTIONS: [Action; 4] = [
+const ACTIONS: [Action; 5] = [
     Action::CloseCycle,
     Action::DrainIpc,
     Action::PublishCapturedReplay,
+    Action::ProveLiveChildContinuity,
     Action::Replace,
 ];
 
@@ -80,18 +83,21 @@ fn initial_states() -> Vec<State> {
     let mut states = Vec::new();
     for cycle_open in [false, true] {
         for replay_checkpoint in [false, true] {
-            for ipc_drained in [false, true] {
-                for cause in CAUSES {
-                    states.push(State {
-                        cycle_open,
-                        replay_checkpoint,
-                        ipc_drained,
-                        cause,
-                        phase: Phase::Requested,
-                        replacements: 0,
-                        unsafe_replacements: 0,
-                        uncheckpointed_open_replacements: 0,
-                    });
+            for live_child_continuity in [false, true] {
+                for ipc_drained in [false, true] {
+                    for cause in CAUSES {
+                        states.push(State {
+                            cycle_open,
+                            replay_checkpoint,
+                            live_child_continuity,
+                            ipc_drained,
+                            cause,
+                            phase: Phase::Requested,
+                            replacements: 0,
+                            unsafe_replacements: 0,
+                            uncheckpointed_open_replacements: 0,
+                        });
+                    }
                 }
             }
         }
@@ -104,21 +110,26 @@ fn captured_recovery(s: &State) -> bool {
     s.cause == Cause::CapturedRecovery && s.replay_checkpoint
 }
 
-/// The model's `Replace` guard, transcribed literally:
-/// `ipcDrained /\ (~cycleOpen \/ CapturedRecovery)`.
-fn tla_replace_enabled(s: &State) -> bool {
-    s.ipc_drained && (!s.cycle_open || captured_recovery(s))
+fn generation_continuity(s: &State) -> bool {
+    captured_recovery(s) || s.live_child_continuity
 }
 
-/// The production gate, fed the model state. The durable replay checkpoint the
-/// Rust gate sees exists exactly when the model's `CapturedRecovery` holds.
+/// The model's `Replace` guard, transcribed literally:
+/// `ipcDrained /\ (~cycleOpen \/ GenerationContinuity)`.
+fn tla_replace_enabled(s: &State) -> bool {
+    s.ipc_drained && (!s.cycle_open || generation_continuity(s))
+}
+
+/// The production gate, fed the model's exact replay-or-live-child continuity.
 fn production_admission(s: &State) -> GenerationTransitionAdmission {
-    let replay = if captured_recovery(s) {
-        DurableReplayCheckpoint::CapturedResponse
+    let continuity = if captured_recovery(s) {
+        GenerationContinuity::CapturedResponse
+    } else if s.live_child_continuity {
+        GenerationContinuity::PreservedHarnessChild
     } else {
-        DurableReplayCheckpoint::Absent
+        GenerationContinuity::None
     };
-    generation_transition_admission(s.cycle_open, replay, s.ipc_drained)
+    generation_transition_admission(s.cycle_open, continuity, s.ipc_drained)
 }
 
 /// `Next`, with the `Replace` guard supplied by the PRODUCTION gate.
@@ -146,6 +157,12 @@ fn step(s: &State, action: Action) -> Option<State> {
             }
             next.replay_checkpoint = true;
         }
+        Action::ProveLiveChildContinuity => {
+            if s.live_child_continuity {
+                return None;
+            }
+            next.live_child_continuity = true;
+        }
         Action::Replace => {
             if production_admission(s) != GenerationTransitionAdmission::Permit {
                 return None;
@@ -153,7 +170,8 @@ fn step(s: &State, action: Action) -> Option<State> {
             next.phase = Phase::Replaced;
             next.replacements += 1;
             next.unsafe_replacements += u32::from(!s.ipc_drained);
-            next.uncheckpointed_open_replacements += u32::from(s.cycle_open && !captured_recovery(s));
+            next.uncheckpointed_open_replacements +=
+                u32::from(s.cycle_open && !generation_continuity(s));
         }
     }
     Some(next)
@@ -170,8 +188,10 @@ fn check_invariants(s: &State) -> Result<(), String> {
     if s.replacements > 1 {
         return Err(format!("AtMostOneReplacement violated: {s:?}"));
     }
-    if s.phase == Phase::Replaced && s.cycle_open && !captured_recovery(s) {
-        return Err(format!("OnlyCapturedRecoveryCrossesOpenCycle violated: {s:?}"));
+    if s.phase == Phase::Replaced && s.cycle_open && !generation_continuity(s) {
+        return Err(format!(
+            "OnlyProvenContinuityCrossesOpenCycle violated: {s:?}"
+        ));
     }
     Ok(())
 }
@@ -186,7 +206,7 @@ fn tla_replace_guard_text_is_the_transcribed_guard() {
     for conjunct in [
         "/\\ phase = \"requested\"",
         "/\\ ipcDrained",
-        "/\\ (~cycleOpen \\/ CapturedRecovery)",
+        "/\\ (~cycleOpen \\/ GenerationContinuity)",
     ] {
         assert!(
             replace.contains(conjunct),
@@ -199,14 +219,18 @@ fn tla_replace_guard_text_is_the_transcribed_guard() {
         ),
         "CapturedRecovery definition drifted from the transcription"
     );
+    assert!(
+        TLA_SOURCE.contains("GenerationContinuity == CapturedRecovery \\/ liveChildContinuity"),
+        "GenerationContinuity definition drifted from the transcription"
+    );
 }
 
 #[test]
 fn production_gate_equals_the_tla_guard_on_every_state() {
-    // The shared transition table: one row per (cycleOpen, CapturedRecovery,
-    // ipcDrained), expected Replace-enabled. Both sides must match it.
+    // The shared transition table: one row per (cycleOpen,
+    // GenerationContinuity, ipcDrained), expected Replace-enabled.
     const TABLE: [(bool, bool, bool, bool); 8] = [
-        // (cycle_open, captured_recovery, ipc_drained) -> replace enabled
+        // (cycle_open, continuity, ipc_drained) -> replace enabled
         (false, false, false, false),
         (false, false, true, true),
         (false, true, false, false),
@@ -219,13 +243,17 @@ fn production_gate_equals_the_tla_guard_on_every_state() {
     for state in initial_states() {
         let row = TABLE
             .iter()
-            .find(|(open, captured, drained, _)| {
+            .find(|(open, continuity, drained, _)| {
                 *open == state.cycle_open
-                    && *captured == captured_recovery(&state)
+                    && *continuity == generation_continuity(&state)
                     && *drained == state.ipc_drained
             })
             .expect("table covers every state");
-        assert_eq!(tla_replace_enabled(&state), row.3, "TLA guard vs table: {state:?}");
+        assert_eq!(
+            tla_replace_enabled(&state),
+            row.3,
+            "TLA guard vs table: {state:?}"
+        );
         assert_eq!(
             production_admission(&state) == GenerationTransitionAdmission::Permit,
             row.3,
@@ -261,25 +289,38 @@ fn exhaustive_state_space_satisfies_every_invariant() {
             .any(|s| s.phase == Phase::Replaced && s.cycle_open && captured_recovery(s)),
         "captured recovery never crossed an open cycle"
     );
+    assert!(
+        seen.iter()
+            .any(|s| { s.phase == Phase::Replaced && s.cycle_open && s.live_child_continuity }),
+        "live-child continuity never crossed an open cycle"
+    );
 }
 
 fn arb_state() -> impl Strategy<Value = State> {
-    (any::<bool>(), any::<bool>(), any::<bool>(), 0usize..4).prop_map(
-        |(cycle_open, replay_checkpoint, ipc_drained, cause)| State {
-            cycle_open,
-            replay_checkpoint,
-            ipc_drained,
-            cause: CAUSES[cause],
-            phase: Phase::Requested,
-            replacements: 0,
-            unsafe_replacements: 0,
-            uncheckpointed_open_replacements: 0,
-        },
+    (
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        0usize..4,
     )
+        .prop_map(
+            |(cycle_open, replay_checkpoint, live_child_continuity, ipc_drained, cause)| State {
+                cycle_open,
+                replay_checkpoint,
+                live_child_continuity,
+                ipc_drained,
+                cause: CAUSES[cause],
+                phase: Phase::Requested,
+                replacements: 0,
+                unsafe_replacements: 0,
+                uncheckpointed_open_replacements: 0,
+            },
+        )
 }
 
 fn arb_action() -> impl Strategy<Value = Action> {
-    (0usize..4).prop_map(|index| ACTIONS[index])
+    (0usize..5).prop_map(|index| ACTIONS[index])
 }
 
 proptest! {

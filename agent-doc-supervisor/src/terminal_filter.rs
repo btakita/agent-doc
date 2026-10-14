@@ -63,6 +63,14 @@ impl TerminalFilter {
         }
     }
 
+    /// True when no incomplete escape/control sequence is buffered between
+    /// reads. A supervisor image handoff may reset this filter only at such a
+    /// boundary; otherwise the replacement could render or drop half a prompt
+    /// control sequence.
+    pub fn at_sequence_boundary(&self) -> bool {
+        self.carryover.is_empty()
+    }
+
     pub fn filter(&mut self, input: &[u8], output: &mut Vec<u8>) -> Vec<TerminalFilterTrace> {
         let mut trace = Vec::new();
         self.filter_with_trace(input, output, &mut trace);

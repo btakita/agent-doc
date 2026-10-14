@@ -1753,6 +1753,7 @@ impl SimWorld {
             self.recycle_clear.cycle_open,
             !self.recycle_clear.recycle_child_died,
             self.recycle_clear.recycle_resume_consumed,
+            true,
         );
         match action {
             BootResumeAction::RedispatchInterruptedTurn => {
@@ -1766,6 +1767,11 @@ impl SimWorld {
                 self.coverage.recycle_resume_adopt_surviving += 1;
                 self.record_ops_proof(
                     "supervisor_recycle_resume_adopt_surviving_child reason=child_alive_owns_resume",
+                );
+            }
+            BootResumeAction::SpawnWithoutRedispatch => {
+                self.record_ops_proof(
+                    "supervisor_recycle_resume_child_lost action=spawn_without_redispatch reason=adopt_only_handoff",
                 );
             }
             BootResumeAction::None => {}

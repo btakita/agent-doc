@@ -33,10 +33,11 @@ use agent_doc_supervisor::{
         paused_idle_watch_should_skip, supervisor_auto_install_pane_message,
     },
     lifecycle::{
-        MAX_REEXEC_ESCALATIONS, SupervisorInstallAction, SupervisorRecycleAction,
-        SupervisorRecycleCheckpoint, SupervisorRestartAction,
+        GenerationContinuity, MAX_REEXEC_ESCALATIONS, SupervisorInstallAction,
+        SupervisorRecycleAction, SupervisorRecycleCheckpoint, SupervisorRestartAction,
         captured_cycle_generation_refresh_due, reexec_escalation_within_bound,
-        supervisor_install_action, supervisor_recycle_action, supervisor_restart_action,
+        supervisor_install_action, supervisor_recycle_action,
+        supervisor_recycle_action_with_continuity, supervisor_restart_action,
     },
 };
 use agent_doc_turn::op_log::OpsLogEvent;
@@ -3850,9 +3851,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // the live turn. Checked before the opt-in auto-recycle decision so a
                 // deliberate operator restart always supersedes (no env opt-in needed).
                 // `#midturn-recycle-resume`: a stale operator-requested replacement may
-                // reexec only after supervisor IPC drains and the durable document cycle
-                // closes. Execve usually preserves the harness child, but its fallback
-                // does not make an uncaptured preflight replayable.
+                // reexec during an open cycle only with an exact adopt-only child/PTY
+                // handoff at a drained IPC/I/O checkpoint. Without that continuity it
+                // still waits for the durable document cycle to close.
                 // Cycle state is the durable topology edge. The idle watcher may
                 // observe it but must not infer abandonment from elapsed time or a
                 // scraped prompt: both api.md and fpe.md disproved that inference.
@@ -3867,7 +3868,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     .is_some_and(|state| state.has_durable_response_capture());
                 // A durable open cycle is the generation-transition interlock. Prompt
                 // idleness, supervisor staleness, and elapsed watch ticks cannot weaken
-                // it: an uncaptured preflight has no replay point after exec fallback.
+                // it: an uncaptured preflight may move only with the exact live child,
+                // never through a kill/relaunch fallback.
                 let effective_cycle_open = cycle_open;
                 // `#gh179`: reclaim scheduling belongs to the idle supervisor,
                 // not to the optional recycle path below. A recycle request can
@@ -3997,7 +3999,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 "[agent-doc] warning: failed to publish recycle-inflight before restart reexec: {err:#}"
                             );
                         }
-                        match supervisor_perform_reexec(&shared) {
+                        match supervisor_perform_reexec(&shared, true) {
                             Ok(never) => match never {},
                             Err(SupervisorReexecError::Refused(refusal)) => {
                                 log_reexec_child_refusal(
@@ -4007,6 +4009,21 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     "restart_drain",
                                     refusal, &mut reexec_child_refusal_logged);
                                 settle_recycle_after_aborted_reexec(&path, "restart_drain", "refused");
+                            }
+                            Err(SupervisorReexecError::UnsafeIoHandoff(reason)) => {
+                                settle_recycle_after_aborted_reexec(
+                                    &path,
+                                    "restart_drain",
+                                    reason,
+                                );
+                                agent_doc_ops_log_io::log_op(
+                                    &path,
+                                    &format!(
+                                        "supervisor_restart_reexec_deferred file={} pane={} reason={reason} action=retry_safe_io_boundary",
+                                        path.display(),
+                                        shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                    ),
+                                );
                             }
                             Err(SupervisorReexecError::Io(err)) => {
                                 settle_recycle_after_aborted_reexec(&path, "restart_drain", "io_error");
@@ -4158,16 +4175,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let explicit_admin_recycle = recycle_request_cause_live;
                 // Recycle a wedged OR stale supervisor at the FIRST AVAILABLE SAFE
                 // intra-turn checkpoint, not merely at an idle prompt. A tick is a safe checkpoint when no
-                // supervisor IPC connection is being handled
-                // (`inflight_connection_handlers() == 0`): an `execve` recycle there
-                // cannot sever an active patch apply mid-flight. The wedge is already
+                // editor/controller or supervisor IPC connection is being handled:
+                // an `execve` recycle there cannot sever an active patch apply or
+                // prompt injection mid-flight. The effect rechecks under the IPC
+                // handoff gate to close the decision-to-exec race. The wedge is already
                 // capture-backed (the write closeout parked the response + retry patch
                 // before latching the wedge), so an in-flight handler is the only unsafe
                 // window. Off a safe checkpoint the recycle defers to the next tick and
                 // re-checks — it still fires mid-turn (no wait for the full turn
                 // boundary), just at the earliest point that cannot corrupt in-flight IO.
                 let inflight_handlers = inflight;
-                let at_safe_checkpoint = inflight_handlers == 0;
+                let inflight_supervisor_handlers =
+                    agent_doc_supervisor_io::ipc::inflight_supervisor_handler_count();
+                let output_filter_at_boundary = shared.io_handoff.output_filter_at_boundary();
+                let at_safe_checkpoint = inflight_handlers == 0
+                    && inflight_supervisor_handlers == 0
+                    && output_filter_at_boundary;
                 let stale_safe_checkpoint = stale_restart_safe_checkpoint;
                 let recycle_checkpoint = SupervisorRecycleCheckpoint::from_observation(
                     turn_boundary || stale_safe_checkpoint,
@@ -4199,6 +4222,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     || stale_capture_resume_latched)
                     && at_safe_checkpoint)
                     || captured_cycle_refresh;
+                let live_child_handoff_ready = shared.reexec_preserve_child_refusal().is_none();
+                let generation_continuity = if write_wedged || capture_backed_refresh {
+                    GenerationContinuity::CapturedResponse
+                } else if effective_cycle_open && live_child_handoff_ready {
+                    GenerationContinuity::PreservedHarnessChild
+                } else {
+                    GenerationContinuity::None
+                };
                 if captured_cycle_refresh {
                     agent_doc_ops_log_io::log_op(
                         &path,
@@ -4257,7 +4288,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         ),
                     );
                 }
-                let recycle_action = supervisor_recycle_action(
+                let recycle_action = supervisor_recycle_action_with_continuity(
                     supervisor_stale,
                     recycle_auto_enabled,
                     recycle_checkpoint,
@@ -4267,7 +4298,27 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     capture_backed_refresh,
                     reexec_failed,
                     effective_cycle_open,
+                    generation_continuity,
                 );
+                let open_cycle_preserved_child_refresh = effective_cycle_open
+                    && matches!(
+                        generation_continuity,
+                        GenerationContinuity::PreservedHarnessChild
+                    )
+                    && matches!(recycle_action, SupervisorRecycleAction::RecycleImmediate);
+                if open_cycle_preserved_child_refresh {
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "supervisor_open_cycle_child_preserving_recycle file={} pane={} cycle_open=true child_pid={} inflight={} output_filter_boundary={} action=execve_adopt_only (#midturn-live-child-recycle)",
+                            path.display(),
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            shared.child_pid.load(Ordering::Relaxed),
+                            inflight_handlers,
+                            output_filter_at_boundary,
+                        ),
+                    );
+                }
                 match recycle_action {
                     SupervisorRecycleAction::DeferCycleOpen => {
                         if empty_preflight_reclaim_probe_due {
@@ -4723,7 +4774,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // process (now serving the current binary) does not immediately
                         // re-recycle in a loop.
                         agent_doc_supervisor_io::recycle_request::clear_recycle_request(&file);
-                        match supervisor_perform_reexec(&shared) {
+                        match supervisor_perform_reexec(
+                            &shared,
+                            !open_cycle_preserved_child_refresh,
+                        ) {
                             Ok(never) => match never {},
                             Err(SupervisorReexecError::Refused(refusal)) => {
                                 // Lost the race to the host loop's reap: a
@@ -4735,6 +4789,21 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     "stale_recycle",
                                     refusal, &mut reexec_child_refusal_logged);
                                 settle_recycle_after_aborted_reexec(&path, "stale_recycle", "refused");
+                            }
+                            Err(SupervisorReexecError::UnsafeIoHandoff(reason)) => {
+                                settle_recycle_after_aborted_reexec(
+                                    &path,
+                                    "stale_recycle",
+                                    reason,
+                                );
+                                agent_doc_ops_log_io::log_op(
+                                    &path,
+                                    &format!(
+                                        "supervisor_reexec_deferred file={} pane={} reason={reason} action=retry_safe_io_boundary (#midturn-live-child-recycle)",
+                                        path.display(),
+                                        shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                    ),
+                                );
                             }
                             Err(SupervisorReexecError::Io(err)) => {
                                 settle_recycle_after_aborted_reexec(&path, "stale_recycle", "io_error");

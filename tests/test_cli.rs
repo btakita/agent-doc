@@ -20112,8 +20112,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && orchestration_start_run.contains(
                 "authoritative_reentry_document_for_pid("
             )
-            && orchestration_start_run
-                .contains("if preserved_child_survived && !file.exists()")
+            && orchestration_start_run.contains("if reexec_reentry && !file.exists()")
             && orchestration_start_run.contains(
                 "prepare_start_runtime_with_harness_and_purpose("
             )

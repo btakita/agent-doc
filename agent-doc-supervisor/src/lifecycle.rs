@@ -68,9 +68,16 @@ pub fn write_wedged_from_ipc_failures(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DurableReplayCheckpoint {
-    Absent,
+pub enum GenerationContinuity {
+    /// No durable response and no exact live-child transport handoff exists.
+    None,
+    /// The response is capture-backed and the fresh generation can replay the
+    /// closeout state machine without re-running the harness turn.
     CapturedResponse,
+    /// The exact harness child, PTY, session, and open cycle remain live while
+    /// only the supervisor image changes. This is adopt-only continuity: child
+    /// loss must never cause the turn to be re-dispatched.
+    PreservedHarnessChild,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,14 +91,15 @@ pub enum GenerationTransitionAdmission {
 ///
 /// An open cycle is stronger evidence than prompt-idle, binary-stale, or elapsed
 /// watch-tick observations. It may cross a generation boundary only when that
-/// exact cycle has a durable captured-response checkpoint from which the typed
-/// recovery path can replay. There is deliberately no timeout input.
+/// exact cycle has durable response-replay continuity or the replacement can
+/// adopt the exact live harness child without replay. There is deliberately no
+/// timeout input.
 pub fn generation_transition_admission(
     cycle_open: bool,
-    replay: DurableReplayCheckpoint,
+    continuity: GenerationContinuity,
     supervisor_ipc_drained: bool,
 ) -> GenerationTransitionAdmission {
-    if cycle_open && matches!(replay, DurableReplayCheckpoint::Absent) {
+    if cycle_open && matches!(continuity, GenerationContinuity::None) {
         return GenerationTransitionAdmission::DeferOpenCycle;
     }
     if !supervisor_ipc_drained {
@@ -127,6 +135,7 @@ pub enum BootResumeAction {
     None,
     AdoptSurvivingChild,
     RedispatchInterruptedTurn,
+    SpawnWithoutRedispatch,
 }
 
 pub fn boot_resume_action(
@@ -134,12 +143,16 @@ pub fn boot_resume_action(
     cycle_open: bool,
     child_survived: bool,
     already_consumed: bool,
+    redispatch_if_child_died: bool,
 ) -> BootResumeAction {
     if !is_recycle_boot || !cycle_open {
         return BootResumeAction::None;
     }
     if child_survived {
         return BootResumeAction::AdoptSurvivingChild;
+    }
+    if !redispatch_if_child_died {
+        return BootResumeAction::SpawnWithoutRedispatch;
     }
     if already_consumed {
         return BootResumeAction::None;
@@ -590,23 +603,75 @@ pub fn supervisor_recycle_action(
     reexec_failed: bool,
     cycle_open: bool,
 ) -> SupervisorRecycleAction {
-    let replay_checkpoint = if write_wedged || capture_backed_refresh {
-        DurableReplayCheckpoint::CapturedResponse
+    let continuity = if write_wedged || capture_backed_refresh {
+        GenerationContinuity::CapturedResponse
     } else {
-        DurableReplayCheckpoint::Absent
+        GenerationContinuity::None
     };
-    match generation_transition_admission(cycle_open, replay_checkpoint, checkpoint.is_safe()) {
+    supervisor_recycle_action_with_continuity(
+        stale,
+        auto_recycle,
+        checkpoint,
+        head_pending,
+        explicit_admin,
+        write_wedged,
+        capture_backed_refresh,
+        reexec_failed,
+        cycle_open,
+        continuity,
+    )
+}
+
+/// Full generation-transition policy, including the exact live-child handoff
+/// used for a stale-supervisor refresh during an open harness turn.
+#[allow(clippy::too_many_arguments)]
+pub fn supervisor_recycle_action_with_continuity(
+    stale: bool,
+    auto_recycle: bool,
+    checkpoint: SupervisorRecycleCheckpoint,
+    head_pending: bool,
+    explicit_admin: bool,
+    write_wedged: bool,
+    capture_backed_refresh: bool,
+    reexec_failed: bool,
+    cycle_open: bool,
+    continuity: GenerationContinuity,
+) -> SupervisorRecycleAction {
+    match generation_transition_admission(cycle_open, continuity, checkpoint.is_safe()) {
         GenerationTransitionAdmission::DeferOpenCycle => {
             return SupervisorRecycleAction::DeferCycleOpen;
         }
         GenerationTransitionAdmission::DeferUnsafeCheckpoint => {
-            return if explicit_admin || write_wedged || capture_backed_refresh {
+            return if explicit_admin
+                || write_wedged
+                || capture_backed_refresh
+                || (cycle_open && matches!(continuity, GenerationContinuity::PreservedHarnessChild))
+            {
                 SupervisorRecycleAction::DeferUnsafeCheckpoint
             } else {
                 SupervisorRecycleAction::None
             };
         }
         GenerationTransitionAdmission::Permit => {}
+    }
+
+    // A live-child handoff is the non-destructive mid-turn path: execve only
+    // replaces this supervisor image and the fresh image adopts the exact PTY
+    // and child without injecting or replaying the document turn. A failed
+    // exec remains on the old image. It must never fall through to the
+    // kill+relaunch escalation while that uncaptured cycle is open.
+    if cycle_open && matches!(continuity, GenerationContinuity::PreservedHarnessChild) {
+        if reexec_failed {
+            return SupervisorRecycleAction::DeferCycleOpen;
+        }
+        if explicit_admin || (stale && auto_recycle) {
+            return SupervisorRecycleAction::RecycleImmediate;
+        }
+        return if stale {
+            SupervisorRecycleAction::Detect
+        } else {
+            SupervisorRecycleAction::None
+        };
     }
 
     // The transition owner consumes the live IPC-drain observation directly.
@@ -733,7 +798,7 @@ pub fn supervisor_restart_action(
     if matches!(
         generation_transition_admission(
             cycle_open,
-            DurableReplayCheckpoint::Absent,
+            GenerationContinuity::None,
             stale_reexec_safe_checkpoint,
         ),
         GenerationTransitionAdmission::DeferOpenCycle
@@ -1188,6 +1253,50 @@ mod tests {
         );
     }
 
+    /// Live `ad.md` / pane %192 shape (2026-10-13): an uncaptured open cycle is
+    /// running in the exact child this supervisor can carry across execve. The
+    /// stale image refreshes at the first drained I/O checkpoint, while every
+    /// missing/unsafe/failed handoff stays non-destructive.
+    #[test]
+    fn live_child_continuity_recycles_open_turn_without_replay_or_kill() {
+        use GenerationContinuity::*;
+        use SupervisorRecycleAction::*;
+        use SupervisorRecycleCheckpoint::*;
+
+        let decide = |checkpoint, continuity, reexec_failed| {
+            supervisor_recycle_action_with_continuity(
+                true,
+                true,
+                checkpoint,
+                false,
+                false,
+                false,
+                false,
+                reexec_failed,
+                true,
+                continuity,
+            )
+        };
+
+        assert_eq!(
+            decide(SafeIntraTurn, PreservedHarnessChild, false),
+            RecycleImmediate
+        );
+        assert_eq!(
+            decide(Unsafe, PreservedHarnessChild, false),
+            DeferUnsafeCheckpoint
+        );
+        assert_eq!(
+            decide(SafeIntraTurn, GenerationContinuity::None, false),
+            DeferCycleOpen
+        );
+        assert_eq!(
+            decide(SafeIntraTurn, PreservedHarnessChild, true),
+            DeferCycleOpen,
+            "failed execve must not escalate to child kill/relaunch mid-turn"
+        );
+    }
+
     #[test]
     fn stale_editor_delivery_recycles_capture_backed_open_cycle() {
         use SupervisorRecycleAction::*;
@@ -1255,12 +1364,12 @@ mod tests {
 
     #[test]
     fn generation_transition_gate_has_no_timeout_escape() {
-        use DurableReplayCheckpoint::*;
+        use GenerationContinuity::*;
         use GenerationTransitionAdmission::*;
 
         for ipc_drained in [false, true] {
             assert_eq!(
-                generation_transition_admission(true, Absent, ipc_drained),
+                generation_transition_admission(true, None, ipc_drained),
                 DeferOpenCycle,
                 "an uncaptured open cycle dominates every IPC observation"
             );
@@ -1273,24 +1382,34 @@ mod tests {
             generation_transition_admission(true, CapturedResponse, true),
             Permit
         );
-        assert_eq!(generation_transition_admission(false, Absent, true), Permit);
+        assert_eq!(generation_transition_admission(false, None, true), Permit);
+        assert_eq!(
+            generation_transition_admission(true, PreservedHarnessChild, true),
+            Permit,
+            "the exact live child/PTY handoff carries the open cycle without replay"
+        );
     }
 
     #[test]
     fn boot_resume_redispatches_only_when_cycle_open_and_child_died() {
         use BootResumeAction::*;
 
-        assert_eq!(boot_resume_action(false, true, false, false), None);
-        assert_eq!(boot_resume_action(true, false, false, false), None);
+        assert_eq!(boot_resume_action(false, true, false, false, true), None);
+        assert_eq!(boot_resume_action(true, false, false, false, true), None);
         assert_eq!(
-            boot_resume_action(true, true, true, false),
+            boot_resume_action(true, true, true, false, true),
             AdoptSurvivingChild
         );
         assert_eq!(
-            boot_resume_action(true, true, false, false),
+            boot_resume_action(true, true, false, false, true),
             RedispatchInterruptedTurn
         );
-        assert_eq!(boot_resume_action(true, true, false, true), None);
+        assert_eq!(boot_resume_action(true, true, false, true, true), None);
+        assert_eq!(
+            boot_resume_action(true, true, false, false, false),
+            SpawnWithoutRedispatch,
+            "an adopt-only mid-turn handoff never replays an in-flight turn"
+        );
     }
 
     #[test]

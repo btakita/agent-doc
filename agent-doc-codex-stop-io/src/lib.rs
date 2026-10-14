@@ -1840,6 +1840,52 @@ fn active_session_prompt_requires_writeback(
         }
     };
 
+    // `#postcommitpromptownership`: the first Stop after a committed cycle can
+    // observe a queue item that appeared after that cycle while Codex still
+    // supplies the predecessor turn's closing chat summary. Textual novelty is
+    // not proof that the summary answers the new item: the committed cycle's
+    // prompt binding is the durable ownership fact. Open an empty successor so
+    // this Stop hands the new work back in-pane and only the recursive Stop can
+    // capture the continuation's actual answer.
+    if !input.stop_hook_active
+        && let Some(previous_cycle_id) = agent_doc_flow_io::closeout::cycle_already_committed(file)
+        && committed_cycle_settled_prompt_debt(file, state)?
+    {
+        let current = current_document_content(file, "codex_stop_post_commit_prompt_successor")?;
+        let head = agent_doc_git_io::revision::show_head(file)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "cannot open a post-commit Stop successor for {} without a committed HEAD baseline",
+                file.display()
+            )
+        })?;
+        let opened = agent_doc_cycle_state_io::start_stop_steering_continuation_preflight(
+            file,
+            Some(&head),
+            Some(&current),
+        )?;
+        anyhow::ensure!(
+            opened.last_event == agent_doc_cycle_state_io::CODEX_STOP_STEERING_CONTINUATION_EVENT,
+            "post-commit Stop successor {} lost its durable origin event",
+            opened.cycle_id
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "codex_stop_post_commit_prompt_successor_opened previous_cycle_id={} cycle_id={} capture_skipped=true source=settled_prompt_debt",
+                previous_cycle_id, opened.cycle_id,
+            ),
+        );
+        return Ok(Some(StopResponse::Block {
+            decision: "block",
+            reason: format!(
+                "agent-doc Stop hook opened successor cycle {cycle_id} for fresh post-commit session work in {disp}. The previous closing assistant text belongs to committed predecessor {previous_cycle_id} and was deliberately not captured. Active prompt: {prompt:?}. Continue THIS turn in-pane, answer that prompt, and persist through the normal agent-doc closeout. Do not send the final answer yet.",
+                cycle_id = opened.cycle_id,
+                disp = file.display(),
+                prompt = first_nonempty_prompt_line(&prompt),
+            ),
+        }));
+    }
+
     let mut payload_already_committed = false;
     if agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
         && matches!(
@@ -8526,6 +8572,109 @@ Reviewed the gated items.\n\
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert!(state.last_prompt.is_empty());
         assert!(state.last_turn_id.is_empty());
+    }
+
+    /// `#postcommitpromptownership`: tools.md, 2026-10-14. A queue edit
+    /// appeared after the turn's response was already committed, while Codex's
+    /// first Stop still carried that predecessor turn's nonverbatim console
+    /// summary. The summary must not become the response to the new queue item.
+    #[test]
+    fn stop_opens_empty_successor_instead_of_capturing_predecessor_summary_for_new_queue_work() {
+        let dir = setup_project();
+        let doc = write_manual_queue_doc(&dir, &[]);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        let predecessor =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original))
+                .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&original),
+            Some(&original),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+
+        let queue_prompt = "Can we base #22 on the";
+        let with_new_queue_work = original.replace(
+            "<!-- /agent:queue -->",
+            &format!("- {queue_prompt}\n<!-- /agent:queue -->"),
+        );
+        fs::write(&doc, &with_new_queue_work).unwrap();
+        invalidate_stop_document_cache();
+
+        let (loaded_root, tracked) = load_bound_session_for_stop(dir.path(), "codex-session")
+            .unwrap()
+            .expect("bound session");
+        assert!(
+            committed_cycle_settled_prompt_debt(&doc, &tracked).unwrap(),
+            "the committed predecessor must own the turn's original prompt"
+        );
+        let roots = tracking_roots(dir.path(), Some(&doc));
+        let stale_summary = "No—the PR title does not generally trigger it.";
+        let response = active_session_prompt_requires_writeback(
+            &doc,
+            &roots,
+            &loaded_root,
+            &tracked,
+            &StopInput {
+                session_id: "codex-session".to_string(),
+                turn_id: "turn-1".to_string(),
+                cwd: dir.path().display().to_string(),
+                last_assistant_message: stale_summary.to_string(),
+                stop_hook_active: false,
+            },
+        )
+        .unwrap()
+        .expect("new queue work must block the first Stop");
+
+        assert!(
+            matches!(&response, StopResponse::Block { reason, .. }
+                if reason.contains("opened successor cycle")
+                    && reason.contains(queue_prompt)
+                    && reason.contains("deliberately not captured")),
+            "{response:?}"
+        );
+        let successor = agent_doc_cycle_state_io::load(&doc)
+            .unwrap()
+            .expect("post-commit successor cycle");
+        assert_ne!(successor.cycle_id, predecessor.cycle_id);
+        assert_eq!(successor.phase.as_str(), "preflight_started");
+        assert_eq!(
+            successor.last_event,
+            agent_doc_cycle_state_io::CODEX_STOP_STEERING_CONTINUATION_EVENT
+        );
+        assert!(successor.capture_id.is_none());
+        assert!(successor.response_sha256.is_none());
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains(queue_prompt));
+        assert!(!content.contains(stale_summary));
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_post_commit_prompt_successor_opened")
+                && ops.contains("capture_skipped=true")
+                && !ops.contains("codex_stop_capture_saved"),
+            "{ops}"
+        );
     }
 
     #[test]

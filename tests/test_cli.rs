@@ -2116,6 +2116,51 @@ fn test_respond_help_routes_backlog_only_to_write_commit() {
 }
 
 #[test]
+fn test_admin_issue_help_exposes_repository_locked_contract() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["admin", "issue", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("btakita/agent-doc"))
+        .stdout(predicate::str::contains("--handling"))
+        .stdout(predicate::str::contains("human-only"))
+        .stdout(predicate::str::contains("agent-assisted"))
+        .stdout(predicate::str::contains("--dry-run"));
+}
+
+#[test]
+fn test_admin_issue_dry_run_json_reports_exact_policy_payload() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args([
+        "admin",
+        "issue",
+        "--title",
+        "Route ownership regression",
+        "--body",
+        "Observed after a retained write.",
+        "--handling",
+        "human-only",
+        "--label",
+        "bug",
+        "--dry-run",
+        "--json",
+    ]);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let result: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(result["status"], "dry_run");
+    assert_eq!(result["repository"], "btakita/agent-doc");
+    assert_eq!(result["handling"], "human-only");
+    assert_eq!(result["title"], "Route ownership regression");
+    assert_eq!(result["labels"], serde_json::json!(["bug"]));
+    assert!(
+        result["body"]
+            .as_str()
+            .unwrap()
+            .contains("<!-- agent-doc-admin-issue: handling=human-only -->")
+    );
+}
+
+#[test]
 fn test_admin_recycle_help_accepts_document_or_project_target() {
     let mut cmd = agent_doc_cmd();
     cmd.args(["admin", "recycle", "--help"]);

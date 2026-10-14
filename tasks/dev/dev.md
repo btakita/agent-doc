@@ -5,6 +5,7 @@ agent_doc_write: crdt
 agent: codex
 resume:
   claude: c1cf43ac-1094-4ecf-8b3d-a7f7f7168edb
+queue: go
 ---
 
 ## Status
@@ -334,12 +335,80 @@ A dashboard would be useful as a durable, filterable primary view, but GitHub Ac
 Yes—Slack calls this an app. The existing updater can remain the reconciliation engine while a separate app layer adds a reusable manifest, bot token, `/pr-status` command, refresh/settings controls, and Socket Mode. Socket Mode avoids a public Slack request endpoint, but the process still needs hosting and the GitHub poller remains necessary. Workspace policy may require Slack-admin approval. This is best handled as a follow-up rather than expanding PR #21. See [Slack Socket Mode](https://api.slack.com/apis/connections/socket), [app manifests](https://docs.slack.dev/app-manifests/), and [Slack app hosting](https://docs.slack.dev/app-management/hosting-slack-apps/).
 
 Both performance commits are pushed to [haiven-tools PR #21](https://github.com/haiven-dev/haiven-tools/pull/21), whose description now documents the 15-second cadence and bulk-query behavior. Verification passes: 27 focused updater tests, the complete portable project suite, `uv lock --check`, `git diff --check`, and the live 39-PR bulk fetch. Ubuntu and macOS CI pass; Windows remained in progress at closeout.
+
+### Re: Scheduled Slack app and one-shot Lambda — gpt-5 · 2026-10-13T20:30:19-04:00
+
+> **Queue prompt:** do [#slackappversion]
+
+Implemented the Slack app version and pushed commit `e369b39` to [haiven-tools PR #21](https://github.com/haiven-dev/haiven-tools/pull/21).
+
+The deployment is deliberately one-shot: EventBridge invokes the Lambda, it reconciles once, and exits. It does not run `--watch`. The SAM template uses `rate(1 minute)`, because EventBridge Scheduler has 60-second precision; AWS does not support a 15-second cron/rate schedule. A hard 15-second target still needs a continuously running service. See [EventBridge schedule precision](https://docs.aws.amazon.com/scheduler/latest/UserGuide/schedule-types.html).
+
+The change includes:
+
+- a least-privilege Slack app manifest using `chat:write` and `channels:history`
+- bot-token preference with `SLACK_USER_TOKEN` compatibility
+- direct GitHub REST/GraphQL access for Lambda, with local `gh` fallback
+- a Python 3.14 Lambda handler and SAM/EventBridge deployment template
+- setup and operating documentation
+- regression coverage for the app, one-shot handler, and direct API path
+
+The scheduled app is implemented but not deployed yet, so the live message will not keep refreshing automatically until its Slack bot, secrets, and AWS stack are configured.
+
+> **Chat prompt (#chatprompt):** perhaps this should not run in watch mode?
+
+Correct. Lambda runs one reconciliation per invocation. Watch mode remains only for a continuously hosted process that genuinely needs a 15-second cadence.
+
+### Re: Human and agent use — gpt-5 · 2026-10-13T20:30:19-04:00
+
+> **Chat prompt (#chatprompt):** I do want to use agents with this. particularly with the review/merge order.
+
+> **Chat prompt (#chatprompt):** But I also want to allow for human usage.
+
+Implemented a hybrid boundary.
+
+The Slack message remains the deterministic, human-editable primary view. Humans can reorder entries and manually invoke a refresh, and the app works normally when no agent is configured.
+
+When an optional EventBridge agent bus is configured, meaningful PR-line changes publish a provider-neutral `haiven.pull_request_state.changed` v1 event. It includes the human display order, review state, conflicts, head SHA, stack position, and direct `depends_on` relationships. That gives an agent enough data to recommend dependency-aware review and merge order.
+
+The event contract is explicitly `recommendation_only`, requires human confirmation, and sets `merge_execution_allowed=false`. No autonomous approval, rebase, or merge permission was added.
+
+### Re: Cheap GitHub change detection — gpt-5 · 2026-10-13T20:30:19-04:00
+
+> **Queue prompt:** Does gh provide a "cheap" way to tell if the developer's PR state has changed at all?
+
+GitHub offers cheap hints, but no separate sentinel is both cheaper and guaranteed to cover every displayed transition.
+
+- A REST pulls-list ETag can return `304` without consuming primary quota, but that representation omits reviews and mergeability and carries a 60-second cache directive.
+- PR `updatedAt` is not documented to change when background mergeability is recalculated, so it can miss a conflict-status change.
+- Both the sentinel GraphQL query and an exact compact status query cost the minimum one point, so a sentinel does not save primary GraphQL budget.
+
+I used the exact compact query instead. It requests `latestOpinionatedReviews` plus the state, refs, head SHA, and mergeability required by the dashboard. A live query costs one point, and measurement found it about 1.8× faster than the previous `gh pr list` review payload. Four repositories every 15 seconds would remain about 960 points/hour against the normal 5,000-point/hour authenticated GraphQL limit. See [GitHub GraphQL limits](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api) and the [pull-request schema](https://docs.github.com/en/graphql/reference/objects#pullrequest).
+
+### Re: Live Slack recovery and strikethrough — gpt-5 · 2026-10-13T20:30:19-04:00
+
+> **Chat prompt (#chatprompt):** The message has not updated for >10 minutes
+
+Confirmed: no updater process was running, so the local watch lifecycle had stopped. I performed a one-shot reconciliation through the current implementation and updated the live message from 39 to 40 entries.
+
+> **Queue prompt:** The strikethrough formatting is broken. Use the strikethrough, not `~...~`.
+
+Dispatched and completed the required isolated strikethrough investigation. The application code was already correct: Slack's native mrkdwn API uses `~text~`. The breakage came from the emergency connector edit, whose input expects CommonMark `~~text~~` and translates it to native Slack mrkdwn.
+
+I re-authored the complete live message through the connector using CommonMark strikethrough and verified Slack readback now stores native `~text~`; the title is also restored as bold. No repository change was needed for this item.
+
+### Re: Verification — gpt-5 · 2026-10-13T20:30:19-04:00
+
+All 31 focused updater tests, all 7 Lambda/agent-boundary tests, and the complete portable project suite pass. `uv lock --check`, `git diff --check`, and the live one-point GraphQL query pass. The pushed CI run passes on Ubuntu and macOS; Windows was still running at closeout.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue subagents priority -->
+<!-- agent:queue subagents priority go -->
+- do [#slackappversion]
+- Does gh provide a "cheap" way to tell if the developer's PR state has changed at all?
+- The strikethrough formatting is broken. Use the strikethrough, not `~...~`.
 <!-- /agent:queue -->
 
 ## Backlog

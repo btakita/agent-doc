@@ -222,7 +222,7 @@ Allow preset to recognize the entire text and support multiple presets in the te
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#toolspresetmultiname] Diagnose and fix multi-preset queue authorization in haiven-dev/tasks/tools.md:  is parsed as one undefined preset name for authorization, even though the same dispatch separately reports item preset  expanded to . Specify whether preset attributes accept whitespace-delimited preset references and recursive preset expansion; add a regression covering this contradictory resolution, preserve explicit operator authorization, and provide a migration/diagnostic if combined names are invalid.
+- [ ] [#toolspresetmultiname] Diagnose and fix multi-preset queue authorization in haiven-dev/tasks/tools.md: preset="#push #auth" is parsed as one undefined preset name for authorization, even though the same dispatch separately reports item preset #push expanded to "commit + push: #auth". Specify whether preset attributes accept whitespace-delimited preset references and recursive preset expansion; add a regression covering this contradictory resolution, preserve explicit operator authorization, and provide a migration/diagnostic if combined names are invalid.
 <!-- /agent:backlog -->
 
 ## Review

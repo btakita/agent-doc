@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -37,6 +38,21 @@ Review pass done. frontendlivedispatch closed on live evidence. Two review items
 Compacted content:
 - Archived 30 response topic(s): #actionable-review; GitHub issue #245; Restart Agent retained projection and infra.md recovery; 27 more
 - Prior summary/context: prior compacted content: Archived 59 response topic(s): dispatched GH #240 to a subagent; Clear Session Context on sd...
+❯ 🚧 What this mean? Is this a bug?
+```
+• Failed (exit 1) agent-doc respond /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md --template --done …
+  └ This exchange is already above the legibility target, but the active queue takes precedence; no repository or prod…
+    [write] template write requested for realtime document; routing through stream document-model write path
+    Error: strict template closeout response must wrap its response in matching `<!-- patch:exchange -->` and `<!-- /p…
+    + 33 lines (^t to expand)
+```
+
+### Re: strict-template failure and steering stall — gpt-5 · 2026-10-14T01:05-04:00
+
+The shown `respond --template` failure is not an Agent Doc core bug. That call supplied plain Markdown even though preflight had explicitly required matching `<!-- patch:exchange -->` and `<!-- /patch:exchange -->` markers and disallowed plain stdin. Strict template mode rejected it before capture or mutation, as designed. The retry added both markers and succeeded with the same response, so no answer or `--done` mutation was lost. The realtime-routing line was informational, and `--done` was unrelated.
+
+The later stall is a separate issue. The committed response was followed by new realtime steering, but the continuation stopped with an abandoned prior cycle instead of admitting the new prompt automatically. That behavior should continue without manual re-entry. The queue item describing it is now claimed by `subagent:steering_stall` for a spec, regression-test, and implementation fix; two isolated investigators are also checking why the pasted queue diagnostic was classified and split into extra exchange prompts. The existing GitHub issue workers remain active.
+
 <!-- agent:boundary:df975275 -->
 <!-- /agent:exchange -->
 
@@ -44,7 +60,38 @@ Compacted content:
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+The last turn stalled. It should not stall. The real-time steering should continue:
+```
+• Hook stopped
+  └ agent-doc Stop hook already continued once for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-
+bugs.md, but the cycle is still open. [session-check] INTERRUPTED: cycle `cycle-1791953414683` is `abandoned`
+(cancel_preflight_cycle_abandoned), but the document still has unresolved prompt-bearing user changes with no new agent-
+doc cycle started: prompt_target: What this mean? Is this a bug?
+    ```
+    • Failed (exit 1) agent-doc respond /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md --template
+--done …
+      └ This exchange is already above the legibility target, but the active queue takes precedence; no repository or
+prod…
+        [write] template write requested for realtime document; routing through stream document-model write path
+        Error: strict template closeout response must wrap its response in matching `<!-- patch:exchange -->` and
+`<!-- /p…
+        + 33 lines (^t to expand)
+    ```
+    This is pending operator steering, not a failed closeout: your prior response is already committed in HEAD. Handle
+each item by its `dispatch`: `address_now` is the next cycle's prompt (`agent-doc /home/brian/work/btakita/agent-loop/
+tasks/agent-doc/agent-doc-bugs.md` admits it to continue), `drain_after_current` runs in operator queue order through
+the normal drain, and `subagent` goes to a new background subagent (claim it first with `agent-doc queue claim /home/
+brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md --item <id-or-line> --owner subagent:<label>`). Do NOT
+re-run finalize on the prior response, do NOT use `--force-disk` (that clobbers the operator's live edits), and do NOT
+re-answer any prompt already committed in HEAD (the realtime replica reconciles your committed response back into the
+live buffer).
+
+  Worked for 5m 10s • 12:55 AM
+```
+---
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/251
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/252
 <!-- /agent:queue -->
 
 ## Backlog

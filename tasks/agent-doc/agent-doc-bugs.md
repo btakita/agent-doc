@@ -218,6 +218,14 @@ I claimed the new hot-reload/auto-sync report and dispatched a fresh isolated wo
 `v0.35.500` is installed locally and its correct hosted Release run is active on `btakita/agent-doc`, but publication is not complete yet. I will notify the operator only after the Windows build is green and the GitHub release, PyPI package, and Homebrew formula are publicly visible. The release claim remains open until those checks pass.
 
 The exchange remains above the normal accretion warning threshold; the active auto-clear queue requires yielding for its fresh-context boundary rather than pausing the queue for compaction.
+
+### Re: surface subagent prompts and permission requests across harnesses — gpt-5 · 2026-10-14T15:22-04:00
+
+Yes. Agent-doc can define a harness-neutral escalation envelope so a background subagent sends its blocking question or permission request—with the exact proposed action, why it is needed, affected scope, and safe alternatives—to the coordinator, which presents it to the operator in the owning session. Approval must remain operator-to-coordinator only: a worker may request authority, but it cannot grant itself authority, broaden its queue preset, or treat silence as consent.
+
+The implementation must map that common contract onto each harness honestly: use native subagent messaging or permission surfaces where Claude Code, Codex, Grok Build, or OpenCode expose them, and use an agent-doc coordinator relay where they do not. It must preserve the request verbatim, identify the originating worker and queue item, deduplicate retries, keep the worker paused, and route the operator’s answer back to that worker without converting it into authorization for sibling work.
+
+I have claimed this item and dispatched a dedicated isolated worker with the authorized specification, implementation, regression-test, build, commit, and push scope. It is explicitly covering all four named harnesses and distinguishing native capabilities from protocol fallbacks. The item remains open until the coordinator reviews, integrates, tests, installs, and releases the result.
 <!-- agent:boundary:403f486c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -253,7 +261,23 @@ Allow preset to recognize the entire text and support multiple presets in the te
 - 🚧 release + publish
 - 🚧 When the agent prompts the developer, show the prompt choices with context in the agent:exchange.
 - During a hot-reload, tmux pane auto-sync is temporarily not operational.
-- Can we guide subagents to surface prompts + permission requests to the user across all supported agent hanlesses? If yes, add the functionality to agent-doc.
+- Can we guide subagents to surface prompts + permission requests to the user across all supported agent harnesses (Claude Code + Codex + Grok Build + OpenCode)? If yes, add the functionality to agent-doc.
+---
+Fix agent-doc causes of agent-doc-bugs.md Stop hook issue:
+```
+• Blocked by hook
+  └ agent-doc Stop hook found fresh unresolved exchange work for /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+agent-doc-bugs.md after the previous cycle was already committed. Continue THIS turn in-pane: answer "Can we guide
+subagents to surface prompts + permission requests to the user across all supported agent harnesses (Claude Code + Codex
++ Grok Build + OpenCode)? If yes, add the functionality to agent-doc." in /home/brian/work/btakita/agent-loop/tasks/
+agent-doc/agent-doc-bugs.md and persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/tasks/agent-doc/
+agent-doc-bugs.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-
+bugs.md`). Do NOT send the final answer yet.
+
+• The newly admitted prompt is already claimed by the dedicated cross-harness worker. I’m persisting that answer in its
+  own agent-doc cycle now: yes, the intended design is to surface subagent prompts and permission requests through the
+  coordinator with exact context, while preserving each harness’s native permission boundary.
+```
 <!-- /agent:queue -->
 
 ## Backlog

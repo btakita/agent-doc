@@ -154,6 +154,14 @@ Fixed, integrated, pushed, installed, and closed. Commit `10fb137c24` makes dupl
 Verification passed on the integrated batch: the authoritative `make check` exited 0 with zero detected failures; the focused worker suites passed 5,240 nextest tests, 160 start-runtime tests, 26 start-IO tests, policy tests, clippy, and full `make tmux-ci`. The single coordinator `make install` completed for the CLI/library, JetBrains packages, and VS Code extension. The batch is on `origin/main`; CI run `38607719497` is in progress.
 
 A separate `tools.md` Stop-hook regression is claimed by `subagent:tools_md_issue` in an isolated worktree and was deliberately kept outside this sealed batch.
+
+### Re: GitHub issue #254 — gpt-5 · 2026-10-14T13:36-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/254
+
+Fixed, integrated, pushed, installed, and closed. Integrated commit `73f94f2d32` repairs both causes of the four-hour editor convergence wedge: repeated refused native-save receipts now request an idempotent editor-replica re-registration every third refusal, independently of replica pull traffic, and a structurally valid complete live editor observation now outranks a partial stale op-epoch replay that could otherwise manufacture garbled operator text.
+
+The realtime workflow specification and incident-shaped regressions cover both rules. Focused verification passed 688 controller tests, 185 realtime tests, controller clippy, the JetBrains local-splice suite, and `buildPlugin`; the worker's final `make check-fast` passed 3,808 nextest tests. After serial integration, the coordinator's authoritative `make check` exited 0 with zero detected failures, and the single batch `make install` completed for the CLI/library and editor packages. The fix is on `origin/main` as part of `10fb137c24`; issue #254 is closed.
 <!-- agent:boundary:b66994af -->
 <!-- /agent:exchange -->
 
@@ -163,7 +171,7 @@ A separate `tools.md` Stop-hook regression is claimed by `subagent:tools_md_issu
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/243~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/254
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/254~~
 - Is the project-wide agent-doc template (i.e. presets) released + published? How do I use it?
 ---
 tools.md issue

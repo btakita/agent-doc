@@ -107,9 +107,14 @@ pub fn prefer_mapped_plugin_jar(
 /// process can map. The classic 242-261 package ships
 /// `agent-doc-jetbrains-<v>.jar`; the exact-262 modular package ships its root
 /// descriptor jar as `agent.doc-<v>.jar` (its `lib/modules/agent.doc.*.jar`
-/// module jars are unversioned and never match). A probe that knew only the
-/// classic prefix read every 262 IDE as "no plugin mapped".
-pub const JETBRAINS_PLUGIN_JAR_STEMS: &[&str] = &["agent-doc-jetbrains-", "agent.doc-"];
+/// module jars are unversioned and never match); and the 263 package ships
+/// `agent-doc-jetbrains-263-<v>.jar`. A probe missing a package-specific prefix
+/// reads that IDE line as "no plugin mapped".
+pub const JETBRAINS_PLUGIN_JAR_STEMS: &[&str] = &[
+    "agent-doc-jetbrains-263-",
+    "agent-doc-jetbrains-",
+    "agent.doc-",
+];
 
 /// The version a plugin jar filename carries under one of `jar_stems`:
 /// `<stem><digits>(.<digits>)*.jar`. Anything else (another plugin, an
@@ -299,10 +304,10 @@ pub fn probe_superseded_editors(
 mod tests {
     use super::*;
 
-    /// `#jb262dynupgrade`: the live-jar probes match both the classic and the
-    /// exact-262 modular plugin jar, and nothing else.
+    /// `#jb262dynupgrade` / GH #251: live-jar probes match all published
+    /// package lines, and nothing else.
     #[test]
-    fn plugin_jar_version_matches_classic_and_modular_262_jars() {
+    fn plugin_jar_version_matches_all_published_jetbrains_jars() {
         let stems = plugin_jar_stems("jetbrains").unwrap();
         assert_eq!(
             plugin_jar_version("agent-doc-jetbrains-0.2.513.jar", stems),
@@ -311,6 +316,10 @@ mod tests {
         assert_eq!(
             plugin_jar_version("agent.doc-0.2.514.jar", stems),
             Some("0.2.514")
+        );
+        assert_eq!(
+            plugin_jar_version("agent-doc-jetbrains-263-0.2.515.jar", stems),
+            Some("0.2.515")
         );
         for name in [
             "agent.doc.backend.jar",

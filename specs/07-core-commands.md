@@ -494,7 +494,8 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   Selection must not depend on the order the API returns assets in. JetBrains
   install/update derives the platform branch from the versioned IDE data root:
   builds 242–261 select `agent-doc-jetbrains-<version>.zip`, build 262 selects
-  `agent-doc-jetbrains-262-<version>.zip`, and an unprovable or unsupported
+  `agent-doc-jetbrains-262-<version>.zip`, build 263 selects
+  `agent-doc-jetbrains-263-<version>.zip`, and an unprovable or unsupported
   target fails before any installed tree is replaced. `--local --all-installed`
   applies the same policy independently to every existing installation.
   When a live IDE owns a 262 target, the modular package has no restart-free

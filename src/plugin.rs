@@ -1340,10 +1340,10 @@ fn same_filesystem_path(left: &Path, right: &Path) -> bool {
 }
 
 /// `#jbdynamicfalsereport`: whether a live process's mapped plugin jar proves it
-/// is executing `expected_version` from `target_dir`. Only a still-linked jar at
-/// `<target_dir>/agent-doc-jetbrains/lib/agent-doc-jetbrains-<expected>.jar`
-/// (or the exact-262 `agent.doc-<expected>.jar`) counts; a deleted mapping, a different version or a different plugin root is
-/// not a load of this install.
+/// is executing `expected_version` from `target_dir`. The mapped root jar may
+/// use the classic, exact-262, or 263 filename and plugin directory; a deleted
+/// mapping, a different version, or a different plugin root is not a load of
+/// this install.
 fn jetbrains_mapped_jar_proves_load(
     mapped: &agent_doc_fs::plugin_jar::MappedPluginJar,
     target_dir: &Path,
@@ -1352,15 +1352,29 @@ fn jetbrains_mapped_jar_proves_load(
     let agent_doc_fs::plugin_jar::MappedPluginJar::Current { path, .. } = mapped else {
         return false;
     };
-    // The classic package ships `agent-doc-jetbrains-<v>.jar`; the modular 262
-    // package ships `agent.doc-<v>.jar`. Both land in the canonical tree.
-    let lib = target_dir.join(JETBRAINS_PLUGIN_DIR).join("lib");
-    [
-        format!("agent-doc-jetbrains-{expected_version}.jar"),
-        format!("agent.doc-{expected_version}.jar"),
-    ]
-    .iter()
-    .any(|jar| same_filesystem_path(Path::new(path), &lib.join(jar)))
+    let mapped_path = Path::new(path);
+    let Some(file_name) = mapped_path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if agent_doc_fs::plugin_jar::plugin_jar_version(
+        file_name,
+        agent_doc_fs::plugin_jar::JETBRAINS_PLUGIN_JAR_STEMS,
+    ) != Some(expected_version)
+    {
+        return false;
+    }
+    let Some(plugin_dir) = mapped_path.parent().and_then(Path::parent) else {
+        return false;
+    };
+    if !matches!(
+        plugin_dir.file_name().and_then(|name| name.to_str()),
+        Some("agent-doc-jetbrains" | "agent-doc-jetbrains-262" | "agent-doc-jetbrains-263")
+    ) {
+        return false;
+    }
+    plugin_dir
+        .parent()
+        .is_some_and(|plugins_dir| same_filesystem_path(plugins_dir, target_dir))
 }
 
 /// Poll `pid`'s mapped plugin jar until it proves the expected generation is
@@ -5784,6 +5798,15 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             &current(&jar),
             &target,
             "0.2.448"
+        ));
+        let modern_lib = target.join("agent-doc-jetbrains-263/lib");
+        fs::create_dir_all(&modern_lib).unwrap();
+        let modern_jar = modern_lib.join("agent-doc-jetbrains-263-0.2.450.jar");
+        fs::write(&modern_jar, b"x").unwrap();
+        assert!(super::jetbrains_mapped_jar_proves_load(
+            &current(&modern_jar),
+            &target,
+            "0.2.450"
         ));
         assert!(!super::jetbrains_mapped_jar_proves_load(
             &current(&jar),

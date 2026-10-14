@@ -221,9 +221,8 @@ fn mapped_plugin_version(pid: u32) -> Option<String> {
     ))
 }
 
-/// The generation a still-linked mapping names: the classic
-/// `agent-doc-jetbrains-<v>.jar` or the exact-262 modular `agent.doc-<v>.jar`
-/// (`#jb262dynupgrade`). Anything not `Current` proves no live generation.
+/// The generation a still-linked mapping names across the classic, exact-262,
+/// and 263 root-jar layouts. Anything not `Current` proves no live generation.
 fn mapped_jar_plugin_version(
     mapped: &agent_doc_preflight_io::warnings::MappedPluginJar,
 ) -> Option<String> {
@@ -436,7 +435,7 @@ mod tests {
     /// `agent.doc-<v>.jar`; reading only the classic name reported no loaded
     /// generation and fell back to the mtime heuristic.
     #[test]
-    fn mapped_jar_plugin_version_reads_classic_and_modular_262_jars() {
+    fn mapped_jar_plugin_version_reads_all_published_package_jars() {
         use agent_doc_preflight_io::warnings::MappedPluginJar;
         let current = |path: &str| MappedPluginJar::Current {
             path: path.to_string(),
@@ -453,6 +452,13 @@ mod tests {
             mapped_jar_plugin_version(&current("/p/agent-doc-jetbrains/lib/agent.doc-0.2.514.jar"))
                 .as_deref(),
             Some("0.2.514")
+        );
+        assert_eq!(
+            mapped_jar_plugin_version(&current(
+                "/p/agent-doc-jetbrains-263/lib/agent-doc-jetbrains-263-0.2.515.jar"
+            ))
+            .as_deref(),
+            Some("0.2.515")
         );
         assert_eq!(
             mapped_jar_plugin_version(&current(

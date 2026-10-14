@@ -65,7 +65,8 @@
 //! - `strip_preserves_comment_syntax_in_fenced_code_block`: `<!-- not a comment -->` inside triple-backtick fence → unchanged
 //! - `strip_preserves_comment_syntax_in_inline_backticks`: `` `<!--` `` in inline code → not treated as comment start
 //! - `strip_backtick_comment_before_agent_marker`: `` `<!--` `` text followed by `<!-- /agent:exchange -->` → agent marker not consumed
-//! - `notes_only_change_is_not_a_turn_trigger`: changing only `agent:notes` content → no unified diff
+//! - `operator_owned_informational_change_is_not_a_turn_trigger`: changing only `agent:notes` or
+//!   `agent:todo` content → no unified diff
 //! - `notes_change_with_exchange_prompt_still_triggers`: notes plus exchange prompt → prompt remains in unified diff
 //! - `post_exchange_comment_scan_ignores_agent_components_and_user_notes`:
 //!   post-exchange scratch comments are returned, while comments inside agent components
@@ -4012,20 +4013,27 @@ diff --git a/tests/render_test.rs b/tests/render_test.rs
     }
 
     #[test]
-    fn notes_only_change_is_not_a_turn_trigger() {
-        let previous = concat!(
-            "<!-- agent:notes -->\n",
-            "Remember the old detail.\n",
-            "<!-- /agent:notes -->\n",
-        );
-        let current = concat!(
-            "<!-- agent:notes -->\n",
-            "Remember the new detail.\n",
-            "<!-- /agent:notes -->\n",
-        );
+    fn operator_owned_informational_change_is_not_a_turn_trigger() {
+        for (name, previous_body, current_body) in [
+            (
+                "notes",
+                "Remember the old detail.",
+                "Remember the new detail.",
+            ),
+            (
+                "todo",
+                "- [ ] Publish the draft.",
+                "- [x] Publish the draft.",
+            ),
+        ] {
+            let previous =
+                format!("<!-- agent:{name} -->\n{previous_body}\n<!-- /agent:{name} -->\n");
+            let current =
+                format!("<!-- agent:{name} -->\n{current_body}\n<!-- /agent:{name} -->\n");
 
-        assert_eq!(strip_comments(previous), strip_comments(current));
-        assert_eq!(unified_diff_from_contents(previous, current), None);
+            assert_eq!(strip_comments(&previous), strip_comments(&current));
+            assert_eq!(unified_diff_from_contents(&previous, &current), None);
+        }
     }
 
     /// `#donearchive-stop-race`: publishing the completed-work body to the

@@ -24,6 +24,9 @@ const DEFAULT_TEMPLATE_COMPONENTS: &str = concat!(
     "\n## Done\n\n",
     "<!-- agent:done -->\n",
     "<!-- /agent:done -->\n",
+    "\n## Todo\n\n",
+    "<!-- agent:todo -->\n",
+    "<!-- /agent:todo -->\n",
     "\n## Notes\n\n",
     "<!-- agent:notes -->\n",
     "<!-- /agent:notes -->\n",
@@ -118,6 +121,7 @@ mod tests {
         let scaffold = render_empty_template_scaffold("session-1");
         assert!(scaffold.contains("agent_doc_session: session-1"));
         assert!(scaffold.contains("agent_doc_format: template"));
+        assert!(scaffold.contains("\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n"));
 
         let components = agent_doc_element::element::parse(&scaffold)
             .expect("default template components must form a valid component AST");
@@ -128,7 +132,8 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status", "exchange", "queue", "backlog", "review", "icebox", "done", "notes",
+                "status", "exchange", "queue", "backlog", "review", "icebox", "done", "todo",
+                "notes",
             ],
             "claim scaffolds every canonical component in stable document order"
         );
@@ -179,7 +184,8 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status", "exchange", "queue", "backlog", "review", "icebox", "done", "notes",
+                "status", "exchange", "queue", "backlog", "review", "icebox", "done", "todo",
+                "notes",
             ],
             "claim must use the same canonical component sequence for non-empty templates"
         );

@@ -44,6 +44,37 @@ All fields are optional and default to null.
 
 Delimited by `---\n` at the start of the file and a closing `\n---\n`. If frontmatter is absent, all fields default to null and the entire content is treated as the body.
 
+## Prompt presets
+
+Prompt presets are named, reusable instructions. A session document can define
+its own `prompt_presets:` (or the shorter `presets:` alias), or a project can
+provide defaults for every session below its nearest `.agent-doc/` directory.
+Put project defaults in `.agent-doc/project.md`:
+
+```markdown
+---
+presets:
+  "#review": Review the change and run focused tests.
+  "#release":
+    prompt: Prepare and publish the release.
+    runbook: runbooks/release.md
+---
+
+# Agent Doc project defaults
+```
+
+Invoke a preset by writing its name wherever you would submit a prompt. For
+example, add `#review` to the session's exchange, or add `- #review` to an active
+`agent:queue`. Agent Doc expands the name to its instruction during preflight;
+an associated runbook is loaded only when that preset is invoked.
+
+Project presets are live defaults, not a copied project template. Changes to
+`.agent-doc/project.md` apply to existing session documents without rewriting
+them. A session-local preset with the same exact name overrides the project
+value; an unfinished or null local declaration also masks the inherited value
+while it is being edited. Only presets are inherited—the project file's body
+and its other frontmatter fields do not affect session behavior.
+
 ## Interaction modes
 
 ### Append mode

@@ -645,6 +645,42 @@ Yes. **v0.35.498 is publicly published**:
 - The tag's Release, PyPI, CI, documentation, and book workflows all completed successfully.
 
 One important distinction: the published tag is `b9c80b963c`, while current `main` is `5db0f25f78`, 29 commits ahead. The completion-feedback integrity repair and the other changes integrated after the tag are therefore **on main and installed locally, but not included in v0.35.498**. No newer release has been published.
+❯ 🚧 sdk.md issue
+```
+• Blocked by hook
+  └ Queue continuation, not an error: Codex labels it `Blocked by hook`. Next `agent:queue auto` prompt for /home/
+brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md: "Let's try a different strategy with the PRs. Since we have
+so many PRs, reviews are taking a long time, and the other devs are dissatisfied with reviewing the PRs. Let's create
+larger salient PRs that consolidate churn and end up with the product that we want.". Continue THIS turn in-pane:
+answer it, then persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md`. Do
+NOT run `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` (recursive self-invocation) and do
+not send the final answer yet.
+...
+• Hook stopped
+  └ agent-doc Stop hook already continued once for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md, but
+the cycle is still open. [session-check] INTERRUPTED: cycle `cycle-1791950677925` is still `preflight_started`
+(preflight_started) — cycle started but no write/commit followed.
+
+  Worked for 17m 40s • 12:04 AM
+```
+
+### Re: sdk.md queue continuation — gpt-5 · 2026-10-14T00:07:22-04:00
+
+Recovered the interrupted `sdk.md` queue continuation through a dedicated subagent in the authoritative pane.
+
+The SDK strategy is now durably recorded as five product-shaped replacement PRs:
+
+1. Rewards and analytics across game SDKs.
+2. SDK targets and engine-tier compatibility gates.
+3. A self-contained AOT-safe Unity production package.
+4. Unreal chat developer-preview integration.
+5. Component-driven portable SDK tooling.
+
+The plan keeps at most one PR ready for human review and one successor in draft. Each bundle has an adversarial pre-review gate covering product/contract correctness, branch-specific technical risks, integration behavior, inherited review-thread disposition, frozen-head evidence, and the rule that P0–P2 findings block human review.
+
+The worker verified that `#sdkconsolidationexecution` and the five `#sdkadv*gate` backlog items were already present, so it preserved them without duplication. No repository or GitHub mutation was needed. The `sdk.md` recovery committed as `cc48d80e13e07c9867ed5111c63490425dcd4f31`; cycle `cycle-1791950766155` passed `session-check` with no drainable work.
+
+This document's exchange is above its legibility threshold. I did not compact it because automatic compaction is disabled and no explicit approval was given.
 <!-- agent:boundary:df975275 -->
 <!-- /agent:exchange -->
 
@@ -652,7 +688,7 @@ One important distinction: the published tag is `b9c80b963c`, while current `mai
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

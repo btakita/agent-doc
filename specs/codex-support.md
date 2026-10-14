@@ -70,8 +70,15 @@ closeout's own text, so it is an idempotent no-op — no fresh cycle, no capture
 logged `codex_stop_post_commit_payload_already_committed` — never a fail-closed
 error: with no other work it allows the stop, and any work session-check still
 reports is handed back in-pane without recapturing the payload. A payload that
-is new, or visible only in the uncommitted current authority, keeps the
-reopen-and-capture or fail-closed behavior (`#fixlazilycodex`).
+belongs to a user prompt admitted after the commit, or is visible only in the
+uncommitted current authority of that later response cycle, keeps the
+reopen-and-capture or fail-closed behavior (`#fixlazilycodex`). Textual novelty
+alone does not establish that ownership: when the committed cycle settled the
+tracked prompt and fresh queue or exchange work appears before the first Stop,
+the hook opens an empty successor and hands that work back in-pane without
+capturing the predecessor turn's closing chat summary. Only the recursive Stop
+may capture the continuation's actual answer under that successor
+(`#postcommitpromptownership`).
 
 ### Claude-Code-Specific (Coupling Points)
 

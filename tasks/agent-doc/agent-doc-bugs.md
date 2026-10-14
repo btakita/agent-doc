@@ -408,21 +408,27 @@ Confidence: high. Escalation: none.
 <!-- agent-doc-subagent-completion key=d688a0f356b1a9c1c7560b64d2957a5af2a066e4ada273984b68b7296d4c213a -->
 
 ### Re: Subagent completed — agent-doc: `subagent:dev_tmux_feedback` returned work for queue item “What is wrong with dev.md? I cannot open the tmux pane. There needs to be feedback in the editor. `> 4 | : resume:` was fixed but still not opening and has the error message saying `> 4 | : resume:` is broken.”; coordinator integration and closeout are pending.
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=0ad17090bf998c7ddbe0b08e5cf2354bbbe1d51305084533da3a305e12cdfb50 -->
 
 ### Re: Subagent completed — agent-doc: `subagent:steering_delivery_feedback` returned work for queue item “Error in this session: [route] explicit send for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md: delivered 1 pending steering item(s) to the owning turn (sent=explicit); its next tool call, its turn-boundary report, or the idle wake surfaces them. No second trigger was injected: the open closeout still owns the pane (blocker: [session-check] IN PROGRESS: cycle `cycle-1791930737701` remains `preflight_started` (preflight_started) while owning pane `%192` has a fresh active-turn lease — the response turn is still running, so no response capture or terminal commit exists yet. This is not abandoned closeout evidence. Do not recover or abandon this cycle, rerun finalize/write, or restart/clear the owner from another pane. Re-run `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` only after the owning turn reaches its terminal boundary.). steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain”; coordinator integration and closeout are pending.
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=15425ea8539c2321243f2fd81889fab7376872c30fe5fc0b9aed444d4266000c -->
 
 ### Re: Subagent completed — agent-doc: `subagent:subagent_completion_feedback` returned work for queue item “In sdk.md, I have a long list of subagents. When a subagent completes, there's no feedback. agent-doc should immediately write to the `agent:exchange` when the subagent completes.”; coordinator integration and closeout are pending.
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=7680f31d88e549d062fb58307569aa82370c0135e8f06a360e5b9acb899640e6 -->
 
 ### Re: Subagent completed — agent-doc: `subagent:this_doc_pane_visibility` returned work for queue item “Now this document's tmux pane is not visible.”; coordinator integration and closeout are pending.
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=47c22e67b3236b9d85d78a52c0cbfa076c200cadb743a95d9d7f32ef3c88e2c5 -->
 
 ### Re: Subagent completed — agent-doc: `subagent:this_doc_pane_recurrence` returned work for queue item “This document's tmux pane was visible for a bit...now it is not visible. Please fix in agent-doc + this session.”; coordinator integration and closeout are pending.
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=5594d9bd2705023c994fc1b67a3fc18a319c1606389c62b2e192105494a30b3e -->
 
 ### Re: Subagent completed — agent-doc: `subagent:midturn_recycle_recovery` returned work for queue item “See ad.md: "A recycle can only happen at a turn boundary": Make recycle occur during a turn so the session can immediately recover.”; coordinator integration and closeout are pending.
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=67ec9dcfa805a1e1ceb88f6b38e4dc64246de8d1c193aa153292fc9507afd914 -->
 > **Chat prompt (#chatprompt):** cont
 
@@ -627,7 +633,19 @@ Coordinator verification on the exact pushed bytes:
 - GitHub CI run `38490233533` for `e61d247c3a` is still in progress; local authoritative gates are the closeout proof.
 
 Confidence: high. Escalation: only the missing `HOMEBREW_TAP_TOKEN` secret remains external. The exchange remains above the session-accretion warning threshold; the active queue was completed without interrupting it for compaction.
-<!-- agent:boundary:5be64bbf -->
+> **Chat prompt (#chatprompt):** Is the release published?
+
+### Re: Release publication status — gpt-5 · 2026-10-13T21:45:10-04:00
+
+Yes. **v0.35.498 is publicly published**:
+
+- The [GitHub release](https://github.com/btakita/agent-doc/releases/tag/v0.35.498) is neither a draft nor a prerelease and has 15 downloadable assets.
+- The [PyPI release](https://pypi.org/project/agent-doc/0.35.498/) is live and not yanked.
+- The Homebrew tap formula points to version `0.35.498`.
+- The tag's Release, PyPI, CI, documentation, and book workflows all completed successfully.
+
+One important distinction: the published tag is `b9c80b963c`, while current `main` is `5db0f25f78`, 29 commits ahead. The completion-feedback integrity repair and the other changes integrated after the tag are therefore **on main and installed locally, but not included in v0.35.498**. No newer release has been published.
+<!-- agent:boundary:df975275 -->
 <!-- /agent:exchange -->
 
 <!--

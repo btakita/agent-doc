@@ -945,6 +945,12 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   dispatch/cycle/CRDT recovery state is durable in SQLite; therefore the
   controller replacement does not interrupt the turn. A non-stable handoff is
   the strict launch gate.
+  `#handoffsocketownership`: once a self-recycle worker owns the predecessor's
+  outgoing handoff, the predecessor's stranded-controller self-watchdog is
+  disarmed through promotion and drain. After the private replacement socket is
+  renamed onto the public path, the predecessor must relinquish its listener's
+  pathname-reclamation guard before exit; dropping the predecessor listener
+  must never unlink the successor's live `controller.sock`.
   `#handoffrouteforward`: async editor commands (`editor_command_submit_async`:
   Run Agent Doc `editor_route`, `sync_tmux_layout`, `focus_document_pane`) are
   answered `accepted` before their worker dispatches, so they hold no client

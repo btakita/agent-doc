@@ -208,7 +208,17 @@ The repository does not yet have the requested action contract, so I have claime
 The worker owns specification, implementation, regression tests, build verification, commit, and branch push. I retain coordinator ownership of review, integration, the single local install/release batch, claim release, and final closeout. The item stays open until that evidence is integrated and verified.
 
 The exchange is above the normal accretion warning threshold, but the active queue contract requires continued draining rather than pausing for compaction.
-<!-- agent:boundary:b66994af -->
+
+> **Chat prompt (#chatprompt):** Let me know when the release is published
+
+### Re: hot-reload tmux auto-sync and release notification — gpt-5 · 2026-10-14T15:20-04:00
+
+I claimed the new hot-reload/auto-sync report and dispatched a fresh isolated worker with the authorized specification, tests, build verification, commit, and push scope. It will reproduce the library/plugin reload gap, trace the tmux layout ownership transition, and add deterministic coverage; coordinator review, integration, installation, and claim release remain here. The earlier developer-prompt-choice item is likewise claimed and running in its own isolated worker.
+
+`v0.35.500` is installed locally and its correct hosted Release run is active on `btakita/agent-doc`, but publication is not complete yet. I will notify the operator only after the Windows build is green and the GitHub release, PyPI package, and Homebrew formula are publicly visible. The release claim remains open until those checks pass.
+
+The exchange remains above the normal accretion warning threshold; the active auto-clear queue requires yielding for its fresh-context boundary rather than pausing the queue for compaction.
+<!-- agent:boundary:403f486c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -216,7 +226,7 @@ The exchange is above the normal accretion warning threshold, but the active que
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#actionfileshuman]
+- 🚧 do [#actionfileshuman]
 ---
 tools.md issue
 ```
@@ -241,12 +251,15 @@ Allow preset to recognize the entire text and support multiple presets in the te
 ---
 - 🚧 Add a `agent:todo` to store todo items for the operator to act on. Unpublished drafts are a common todo item. Add `agent:todo` into the agent document template for Claim for Tmux Pane command. The agents should be instructed to make a brief TODO item. It can refer to `agent:review` + `agent:backlog` items, draft files, etc.
 - 🚧 release + publish
+- 🚧 When the agent prompts the developer, show the prompt choices with context in the agent:exchange.
+- During a hot-reload, tmux pane auto-sync is temporarily not operational.
+- Can we guide subagents to surface prompts + permission requests to the user across all supported agent hanlesses? If yes, add the functionality to agent-doc.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#actionfileshuman] Does agent-doc have an `admin issue` or `issue` action which files a human-only or agent-assisted gh issue in the btakita/agent-doc repo? Should we leave `issue` open for people who want to file issues in their own repos? Would operator repo or PM tool issue filing be in the scope of agent-doc or should this be left for the agents + harness themselves?
+- [ ] 🚧 [#actionfileshuman] Does agent-doc have an `admin issue` or `issue` action which files a human-only or agent-assisted gh issue in the btakita/agent-doc repo? Should we leave `issue` open for people who want to file issues in their own repos? Would operator repo or PM tool issue filing be in the scope of agent-doc or should this be left for the agents + harness themselves?
 <!-- /agent:backlog -->
 
 ## Review

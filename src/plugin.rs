@@ -2394,7 +2394,25 @@ fn install_jetbrains_zip_into(
         agent_doc_fs::jetbrains_install::StagingPurge::Doomed,
     );
     if jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
-        return Ok(JetbrainsLocalInstallOutcome::Unchanged);
+        let restart_marker =
+            target_dir.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
+        if !restart_marker.is_file() {
+            return Ok(JetbrainsLocalInstallOutcome::Unchanged);
+        }
+        let pids = match live_jetbrains_ide_pids() {
+            Ok(pids) => pids,
+            Err(error) => {
+                eprintln!(
+                    "[plugin] could not enumerate live JetBrains processes while checking an existing restart verdict: {error:#}"
+                );
+                Vec::new()
+            }
+        };
+        return Ok(unchanged_jetbrains_install_outcome_at(
+            target_dir,
+            pids,
+            Path::new("/proc"),
+        ));
     }
     if let Some(outcome) = already_staged_outcome(
         target_dir,
@@ -2440,6 +2458,25 @@ fn install_jetbrains_zip_into(
         );
     }
     Ok(outcome)
+}
+
+/// GH #257: matching bytes do not supersede a refusal already recorded for a
+/// live owner. The files can be current while that owner still executes the old
+/// generation, so an unchanged install must continue to prescribe its restart.
+fn unchanged_jetbrains_install_outcome_at(
+    target_dir: &Path,
+    live_pids: Vec<u32>,
+    proc_root: &Path,
+) -> JetbrainsLocalInstallOutcome {
+    let pids = jetbrains_live_owner_candidates(live_pids, target_dir, proc_root);
+    pids.into_iter()
+        .find_map(|pid| {
+            agent_doc_fs::plugin_jar::recorded_restart_verdict_for_plugins_dir_at(
+                pid, target_dir, proc_root,
+            )
+        })
+        .map(|reason| JetbrainsLocalInstallOutcome::RestartRequired { reason })
+        .unwrap_or(JetbrainsLocalInstallOutcome::Unchanged)
 }
 
 /// GH #115: when the IDE's pending-install queue already holds a viable staging
@@ -3550,7 +3587,8 @@ mod tests {
         jetbrains_upgrade_launcher_has_main_manifest, jetbrains_upgrade_reattach_warning,
         jetbrains_version_cmp, local_jetbrains_zip_in, local_jetbrains_zip_version,
         packaged_plugin_version, release_version, releases_page_url, replace_jetbrains_plugin_tree,
-        verify_local_install_version, vscode_extension_version_from_output,
+        unchanged_jetbrains_install_outcome_at, verify_local_install_version,
+        vscode_extension_version_from_output,
     };
     use super::{install_jetbrains_package_bytes, java_candidates_for_ide, resolve_java_for_ide};
     use serde_json::json;
@@ -6241,6 +6279,50 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert_eq!(
             super::jetbrains_live_owner_candidates(vec![pid], &target, &proc_root),
             vec![pid]
+        );
+    }
+
+    /// GH #257: once the install already recorded that this live owner cannot
+    /// hot-upgrade, finding the same bytes on disk must not erase that fact by
+    /// reporting `Unchanged` / "No JetBrains restart is required".
+    #[test]
+    fn unchanged_install_preserves_newer_restart_verdict_for_live_owner() {
+        let tmp = TempDir::new().unwrap();
+        let (proc_root, pid) = gh238_fake_host(&tmp, "IntelliJIdea2026.3");
+        let target = tmp.path().join("share/JetBrains/IntelliJIdea2026.3");
+        let marker = target.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
+        fs::write(
+            &marker,
+            "exact-263 package has no restart-free upgrade entry point\n",
+        )
+        .unwrap();
+        filetime::set_file_mtime(
+            proc_root.join(pid.to_string()),
+            filetime::FileTime::from_unix_time(1_700_000_000, 0),
+        )
+        .unwrap();
+        filetime::set_file_mtime(
+            &marker,
+            filetime::FileTime::from_unix_time(1_700_000_100, 0),
+        )
+        .unwrap();
+
+        assert_eq!(
+            unchanged_jetbrains_install_outcome_at(&target, vec![pid], &proc_root),
+            JetbrainsLocalInstallOutcome::RestartRequired {
+                reason: "exact-263 package has no restart-free upgrade entry point".to_string(),
+            }
+        );
+
+        // A marker from before this owner started does not prescribe a restart.
+        filetime::set_file_mtime(
+            &marker,
+            filetime::FileTime::from_unix_time(1_699_999_900, 0),
+        )
+        .unwrap();
+        assert_eq!(
+            unchanged_jetbrains_install_outcome_at(&target, vec![pid], &proc_root),
+            JetbrainsLocalInstallOutcome::Unchanged
         );
     }
 

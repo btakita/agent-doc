@@ -193,21 +193,47 @@ pub fn plugin_jar_stems(editor_kind: &str) -> Option<&'static [&'static str]> {
     }
 }
 
-/// The refusal an install recorded next to the jar this process maps, when that
-/// record is newer than the process (so it was this process that refused).
-pub fn recorded_restart_verdict(pid: u32, mapped: &MappedPluginJar) -> Option<String> {
-    let path = match mapped {
-        MappedPluginJar::Deleted { path } | MappedPluginJar::Superseded { path, .. } => path,
-        _ => return None,
-    };
-    // <plugins>/agent-doc-jetbrains/lib/<jar>
-    let plugins_dir = std::path::Path::new(path.trim_end_matches(" (deleted)"))
-        .parent()?
-        .parent()?
-        .parent()?;
+/// The plugins directory that owns one mapped plugin jar. Atomic replacement
+/// normally leaves the mapping under the installed tree, but `#jbpluginvanish`
+/// moves the old tree to `<plugins>/.agent-doc-jetbrains-install/backup-*/`.
+/// Both paths still belong to the same plugins directory and restart marker.
+fn plugins_dir_for_mapped_jar(path: &str) -> Option<&std::path::Path> {
+    let jar = std::path::Path::new(path.trim_end_matches(" (deleted)"));
+    let tree = jar.parent()?.parent()?;
+    let parent = tree.parent()?;
+    if tree
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("backup-"))
+        && parent
+            .file_name()
+            .is_some_and(|name| name == ".agent-doc-jetbrains-install")
+    {
+        parent.parent()
+    } else {
+        // <plugins>/agent-doc-jetbrains[-263]/lib/<jar>
+        Some(parent)
+    }
+}
+
+/// The refusal an install recorded in `plugins_dir`, when that record is newer
+/// than the process (so it was this process that refused).
+pub fn recorded_restart_verdict_for_plugins_dir(
+    pid: u32,
+    plugins_dir: &std::path::Path,
+) -> Option<String> {
+    recorded_restart_verdict_for_plugins_dir_at(pid, plugins_dir, std::path::Path::new("/proc"))
+}
+
+/// Proc-root-parameterized core used by deterministic installer regressions.
+pub fn recorded_restart_verdict_for_plugins_dir_at(
+    pid: u32,
+    plugins_dir: &std::path::Path,
+    proc_root: &std::path::Path,
+) -> Option<String> {
     let marker = plugins_dir.join(PLUGIN_RESTART_REQUIRED_MARKER);
     let recorded_at = std::fs::metadata(&marker).ok()?.modified().ok()?;
-    let started_at = std::fs::metadata(format!("/proc/{pid}"))
+    let started_at = std::fs::metadata(proc_root.join(pid.to_string()))
         .ok()?
         .modified()
         .ok()?;
@@ -216,6 +242,25 @@ pub fn recorded_restart_verdict(pid: u32, mapped: &MappedPluginJar) -> Option<St
     }
     let reason = std::fs::read_to_string(&marker).ok()?;
     Some(reason.lines().next().unwrap_or("").to_string()).filter(|r| !r.trim().is_empty())
+}
+
+/// The refusal an install recorded next to the jar this process maps, when that
+/// record is newer than the process (so it was this process that refused).
+pub fn recorded_restart_verdict(pid: u32, mapped: &MappedPluginJar) -> Option<String> {
+    recorded_restart_verdict_at(pid, mapped, std::path::Path::new("/proc"))
+}
+
+/// Proc-root-parameterized mapped-jar lookup used by deterministic regressions.
+pub fn recorded_restart_verdict_at(
+    pid: u32,
+    mapped: &MappedPluginJar,
+    proc_root: &std::path::Path,
+) -> Option<String> {
+    let path = match mapped {
+        MappedPluginJar::Deleted { path } | MappedPluginJar::Superseded { path, .. } => path,
+        _ => return None,
+    };
+    recorded_restart_verdict_for_plugins_dir_at(pid, plugins_dir_for_mapped_jar(path)?, proc_root)
 }
 
 /// What a superseded mapping is, in words: which jar, and how it was replaced.
@@ -333,6 +378,81 @@ mod tests {
         ] {
             assert_eq!(plugin_jar_version(name, stems), None, "{name}");
         }
+    }
+
+    /// GH #257: an atomic plugin swap moves the live jar into the private
+    /// backup tree, but the refusal marker remains beside that tree in the IDE
+    /// data/plugins directory. Both layouts must find the same verdict.
+    #[test]
+    fn recorded_restart_verdict_resolves_installed_and_backup_mappings() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("IntelliJIdea2026.3");
+        let proc_root = root.path().join("proc");
+        let pid_dir = proc_root.join("42");
+        std::fs::create_dir_all(&pid_dir).unwrap();
+        std::fs::create_dir_all(&plugins).unwrap();
+        let marker = plugins.join(PLUGIN_RESTART_REQUIRED_MARKER);
+        std::fs::write(&marker, "exact-263 package requires restart\nmetadata\n").unwrap();
+        filetime::set_file_mtime(
+            &pid_dir,
+            filetime::FileTime::from_unix_time(1_700_000_000, 0),
+        )
+        .unwrap();
+        filetime::set_file_mtime(
+            &marker,
+            filetime::FileTime::from_unix_time(1_700_000_100, 0),
+        )
+        .unwrap();
+
+        assert_eq!(
+            recorded_restart_verdict_for_plugins_dir_at(42, &plugins, &proc_root).as_deref(),
+            Some("exact-263 package requires restart")
+        );
+
+        let installed = MappedPluginJar::Deleted {
+            path: plugins
+                .join("agent-doc-jetbrains-263/lib/agent-doc-jetbrains-263-0.2.592.jar")
+                .display()
+                .to_string(),
+        };
+        let backup = MappedPluginJar::Deleted {
+            path: plugins
+                .join(
+                    ".agent-doc-jetbrains-install/backup-2095041-1792008622073994402/lib/agent-doc-jetbrains-263-0.2.577.jar",
+                )
+                .display()
+                .to_string(),
+        };
+        let installed_path = match &installed {
+            MappedPluginJar::Deleted { path } => path,
+            _ => unreachable!(),
+        };
+        let backup_path = match &backup {
+            MappedPluginJar::Deleted { path } => path,
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            plugins_dir_for_mapped_jar(installed_path),
+            Some(plugins.as_path())
+        );
+        assert_eq!(
+            plugins_dir_for_mapped_jar(backup_path),
+            Some(plugins.as_path())
+        );
+        assert_eq!(
+            recorded_restart_verdict_at(42, &installed, &proc_root).as_deref(),
+            Some("exact-263 package requires restart")
+        );
+        assert_eq!(
+            recorded_restart_verdict_at(42, &backup, &proc_root).as_deref(),
+            Some("exact-263 package requires restart")
+        );
+
+        let unrelated = plugins.join("other/backup-123/lib/agent-doc-jetbrains-0.2.1.jar");
+        assert_ne!(
+            plugins_dir_for_mapped_jar(&unrelated.display().to_string()),
+            Some(plugins.as_path())
+        );
     }
 
     /// GH #84: without a recorded refusal the ladder starts restart-free; with

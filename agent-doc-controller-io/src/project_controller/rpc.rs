@@ -12690,15 +12690,29 @@ fn superseded_editor_route_refusal(
             | agent_doc_fs::plugin_jar::MappedPluginJar::Superseded { path, .. } => path,
             _ => return None,
         };
-        Some(format!(
-            "plugin_bytes_superseded: editor_route refused before dispatch — live {kind} editor \
-             pid {pid} is executing superseded plugin bytes ({path} is no longer the installed \
-             jar), so it cannot publish the observations this route waits on and the command \
-             would only burn its timeout. Run the plugin install once so its restart-free \
-             update can converge; if the install reports the process refused that update, \
-             restart the editor backend (pid {pid}). Then retry (#76)."
+        let restart_verdict = agent_doc_fs::plugin_jar::recorded_restart_verdict(*pid, mapped);
+        Some(superseded_editor_route_refusal_message(
+            kind,
+            *pid,
+            path,
+            restart_verdict.as_deref(),
         ))
     })
+}
+
+fn superseded_editor_route_refusal_message(
+    kind: &str,
+    pid: u32,
+    path: &str,
+    restart_verdict: Option<&str>,
+) -> String {
+    let remedy = agent_doc_fs::plugin_jar::superseded_editor_remedy(restart_verdict);
+    format!(
+        "plugin_bytes_superseded: editor_route refused before dispatch — live {kind} editor \
+         pid {pid} is executing superseded plugin bytes ({path} is no longer the installed \
+         jar), so it cannot publish the observations this route waits on and the command \
+         would only burn its timeout. {remedy} Then retry (#76; editor backend pid {pid})."
+    )
 }
 
 /// GH #76: refuse an `editor_route` whose document is held by an editor already
@@ -53027,7 +53041,28 @@ mod tests {
         assert!(refusal.starts_with("plugin_bytes_superseded"), "{refusal}");
         assert!(refusal.contains("pid 1506046"), "{refusal}");
         assert!(refusal.contains(jar), "{refusal}");
-        assert!(refusal.contains("restart-free update"), "{refusal}");
+        assert!(
+            refusal.contains("Re-run the plugin installation once"),
+            "{refusal}"
+        );
+
+        // GH #257: once the installer already recorded a refusal, route
+        // admission must skip the install rung and prescribe the restart.
+        let restart = superseded_editor_route_refusal_message(
+            "jetbrains",
+            1506046,
+            jar,
+            Some("exact-263 package has no restart-free upgrade entry point"),
+        );
+        assert!(
+            restart.contains("Restart the editor to load them"),
+            "{restart}"
+        );
+        assert!(restart.contains("pid 1506046"), "{restart}");
+        assert!(
+            !restart.contains("Re-run the plugin installation once"),
+            "{restart}"
+        );
 
         // Fail open: current or inconclusive mappings never refuse.
         assert_eq!(

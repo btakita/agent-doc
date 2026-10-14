@@ -284,6 +284,56 @@ Implemented optional `--title` and `--description` arguments for `update-slack-p
 Added `docs/assets/slack-pr-list-example.png`, pushed commit `f8754db30d541c4b7b956f3cc0ee58376aba395b` (`feat: configure Slack message heading`) to `feat/slack-pr-status`, and embedded the commit-pinned full screenshot in [haiven-tools PR #21](https://github.com/haiven-dev/haiven-tools/pull/21). GitHub API readback confirms the 401,172-byte asset and the PR-body image link.
 
 Verification passed: the installed entry-point help exposes both new flags; all 25 focused updater tests pass; the complete portable `scripts/check.py` suite passes (including 59 integration tests with 4 skips); `uv lock --check` and `git diff --check` pass. The new CI run has passed on Ubuntu and macOS; Windows was still running at closeout.
+
+### Re: Faster polling, GitHub limits, and Slack app options — gpt-5 · 2026-10-13T20:07:29-04:00
+
+> **Chat prompt (#chatprompt):** The script seems to take longer than 1 minute
+
+Confirmed. The prior 60-second setting was a sleep after each complete GitHub/Slack cycle, so query runtime was added on top and total latency could exceed one minute.
+
+> **Chat prompt (#chatprompt):** Can we tighten the polling?
+
+Yes. Commit `200460f` changes the default to a 15-second start-to-start cadence. Each cycle now measures its runtime, sleeps only for the remaining portion of the interval, logs both values, and never overlaps another cycle.
+
+> **Chat prompt (#chatprompt):** Does gh provide a push mechanism?
+
+No general PR-event subscription is exposed by `gh`. Its watch commands poll; true event delivery is provided by GitHub webhooks. See the [GitHub CLI check watcher](https://cli.github.com/manual/gh_pr_checks) and [webhook delivery documentation](https://docs.github.com/en/webhooks/using-webhooks/handling-webhook-deliveries).
+
+> **Chat prompt (#chatprompt):** Can we
+
+This prompt arrived incomplete and was superseded by the following complete question.
+
+> **Chat prompt (#chatprompt):** Can we setup a proxied webhook mechanism?
+
+Yes: GitHub webhook → authenticated public relay → local client stream → immediate reconciliation, with fallback polling for missed deliveries. GitHub documents proxy forwarding for development, but recommends a dedicated production receiver and signature verification.
+
+> **Chat prompt (#chatprompt):** or would that require admin permissions?
+
+Repository webhooks require repository admin access; organization webhooks require organization-owner or delegated webhook-management access. The current credentials have repository admin on `haiven-tools`, `haiven-sdk`, and `haiven-cli`, but not `haiven-api` or `haiven-contracts`, so repository webhooks would not currently cover the entire list. See [GitHub webhook permissions](https://docs.github.com/en/webhooks/types-of-webhooks).
+
+> **Chat prompt (#chatprompt):** ok...stick with polling. it's slower than I would like though
+
+Kept polling and optimized its dominant GitHub fetch path.
+
+> **Chat prompt (#chatprompt):** can we use async to request all PRs in the list? does gh have rate limiting?
+
+The old implementation already used eight concurrent workers, but still made about two REST calls per PR. More per-PR concurrency would improve wall time while consuming the rate limit much faster. Commit `243d3da` instead batches statuses into one concurrent `gh pr list --json` query per repository and falls back to individual REST reads only for a PR absent from the 100-item batch. A live check fetched all 39 listed statuses through four repository queries in 3.786 seconds with no missing entries.
+
+> **Chat prompt (#chatprompt):** what is the rate limit?
+
+For local authenticated-user credentials, GitHub normally allows 5,000 REST requests/hour and 5,000 GraphQL points/hour. Secondary limits include 100 concurrent requests, 900 REST points/minute, and 2,000 GraphQL points/minute. The measured bulk query costs about one GraphQL point per repository; four repositories every 15 seconds is roughly 960 points/hour. See [REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) and [GraphQL limits](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api).
+
+> **Chat prompt (#chatprompt):** would it be better to have a dashboard?
+
+> **Chat prompt (#chatprompt):** with gh actions?
+
+A dashboard would be useful as a durable, filterable primary view, but GitHub Actions would not improve freshness by itself. Scheduled workflows have a five-minute minimum and may be delayed; event-triggered cross-repository aggregation requires a workflow in every source repository plus central dispatch credentials. The optimized local poller is simpler and faster for the current Slack status goal. See [GitHub Actions trigger timing](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows).
+
+> **Chat prompt (#chatprompt):** Can we turn this into a Slack plugin?
+
+Yes—Slack calls this an app. The existing updater can remain the reconciliation engine while a separate app layer adds a reusable manifest, bot token, `/pr-status` command, refresh/settings controls, and Socket Mode. Socket Mode avoids a public Slack request endpoint, but the process still needs hosting and the GitHub poller remains necessary. Workspace policy may require Slack-admin approval. This is best handled as a follow-up rather than expanding PR #21. See [Slack Socket Mode](https://api.slack.com/apis/connections/socket), [app manifests](https://docs.slack.dev/app-manifests/), and [Slack app hosting](https://docs.slack.dev/app-management/hosting-slack-apps/).
+
+Both performance commits are pushed to [haiven-tools PR #21](https://github.com/haiven-dev/haiven-tools/pull/21), whose description now documents the 15-second cadence and bulk-query behavior. Verification passes: 27 focused updater tests, the complete portable project suite, `uv lock --check`, `git diff --check`, and the live 39-PR bulk fetch. Ubuntu and macOS CI pass; Windows remained in progress at closeout.
 <!-- agent:boundary:2d2e1811 -->
 <!-- /agent:exchange -->
 

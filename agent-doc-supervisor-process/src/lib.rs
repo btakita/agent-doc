@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod detached_child;
 pub mod in_process;
+pub mod io_handoff;
 pub mod io_threads;
 pub mod output_state;
 pub mod pty;
@@ -39,6 +40,7 @@ impl SupervisorProcessCommand {
 
 pub const REEXEC_CHILD_PID_ENV: &str = "AGENT_DOC_REEXEC_CHILD_PID";
 pub const REEXEC_MASTER_FD_ENV: &str = "AGENT_DOC_REEXEC_MASTER_FD";
+pub const REEXEC_REDISPATCH_IF_CHILD_DIED_ENV: &str = "AGENT_DOC_REEXEC_REDISPATCH_IF_CHILD_DIED";
 pub const REEXEC_CAPABILITY_PROOF_CONTRACT_ENV: &str = "AGENT_DOC_REEXEC_CAPABILITY_PROOF_CONTRACT";
 /// Set on a same-child hot-reexec when the outgoing supervisor had promoted its
 /// route-owned start purpose from `layout-provision` to `dispatch`.
@@ -100,10 +102,14 @@ fn resolve_agent_doc_start_bin(
 pub struct ReexecState {
     pub child_pid: u32,
     pub master_fd: i32,
+    /// Whether a missing child may re-submit the interrupted document turn.
+    /// Open-cycle live-child handoffs set this false: their safety contract is
+    /// adoption only, never replay of an in-flight turn.
+    pub redispatch_if_child_died: bool,
 }
 
 impl ReexecState {
-    pub fn parse(pid: &str, fd: &str) -> Option<Self> {
+    pub fn parse(pid: &str, fd: &str, redispatch_if_child_died: Option<&str>) -> Option<Self> {
         let child_pid = pid.trim().parse::<u32>().ok()?;
         let master_fd = fd.trim().parse::<i32>().ok()?;
         if child_pid == 0 || master_fd < 0 {
@@ -112,6 +118,9 @@ impl ReexecState {
         Some(Self {
             child_pid,
             master_fd,
+            // Missing means an older outgoing image, whose established
+            // behavior was to recover a dead child by redispatching once.
+            redispatch_if_child_died: redispatch_if_child_died != Some("0"),
         })
     }
 
@@ -119,6 +128,9 @@ impl ReexecState {
         Self::parse(
             &std::env::var(REEXEC_CHILD_PID_ENV).ok()?,
             &std::env::var(REEXEC_MASTER_FD_ENV).ok()?,
+            std::env::var(REEXEC_REDISPATCH_IF_CHILD_DIED_ENV)
+                .ok()
+                .as_deref(),
         )
     }
 
@@ -136,10 +148,19 @@ impl ReexecState {
         true
     }
 
-    pub fn to_env(self) -> [(String, String); 2] {
+    pub fn to_env(self) -> [(String, String); 3] {
         [
             (REEXEC_CHILD_PID_ENV.to_string(), self.child_pid.to_string()),
             (REEXEC_MASTER_FD_ENV.to_string(), self.master_fd.to_string()),
+            (
+                REEXEC_REDISPATCH_IF_CHILD_DIED_ENV.to_string(),
+                if self.redispatch_if_child_died {
+                    "1"
+                } else {
+                    "0"
+                }
+                .to_string(),
+            ),
         ]
     }
 }
@@ -194,27 +215,29 @@ mod tests {
     #[test]
     fn reexec_state_parses_valid_handoff() {
         assert_eq!(
-            ReexecState::parse("4242", "7"),
+            ReexecState::parse("4242", "7", None),
             Some(ReexecState {
                 child_pid: 4242,
                 master_fd: 7,
+                redispatch_if_child_died: true,
             })
         );
         assert_eq!(
-            ReexecState::parse(" 9 ", " 12 "),
+            ReexecState::parse(" 9 ", " 12 ", Some("0")),
             Some(ReexecState {
                 child_pid: 9,
                 master_fd: 12,
+                redispatch_if_child_died: false,
             })
         );
     }
 
     #[test]
     fn reexec_state_rejects_invalid_handoff() {
-        assert_eq!(ReexecState::parse("0", "7"), None);
-        assert_eq!(ReexecState::parse("4242", "-1"), None);
-        assert_eq!(ReexecState::parse("x", "7"), None);
-        assert_eq!(ReexecState::parse("4242", "fd"), None);
+        assert_eq!(ReexecState::parse("0", "7", None), None);
+        assert_eq!(ReexecState::parse("4242", "-1", None), None);
+        assert_eq!(ReexecState::parse("x", "7", None), None);
+        assert_eq!(ReexecState::parse("4242", "fd", None), None);
     }
 
     #[test]
@@ -222,13 +245,19 @@ mod tests {
         let state = ReexecState {
             child_pid: 4242,
             master_fd: 7,
+            redispatch_if_child_died: false,
         };
         let env = state.to_env();
         assert_eq!(env[0].0, REEXEC_CHILD_PID_ENV);
         assert_eq!(env[0].1, "4242");
         assert_eq!(env[1].0, REEXEC_MASTER_FD_ENV);
         assert_eq!(env[1].1, "7");
-        assert_eq!(ReexecState::parse(&env[0].1, &env[1].1), Some(state));
+        assert_eq!(env[2].0, REEXEC_REDISPATCH_IF_CHILD_DIED_ENV);
+        assert_eq!(env[2].1, "0");
+        assert_eq!(
+            ReexecState::parse(&env[0].1, &env[1].1, Some(&env[2].1)),
+            Some(state)
+        );
     }
 
     #[test]
@@ -286,6 +315,7 @@ mod tests {
         let live = ReexecState {
             child_pid: std::process::id(),
             master_fd: 7,
+            redispatch_if_child_died: false,
         };
         assert!(live.child_survived());
 
@@ -297,6 +327,7 @@ mod tests {
         let dead = ReexecState {
             child_pid: dead_pid,
             master_fd: 7,
+            redispatch_if_child_died: false,
         };
         assert!(!dead.child_survived());
     }

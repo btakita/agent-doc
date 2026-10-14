@@ -8,12 +8,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
+use crate::io_handoff::IoHandoffGate;
+
 const SHARED_WRITER_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SHARED_WRITER_WRITE_POLL_INTERVAL_MS: i32 = 50;
 const SHARED_WRITER_CHUNK_MAX: usize = 1024;
 
 pub struct SharedPtyWriter {
     writer: Box<dyn Write + Send>,
+    handoff: Arc<IoHandoffGate>,
     #[cfg(unix)]
     raw_fd: Option<std::os::unix::io::RawFd>,
 }
@@ -98,6 +101,7 @@ impl SharedPtyWriter {
     pub fn new(writer: Box<dyn Write + Send>) -> Self {
         Self {
             writer,
+            handoff: Arc::new(IoHandoffGate::default()),
             #[cfg(unix)]
             raw_fd: None,
         }
@@ -105,13 +109,42 @@ impl SharedPtyWriter {
 
     #[cfg(unix)]
     pub fn with_raw_fd(writer: Box<dyn Write + Send>, raw_fd: std::os::unix::io::RawFd) -> Self {
+        Self::with_raw_fd_and_handoff(writer, raw_fd, Arc::new(IoHandoffGate::default()))
+    }
+
+    #[cfg(unix)]
+    pub fn with_raw_fd_and_handoff(
+        writer: Box<dyn Write + Send>,
+        raw_fd: std::os::unix::io::RawFd,
+        handoff: Arc<IoHandoffGate>,
+    ) -> Self {
         Self {
             writer,
+            handoff,
             raw_fd: Some(raw_fd),
         }
     }
 
+    pub fn handoff_gate(&self) -> Arc<IoHandoffGate> {
+        self.handoff.clone()
+    }
+
     pub fn write_all_interruptibly(&mut self, bytes: &[u8], stop: &AtomicBool) -> io::Result<()> {
+        let handoff = self.handoff.clone();
+        let _transaction = handoff.forwarding();
+        self.write_all_interruptibly_handoff_held(bytes, stop)
+    }
+
+    /// Write while the caller already holds this writer's handoff gate.
+    ///
+    /// The stdin forwarder uses this after acquiring the gate *before* reading
+    /// stdin, so an exec cannot consume operator input into a doomed process
+    /// image. Other callers use [`Self::write_all_interruptibly`].
+    pub fn write_all_interruptibly_handoff_held(
+        &mut self,
+        bytes: &[u8],
+        stop: &AtomicBool,
+    ) -> io::Result<()> {
         #[cfg(unix)]
         if let Some(fd) = self.raw_fd {
             return write_all_fd_interruptibly(fd, bytes, stop);

@@ -14,7 +14,7 @@ use agent_doc_supervisor::{
 use agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState;
 use agent_doc_supervisor_process::{
     REEXEC_CAPABILITY_PROOF_CONTRACT_ENV, REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV,
-    REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV, ReexecState,
+    REEXEC_REDISPATCH_IF_CHILD_DIED_ENV, REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV, ReexecState,
     io_threads::{spawn_reader_thread, spawn_writer_thread},
     reentry_route_owned_start_purpose, resize,
 };
@@ -131,14 +131,15 @@ fn reentry_may_record_resume_id(
 /// `#frontmattersessionflap`: whether this start launches a harness that needs a
 /// freshly minted conversation id.
 ///
-/// A re-exec that adopts the surviving child launches nothing: the child keeps
-/// its own thread, so a minted id is never used by any process. Minting it
-/// anyway rewrote `resume.claude:` on every stale-binary re-exec
+/// A re-exec is transport reentry: a surviving child keeps its own thread, and
+/// an adopt-only child lost during the image swap still leaves an open cycle
+/// under the existing identity. A minted id is never valid for either case.
+/// Minting one previously rewrote `resume.claude:` on every stale-binary re-exec
 /// (agent-doc-bugs.md 2026-09-29: 67619911 -> 6408b655 at 00:18:19, right after
 /// `supervisor_binary_stale_self_recycled via=execve_preserve_child`, with no
 /// transcript for either id), and each rewrite was post-commit drift.
-fn launch_mints_session_id(preserved_child_survived: bool) -> bool {
-    !preserved_child_survived
+fn launch_mints_session_id(reexec_reentry: bool) -> bool {
+    !reexec_reentry
 }
 
 fn resolve_resume_request_from_sources(
@@ -872,6 +873,7 @@ pub fn run_with_reap_policy_resume_and_harness(
     // the supervisor transport. Detect it before start admission so that
     // admission cannot publish a false session start or advance actor generation.
     let mut pending_adopt = ReexecState::from_env();
+    let reexec_reentry = pending_adopt.is_some();
     let preserved_child_survived = pending_adopt
         .as_ref()
         .is_some_and(|state| state.child_survived());
@@ -881,7 +883,7 @@ pub fn run_with_reap_policy_resume_and_harness(
     // ordinary starts keep the requested path and therefore cannot be redirected
     // by a stale/reused PID row. The lease lookup additionally requires one
     // non-closed, existing document in this project.
-    let reentry_file = if preserved_child_survived && !file.exists() {
+    let reentry_file = if reexec_reentry && !file.exists() {
         match agent_doc_controller_io::project_controller::authoritative_reentry_document_for_pid(
             file,
             std::process::id(),
@@ -936,7 +938,7 @@ pub fn run_with_reap_policy_resume_and_harness(
         supervisor_instance_id,
         actor_record,
         post_start_document_model_ensure,
-    } = if preserved_child_survived {
+    } = if reexec_reentry {
         prepare_start_runtime_reentry(&reentry_file, force, route_owned)?
     } else {
         if let Some(harness_override) = harness_override.as_deref() {
@@ -1057,6 +1059,7 @@ pub fn run_with_reap_policy_resume_and_harness(
         unsafe {
             std::env::remove_var(REEXEC_CHILD_PID_ENV);
             std::env::remove_var(REEXEC_MASTER_FD_ENV);
+            std::env::remove_var(REEXEC_REDISPATCH_IF_CHILD_DIED_ENV);
             std::env::remove_var(REEXEC_CAPABILITY_PROOF_CONTRACT_ENV);
         }
         log_event(&mut session_log, "supervisor_reexec_reentry detected");
@@ -1105,7 +1108,7 @@ pub fn run_with_reap_policy_resume_and_harness(
     // `#resumecapture`: mint this launch's conversation id, hand it to the
     // harness, and record it on the document — so the NEXT restart can resume
     // precisely instead of starting fresh. No-op when already resuming.
-    if launch_mints_session_id(preserved_child_survived)
+    if launch_mints_session_id(reexec_reentry)
         && let Some(assigned) =
             assign_and_record_session_id(&canonical, &harness, &mut initial_launch_args)
     {
@@ -1223,6 +1226,7 @@ pub fn run_with_reap_policy_resume_and_harness(
     // Start IPC listener
     let shared_for_ipc = shared.clone();
     let mut ipc = SupervisorIpc::start(&project_root, &session_id, move |method| {
+        let _handoff = shared_for_ipc.ipc_handoff.lock();
         agent_doc_supervisor_io::ipc::handle_supervisor_ipc(method, shared_for_ipc.as_ref())
     })?;
     log_event(
@@ -1370,16 +1374,13 @@ pub fn run_with_reap_policy_resume_and_harness(
     // authoritative even if editor/frontmatter projection lags.
     let mut refresh_resume_from_frontmatter = false;
 
-    // `#midturn-recycle-resume` Phase B — actively resume a turn that was genuinely
-    // INTERRUPTED across the recycle. Phase A makes a mid-cycle `execve` impossible
-    // in the steady state, but a child can still die across the recycle window (it
-    // crashed/was killed, or the escalation forced the recycle over a never-closing
-    // wedged cycle). In that case the surviving-child resume never happens, so the
-    // fresh image must re-dispatch the interrupted turn from the `#durablerecycle`
-    // checkpoint keyed off `queue_task_id` / `prompt_targets`. When the child DID
-    // survive (the common case) we do NOT re-dispatch — the adopted child is still
-    // running the turn (idempotency). A committed/abandoned (closed) checkpoint, an
-    // already-consumed checkpoint, or a non-recycle boot all resume nothing.
+    // `#midturn-recycle-resume` Phase B — resume according to the handoff mode.
+    // Legacy/capture-backed recovery may re-dispatch once when the child died,
+    // using the durable checkpoint keyed by `queue_task_id` / `prompt_targets`.
+    // An uncaptured live-child transition is adopt-only: the child keeps running
+    // without a trigger, and even unexpected child loss cannot authorize replay.
+    // A committed/abandoned checkpoint, an already-consumed legacy checkpoint,
+    // or a non-recycle boot resumes nothing.
     {
         let is_recycle_boot = pending_adopt.is_some();
         let cycle_checkpoint = agent_doc_cycle_state_io::load_with_closeout_projection(file)
@@ -1401,6 +1402,9 @@ pub fn run_with_reap_policy_resume_and_harness(
             cycle_open,
             child_survived,
             already_consumed,
+            pending_adopt
+                .map(|state| state.redispatch_if_child_died)
+                .unwrap_or(true),
         );
         match resume_action {
             BootResumeAction::RedispatchInterruptedTurn => {
@@ -1453,6 +1457,25 @@ pub fn run_with_reap_policy_resume_and_harness(
                 log_event(
                     &mut session_log,
                     "supervisor_recycle_resume_adopt_surviving_child reason=child_alive_owns_resume",
+                );
+            }
+            BootResumeAction::SpawnWithoutRedispatch => {
+                // The outgoing image authorized only adoption of the exact
+                // in-flight child. If that child disappeared during exec, start
+                // a replacement composer but do not inject the document turn:
+                // replaying could duplicate arbitrary side effects from the
+                // lost child. The open cycle remains durable and diagnosable.
+                pending_adopt = None;
+                log_event(
+                    &mut session_log,
+                    "supervisor_recycle_resume_child_lost action=spawn_without_redispatch reason=adopt_only_handoff",
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "supervisor_recycle_resume_child_lost file={} action=spawn_without_redispatch reason=adopt_only_handoff (#midturn-live-child-recycle)",
+                        file.display(),
+                    ),
                 );
             }
             BootResumeAction::None => {}
@@ -1963,9 +1986,12 @@ pub fn run_with_reap_policy_resume_and_harness(
         let pty_writer = session.take_writer()?;
         let pty_reader = session.clone_reader()?;
         #[cfg(unix)]
-        let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::with_raw_fd(
+        let pty_read_poll_fd = session.dup_read_poll_fd()?;
+        #[cfg(unix)]
+        let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::with_raw_fd_and_handoff(
             pty_writer,
             pty_write_fd,
+            shared.io_handoff.clone(),
         )));
         #[cfg(not(unix))]
         let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(pty_writer)));
@@ -2018,8 +2044,14 @@ pub fn run_with_reap_policy_resume_and_harness(
         let process_io_observer = Arc::new(
             agent_doc_supervisor_process_io::SupervisorProcessIoObserver::new(shared.clone()),
         );
-        let reader_thread =
-            spawn_reader_thread(process_io_observer.clone(), harness.clone(), pty_reader);
+        let reader_thread = spawn_reader_thread(
+            process_io_observer.clone(),
+            harness.clone(),
+            pty_reader,
+            #[cfg(unix)]
+            Some(pty_read_poll_fd),
+            shared.io_handoff.clone(),
+        );
         let writer_stop = StopSignal::new().context("failed to create writer stop signal")?;
         let writer_stop_flag = Arc::new(AtomicBool::new(false));
         let ctrl_c_flag = Arc::new(AtomicBool::new(false));
@@ -3164,17 +3196,14 @@ mod tests {
             panic!("frontmatter seed should resolve");
         };
         assert!(!reentry_may_record_resume_id(true, None, &id));
-        // `#frontmattersessionflap`: the adopted child launches nothing, so no id
-        // is minted (and none recorded) for it.
+        // `#frontmattersessionflap`: transport reentry preserves the existing
+        // session identity even if its adopt-only child disappears.
         assert!(!launch_mints_session_id(true));
         assert!(launch_mints_session_id(false));
         let source = include_str!("run.rs");
         let gate = source
-            .find(concat!(
-                "if launch_mints_session_id",
-                "(preserved_child_survived)"
-            ))
-            .expect("the launch-args id mint must be gated on child survival");
+            .find(concat!("if launch_mints_session_id", "(reexec_reentry)"))
+            .expect("the launch-args id mint must be gated on transport reentry");
         let mint = source[gate..]
             .find(concat!("assign_and_record_session_id", "(&canonical"))
             .expect("the gated call must be the mint");

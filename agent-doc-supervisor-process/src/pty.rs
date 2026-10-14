@@ -321,6 +321,25 @@ impl PtySession {
         Ok(duped)
     }
 
+    /// Duplicate the master fd for readiness polling by the PTY reader.
+    ///
+    /// The actual read still uses portable-pty's cloned reader. This duplicate
+    /// only lets the reader wait outside the exec handoff gate, then enter the
+    /// gate and consume a complete output transaction without blocking.
+    #[cfg(unix)]
+    pub fn dup_read_poll_fd(&self) -> Result<std::os::fd::OwnedFd> {
+        use std::os::fd::FromRawFd;
+
+        let fd = self
+            .master
+            .as_raw_fd()
+            .ok_or_else(|| anyhow::anyhow!("master pty does not expose a raw fd for polling"))?;
+        let duped = dup_cloexec(fd)
+            .map_err(|e| anyhow::anyhow!("dup master fd for read poll failed: {e}"))?;
+        // SAFETY: `duped` is a new descriptor owned by this return value.
+        Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(duped) })
+    }
+
     /// Clone the pty reader for external use (e.g., master→stdout I/O thread).
     pub fn clone_reader(&self) -> Result<Box<dyn Read + Send>> {
         self.master
@@ -593,6 +612,10 @@ impl PtyFilter {
         for trace in self.trace.iter().copied() {
             log_terminal_filter_trace(trace);
         }
+    }
+
+    pub fn at_sequence_boundary(&self) -> bool {
+        self.inner.at_sequence_boundary()
     }
 }
 

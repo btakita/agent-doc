@@ -507,6 +507,8 @@ new operator intent; an unanswered quoted tail remains actionable.
 - Route progress/status diagnostics must also be binary-safe: when `route.rs` trims captured tmux lines for stderr/status output, it must preserve UTF-8 char boundaries so multibyte glyphs in prompt/status lines cannot panic the reroute path.
 - Route trigger commands must use absolute file paths (resolved against the invoker's CWD) to prevent submodule CWD-dependent misrouting. That invariant applies to every routed reopen attempt, including post-restart retries after an admission projection stays unchanged; once route has resolved the canonical path, later retries must not fall back to `file.display()` or other caller-relative renderings. When a tmux pane's CWD is narrowed to a submodule root and the same relative path exists in both the main repo and the submodule, a relative path would resolve to the wrong file.
 
+- A stale JetBrains plugin warning must resolve package generation and install state from the live IDE's mapped JAR. A mapping under the installer's deleted `.agent-doc-jetbrains-install/backup-*/lib/` swap tree retains the same IDE data-root identity as the replaced canonical plugin tree, so the warning must inspect the replacement package now on disk and prescribe restart-only guidance when that package is current.
+
 | # | File | Description |
 |---|------|-------------|
 | 1 | [Overview](specs/01-overview.md) | What agent-doc does and how sessions work |

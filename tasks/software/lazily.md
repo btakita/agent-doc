@@ -68,6 +68,10 @@ Run A is acknowledged.
 ### Re: recovered response
 
 The two Core heads are reclaimed by their original workers, who are validating the existing isolated results rather than duplicating implementation. No commit, push, install, release, or publication is authorized while `#spec-test-commit-push` remains undefined.
+
+### Re: recovered response
+
+Core revalidations passed and their completion feedback is now visible in the document. Issue 249 and release-readiness workers are running under active claims. The stale JetBrains plugin warning remains advisory; no install or reload was attempted.
 <!-- agent:boundary:dc8f8751 -->
 <!-- /agent:exchange -->
  
@@ -76,8 +80,8 @@ The two Core heads are reclaimed by their original workers, who are validating t
 <!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
 - ⏭️ do [#lzcoreevidencedarttimeout]
 - do [#lzcoreciactivationfixes]
-- 🚧 release + publish
-- 🚧 [from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249
+- release + publish
+- [from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249
 <!-- /agent:queue -->
 
 ## Backlog

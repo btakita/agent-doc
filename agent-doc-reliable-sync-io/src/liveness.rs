@@ -54,6 +54,32 @@ pub fn expected_editor_plugin_version(editor_kind: &str) -> Option<&'static str>
     }
 }
 
+/// Package generation expected for the proven JetBrains platform line.
+///
+/// JetBrains 262 and 263 use separately versioned packages. Callers that can
+/// prove the live IDE build must compare against that package generation, not
+/// the classic 242-261 generation. Unknown and unsupported builds retain the
+/// classic fallback so the existing unsupported-build diagnostic can explain
+/// that no matching package is published.
+pub fn expected_editor_plugin_version_for_platform_build(
+    editor_kind: &str,
+    platform_build: Option<u32>,
+) -> Option<&'static str> {
+    if matches!(
+        editor_kind.trim().to_ascii_lowercase().as_str(),
+        "jetbrains" | "intellij" | "idea" | "jb"
+    ) {
+        return match platform_build {
+            Some(262) => option_env!("AGENT_DOC_EXPECTED_JETBRAINS_262_PLUGIN_VERSION")
+                .or_else(|| expected_editor_plugin_version(editor_kind)),
+            Some(263) => option_env!("AGENT_DOC_EXPECTED_JETBRAINS_263_PLUGIN_VERSION")
+                .or_else(|| expected_editor_plugin_version(editor_kind)),
+            _ => expected_editor_plugin_version(editor_kind),
+        };
+    }
+    expected_editor_plugin_version(editor_kind)
+}
+
 /// Exact generation identity with the editor kind's primary (classic) package.
 ///
 /// This is a *display/staleness* question, not the native-save admission
@@ -812,6 +838,19 @@ mod tests {
         assert_eq!(paired.iter().copied().collect::<BTreeSet<_>>().len(), 3);
         let modular = paired[1];
         let modern = paired[2];
+
+        assert_eq!(
+            expected_editor_plugin_version_for_platform_build("jetbrains", Some(261)),
+            Some(classic)
+        );
+        assert_eq!(
+            expected_editor_plugin_version_for_platform_build("jetbrains", Some(262)),
+            Some(modular)
+        );
+        assert_eq!(
+            expected_editor_plugin_version_for_platform_build("jetbrains", Some(263)),
+            Some(modern)
+        );
 
         // Matching classic package.
         assert_eq!(

@@ -444,6 +444,7 @@ pub struct LivePluginGenerationStatus {
     pub expected: String,
     pub timestamp_ms: u128,
     pub stale: bool,
+    pub mapped_plugin_jar: MappedPluginJar,
 }
 
 /// Resolve the latest live registration for each editor instance. A plugin
@@ -501,6 +502,7 @@ pub fn live_plugin_generation_statuses_from_registrations(
                     && !agent_doc_reliable_sync_io::liveness::editor_plugin_version_is_release_paired(
                         kind, running,
                     ),
+                mapped_plugin_jar: MappedPluginJar::Unknown,
             })
         })
         .collect::<Vec<_>>();
@@ -516,7 +518,24 @@ pub fn live_plugin_generation_statuses(file: &Path) -> Vec<LivePluginGenerationS
     let registrations =
         agent_doc_controller_io::project_controller::live_editor_registrations_for_file(file)
             .unwrap_or_default();
-    live_plugin_generation_statuses_from_registrations(&registrations, expected_plugin_version)
+    let mut statuses =
+        live_plugin_generation_statuses_from_registrations(&registrations, expected_plugin_version);
+    for status in &mut statuses {
+        if !status.kind.eq_ignore_ascii_case("jetbrains") || status.pid == 0 {
+            continue;
+        }
+        let Some(jar_stems) = plugin_jar_stems(&status.kind) else {
+            continue;
+        };
+        let mapped = probe_mapped_plugin_jar(status.pid, jar_stems);
+        status.expected =
+            expected_plugin_version_for_mapped_jar(&status.kind, &status.expected, &mapped);
+        if !matches!(mapped, MappedPluginJar::Unknown) {
+            status.stale = status.running.trim() != status.expected;
+        }
+        status.mapped_plugin_jar = mapped;
+    }
+    statuses
 }
 
 /// Emit replay-time generation evidence. This deliberately runs after preflight
@@ -526,17 +545,16 @@ pub fn report_live_plugin_generation_refresh(file: &Path) {
         if status.stale {
             // GH #233: an IDE on an unsupported platform build must hear the
             // same no-install remedy here as in the preflight warning.
-            let unsupported_platform_build =
-                live_plugin_install_state(&status).unsupported_platform_build;
+            let install_state = live_plugin_install_state(&status);
             eprintln!(
                 "[editor] {}",
                 stale_plugin_message_for_platform(
                     &status.kind,
                     &status.running,
                     &status.expected,
-                    installed_plugin_version(&status.kind).as_deref(),
-                    plugin_staged_for_restart(&status.kind, &status.expected),
-                    unsupported_platform_build,
+                    install_state.installed.as_deref(),
+                    install_state.staged_for_restart,
+                    install_state.unsupported_platform_build,
                 ),
             );
         } else {
@@ -665,13 +683,10 @@ fn live_plugin_install_state(status: &LivePluginGenerationStatus) -> PluginInsta
     if !status.kind.eq_ignore_ascii_case("jetbrains") || status.pid == 0 {
         return PluginInstallState::default();
     }
-    let Some(jar_stems) = plugin_jar_stems(&status.kind) else {
-        return PluginInstallState::default();
-    };
     plugin_install_state_for_mapped_jar(
         &status.kind,
         &status.expected,
-        &probe_mapped_plugin_jar(status.pid, jar_stems),
+        &status.mapped_plugin_jar,
         &agent_doc_fs::jetbrains_install::jetbrains_system_roots(),
     )
 }
@@ -706,6 +721,25 @@ fn plugin_install_state_for_mapped_jar(
     }
 }
 
+/// Resolve the package generation from the live mapped plugin tree's IDE data
+/// directory. This keeps the expected version and the installed/staged remedy
+/// on the same live-IDE evidence instead of borrowing the classic package line.
+fn expected_plugin_version_for_mapped_jar(
+    kind: &str,
+    fallback: &str,
+    mapped: &MappedPluginJar,
+) -> String {
+    let platform_build = jetbrains_plugins_dir_from_mapped_jar(mapped)
+        .as_deref()
+        .and_then(agent_doc_fs::jetbrains_install::jetbrains_platform_build);
+    agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version_for_platform_build(
+        kind,
+        platform_build,
+    )
+    .map(str::to_string)
+    .unwrap_or_else(|| fallback.to_string())
+}
+
 fn jetbrains_plugins_dir_from_mapped_jar(mapped: &MappedPluginJar) -> Option<PathBuf> {
     let path = match mapped {
         MappedPluginJar::Deleted { path }
@@ -715,12 +749,12 @@ fn jetbrains_plugins_dir_from_mapped_jar(mapped: &MappedPluginJar) -> Option<Pat
     };
     let lib_dir = path.parent()?;
     let plugin_dir = lib_dir.parent()?;
-    // `#jb262dynupgrade`: both lines install into the canonical tree; an older
-    // 262 install may still sit in its legacy `agent-doc-jetbrains-262/` tree.
+    // Every published line may install into the canonical tree; older 262/263
+    // installs may still sit in their package-specific plugin directory.
     if lib_dir.file_name()? != "lib"
         || !matches!(
             plugin_dir.file_name()?.to_str()?,
-            "agent-doc-jetbrains" | "agent-doc-jetbrains-262"
+            "agent-doc-jetbrains" | "agent-doc-jetbrains-262" | "agent-doc-jetbrains-263"
         )
     {
         return None;
@@ -1264,7 +1298,7 @@ mod tests {
         for kind in ["jetbrains", "JetBrains", "intellij", "idea"] {
             assert_eq!(
                 plugin_jar_stems(kind),
-                Some(&["agent-doc-jetbrains-", "agent.doc-"][..]),
+                Some(agent_doc_fs::plugin_jar::JETBRAINS_PLUGIN_JAR_STEMS),
                 "{kind}"
             );
         }
@@ -1532,6 +1566,48 @@ mod tests {
         }
     }
 
+    /// GH #251: a live 263 mapping selects the 263 release generation and
+    /// recognizes that exact generation as staged in the live IDE's own tree.
+    #[test]
+    fn stale_plugin_install_state_uses_the_modern_263_package_generation() {
+        let tmp = TempDir::new().unwrap();
+        let live = tmp.path().join("data/IntelliJIdea2026.3");
+        let lib = live.join("agent-doc-jetbrains-263/lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        let live_jar = lib.join("agent-doc-jetbrains-263-0.2.571.jar");
+        std::fs::write(&live_jar, b"live").unwrap();
+        let mapped = MappedPluginJar::Current {
+            path: live_jar.to_string_lossy().into_owned(),
+            inode: 1,
+        };
+        let expected =
+            expected_plugin_version_for_mapped_jar("jetbrains", "classic-fallback", &mapped);
+        let modern = agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version_for_platform_build(
+            "jetbrains",
+            Some(263),
+        )
+        .unwrap();
+        assert_eq!(expected, modern);
+
+        std::fs::write(
+            live.join(agent_doc_fs::plugin_jar::PLUGIN_RESTART_REQUIRED_MARKER),
+            format!("restart required\nstaged_version={modern}\n"),
+        )
+        .unwrap();
+        let state = plugin_install_state_for_mapped_jar("jetbrains", &expected, &mapped, &[]);
+        assert_eq!(state.installed.as_deref(), Some("0.2.571"));
+        assert!(state.staged_for_restart);
+        let message = stale_plugin_message(
+            "jetbrains",
+            "0.2.571",
+            &expected,
+            state.installed.as_deref(),
+            state.staged_for_restart,
+        );
+        assert!(message.contains("ALREADY STAGED"), "{message}");
+        assert!(message.contains(modern), "{message}");
+    }
+
     /// GH #233: a live IDE whose platform build no published package declares
     /// (264, past the published 242-263 ranges) must not be
     /// told to "install {expected} first": no package can be installed there.
@@ -1559,6 +1635,7 @@ mod tests {
             expected: "0.2.517".to_string(),
             timestamp_ms: 1,
             stale: true,
+            mapped_plugin_jar: MappedPluginJar::Unknown,
         };
         let warnings = stale_plugin_warnings_from_statuses(vec![status], |_| state.clone());
         assert_eq!(warnings.len(), 1);
@@ -1716,6 +1793,7 @@ mod tests {
             expected: "0.2.453".to_string(),
             timestamp_ms: 1,
             stale: true,
+            mapped_plugin_jar: MappedPluginJar::Unknown,
         }];
         let warnings =
             stale_plugin_warnings_from_statuses(statuses.clone(), |_| PluginInstallState {

@@ -501,11 +501,13 @@ mod tests {
 7f02-7f03 r--s 00000000 103:02 6 /opt/idea/lib/app.jar
 7f04-7f05 rw-p 00000000 00:00 0
 7f06-7f07 r--s 00000000 103:02 7 /d/agent-doc-jetbrains/lib/agent.doc-0.2.530.jar (deleted)
+7f08-7f09 r--s 00000000 103:02 8 /d/agent-doc-jetbrains-263/lib/agent-doc-jetbrains-263-0.2.531.jar
 ";
         assert_eq!(
             mapped_plugin_jars_from_maps(maps),
             vec![
                 PathBuf::from("/d/agent-doc-jetbrains/lib/agent.doc-0.2.530.jar"),
+                PathBuf::from("/d/agent-doc-jetbrains-263/lib/agent-doc-jetbrains-263-0.2.531.jar"),
                 PathBuf::from(
                     "/opt/JetBrains Rider-2026.2/plugins/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.500.jar"
                 ),

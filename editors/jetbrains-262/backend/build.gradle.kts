@@ -1,9 +1,13 @@
 import java.nio.file.Files
+import org.gradle.api.file.DuplicatesStrategy
+import org.gradle.jvm.tasks.Jar
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.transform.OutputKeys
 import javax.xml.transform.TransformerFactory
 import javax.xml.transform.dom.DOMSource
 import javax.xml.transform.stream.StreamResult
+
+val embeddedLazily by configurations.creating
 
 dependencies {
     intellijPlatform {
@@ -16,7 +20,19 @@ dependencies {
     }
 
     implementation(project(":shared"))
-    implementation("io.github.lazily:lazily:0.39.0") {
+    compileOnly("io.github.lazily:lazily:0.39.0") {
+        exclude(group = "org.jetbrains.kotlinx")
+        exclude(group = "org.jetbrains.kotlin")
+        exclude(group = "org.jetbrains", module = "annotations")
+        exclude(group = "net.java.dev.jna")
+    }
+    testImplementation("io.github.lazily:lazily:0.39.0") {
+        exclude(group = "org.jetbrains.kotlinx")
+        exclude(group = "org.jetbrains.kotlin")
+        exclude(group = "org.jetbrains", module = "annotations")
+        exclude(group = "net.java.dev.jna")
+    }
+    embeddedLazily("io.github.lazily:lazily:0.39.0") {
         exclude(group = "org.jetbrains.kotlinx")
         exclude(group = "org.jetbrains.kotlin")
         exclude(group = "org.jetbrains", module = "annotations")
@@ -26,6 +42,15 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
+}
+
+// Content modules have isolated classloaders. Keep the backend's private Lazily
+// runtime in the backend module JAR instead of the root plugin lib directory.
+tasks.named<Jar>("jar") {
+    from({ embeddedLazily.map { zipTree(it) } }) {
+        include("io/github/lazily/**")
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 sourceSets {

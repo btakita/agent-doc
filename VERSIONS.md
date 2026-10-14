@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.500
+
+- **Windows release builds compile the supervisor idle watcher.** The
+  preserved-child recycle probe is now gated to Unix, while non-Unix builds
+  conservatively report that live-child handoff is unavailable. This repairs
+  the Windows matrix failure that prevented `v0.35.499` from publishing.
+- **Operator follow-ups are captured as concise Todo actions.** When completed
+  work leaves a concrete operator action, agents now add a brief, action-first
+  checklist item in the same cycle. Todo entries may point to an existing
+  review/backlog ID or draft path, and updates preserve every existing item.
+
 ## 0.35.499
 
 - **Prompt presets now compose at project and component scope.** Sessions inherit

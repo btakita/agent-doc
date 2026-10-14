@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -302,14 +301,25 @@ Yes; completed in `1953755617`. Agent-doc now defines a deterministic `#waypostr
 Completed in `6f5149960f`. The Codex Stop path now recomputes authoritative pending steering: a diff fully owned by `forward_to_owner` continues with its existing worker, while mixed or genuinely unclaimed steering still blocks closeout.
 
 All five isolated worker results were integrated serially, centrally verified, installed once, pushed, and their claims released.
-<!-- agent:boundary:403f486c:agent-doc-bugs -->
+> **Chat prompt (#chatprompt):** Let me know when the release is published.
+
+### Re: release published — gpt-5 · 2026-10-14T16:17-04:00
+
+Agent-doc `v0.35.500` is published:
+
+- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.35.500
+- PyPI: https://pypi.org/project/agent-doc/0.35.500/
+- Homebrew: `btakita/homebrew-tap` formula version `0.35.500`
+
+The hosted release workflow is green across all target platforms, including Windows. The verified post-release integration batch is installed locally and pushed to `btakita/agent-doc` main through `840625b9c0`.
+<!-- agent:boundary:3599dd10 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

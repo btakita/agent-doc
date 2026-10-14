@@ -2,6 +2,44 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.499
+
+- **Prompt presets now compose at project and component scope.** Sessions inherit
+  project-wide prompt presets dynamically, and a quoted `preset=` attribute may
+  name multiple whitespace-separated presets (for example `preset="#push
+  #auth"`). Preflight, realtime steering, and subagent briefs resolve them in
+  source order, canonicalize duplicates, preserve structured runbooks, and fail
+  closed when any reference is missing.
+- **Claim for Tmux Pane now scaffolds an operator-owned `agent:todo`
+  checklist.** The shared Claim/Sync template adds an empty Todo section for
+  operator actions such as publishing drafts. Todo edits are informational and
+  do not start agent turns or enter queue scheduling; the existing destructive
+  checklist replacement guard remains in force.
+- **Editor replicas converge after missed or reordered updates (GH #254).** A
+  lagging editor replica now recovers to the authoritative document instead of
+  remaining indefinitely behind after a dropped generation, with regression
+  coverage across the editor synchronization path.
+- **Duplicate supervisor retirement is safe during active work (GH #243).** A
+  protected live owner is no longer killed while another pane is being adopted;
+  retirement is deferred until ownership can move without interrupting the
+  active turn.
+- **Codex Stop keeps fresh post-commit prompts with their successor cycle.** A
+  predecessor summary is no longer captured as the answer to queue work typed
+  after that predecessor committed; continuation opens a fresh cycle and only
+  its own response may be captured.
+- **Queue and closeout ownership are more durable.** Subagent completion
+  feedback is bounded and structurally valid, steering survives abandoned Stop
+  preflights, committed closeout owners are awaited, and queue continuations are
+  fenced to the turn that owns them.
+- **Supervisor and routing recovery is tighter.** Recycle preserves promoted
+  sockets, renamed documents are adopted after re-exec, stale route-owned
+  processes are retired, active panes remain focused across live peers, and
+  off-screen owners are reported instead of silently stealing navigation.
+- **Hot-path state work is bounded and JetBrains projections are current.**
+  Liveness hydration, starting-actor reads, idle status diagnostics, CRDT
+  frontier work, and stale probes avoid unbounded scans; JetBrains 263 packaging
+  and provisional remote-layout correction carry the current fixes.
+
 ## 0.35.498
 
 - **Idle JetBrains projects stop polling the controller.** Reverse-focus sync now
@@ -11724,8 +11762,6 @@ _JetBrains plugin 0.2.283._
 - **Three merge/commit-core safety fixes that cascaded in a live degraded session: compaction overlay-CRDT staleness, reset queue-journal clear, and queue-consume head-divergence reconcile (`#editorbufwin` Fix A).** (1) **Compaction overlay-CRDT staleness** (`compact.rs`): a CRDT-mode `compact --commit` no longer leaves the overlay CRDT carrying the PRE-compaction (large) markdown. The early template-branch `save_document_crdt(file, &compact(&crdt_state), &content)` was the defect — it saved the overlay with the large `&content`, so later cycles re-projected (`load_overlay_crdt`→`to_markdown`) snapshot(large) > visible(small) and tripped `guard_no_stale_snapshot_reset_drift`'s "looks like a manual cleanup" refusal. That early stale save is removed; `apply_compacted_document(..., refresh_crdt=true)` is now the single authoritative CRDT writer and rebuilds the overlay from the COMPACTED text (fresh `CrdtDoc::from_text` / `OverlayCrdtDoc::from_markdown`, which also supersedes the old tombstone-GC step since fresh docs carry no tombstones). (2) **Reset queue-journal clear** (`reset.rs`): `reset --from-current [--preserve-session]` now clears the crash-durability queue journal (`queue_journal::clear`, mirroring the commit-time clear) after rebuilding the sidecars. The rebuilt snapshot/baseline IS the new durable queue baseline, so a pre-reset journal window (heads recorded while older prompts were live) is superseded — without this, answered+compacted heads would be re-inserted by `queue_journal::replay_missing` at the next `start` and resurface over the current queue. (3) **Queue-consume head divergence** (`write/queue_consume.rs`, `#editorbufwin` Fix A): the snapshot/content_ours head is the OLD head (the live user queue addition is deliberately NOT absorbed into content_ours), while the document head read fresh from disk is the user's live editor-buffer addition, so a benign live editor buffer made the head-equality check hard-bail EVERY cycle (the remaining-queue check below already tolerated this kind of divergence). The head check now reconciles — log `queue_consume_head_divergence_reconciled reason=live_buffer_addition_authoritative` and proceed using the DOCUMENT head as authoritative — but ONLY when the divergence is explained by recorded dropped-queue evidence (`cycle_state::dropped_queue_prompts`, written by the ipc write path); with no evidence it keeps the hard-bail as a corruption guard. content_ours/snapshot composition is untouched (the `ipc_live_prompt_drift_content_ours_ignores_unproven_live_queue_deletions` invariant still passes). Tests: `compact_advances_snapshot_and_crdt_so_next_preflight_does_not_refuse`, `preserve_session_clears_stale_queue_journal_so_compacted_heads_do_not_resurface`, `queue_consume_head_divergence_reconciles_with_dropped_queue_evidence` (+ negative `…_without_evidence_still_bails`). Full suite + clippy green. **Live (operator):** the `cargo install` / `admin recycle` deploy and the live zero-drift proof against a running route-owned supervisor remain operator-gated.
 
 ## Unreleased
-
-- **Claim for Tmux Pane now scaffolds an operator-owned `agent:todo` checklist.** The shared Claim/Sync template adds an empty Todo section for operator actions such as publishing drafts. `todo` is a built-in informational component, so its content-only edits do not start agent turns or enter queue scheduling, while the existing destructive checklist replacement guard remains in force.
 
 - **Pre-run live-editor queue batches now have exact regression proof (`#qeditrace`).** Queue maintenance already reads the complete Lazily editor head and compare-and-swaps the whole document, but the original “only the first new head survives” report had no live multi-add reproduction. New embedded-relay coverage replaces stale queue rows with three unsaved heads and proves preflight preserves every addition in Lazily plus the recovery baseline without touching stale disk. If the head advances after planning, maintenance now records a durable `queue_maintenance_compare_and_swap_blocked ... recovery=retry_from_live_head` artifact and fails closed; SimWorld proves that stale first-add observation cannot mutate the batch and that retry converges all heads through editor, canonical, disk, and HEAD.
 

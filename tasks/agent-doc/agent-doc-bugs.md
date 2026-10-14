@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a138be-f42a-71f1-9164-e2992fb43c04
+  codex: 01a13960-ea2a-76e1-aad4-aa0233a71812
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -131,15 +131,26 @@ The root cause was premature Stop-adapter handling: a durable controller-owned `
 No polling loop, duplicate state owner, forced write, recycle, reload, or live `sdk.md` mutation was introduced. The historical SDK retained cycle had already completed normally and was inspected read-only.
 
 Verification on the integrated commit passed: 10,472 Rust tests (167 skipped), 202 VS Code tests, native cross-editor SimWorld, JetBrains classic/262/263 builds, eight bootstrap tests, docs/version audits, and the matching TLA receipt. The release-local CLI/library and editor packages installed successfully. The preceding `main` CI run was still in progress when checked; local authoritative verification is complete.
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/253
 
-<!-- agent:boundary:cc9a9855 -->
+### Re: GH #253 one-column provisional layout regression — gpt-5 · 2026-10-14T04:09-04:00
+
+Issue #253 is fixed on `main` and closed. The production ordering correction was already present in `a6690b86a1`; commit `55d1c4e9985e777b69ebd0807f49c68dca2c5372` adds the exact one-column regression sequence (`[a]` → provisional `[c]` → repeated structural `[a,c]`) and specifies that the pre-guess ancestry rule applies at width one.
+
+Changed files:
+
+- `agent-doc-editor-surface/src/remote_layout.rs` — focused GH #253 regression coverage.
+- `editors/jetbrains/SPEC.md` — one-column provisional ancestry contract.
+
+Verification passed: touched-file rustfmt, the focused regression, `make check-fast`, and the authoritative full `make check` (exit 0; zero detected failures). The single local `make install` completed successfully for the CLI/library, JetBrains packages, and VS Code extension. The worker branch was pushed, then fast-forwarded to `origin/main`; CI run `38533121984` for `55d1c4e9` is queued. The public package release remains for the next release cut; no release or version bump was performed in this cycle.
+<!-- agent:boundary:b66994af -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 
 ## Backlog

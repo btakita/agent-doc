@@ -33,6 +33,21 @@ internal data class FocusProjectionEffectResponse(
 )
 
 /**
+ * Whether stopping a local editor-surface adapter also withdraws its retained controller Source.
+ *
+ * A project close is an authority transition: the editor surface is gone and the controller must
+ * forget it. A dynamic plugin replacement is only an adapter-generation transition: the project
+ * and its visible layout survive, so the old controller fact remains authoritative until the
+ * replacement generation publishes its first observation.
+ */
+internal enum class EditorSurfaceShutdownPolicy(
+    val retireControllerProjection: Boolean,
+) {
+    RetireControllerProjection(true),
+    PreserveForDynamicReplacement(false),
+}
+
+/**
  * Reports what this editor looks like; the tmux consequence is derived elsewhere (`#jbsurfaceswap`
  * / `#jbpluginlazilyeffects`).
  *
@@ -120,9 +135,12 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 if (current == null || current.closed) EditorTabSyncListener() else current
             }!!
 
-        /** Release the project's surface graphs and stop its debounce executor. */
-        fun disposeProject(project: Project) {
-            instances.remove(project)?.shutdown()
+        /** Release local surface graphs and apply the lifecycle-owned controller retirement policy. */
+        internal fun disposeProject(
+            project: Project,
+            policy: EditorSurfaceShutdownPolicy = EditorSurfaceShutdownPolicy.RetireControllerProjection,
+        ) {
+            instances.remove(project)?.shutdown(policy)
         }
 
         internal fun shouldPublishFocusProjection(
@@ -1426,7 +1444,7 @@ private data class CapturedSurface(
             requestedGeneration
         }
 
-    private fun shutdown() {
+    private fun shutdown(policy: EditorSurfaceShutdownPolicy) {
         val (roots, endpoints) =
             synchronized(lifecycleLock) {
                 closed = true
@@ -1436,6 +1454,12 @@ private data class CapturedSurface(
                 surfaceRoots.drain() to surfaceEndpoints.drain()
             }
         latestSurfaceObservation.set(null)
+        if (!policy.retireControllerProjection) {
+            // Dynamic replacement keeps the controller's last acknowledged Source live. The new
+            // classloader publishes the same client family with a newer generation, atomically
+            // superseding it without an idle/null interval in tmux layout auto-sync.
+            return
+        }
         Thread(
                 {
                     for (root in roots) {

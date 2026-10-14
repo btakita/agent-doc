@@ -1791,6 +1791,30 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
     if !is_committed_prompt_diff_interruption(reason) {
         return Ok(None);
     }
+    // `#claimedstopforward`: the shared steering classifier has already
+    // decided who owns each prompt-bearing edit. A queue edit routed to a live
+    // claim owner is not fresh work for the coordinator merely because the
+    // predecessor cycle committed before Stop observed the edit. Recompute the
+    // typed items from current document authority so this path agrees with the
+    // mid-turn hook; if every item is forwarded, let the coordinator stop.
+    // Mixed edits still re-enter for the first item that has no external owner.
+    let current = current_document_content(file, "codex_stop_committed_prompt_diff")?;
+    let pending =
+        agent_doc_session_check_io::midturn_steering::pending_steering_items(file, &current);
+    let coordinator_prompt = pending
+        .iter()
+        .find(|item| item.dispatch.as_str() != "forward_to_owner")
+        .map(|item| item.verbatim.clone());
+    if !pending.is_empty() && coordinator_prompt.is_none() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "codex_stop_committed_prompt_diff_forwarded_to_claim_owners items={} action=continue (#claimedstopforward)",
+                pending.len(),
+            ),
+        );
+        return Ok(Some(StopResponse::Continue { continue_: true }));
+    }
     // `#queuetypingsteer`: a `content_edit` is the operator's own edit inside an
     // existing queue item or prompt; name that edit, not some other prompt the
     // exchange happens to hold.
@@ -1799,7 +1823,9 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
             .find("prompt_target:")
             .is_none_or(|target| at < target)
     });
-    let prompt = if steering_is_content_edit {
+    let prompt = if coordinator_prompt.is_some() {
+        coordinator_prompt
+    } else if steering_is_content_edit {
         prompt_target_from_interruption_reason(reason)
     } else {
         agent_doc_session_check_io::unresolved_exchange_prompt(file)?
@@ -9368,6 +9394,108 @@ Reviewed the gated items.\n\
             matches!(&response, StopResponse::Block { reason, .. }
                 if reason.contains("fresh unresolved exchange work")
                     && reason.contains("Even if formal logic code is not directly understandable")),
+            "{response:?}"
+        );
+    }
+
+    /// `#claimedstopforward`: agent-doc-bugs.md, 2026-10-14. The mid-turn hook
+    /// had already classified a newly added queue prompt as
+    /// `forward_to_owner` for its live subagent claim. After the predecessor
+    /// committed, Stop re-read the same diff as fresh coordinator work and
+    /// emitted "Blocked by hook". The typed claim routing remains authoritative
+    /// at Stop; releasing the claim makes the exact same prompt actionable again.
+    #[test]
+    fn committed_claimed_prompt_diff_stops_quietly_until_claim_is_released() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &[]);
+        init_git_repo(dir.path(), &doc);
+        complete_run(&doc);
+
+        let prompt = "Can we guide subagents to surface prompts and permission requests?";
+        let current = fs::read_to_string(&doc).unwrap().replace(
+            "<!-- /agent:queue -->",
+            &format!("- {prompt}\n<!-- /agent:queue -->"),
+        );
+        fs::write(&doc, &current).unwrap();
+        agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            prompt,
+            "subagent:subagent_prompt_permissions",
+            3600,
+        )
+        .unwrap();
+
+        let pending =
+            agent_doc_session_check_io::midturn_steering::pending_steering_items(&doc, &current);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].dispatch.as_str(), "forward_to_owner");
+        assert_eq!(
+            pending[0].owner.as_deref(),
+            Some("subagent:subagent_prompt_permissions")
+        );
+
+        let reason = format!(
+            "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started; prompt_target: {prompt}"
+        );
+        assert!(is_committed_prompt_diff_interruption(&reason), "{reason}");
+        assert_eq!(
+            committed_prompt_diff_stop_response(&doc, &reason).unwrap(),
+            Some(StopResponse::Continue { continue_: true }),
+            "claimed worker steering must not be re-admitted as coordinator work"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_committed_prompt_diff_forwarded_to_claim_owners"),
+            "{ops}"
+        );
+
+        agent_doc_queue_io::queue_claim::release(&doc, prompt).unwrap();
+        let response = committed_prompt_diff_stop_response(&doc, &reason)
+            .unwrap()
+            .expect("released prompt must re-enter");
+        assert!(
+            matches!(&response, StopResponse::Block { reason, .. }
+                if reason.contains("fresh unresolved exchange work")
+                    && reason.contains(prompt)),
+            "{response:?}"
+        );
+    }
+
+    /// A claimed item may share one post-commit diff with genuine fresh work.
+    /// Only the externally owned item is excluded; Stop must still hand the
+    /// unclaimed prompt back to the coordinator and name that prompt.
+    #[test]
+    fn committed_mixed_prompt_diff_reenters_for_unclaimed_work() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &[]);
+        init_git_repo(dir.path(), &doc);
+        complete_run(&doc);
+
+        let claimed = "Worker-owned permission prompt";
+        let unclaimed = "Operator follow-up still needs the coordinator";
+        let current = fs::read_to_string(&doc).unwrap().replace(
+            "<!-- /agent:queue -->",
+            &format!("- {claimed}\n- {unclaimed}\n<!-- /agent:queue -->"),
+        );
+        fs::write(&doc, &current).unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, claimed, "subagent:permissions", 3600)
+            .unwrap();
+
+        let pending =
+            agent_doc_session_check_io::midturn_steering::pending_steering_items(&doc, &current);
+        assert_eq!(pending.len(), 2, "{pending:?}");
+        assert_eq!(pending[0].dispatch.as_str(), "forward_to_owner");
+        assert_ne!(pending[1].dispatch.as_str(), "forward_to_owner");
+
+        let reason = format!(
+            "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started; prompt_target: {claimed}"
+        );
+        let response = committed_prompt_diff_stop_response(&doc, &reason)
+            .unwrap()
+            .expect("unclaimed work must re-enter");
+        assert!(
+            matches!(&response, StopResponse::Block { reason, .. }
+                if reason.contains(unclaimed) && !reason.contains(claimed)),
             "{response:?}"
         );
     }

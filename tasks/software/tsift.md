@@ -21,7 +21,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -121,13 +120,43 @@ The two failures have different causes:
 
 1. **`parse_args`: the agent guessed.** `scripts/check-godot.py` never defines `parse_args`. It only calls `parser.parse_args()` (argparse) at line 344. The agent took a name from a call site and assumed it was defined in the file. tsift made this worse, because its error says only "no indexed symbol matched". It doesn't mention the call site or list the symbols the file does define, so the agent has nothing to correct with. The fix makes the error do both and suggests a `source-read` window instead.
 2. **`main`: a real tsift bug.** `main` is in the file, at line 164 in the `actionable-review-20261014-2` haiven-sdk worktree. That worktree's `.tsift/index.db` holds `main|163`, but `tsift status` still reports the index as `fresh` with 0 stale files. Either the symbol rows are stale while freshness says fresh, or symbol-read rejects a row that drifted and reports that as "not matched". The same command succeeds in `src/haiven-dev/src/haiven-sdk`. The worker is finding which of the two it is, fixing it so a drifted file is re-parsed when requested, and adding regression tests for both cases.
+
+### Re: #fixsdkrun landed — opus-5.5 · 2026-10-14T17:30-04:00
+
+> **Queue prompt:**
+>
+> do [#fixsdkrun]: Why is the agent searching for symbols that are not in files?
+
+
+> **Queue prompt:** do [#fixsdkrun]
+
+> **Operator note:** Why is the agent searching for symbols that are not in files?
+
+Correction to my earlier diagnosis: the index was **not** stale. It stores lines counted from 0, so `main|163` means line 164, and the index matched the file.
+
+- **`main`, the real bug:** with `--file`, `symbol-read` first searched the whole repo for the name, kept only about 10 results sorted by path, and only then looked for a hit in the requested file. The repro worktree has 42 `main` functions, so the one in `scripts/check-godot.py` was cut before the file filter ran. The other checkout worked only because its `main` happened to land in the top 10. Now `--file` searches that file's symbols first and falls back to the repo-wide search only if that finds nothing.
+- **`parse_args`, the agent guessed:** `parse_args` is argparse's `parser.parse_args()`, called at line 344. The agent read a call site and took it for a definition in this file. The miss error now:
+  - says the name is only used at line 344, not defined there, and may come from an imported library;
+  - lists the symbols the file does define;
+  - suggests a window read around that line, a whole-file `source-read`, or a repo search.
+
+  The agent now has something to correct course with.
+
+**Landed:**
+- tsift `5152d0b`, fast-forwarded onto `main` and pushed.
+- Files: `packages/tsift-index/src/index.rs` (`symbol_search_in_file`), `packages/tsift-cli/src/lib.rs`, `packages/tsift-cli/tests/exit_code.rs`, `specs/search-navigation.md`, the skill reference text and its generator, and `VERSIONS.md`.
+
+**Verification:**
+- New tests cover both cases. The common-name test uses 40 decoy `main` functions and fails when the fix is disabled.
+- `make check` passed in the worker's worktree.
+- `cargo install --path .` is done. On the repro worktree, `symbol-read main` now returns lines 164–243, and `symbol-read parse_args` prints the call-site note and the list of defined symbols.
+- CI run 38639096649 was still in progress when I checked.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#fixsdkrun]: Why is the agent searching for symbols that are not in files?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -136,14 +165,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fixsdkrun] Fix from sdk.md run:
-  ```
-  • Failed (exit 1) tsift --envelope symbol-read main --file scripts/check-godot.py --budget normal
-  └ Error: no indexed symbol matched "main" in scripts/check-godot.py; searched: <root>
-
-  • Failed (exit 1) tsift --envelope symbol-read parse_args --file scripts/check-godot.py --budget normal
-  └ Error: no indexed symbol matched "parse_args" in scripts/check-godot.py; searched: <root>
-  ```
 <!-- /agent:backlog -->
 
 ## Review

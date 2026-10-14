@@ -569,3 +569,11 @@
 - 2026-10-04 [#tsiftskillrefresh] [recommended] Refresh the stale tsift skill copies to 0.1.103: agent-loop .agents/skills/tsift/SKILL.md (0.1.101), .claude/skills/tsift/SKILL.md and ~/.claude/skills/tsift/SKILL.md (both 0.1.62, plain copies, not links). Use tsift init --harness claude (links rather than copies). Check first that no other session is editing those files in the shared tree, and commit only those paths.
 - 2026-10-04 [#tsiftharnesslinks] [recommended] Decide whether codex, opencode and grok should get personal tsift skill links (tsift init --instructions personal --harness all). First confirm where each harness reads global skills: personal mode links ~/.opencode/skills, but OpenCode documents ~/.config/opencode/skills. If tsift links the wrong directory, fix that in tsift with a regression test.
 - 2026-10-07 [#releasepublish] release + publish?
+- 2026-10-14 [#fixsdkrun] Fix from sdk.md run:
+  ```
+  • Failed (exit 1) tsift --envelope symbol-read main --file scripts/check-godot.py --budget normal
+  └ Error: no indexed symbol matched "main" in scripts/check-godot.py; searched: <root>
+
+  • Failed (exit 1) tsift --envelope symbol-read parse_args --file scripts/check-godot.py --budget normal
+  └ Error: no indexed symbol matched "parse_args" in scripts/check-godot.py; searched: <root>
+  ```

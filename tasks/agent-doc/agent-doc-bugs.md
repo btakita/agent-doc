@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: ba846c4c-2e01-4e12-9539-096faec207ee
-  codex: 01a13960-ea2a-76e1-aad4-aa0233a71812
+  codex: 01a13b46-0ff5-7cb3-9cad-48c782f68b6a
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -143,6 +144,16 @@ Changed files:
 - `editors/jetbrains/SPEC.md` — one-column provisional ancestry contract.
 
 Verification passed: touched-file rustfmt, the focused regression, `make check-fast`, and the authoritative full `make check` (exit 0; zero detected failures). The single local `make install` completed successfully for the CLI/library, JetBrains packages, and VS Code extension. The worker branch was pushed, then fast-forwarded to `origin/main`; CI run `38533121984` for `55d1c4e9` is queued. The public package release remains for the next release cut; no release or version bump was performed in this cycle.
+
+### Re: GitHub issue #243 — gpt-5 · 2026-10-14T13:34-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/243
+
+Fixed, integrated, pushed, installed, and closed. Commit `10fb137c24` makes duplicate-supervisor retirement safe: a proven duplicate is retired immediately only when it is idle, input-free, and not client-visible; protected route duplicates receive a durable PID/pane/start-tick-targeted request that their existing idle watcher consumes only after revalidating authority and live protections. A protected `start --force` now fails closed for operator retry, and diagnostics name the duplicate pane, window, authoritative owner, reason, and eventual closure.
+
+Verification passed on the integrated batch: the authoritative `make check` exited 0 with zero detected failures; the focused worker suites passed 5,240 nextest tests, 160 start-runtime tests, 26 start-IO tests, policy tests, clippy, and full `make tmux-ci`. The single coordinator `make install` completed for the CLI/library, JetBrains packages, and VS Code extension. The batch is on `origin/main`; CI run `38607719497` is in progress.
+
+A separate `tools.md` Stop-hook regression is claimed by `subagent:tools_md_issue` in an isolated worktree and was deliberately kept outside this sealed batch.
 <!-- agent:boundary:b66994af -->
 <!-- /agent:exchange -->
 
@@ -151,7 +162,22 @@ Verification passed: touched-file rustfmt, the focused regression, `make check-f
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/243~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/254
+- Is the project-wide agent-doc template (i.e. presets) released + published? How do I use it?
+---
+tools.md issue
+```
+› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md
+queue or backlog line the live buffer has and the disk projection does not). It is either operator steering or an
+earlier `agent-doc write` whose own commit refused; this check compares components and cannot tell which, so it does
+not guess. Either way it is not a failed closeout. Answer it: run `agent-doc /home/brian/work/btakita/agent-loop/src/
+haiven-dev/tasks/tools.md` to open the next cycle, which reads that edit as its prompt and commits it. Do NOT run
+`agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` — every commit path refuses a
+fresh unanswered edit on purpose, because committing it would swallow the next turn's prompt — and do NOT force disk,
+which clobbers the live edits. Do not recapture the response or rerun finalize/write. Run `agent-doc session-check /
+home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` and let the binary-owned keyed retry finish.
+```
 <!-- /agent:queue -->
 
 ## Backlog

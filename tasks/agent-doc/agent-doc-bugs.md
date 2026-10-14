@@ -200,6 +200,14 @@ Implemented and released in agent-doc `v0.35.499`.
 - Focused regressions passed 17/17; the authoritative release gate passed 10,483/10,483 Rust tests, 202/202 VS Code tests, all JetBrains package lines, cross-editor simulation, and the live tmux suite.
 
 The hosted Release workflow is still assembling platform artifacts; code, tag, and local install are complete. Exchange size is elevated, but the active auto-queue continues without pausing for compaction.
+
+### Re: `admin issue` action (`#actionfileshuman`) — gpt-5 · 2026-10-14T14:57-04:00
+
+The repository does not yet have the requested action contract, so I have claimed `#actionfileshuman` and dispatched a fresh isolated worker with the authorized `#spec-test-build-install-commit-push` scope. The implementation brief reserves a repository-specific `admin issue` action for filing human-only or agent-assisted issues in `btakita/agent-doc`, while keeping generic `issue` available for callers' own repositories unless the existing action architecture requires a more compatible spelling.
+
+The worker owns specification, implementation, regression tests, build verification, commit, and branch push. I retain coordinator ownership of review, integration, the single local install/release batch, claim release, and final closeout. The item stays open until that evidence is integrated and verified.
+
+The exchange is above the normal accretion warning threshold, but the active queue contract requires continued draining rather than pausing for compaction.
 <!-- agent:boundary:b66994af -->
 <!-- /agent:exchange -->
 
@@ -208,8 +216,9 @@ The hosted Release workflow is still assembling platform artifacts; code, tag, a
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#actionfileshuman]
 ---
-🚧 tools.md issue
+tools.md issue
 ```
 › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md
 queue or backlog line the live buffer has and the disk projection does not). It is either operator steering or an
@@ -223,7 +232,7 @@ home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` and let the bi
 ```
 ---
 ---
-🚧 Allow preset to recognize the entire text and support multiple presets in the text. Attribute was `preset="#push #auth"`. See tools.md:
+Allow preset to recognize the entire text and support multiple presets in the text. Attribute was `preset="#push #auth"`. See tools.md:
 ```
 • The #push preset itself is now defined, but the queue attribute is preset="#push #auth", which the document engine
   treats as one undefined preset name. I’ll follow the generated contract exactly and dispatch a fresh verifier; I
@@ -231,13 +240,13 @@ home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` and let the bi
 ```
 ---
 - 🚧 Add a `agent:todo` to store todo items for the operator to act on. Unpublished drafts are a common todo item. Add `agent:todo` into the agent document template for Claim for Tmux Pane command. The agents should be instructed to make a brief TODO item. It can refer to `agent:review` + `agent:backlog` items, draft files, etc.
-- ~~do [#toolspresetmultiname]~~
 - 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#actionfileshuman] Does agent-doc have an `admin issue` or `issue` action which files a human-only or agent-assisted gh issue in the btakita/agent-doc repo? Should we leave `issue` open for people who want to file issues in their own repos? Would operator repo or PM tool issue filing be in the scope of agent-doc or should this be left for the agents + harness themselves?
 <!-- /agent:backlog -->
 
 ## Review

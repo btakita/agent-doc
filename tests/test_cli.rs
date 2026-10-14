@@ -30214,6 +30214,58 @@ fn test_agent_doc_template_owns_todo_patch_guard_policy() {
     );
 }
 
+/// `#operatortodo`: every shipped instruction surface must tell agents to leave
+/// concise operator actions in `agent:todo` without duplicating the tracked work
+/// or silently replacing the operator's existing checklist.
+#[test]
+fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfaces() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    for relative_path in [
+        "SKILL.md",
+        ".claude/skills/agent-doc/SKILL.md",
+        ".codex/skills/agent-doc/SKILL.md",
+        ".opencode/skills/agent-doc/SKILL.md",
+        ".grok/skills/agent-doc/SKILL.md",
+        ".cursor/rules/agent-doc.md",
+        "runbooks/respond.md",
+        ".claude/skills/agent-doc/runbooks/respond.md",
+        ".codex/skills/agent-doc/runbooks/respond.md",
+        ".opencode/skills/agent-doc/runbooks/respond.md",
+        ".grok/skills/agent-doc/runbooks/respond.md",
+        ".cursor/rules/runbooks/respond.md",
+    ] {
+        let surface = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        for required in [
+            "#operatortodo",
+            "brief checklist item",
+            "`agent:review` or `agent:backlog`",
+            "draft file path",
+            "every existing checklist item",
+        ] {
+            assert!(
+                surface.contains(required),
+                "{relative_path} must carry the operator TODO authoring contract: {required}"
+            );
+        }
+    }
+
+    let document_spec =
+        fs::read_to_string(manifest_dir.join("specs/02-document-format.md")).unwrap();
+    for required in [
+        "#operatortodo",
+        "brief, action-first",
+        "`agent:review` or `agent:backlog`",
+        "draft file path",
+        "MUST preserve every existing item",
+    ] {
+        assert!(
+            document_spec.contains(required),
+            "document format spec must define the operator TODO authoring contract: {required}"
+        );
+    }
+}
+
 #[test]
 fn test_agent_doc_template_owns_stale_baseline_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));

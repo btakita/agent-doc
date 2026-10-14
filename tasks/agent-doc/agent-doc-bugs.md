@@ -186,6 +186,20 @@ presets:
 Then invoke `#review` in a session exchange or add `- #review` to an active `agent:queue`. Both `presets:` and `prompt_presets:` are accepted. The nearest `.agent-doc/project.md` supplies live defaults to sessions below it; edits apply without copying or syncing. An exact-name session-local declaration overrides the project value, while an unfinished or null local declaration masks it. Only presets inherit; other project frontmatter and body content do not.
 
 User-facing setup and inheritance documentation is now on `main` in `48eeb06782` (`docs/guide/document-format.md` and `docs/reference/features.md`), included in integrated head `10fb137c24`. Verification passed three focused inheritance tests, `make check-fast`, and the authoritative full suite with 10,473 Rust tests plus the remaining checks.
+
+### Re: multi-preset queue authorization — gpt-5 · 2026-10-14T14:43:02-04:00
+
+> **Queue prompt:** do [#toolspresetmultiname]
+
+Implemented and released in agent-doc `v0.35.499`.
+
+- `preset="#push #auth"` now resolves each whitespace-separated preset independently, in source order.
+- Whole-value and individually quoted references are supported; canonical duplicates collapse at first occurrence.
+- Preflight, realtime steering, and subagent briefs share the behavior, preserve structured runbooks, and fail closed if any reference is unresolved.
+- Integration commit: `8935621f29` (`fix: resolve multiple component presets`); release commit/tag: `32990a20ed` / `v0.35.499`.
+- Focused regressions passed 17/17; the authoritative release gate passed 10,483/10,483 Rust tests, 202/202 VS Code tests, all JetBrains package lines, cross-editor simulation, and the live tmux suite.
+
+The hosted Release workflow is still assembling platform artifacts; code, tag, and local install are complete. Exchange size is elevated, but the active auto-queue continues without pausing for compaction.
 <!-- agent:boundary:b66994af -->
 <!-- /agent:exchange -->
 
@@ -208,21 +222,22 @@ which clobbers the live edits. Do not recapture the response or rerun finalize/w
 home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/tools.md` and let the binary-owned keyed retry finish.
 ```
 ---
-Allow preset to recognize the entire text and support multiple presets in the text. Attribute was `preset="#push #auth"`. See tools.md:
+---
+🚧 Allow preset to recognize the entire text and support multiple presets in the text. Attribute was `preset="#push #auth"`. See tools.md:
 ```
 • The #push preset itself is now defined, but the queue attribute is preset="#push #auth", which the document engine
   treats as one undefined preset name. I’ll follow the generated contract exactly and dispatch a fresh verifier; I
   won’t reinterpret the combined preset string or perform an unauthorized push.
 ```
 ---
-- Add a `agent:todo` to store todo items for the operator to act on. Unpublished drafts are a common todo item. Add `agent:todo` into the agent document template for Claim for Tmux Pane command.
-- release + publish
+- 🚧 Add a `agent:todo` to store todo items for the operator to act on. Unpublished drafts are a common todo item. Add `agent:todo` into the agent document template for Claim for Tmux Pane command. The agents should be instructed to make a brief TODO item. It can refer to `agent:review` + `agent:backlog` items, draft files, etc.
+- ~~do [#toolspresetmultiname]~~
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#toolspresetmultiname] Diagnose and fix multi-preset queue authorization in haiven-dev/tasks/tools.md: preset="#push #auth" is parsed as one undefined preset name for authorization, even though the same dispatch separately reports item preset #push expanded to "commit + push: #auth". Specify whether preset attributes accept whitespace-delimited preset references and recursive preset expansion; add a regression covering this contradictory resolution, preserve explicit operator authorization, and provide a migration/diagnostic if combined names are invalid.
 <!-- /agent:backlog -->
 
 ## Review

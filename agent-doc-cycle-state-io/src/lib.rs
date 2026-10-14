@@ -1377,6 +1377,7 @@ pub fn start_preflight(
         None,
         None,
         QueueSelectionAuthority::LegacyUnknown,
+        "preflight_started",
     )
 }
 
@@ -1390,6 +1391,44 @@ pub fn start_out_of_band_closeout_preflight(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
+    start_out_of_band_closeout_preflight_with_event(
+        file,
+        snapshot_content,
+        file_content,
+        "preflight_started",
+    )
+}
+
+/// Durable origin marker for a successor cycle opened by the Codex Stop hook
+/// after an empty predecessor was abandoned with operator steering pending.
+pub const CODEX_STOP_STEERING_CONTINUATION_EVENT: &str = "codex_stop_steering_continuation_started";
+
+/// Open the Codex Stop hook's successor cycle for steering that outlived an
+/// empty abandoned predecessor.
+///
+/// The distinct opening event is a durable ownership fact: recursive Stop
+/// invocations may finish this exact cycle even though Codex sets
+/// `stop_hook_active`, while unrelated open cycles retain the ordinary
+/// one-block recursion guard.
+pub fn start_stop_steering_continuation_preflight(
+    file: &Path,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<CycleState> {
+    start_out_of_band_closeout_preflight_with_event(
+        file,
+        snapshot_content,
+        file_content,
+        CODEX_STOP_STEERING_CONTINUATION_EVENT,
+    )
+}
+
+fn start_out_of_band_closeout_preflight_with_event(
+    file: &Path,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    event: &str,
+) -> Result<CycleState> {
     start_preflight_with_task_and_queue_selection_authority(
         file,
         snapshot_content,
@@ -1397,6 +1436,7 @@ pub fn start_out_of_band_closeout_preflight(
         None,
         None,
         QueueSelectionAuthority::OutOfBandCloseout,
+        event,
     )
 }
 
@@ -1419,6 +1459,7 @@ pub fn start_preflight_with_task(
         queue_task_id,
         turn_id,
         QueueSelectionAuthority::LegacyUnknown,
+        "preflight_started",
     )
 }
 
@@ -1429,6 +1470,7 @@ fn start_preflight_with_task_and_queue_selection_authority(
     queue_task_id: Option<&str>,
     turn_id: Option<&str>,
     queue_selection_authority: QueueSelectionAuthority,
+    event: &str,
 ) -> Result<CycleState> {
     start_preflight_with_task_queue_selection_and_after_checkpoint(
         file,
@@ -1437,6 +1479,7 @@ fn start_preflight_with_task_and_queue_selection_authority(
         queue_task_id,
         turn_id,
         queue_selection_authority,
+        event,
         || {},
     )
 }
@@ -1449,6 +1492,7 @@ fn start_preflight_with_task_queue_selection_and_after_checkpoint(
     queue_task_id: Option<&str>,
     turn_id: Option<&str>,
     queue_selection_authority: QueueSelectionAuthority,
+    event: &str,
     after_checkpoint: impl FnOnce(),
 ) -> Result<CycleState> {
     let now = now_secs();
@@ -1497,7 +1541,7 @@ fn start_preflight_with_task_queue_selection_and_after_checkpoint(
             }),
         file: canonical.display().to_string(),
         phase,
-        last_event: "preflight_started".to_string(),
+        last_event: event.to_string(),
         started_at: reentrant.as_ref().map_or(now, |open| open.started_at),
         updated_at: now,
         snapshot_hash: snapshot_content.map(agent_doc_hash::content_hash),
@@ -5466,6 +5510,7 @@ mod tests {
                 None,
                 None,
                 QueueSelectionAuthority::OutOfBandCloseout,
+                "preflight_started",
                 || {
                     writer_checkpoint.wait();
                     writer_resume.wait();

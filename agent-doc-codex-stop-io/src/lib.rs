@@ -1205,6 +1205,23 @@ fn apply_bound_stop(
         // report from an older binary took; nothing below treats it as a failure.
         agent_doc_session_check_io::SessionCheckStatus::SteeringPending(reason)
         | agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
+            // `#stopsteeringafterabandon`: the first Stop can fail before it
+            // captures anything (for example, an operator edit temporarily
+            // fragments an exchange marker). Once the harness turn ends, the
+            // supervisor correctly abandons that empty preflight. A recursive
+            // Stop still owns the same in-pane continuation, however, and the
+            // unresolved steering must get a fresh cycle now rather than fall
+            // through to "already continued once" and require an operator to
+            // type `agent-doc <FILE>` manually.
+            if let Some((cycle_id, prompt)) = reopen_abandoned_cycle_for_pending_steering(file)? {
+                return Ok(StopResponse::Block {
+                    decision: "block",
+                    reason: format!(
+                        "agent-doc Stop hook opened successor cycle {cycle_id} for operator steering that outlived an empty abandoned predecessor in {disp}. Continue THIS turn and handle the steering by its previously supplied dispatch; wait for any dispatched worker result, then persist the completed answer through the normal agent-doc closeout. Pending steering begins: {prompt:?}. Do not send the final answer yet.",
+                        disp = file.display(),
+                    ),
+                });
+            }
             // `#stopterminalreapfirst`: a completed-item guard after a committed
             // cycle is residue from that terminal cycle, not proof that Codex's
             // latest chat text belongs to a new response cycle. Reopening here
@@ -1397,8 +1414,13 @@ fn apply_bound_stop(
                     ),
                     agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
                 );
+            let recursive_steering_successor =
+                input.stop_hook_active && stop_steering_continuation_cycle_is_open(file)?;
             let mut payload_already_committed = false;
-            if !input.stop_hook_active || recursive_post_commit_prompt {
+            if !input.stop_hook_active
+                || recursive_post_commit_prompt
+                || recursive_steering_successor
+            {
                 let stop_closeout = match attempt_stop_closeout(file, state, input) {
                     Ok(stop_closeout) => stop_closeout,
                     Err(err) => {
@@ -1419,6 +1441,12 @@ fn apply_bound_stop(
                 };
                 match stop_closeout {
                     StopCloseAttempt::Closed => {
+                        if recursive_steering_successor {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                "codex_stop_steering_continuation_auto_closed source=recursive_stop",
+                            );
+                        }
                         if recursive_post_commit_prompt {
                             agent_doc_ops_log_io::log_op(
                                 file,
@@ -1657,6 +1685,72 @@ fn is_binary_owned_closeout_interruption(reason: &str) -> bool {
 
 fn retained_closeout_needs_operator(reason: &str) -> bool {
     reason.contains(agent_doc_session_check_io::RETAINED_PENDING_NEEDS_OPERATOR_TOKEN)
+}
+
+/// Open the successor owned by a recursive Stop when its predecessor was an
+/// empty preflight abandoned after the first Stop returned.
+///
+/// This is deliberately derived from typed cycle and steering observations,
+/// not from the human-readable `session-check` string. Only the exact
+/// `cancel_preflight_cycle_abandoned` shape qualifies; an abandoned cycle with
+/// a capture, or one without unresolved steering, keeps the ordinary bounded
+/// Stop behavior.
+fn reopen_abandoned_cycle_for_pending_steering(file: &Path) -> Result<Option<(String, String)>> {
+    let Some(cycle) = agent_doc_cycle_state_io::load(file)? else {
+        return Ok(None);
+    };
+    if cycle.phase != agent_doc_turn::CyclePhase::Abandoned
+        || cycle.last_event != "cancel_preflight_cycle_abandoned"
+        || cycle.capture_id.is_some()
+        || cycle.response_sha256.is_some()
+    {
+        return Ok(None);
+    }
+
+    let current = current_document_content(file, "codex_stop_abandoned_steering_successor")?;
+    let items =
+        agent_doc_session_check_io::midturn_steering::pending_steering_items(file, &current);
+    let Some(first) = items.first() else {
+        return Ok(None);
+    };
+    let head = agent_doc_git_io::revision::show_head(file)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "cannot open a Stop steering successor for {} without a committed HEAD baseline",
+            file.display()
+        )
+    })?;
+    let opened = agent_doc_cycle_state_io::start_stop_steering_continuation_preflight(
+        file,
+        Some(&head),
+        Some(&current),
+    )?;
+    anyhow::ensure!(
+        opened.last_event == agent_doc_cycle_state_io::CODEX_STOP_STEERING_CONTINUATION_EVENT,
+        "Stop steering successor {} lost its durable origin event",
+        opened.cycle_id
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "codex_stop_abandoned_steering_successor_opened previous_cycle_id={} cycle_id={} items={} source=typed_pending_steering",
+            cycle.cycle_id,
+            opened.cycle_id,
+            items.len(),
+        ),
+    );
+    Ok(Some((
+        opened.cycle_id,
+        first_nonempty_prompt_line(&first.verbatim),
+    )))
+}
+
+fn stop_steering_continuation_cycle_is_open(file: &Path) -> Result<bool> {
+    Ok(agent_doc_cycle_state_io::load(file)?.is_some_and(|cycle| {
+        cycle.phase == agent_doc_turn::CyclePhase::PreflightStarted
+            && cycle.last_event == agent_doc_cycle_state_io::CODEX_STOP_STEERING_CONTINUATION_EVENT
+            && cycle.capture_id.is_none()
+            && cycle.response_sha256.is_none()
+    }))
 }
 
 fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Option<StopResponse>> {
@@ -9026,6 +9120,113 @@ Reviewed the gated items.\n\
             ops.contains("codex_stop_post_commit_prompt_cycle_reopened")
                 && ops.contains("codex_stop_post_commit_prompt_auto_closed"),
             "recursive Stop must cross the same binary-owned reopen/close path as the first Stop attempt:\n{ops}"
+        );
+    }
+
+    /// `#stopsteeringafterabandon`: agent-doc-bugs.md, 2026-10-14. The first
+    /// Stop failed while an operator edit temporarily fragmented the exchange;
+    /// owner release then abandoned the empty preflight. The recursive Stop
+    /// still carried settled steering, but the generic recursion bound ended
+    /// the turn with "already continued once". It must instead mint one
+    /// successor cycle and let that same recursive Stop chain close it.
+    #[test]
+    fn recursive_stop_opens_and_closes_successor_after_empty_cycle_abandoned_with_steering() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let committed = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Earlier prompt\n\n",
+            "### Re: Earlier prompt — gpt-5\n\n",
+            "Earlier response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+
+        let abandoned =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed))
+                .unwrap();
+        agent_doc_cycle_state_io::mark_abandoned(
+            &doc,
+            "cancel_preflight_cycle_abandoned",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        let with_steering = committed.replace(
+            "<!-- /agent:exchange -->",
+            "\n❯ Diagnose the recursive Stop stall.\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &with_steering).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let continued = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "The prior Stop reported its recovery boundary.".to_string(),
+            stop_hook_active: true,
+        })
+        .unwrap();
+        assert!(
+            matches!(&continued, StopResponse::Block { reason, .. }
+                if reason.contains("opened successor cycle")
+                    && reason.contains("Diagnose the recursive Stop stall")),
+            "{continued:?}"
+        );
+        let successor = agent_doc_cycle_state_io::load(&doc)
+            .unwrap()
+            .expect("Stop successor cycle");
+        assert_ne!(successor.cycle_id, abandoned.cycle_id);
+        assert_eq!(successor.phase.as_str(), "preflight_started");
+        assert_eq!(
+            successor.last_event,
+            agent_doc_cycle_state_io::CODEX_STOP_STEERING_CONTINUATION_EVENT
+        );
+        assert!(successor.capture_id.is_none());
+        assert!(
+            !fs::read_to_string(&doc)
+                .unwrap()
+                .contains("prior Stop reported"),
+            "opening the successor must not capture the predecessor's status text"
+        );
+
+        let closed = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: concat!(
+                "<!-- patch:exchange -->\n",
+                "### Re: recursive Stop stall — gpt-5\n\n",
+                "The successor-cycle handoff now continues automatically.\n",
+                "<!-- /patch:exchange -->\n",
+            )
+            .to_string(),
+            stop_hook_active: true,
+        })
+        .unwrap();
+        assert_eq!(closed, StopResponse::Continue { continue_: true });
+        let terminal = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(terminal.cycle_id, successor.cycle_id);
+        assert_eq!(terminal.phase.as_str(), "committed");
+        assert!(
+            fs::read_to_string(&doc)
+                .unwrap()
+                .contains("successor-cycle handoff now continues automatically")
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_abandoned_steering_successor_opened")
+                && ops.contains("codex_stop_steering_continuation_auto_closed"),
+            "{ops}"
         );
     }
 }

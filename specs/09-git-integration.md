@@ -89,9 +89,15 @@ When capture publication wakes the `captured_finalize_resume` worker before the
 Stop hook's own repair attempt acquires the closeout lease, the resulting
 `closeout_owner_retry_at` receipt is a binary-owned deferral, not a second
 unfinished-cycle failure. The hook preserves the retained capture, leaves the
-controller as the sole delivery owner, and must not append stale queue-guard or
-manual `repair`/`finalize` guidance to that handoff. Without retained-capture
-ownership, the same lease receipt remains fail-closed.
+controller as the sole delivery owner, and subscribes to the exact cycle's
+controller projection before returning a Stop decision. A terminal or
+superseded projection is re-inspected; an owner-release projection permits one
+exact keyed resume before re-inspection. The live lease alone must not surface
+as `Blocked by hook`, and the hook must not append stale queue-guard or manual
+`repair`/`finalize` guidance to that handoff. A bounded wait with no progress,
+an observation failure, or an explicit `needs_operator` result remains
+fail-closed. Without retained-capture ownership, the same lease receipt remains
+fail-closed.
 
 A refused UserPromptSubmit admission never binds that Codex thread to the
 document. Its refusal receipt fences the matching Stop invocation, which then

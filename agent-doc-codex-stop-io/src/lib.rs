@@ -14,6 +14,10 @@
 //! - The same closeout path also self-heals a missed startup when the document
 //!   still has unresolved prompt-bearing user edits but no new cycle ever
 //!   started, instead of letting Codex exit with an external-only answer.
+//! - If another durable keyed owner already holds the exact captured closeout,
+//!   the hook follows the controller's reactive cycle projection before it
+//!   decides whether recovery is still blocked. A lease is not itself a user-
+//!   visible blocker when that owner reaches the terminal state.
 //! - If the cycle still cannot be closed automatically, the hook falls back to
 //!   blocking the turn with instructions to finish recovery/persistence.
 //! - If Codex reaches a second `Stop` for the same still-open cycle
@@ -176,6 +180,40 @@ enum StopCloseAttempt {
     /// idempotent no-op, never a fail-closed error.
     AlreadyCommitted,
     NotPossible,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DurableOwnerProgressDecision {
+    Reinspect,
+    ResumeThenReinspect,
+    StillPending,
+}
+
+fn durable_owner_progress_decision(
+    outcome: agent_doc_closeout_runtime_io::CloseoutCycleWaitOutcome,
+) -> DurableOwnerProgressDecision {
+    use agent_doc_closeout_runtime_io::CloseoutCycleWaitOutcome;
+
+    match outcome {
+        CloseoutCycleWaitOutcome::Terminal | CloseoutCycleWaitOutcome::Superseded => {
+            DurableOwnerProgressDecision::Reinspect
+        }
+        CloseoutCycleWaitOutcome::OwnerReleased => {
+            DurableOwnerProgressDecision::ResumeThenReinspect
+        }
+        CloseoutCycleWaitOutcome::TimedOut => DurableOwnerProgressDecision::StillPending,
+    }
+}
+
+fn await_durable_owner_progress_with(
+    file: &Path,
+    cycle_id: &str,
+    await_progress: impl FnOnce(
+        &Path,
+        &str,
+    ) -> Result<agent_doc_closeout_runtime_io::CloseoutCycleWaitOutcome>,
+) -> Result<DurableOwnerProgressDecision> {
+    await_progress(file, cycle_id).map(durable_owner_progress_decision)
 }
 
 /// What [`reopen_terminal_cycle_before_stop_capture`] did before capture.
@@ -1485,11 +1523,7 @@ fn apply_bound_stop(
                         return Ok(StopResponse::Continue { continue_: true });
                     }
                     StopCloseAttempt::RepairDeferredToDurableOwner { note } => {
-                        return Ok(durable_owner_repair_deferral_response(
-                            file,
-                            &note,
-                            input.stop_hook_active,
-                        ));
+                        return await_durable_owner_repair_deferral(file, &note, input);
                     }
                     StopCloseAttempt::StillOpen { note } => {
                         return Ok(StopResponse::Block {
@@ -1836,11 +1870,7 @@ fn active_session_prompt_requires_writeback(
                 return Ok(Some(StopResponse::Continue { continue_: true }));
             }
             StopCloseAttempt::RepairDeferredToDurableOwner { note } => {
-                return Ok(Some(durable_owner_repair_deferral_response(
-                    file,
-                    &note,
-                    input.stop_hook_active,
-                )));
+                return await_durable_owner_repair_deferral(file, &note, input).map(Some);
             }
             StopCloseAttempt::StillOpen { note } => {
                 return Ok(Some(StopResponse::Block {
@@ -2717,6 +2747,111 @@ fn durable_owner_repair_deferral_response(
             decision: "block",
             reason: message,
         }
+    }
+}
+
+/// Follow the exact keyed owner's controller projection before surfacing a
+/// retained-closeout blocker.
+///
+/// The lease refusal is only a snapshot of ownership at repair time. The
+/// controller's document-lifecycle graph is the authority for what happens
+/// next: terminal/superseded projections are re-inspected, and an owner-release
+/// edge permits one exact keyed resume before re-inspection. Only a bounded
+/// wait with no progress (or a failed observation) preserves the fail-closed
+/// deferral response.
+fn await_durable_owner_repair_deferral(
+    file: &Path,
+    note: &str,
+    input: &StopInput,
+) -> Result<StopResponse> {
+    let key = match agent_doc_repair_command_io::captured_finalize_resume_key(file) {
+        Ok(Some(key)) => key,
+        Ok(None) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                "codex_stop_durable_owner_wait_skipped reason=missing_exact_resume_key action=fail_closed",
+            );
+            return Ok(durable_owner_repair_deferral_response(
+                file,
+                note,
+                input.stop_hook_active,
+            ));
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "codex_stop_durable_owner_wait_skipped reason=resume_key_read_failed err={} action=fail_closed",
+                    format!("{err:#}").replace('\n', " "),
+                ),
+            );
+            return Ok(durable_owner_repair_deferral_response(
+                file,
+                note,
+                input.stop_hook_active,
+            ));
+        }
+    };
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "codex_stop_durable_owner_wait_started cycle_id={} capture_id={} action=await_controller_state_edge",
+            key.cycle_id, key.capture_id,
+        ),
+    );
+    let decision = match await_durable_owner_progress_with(
+        file,
+        &key.cycle_id,
+        agent_doc_closeout_runtime_io::await_closeout_cycle_progress,
+    ) {
+        Ok(decision) => decision,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "codex_stop_durable_owner_wait_failed cycle_id={} err={} action=fail_closed",
+                    key.cycle_id,
+                    format!("{err:#}").replace('\n', " "),
+                ),
+            );
+            return Ok(durable_owner_repair_deferral_response(
+                file,
+                note,
+                input.stop_hook_active,
+            ));
+        }
+    };
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "codex_stop_durable_owner_wait_settled cycle_id={} decision={decision:?}",
+            key.cycle_id,
+        ),
+    );
+    match decision {
+        DurableOwnerProgressDecision::Reinspect => {
+            invalidate_stop_document_cache();
+            apply_stop(input)
+        }
+        DurableOwnerProgressDecision::ResumeThenReinspect => {
+            if try_resume_captured_finalize_in_hook(file) {
+                invalidate_stop_document_cache();
+                apply_stop(input)
+            } else {
+                Ok(durable_owner_repair_deferral_response(
+                    file,
+                    note,
+                    input.stop_hook_active,
+                ))
+            }
+        }
+        DurableOwnerProgressDecision::StillPending => Ok(durable_owner_repair_deferral_response(
+            file,
+            note,
+            input.stop_hook_active,
+        )),
     }
 }
 
@@ -4666,6 +4801,46 @@ Done.\n\
                 RetainedWriteVerdict::CaptureResumeUnowned,
             ),
             "a lease marker without retained capture ownership must remain fail-closed",
+        );
+    }
+
+    #[test]
+    fn durable_owner_progress_waits_for_terminal_before_surfacing_a_blocker() {
+        use agent_doc_closeout_runtime_io::CloseoutCycleWaitOutcome;
+
+        let decision = await_durable_owner_progress_with(
+            Path::new("/p/sample.md"),
+            "cycle-1",
+            |file, cycle_id| {
+                assert_eq!(file, Path::new("/p/sample.md"));
+                assert_eq!(cycle_id, "cycle-1");
+                Ok(CloseoutCycleWaitOutcome::Terminal)
+            },
+        )
+        .unwrap();
+        assert_eq!(decision, DurableOwnerProgressDecision::Reinspect);
+        assert_eq!(
+            durable_owner_progress_decision(CloseoutCycleWaitOutcome::Terminal),
+            DurableOwnerProgressDecision::Reinspect,
+        );
+        assert_eq!(
+            durable_owner_progress_decision(CloseoutCycleWaitOutcome::Superseded),
+            DurableOwnerProgressDecision::Reinspect,
+        );
+        assert_eq!(
+            durable_owner_progress_decision(CloseoutCycleWaitOutcome::OwnerReleased),
+            DurableOwnerProgressDecision::ResumeThenReinspect,
+        );
+        assert_eq!(
+            durable_owner_progress_decision(CloseoutCycleWaitOutcome::TimedOut),
+            DurableOwnerProgressDecision::StillPending,
+        );
+        assert!(
+            !matches!(
+                durable_owner_progress_decision(CloseoutCycleWaitOutcome::Terminal),
+                DurableOwnerProgressDecision::StillPending
+            ),
+            "a terminal controller edge must be re-inspected instead of rendered as Blocked by hook",
         );
     }
 

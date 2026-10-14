@@ -74,6 +74,32 @@ Dispatched the retained-closeout ownership failure to `subagent:retained_closeou
 
 A second document-queue report showed a distinct in-pane queue-continuation failure for `do [#sdkreleasecontrolreset]`. I claimed that queue head and dispatched `subagent:sdk_queue_continuation` separately so it can fix continuation behavior without executing or modifying the live SDK session. Neither worker will resubmit, force-write, recycle, reload, or otherwise disturb `sdk.md`.
 
+### Re: integrated queue fixes — gpt-5 · 2026-10-14T03:29-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/251
+
+Fixed and integrated on `main` as `3f45b8e935`. The JetBrains stale-plugin diagnostic now selects the expected package generation from the live IDE platform line, including build 263, and reuses live mapped-JAR evidence. Issue #251 is closed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/252
+
+Fixed and integrated on `main` as `b709dc7065`. Self-recycle handoff now preserves predecessor lifecycle authority through promotion/drain and prevents the predecessor listener from unlinking the promoted successor socket. Issue #252 is closed.
+
+> **Queue prompt:** fix sdk.md issue
+> ```
+> › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
+>
+> • Blocked by hook
+>   └ Queue continuation, not an error: Codex labels it `Blocked by hook`. Next `agent:queue auto` prompt for /home/
+> brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md: "do [#sdkreleasecontrolreset]". Continue THIS turn in-pane:
+> answer it, then persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md`. Do
+> NOT run `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` (recursive self-invocation) and do
+> not send the final answer yet.
+> ```
+
+The foreign-subagent inheritance defect was already fixed on `origin/main` by `3e21e1a24e`, which fences queue continuation by the tracked Codex turn ID. Read-only session evidence confirms `#sdkreleasecontrolreset` continued and committed successfully. The current integrated build, including that fix, is now installed; no live `sdk.md` response was resubmitted or modified.
+
+The same verified batch also integrated realtime steering continuation after an abandoned empty Stop preflight as `5af7f40b1f`. Coordinator verification passed: 10,471 Rust tests, 202 VS Code tests, cross-editor SimWorld, JetBrains classic/262/263, bootstrap, docs/version audits, and TLA receipt. The batch was pushed to `main` and installed locally.
+
 <!-- agent:boundary:713dace6 -->
 <!-- /agent:exchange -->
 
@@ -82,6 +108,7 @@ A second document-queue report showed a distinct in-pane queue-continuation fail
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+~~~done
 The last turn stalled. It should not stall. The real-time steering should continue:
 ```
 • Hook stopped
@@ -110,8 +137,8 @@ live buffer).
 
   Worked for 5m 10s • 12:55 AM
 ```
----
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/251
+~~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/251~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/252
 ---
 fix sdk.md issue

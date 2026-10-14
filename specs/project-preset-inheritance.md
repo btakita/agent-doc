@@ -55,6 +55,35 @@ For a session document under a discovered project root:
    Project-relative runbook paths continue to resolve from the project root.
 5. Resolve on read (or invalidate a cache by project-file identity and content
    change). Never write inherited entries into a session document.
+6. After overlaying document declarations, recursively interpolate references
+   in every effective preset body. A bare hashtag token is substituted only
+   when that exact key is declared in the effective map, so ordinary hashtags
+   remain prose. `{{#name}}` is the explicit form: it requires `#name` to be
+   declared. Missing explicit references, declared-but-unset values, malformed
+   values, and cycles fail closed before a preset can authorize work.
+
+For example, the project may define a reusable preset and defaults:
+
+```yaml
+presets:
+  "#generic-preset": "Check JIRA tickets for #project on {{#board}}"
+  "#project": DEFAULT
+  "#board": General
+```
+
+A session document can override only the values:
+
+```yaml
+presets:
+  "#project": AGENT-DOC
+  "#board": Platform
+```
+
+Invoking `#generic-preset` then expands to `Check JIRA tickets for AGENT-DOC
+on Platform`. Expansion is a read-time projection: the project and session
+frontmatter remain byte-for-byte operator-owned, and editing `project.md` does
+not require restarting agent-doc. Structured `runbook` metadata remains attached
+to the preset that declares it; interpolation composes prompt text only.
 
 A missing project file means there are no project defaults. An existing file
 with malformed frontmatter must produce an actionable diagnostic and must not
@@ -86,6 +115,10 @@ Integration coverage for the resolver must prove:
 - edits to `project.md` affect an existing document without rewriting it;
 - missing project files yield an empty inherited map;
 - malformed project frontmatter cannot silently fall back to stale or partial
-  inherited authorization; and
+  inherited authorization;
 - consumers such as preflight expansion and queue subagent authorization use
-  the same effective preset map.
+  the same effective preset map;
+- project presets interpolate document-local overrides recursively without
+  rewriting either document; and
+- missing explicit references, unset declared values, and cycles fail closed,
+  while undeclared ordinary hashtags remain literal text.

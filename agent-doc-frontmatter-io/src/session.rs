@@ -77,26 +77,33 @@ pub fn effective_prompt_presets_for_file(content: &str, file: &Path) -> Result<P
         .map_err(|err| contextualize_parse_error(&display, err))?
         .0
         .prompt_presets;
-    let Some(root) = agent_doc_project_config_io::project_root_for_doc(file) else {
-        return Ok(local);
-    };
-    let project_file = root.join(".agent-doc").join("project.md");
-    let project_content = match std::fs::read_to_string(&project_file) {
-        Ok(content) => content,
-        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(local),
-        Err(err) => {
-            anyhow::bail!(
-                "failed to read project preset file {}: {err}",
-                project_file.display()
-            );
+    if let Some(root) = agent_doc_project_config_io::project_root_for_doc(file) {
+        let project_file = root.join(".agent-doc").join("project.md");
+        let project_content = match std::fs::read_to_string(&project_file) {
+            Ok(content) => Some(content),
+            Err(err) if err.kind() == ErrorKind::NotFound => None,
+            Err(err) => {
+                anyhow::bail!(
+                    "failed to read project preset file {}: {err}",
+                    project_file.display()
+                );
+            }
+        };
+        if let Some(project_content) = project_content {
+            let project_display = project_file.display().to_string();
+            let defaults = agent_doc_frontmatter::frontmatter::parse(&project_content)
+                .map_err(|err| contextualize_parse_error(&project_display, err))?
+                .0
+                .prompt_presets;
+            local.inherit_defaults(&defaults);
         }
-    };
-    let project_display = project_file.display().to_string();
-    let defaults = agent_doc_frontmatter::frontmatter::parse(&project_content)
-        .map_err(|err| contextualize_parse_error(&project_display, err))?
-        .0
-        .prompt_presets;
-    local.inherit_defaults(&defaults);
+    }
+    local.resolve_nested_references().map_err(|err| {
+        anyhow::anyhow!(
+            "failed to resolve effective prompt presets for {}: {err}",
+            file.display()
+        )
+    })?;
     Ok(local)
 }
 
@@ -307,6 +314,59 @@ mod tests {
             Some("Prepare and publish the release.")
         );
         assert_eq!(effective.runbook("#release"), Some("runbooks/release.md"));
+    }
+
+    #[test]
+    fn project_preset_references_use_document_overrides() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\npresets:\n  '#generic-preset': 'Check JIRA tickets for #project on {{#board}}'\n  '#project': DEFAULT\n  '#board': General\n---\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("work.md");
+        let content = "---\npresets:\n  '#project': AGENT-DOC\n  '#board': Platform\n---\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let effective = effective_prompt_presets_for_file(content, &doc).unwrap();
+
+        assert_eq!(
+            effective.get("#generic-preset").map(String::as_str),
+            Some("Check JIRA tickets for AGENT-DOC on Platform")
+        );
+        assert_eq!(
+            effective.get("#project").map(String::as_str),
+            Some("AGENT-DOC")
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn invalid_effective_project_preset_graph_fails_closed() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let project_file = dir.path().join(".agent-doc/project.md");
+        std::fs::write(
+            &project_file,
+            "---\npresets:\n  '#generic': '#project'\n  '#project': default\n---\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("work.md");
+        let content = "---\npresets:\n  '#project':\n---\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let err = effective_prompt_presets_for_file(content, &doc).unwrap_err();
+
+        assert!(
+            err.to_string().contains(&doc.display().to_string()),
+            "{err:#}"
+        );
+        assert!(
+            err.to_string()
+                .contains("nested prompt preset reference #project has no value"),
+            "{err:#}"
+        );
     }
 
     #[test]

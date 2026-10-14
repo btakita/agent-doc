@@ -2347,7 +2347,7 @@ fn run_with_options_to_writer_in_pass(
         file,
         queue_authoritative_content,
         &pending_queue_subagent_dispatch,
-    );
+    )?;
     let exchange_subagent_dispatch = if exchange_prompt_attrs.subagents {
         agent_doc_preflight_io::exchange_subagent_dispatch_entries(&active_exchange_prompt_targets)
     } else {

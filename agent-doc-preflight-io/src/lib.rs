@@ -602,18 +602,24 @@ pub fn queue_subagent_dispatch_entries(
     file: &Path,
     content: &str,
     items: &[String],
-) -> Vec<QueueSubagentDispatch> {
+) -> anyhow::Result<Vec<QueueSubagentDispatch>> {
     let document = file.display().to_string();
     items
         .iter()
-        .map(|item| QueueSubagentDispatch {
-            item: item.clone(),
-            claim_command: agent_doc_queue_io::subagent_dispatch::claim_command(&document, item),
-            brief_command: agent_doc_queue_io::subagent_dispatch::brief_command(&document, item),
-            authorization:
-                agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_content(
-                    file, content, item,
+        .map(|item| {
+            Ok(QueueSubagentDispatch {
+                item: item.clone(),
+                claim_command: agent_doc_queue_io::subagent_dispatch::claim_command(
+                    &document, item,
                 ),
+                brief_command: agent_doc_queue_io::subagent_dispatch::brief_command(
+                    &document, item,
+                ),
+                authorization:
+                    agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_content(
+                        file, content, item,
+                    )?,
+            })
         })
         .collect()
 }
@@ -9077,7 +9083,7 @@ mod tests {
             dispatch,
             vec!["#subagents do [#preflightdeadline]".to_string()]
         );
-        let entries = queue_subagent_dispatch_entries(&doc, &content, &dispatch);
+        let entries = queue_subagent_dispatch_entries(&doc, &content, &dispatch).unwrap();
         assert!(
             entries[0]
                 .claim_command

@@ -178,21 +178,18 @@ pub fn subagent_authorization_for_content(
     file: &Path,
     content: &str,
     item: &str,
-) -> agent_doc_queue::subagent_brief::SubagentAuthorization {
+) -> Result<agent_doc_queue::subagent_brief::SubagentAuthorization> {
     let prompt_presets =
-        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)
-            .unwrap_or_else(|_| {
-                agent_doc_frontmatter::frontmatter::parse(content)
-                    .map(|(fm, _)| fm.prompt_presets)
-                    .unwrap_or_default()
-            });
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
     let components = agent_doc_element::element::parse(content).unwrap_or_default();
-    agent_doc_queue::subagent_brief::subagent_authorization_with_presets(
-        &file.display().to_string(),
-        content,
-        item,
-        &components,
-        &prompt_presets,
+    Ok(
+        agent_doc_queue::subagent_brief::subagent_authorization_with_presets(
+            &file.display().to_string(),
+            content,
+            item,
+            &components,
+            &prompt_presets,
+        ),
     )
 }
 
@@ -321,27 +318,55 @@ mod tests {
         std::fs::write(dir.path().join(".agent-doc/config.toml"), "").unwrap();
         std::fs::write(
             dir.path().join(".agent-doc/project.md"),
-            "---\npresets:\n  '#delegate': run this item in a subagent\n---\n",
+            "---\npresets:\n  '#delegate': 'run #project item in a subagent'\n  '#project': default\n---\n",
+        )
+        .unwrap();
+        let file = dir.path().join("task.md");
+        let content = doc(&["#delegate do [#work]"]).replacen(
+            "---\n",
+            "---\npresets:\n  '#project': agent-doc\n",
+            1,
+        );
+        std::fs::write(&file, &content).unwrap();
+
+        let listed = pending_subagent_dispatch_for_content(&file, &content).unwrap();
+        assert_eq!(listed, vec!["#delegate do [#work]".to_string()]);
+        let authorization =
+            subagent_authorization_for_content(&file, &content, "#delegate do [#work]").unwrap();
+        assert_eq!(authorization.presets.len(), 1);
+        assert_eq!(authorization.presets[0].name, "#delegate");
+        assert_eq!(
+            authorization.presets[0].body.as_deref(),
+            Some("run agent-doc item in a subagent")
+        );
+        assert!(
+            !std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("run agent-doc item in a subagent")
+        );
+    }
+
+    #[test]
+    fn invalid_nested_project_preset_fails_authorization_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join(".agent-doc/config.toml"), "").unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\npresets:\n  '#delegate': 'run {{#missing}} item'\n---\n",
         )
         .unwrap();
         let file = dir.path().join("task.md");
         let content = doc(&["#delegate do [#work]"]);
         std::fs::write(&file, &content).unwrap();
 
-        let listed = pending_subagent_dispatch_for_content(&file, &content).unwrap();
-        assert_eq!(listed, vec!["#delegate do [#work]".to_string()]);
-        let authorization =
-            subagent_authorization_for_content(&file, &content, "#delegate do [#work]");
-        assert_eq!(authorization.presets.len(), 1);
-        assert_eq!(authorization.presets[0].name, "#delegate");
-        assert_eq!(
-            authorization.presets[0].body.as_deref(),
-            Some("run this item in a subagent")
-        );
+        let err = subagent_authorization_for_content(&file, &content, "#delegate do [#work]")
+            .unwrap_err();
+
         assert!(
-            !std::fs::read_to_string(&file)
-                .unwrap()
-                .contains("run this item in a subagent")
+            err.to_string()
+                .contains("unknown nested prompt preset reference #missing"),
+            "{err:#}"
         );
     }
 
@@ -595,7 +620,8 @@ mod tests {
             dispatch,
             vec!["do [#a]".to_string(), "tidy docs".to_string()]
         );
-        let from_dispatch = subagent_authorization_for_content(&file, &resolved, &dispatch[0]);
+        let from_dispatch =
+            subagent_authorization_for_content(&file, &resolved, &dispatch[0]).unwrap();
         let from_brief = subagent_authorization_for_item(&file, "#a").unwrap();
         assert_eq!(from_dispatch, from_brief);
         assert_eq!(

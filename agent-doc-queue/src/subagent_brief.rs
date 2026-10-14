@@ -53,7 +53,8 @@ pub struct PresetAuthorization {
     pub source: PresetSource,
     /// Whether frontmatter `prompt_presets` / `presets` defines it.
     pub resolved: bool,
-    /// The preset body, verbatim. `None` when unresolved (never invented).
+    /// The effective preset body after project/session interpolation. `None`
+    /// when unresolved (never invented).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
     /// The preset's declared runbook path, as written in frontmatter.
@@ -346,7 +347,7 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
             PresetSource::Item => "item preset",
         };
         out.push_str(&format!(
-            "\nOperator authorization, {origin} `{}` (verbatim):\n{}\n",
+            "\nOperator authorization, {origin} `{}` (effective value):\n{}\n",
             preset.name,
             quote(preset.body.as_deref().unwrap_or_default())
         ));

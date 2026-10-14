@@ -38,6 +38,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.500
 
+- **Project presets accept session-overridable value references.** A reusable
+  preset in `.agent-doc/project.md` can interpolate declared `#value` tokens
+  after session overrides are applied, or use explicit `{{#value}}` references
+  when a missing definition must fail closed. Recursive chains resolve on every
+  read without a restart; unset values and cycles cannot authorize work.
 - **Windows release builds compile the supervisor idle watcher.** The
   preserved-child recycle probe is now gated to Unix, while non-Unix builds
   conservatively report that live-child handoff is unavailable. This repairs

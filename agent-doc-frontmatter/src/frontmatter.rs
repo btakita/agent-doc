@@ -979,6 +979,39 @@ impl PromptPresets {
         self.rebuild_resolved();
     }
 
+    /// Resolve preset references inside preset bodies against this effective map.
+    ///
+    /// This runs after project defaults and document declarations have been
+    /// merged, so a document-local value can parameterize a project preset. A
+    /// declared hashtag token such as `#project` is interpolated when it appears
+    /// in another preset body. Unknown hashtags remain literal text; callers can
+    /// use the explicit `{{#name}}` form when an absent definition must be an
+    /// error. Declared-but-unresolved values and reference cycles always fail
+    /// closed.
+    ///
+    /// Only `resolved` is projected. `entries` retains the operator-authored
+    /// source values so serialization and structured runbook metadata continue
+    /// to round-trip unchanged.
+    pub fn resolve_nested_references(&mut self) -> anyhow::Result<()> {
+        let declared = self
+            .entries
+            .iter()
+            .map(|(key, value)| (key.clone(), value.as_ref().and_then(PresetValue::body)))
+            .collect::<indexmap::IndexMap<_, _>>();
+        let mut resolved = indexmap::IndexMap::new();
+        let mut stack = Vec::new();
+
+        for key in declared.keys() {
+            if declared.get(key).is_some_and(Option::is_none) {
+                continue;
+            }
+            let body = resolve_nested_preset(key, &declared, &mut resolved, &mut stack)?;
+            resolved.insert(key.clone(), body);
+        }
+        self.resolved = resolved;
+        Ok(())
+    }
+
     fn rebuild_resolved(&mut self) {
         self.resolved = self
             .entries
@@ -1075,6 +1108,93 @@ impl PromptPresets {
         self.rebuild_resolved();
         Ok(())
     }
+}
+
+fn resolve_nested_preset(
+    key: &str,
+    declared: &indexmap::IndexMap<String, Option<String>>,
+    resolved: &mut indexmap::IndexMap<String, String>,
+    stack: &mut Vec<String>,
+) -> anyhow::Result<String> {
+    if let Some(body) = resolved.get(key) {
+        return Ok(body.clone());
+    }
+    if let Some(cycle_start) = stack.iter().position(|active| active == key) {
+        let mut cycle = stack[cycle_start..].to_vec();
+        cycle.push(key.to_string());
+        anyhow::bail!("prompt preset reference cycle: {}", cycle.join(" -> "));
+    }
+    let body = declared
+        .get(key)
+        .ok_or_else(|| anyhow::anyhow!("unknown nested prompt preset reference {key}"))?
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("nested prompt preset reference {key} has no value"))?
+        .clone();
+
+    stack.push(key.to_string());
+    let expanded = expand_nested_preset_body(&body, declared, resolved, stack);
+    stack.pop();
+    let expanded = expanded?;
+    resolved.insert(key.to_string(), expanded.clone());
+    Ok(expanded)
+}
+
+fn expand_nested_preset_body(
+    body: &str,
+    declared: &indexmap::IndexMap<String, Option<String>>,
+    resolved: &mut indexmap::IndexMap<String, String>,
+    stack: &mut Vec<String>,
+) -> anyhow::Result<String> {
+    let mut out = String::with_capacity(body.len());
+    let mut cursor = 0usize;
+
+    while cursor < body.len() {
+        let rest = &body[cursor..];
+        if let Some(explicit) = rest.strip_prefix("{{#") {
+            let Some(close) = explicit.find("}}") else {
+                anyhow::bail!("unterminated explicit nested prompt preset reference");
+            };
+            let name = &explicit[..close];
+            if name.is_empty()
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+            {
+                anyhow::bail!("invalid explicit nested prompt preset reference `{{{{#{name}}}}}`");
+            }
+            let key = format!("#{name}");
+            if !declared.contains_key(&key) {
+                anyhow::bail!("unknown nested prompt preset reference {key}");
+            }
+            out.push_str(&resolve_nested_preset(&key, declared, resolved, stack)?);
+            cursor += 3 + close + 2;
+            continue;
+        }
+
+        if let Some(after_hash) = rest.strip_prefix('#') {
+            let token_len = 1 + after_hash
+                .bytes()
+                .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'-' || *byte == b'_')
+                .count();
+            if token_len > 1 {
+                let key = &rest[..token_len];
+                if declared.contains_key(key) {
+                    out.push_str(&resolve_nested_preset(key, declared, resolved, stack)?);
+                    cursor += token_len;
+                    continue;
+                }
+            }
+        }
+
+        let ch = rest
+            .chars()
+            .next()
+            .expect("cursor is inside the preset body");
+        out.push(ch);
+        cursor += ch.len_utf8();
+    }
+
+    Ok(out)
 }
 
 /// One preset value: the plain string body, or a structured mapping kept
@@ -4355,6 +4475,66 @@ mod tests {
         assert_eq!(
             document.prompt_presets.keys().cloned().collect::<Vec<_>>(),
             vec!["#shared", "#document-only"]
+        );
+    }
+
+    #[test]
+    fn effective_prompt_presets_interpolate_declared_values_recursively() {
+        let (mut fm, _) = parse(
+            "---\npresets:\n  '#generic': 'Check JIRA tickets for #project on {{#board}}'\n  '#project': AGENT\n  '#board': Core\n  '#literal': 'Keep #unknown and GH #123 literal'\n---\n",
+        )
+        .unwrap();
+
+        fm.prompt_presets.resolve_nested_references().unwrap();
+
+        assert_eq!(
+            fm.prompt_presets.get("#generic").map(String::as_str),
+            Some("Check JIRA tickets for AGENT on Core")
+        );
+        assert_eq!(
+            fm.prompt_presets.get("#literal").map(String::as_str),
+            Some("Keep #unknown and GH #123 literal")
+        );
+    }
+
+    #[test]
+    fn nested_prompt_preset_references_fail_closed_on_missing_unset_and_cycles() {
+        let (mut missing, _) =
+            parse("---\npresets:\n  '#generic': 'Use {{#missing}}'\n---\n").unwrap();
+        let err = missing
+            .prompt_presets
+            .resolve_nested_references()
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown nested prompt preset reference #missing"),
+            "{err:#}"
+        );
+
+        let (mut unset, _) =
+            parse("---\npresets:\n  '#generic': 'Use #project'\n  '#project':\n---\n").unwrap();
+        let err = unset
+            .prompt_presets
+            .resolve_nested_references()
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("nested prompt preset reference #project has no value"),
+            "{err:#}"
+        );
+
+        let (mut cyclic, _) = parse(
+            "---\npresets:\n  '#first': '#second'\n  '#second': '#third'\n  '#third': '#first'\n---\n",
+        )
+        .unwrap();
+        let err = cyclic
+            .prompt_presets
+            .resolve_nested_references()
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("#first -> #second -> #third -> #first"),
+            "{err:#}"
         );
     }
 

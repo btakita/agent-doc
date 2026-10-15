@@ -26,6 +26,7 @@ use agent_doc_turn_executor_tmux::context_clear::{
     context_clear_submit_blocked_line, context_clear_submit_blocked_message,
     context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
     context_clear_submit_retry_action, interrupt_clear_timeout_message,
+    ABANDONED_PROMPT_SETTLING_EVIDENCE, abandoned_prompt_clear_queued_message,
     live_turn_clear_queued_message, live_turn_clear_refusal_message, operator_interrupt_key_plan,
     operator_interrupt_step_delay, protected_clear_refusal_message, terminal_editor_command,
 };
@@ -1263,6 +1264,18 @@ fn reconcile_idle_projection_before_clear(
                         == agent_doc_queue::queue_preemption::BusyClearOutcome::RearmBehindLiveTurn;
                     let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
                     let live_evidence = live_turn_evidence.unwrap_or("unknown");
+                    // `#clearctxslow`: a lease whose prompt Claude Code never
+                    // recorded is not a running turn; it is waiting out the
+                    // abandoned-prompt settle window. Same queue, same wait —
+                    // but say so, and say when the clear runs.
+                    let settling = settling_abandoned_prompt_for_clear(ctx, pane, live_evidence);
+                    let logged_evidence = match &settling {
+                        Some(settling) => format!(
+                            "{ABANDONED_PROMPT_SETTLING_EVIDENCE} settles_in_secs={}",
+                            settling.settles_in_secs
+                        ),
+                        None => live_evidence.to_string(),
+                    };
                     agent_doc_controller_io::project_controller::queue_context_clear_deferred_for_file(
                         &ctx.canonical_file,
                         pane,
@@ -1278,21 +1291,29 @@ fn reconcile_idle_projection_before_clear(
                             ctx.canonical_file.display(),
                             pane,
                             evidence.source,
-                            live_evidence,
+                            logged_evidence,
                             rearmed,
                         ),
                     );
-                    eprintln!(
-                        "{}",
-                        live_turn_clear_queued_message(
+                    let message = match settling {
+                        Some(settling) => abandoned_prompt_clear_queued_message(
+                            &ctx.canonical_file,
+                            evidence.pane_id.as_deref(),
+                            evidence.source,
+                            settling.settles_in_secs,
+                            agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS,
+                            rearmed,
+                        ),
+                        None => live_turn_clear_queued_message(
                             &ctx.canonical_file,
                             evidence.pane_id.as_deref(),
                             evidence.source,
                             live_evidence,
                             live_turn_evidence_age_secs(ctx, pane, live_evidence),
                             rearmed,
-                        )
-                    );
+                        ),
+                    };
+                    eprintln!("{message}");
                     return Ok(ClearPreflightOutcome::DeferredPreempt);
                 }
                 agent_doc_queue::queue_preemption::BusyClearOutcome::PauseAndDefer => {
@@ -1471,6 +1492,24 @@ fn harness_turn_live_evidence(
 /// `#clearqueuedliveturn`: how old the live-turn evidence a queued clear waits
 /// on is — the turn lease's `UserPromptSubmit` second, or the oldest open
 /// dispatch receipt — for the operator notice.
+/// `#clearctxslow`: the settling abandoned prompt behind a queued clear's
+/// `turn_active_lease` evidence, if that is what the lease is. Read-only: the
+/// settle window and the supervisor's delivery are unchanged.
+fn settling_abandoned_prompt_for_clear(
+    ctx: &SessionContext,
+    pane: &str,
+    live_evidence: &str,
+) -> Option<agent_doc_turn_status_io::SettlingAbandonedPrompt> {
+    (live_evidence == "turn_active_lease")
+        .then(|| {
+            agent_doc_turn_status_io::settling_abandoned_prompt_for_pane_for_file(
+                &ctx.canonical_file,
+                pane,
+            )
+        })
+        .flatten()
+}
+
 fn live_turn_evidence_age_secs(ctx: &SessionContext, pane: &str, evidence: &str) -> Option<u64> {
     let since = match evidence {
         "turn_active_lease" => agent_doc_turn_status_io::turn_active_marker_for_pane_for_file(
@@ -6067,6 +6106,27 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             harness_turn_live_evidence(&ctx, &idle),
             Some("turn_active_lease")
         );
+        // `#clearctxslow`: the queued clear names the settling abandoned
+        // prompt and the seconds left (snapshot 2s old), instead of a live turn.
+        let settling = settling_abandoned_prompt_for_clear(&ctx, "%180", "turn_active_lease")
+            .expect("an unsettled abandoned prompt behind the lease");
+        assert_eq!(settling.snapshot_at, lease_at + 2);
+        assert!(
+            (agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 3
+                ..=agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 2)
+                .contains(&settling.settles_in_secs),
+            "{settling:?}"
+        );
+        assert_eq!(
+            settling_abandoned_prompt_for_clear(&ctx, "%180", "dispatch_turn_running"),
+            None,
+            "only lease evidence can be an abandoned prompt"
+        );
+        assert_eq!(
+            harness_turn_live_evidence(&ctx, &idle),
+            Some("turn_active_lease"),
+            "naming the wait never shortens it"
+        );
 
         // Settled: the guard retires the lease and its receipt; clear proceeds.
         let lease_at = now - agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 10;
@@ -6076,6 +6136,11 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         )
         .unwrap();
         write_incident(lease_at);
+        assert_eq!(
+            settling_abandoned_prompt_for_clear(&ctx, "%180", "turn_active_lease"),
+            None,
+            "a settled snapshot is not waiting on anything"
+        );
         assert_eq!(harness_turn_live_evidence(&ctx, &idle), None);
         assert_eq!(
             operator_clear_input_state_for_evidence(&idle, false, false, false, false),

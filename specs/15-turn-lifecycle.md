@@ -478,6 +478,18 @@ its prompt, until the operator typed `/clear` by hand.
   records a `turn_ended` receipt with reason `abandoned_prompt`, and the
   supervisor logs `turn_status_projection_repaired
   reason=harness_prompt_abandoned`.
+- **Operator notice while settling (`#clearctxslow`).** Until the snapshot settles the lease
+  still reads as live, so Clear Session Context queues behind it. The guard asks
+  `settling_abandoned_prompt_for_pane_for_file` (pure rule:
+  `abandoned_prompt_settle_remaining_secs`) whether the lease's newest record is an
+  abandoned prompt no older than the lease and still inside the window, and if so
+  reports `evidence=abandoned_prompt_settling settles_in_secs=<n>` instead of a live
+  turn. The read never retires the lease and never shortens the window. A 2026-10-15
+  audit of 1711 prompt snapshots from the previous 21 days found all 1681 persisted
+  prompt records adjacent to their snapshot. Of the 30 snapshots with no prompt record,
+  several were followed by a `queue-operation` 4.8s to 30s later, and the rule fails
+  closed on that record. A shorter window would retire those leases before the
+  `queue-operation` could keep them.
 - **Dispatch receipt.** A route dispatch (`dispatch_only_reopen`) never moves
   the actor. Its receipt, which the turn's own preflight promoted to
   `running`, therefore never meets a `Ready` edge and would keep the

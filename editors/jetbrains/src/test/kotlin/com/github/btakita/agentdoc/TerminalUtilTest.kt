@@ -959,6 +959,52 @@ class TerminalUtilTest {
         )
     }
 
+    // #clearctxslow: live 2026-10-15 on haiven-dev tasks/sdk.md — Run Agent Doc's prompt was
+    // cancelled before Claude Code recorded it, and the queued clear's notice said "it runs when
+    // the turn in pane %180 ends" over an idle pane. The binary now reports the settling prompt
+    // and when the clear runs; the notice says that instead of claiming a live turn.
+    @Test
+    fun `clear queued behind a cancelled prompt says when it runs, not that a turn is live`() {
+        val output = """
+            session_clear queued for /repo/src/haiven-dev/tasks/sdk.md — the last prompt in pane %180 has not started a turn (harness_turn_live=pending evidence=abandoned_prompt_settling settles_in_secs=16 settle_window_secs=20, source=authoritative_actor): Claude Code wrote no prompt record after its snapshot, which is what a prompt cancelled during its `UserPromptSubmit` hooks leaves. A prompt can still start up to 20s after its snapshot, so no `/clear` was typed yet. One clear is queued and the supervisor delivers it automatically in about 16s; pressing Clear Session Context again does not make it sooner. It is dropped instead if that prompt or a newer one starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false. Run `agent-doc session interrupt-clear /repo/src/haiven-dev/tasks/sdk.md` to clear now.
+        """.trimIndent()
+
+        val queued = TerminalUtil.parseLiveTurnQueuedClear(output)!!
+        assertEquals("/repo/src/haiven-dev/tasks/sdk.md", queued.file)
+        assertEquals("%180", queued.pane)
+        assertEquals("abandoned_prompt_settling", queued.evidence)
+        assertEquals(16L, queued.settlesInSecs)
+        assertFalse(queued.rearmed)
+        assertNull(TerminalUtil.parseBusySessionClearRefusal(output))
+        assertFalse(TerminalUtil.isDeferredQueuePreemptClear(output))
+        val message = TerminalUtil.buildLiveTurnQueuedClearMessage("tasks/sdk.md", queued)
+        assertEquals(
+            "Clear Session Context queued for tasks/sdk.md: it runs automatically in about 16s.",
+            message.lineSequence().first(),
+        )
+        assertTrue(message.contains("The last prompt in pane %180 never started a turn"))
+        assertFalse(message.contains("the turn in pane"))
+        assertFalse(message.contains("running turn"))
+
+        val again = TerminalUtil.parseLiveTurnQueuedClear(
+            output.replace("settles_in_secs=16", "settles_in_secs=10")
+                .replace("about 16s", "about 10s")
+                .replace("rearmed=false", "rearmed=true"),
+        )!!
+        assertTrue(again.rearmed)
+        assertEquals(
+            "Clear Session Context is already queued for tasks/sdk.md: it runs automatically in about 10s.",
+            TerminalUtil.buildLiveTurnQueuedClearMessage("tasks/sdk.md", again).lineSequence().first(),
+        )
+
+        // A live-turn queue (no settle) keeps the turn-end wording.
+        val live = TerminalUtil.parseLiveTurnQueuedClear(
+            "session_clear queued for /repo/tmp/doc.md — a turn is live in pane %185 (harness_turn_live=true evidence=turn_active_lease evidence_age_secs=42, source=authoritative_actor). rearmed=false",
+        )!!
+        assertNull(live.settlesInSecs)
+        assertTrue(TerminalUtil.buildLiveTurnQueuedClearMessage("tmp/doc.md", live).contains("when the turn in pane %185 ends"))
+    }
+
     @Test
     fun `busy clear refusal parses generic command wrapper output`() {
         val output = """

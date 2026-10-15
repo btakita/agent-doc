@@ -24,7 +24,7 @@ use agent_doc_sqlite::state_store::{
 };
 use agent_doc_turn::turn_status::{
     TRANSCRIPT_TAIL_PROBE_BYTES, TranscriptTailEvidence, TurnActiveMarker,
-    classify_transcript_tail, pane_title_for_status, transcript_turn_end_reason,
+    abandoned_prompt_settle_remaining_secs, classify_transcript_tail, pane_title_for_status, transcript_turn_end_reason,
     turn_active_expiry_cutoff, turn_active_marker_is_fresh, turn_active_marker_matches_pane,
     turn_lease_ended_by_interrupt, turn_lease_ended_by_withdrawn_prompt,
 };
@@ -450,6 +450,60 @@ pub fn reclaim_withdrawn_prompt_turn_for_pane_for_file(
 ) -> Option<InterruptedTurnLease> {
     let root = agent_doc_project_root_io::project_root_containing(file)?;
     reclaim_withdrawn_prompt_turn_for_pane_at(&root, pane, now_secs())
+}
+
+/// `#clearctxslow`: a fresh turn-active lease whose prompt the bound harness
+/// transcript shows as abandoned (a prompt snapshot with no prompt record) but
+/// not yet settled, so the lease still reads as a live turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettlingAbandonedPrompt {
+    pub pane: String,
+    /// Unix seconds the lease was written (the prompt's `UserPromptSubmit`).
+    pub written_at: u64,
+    /// Unix seconds of the abandoned prompt's snapshot.
+    pub snapshot_at: u64,
+    /// Seconds until the snapshot settles and the lease retires.
+    pub settles_in_secs: u64,
+}
+
+/// `#clearctxslow`: read-only. Reports `pane`'s lease as a
+/// [`SettlingAbandonedPrompt`] while its abandoned prompt snapshot is inside
+/// the settle window. It never retires the lease or shortens the window; the
+/// operator-clear guard uses it only to name what the queued clear waits on.
+/// `None` when there is no fresh lease, no bound transcript, or the tail is
+/// anything other than an unsettled abandoned prompt for this lease.
+pub fn settling_abandoned_prompt_for_pane_at(
+    base: &Path,
+    pane: &str,
+    now: u64,
+) -> Option<SettlingAbandonedPrompt> {
+    let conn = open_state_db(base).ok()?;
+    let lease = load_coordination_lease_from_db(&conn, TURN_ACTIVE_SCOPE, pane)
+        .ok()
+        .flatten()?;
+    let marker = marker_from_lease(lease, now)?;
+    let transcript = transcript_for_marker(&conn, &marker)?;
+    let (tail, starts_mid_file) = read_transcript_tail(&transcript)?;
+    let evidence = classify_transcript_tail(&tail, starts_mid_file);
+    let settles_in_secs = abandoned_prompt_settle_remaining_secs(&marker, evidence, now)?;
+    let TranscriptTailEvidence::AbandonedPrompt { at_secs } = evidence else {
+        return None;
+    };
+    Some(SettlingAbandonedPrompt {
+        pane: marker.pane,
+        written_at: marker.written_at,
+        snapshot_at: at_secs,
+        settles_in_secs,
+    })
+}
+
+/// [`settling_abandoned_prompt_for_pane_at`] for the project containing `file`.
+pub fn settling_abandoned_prompt_for_pane_for_file(
+    file: &Path,
+    pane: &str,
+) -> Option<SettlingAbandonedPrompt> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    settling_abandoned_prompt_for_pane_at(&root, pane, now_secs())
 }
 
 /// [`reclaim_interrupted_turn_for_pane_at`] for the project containing `file`.
@@ -1663,6 +1717,64 @@ mod tests {
         world.tick(5);
         world.submit_prompt_with_snapshot("next", 2, true);
         world.tick(600);
+        assert!(world.live());
+    }
+
+    /// `#clearctxslow` incident replay (haiven-dev `tasks/sdk.md`, pane %180,
+    /// 2026-10-15): Run Agent Doc's lease at 14:49:04, the prompt's snapshot
+    /// at 14:49:06 with no prompt record, Clear Session Context pressed at
+    /// 14:49:10 and 14:49:16, lease retired at 14:49:26. The probe names the
+    /// settling abandoned prompt and the seconds left, without retiring it.
+    #[test]
+    fn sim_settling_abandoned_prompt_reports_remaining_wait_without_retiring() {
+        let mut world = TurnSimWorld::new("%180");
+        world.submit_prompt_with_snapshot("prev", 1, true);
+        world.tick(30);
+        world.finish_turn_without_stop();
+        world.stop_hook();
+        world.tick(200);
+        assert_eq!(
+            settling_abandoned_prompt_for_pane_at(&world.base, world.pane, world.now),
+            None,
+            "an idle pane with no lease has nothing settling"
+        );
+
+        world.submit_prompt_with_snapshot("sdk-run", 2, false);
+        let snapshot_at = world.now;
+        world.tick(4);
+        let settling = settling_abandoned_prompt_for_pane_at(&world.base, world.pane, world.now)
+            .expect("first press: an unsettled abandoned prompt");
+        assert_eq!(settling.snapshot_at, snapshot_at);
+        assert_eq!(settling.written_at, snapshot_at - 2);
+        assert_eq!(
+            settling.settles_in_secs,
+            agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 4
+        );
+        assert!(world.live(), "the probe never retires the lease");
+        world.tick(6);
+        assert_eq!(
+            settling_abandoned_prompt_for_pane_at(&world.base, world.pane, world.now)
+                .expect("second press")
+                .settles_in_secs,
+            agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 10
+        );
+        assert!(world.live());
+        world.tick(agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 10);
+        assert_eq!(
+            settling_abandoned_prompt_for_pane_at(&world.base, world.pane, world.now),
+            None,
+            "settled: the lease retires instead"
+        );
+        assert!(!world.live());
+
+        // A persisted prompt is a live turn, never a settling abandoned one.
+        world.tick(5);
+        world.submit_prompt_with_snapshot("live", 2, true);
+        world.tick(1);
+        assert_eq!(
+            settling_abandoned_prompt_for_pane_at(&world.base, world.pane, world.now),
+            None
+        );
         assert!(world.live());
     }
 

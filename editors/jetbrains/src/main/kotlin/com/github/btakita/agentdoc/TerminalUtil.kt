@@ -43,10 +43,14 @@ object TerminalUtil {
         """session_clear refused for (.+?) because a turn is live in pane (\S+) \(harness_turn_live=true evidence=([^,\s)]+)""",
         RegexOption.DOT_MATCHES_ALL,
     )
+    // #clearctxslow: the binary also queues behind a prompt that has not
+    // started a turn ("the last prompt in pane ... has not started a turn",
+    // an abandoned prompt still inside its settle window).
     private val LIVE_TURN_CLEAR_QUEUED_REGEX = Regex(
-        """session_clear queued for (.+?) — a turn is live in pane (\S+)""",
+        """session_clear queued for (.+?) — (?:a turn is live|the last prompt) in pane (\S+)""",
         RegexOption.DOT_MATCHES_ALL,
     )
+    private val LIVE_TURN_CLEAR_QUEUED_SETTLES_IN_REGEX = Regex("""\bsettles_in_secs=(\d+)""")
     // #clearnoticeverify: the queued notice carries the live-turn evidence, its
     // age and whether this press re-armed an already-queued clear.
     private val LIVE_TURN_CLEAR_QUEUED_EVIDENCE_REGEX = Regex("""\bevidence=([^,\s)]+)""")
@@ -215,6 +219,9 @@ object TerminalUtil {
         val evidence: String = "",
         val evidenceAgeSecs: Long? = null,
         val rearmed: Boolean = false,
+        // #clearctxslow: seconds until the cancelled prompt's settle window
+        // passes and the supervisor delivers the clear; null for a live turn.
+        val settlesInSecs: Long? = null,
     )
 
     internal data class BusySessionRestartRefusal(
@@ -1704,6 +1711,7 @@ object TerminalUtil {
             evidence = LIVE_TURN_CLEAR_QUEUED_EVIDENCE_REGEX.find(detail)?.groupValues?.get(1).orEmpty(),
             evidenceAgeSecs = LIVE_TURN_CLEAR_QUEUED_AGE_REGEX.find(detail)?.groupValues?.get(1)?.toLongOrNull(),
             rearmed = LIVE_TURN_CLEAR_QUEUED_REARMED_REGEX.find(detail)?.groupValues?.get(1) == "true",
+            settlesInSecs = LIVE_TURN_CLEAR_QUEUED_SETTLES_IN_REGEX.find(detail)?.groupValues?.get(1)?.toLongOrNull(),
         )
     }
 
@@ -1714,8 +1722,9 @@ object TerminalUtil {
      * press re-armed the one queued clear, and the live-turn evidence and its
      * age (a stale receipt absorbing presses is then visible to the operator).
      */
-    internal fun buildLiveTurnQueuedClearMessage(relativePath: String, queued: LiveTurnQueuedClear): String =
-        buildString {
+    internal fun buildLiveTurnQueuedClearMessage(relativePath: String, queued: LiveTurnQueuedClear): String {
+        queued.settlesInSecs?.let { return buildCancelledPromptQueuedClearMessage(relativePath, queued, it) }
+        return buildString {
             if (queued.rearmed) {
                 append("Clear Session Context re-armed for ")
                 append(relativePath)
@@ -1741,6 +1750,30 @@ object TerminalUtil {
             append(". The clear is dropped if a new prompt starts first. ")
             append("Use Interrupt and clear to clear immediately instead.")
         }
+    }
+
+    /**
+     * #clearctxslow: the queued clear waits on a prompt that never started a turn (Claude Code
+     * recorded no prompt after its snapshot, e.g. Esc during its hooks), not on a running turn.
+     * Live 2026-10-15 on sdk.md: the notice said "the turn in pane %180 ends" over an idle pane,
+     * so the operator read it as an error and pressed again. Say when the clear runs instead.
+     */
+    private fun buildCancelledPromptQueuedClearMessage(
+        relativePath: String,
+        queued: LiveTurnQueuedClear,
+        settlesInSecs: Long,
+    ): String = buildString {
+        append(if (queued.rearmed) "Clear Session Context is already queued for " else "Clear Session Context queued for ")
+        append(relativePath)
+        append(": it runs automatically in about ")
+        append(formatEvidenceAge(settlesInSecs))
+        append(".\n")
+        append("The last prompt in pane ")
+        append(queued.pane)
+        append(" never started a turn (it looks cancelled); agent-doc waits for that to be confirmed before ")
+        append("typing /clear. Pressing Clear again does not make it sooner. ")
+        append("Use Interrupt and clear to clear immediately instead.")
+    }
 
     internal fun formatEvidenceAge(secs: Long): String = when {
         secs < 120 -> "${secs}s"

@@ -628,6 +628,28 @@ pub fn turn_lease_ended_by_withdrawn_prompt(
     )
 }
 
+/// `#clearctxslow`: seconds until an abandoned prompt snapshot that belongs to
+/// `marker`'s turn settles and [`turn_lease_ended_by_interrupt`] retires the
+/// lease, or `None` when the tail is not such a snapshot (or it has settled).
+///
+/// Only reports the wait; it never shortens it. The operator-clear guard uses
+/// it to tell the operator that no turn is running yet and when the queued
+/// clear will run, instead of claiming a live turn.
+pub fn abandoned_prompt_settle_remaining_secs(
+    marker: &TurnActiveMarker,
+    evidence: TranscriptTailEvidence,
+    now: u64,
+) -> Option<u64> {
+    let TranscriptTailEvidence::AbandonedPrompt { at_secs } = evidence else {
+        return None;
+    };
+    if at_secs < marker.written_at {
+        return None;
+    }
+    let elapsed = now.saturating_sub(at_secs);
+    (elapsed < ABANDONED_PROMPT_SETTLE_SECS).then(|| ABANDONED_PROMPT_SETTLE_SECS - elapsed)
+}
+
 /// The turn-end receipt reason a lease-retiring transcript boundary proves.
 pub fn transcript_turn_end_reason(evidence: TranscriptTailEvidence) -> Option<&'static str> {
     match evidence {
@@ -1289,6 +1311,61 @@ mod tests {
             transcript_turn_end_reason(TranscriptTailEvidence::Activity),
             None
         );
+    }
+
+    /// `#clearctxslow` incident replay: haiven-dev `tasks/sdk.md`, pane %180,
+    /// 2026-10-15. Run Agent Doc's lease was written at 14:49:04, the prompt's
+    /// snapshot landed at 14:49:06.904 with no prompt record, and Clear
+    /// Session Context was pressed at 14:49:10 and 14:49:16. The lease retired
+    /// at 14:49:26 (`turn_status_projection_repaired
+    /// reason=harness_prompt_abandoned`). The settle window is unchanged; the
+    /// guard only reports how long is left.
+    #[test]
+    fn clearctxslow_reports_the_remaining_abandoned_prompt_settle() {
+        let lease = TurnActiveMarker {
+            pane: "%180".to_string(),
+            written_at: parse_rfc3339_utc_secs("2026-10-15T14:49:04Z").unwrap(),
+        };
+        let snapshot = parse_rfc3339_utc_secs("2026-10-15T14:49:06.904Z").unwrap();
+        let evidence = TranscriptTailEvidence::AbandonedPrompt { at_secs: snapshot };
+        let first_press = parse_rfc3339_utc_secs("2026-10-15T14:49:10Z").unwrap();
+        let second_press = parse_rfc3339_utc_secs("2026-10-15T14:49:16Z").unwrap();
+        assert_eq!(
+            abandoned_prompt_settle_remaining_secs(&lease, evidence, first_press),
+            Some(16)
+        );
+        assert_eq!(
+            abandoned_prompt_settle_remaining_secs(&lease, evidence, second_press),
+            Some(10)
+        );
+        // Settled: the lease retires instead, so there is nothing to wait for.
+        let settled = snapshot + ABANDONED_PROMPT_SETTLE_SECS;
+        assert_eq!(
+            abandoned_prompt_settle_remaining_secs(&lease, evidence, settled),
+            None
+        );
+        assert!(turn_lease_ended_by_interrupt(&lease, evidence, settled));
+        assert!(!turn_lease_ended_by_interrupt(&lease, evidence, second_press));
+        // A snapshot older than the lease belongs to an earlier prompt, and
+        // any other tail proves no abandoned prompt.
+        let newer = TurnActiveMarker {
+            pane: "%180".to_string(),
+            written_at: snapshot + 1,
+        };
+        assert_eq!(
+            abandoned_prompt_settle_remaining_secs(&newer, evidence, first_press),
+            None
+        );
+        for other in [
+            TranscriptTailEvidence::Activity,
+            TranscriptTailEvidence::Unknown,
+            TranscriptTailEvidence::Interrupted { at_secs: snapshot },
+        ] {
+            assert_eq!(
+                abandoned_prompt_settle_remaining_secs(&lease, other, first_press),
+                None
+            );
+        }
     }
 
     /// `#cancelturnprompt` incident replay: agent-loop

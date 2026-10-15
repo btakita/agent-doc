@@ -486,6 +486,14 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `Clear Session Context` action; `DeferredClearSupersededNotices` seeds its baseline from the first
   ready frame per document so reopen/reconnect never re-announces an old drop
   (`#clearsupersedenotice`).
+- A Clear Session Context the binary queues behind a prompt that never started a turn
+  (`session_clear queued for <FILE> — the last prompt in pane <pane> has not started a turn ...
+  settles_in_secs=<n>`, `#clearctxslow`) is an accepted, queued outcome, not a failure. The
+  information notice's first line says when the clear runs ("Clear Session Context queued for
+  <path>: it runs automatically in about <n>s."; "is already queued" on a re-press) and the
+  second says the last prompt never started a turn, that pressing again does not make it
+  sooner, and that Interrupt and clear clears immediately. It never says a turn is running.
+  A clear queued behind a live turn keeps the "it runs when the turn in pane <pane> ends" notice.
 
 ### Run Feedback
 

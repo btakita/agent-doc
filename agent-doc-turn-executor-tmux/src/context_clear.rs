@@ -1016,6 +1016,50 @@ pub fn live_turn_clear_queued_message(
     )
 }
 
+/// (`#clearctxslow`) Evidence label for a queued clear whose turn-active
+/// lease belongs to a prompt Claude Code never recorded (an abandoned prompt
+/// snapshot still inside its settle window).
+pub const ABANDONED_PROMPT_SETTLING_EVIDENCE: &str = "abandoned_prompt_settling";
+
+/// (`#clearctxslow`) A non-interrupting clear queued behind a prompt that has
+/// not started a turn: the lease was written by the prompt's
+/// `UserPromptSubmit` hooks, but Claude Code wrote no prompt record after its
+/// snapshot (the shape an Esc during those hooks leaves). The prompt may
+/// still start for up to `settle_window_secs`, so nothing is typed yet; the
+/// supervisor delivers the clear when the window passes. Same success
+/// contract and prefix as [`live_turn_clear_queued_message`], but it does not
+/// claim a live turn, and it says when the clear runs.
+pub fn abandoned_prompt_clear_queued_message(
+    file: &Path,
+    pane_id: Option<&str>,
+    source: &str,
+    settles_in_secs: u64,
+    settle_window_secs: u64,
+    rearmed: bool,
+) -> String {
+    let pane = pane_id.unwrap_or("unknown");
+    let queued = if rearmed {
+        "The clear that was already queued stays queued (still one clear)"
+    } else {
+        "One clear is queued"
+    };
+    format!(
+        "{} {} — the last prompt in pane {} has not started a turn (harness_turn_live=pending evidence={} settles_in_secs={} settle_window_secs={}, source={}): Claude Code wrote no prompt record after its snapshot, which is what a prompt cancelled during its `UserPromptSubmit` hooks leaves. A prompt can still start up to {}s after its snapshot, so no `/clear` was typed yet. {} and the supervisor delivers it automatically in about {}s; pressing Clear Session Context again does not make it sooner. It is dropped instead if that prompt or a newer one starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed={}. Run `agent-doc session interrupt-clear {}` to clear now.",
+        LIVE_TURN_CLEAR_QUEUED_PREFIX,
+        file.display(),
+        pane,
+        ABANDONED_PROMPT_SETTLING_EVIDENCE,
+        settles_in_secs,
+        settle_window_secs,
+        source,
+        settle_window_secs,
+        queued,
+        settles_in_secs,
+        rearmed,
+        file.display()
+    )
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct InterruptClearTimeoutFacts<'a> {
     pub file: &'a Path,
@@ -2604,5 +2648,44 @@ Welcome to Claude Code
         assert!(!message.contains("refused"));
         assert!(!message.contains("blocked_with_exact_unblocker"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    /// `#clearctxslow`: the 2026-10-15 sdk.md notice claimed "a turn is live"
+    /// on an idle pane whose cancelled prompt was still settling. The queued
+    /// outcome now names the settling prompt and when the clear runs, keeps
+    /// the success contract, and never reads as a refusal.
+    #[test]
+    fn abandoned_prompt_clear_queued_message_names_the_wait_not_a_live_turn() {
+        let message = abandoned_prompt_clear_queued_message(
+            Path::new("/repo/tasks/sdk.md"),
+            Some("%180"),
+            "authoritative_actor",
+            16,
+            20,
+            false,
+        );
+        assert!(message.starts_with(LIVE_TURN_CLEAR_QUEUED_PREFIX));
+        assert!(message.contains(
+            "session_clear queued for /repo/tasks/sdk.md — the last prompt in pane %180 has not started a turn"
+        ));
+        assert!(message.contains("evidence=abandoned_prompt_settling settles_in_secs=16"));
+        assert!(message.contains("in about 16s"));
+        assert!(message.contains("One clear is queued"));
+        assert!(!message.contains("a turn is live"));
+        assert!(message.contains("ui_outcome=queued ui_outcome_class=queued"));
+        assert!(message.contains("unblocker=none"));
+        assert!(!message.contains("refused"));
+        assert!(message.contains("rearmed=false"));
+        let rearmed = abandoned_prompt_clear_queued_message(
+            Path::new("/repo/tasks/sdk.md"),
+            Some("%180"),
+            "authoritative_actor",
+            10,
+            20,
+            true,
+        );
+        assert!(rearmed.contains("still one clear"));
+        assert!(rearmed.contains("rearmed=true"));
+        assert!(rearmed.contains("settles_in_secs=10"));
     }
 }

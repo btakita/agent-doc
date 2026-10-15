@@ -16628,25 +16628,37 @@ fn install_local_document_projection_reader(runtime: &Arc<ControllerRuntime>) {
 /// controller spawns replayed the durable ledger instead — inside the process
 /// that owns the authoritative in-memory projection. A `Weak` keeps this from
 /// pinning the runtime past shutdown.
-fn install_process_document_projection_reader(runtime: &Arc<ControllerRuntime>) {
+///
+/// `#ctrltimingflakes`: both readers are bound to `project_root`, so a read for
+/// another in-process controller's root never consults this runtime.
+fn install_process_document_projection_reader(
+    runtime: &Arc<ControllerRuntime>,
+    project_root: &Path,
+) {
     let runtime = Arc::downgrade(runtime);
     let closeout_runtime = runtime.clone();
-    agent_doc_state_wire::set_process_document_projection_reader(move |document_hash| {
-        runtime.upgrade().and_then(|runtime| {
-            runtime
-                .document_state_projection(document_hash)
-                .ok()
-                .flatten()
-        })
-    });
-    agent_doc_state_wire::set_process_document_closeout_reader(move |document_hash| {
-        closeout_runtime.upgrade().and_then(|runtime| {
-            runtime
-                .document_closeout_projection(document_hash)
-                .ok()
-                .flatten()
-        })
-    });
+    agent_doc_state_wire::set_process_document_projection_reader(
+        project_root,
+        move |document_hash| {
+            runtime.upgrade().and_then(|runtime| {
+                runtime
+                    .document_state_projection(document_hash)
+                    .ok()
+                    .flatten()
+            })
+        },
+    );
+    agent_doc_state_wire::set_process_document_closeout_reader(
+        project_root,
+        move |document_hash| {
+            closeout_runtime.upgrade().and_then(|runtime| {
+                runtime
+                    .document_closeout_projection(document_hash)
+                    .ok()
+                    .flatten()
+            })
+        },
+    );
 }
 
 /// Install the controller-local reactive projection context on the thread that
@@ -17012,7 +17024,7 @@ pub(crate) fn serve_with_options(
     let durable_project_root = bootstrap.project_root.clone();
     let runtime = ControllerRuntime::new_arc(bootstrap)?;
     install_local_document_projection_reader(&runtime);
-    install_process_document_projection_reader(&runtime);
+    install_process_document_projection_reader(&runtime, project_root);
     // `#ctrlbindbeforeserve`: fold the durable reliable-sync journal BEFORE the
     // socket becomes connectable. A bound socket with no accept loop behind it
     // is a silent black hole: the client connects, writes, and waits out its own
@@ -51078,30 +51090,67 @@ mod tests {
         std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
         let name = sock.clone().to_fs_name::<GenericFilePath>().unwrap();
         let listener = ListenerOptions::new().name(name).create_sync().unwrap();
-        let (release, released) = std::sync::mpsc::channel::<()>();
+        // `#ctrltimingflakes`: a retry reconnects from scratch
+        // (`request_across_controller_handoff` re-runs `connect`), so "no retry"
+        // is proven by counting the connections the listener accepted, not by
+        // a wall-clock bound (`elapsed < 2x deadline` failed at 748ms for a
+        // 300ms deadline under 16-thread libtest load). The server records
+        // each connection's command and holds it unanswered; the test's own
+        // sentinel connection, opened only after the observation returned,
+        // ends the loop. Accept order is FIFO, so every attempt the client made
+        // is counted before the sentinel.
+        const SENTINEL: &str = "__ctrltimingflakes_sentinel";
         let handle = std::thread::spawn(move || {
-            let _stream = listener.accept().unwrap();
-            let _ = released.recv();
+            let mut held = Vec::new();
+            let mut commands = Vec::new();
+            loop {
+                let stream = listener.accept().unwrap();
+                let (reader_half, writer_half) = stream.split();
+                let mut reader = BufReader::new(reader_half);
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                let command = serde_json::from_str::<serde_json::Value>(line.trim())
+                    .ok()
+                    .and_then(|request| request["command"].as_str().map(str::to_string))
+                    .unwrap_or_default();
+                if command == SENTINEL {
+                    return commands;
+                }
+                commands.push(command);
+                held.push((reader, writer_half));
+            }
         });
-        // Large enough that scheduling jitter on a loaded machine stays well
-        // inside the 2x bound (50ms flaked at 156ms during a parallel
-        // `make check`), small enough that a retry still crosses it.
         let deadline = Duration::from_millis(300);
 
         let started = Instant::now();
         let observation =
             authoritative_actor_binding_with_deadline(dir.path(), &document, deadline).unwrap();
         let elapsed = started.elapsed();
-        drop(release);
-        handle.join().unwrap();
+        let sentinel = connect(dir.path()).unwrap();
+        let (_sentinel_reader, mut sentinel_writer) = sentinel.split();
+        writeln!(
+            sentinel_writer,
+            "{}",
+            serde_json::json!({ "command": SENTINEL })
+        )
+        .unwrap();
+        sentinel_writer.flush().unwrap();
+        let commands = handle.join().unwrap();
 
         assert_eq!(
             observation,
             AuthoritativeActorBindingObservation::DeadlineExceeded { deadline }
         );
+        assert_eq!(
+            commands,
+            vec!["actor_binding".to_string()],
+            "one bounded observation must send exactly one request on one connection, never retry"
+        );
+        // A lower bound is load-safe: the single unanswered request waited out
+        // the caller's whole deadline instead of failing early.
         assert!(
-            elapsed < deadline * 2,
-            "one bounded observation must not spend a second deadline on retry: {elapsed:?}"
+            elapsed >= deadline,
+            "the observation must wait the caller's deadline: {elapsed:?}"
         );
     }
 

@@ -807,6 +807,15 @@ fn clear_run_clear_after_a_normally_ended_dispatch_turn_delivers_both_clears_in_
         second_stderr.contains("evidence=dispatch_turn_pending"),
         "{second_stderr}"
     );
+    // `#clearaftrun`: the run has not started a turn; the notice must not claim
+    // one is live, nor offer interrupt-clear as a faster path.
+    assert!(
+        second_stderr.contains("Run Agent Doc for pane")
+            && second_stderr.contains("has not started its turn yet")
+            && !second_stderr.contains("a turn is live")
+            && !second_stderr.contains("session interrupt-clear"),
+        "{second_stderr}"
+    );
     std::thread::sleep(Duration::from_secs(2));
     assert_eq!(scenario.clears(), 1, "clear #2 does not race the trigger");
 

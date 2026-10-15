@@ -1124,6 +1124,66 @@ pub fn abandoned_prompt_clear_queued_message(
     )
 }
 
+/// (`#clearaftrun`) Evidence label for a queued clear whose only live-turn
+/// evidence is an accepted dispatch (Run Agent Doc) whose turn has not
+/// started: its trigger has not reached the harness yet, or is still being
+/// submitted. Same string the operator-clear guard logs.
+pub const DISPATCH_TURN_PENDING_EVIDENCE: &str = "dispatch_turn_pending";
+
+/// (`#clearaftrun`) A non-interrupting clear queued behind a Run Agent Doc
+/// dispatch that was accepted but has not started its turn.
+///
+/// Live 2026-10-15 19:40Z on haiven-dev `tasks/sdk.md` (pane %180): Run Agent
+/// Doc was accepted at 19:39:58, its route then waited ~22s on the previous
+/// cycle's compaction commit before typing the trigger, and Clear Session
+/// Context pressed at 19:40:10 was queued behind that run. The notice said "a
+/// turn is live in pane %180 ... no `/clear` was typed into the running turn"
+/// over an idle pane, and offered `interrupt-clear`, which re-enters this
+/// same guard and queues again. The operator read it as an error.
+///
+/// This reports what is actually true: no turn has started; a clear pressed
+/// after Run Agent Doc runs after that run; the run does not drop the clear;
+/// nothing (re-pressing, interrupt-and-clear) makes it sooner; and, if the run
+/// never starts, the clear still runs once the receipt's pre-turn grace
+/// expires. Same success contract and prefix as
+/// [`live_turn_clear_queued_message`].
+pub fn pending_dispatch_clear_queued_message(
+    file: &Path,
+    pane_id: Option<&str>,
+    source: &str,
+    evidence_age_secs: Option<u64>,
+    pre_turn_grace_secs: u64,
+    rearmed: bool,
+) -> String {
+    let pane = pane_id.unwrap_or("unknown");
+    let age = evidence_age_secs.map_or_else(|| "unknown".to_string(), |secs| secs.to_string());
+    let accepted = evidence_age_secs.map_or_else(
+        || "was accepted".to_string(),
+        |secs| format!("was accepted {secs}s ago"),
+    );
+    let fallback_secs = evidence_age_secs
+        .map_or(pre_turn_grace_secs, |secs| pre_turn_grace_secs.saturating_sub(secs));
+    let queued = if rearmed {
+        "The clear that was already queued stays queued (still one clear)"
+    } else {
+        "One clear is queued"
+    };
+    format!(
+        "{} {} — Run Agent Doc for pane {} {} and has not started its turn yet (harness_turn_live=pending evidence={} evidence_age_secs={} pre_turn_grace_secs={}, source={}); its trigger has not reached the harness or is still being submitted, so no turn is running. A clear pressed after Run Agent Doc runs after that run, so no `/clear` was typed ahead of its trigger. {} and the supervisor delivers it automatically when that run's turn ends; that run does not drop it, but a prompt started after this press or a session restart does. If that run never starts, the clear runs within about {}s, when its pre-turn grace expires. Pressing Clear Session Context again, or Interrupt and clear, does not make it sooner: there is no turn to interrupt yet. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed={}.",
+        LIVE_TURN_CLEAR_QUEUED_PREFIX,
+        file.display(),
+        pane,
+        accepted,
+        DISPATCH_TURN_PENDING_EVIDENCE,
+        age,
+        pre_turn_grace_secs,
+        source,
+        queued,
+        fallback_secs,
+        rearmed,
+    )
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct InterruptClearTimeoutFacts<'a> {
     pub file: &'a Path,
@@ -2886,5 +2946,67 @@ Welcome to Claude Code
         assert!(rearmed.contains("still one clear"));
         assert!(rearmed.contains("rearmed=true"));
         assert!(rearmed.contains("settles_in_secs=10"));
+    }
+
+    /// `#clearaftrun`: the 2026-10-15 19:40Z sdk.md notice said "a turn is
+    /// live ... no `/clear` was typed into the running turn" while Run Agent
+    /// Doc's trigger had not even been typed, and offered `interrupt-clear`,
+    /// which cannot clear sooner there. The queued outcome now says no turn is
+    /// running, that the clear runs after that run, and when it runs if the
+    /// run never starts.
+    #[test]
+    fn pending_dispatch_clear_queued_message_names_the_run_not_a_live_turn() {
+        let message = pending_dispatch_clear_queued_message(
+            Path::new("/repo/tasks/sdk.md"),
+            Some("%180"),
+            "authoritative_actor",
+            Some(12),
+            120,
+            false,
+        );
+        assert!(message.starts_with(LIVE_TURN_CLEAR_QUEUED_PREFIX));
+        assert!(message.contains(
+            "session_clear queued for /repo/tasks/sdk.md — Run Agent Doc for pane %180 was accepted 12s ago and has not started its turn yet"
+        ));
+        assert!(message.contains(
+            "harness_turn_live=pending evidence=dispatch_turn_pending evidence_age_secs=12 pre_turn_grace_secs=120"
+        ));
+        assert!(message.contains("no turn is running"));
+        assert!(message.contains("One clear is queued"));
+        assert!(message.contains("that run does not drop it"));
+        assert!(message.contains("within about 108s"));
+        assert!(!message.contains("a turn is live"));
+        assert!(!message.contains("running turn"));
+        assert!(!message.contains("interrupt-clear"));
+        assert!(message.contains("ui_outcome=queued ui_outcome_class=queued"));
+        assert!(message.contains("unblocker=none"));
+        assert!(!message.contains("refused"));
+        assert!(message.contains("rearmed=false"));
+
+        let rearmed = pending_dispatch_clear_queued_message(
+            Path::new("/repo/tasks/sdk.md"),
+            Some("%180"),
+            "authoritative_actor",
+            None,
+            120,
+            true,
+        );
+        assert!(rearmed.contains("Run Agent Doc for pane %180 was accepted and has not"));
+        assert!(rearmed.contains("evidence_age_secs=unknown"));
+        assert!(rearmed.contains("still one clear"));
+        assert!(rearmed.contains("within about 120s"));
+        assert!(rearmed.contains("rearmed=true"));
+        // A receipt older than its grace never underflows.
+        assert!(
+            pending_dispatch_clear_queued_message(
+                Path::new("/repo/tasks/sdk.md"),
+                Some("%180"),
+                "authoritative_actor",
+                Some(500),
+                120,
+                false,
+            )
+            .contains("within about 0s")
+        );
     }
 }

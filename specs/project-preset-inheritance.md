@@ -42,15 +42,18 @@ preset exactly as they invoke a document-local preset: `#name` in prompt text,
 
 ## Resolution
 
-For a session document under a discovered project root:
+For a session document under one or more nested project roots:
 
-1. Read only the frontmatter of the nearest `.agent-doc/project.md`.
-2. Parse its presets through the same `Frontmatter` / `PromptPresets` path used
+1. Walk from the nearest discovered project root through its ancestors, bounded
+   by `AGENT_DOC_ROOT_CEILING_DIRECTORIES`, and read every existing
+   `.agent-doc/project.md`.
+2. Parse their presets through the same `Frontmatter` / `PromptPresets` path used
    by session documents, including scalar, multiline, and structured values.
-3. Treat project presets as defaults and overlay the session document's
-   declarations by exact key. A document-local declaration wins, including an
-   unset, half-typed declaration; it must mask an inherited value rather than
-   execute the project value while the operator is editing an override.
+3. Treat farther ancestors as defaults, overlay nearer project declarations by
+   exact key, then overlay the session document's declarations. A nearer or
+   document-local declaration wins, including an unset, half-typed declaration;
+   it must mask an inherited value rather than execute the ancestor value while
+   the operator is editing an override.
 4. Preserve the source preset's diagnostics and structured `runbook` metadata.
    Project-relative runbook paths continue to resolve from the project root.
 5. Resolve on read (or invalidate a cache by project-file identity and content
@@ -110,8 +113,10 @@ inherited presets.
 Integration coverage for the resolver must prove:
 
 - a project-only scalar, multiline, and structured preset resolves;
-- a document-local value overrides the same project key;
-- a document-local unset declaration masks the same project key;
+- a nearer nested project inherits parent-only presets and overrides shared keys;
+- a nearer nested-project unset declaration masks the same parent key;
+- a document-local value overrides the same nested or parent project key;
+- a document-local unset declaration masks the same nested or parent project key;
 - edits to `project.md` affect an existing document without rewriting it;
 - missing project files yield an empty inherited map;
 - malformed project frontmatter cannot silently fall back to stale or partial

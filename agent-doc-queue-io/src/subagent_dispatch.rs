@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn project_preset_drives_dispatch_and_authorization_without_local_copy() {
+    fn ancestor_project_preset_uses_nested_project_overrides_without_local_copy() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::write(dir.path().join(".agent-doc/config.toml"), "").unwrap();
@@ -321,12 +321,16 @@ mod tests {
             "---\npresets:\n  '#delegate': 'run #project item in a subagent'\n  '#project': default\n---\n",
         )
         .unwrap();
-        let file = dir.path().join("task.md");
-        let content = doc(&["#delegate do [#work]"]).replacen(
-            "---\n",
-            "---\npresets:\n  '#project': agent-doc\n",
-            1,
-        );
+        let nested = dir.path().join("nested");
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::write(nested.join(".agent-doc/config.toml"), "").unwrap();
+        std::fs::write(
+            nested.join(".agent-doc/project.md"),
+            "---\npresets:\n  '#project': agent-doc\n---\n",
+        )
+        .unwrap();
+        let file = nested.join("task.md");
+        let content = doc(&["#delegate do [#work]"]);
         std::fs::write(&file, &content).unwrap();
 
         let listed = pending_subagent_dispatch_for_content(&file, &content).unwrap();

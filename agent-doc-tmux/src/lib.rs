@@ -1302,18 +1302,52 @@ impl TmuxClientGeometry {
     /// Two or more attached clients whose sizes differ materially: the window can
     /// render faithfully for at most one of them.
     pub fn clients_mismatched(&self) -> bool {
-        let widths = self.clients.iter().map(|client| client.width);
-        let heights = self.clients.iter().map(|client| client.height);
-        let spread = |values: &mut dyn Iterator<Item = u32>| {
+        let (widths_differ, heights_differ) = self.client_dimensions_differ();
+        self.clients.len() > 1 && (widths_differ || heights_differ)
+    }
+
+    /// Whether the clients' widths, and their heights, spread by more than
+    /// [`CLIENT_SIZE_MISMATCH_CELLS`].
+    fn client_dimensions_differ(&self) -> (bool, bool) {
+        let differ = |values: &mut dyn Iterator<Item = u32>| {
             let values: Vec<u32> = values.collect();
             match (values.iter().min(), values.iter().max()) {
-                (Some(min), Some(max)) => max - min,
-                _ => 0,
+                (Some(min), Some(max)) => max - min > CLIENT_SIZE_MISMATCH_CELLS,
+                _ => false,
             }
         };
-        self.clients.len() > 1
-            && (spread(&mut { widths }) > CLIENT_SIZE_MISMATCH_CELLS
-                || spread(&mut { heights }) > CLIENT_SIZE_MISMATCH_CELLS)
+        (
+            differ(&mut self.clients.iter().map(|client| client.width)),
+            differ(&mut self.clients.iter().map(|client| client.height)),
+        )
+    }
+
+    /// GH #268: what the operator can do about mismatched clients, or `None`
+    /// when the clients agree.
+    ///
+    /// `set_window-size_largest` is offered only when the clients agree in one
+    /// dimension: `largest` takes width and height independently, so clients
+    /// that differ in both are each cropped by the other's larger dimension.
+    /// Under an effective `manual` policy (a per-window pin, typically left by
+    /// `resize-window -A`), neither detaching a client nor a global `largest`
+    /// moves the window, so the pin is named first.
+    pub fn mismatch_remedy(&self) -> Option<String> {
+        if !self.clients_mismatched() {
+            return None;
+        }
+        let (widths_differ, heights_differ) = self.client_dimensions_differ();
+        let unpinned = if widths_differ && heights_differ {
+            "detach_the_extra_client"
+        } else {
+            "detach_the_extra_client_or_set_window-size_largest"
+        };
+        Some(
+            if self.window_size.as_deref().map(str::trim) == Some("manual") {
+                format!("set-option_-wu_window-size_then_{unpinned}")
+            } else {
+                unpinned.to_string()
+            },
+        )
     }
 
     /// One log/diagnostic line: every client's size, the policy, the window size,
@@ -1388,21 +1422,27 @@ impl AttachedClientViewport {
     }
 }
 
-/// GH #244: whether an agent-doc-owned window is held below its clients by a
-/// per-window `window-size manual` pin and should be re-fit.
+/// GH #244 / GH #268: whether an agent-doc-owned window is held at a size no
+/// attached client shows correctly by a per-window `window-size manual` pin,
+/// and should be re-fit.
 ///
 /// tmux's `resize-window -A` (commonly bound to a "fit window" key) sets the
 /// window's own `window-size` to `manual` and leaves it there, so the window
-/// stops following its client and is dot-padded once the terminal grows. The
-/// pin is released only when all of these hold:
+/// stops following its client. Once the clients change, the pinned size is
+/// dot-padded in a client larger than it and cropped in a client smaller than
+/// it. With two differently sized clients attached, `-A` takes the larger
+/// width and the larger height independently, so the pin can be larger than
+/// one client and smaller than the other at once (GH #268). The pin is
+/// released only when all of these hold:
 ///
 /// - the window's **local** (not inherited) `window-size` is `manual` — a
 ///   global or session `manual` policy is the operator's choice, not a stray pin;
-/// - at least one client is attached — with none, nothing is dot-padded and
-///   there is no size to fit to;
-/// - the window is smaller than **every** attached client's window area, so no
-///   client relies on the pinned size: no larger than it in either dimension and
-///   strictly smaller in at least one.
+/// - at least one client is attached — with none, nothing is padded or cropped
+///   and there is no size to fit to;
+/// - no attached client's window area is exactly the pinned size, in either
+///   direction: smaller, larger, or larger in one dimension and smaller in the
+///   other. A client that sees the window at exactly its size relies on the
+///   pin, so it is kept.
 ///
 /// The caller must restrict this to windows agent-doc owns; an operator's own
 /// window keeps its pin regardless (`#bare-foreign-session-guard`).
@@ -1414,12 +1454,9 @@ pub fn manual_window_pin_needs_refit(
 ) -> bool {
     local_window_size.map(str::trim) == Some("manual")
         && !clients.is_empty()
-        && clients.iter().all(|client| {
-            let (width, height) = client.window_area();
-            window_width <= width
-                && window_height <= height
-                && (window_width < width || window_height < height)
-        })
+        && clients
+            .iter()
+            .all(|client| client.window_area() != (window_width, window_height))
 }
 
 #[cfg(test)]
@@ -1467,14 +1504,52 @@ mod client_geometry_tests {
             19,
             &[viewport(244, 20)]
         ));
-        // A window larger than its client in either dimension is not "held
-        // below" it; some other policy chose that size.
-        assert!(!manual_window_pin_needs_refit(
+    }
+
+    #[test]
+    fn gh268_manual_pin_larger_than_its_client_needs_refit() {
+        // A pin larger than its only client crops it just as a smaller pin
+        // dot-pads it.
+        assert!(manual_window_pin_needs_refit(
             Some("manual"),
             300,
             12,
             &[viewport(244, 20)]
         ));
+        assert!(manual_window_pin_needs_refit(
+            Some("manual"),
+            244,
+            25,
+            &[viewport(244, 20)]
+        ));
+    }
+
+    #[test]
+    fn gh268_resize_window_a_pin_across_two_clients_needs_refit() {
+        // The incident: `resize-window -A` with a 120x30 and a 202x15 client
+        // attached pinned `@4` at 202x29, the larger width and the larger
+        // height: too wide for one client, too tall for the other.
+        let clients = [viewport(120, 30), viewport(202, 15)];
+        assert!(manual_window_pin_needs_refit(
+            Some("manual"),
+            202,
+            29,
+            &clients
+        ));
+        // The IDE client then shrank to 203x11; still releasable.
+        assert!(manual_window_pin_needs_refit(
+            Some("manual"),
+            202,
+            29,
+            &[viewport(120, 30), viewport(203, 11)]
+        ));
+        // Either client alone after the other detaches: still releasable.
+        for client in clients {
+            assert!(
+                manual_window_pin_needs_refit(Some("manual"), 202, 29, &[client]),
+                "{client:?}"
+            );
+        }
     }
 
     #[test]
@@ -1494,7 +1569,7 @@ mod client_geometry_tests {
     #[test]
     fn gh244_a_client_matching_the_pinned_size_keeps_the_pin() {
         // Smaller than one client but exactly the other's view: that client
-        // relies on the current size, so it is not "smaller than every client".
+        // relies on the current size, so the pin is kept.
         assert!(!manual_window_pin_needs_refit(
             Some("manual"),
             203,
@@ -1545,6 +1620,55 @@ mod client_geometry_tests {
             geometry.summary(),
             "clients=2 [/dev/pts/65 120x30, /dev/pts/66 243x21] window_size=latest window=120x29 mismatch=true"
         );
+    }
+
+    #[test]
+    fn gh268_mismatch_remedy_names_the_manual_pin_and_drops_largest_when_both_dimensions_differ() {
+        let incident = TmuxClientGeometry {
+            clients: TmuxClientGeometry::parse_clients("/dev/pts/47 120 30\n/dev/pts/0 202 15\n"),
+            window_size: Some("manual".to_string()),
+            window_width: Some(202),
+            window_height: Some(29),
+        };
+        assert_eq!(
+            incident.mismatch_remedy().as_deref(),
+            Some("set-option_-wu_window-size_then_detach_the_extra_client")
+        );
+        let latest = TmuxClientGeometry {
+            window_size: Some("latest".to_string()),
+            window_width: Some(120),
+            window_height: Some(29),
+            ..incident.clone()
+        };
+        assert_eq!(
+            latest.mismatch_remedy().as_deref(),
+            Some("detach_the_extra_client")
+        );
+        // Clients that agree in one dimension: `largest` shows the larger one
+        // correctly, so it stays on offer.
+        let same_height = TmuxClientGeometry {
+            clients: TmuxClientGeometry::parse_clients("a 120 30\nb 243 30\n"),
+            ..latest.clone()
+        };
+        assert_eq!(
+            same_height.mismatch_remedy().as_deref(),
+            Some("detach_the_extra_client_or_set_window-size_largest")
+        );
+        let same_height_pinned = TmuxClientGeometry {
+            window_size: Some("manual".to_string()),
+            ..same_height
+        };
+        assert_eq!(
+            same_height_pinned.mismatch_remedy().as_deref(),
+            Some(
+                "set-option_-wu_window-size_then_detach_the_extra_client_or_set_window-size_largest"
+            )
+        );
+        let one = TmuxClientGeometry {
+            clients: TmuxClientGeometry::parse_clients("a 120 30\n"),
+            ..incident
+        };
+        assert_eq!(one.mismatch_remedy(), None);
     }
 
     #[test]

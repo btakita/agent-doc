@@ -33170,11 +33170,12 @@ fn log_tmux_client_geometry(project_root: &Path, session: &str, window: &str) {
         project_root,
         &format!(
             "tmux_client_geometry session={session} window={window} {summary}{}",
-            if geometry.clients_mismatched() {
-                " warning=clients_of_different_sizes_attached remedy=detach_the_extra_client_or_set_window-size_largest"
-            } else {
-                ""
-            },
+            geometry
+                .mismatch_remedy()
+                .map(|remedy| format!(
+                    " warning=clients_of_different_sizes_attached remedy={remedy}"
+                ))
+                .unwrap_or_default(),
         ),
     );
 }

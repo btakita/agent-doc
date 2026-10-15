@@ -1135,20 +1135,39 @@ markdown file, sync must expand that one-column projection from the project
   session policy:
   - the exact 1000-row stash-join staging height left by older binaries
     (`layout_repair_unpinned_window`);
-  - a per-window `window-size manual` that holds the window smaller than
-    **every** client attached to the session, measured against each client's
+  - a per-window `window-size manual` that holds the window at a size **no**
+    client attached to the session sees it at, measured against each client's
     size less its status rows (`layout_repair_window_size_pin_released`). tmux's
     own `resize-window -A`, commonly bound to a "fit window" key, sets that pin
-    and leaves it, so after the terminal grows the window stays at the old size
-    and tmux dot-pads the rest. The pin is kept when it is only inherited (a
-    global/session `manual` policy), when no client is attached, when any
-    client already sees the window at or below its size, or when any client's
-    size is unreadable (tmux reports no height for a control-mode client).
+    and leaves it, so once the clients change the window stays at the old size:
+    dot-padded in a larger client, cropped in a smaller one. With two
+    differently sized clients attached, `-A` takes the larger width and the
+    larger height independently, so the pin can be too wide for one client and
+    too tall for the other at once; it is released in that case, and it stays
+    releasable after either client detaches (GH #268 — the #244 guard released
+    only a pin smaller than every client, so a cropping pin stuck for good).
+    The pin is kept when it is only inherited (a global/session `manual`
+    policy), when no client is attached, when any client sees the window at
+    exactly its pinned size, or when any client's size is unreadable (tmux
+    reports no height for a control-mode client).
   A repair that releases a pin returns `Repaired`; a pinned window that is
   still undersized is never `AlreadyConverged`. The check costs nothing on the
   converged path: the single window listing carries each window's width and
   effective `window-size`, and the local option and client list are probed only
   for an owned window whose effective policy is `manual`.
+- Client geometry record (GH #83, GH #268). The controller logs
+  `tmux_client_geometry` for the layout window whenever the attached clients'
+  sizes, the effective `window-size`, or the window size change, and on every
+  pass while two or more clients differ by more than 10 cells in width or
+  height. A mismatched record carries
+  `warning=clients_of_different_sizes_attached` and a `remedy=` that matches
+  the state: `set_window-size_largest` is offered only when the clients agree
+  in one dimension (`largest` takes width and height independently, so clients
+  differing in both are each cropped by the other's larger dimension), leaving
+  `detach_the_extra_client` alone otherwise; under an effective `manual`
+  policy the remedy names the pin first
+  (`set-option_-wu_window-size_then_...`), because neither detaching a client
+  nor a global `largest` moves a pinned window.
 - Both doctor-repair passes are metered as `doctor_repair_pre` and
   `doctor_repair_post` in the sync phase log. They previously sat between
   measured phases and were invisible to the phase meter, which is how that cost

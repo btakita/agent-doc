@@ -141,6 +141,16 @@ All six follow-up items and the newly queued GH #274 are claimed. Each runs in i
 For #274, the subagent first checks whether 0.35.509 already blocks the sequence, since the #273 merge-forward and cut-exclusivity rules are both new. It then fixes what remains at two choke points: byte-exact UTF-8 projection that fails closed instead of substituting, and a repair commit that refuses a duplicate committed section.
 
 **`release + publish` (v0.35.509):** the tag and `main` are pushed and the local install is done. Release run `38788644925` is still building platform archives, and GitHub Releases and PyPI still show 0.35.508. I'll close this item once it publishes. This batch goes into the next release.
+
+### Re: `agent:todo` id + done flow — dispatched — opus-5-5 · 2026-10-15T15:16-04:00
+
+The new `agent:todo` item is claimed for `subagent:todoids`, branch `feat/todo-ids` from v0.35.509. It is scoped to three parts:
+
+1. **Id discipline.** A todo reuses the id of the review or backlog item it refers to, and its text becomes that item's actionable operator prompt. Otherwise it mints a new id through the same coined-id rules. A todo with no id, or with an id that resolves to nothing, is handled at write time, and duplicates for one id fold.
+2. **Operator done flow.** Checking the box (`- [x]`) in the editor is the done signal. agent-doc reconciles it without an agent turn (moved to done, closing the linked review gate where appropriate), and no later agent write may revert the operator's check.
+3. **Agent auto-check.** At preflight and closeout, todos whose completion the binary can check cheaply and deterministically are completed with a recorded reason, for example a linked id that is already done or a referenced release that exists. Anything that needs human judgement is left for the operator.
+
+**In flight:** 8 subagents (6 follow-ups, GH #274, and this one). **`release + publish`:** run `38788644925` has 5 of 6 platform builds and `plugins` green. The `x86_64-apple-darwin` and Windows builds are still running, and it is not published yet.
 <!-- agent:boundary:956b73e3 -->
 <!-- /agent:exchange -->
 
@@ -149,26 +159,26 @@ For #274, the subagent first checks whether 0.35.509 already blocks the sequence
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/274
-- `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune ev.
-- do [#keylogrebase]
-- do [#claimfollowedit]
-- do [#splicesessionack]
-- do [#rearmreadfailclosed2]
-- do [#execfailpipe]
-- do [#staleplugwarnflake]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/274
+- `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.
+- 🚧 do [#keylogrebase]
+- 🚧 do [#claimfollowedit]
+- 🚧 do [#splicesessionack]
+- 🚧 do [#rearmreadfailclosed2]
+- 🚧 do [#execfailpipe]
+- 🚧 do [#staleplugwarnflake]
 - 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#keylogrebase] Keystroke log reopened after a compaction keeps the pre-compaction base hash (`merge_base=97b41a5fa5b6` after the 2026-10-15 16:29:43Z compaction), so admission has no op-lineage proof. Fixing it also closes the documented gap where a disk-only component can still arrive twice (see specs/14-realtime-workflow.md "Cut exclusivity" and the TLA+ `AdmissionCutExclusivityResidual` config).
-- [ ] [#claimfollowedit] Queue claims are keyed by exact line text, so editing a claimed line drops the claim (`queue_claim_prune pruned=1`; GH #272 line 2026-10-15). Claims should follow the edited item (node identity) the way steering forward_to_owner already does.
-- [ ] [#splicesessionack] GH #273 remainder: session-check still reports "acknowledgement pending" after the controller logs `retained_persistence_replica_rebuild_exhausted ... editor_holds_unmerged_visible_text`; give session-check a durable read of that state and name the operator action.
-- [ ] [#rearmreadfailclosed2] Two remaining rearm-evidence reads in agent-doc-document-realtime-io/src/lib.rs (around lines 4167 and 5334) still use `.ok().flatten()`, treating a failed read as "no evidence"; apply the fail-closed rule from fix/preflight-io-load-flakes (6f54959182).
-- [ ] [#execfailpipe] Verify and fix: `close_inherited_fds_on_exec` closes fds >= 3 in the child before exec, likely including Rust spawn's CLOEXEC exec-failure pipe, so an exec ENOENT may report as a successful spawn and defeat the launch-ENOENT retry.
-- [ ] [#staleplugwarnflake] `warnings::tests::stale_plugin_warning_end_to_end_from_reliable_registration` failed 1/96 whole-crate runs under load (2026-10-15); find and fix the nondeterminism, never rerun to green.
+- [ ] 🚧 [#keylogrebase] Keystroke log reopened after a compaction keeps the pre-compaction base hash (`merge_base=97b41a5fa5b6` after the 2026-10-15 16:29:43Z compaction), so admission has no op-lineage proof. Fixing it also closes the documented gap where a disk-only component can still arrive twice (see specs/14-realtime-workflow.md "Cut exclusivity" and the TLA+ `AdmissionCutExclusivityResidual` config).
+- [ ] 🚧 [#claimfollowedit] Queue claims are keyed by exact line text, so editing a claimed line drops the claim (`queue_claim_prune pruned=1`; GH #272 line 2026-10-15). Claims should follow the edited item (node identity) the way steering forward_to_owner already does.
+- [ ] 🚧 [#splicesessionack] GH #273 remainder: session-check still reports "acknowledgement pending" after the controller logs `retained_persistence_replica_rebuild_exhausted ... editor_holds_unmerged_visible_text`; give session-check a durable read of that state and name the operator action.
+- [ ] 🚧 [#rearmreadfailclosed2] Two remaining rearm-evidence reads in agent-doc-document-realtime-io/src/lib.rs (around lines 4167 and 5334) still use `.ok().flatten()`, treating a failed read as "no evidence"; apply the fail-closed rule from fix/preflight-io-load-flakes (6f54959182).
+- [ ] 🚧 [#execfailpipe] Verify and fix: `close_inherited_fds_on_exec` closes fds >= 3 in the child before exec, likely including Rust spawn's CLOEXEC exec-failure pipe, so an exec ENOENT may report as a successful spawn and defeat the launch-ENOENT retry.
+- [ ] 🚧 [#staleplugwarnflake] `warnings::tests::stale_plugin_warning_end_to_end_from_reliable_registration` failed 1/96 whole-crate runs under load (2026-10-15); find and fix the nondeterminism, never rerun to green.
 <!-- /agent:backlog -->
 
 ## Review

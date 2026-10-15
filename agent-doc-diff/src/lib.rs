@@ -3001,9 +3001,19 @@ pub fn detect_exchange_compaction_request(diff: &str) -> bool {
     let mut in_fence = false;
     let mut fence_char = '`';
     let mut fence_len = 0usize;
+    // `#qcompactnoun`: a task entry inside a managed list component is never a
+    // same-turn directive, bullet or not — a multi-line free-text queue head
+    // separated by `---` starts with plain prose. Track the component from the
+    // marker lines the hunk context carries; a hunk that starts mid-component
+    // falls back to the bullet and continuation checks below.
+    let mut managed_component: Option<String> = None;
 
     for line in diff.lines() {
-        if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+        if line.starts_with("@@") {
+            managed_component = None;
+            continue;
+        }
+        if line.starts_with("--- ") || line.starts_with("+++") {
             continue;
         }
 
@@ -3013,6 +3023,19 @@ pub fn detect_exchange_compaction_request(diff: &str) -> bool {
             line
         };
         let trimmed = content.trim_start();
+
+        if !in_fence {
+            if let Some(name) = managed_list_component_open(trimmed) {
+                managed_component = Some(name);
+                continue;
+            }
+            if let Some(name) = managed_component.as_deref()
+                && managed_list_component_close(trimmed, name)
+            {
+                managed_component = None;
+                continue;
+            }
+        }
 
         if !in_fence {
             let fc = trimmed.chars().next().unwrap_or('\0');
@@ -3041,6 +3064,7 @@ pub fn detect_exchange_compaction_request(diff: &str) -> bool {
             || in_fence
             || content.starts_with('>')
             || trimmed_line_looks_like_markdown_list_item(trimmed)
+            || managed_component.is_some()
         {
             // A markdown list item (`- `/`* `/`+ `/`N. `) is a queue/backlog/review
             // task entry, never a same-turn exchange compaction directive — a real
@@ -3065,6 +3089,34 @@ pub fn detect_exchange_compaction_request(diff: &str) -> bool {
     }
 
     false
+}
+
+/// Components whose body is a list of task entries rather than exchange prose.
+const MANAGED_LIST_COMPONENTS: &[&str] = &["queue", "backlog", "review", "todo", "icebox", "done"];
+
+/// `<!-- agent:queue ... -->` (with optional attributes) opens a managed list
+/// component; returns its name.
+fn managed_list_component_open(trimmed: &str) -> Option<String> {
+    let rest = trimmed
+        .strip_prefix("<!--")?
+        .trim_start()
+        .strip_prefix("agent:")?;
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    MANAGED_LIST_COMPONENTS
+        .contains(&name.as_str())
+        .then_some(name)
+}
+
+fn managed_list_component_close(trimmed: &str, name: &str) -> bool {
+    trimmed
+        .strip_prefix("<!--")
+        .map(str::trim_start)
+        .and_then(|rest| rest.strip_prefix("/agent:"))
+        .and_then(|rest| rest.strip_prefix(name))
+        .is_some_and(|rest| rest.trim_start().starts_with("-->"))
 }
 
 /// Does the text following a leading `compact exchange` read as a *statement
@@ -3134,6 +3186,24 @@ fn continuation_reads_as_statement_about_compaction(rest: &str) -> bool {
             | "never"
             | "always"
             | "sometimes"
+            // `#qcompactnoun`: a noun naming a report about the command
+            // ("Compact Exchange error on sdk.md: ...").
+            | "error"
+            | "errors"
+            | "bug"
+            | "bugs"
+            | "issue"
+            | "issues"
+            | "failure"
+            | "failures"
+            | "crash"
+            | "crashes"
+            | "problem"
+            | "problems"
+            | "regression"
+            | "defect"
+            | "warning"
+            | "refusal"
     )
 }
 
@@ -6088,6 +6158,30 @@ Done.\n\
         // A genuine prose directive (no bullet) still matches.
         let prose = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+compact exchange\n";
         assert!(detect_exchange_compaction_request(prose));
+    }
+
+    #[test]
+    fn detect_exchange_compaction_request_ignores_managed_component_entries() {
+        // #qcompactnoun: a multi-line free-text queue head (no bullet, `---`
+        // separated) that begins with "compact exchange" must not abort finalize.
+        let diff = "--- snapshot\n+++ document\n@@ -1,4 +1,8 @@\n <!-- agent:queue subagents priority -->\n - first\n+---\n+Compact Exchange keep only the last response\n+```\n+Unknown agent-doc close tag.\n+```\n+---\n <!-- /agent:queue -->\n";
+        assert!(!detect_exchange_compaction_request(diff));
+        // The same line in exchange prose after the component closes still counts.
+        let after_close = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n <!-- agent:queue -->\n - first\n <!-- /agent:queue -->\n+compact exchange\n";
+        assert!(detect_exchange_compaction_request(after_close));
+        // A new hunk resets the component, so a later exchange directive counts.
+        let next_hunk = "--- snapshot\n+++ document\n@@ -1,2 +1,2 @@\n <!-- agent:queue -->\n+- item\n@@ -9 +9,2 @@\n ctx\n+compact exchange\n";
+        assert!(detect_exchange_compaction_request(next_hunk));
+        // The exchange component is not a managed list: its directive counts.
+        let exchange = "--- snapshot\n+++ document\n@@ -1,2 +1,3 @@\n <!-- agent:exchange -->\n+compact exchange\n <!-- /agent:exchange -->\n";
+        assert!(detect_exchange_compaction_request(exchange));
+    }
+
+    #[test]
+    fn detect_exchange_compaction_request_ignores_noun_report() {
+        // #qcompactnoun: "Compact Exchange error on <doc>: ..." names a report.
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+Compact Exchange error on sdk.md: `agent:salient-response` tag in the exchange.\n";
+        assert!(!detect_exchange_compaction_request(diff));
     }
 
     #[test]

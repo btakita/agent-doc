@@ -1011,6 +1011,7 @@ dependencies = [
  "agent-doc-template",
  "anyhow",
  "parking_lot",
+ "proptest",
  "serde",
  "serde_json",
  "tempfile",

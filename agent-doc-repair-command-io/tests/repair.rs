@@ -5332,4 +5332,118 @@ mod tests {
             "repair must not commit the later prompt drift:\n{head}"
         );
     }
+
+    /// GH #274: the issue's sequence end to end at the repair boundary. A response
+    /// is committed with correct UTF-8 (`commit_success`); the snapshot lags it
+    /// (the #273 retained-write state); an editor whose JVM ran under an ASCII
+    /// locale projected a second copy of the response through JNA, so every
+    /// non-ASCII character became `?`, inserted directly above the correct copy.
+    /// The later preflight repair took the `repair_adopt_existing_response
+    /// reason=snapshot_missing_response` branch and committed both copies. The
+    /// repair must refuse the candidate, leave `HEAD` and the snapshot untouched,
+    /// and name the lossy line.
+    #[test]
+    fn gh274_repair_refuses_to_adopt_a_lossy_second_copy_of_a_committed_response() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let base = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ upgrade to 0.35.508\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n"
+        );
+        let response_body = concat!(
+            "### Re: upgrade to 0.35.508 and viewpane issue dispatched — opus-5.5 · 2026-10-15T11:20-04:00\n",
+            "- **Upgraded 0.35.505 → 0.35.508** (`agent-doc upgrade`, exit 0).\n",
+            "  - `#upgrade`: checks gh 261–267 against 0.35.508, emoji 😀 kept.\n",
+        );
+        std::fs::write(&doc, base).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
+
+        // 16:17:13Z: the response is committed with one correct copy through the
+        // ordinary already-present closeout (`commit_success`).
+        let committed = base.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            &format!("{response_body}<!-- agent:boundary:abc123 -->\n"),
+        );
+        std::fs::write(&doc, &committed).unwrap();
+        let response =
+            format!("<!-- patch:exchange -->\n{response_body}<!-- /patch:exchange -->\n");
+        agent_doc_repair_io::pending::save_pending(&doc, &response).unwrap();
+        assert_eq!(repair(&doc).unwrap(), RepairOutcome::AlreadyApplied);
+        let committed = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(committed.matches("### Re: upgrade").count(), 1);
+        assert!(committed.contains("dispatched — opus-5.5 · 2026"));
+
+        // #273: the retained closeout write leaves the recovery snapshot behind
+        // the committed response (`snapshot_missing_response` at 18:21:34Z).
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        // 16:53:31Z: the post-register projection adds the lossy copy above the
+        // correct one. The transform is JNA's US-ASCII encode: one `?` per scalar.
+        let lossy_body: String = response_body
+            .chars()
+            .map(|ch| if ch.is_ascii() { ch } else { '?' })
+            .collect();
+        assert!(lossy_body.contains("dispatched ? opus-5.5 ? 2026-10-15T11:20-04:00"));
+        let projected = committed.replace(response_body, &format!("{lossy_body}{response_body}"));
+        std::fs::write(&doc, &projected).unwrap();
+
+        // The Run opens a new cycle over the projected document and retains the
+        // response it believes is still owed.
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(&projected)).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, &response).unwrap();
+
+        // 18:21:34Z: the operator's Run reaches repair.
+        let err = repair(&doc).expect_err("repair must refuse the lossy second copy");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("lossy_committed_text_copy")
+                && message.contains("dispatched ? opus-5.5 ?"),
+            "refusal must name the lossy line: {message}"
+        );
+
+        let head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(head, committed, "HEAD must keep the single correct copy");
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !snap.contains("dispatched ? opus-5.5 ?"),
+            "the snapshot must not adopt the lossy copy:\n{snap}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            projected,
+            "the refusal must not rewrite the visible document"
+        );
+    }
 }

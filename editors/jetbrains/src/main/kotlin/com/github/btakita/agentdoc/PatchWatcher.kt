@@ -311,7 +311,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             val callbackV2 = object : AgentDocLib.IpcMessageCallbackV2 {
                 override fun invoke(message: Pointer): Int {
                     return try {
-                        val json = message.getString(0)
+                        val json = message.readNativeUtf8()
                         dispatchSocketMessage(json)
                     } catch (e: Exception) {
                         LOG.warn("[socket] callback error", e)
@@ -339,7 +339,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             val callback = object : AgentDocLib.IpcMessageCallback {
                 override fun invoke(message: Pointer): Boolean {
                     return try {
-                        val json = message.getString(0)
+                        val json = message.readNativeUtf8()
                         dispatchSocketMessage(json) == 1
                     } catch (e: Exception) {
                         LOG.warn("[socket] callback error", e)

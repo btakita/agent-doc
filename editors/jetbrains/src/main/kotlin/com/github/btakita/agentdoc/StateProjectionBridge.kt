@@ -71,7 +71,7 @@ object StateProjectionBridge {
             return null
         }
         try {
-            val raw = ptr?.getString(0) ?: return null
+            val raw = ptr?.readNativeUtf8() ?: return null
             return raw.takeUnless { it == "null" }
         } finally {
             lib.agent_doc_free_string(ptr)
@@ -124,7 +124,7 @@ object StateProjectionBridge {
             return null
         }
         val raw = try {
-            ptr?.getString(0)
+            ptr?.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(ptr)
         }

@@ -88,7 +88,7 @@ internal object PeerReplicaPull {
             null
         } ?: return null
         return try {
-            ptr.getString(0)
+            ptr.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(ptr)
         }

@@ -1201,7 +1201,7 @@ class NativeReplicaNode : ReplicaNode {
         return try {
             val ptr = lib.agent_doc_replica_text(clientIdForEncode) ?: return null
             try {
-                ptr.getString(0)
+                ptr.readNativeUtf8()
             } finally {
                 lib.agent_doc_free_string(ptr)
             }

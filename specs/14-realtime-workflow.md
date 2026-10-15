@@ -2524,6 +2524,58 @@ handoff, or an operator-selected no-commit flow. Saving backup/audit state can
 be part of lifecycle closeout, but backup writes are not realtime authority.
 Invariant: document turn lifecycle owns commits; merge/realtime paths must not run git commit.
 
+### Committed-text integrity at the repair commit choke point (GH #274)
+
+Every text projection is byte-exact UTF-8. A conversion that would lose a
+character fails closed; it never substitutes `?` or U+FFFD. GH #274 is the
+failure this rule names. A JetBrains backend started under an ASCII locale
+(`locale=en_US`, `sun.jnu.encoding=ANSI_X3.4-1968`) marshalled document text
+across JNA with US-ASCII, because JNA's default string encoding follows the
+JVM's `native.encoding`. Every `—`, `·`, `→` and emoji in a committed response
+became a literal `?`, which is valid UTF-8, so the Rust side could not detect
+it. A post-register projection placed that lossy copy above the correct one,
+and a later preflight repair (`repair_adopt_existing_response
+reason=snapshot_missing_response`) baselined and committed both. The editor
+plugin's half of the rule is in `editors/jetbrains/SPEC.md` § "Native string
+encoding". On the Rust side, `CStr::to_str` already refuses non-UTF-8 FFI
+input, and committed document text read from git (`show_rev`/`show_head`)
+fails closed on a non-UTF-8 blob instead of decoding lossily.
+
+Invariant: a repair never commits a candidate that **adds** a copy of
+committed text. A copy is either a second exact copy of a committed response
+block, or a line that differs from a committed line only by encoder replacement
+characters (`?`/U+FFFD in place of each non-ASCII scalar or UTF-8 byte; the
+line must keep at least eight ASCII alphanumerics). Agent-authored text never
+comes from an encoder, so such a line is corruption, not authorship. The check
+is `agent_doc_turn::committed_text_integrity::committed_text_violation` against
+committed `HEAD`. Copies and corruption that `HEAD` already carries are not
+"added", so they never wedge a document.
+
+The choke point is `agent_doc_repair_io::refuse_added_committed_text_copy`. The
+preflight commit stages the recovery baseline, so every repair candidate that
+becomes one passes this guard before the repair writes it or baselines it:
+`repair_adopt_existing_response`, structural-history and lossy-editor-projection
+recovery, partial-capture reconciliation, retained replay fragments, and the
+template, prompt-prefix, duplicate-scaffold and inline-boundary normalizations.
+A refusal logs `repair_committed_text_copy_refused` (site, kind, hashes). It
+leaves the visible document, the snapshot and `HEAD` unchanged and names the
+candidate line and the committed line. The repair does not delete the copy:
+removing operator-visible text is the operator's decision.
+
+The projection side has the same rule. In GH #274 the editor baseline at the
+re-register already held the lossy copy, and the deferred-write semantic replay
+put the retained, correct response beside it. Neither line was new relative to
+committed text, but the candidate was the first text to carry both. Every
+reconnect and post-register candidate (`deferred_write_reconnect_candidate`, the
+source of `agent_doc_deferred_write_reconnect_content`,
+`agent_doc_deferred_write_post_register_content` and
+`agent_doc_deferred_write_post_register_project`) therefore passes
+`committed_text_integrity::added_lossy_copy_pair` against the editor content. A
+candidate that adds a line beside its own encoder-replaced rendering yields no
+candidate. It logs `deferred_write_lossy_copy_refused` (kind and hashes), and
+the editor keeps its bytes. A pair that the editor baseline already carries is
+not added and does not refuse.
+
 ### Merge cost bound
 
 A CRDT merge runs inside the document's serialized write owner (the session
@@ -2659,6 +2711,10 @@ The following are correctness violations:
 - treating operator-origin authority as future work or as gated by a later CRDT
   hookup;
 - direct harness patchback of an assistant response into the session document.
+- marshalling document text across an editor FFI boundary with a
+  locale-dependent or replacing encoder (JNA's default string encoding, an
+  un-encoded `Pointer.getString`), or committing a candidate that adds a copy of
+  committed text (GH #274).
 
 ## Harness Contract
 
@@ -2778,4 +2834,13 @@ Implementations must keep tests for these cases:
 - an applied relay mutation with an empty target set is not delivery
   convergence;
 - harness Stop-hook recovery cannot commit transcript-shaped or direct-patched
-  responses.
+  responses;
+- GH #274: a repair over a committed response plus a lossy copy (non-ASCII
+  replaced by `?`) refuses at `repair_adopt_existing_response` and leaves
+  `HEAD`, the snapshot and the visible document unchanged; any lossy rendering
+  of a committed non-ASCII line is refused (property test); a post-register
+  reconnect candidate that places the retained response beside the editor's
+  lossy copy is refused with no projection and no disk write (any added lossy
+  pair is refused, property test); and editor-replica
+  projection of non-ASCII text (em dashes, `·`, `→`, emoji, CJK) is byte-exact
+  through the FFI, both locally and through a peer delta (property test).

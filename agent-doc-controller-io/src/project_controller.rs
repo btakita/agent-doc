@@ -9920,6 +9920,20 @@ pub(crate) fn read_predecessor_drain_lease(
     serde_json::from_str(&json).ok()
 }
 
+/// [`read_predecessor_drain_lease`] for a project root this process does not
+/// own: read-only, so the cross-project orphan sweep never initializes that
+/// root's ledger (`#flakyreceipthelpers` foreign bootstrap read).
+fn read_foreign_predecessor_drain_lease(
+    project_root: &Path,
+) -> Option<agent_doc_controller::recycle::PredecessorDrainLease> {
+    let json = state_store::load_controller_bootstrap_json_read_only(
+        project_root,
+        PREDECESSOR_DRAIN_LEASE_SCOPE,
+    )
+    .ok()??;
+    serde_json::from_str(&json).ok()
+}
+
 pub(crate) fn record_predecessor_drain_lease(
     project_root: &Path,
     pid: u32,
@@ -11172,6 +11186,12 @@ pub fn terminate_stale_preparing_controllers(
 /// processes that still carry `--handoff-state preparing` and whose start age
 /// exceeds `stale_after`, then reaps each via the verified-pid path (cmdline +
 /// not-self gated). Returns `(reaped, kept)`.
+///
+/// GH #269: a predecessor named by a live `#drainingpredecessor` lease is kept
+/// whatever its process age. A handoff replacement keeps its immutable
+/// `--handoff-state preparing` argv for life, so when it later hands off in
+/// turn it is both a "preparing" process and older than `stale_after`; the
+/// lease is the only record that it is draining, not wedged.
 pub fn reap_orphaned_preparing_controllers_for_caller(
     project_root: &Path,
     stale_after: Duration,
@@ -11179,10 +11199,8 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
     caller: &str,
 ) -> Result<(usize, usize)> {
     let bootstrap = read_bootstrap(project_root)?;
-    let generation = bootstrap
-        .as_ref()
-        .map(|bootstrap| bootstrap.controller_generation)
-        .unwrap_or(0);
+    let drain_lease = read_predecessor_drain_lease(project_root);
+    let now_secs = timestamp_secs();
     let mut reaped = 0;
     let mut kept = 0;
     for pid in crate::process::project_controller_pids(project_root) {
@@ -11193,6 +11211,16 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
             continue;
         }
         if bootstrap_owns_controller_pid(project_root, pid)? {
+            continue;
+        }
+        if orphan_reap_spares_draining_predecessor(
+            project_root,
+            drain_lease.as_ref(),
+            pid,
+            now_secs,
+            caller,
+        ) {
+            kept += 1;
             continue;
         }
         if bootstrap
@@ -11219,17 +11247,46 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
             reaped += 1;
             continue;
         }
+        // The orphan is by definition not the bootstrap's controller, so name
+        // it by its own launch generation (GH #269), 0 when unknown.
+        let generation = crate::process::cmdline_controller_generation(pid).unwrap_or(0);
         reap_verified_controller_pid(project_root, pid, generation);
         agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
-                "orphaned_preparing_controller_reaped pid={pid} age_secs={age} threshold_secs={} caller={caller}",
+                "orphaned_preparing_controller_reaped pid={pid} generation={generation} age_secs={age} threshold_secs={} caller={caller}",
                 stale_after.as_secs()
             ),
         );
         reaped += 1;
     }
     Ok((reaped, kept))
+}
+
+/// GH #269 (`#drainingpredecessor`): the orphaned-preparing scans apply the
+/// same lease filter as duplicate reaping
+/// (`reap_candidates_excluding_draining_predecessor`). The lease names
+/// the exact predecessor pid and bounds the protection by its deadline, so a
+/// predecessor wedged past its drain budget is still reaped.
+fn orphan_reap_spares_draining_predecessor(
+    project_root: &Path,
+    lease: Option<&agent_doc_controller::recycle::PredecessorDrainLease>,
+    pid: u32,
+    now_secs: u64,
+    caller: &str,
+) -> bool {
+    let protected =
+        agent_doc_controller::recycle::predecessor_drain_lease_protects(lease, pid, now_secs);
+    if protected && let Some(lease) = lease {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "orphaned_preparing_reap_protected_draining_predecessor pid={pid} generation={} deadline_secs={} caller={caller} (#drainingpredecessor)",
+                lease.generation, lease.deadline_secs,
+            ),
+        );
+    }
+    protected
 }
 
 fn active_handoff_is_fresh(bootstrap: &ControllerBootstrap, stale_after: Duration) -> bool {
@@ -11386,6 +11443,16 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
         if bootstrap_record_owns_controller_pid(&root, bootstrap.as_ref(), pid) {
             continue;
         }
+        if orphan_reap_spares_draining_predecessor(
+            &root,
+            read_foreign_predecessor_drain_lease(&root).as_ref(),
+            pid,
+            timestamp_secs(),
+            caller,
+        ) {
+            kept += 1;
+            continue;
+        }
         if bootstrap
             .as_ref()
             .is_some_and(|bootstrap| active_handoff_is_fresh(bootstrap, stale_after))
@@ -11407,10 +11474,7 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
             reaped += 1;
             continue;
         }
-        let generation = bootstrap
-            .as_ref()
-            .map(|bootstrap| bootstrap.controller_generation)
-            .unwrap_or(0);
+        let generation = crate::process::cmdline_controller_generation(pid).unwrap_or(0);
         reap_verified_controller_pid(&root, pid, generation);
         agent_doc_ops_log_io::log_op(
             &root,
@@ -11609,6 +11673,16 @@ pub(crate) fn spawn_controller_sentinel(project_root: &Path) -> std::process::Ch
 /// `--handoff-state preparing`, mirroring a replacement controller launched
 /// mid-handoff that wedged because the client never sent `promote_handoff`.
 pub(crate) fn spawn_preparing_controller_sentinel(project_root: &Path) -> std::process::Child {
+    spawn_preparing_controller_sentinel_with_args(project_root, &[])
+}
+
+#[cfg(test)]
+/// [`spawn_preparing_controller_sentinel`] with extra `controller serve` args
+/// (a handoff replacement's `--controller-generation`, for example).
+pub(crate) fn spawn_preparing_controller_sentinel_with_args(
+    project_root: &Path,
+    extra_args: &[&str],
+) -> std::process::Child {
     let argv0 = project_root.join("agent-doc");
     let child = Command::new("sh")
         .arg("-c")
@@ -11618,6 +11692,7 @@ pub(crate) fn spawn_preparing_controller_sentinel(project_root: &Path) -> std::p
         .arg("serve")
         .arg("--project-root")
         .arg(project_root.to_string_lossy().to_string())
+        .args(extra_args)
         .arg("--handoff-state")
         .arg("preparing")
         .stdin(Stdio::null())
@@ -19286,6 +19361,99 @@ agent:queue\n\
 
         let _ = predecessor.kill();
         let _ = predecessor.wait();
+    }
+
+    /// GH #269 (`#drainingpredecessor`): a predecessor that was itself a handoff
+    /// replacement keeps its `--handoff-state preparing` argv and is older than
+    /// `stale_after` when it hands off in turn. Once its successor's bootstrap
+    /// moves past `Preparing`/`Promoted`, only the drain lease says it is
+    /// draining: the orphan scan must honour that lease (as duplicate reaping
+    /// does) until its deadline, then reap the predecessor under its OWN
+    /// generation, not the successor's.
+    #[test]
+    fn orphan_reaper_spares_leased_draining_predecessor_until_deadline() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let predecessor = spawn_preparing_controller_sentinel_with_args(
+            dir.path(),
+            &["--controller-generation", "103"],
+        );
+        let pid = predecessor.id();
+        assert!(crate::process::cmdline_has_preparing_handoff(pid));
+        // Age the predecessor past `stale_after = 0` so its process age alone
+        // would reap it (the incident: age_secs=2121 threshold_secs=45).
+        std::thread::sleep(Duration::from_millis(1100));
+
+        // The successor (generation 104) owns a bootstrap that has moved past
+        // the handoff states, so `active_handoff_is_fresh` no longer spares the
+        // predecessor.
+        let mut successor =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        successor.pid = u32::MAX;
+        successor.controller_generation = 104;
+        successor.previous_controller_pid = Some(pid);
+        write_bootstrap_state(&successor).unwrap();
+        record_predecessor_drain_lease(dir.path(), pid, 103, Duration::from_secs(360));
+
+        let leased = reap_orphaned_preparing_controllers_for_caller(
+            dir.path(),
+            Duration::from_secs(0),
+            false,
+            "connect_or_launch",
+        )
+        .unwrap();
+        let alive_under_lease = process_is_alive(pid);
+        // The cross-project sweep (gc's breadth rung) applies the same lease.
+        // Dry run: it may also see other tests' sentinels.
+        let _ =
+            reap_orphaned_preparing_controllers_all_projects(Duration::from_secs(0), true, "gh269")
+                .unwrap();
+        let ops_log_under_lease =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+
+        // Past the deadline the lease no longer shields a wedged predecessor.
+        record_predecessor_drain_lease(dir.path(), pid, 103, Duration::ZERO);
+        let expired = reap_orphaned_preparing_controllers_for_caller(
+            dir.path(),
+            Duration::from_secs(0),
+            false,
+            "connect_or_launch",
+        )
+        .unwrap();
+        let status = wait_for_test_child_exit(
+            predecessor,
+            Duration::from_secs(2),
+            "an expired-lease predecessor must be reaped",
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+
+        assert_eq!(
+            leased,
+            (0, 1),
+            "a leased draining predecessor must be kept whatever its process age"
+        );
+        assert!(alive_under_lease, "no SIGTERM while the drain lease is live");
+        assert!(
+            ops_log_under_lease.contains(&format!(
+                "orphaned_preparing_reap_protected_draining_predecessor pid={pid} generation=103"
+            )) && ops_log_under_lease.contains("caller=connect_or_launch")
+                && ops_log_under_lease.contains("caller=gh269"),
+            "{ops_log_under_lease}"
+        );
+        assert!(
+            !ops_log_under_lease.contains("controller_reap_signal"),
+            "{ops_log_under_lease}"
+        );
+        assert_eq!(expired, (1, 0));
+        assert!(!status.success(), "signal-terminated: {status:?}");
+        assert!(
+            ops_log.contains(&format!(
+                "controller_reap_signal pid={pid} generation=103 signal=SIGTERM"
+            )) && ops_log.contains(&format!(
+                "orphaned_preparing_controller_reaped pid={pid} generation=103"
+            )),
+            "the reap names the predecessor's own generation, not the successor's: {ops_log}"
+        );
     }
 
     /// #controllerforkimage: reaping a removed root is kill-everything, so a

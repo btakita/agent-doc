@@ -987,7 +987,21 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   (`reap_stale_duplicate_controllers`, run at promotion and launch-recovery
   transitions) skips the leased pid until the deadline
   (`controller_duplicate_reap_protected_draining_predecessor`);
-  after it, a wedged predecessor is reaped as before. A client that finds a
+  after it, a wedged predecessor is reaped as before. The orphaned-preparing
+  process scans (`reap_orphaned_preparing_controllers_for_caller`, run by
+  `connect_or_launch`, `admin recycle` and gc, and the cross-project
+  `reap_orphaned_preparing_controllers_all_projects`, which reads a foreign
+  root's lease read-only) apply the same lease before any age test
+  (`orphaned_preparing_reap_protected_draining_predecessor ... caller=`).
+  A handoff replacement keeps its immutable `--handoff-state preparing` argv
+  for life, so when it later hands off in turn it is a "preparing" process
+  older than the threshold, and once its successor's bootstrap leaves
+  `Preparing`/`Promoted` the lease is the only record that it is draining,
+  not wedged (GH #269: a 0.35.505 → 0.35.508 upgrade SIGTERMed the
+  predecessor in the second its 360 s lease was written, judged by its
+  2121 s process age). An orphan reap names the process by its own
+  `--controller-generation` argv, 0 when absent, never by the bootstrap
+  record, which belongs to another controller. A client that finds a
   Stable controller on a stale binary no longer hands it off itself: it first
   asks it to `recycle_force` (reason `stale_binary_client`), leases it, releases
   the launch claim, and polls `status` (bounded by one replacement hydration,

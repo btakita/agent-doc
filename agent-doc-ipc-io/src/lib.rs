@@ -499,6 +499,56 @@ fn endpoint_answers(path: &Path) -> bool {
     !matches!(probe_endpoint(path), EndpointProbe::Unresponsive)
 }
 
+/// GH #267: what one hello round trip to an editor's per-pid agent-doc endpoint
+/// proved about the native library generation serving it.
+///
+/// A JetBrains IDE that cannot load a new plugin jar without a restart still
+/// hot-reloads the native library, and that library — not the jar — owns the
+/// endpoint the controller talks to. So "the jar on disk changed" says nothing
+/// about whether the editor can still serve the controller; this does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditorEndpointBuild {
+    /// The endpoint answered the hello with this process's own build.
+    Current { build: String },
+    /// The endpoint answered with a different build: its native library has
+    /// not reloaded to this build, so it rejects this process's messages.
+    OtherBuild {
+        editor_build: String,
+        local_build: String,
+    },
+    /// An endpoint is bound for the pid but did not answer a hello with a
+    /// recognizable handshake within the probe deadline.
+    Unanswered,
+    /// No endpoint is bound for the pid under this project root.
+    NoEndpoint,
+}
+
+impl EditorEndpointBuild {
+    /// Positive proof that the editor speaks this process's build.
+    pub fn is_current(&self) -> bool {
+        matches!(self, EditorEndpointBuild::Current { .. })
+    }
+}
+
+/// GH #267: probe the native endpoint `pid` serves for `project_root` with a
+/// hello round trip, without touching (or unlinking) its socket file.
+pub fn probe_editor_endpoint_build_for_pid(project_root: &Path, pid: u64) -> EditorEndpointBuild {
+    let sock = socket_path_for_pid(project_root, pid);
+    if !sock.exists() {
+        return EditorEndpointBuild::NoEndpoint;
+    }
+    match probe_endpoint(&sock) {
+        EndpointProbe::SameBuild => EditorEndpointBuild::Current {
+            build: local_ipc_identity().build_id,
+        },
+        EndpointProbe::OtherBuild(editor_build) => EditorEndpointBuild::OtherBuild {
+            editor_build,
+            local_build: local_ipc_identity().build_id,
+        },
+        EndpointProbe::Answered | EndpointProbe::Unresponsive => EditorEndpointBuild::Unanswered,
+    }
+}
+
 /// What a live-peer probe learned about the listener bound at a socket path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum EndpointProbe {
@@ -2537,6 +2587,75 @@ mod tests {
         let _ = wake_listener(&root);
         let _ = current.join();
         let _ = old.join();
+    }
+
+    /// GH #267: the editor-endpoint build probe distinguishes a missing
+    /// endpoint, a native generation still on another build, and one that
+    /// already answers with this process's build — over real listeners.
+    #[test]
+    fn editor_endpoint_build_probe_reports_the_serving_native_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let pid = u64::from(std::process::id());
+        let sock_path = socket_path_for_pid(&root, pid);
+
+        assert_eq!(
+            probe_editor_endpoint_build_for_pid(&root, pid),
+            EditorEndpointBuild::NoEndpoint
+        );
+
+        // A native generation that has not reloaded answers with its own build.
+        let old_shutdown = Arc::new(AtomicBool::new(false));
+        let old_root = root.clone();
+        let old_token = Arc::clone(&old_shutdown);
+        let (old_ready_tx, old_ready) = std::sync::mpsc::channel();
+        let old = thread::spawn(move || {
+            let _ = start_listener_with_logger_and_read_timeout(
+                &old_root,
+                |_| None,
+                noop_ops_logger,
+                Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
+                Some(old_token),
+                IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.0.0+pre-reload-generation"),
+                Some(old_ready_tx),
+            );
+        });
+        await_listener_ready(&old_ready, &sock_path)
+            .unwrap_or_else(|why| panic!("the pre-reload listener never came up: {why}"));
+        let probed = probe_editor_endpoint_build_for_pid(&root, pid);
+        assert_eq!(
+            probed,
+            EditorEndpointBuild::OtherBuild {
+                editor_build: "0.0.0+pre-reload-generation".to_string(),
+                local_build: local_ipc_identity().build_id,
+            }
+        );
+        assert!(!probed.is_current());
+        old_shutdown.store(true, Ordering::SeqCst);
+        let _ = wake_listener(&root);
+        let _ = old.join();
+        let _ = std::fs::remove_file(&sock_path);
+
+        // The hot-reloaded generation answers with this build: positive proof.
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let (listener, ready) = spawn_announcing_listener(&root, &shutdown);
+        await_listener_ready(&ready, &sock_path)
+            .unwrap_or_else(|why| panic!("the current listener never came up: {why}"));
+        let probed = probe_editor_endpoint_build_for_pid(&root, pid);
+        assert_eq!(
+            probed,
+            EditorEndpointBuild::Current {
+                build: local_ipc_identity().build_id,
+            }
+        );
+        assert!(probed.is_current());
+        assert!(
+            sock_path.exists(),
+            "probing must never unlink the endpoint it measured"
+        );
+        shutdown.store(true, Ordering::SeqCst);
+        let _ = wake_listener(&root);
+        let _ = listener.join();
     }
 
     /// `#ipcstopneedsnowake`: a listener must terminate on its shutdown token

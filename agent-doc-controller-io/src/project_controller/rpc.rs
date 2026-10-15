@@ -12688,9 +12688,13 @@ fn handle_editor_command_submit_async_rpc_with_settle(
             "receipt": serde_json::Value::Null,
         }));
     }
-    if command_kind == AsyncEditorCommandKind::EditorRoute {
-        refuse_editor_route_to_superseded_editor(bootstrap, &payload_json)?;
-    }
+    // GH #267: a superseded jar whose native endpoint still answers this
+    // controller's build is admitted; the advisory rides on the route output.
+    let superseded_editor_advisory = if command_kind == AsyncEditorCommandKind::EditorRoute {
+        refuse_editor_route_to_superseded_editor(bootstrap, &payload_json)?
+    } else {
+        None
+    };
     let focus_fence = admit_async_editor_focus_fence(
         bootstrap,
         &runtime.async_editor_commands,
@@ -12738,7 +12742,7 @@ fn handle_editor_command_submit_async_rpc_with_settle(
         // `#asynchandoffsettle` (GH #122): never arbitrate authority from the
         // admission-time `worker_bootstrap` clone; re-read it per attempt and
         // wait a mid-handoff refusal out.
-        let result = dispatch_async_editor_command_across_handoff(
+        let mut result = dispatch_async_editor_command_across_handoff(
             worker_runtime.as_ref(),
             &worker_bootstrap,
             &worker_project_root,
@@ -12766,6 +12770,9 @@ fn handle_editor_command_submit_async_rpc_with_settle(
                 )
             },
         );
+        if let Some(advisory) = superseded_editor_advisory.as_deref() {
+            append_superseded_editor_advisory(&mut result.output, advisory);
+        }
         let terminal_reason = result.terminal_reason.as_deref().unwrap_or("");
         agent_doc_ops_log_io::log_op(
             &worker_project_root,
@@ -12806,54 +12813,144 @@ fn handle_editor_command_submit_async_rpc_with_settle(
     Ok(accepted_response)
 }
 
-/// GH #76 pure core: the first live JetBrains editor proven to be executing
-/// superseded plugin bytes, rendered as a refusal reason. `None` when every
-/// probe is current or inconclusive (fails open — `Unknown` never refuses).
-fn superseded_editor_route_refusal(
+/// GH #76 / #267: what route admission concluded about the document's live
+/// JetBrains editors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SupersededEditorRouteVerdict {
+    /// No live editor maps superseded plugin bytes (or every probe is
+    /// inconclusive — `Unknown` never refuses).
+    Admit,
+    /// An editor maps superseded plugin bytes, but its native endpoint answers
+    /// with this controller's build, so it still serves the route. The text is
+    /// an advisory, never a refusal: a restart only loads the new plugin UI.
+    AdmitWithAdvisory(String),
+    /// An editor maps superseded plugin bytes AND its native endpoint does not
+    /// answer with this controller's build: the controller messages the route
+    /// depends on cannot reach it, so dispatching would only burn the timeout.
+    Refuse(String),
+}
+
+/// GH #76 / #267 pure core over the mapped-jar probes.
+///
+/// GH #267: the mapped jar alone is not evidence that the editor cannot serve
+/// the route. On an exact-263 modular package the IDE keeps the old jar until a
+/// restart, yet hot-reloads the native library, whose endpoint is what the
+/// controller talks to. So a superseded jar refuses only when `endpoint` — a
+/// hello round trip to that pid's native endpoint — fails to answer with this
+/// controller's build. The probe runs only for superseded pids.
+fn superseded_editor_route_verdict(
     probes: &[(String, u32, agent_doc_fs::plugin_jar::MappedPluginJar)],
-) -> Option<String> {
-    probes.iter().find_map(|(kind, pid, mapped)| {
+    mut endpoint: impl FnMut(u32) -> agent_doc_ipc_io::EditorEndpointBuild,
+) -> SupersededEditorRouteVerdict {
+    let mut advisory = None;
+    for (kind, pid, mapped) in probes {
         let path = match mapped {
             agent_doc_fs::plugin_jar::MappedPluginJar::Deleted { path }
             | agent_doc_fs::plugin_jar::MappedPluginJar::Superseded { path, .. } => path,
-            _ => return None,
+            _ => continue,
         };
+        let build = endpoint(*pid);
+        if let agent_doc_ipc_io::EditorEndpointBuild::Current { build } = &build {
+            advisory.get_or_insert_with(|| {
+                superseded_editor_route_advisory_message(kind, *pid, path, build)
+            });
+            continue;
+        }
         let restart_verdict = agent_doc_fs::plugin_jar::recorded_restart_verdict(*pid, mapped);
-        Some(superseded_editor_route_refusal_message(
+        return SupersededEditorRouteVerdict::Refuse(superseded_editor_route_refusal_message(
             kind,
             *pid,
             path,
+            &build,
             restart_verdict.as_deref(),
-        ))
-    })
+        ));
+    }
+    match advisory {
+        Some(advisory) => SupersededEditorRouteVerdict::AdmitWithAdvisory(advisory),
+        None => SupersededEditorRouteVerdict::Admit,
+    }
+}
+
+fn superseded_editor_route_advisory_message(
+    kind: &str,
+    pid: u32,
+    path: &str,
+    build: &str,
+) -> String {
+    format!(
+        "plugin_bytes_superseded_advisory: live {kind} editor pid {pid} still runs the previous \
+         plugin jar ({path} is no longer the installed jar), but its native agent-doc endpoint \
+         answers with this controller's build {build}, so the route was admitted. Restart the \
+         editor when convenient to load the new plugin UI (GH #267)."
+    )
 }
 
 fn superseded_editor_route_refusal_message(
     kind: &str,
     pid: u32,
     path: &str,
+    endpoint: &agent_doc_ipc_io::EditorEndpointBuild,
     restart_verdict: Option<&str>,
 ) -> String {
-    let remedy = agent_doc_fs::plugin_jar::superseded_editor_remedy(restart_verdict);
+    use agent_doc_ipc_io::EditorEndpointBuild;
+    let plugin_remedy = agent_doc_fs::plugin_jar::superseded_editor_remedy(restart_verdict);
+    let (evidence, remedy) = match endpoint {
+        EditorEndpointBuild::OtherBuild {
+            editor_build,
+            local_build,
+        } => (
+            format!(
+                "its native agent-doc endpoint answers with build {editor_build}, not this \
+                 controller's build {local_build}"
+            ),
+            format!(
+                "The running IDE reloads the native library when its file changes \
+                 (`agent-doc admin reload-lib` requests that now); the route is admitted once \
+                 the endpoint answers with build {local_build}. If that native reload is \
+                 refused: {plugin_remedy}"
+            ),
+        ),
+        EditorEndpointBuild::Unanswered => (
+            "its native agent-doc endpoint did not answer an IPC hello".to_string(),
+            plugin_remedy,
+        ),
+        EditorEndpointBuild::NoEndpoint | EditorEndpointBuild::Current { .. } => (
+            "it serves no native agent-doc endpoint for this project".to_string(),
+            plugin_remedy,
+        ),
+    };
     format!(
         "plugin_bytes_superseded: editor_route refused before dispatch — live {kind} editor \
          pid {pid} is executing superseded plugin bytes ({path} is no longer the installed \
-         jar), so it cannot publish the observations this route waits on and the command \
-         would only burn its timeout. {remedy} Then retry (#76; editor backend pid {pid})."
+         jar) and {evidence}, so the controller messages this route depends on cannot reach \
+         it and the command would only burn its timeout. {remedy} Then retry (#76, #267; \
+         editor backend pid {pid})."
     )
 }
 
-/// GH #76: refuse an `editor_route` whose document is held by an editor already
-/// proven to run superseded plugin bytes, instead of dispatching a route that
-/// consumes the full await budget (125s) and then reports only a timeout.
+/// GH #267: the admission advisory is a trailing route-output line, the same
+/// diagnostic shape as `controller_editor_route_supervisor_binary_stale`.
+fn append_superseded_editor_advisory(output: &mut String, advisory: &str) {
+    if !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str(advisory);
+    output.push('\n');
+}
+
+/// GH #76 / #267: refuse an `editor_route` whose document is held by an editor
+/// proven to run superseded plugin bytes AND proven unable to answer this
+/// controller, instead of dispatching a route that consumes the full await
+/// budget (125s) and then reports only a timeout. Returns the admission
+/// advisory when a superseded editor still serves this controller's build.
 fn refuse_editor_route_to_superseded_editor(
     bootstrap: &ControllerBootstrap,
     payload_json: &str,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let payload: ControllerEditorRoutePayload =
         serde_json::from_str(payload_json).context("parse editor_route payload")?;
     let Some(relative_path) = payload.relative_path.as_deref() else {
-        return Ok(());
+        return Ok(None);
     };
     let file = bootstrap.project_root.join(relative_path);
     let canonical = file.canonicalize().unwrap_or(file);
@@ -12876,17 +12973,45 @@ fn refuse_editor_route_to_superseded_editor(
             Some((registration.editor_kind, pid, mapped))
         })
         .collect::<Vec<_>>();
-    if let Some(reason) = superseded_editor_route_refusal(&probes) {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "editor_route_refused_superseded_editor file={} reason=plugin_bytes_superseded",
-                canonical.display()
-            ),
-        );
-        anyhow::bail!(reason);
+    // The probe addresses the endpoint at the same root controller → editor
+    // sends (`persist_current`, `observe_lazily_current`) resolve.
+    let ipc_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    editor_route_superseded_admission(&ipc_root, &canonical, &probes)
+}
+
+/// The probing half of [`refuse_editor_route_to_superseded_editor`], over
+/// already-collected mapped-jar probes, so a regression can drive it against
+/// real endpoints.
+fn editor_route_superseded_admission(
+    project_root: &Path,
+    canonical: &Path,
+    probes: &[(String, u32, agent_doc_fs::plugin_jar::MappedPluginJar)],
+) -> Result<Option<String>> {
+    match superseded_editor_route_verdict(probes, |pid| {
+        agent_doc_ipc_io::probe_editor_endpoint_build_for_pid(project_root, u64::from(pid))
+    }) {
+        SupersededEditorRouteVerdict::Admit => Ok(None),
+        SupersededEditorRouteVerdict::AdmitWithAdvisory(advisory) => {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "editor_route_superseded_editor_admitted file={} reason=native_endpoint_current",
+                    canonical.display()
+                ),
+            );
+            Ok(Some(advisory))
+        }
+        SupersededEditorRouteVerdict::Refuse(reason) => {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "editor_route_refused_superseded_editor file={} reason=plugin_bytes_superseded",
+                    canonical.display()
+                ),
+            );
+            anyhow::bail!(reason);
+        }
     }
-    Ok(())
 }
 
 fn validate_async_editor_command_payload(
@@ -54239,26 +54364,43 @@ mod tests {
     }
     #[test]
     fn superseded_editor_route_refusal_names_pid_and_restart_remedy() {
-        // GH #76: an editor proven to run unlinked plugin bytes must refuse the
-        // route up front, naming the cause and the backend-restart remedy.
+        // GH #76: an editor proven to run unlinked plugin bytes, whose native
+        // endpoint cannot answer this controller, refuses the route up front,
+        // naming the cause and the backend-restart remedy.
         use agent_doc_fs::plugin_jar::MappedPluginJar;
+        use agent_doc_ipc_io::EditorEndpointBuild;
         let jar = "/plugins/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.392.jar";
-        let refusal = superseded_editor_route_refusal(&[
-            ("jetbrains".to_string(), 7, MappedPluginJar::Unknown),
-            (
-                "jetbrains".to_string(),
-                1506046,
-                MappedPluginJar::Deleted {
-                    path: jar.to_string(),
-                },
-            ),
-        ])
-        .expect("a deleted mapping must refuse");
+        let mut probed = Vec::new();
+        let verdict = superseded_editor_route_verdict(
+            &[
+                ("jetbrains".to_string(), 7, MappedPluginJar::Unknown),
+                (
+                    "jetbrains".to_string(),
+                    1506046,
+                    MappedPluginJar::Deleted {
+                        path: jar.to_string(),
+                    },
+                ),
+            ],
+            |pid| {
+                probed.push(pid);
+                EditorEndpointBuild::NoEndpoint
+            },
+        );
+        // The endpoint is probed only for the superseded pid.
+        assert_eq!(probed, vec![1506046]);
+        let SupersededEditorRouteVerdict::Refuse(refusal) = verdict else {
+            panic!("a deleted mapping without a serving endpoint must refuse: {verdict:?}");
+        };
         assert!(refusal.starts_with("plugin_bytes_superseded"), "{refusal}");
         assert!(refusal.contains("pid 1506046"), "{refusal}");
         assert!(refusal.contains(jar), "{refusal}");
         assert!(
-            refusal.contains("Re-run the plugin installation once"),
+            refusal.contains("serves no native agent-doc endpoint"),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains(&agent_doc_fs::plugin_jar::superseded_editor_remedy(None)),
             "{refusal}"
         );
 
@@ -54268,32 +54410,216 @@ mod tests {
             "jetbrains",
             1506046,
             jar,
+            &EditorEndpointBuild::Unanswered,
             Some("exact-263 package has no restart-free upgrade entry point"),
         );
         assert!(
             restart.contains("Restart the editor to load them"),
             "{restart}"
         );
+        assert!(restart.contains("did not answer an IPC hello"), "{restart}");
         assert!(restart.contains("pid 1506046"), "{restart}");
         assert!(
             !restart.contains("Re-run the plugin installation once"),
             "{restart}"
         );
 
-        // Fail open: current or inconclusive mappings never refuse.
+        // GH #267: a native generation still on the previous build names both
+        // builds and the restart-free native reload before the plugin remedy.
+        let stale_native = superseded_editor_route_refusal_message(
+            "jetbrains",
+            1506046,
+            jar,
+            &EditorEndpointBuild::OtherBuild {
+                editor_build: "0.35.503".to_string(),
+                local_build: "0.35.505".to_string(),
+            },
+            Some("exact-263 package has no restart-free upgrade entry point"),
+        );
+        assert!(
+            stale_native
+                .contains("answers with build 0.35.503, not this controller's build 0.35.505"),
+            "{stale_native}"
+        );
+        assert!(
+            stale_native.contains("`agent-doc admin reload-lib`"),
+            "{stale_native}"
+        );
+        assert!(
+            stale_native.contains("Restart the editor to load them"),
+            "{stale_native}"
+        );
+
+        // Fail open: current or inconclusive mappings never refuse, and never
+        // spend a probe.
         assert_eq!(
-            superseded_editor_route_refusal(&[
-                ("jetbrains".to_string(), 7, MappedPluginJar::Unknown),
-                (
-                    "jetbrains".to_string(),
-                    8,
-                    MappedPluginJar::Current {
-                        path: jar.to_string(),
-                        inode: 1,
-                    },
-                ),
-            ]),
-            None
+            superseded_editor_route_verdict(
+                &[
+                    ("jetbrains".to_string(), 7, MappedPluginJar::Unknown),
+                    (
+                        "jetbrains".to_string(),
+                        8,
+                        MappedPluginJar::Current {
+                            path: jar.to_string(),
+                            inode: 1,
+                        },
+                    ),
+                ],
+                |pid| panic!("a current mapping must not be probed (pid {pid})"),
+            ),
+            SupersededEditorRouteVerdict::Admit
+        );
+    }
+
+    /// GH #267 fixture: a real agent-doc native endpoint for this process's pid,
+    /// standing in for an IDE whose native library hot-reloaded to the current
+    /// build while its plugin jar stayed superseded.
+    struct CurrentNativeEndpoint {
+        root: PathBuf,
+        shutdown: Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl CurrentNativeEndpoint {
+        fn start(root: &Path) -> Self {
+            let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+            let thread = {
+                let root = root.to_path_buf();
+                let shutdown = Arc::clone(&shutdown);
+                std::thread::spawn(move || {
+                    let _ = agent_doc_ipc_io::start_listener_with_logger_until_ready(
+                        &root,
+                        |_| None,
+                        |_, _| {},
+                        shutdown,
+                        ready_tx,
+                    );
+                })
+            };
+            ready_rx
+                .recv_timeout(Duration::from_secs(30))
+                .expect("the native endpoint fixture must bind its socket");
+            Self {
+                root: root.to_path_buf(),
+                shutdown,
+                thread: Some(thread),
+            }
+        }
+    }
+
+    impl Drop for CurrentNativeEndpoint {
+        fn drop(&mut self) {
+            self.shutdown
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = agent_doc_ipc_io::wake_listener(&self.root);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    #[test]
+    fn superseded_jar_with_current_native_endpoint_is_admitted_gh267() {
+        // GH #267: the exact-263 IDE kept its superseded plugin jar mapped, but
+        // hot-reloaded the native library and kept serving the controller. The
+        // mapped jar alone must not refuse; the live endpoint proves capability.
+        use agent_doc_fs::plugin_jar::MappedPluginJar;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("doc-a.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let _endpoint = CurrentNativeEndpoint::start(&root);
+        let pid = std::process::id();
+        let jar = "/data/.agent-doc-jetbrains-install/backup-2411872-1792046538942846469/lib/agent.doc-0.2.609.jar";
+        let probes = vec![(
+            "jetbrains".to_string(),
+            pid,
+            MappedPluginJar::Superseded {
+                path: jar.to_string(),
+                mapped_inode: 11,
+                disk_inode: 12,
+            },
+        )];
+
+        // Production probes the root controller → editor sends resolve.
+        assert_eq!(
+            agent_doc_project_root_io::resolve_ipc_project_root(&doc),
+            root
+        );
+        let advisory = editor_route_superseded_admission(&root, &doc, &probes)
+            .expect("a superseded jar with a current native endpoint must be admitted")
+            .expect("the admission must carry the restart advisory");
+        assert!(
+            advisory.starts_with("plugin_bytes_superseded_advisory"),
+            "{advisory}"
+        );
+        assert!(advisory.contains(&format!("pid {pid}")), "{advisory}");
+        assert!(advisory.contains(jar), "{advisory}");
+        assert!(advisory.contains("the route was admitted"), "{advisory}");
+        assert!(!advisory.contains("refused"), "{advisory}");
+
+        let mut output = "routed doc-a.md".to_string();
+        append_superseded_editor_advisory(&mut output, &advisory);
+        assert_eq!(output, format!("routed doc-a.md\n{advisory}\n"));
+
+        let ops = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("editor_route_superseded_editor_admitted")
+                && ops.contains("reason=native_endpoint_current"),
+            "{ops}"
+        );
+        assert!(
+            !ops.contains("editor_route_refused_superseded_editor"),
+            "{ops}"
+        );
+    }
+
+    #[test]
+    fn superseded_jar_without_native_endpoint_is_still_refused_gh267() {
+        // GH #267: the fail-closed half. A superseded jar whose pid serves no
+        // native endpoint for this project cannot receive the controller
+        // messages the route depends on, so it still refuses with the remedy.
+        use agent_doc_fs::plugin_jar::MappedPluginJar;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("doc-b.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let pid = std::process::id();
+        let jar = "/plugins/agent-doc-jetbrains-263/lib/agent-doc-jetbrains-263-0.2.577.jar";
+        let probes = vec![(
+            "jetbrains".to_string(),
+            pid,
+            MappedPluginJar::Deleted {
+                path: jar.to_string(),
+            },
+        )];
+
+        let refusal = editor_route_superseded_admission(&root, &doc, &probes)
+            .expect_err("a superseded jar with no native endpoint must refuse")
+            .to_string();
+        assert!(refusal.starts_with("plugin_bytes_superseded:"), "{refusal}");
+        assert!(refusal.contains(&format!("pid {pid}")), "{refusal}");
+        assert!(refusal.contains(jar), "{refusal}");
+        assert!(
+            refusal.contains("serves no native agent-doc endpoint for this project"),
+            "{refusal}"
+        );
+        // No restart verdict was recorded for this process, so the exact
+        // remedy is the restart-free install rung.
+        assert!(
+            refusal.contains(&agent_doc_fs::plugin_jar::superseded_editor_remedy(None)),
+            "{refusal}"
+        );
+        assert!(refusal.contains("Then retry (#76, #267"), "{refusal}");
+
+        let ops = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("editor_route_refused_superseded_editor")
+                && ops.contains("reason=plugin_bytes_superseded"),
+            "{ops}"
         );
     }
 

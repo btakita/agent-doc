@@ -47040,7 +47040,10 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
-        assert!(parsed.len() <= 2, "a projection and one wake at most: {frames}");
+        assert!(
+            parsed.len() <= 2,
+            "a projection and one wake at most: {frames}"
+        );
         for (index, frame) in parsed.iter().enumerate() {
             let last = index + 1 == parsed.len();
             if frame["data"]["timed_out"] == serde_json::Value::Bool(true) {

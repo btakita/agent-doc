@@ -27192,23 +27192,94 @@ fn handle_editor_view_snapshot_observe(
     runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<EditorViewProjectionWire> {
-    let payload = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
-    let snapshot: EditorViewSnapshot =
-        serde_json::from_str(&payload).context("parse complete editor view snapshot")?;
-    anyhow::ensure!(
-        request.caller.as_deref() == Some(snapshot.client_id.as_str())
-            && request.generation == Some(snapshot.connection_generation)
-            && request.sequence == Some(snapshot.sequence),
-        "editor view snapshot envelope identity does not match its authenticated payload"
-    );
+    let payload = match request_string(&request.diagnostic_payload, "diagnostic_payload") {
+        Ok(payload) => payload,
+        Err(error) => {
+            log_editor_view_snapshot_observation(
+                bootstrap,
+                request.caller.as_deref().unwrap_or("unknown"),
+                request.generation.unwrap_or_default(),
+                request.sequence.unwrap_or_default(),
+                false,
+                "missing_payload",
+                None,
+            );
+            return Err(error);
+        }
+    };
+    let snapshot: EditorViewSnapshot = match serde_json::from_str(&payload) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            log_editor_view_snapshot_observation(
+                bootstrap,
+                request.caller.as_deref().unwrap_or("unknown"),
+                request.generation.unwrap_or_default(),
+                request.sequence.unwrap_or_default(),
+                false,
+                "invalid_payload",
+                None,
+            );
+            return Err(error).context("parse complete editor view snapshot");
+        }
+    };
+    let snapshot_diagnostic = Some((
+        snapshot.complete,
+        snapshot.terminal_capable,
+        snapshot.surfaces.len(),
+    ));
+    if request.caller.as_deref() != Some(snapshot.client_id.as_str())
+        || request.generation != Some(snapshot.connection_generation)
+        || request.sequence != Some(snapshot.sequence)
+    {
+        log_editor_view_snapshot_observation(
+            bootstrap,
+            request.caller.as_deref().unwrap_or("unknown"),
+            request.generation.unwrap_or_default(),
+            request.sequence.unwrap_or_default(),
+            false,
+            "envelope_identity_mismatch",
+            snapshot_diagnostic,
+        );
+        anyhow::bail!(
+            "editor view snapshot envelope identity does not match its authenticated payload"
+        );
+    }
     let client_id = snapshot.client_id.clone();
     let connection_generation = snapshot.connection_generation;
     let presentation_revision = snapshot.sequence;
-    let projection = runtime
+    let projection = match runtime
         .editor_view_policy_graph
         .observe(snapshot, |projection| {
             persist_editor_view_transitions(bootstrap, runtime, projection)
-        })?;
+        }) {
+        Ok(projection) => projection,
+        Err(error) => {
+            log_editor_view_snapshot_observation(
+                bootstrap,
+                &client_id,
+                connection_generation,
+                presentation_revision,
+                false,
+                "projection_error",
+                snapshot_diagnostic,
+            );
+            return Err(error);
+        }
+    };
+    let (accepted, status) = match &projection.status {
+        EditorViewPolicyStatus::Applied => (true, "applied"),
+        EditorViewPolicyStatus::Stale => (false, "stale"),
+        EditorViewPolicyStatus::Frozen { .. } => (false, "frozen"),
+    };
+    log_editor_view_snapshot_observation(
+        bootstrap,
+        &client_id,
+        connection_generation,
+        presentation_revision,
+        accepted,
+        status,
+        snapshot_diagnostic,
+    );
     Ok(editor_view_projection_wire(
         runtime,
         projection,
@@ -27216,6 +27287,28 @@ fn handle_editor_view_snapshot_observe(
         connection_generation,
         presentation_revision,
     ))
+}
+
+fn log_editor_view_snapshot_observation(
+    bootstrap: &ControllerBootstrap,
+    client_id: &str,
+    generation: u64,
+    sequence: u64,
+    accepted: bool,
+    status: &str,
+    snapshot: Option<(bool, bool, usize)>,
+) {
+    let detail = snapshot
+        .map(|(complete, terminal_capable, surfaces)| {
+            format!(" complete={complete} terminal_capable={terminal_capable} surfaces={surfaces}")
+        })
+        .unwrap_or_default();
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_editor_view_snapshot_observed client={client_id} generation={generation} sequence={sequence} accepted={accepted} status={status}{detail}"
+        ),
+    );
 }
 
 fn handle_editor_view_client_retire(
@@ -38757,6 +38850,10 @@ mod tests {
         assert!(projection.retry_suggested);
         assert_eq!(projection.presentations[0].kind, "placeholder");
         assert_eq!(projection.presentations[0].reason, Some("binding_pending"));
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains(
+            "controller_editor_view_snapshot_observed client=rd-client-a generation=7 sequence=1 accepted=true status=applied complete=true terminal_capable=true surfaces=2"
+        ));
         let (pending_binding_epoch, pending_binding) = {
             let document_hash = agent_doc_hash::document_id_for_path(&detached);
             let durable = runtime.memory.lock();
@@ -38903,6 +39000,10 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("envelope identity"));
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains(
+            "controller_editor_view_snapshot_observed client=rd-client-b generation=7 sequence=1 accepted=false status=envelope_identity_mismatch complete=true terminal_capable=true surfaces=2"
+        ));
         assert!(
             runtime
                 .main_layout_eligibility()

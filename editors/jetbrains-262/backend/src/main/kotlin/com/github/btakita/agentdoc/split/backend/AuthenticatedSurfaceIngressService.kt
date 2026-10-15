@@ -16,12 +16,17 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 @Service(Service.Level.PROJECT)
 internal class AuthenticatedSurfaceIngressService(project: Project) {
     private val state = AuthenticatedSurfaceIngressState(ControllerSurfaceSnapshotPublisher(project))
+
+    val frontendSnapshotAvailable: StateFlow<Boolean> = state.frontendSnapshotAvailable
 
     suspend fun open(authenticatedClientId: String, frontendInstanceId: String): SurfaceIngressLease =
         state.open(authenticatedClientId, frontendInstanceId)
@@ -50,6 +55,8 @@ internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSn
     private val generation = AtomicLong(0)
     private val mutex = Mutex()
     private val connections = mutableMapOf<String, ConnectionState>()
+    private val mutableFrontendSnapshotAvailable = MutableStateFlow(false)
+    val frontendSnapshotAvailable: StateFlow<Boolean> = mutableFrontendSnapshotAvailable.asStateFlow()
 
     suspend fun open(
         authenticatedClientId: String,
@@ -69,6 +76,7 @@ internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSn
             acceptedSequence = 0,
             acceptedSurfaces = emptyMap(),
         )
+        refreshFrontendSnapshotAvailability()
         lease
     }
 
@@ -108,6 +116,7 @@ internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSn
             acceptedSequence = snapshot.sequence,
             acceptedSurfaces = snapshot.surfaces.associate { it.paneId to it.surfaceGeneration },
         )
+        refreshFrontendSnapshotAvailability()
         SurfaceIngressAck(
             status = SurfaceIngressStatus.ACCEPTED,
             connectionGeneration = lease.connectionGeneration,
@@ -161,6 +170,11 @@ internal class AuthenticatedSurfaceIngressState(private val publisher: SurfaceSn
         if (current?.lease != lease) return@withLock
         connections.remove(authenticatedClientId)
         publisher.retire(authenticatedClientId, lease.connectionGeneration)
+        refreshFrontendSnapshotAvailability()
+    }
+
+    private fun refreshFrontendSnapshotAvailability() {
+        mutableFrontendSnapshotAvailable.value = connections.values.any { it.acceptedSequence > 0 }
     }
 
     private fun rejected(

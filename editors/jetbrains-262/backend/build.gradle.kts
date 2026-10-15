@@ -14,6 +14,7 @@ dependencies {
         bundledModule("intellij.platform.kernel.backend")
         bundledModule("intellij.platform.rpc.backend")
         bundledModule("intellij.platform.backend")
+        bundledModule("intellij.platform.backend.split")
         bundledModule("intellij.platform.vcs")
         bundledPlugin("org.jetbrains.plugins.terminal")
         bundledPlugin("org.intellij.plugins.markdown")
@@ -86,10 +87,16 @@ val generateModularLifecycle by tasks.registering {
             "legacy lifecycle layout-listener markers changed; review the 262 fail-closed override"
         }
         val replacement = """
-        // The 262 frontend module is the only editor-surface authority. It captures pane-tagged
-        // snapshots before dedupe and sends them through authenticated RPC. Installing the classic
-        // backend EditorTabSyncListener here would reintroduce the ambiguous flat
-        // ClientFileEditorManager path and race the generation-fenced source.
+        // The frontend module remains the preferred pane-tagged surface authority. A one-sided
+        // Remote Dev install has no frontend bridge, though, and GuestFileEditorManager does not
+        // publish the project FileEditorManager topic. Observe that guest selection flow only
+        // while no frontend snapshot generation is accepted.
+        val editorTabSync = EditorTabSyncListener.install(project)
+        com.github.btakita.agentdoc.split.backend.BackendGuestSelectionFallback.install(
+            project,
+            lifecycle,
+            editorTabSync,
+        )
 
 """
         val transformed = original.substring(0, start) + replacement + original.substring(end)
@@ -125,6 +132,7 @@ val generateBackendDescriptor by tasks.registering {
         val dependencies = result.createElement("dependencies")
         listOf(
             "intellij.platform.backend",
+            "intellij.platform.backend.split",
             "intellij.platform.kernel.backend",
             "intellij.platform.vcs",
             "agent.doc.shared",

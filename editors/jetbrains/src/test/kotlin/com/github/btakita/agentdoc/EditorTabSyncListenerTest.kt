@@ -441,6 +441,15 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `missing backend windows do not retire a freshly published remote endpoint`() {
+        val ownership = EditorTabSyncListener.SurfaceEndpointOwnership()
+        val remote = EditorTabSyncListener.SurfaceEndpoint("/repo", "surface-unavailable")
+
+        assertTrue(ownership.markPublished(remote, null).isEmpty())
+        assertEquals(listOf(remote), ownership.drain())
+    }
+
+    @Test
     fun `surface projection waits while the selected document is absent`() {
         assertEquals(
             EditorTabSyncListener.SurfaceReport.ProjectionReadiness.AwaitingSelectedDocument,

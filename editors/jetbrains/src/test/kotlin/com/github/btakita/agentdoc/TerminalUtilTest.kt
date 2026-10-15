@@ -1005,6 +1005,52 @@ class TerminalUtilTest {
         assertTrue(TerminalUtil.buildLiveTurnQueuedClearMessage("tmp/doc.md", live).contains("when the turn in pane %185 ends"))
     }
 
+    // #clearaftrun: live 2026-10-15 19:40Z on haiven-dev tasks/sdk.md — Run Agent Doc was accepted,
+    // its trigger was not typed for ~22s, and the Clear pressed in that window was queued behind it.
+    // The notice said "it runs when the turn in pane %180 ends. Nothing was typed into the running
+    // turn" over an idle pane and offered Interrupt and clear, which cannot clear sooner there.
+    @Test
+    fun `clear queued behind an accepted run says no turn is running and it runs after that run`() {
+        val output = """
+            session_clear queued for /repo/src/haiven-dev/tasks/sdk.md — Run Agent Doc for pane %180 was accepted 12s ago and has not started its turn yet (harness_turn_live=pending evidence=dispatch_turn_pending evidence_age_secs=12 pre_turn_grace_secs=120, source=authoritative_actor); its trigger has not reached the harness or is still being submitted, so no turn is running. A clear pressed after Run Agent Doc runs after that run, so no `/clear` was typed ahead of its trigger. One clear is queued and the supervisor delivers it automatically when that run's turn ends; that run does not drop it, but a prompt started after this press or a session restart does. If that run never starts, the clear runs within about 108s, when its pre-turn grace expires. Pressing Clear Session Context again, or Interrupt and clear, does not make it sooner: there is no turn to interrupt yet. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false.
+        """.trimIndent()
+
+        val queued = TerminalUtil.parseLiveTurnQueuedClear(output)!!
+        assertEquals("/repo/src/haiven-dev/tasks/sdk.md", queued.file)
+        assertEquals("%180", queued.pane)
+        assertEquals("dispatch_turn_pending", queued.evidence)
+        assertEquals(12L, queued.evidenceAgeSecs)
+        assertEquals(120L, queued.preTurnGraceSecs)
+        assertNull(queued.settlesInSecs)
+        assertFalse(queued.rearmed)
+        assertNull(TerminalUtil.parseBusySessionClearRefusal(output))
+        assertFalse(TerminalUtil.isDeferredQueuePreemptClear(output))
+        val message = TerminalUtil.buildLiveTurnQueuedClearMessage("tasks/sdk.md", queued)
+        assertEquals(
+            "Clear Session Context queued for tasks/sdk.md: it runs after the Run Agent Doc accepted 12s ago finishes.",
+            message.lineSequence().first(),
+        )
+        assertTrue(message.contains("That run has not started its turn in pane %180 yet, so nothing is running"))
+        assertTrue(message.contains("If the run never starts, the clear runs within about 108s."))
+        assertTrue(message.contains("Interrupt and clear does not make it sooner"))
+        assertFalse(message.contains("the turn in pane"))
+        assertFalse(message.contains("running turn"))
+        assertFalse(message.contains("Use Interrupt and clear to clear immediately"))
+
+        val again = TerminalUtil.parseLiveTurnQueuedClear(
+            output.replace("evidence_age_secs=12", "evidence_age_secs=unknown")
+                .replace("rearmed=false", "rearmed=true"),
+        )!!
+        assertTrue(again.rearmed)
+        assertNull(again.evidenceAgeSecs)
+        val againMessage = TerminalUtil.buildLiveTurnQueuedClearMessage("tasks/sdk.md", again)
+        assertEquals(
+            "Clear Session Context is already queued for tasks/sdk.md: it runs after the Run Agent Doc already accepted finishes.",
+            againMessage.lineSequence().first(),
+        )
+        assertTrue(againMessage.contains("within about 2m 0s."))
+    }
+
     @Test
     fun `busy clear refusal parses generic command wrapper output`() {
         val output = """

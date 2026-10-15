@@ -46,11 +46,16 @@ object TerminalUtil {
     // #clearctxslow: the binary also queues behind a prompt that has not
     // started a turn ("the last prompt in pane ... has not started a turn",
     // an abandoned prompt still inside its settle window).
+    // #clearaftrun: ...and behind a Run Agent Doc dispatch that was accepted but
+    // has not started its turn ("Run Agent Doc for pane ... has not started its
+    // turn yet", evidence=dispatch_turn_pending).
     private val LIVE_TURN_CLEAR_QUEUED_REGEX = Regex(
-        """session_clear queued for (.+?) — (?:a turn is live|the last prompt) in pane (\S+)""",
+        """session_clear queued for (.+?) — (?:(?:a turn is live|the last prompt) in|Run Agent Doc for) pane (\S+)""",
         RegexOption.DOT_MATCHES_ALL,
     )
     private val LIVE_TURN_CLEAR_QUEUED_SETTLES_IN_REGEX = Regex("""\bsettles_in_secs=(\d+)""")
+    private val LIVE_TURN_CLEAR_QUEUED_PRE_TURN_GRACE_REGEX = Regex("""\bpre_turn_grace_secs=(\d+)""")
+    private const val PENDING_RUN_CLEAR_EVIDENCE = "dispatch_turn_pending"
     // #clearnoticeverify: the queued notice carries the live-turn evidence, its
     // age and whether this press re-armed an already-queued clear.
     private val LIVE_TURN_CLEAR_QUEUED_EVIDENCE_REGEX = Regex("""\bevidence=([^,\s)]+)""")
@@ -222,6 +227,9 @@ object TerminalUtil {
         // #clearctxslow: seconds until the cancelled prompt's settle window
         // passes and the supervisor delivers the clear; null for a live turn.
         val settlesInSecs: Long? = null,
+        // #clearaftrun: the accepted run's pre-turn grace, when the clear waits
+        // on a Run Agent Doc dispatch that has not started its turn.
+        val preTurnGraceSecs: Long? = null,
     )
 
     internal data class BusySessionRestartRefusal(
@@ -1337,10 +1345,16 @@ object TerminalUtil {
                 return
             }
             EditorCommandDecision.PREEMPT_RUN_WITH_CLEAR -> {
-                val canceled = inFlightRouteRegistry.cancel(routeKey)
+                // #clearaftrun: the Run is a controller-side editor_route command; the
+                // editor has no way to cancel it, so "canceling" here only abandoned the
+                // wait for its outcome (2026-10-15 sdk.md: logged routeCanceled=true, then
+                // the run's trigger was typed 12s later and its result never shown). Keep
+                // waiting so the Run's outcome is still reported; the binary queues this
+                // clear behind that run (`dispatch_turn_pending`) and says so.
                 LOG.warn(
-                    "[state] Clear Session Context preempted Run Agent Doc dispatch for $relativePath; " +
-                        "routeCanceled=$canceled"
+                    "[state] Clear Session Context requested while Run Agent Doc is dispatching for " +
+                        "$relativePath; the run continues (not cancellable from the editor) and the clear " +
+                        "is ordered after it"
                 )
             }
             EditorCommandDecision.DEDUPE_ACTIVE_RUN,
@@ -1712,6 +1726,7 @@ object TerminalUtil {
             evidenceAgeSecs = LIVE_TURN_CLEAR_QUEUED_AGE_REGEX.find(detail)?.groupValues?.get(1)?.toLongOrNull(),
             rearmed = LIVE_TURN_CLEAR_QUEUED_REARMED_REGEX.find(detail)?.groupValues?.get(1) == "true",
             settlesInSecs = LIVE_TURN_CLEAR_QUEUED_SETTLES_IN_REGEX.find(detail)?.groupValues?.get(1)?.toLongOrNull(),
+            preTurnGraceSecs = LIVE_TURN_CLEAR_QUEUED_PRE_TURN_GRACE_REGEX.find(detail)?.groupValues?.get(1)?.toLongOrNull(),
         )
     }
 
@@ -1724,6 +1739,7 @@ object TerminalUtil {
      */
     internal fun buildLiveTurnQueuedClearMessage(relativePath: String, queued: LiveTurnQueuedClear): String {
         queued.settlesInSecs?.let { return buildCancelledPromptQueuedClearMessage(relativePath, queued, it) }
+        if (queued.evidence == PENDING_RUN_CLEAR_EVIDENCE) return buildPendingRunQueuedClearMessage(relativePath, queued)
         return buildString {
             if (queued.rearmed) {
                 append("Clear Session Context re-armed for ")
@@ -1773,6 +1789,37 @@ object TerminalUtil {
         append(" never started a turn (it looks cancelled); agent-doc waits for that to be confirmed before ")
         append("typing /clear. Pressing Clear again does not make it sooner. ")
         append("Use Interrupt and clear to clear immediately instead.")
+    }
+
+    /**
+     * #clearaftrun: the queued clear waits on a Run Agent Doc dispatch that was accepted but has not
+     * started its turn (its trigger was not typed yet). Live 2026-10-15 19:40Z on sdk.md: the notice
+     * said "it runs when the turn in pane %180 ends. Nothing was typed into the running turn" over an
+     * idle pane, and offered Interrupt and clear, which cannot clear sooner there (no turn to
+     * interrupt; it re-enters the same queue). Say that no turn is running and that the clear runs
+     * after that run.
+     */
+    private fun buildPendingRunQueuedClearMessage(
+        relativePath: String,
+        queued: LiveTurnQueuedClear,
+    ): String = buildString {
+        append(if (queued.rearmed) "Clear Session Context is already queued for " else "Clear Session Context queued for ")
+        append(relativePath)
+        append(": it runs after the Run Agent Doc ")
+        append(queued.evidenceAgeSecs?.let { "accepted ${formatEvidenceAge(it)} ago" } ?: "already accepted")
+        append(" finishes.\n")
+        append("That run has not started its turn in pane ")
+        append(queued.pane)
+        append(" yet, so nothing is running and nothing was typed; a clear pressed after Run Agent Doc runs after that run, ")
+        append("and that run does not cancel it.")
+        val grace = queued.preTurnGraceSecs
+        if (grace != null) {
+            val remaining = (grace - (queued.evidenceAgeSecs ?: 0L)).coerceAtLeast(0L)
+            append(" If the run never starts, the clear runs within about ")
+            append(formatEvidenceAge(remaining))
+            append(".")
+        }
+        append(" Pressing Clear again or Interrupt and clear does not make it sooner.")
     }
 
     internal fun formatEvidenceAge(secs: Long): String = when {

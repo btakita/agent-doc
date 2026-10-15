@@ -494,6 +494,16 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   second says the last prompt never started a turn, that pressing again does not make it
   sooner, and that Interrupt and clear clears immediately. It never says a turn is running.
   A clear queued behind a live turn keeps the "it runs when the turn in pane <pane> ends" notice.
+- A Clear Session Context the binary queues behind a Run Agent Doc that was accepted but has not
+  started its turn (`session_clear queued for <FILE> — Run Agent Doc for pane <pane> was accepted
+  <n>s ago and has not started its turn yet (... evidence=dispatch_turn_pending
+  evidence_age_secs=<n> pre_turn_grace_secs=<g> ...)`, `#clearaftrun`) is likewise a queued
+  outcome. The first line is "Clear Session Context queued for <path>: it runs after the Run Agent
+  Doc accepted <n>s ago finishes." ("is already queued" on a re-press); the second says the run
+  has not started its turn so nothing is running, that the run does not cancel the clear, when the
+  clear runs if the run never starts (`<g> - <n>`), and that pressing again or Interrupt and clear
+  does not make it sooner. It never says a turn is running and never offers Interrupt and clear as
+  "clear now".
 
 ### Run Feedback
 
@@ -516,7 +526,7 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - Every `Run Agent Doc` click writes a durable attempt ledger entry for click receipt, active document save, `editor_route` request construction/start, retry/dedupe, and terminal route outcome. The ledger may persist diagnostic route shape and route output summaries, but it must not persist raw document prompt text; prompt/trigger proof is represented by byte counts and hashes in binary/controller diagnostics.
 - Repeating `Run Agent Doc` while an `editor_route` request is still in flight coalesces with that request instead of canceling and recreating route/controller work. The duplicate click is recorded as deduped and gets an already-dispatching hint; a fresh click is eligible as soon as the bounded request completes.
 - That JetBrains request-level coalescing must not leak into controller admission for an already-authorized operator reopen. `managed_reopen` and `dispatch_only_reopen` bypass stale same-generation in-flight dispatch receipts so a fresh `Run Agent Doc` request cannot settle successfully without reaching the pane; automatic/non-operator redispatches remain coalesced.
-- `Run Agent Doc` and `Clear Session Context` are serialized per document in the JetBrains action layer before route/clear work is submitted. Repeated Run clicks coalesce with the first alive `editor_route` request; `Clear Session Context` preempts a still-dispatching Run by canceling the in-flight request and then running the normal binary-owned `agent-doc session clear <relative-path>` path. If Run is clicked while a normal clear command is already running, the latest Run intent is queued and starts only after the clear completes synchronously. A clear accepted for deferred delivery by the binary does not release the queued Run immediately.
+- `Run Agent Doc` and `Clear Session Context` are serialized per document in the JetBrains action layer before route/clear work is submitted. Repeated Run clicks coalesce with the first alive `editor_route` request; `Clear Session Context` pressed while a Run is still dispatching becomes the active editor command and runs the normal binary-owned `agent-doc session clear <relative-path>` path, but it does not cancel or abandon that Run: the Run is a controller-side `editor_route` command the editor cannot cancel, so the action layer keeps waiting for it and still reports its outcome, and the binary orders the clear after that run (`dispatch_turn_pending`, `#clearaftrun`). Before `#clearaftrun` the action layer "canceled" the request, which only abandoned the wait: the run was still typed into the pane (2026-10-15 sdk.md, logged `routeCanceled=true` 12s before the trigger landed) and its outcome was never shown. If Run is clicked while a normal clear command is already running, the latest Run intent is queued and starts only after the clear completes synchronously. A clear accepted for deferred delivery by the binary does not release the queued Run immediately.
 - `Run Agent Doc` submits its controller-owned `editor_route` directly and never
   creates, attaches, selects, focuses, or reveals an IDE terminal tab. The
   controller route owns cold start and preserves the live actor's tmux session.

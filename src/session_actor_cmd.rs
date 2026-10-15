@@ -20,15 +20,17 @@ use agent_doc_turn_executor_tmux::context_clear::{
     ABANDONED_PROMPT_SETTLING_EVIDENCE, CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
     ContextClearLastFrame, ContextClearSubmitObservation, ContextClearSubmitPollState,
     ContextClearSubmitRetryAction, ContextClearSubmitRetryFacts, ContextClearSubmitRetryProofFacts,
-    ContextClearSubmitStatus, InterruptClearTimeoutFacts, abandoned_prompt_clear_queued_message,
-    busy_clear_already_deferred_message, busy_clear_deferred_message, busy_clear_refusal_message,
+    ContextClearSubmitStatus, DISPATCH_TURN_PENDING_EVIDENCE, InterruptClearTimeoutFacts,
+    abandoned_prompt_clear_queued_message, busy_clear_already_deferred_message,
+    busy_clear_deferred_message, busy_clear_refusal_message,
     context_clear_capture_shows_queued_input, context_clear_command_visible_in_active_input,
     context_clear_history_proves_cleared_state, context_clear_submit_blocked_line,
     context_clear_submit_blocked_message, context_clear_submit_observation_line,
     context_clear_submit_resubmit_proof_line, context_clear_submit_retry_action,
     interrupt_clear_timeout_message, live_turn_clear_queued_message,
     live_turn_clear_refusal_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
-    protected_clear_refusal_message, terminal_editor_command,
+    pending_dispatch_clear_queued_message, protected_clear_refusal_message,
+    terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
@@ -1304,6 +1306,20 @@ fn reconcile_idle_projection_before_clear(
                             agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS,
                             rearmed,
                         ),
+                        // `#clearaftrun`: Run Agent Doc accepted, trigger not yet a
+                        // turn. Nothing is running; say so, and say the clear
+                        // runs after that run rather than claiming a live turn.
+                        None if live_evidence == DISPATCH_TURN_PENDING_EVIDENCE => {
+                            pending_dispatch_clear_queued_message(
+                                &ctx.canonical_file,
+                                evidence.pane_id.as_deref(),
+                                evidence.source,
+                                live_turn_evidence_age_secs(ctx, pane, live_evidence),
+                                agent_doc_sqlite::state_store::DISPATCH_PRE_TURN_GRACE_SECS
+                                    .unsigned_abs(),
+                                rearmed,
+                            )
+                        }
                         None => live_turn_clear_queued_message(
                             &ctx.canonical_file,
                             evidence.pane_id.as_deref(),
@@ -1486,7 +1502,7 @@ fn harness_turn_live_evidence(
     // by the pre-turn grace, so a lost trigger cannot hold clears.
     agent_doc_controller_io::project_controller::dispatch_turn_pending_for_file(&ctx.canonical_file)
         .unwrap_or(false)
-        .then_some("dispatch_turn_pending")
+        .then_some(DISPATCH_TURN_PENDING_EVIDENCE)
 }
 
 /// `#clearqueuedliveturn`: how old the live-turn evidence a queued clear waits
@@ -6341,6 +6357,125 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert_eq!(
             harness_turn_live_evidence(&ctx, &idle),
             Some("dispatch_turn_pending")
+        );
+    }
+
+    /// `#clearaftrun` replay (haiven-dev `tasks/sdk.md`, pane %180,
+    /// 2026-10-15): Run Agent Doc was accepted at 19:39:58Z (receipt 3847,
+    /// `dispatch_only_reopen`), its route waited ~22s on the previous cycle's
+    /// compaction commit before typing the trigger, and Clear Session Context
+    /// at 19:40:10Z found only that accepted receipt. The guard queued the
+    /// clear (`evidence=dispatch_turn_pending`) and the notice claimed "a turn
+    /// is live ... no `/clear` was typed into the running turn" over an idle
+    /// pane, offering `interrupt-clear` — which on an idle pane skips the
+    /// interrupt and re-enters this same guard. The queue decision stays (a
+    /// clear pressed after Run runs after it); the report now says what is
+    /// true.
+    #[test]
+    fn clear_queued_behind_an_accepted_run_reports_no_running_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks/sdk.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-1\n---\n\nBody.\n").unwrap();
+        let mut ctx = test_session_context(
+            test_actor_record(ActorState::Ready),
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            Some("ready"),
+        );
+        ctx.canonical_file = doc.clone();
+        ctx.base_dir = root.clone();
+        let idle = LivePaneEvidence {
+            pane_id: Some("%180".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveIdle,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(true),
+            tail: Some("⏵⏵ bypass permissions on (shift+tab to cycle) · ← 3 agents".to_string()),
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let document_id =
+            agent_doc_session_actor_io::canonical_document_id_in(&root, &doc.to_string_lossy());
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        agent_doc_sqlite::state_store::insert_dispatch_attempt_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DispatchAttemptInsert {
+                document_id: &document_id,
+                generation: 71,
+                command_kind: "dispatch_only_reopen",
+                accepted_stage: Some("ready"),
+                failed_stage: None,
+                diagnostic_payload: "{}",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE dispatch_attempts SET timestamp = ?1",
+            [i64::try_from(now - 12).unwrap()],
+        )
+        .unwrap();
+
+        // The guard's only evidence is the accepted, not-yet-started run.
+        let live_evidence = harness_turn_live_evidence(&ctx, &idle);
+        assert_eq!(live_evidence, Some(DISPATCH_TURN_PENDING_EVIDENCE));
+        assert_eq!(
+            operator_clear_input_state_for_evidence(&idle, false, false, false, true),
+            OperatorClearInputState::LiveTurn,
+            "the clear still queues behind the run the operator started first"
+        );
+        assert_eq!(
+            settling_abandoned_prompt_for_clear(&ctx, "%180", DISPATCH_TURN_PENDING_EVIDENCE),
+            None
+        );
+        let age = live_turn_evidence_age_secs(&ctx, "%180", DISPATCH_TURN_PENDING_EVIDENCE)
+            .expect("the receipt's acceptance second");
+        assert!((12..=14).contains(&age), "{age}");
+
+        let grace = agent_doc_sqlite::state_store::DISPATCH_PRE_TURN_GRACE_SECS.unsigned_abs();
+        let message = pending_dispatch_clear_queued_message(
+            &doc,
+            idle.pane_id.as_deref(),
+            idle.source,
+            Some(age),
+            grace,
+            false,
+        );
+        assert!(message.starts_with(&format!(
+            "session_clear queued for {} — Run Agent Doc for pane %180 was accepted {age}s ago and has not started its turn yet",
+            doc.display()
+        )));
+        assert!(message.contains("evidence=dispatch_turn_pending"));
+        assert!(message.contains("no turn is running"));
+        assert!(!message.contains("a turn is live"));
+        assert!(!message.contains("running turn"));
+        assert!(message.contains("that run does not drop it"));
+        assert!(message.contains(&format!("within about {}s", grace - age)));
+        // `interrupt-clear` on this idle pane skips the interrupt and re-enters
+        // the same guard, so the notice must not offer it as "clear now".
+        assert_eq!(
+            interrupt_clear_initial_action(&idle),
+            InterruptClearInitialAction::SkipInterruptAlreadyIdle
+        );
+        assert!(!message.contains("agent-doc session interrupt-clear"));
+        assert!(message.contains("ui_outcome=queued ui_outcome_class=queued"));
+
+        // Once the run's turn starts, its receipt is `running`: a real live turn,
+        // reported with the live-turn wording.
+        assert_eq!(
+            agent_doc_sqlite::state_store::mark_open_dispatches_turn_started(&conn, &document_id)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            harness_turn_live_evidence(&ctx, &idle),
+            Some("dispatch_turn_running")
         );
     }
 

@@ -2079,6 +2079,7 @@ fn apply_pending_and_status_mutations_with_mode(
                     let open_todo_refs = std::cell::RefCell::new(Vec::<
                         agent_doc_element::todo::OpenTodoReference,
                     >::new());
+                    let todo_auto_done = std::cell::RefCell::new(Some(Vec::<String>::new()));
                     let tracked_work_envelope = || {
                         if options.pending_clear {
                             backlog_cmd::clear(file)?;
@@ -2364,6 +2365,18 @@ fn apply_pending_and_status_mutations_with_mode(
                             let ids = parse_id_order(order);
                             backlog_cmd::icebox_reorder(file, &ids)?;
                         }
+                        // `#todoids`: an OPEN todo whose own id is now-resolved
+                        // tracked work is the operator prompt for finished work;
+                        // check it off in this same transaction. Runs before the
+                        // `#tododone` advisory so only cite-only items remain
+                        // for it to name.
+                        todo_auto_done.replace(backlog_cmd::todo_auto_complete_linked(
+                            file,
+                            &resolved_ids_this_cycle(
+                                &options.pending_done,
+                                &options.review_resolve,
+                            ),
+                        )?);
                         // `#operatortodo`: a human gate opened by this closeout is
                         // an operator action. Read (not write) the final virtual
                         // document so the advisory sees the response's own
@@ -2446,6 +2459,7 @@ fn apply_pending_and_status_mutations_with_mode(
                         }
                     }
                     transaction?;
+                    backlog_cmd::log_todo_auto_done(file, todo_auto_done.into_inner().as_deref());
                     emit_operator_todo_advisory(file, &unreferenced_gate_ids.into_inner());
                     emit_operator_todo_done_advisory(file, &open_todo_refs.into_inner());
                     // `#mutplanwitness`: the envelope published. Anything that

@@ -264,6 +264,89 @@ pub struct GateVerifyResult {
     pub auto_resolved: bool,
 }
 
+/// `#todoids`: one `agent:todo` item whose link to tracked work calls for an
+/// action this cycle. Derived from document state only, so it repeats every
+/// preflight until the state changes (the check is idempotent, not an event).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TodoSignal {
+    /// `operator_done_review_open`, `operator_done_backlog_open`,
+    /// `linked_work_resolved`, or `cited_work_resolved`.
+    pub kind: String,
+    /// The `--todo-*` selector of the item (its own id, else its text).
+    pub todo: String,
+    /// The tracked-work ids the signal is about.
+    pub ids: Vec<String>,
+    /// What the agent does about it.
+    pub action: String,
+}
+
+/// `#todoids`: render the agent-facing action for one link finding.
+pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFinding) -> TodoSignal {
+    use agent_doc_element::todo::TodoLinkFindingKind as Kind;
+    let ids = finding
+        .ids
+        .iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let selector = if finding.selector.contains(char::is_whitespace) {
+        format!("'{}'", finding.selector.replace('\'', "'\\''"))
+    } else {
+        finding.selector.clone()
+    };
+    let action = match finding.kind {
+        Kind::OperatorDoneReviewOpen => format!(
+            "The operator checked todo {label}, the operator prompt for review gate {ids}. Read any operator note, then resolve the gate this cycle (--review-resolve {id}) or record the follow-up; agent-doc never resolves a gate from a checkbox, because which outcome the operator chose is judgement.",
+            label = finding.label,
+            id = finding.ids.first().map(String::as_str).unwrap_or_default(),
+        ),
+        Kind::OperatorDoneBacklogOpen => format!(
+            "The operator checked todo {label}, the operator prerequisite for backlog {ids}. Treat {ids} as unblocked (--backlog-ungate {id} if it is gated).",
+            label = finding.label,
+            id = finding.ids.first().map(String::as_str).unwrap_or_default(),
+        ),
+        Kind::LinkedWorkResolved => format!(
+            "Tracked work {ids} is resolved, so todo {label} is finished or moot. The next closeout that carries tracked-work flags checks it off automatically; to do it now: --todo-done {selector}.",
+            label = finding.label,
+        ),
+        Kind::CitedWorkResolved => format!(
+            "Every tracked item todo {label} cites ({ids}) is resolved. If the operator action is finished, check it off: --todo-done {selector}. agent-doc never auto-completes a todo that only cites work.",
+            label = finding.label,
+        ),
+    };
+    TodoSignal {
+        kind: finding.kind.as_str().to_string(),
+        todo: finding.selector.clone(),
+        ids: finding.ids.clone(),
+        action,
+    }
+}
+
+/// `#todoids`: evaluate the document's `agent:todo` against its tracked work
+/// (including the external done archive). Fail closed: unreadable evidence
+/// yields no signal and a stderr note, never a "nothing to do" that could be
+/// mistaken for a verdict.
+pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> {
+    let links = match agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
+        file, content, true, &[],
+    ) {
+        Ok(links) => links,
+        Err(err) => {
+            eprintln!(
+                "[preflight] todo: tracked-work evidence unreadable ({err:#}); todo link checks skipped"
+            );
+            return Vec::new();
+        }
+    };
+    match agent_doc_element::todo::todo_link_findings(content, &links) {
+        Ok(findings) => findings.iter().map(todo_signal_from_finding).collect(),
+        Err(err) => {
+            eprintln!("[preflight] todo: agent:todo unreadable ({err:#}); todo link checks skipped");
+            Vec::new()
+        }
+    }
+}
+
 /// A change detected in a related document since the last cycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelatedDocChange {
@@ -793,6 +876,10 @@ pub struct PreflightOutput {
     /// Opportunistic gated-review verification results.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gate_verify: Vec<GateVerifyResult>,
+    /// `#todoids`: `agent:todo` items whose tracked-work link calls for an
+    /// action (operator-checked gates to resolve, finished links to check off).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub todo_signals: Vec<TodoSignal>,
     /// Canonical serialized list of user-authored changes that should preempt
     /// or guide the current response cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1483,6 +1570,8 @@ pub struct PendingMaintenanceReport {
     pub review_gated_count: usize,
     pub legacy_gated_in_backlog_count: usize,
     pub terminal_debris_lines_pruned: usize,
+    /// `#todoids`: todo link signals for the preflight output.
+    pub todo_signals: Vec<TodoSignal>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -2153,6 +2242,12 @@ fn run_pending_maintenance_with_options(
         );
     }
 
+    // 6. `#todoids`: operator todo checks at a cheap, deterministic event.
+    let todo_signals = todo_signals_for_document(file, &current_content);
+    for signal in &todo_signals {
+        eprintln!("[preflight] todo: {} {}: {}", signal.kind, signal.todo, signal.action);
+    }
+
     Ok(PendingMaintenanceReport {
         reordered,
         backlog_gated_count,
@@ -2160,6 +2255,7 @@ fn run_pending_maintenance_with_options(
         review_gated_count,
         legacy_gated_in_backlog_count: backlog_gated_count,
         terminal_debris_lines_pruned,
+        todo_signals,
     })
 }
 

@@ -904,6 +904,7 @@ version = "0.35.509"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "anyhow",
 ]
 
 [[package]]

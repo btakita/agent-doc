@@ -2782,6 +2782,7 @@ fn run_with_options_to_writer_in_pass(
         review_count: pending_report.review_count,
         review_gated_count: pending_report.review_gated_count,
         gate_verify: gate_verify_results,
+        todo_signals: pending_report.todo_signals.clone(),
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts,

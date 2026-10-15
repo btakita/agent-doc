@@ -54,6 +54,35 @@
 //!   [`open_todo_items_referencing`] reports open items tied to ids a closeout
 //!   resolved, for the "mark it done" advisory.
 //!
+//! ### Todo id discipline (`#todoids`)
+//! - Every `--todo-add` item carries an own id. It either REUSES the id of the
+//!   tracked work it is the operator prompt for, or MINTS a fresh one; an
+//!   id-less add is never written. [`TodoLinkIndex`] carries the tracked-work
+//!   evidence (open `agent:review` / `agent:backlog` / `agent:icebox` ids and
+//!   resolved ids) the caller read from the document.
+//! - Reuse is automatic when the action cites exactly one OPEN
+//!   `agent:review` or `agent:backlog` id (`Verify [#gate1] live`): the item
+//!   becomes `- [ ] [#gate1] Verify [#gate1] live`. When an OPEN todo already
+//!   owns that id the add is a no-op (duplicate todos for one id fold into the
+//!   existing item); when only a CHECKED todo owns it, the new action is a
+//!   follow-up and gets a minted id that still cites the gate.
+//! - An explicit `id=<id>` / `[#<id>]` reuses `<id>` when it is open tracked
+//!   work, is a custom minted id when the document has no such tracked work,
+//!   and is REJECTED when `<id>` names tracked work that is already resolved —
+//!   a todo for finished work is moot.
+//! - Minted ids avoid every `#id` token in the document plus every id the
+//!   link index knows (open or resolved), so a minted id can never be mistaken
+//!   for a link to tracked work.
+//! - [`preserve_checked_todo_items`] makes an operator's `[x]` sticky against
+//!   a `patch:todo` replacement: an item the document already holds checked
+//!   stays checked when the patch carries it open. Only `--todo-reopen`
+//!   unchecks an item.
+//! - [`todo_link_findings`] evaluates todos against the link index for the
+//!   preflight signals, and [`auto_complete_linked_todos`] checks off an OPEN
+//!   item whose OWN id is resolved tracked work. An item that only CITES
+//!   resolved work is surfaced, never auto-completed: its action may cover
+//!   more than the resolved item, which needs human judgement.
+//!
 //! ## Agentic Contracts
 //! - All functions are pure: no file IO, no clock, no randomness.
 //! - Placement depends only on the component layout, so the same document
@@ -274,6 +303,91 @@ pub struct TodoAddOutcome {
     /// The item's own id: the new id when inserted, or the matching existing
     /// item's id (`None` for an id-less legacy item) when the add was a no-op.
     pub id: Option<String>,
+    /// `#todoids`: the tracked-work component (`review` / `backlog`) whose id
+    /// the item reuses as its own id; `None` for a minted id.
+    pub linked: Option<String>,
+}
+
+/// `#todoids`: tracked-work evidence a todo id is evaluated against.
+///
+/// Built by the caller from the document (and, where available, its done
+/// archive): `open` maps each open tracked-work id to its component
+/// (`review`, `backlog`, `icebox`), `resolved` holds ids of finished work. An
+/// id present in both is OPEN: contradictory evidence never counts as
+/// resolution. An id in neither is unknown (a minted todo id, a GitHub issue
+/// number, prose) and never drives an automatic action.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TodoLinkIndex {
+    open: std::collections::BTreeMap<String, String>,
+    resolved: std::collections::BTreeSet<String>,
+}
+
+fn normalize_link_id(id: &str) -> String {
+    id.trim().trim_start_matches('#').to_ascii_lowercase()
+}
+
+impl TodoLinkIndex {
+    /// Record open tracked work `id` in `component` (first component wins).
+    pub fn mark_open(&mut self, id: &str, component: &str) {
+        let id = normalize_link_id(id);
+        if !id.is_empty() {
+            self.open.entry(id).or_insert_with(|| component.to_string());
+        }
+    }
+
+    /// Record finished tracked work `id`.
+    pub fn mark_resolved(&mut self, id: &str) {
+        let id = normalize_link_id(id);
+        if !id.is_empty() {
+            self.resolved.insert(id);
+        }
+    }
+
+    /// The component holding open tracked work `id`, if any.
+    pub fn open_component(&self, id: &str) -> Option<&str> {
+        self.open.get(&normalize_link_id(id)).map(String::as_str)
+    }
+
+    /// Whether `id` is resolved and not also open.
+    pub fn is_resolved(&self, id: &str) -> bool {
+        let id = normalize_link_id(id);
+        !self.open.contains_key(&id) && self.resolved.contains(&id)
+    }
+
+    /// Whether the index has any evidence about `id`.
+    pub fn knows(&self, id: &str) -> bool {
+        let id = normalize_link_id(id);
+        self.open.contains_key(&id) || self.resolved.contains(&id)
+    }
+
+    /// Every id the index knows, open or resolved.
+    pub fn known_ids(&self) -> impl Iterator<Item = &String> {
+        self.open.keys().chain(self.resolved.iter())
+    }
+
+    /// The component an OPEN `id` may be linked from by a todo: `review` or
+    /// `backlog` (legacy `pending` counts as backlog). Icebox work is frozen
+    /// and is never an operator prompt's target.
+    fn linkable_component(&self, id: &str) -> Option<&str> {
+        self.open_component(id)
+            .filter(|component| matches!(*component, "review" | "backlog" | "pending"))
+    }
+}
+
+/// Every valid todo-id token cited in `action`, lowercase, in first-seen order.
+fn cited_ids(action: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (start, _) in action.match_indices('#') {
+        let id: String = action[start + 1..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if is_valid_todo_id(&id) && !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
 }
 
 /// Normalize one `--todo-add` action into its checklist text.
@@ -354,15 +468,21 @@ fn body_id_tokens(body: &str) -> std::collections::HashSet<String> {
 ///
 /// The new item gets a stable own id, `- [ ] [#<id>] <action>`, so later
 /// `--todo-done`/`--todo-edit` calls (and the keyed document merge) address it
-/// by identity rather than by its text. `id_for(action, counter)` derives a
-/// candidate id; the first candidate not already cited in the todo body and
-/// not in `reserved` (the document's tracked-work ids) wins. A caller-supplied
-/// `id=<id>` / `[#<id>]` prefix is used verbatim.
+/// by identity rather than by its text (`#todoids`):
+/// - an explicit `id=<id>` / `[#<id>]` prefix is used verbatim, and rejected
+///   when it names tracked work `links` reports resolved;
+/// - otherwise, when the action cites exactly one OPEN `agent:review` /
+///   `agent:backlog` id, the item reuses that id (a no-op when an OPEN todo
+///   already owns it);
+/// - otherwise `id_for(action, counter)` derives candidates and the first one
+///   not cited anywhere in the document, not in `reserved` (the document's
+///   tracked-work ids), and unknown to `links` wins.
 pub fn add_todo_item_to_document(
     content: &str,
     text: &str,
     id_for: &dyn Fn(&str, u64) -> String,
     reserved: &std::collections::HashSet<String>,
+    links: &TodoLinkIndex,
 ) -> Result<TodoAddOutcome> {
     let (explicit_id, action) = parse_todo_input(text, "--todo-add")?;
     let (ensured, todo, created_component) = ensure_todo_component_in_document(content)?;
@@ -373,37 +493,87 @@ pub fn add_todo_item_to_document(
         .iter()
         .find(|item| normalize_action_text(item.action) == wanted)
     {
+        let id = existing.own_id.map(str::to_ascii_lowercase);
+        let linked = id
+            .as_deref()
+            .and_then(|id| links.linkable_component(id))
+            .map(str::to_string);
         return Ok(TodoAddOutcome {
             content: ensured.clone(),
             inserted: false,
             created_component,
-            id: existing.own_id.map(str::to_ascii_lowercase),
+            id,
+            linked,
         });
     }
-    let id = match explicit_id {
+    let owner = |id: &str| {
+        items
+            .iter()
+            .find(|item| item.own_id.is_some_and(|own| own.eq_ignore_ascii_case(id)))
+    };
+    let (id, linked) = match explicit_id {
         Some(id) => {
             anyhow::ensure!(
-                !items
-                    .iter()
-                    .any(|item| item.own_id.is_some_and(|own| own.eq_ignore_ascii_case(&id))),
+                owner(&id).is_none(),
                 "--todo-add: agent:todo already has an item with id [#{id}]; use --todo-edit \"{id}=<text>\" to change it"
             );
-            id
+            anyhow::ensure!(
+                !links.is_resolved(&id),
+                "--todo-add: [#{id}] names tracked work that is already resolved, so an operator todo for it is moot (#todoids). Cite it in a new action without id= to get a fresh id, or reopen the tracked item first"
+            );
+            let linked = links.linkable_component(&id).map(str::to_string);
+            (id, linked)
         }
         None => {
-            let taken = body_id_tokens(body);
-            let mut chosen = None;
-            for counter in 0..256u64 {
-                let candidate = id_for(&action, counter).to_ascii_lowercase();
-                if is_valid_todo_id(&candidate)
-                    && !taken.contains(&candidate)
-                    && !reserved.contains(&candidate)
-                {
-                    chosen = Some(candidate);
-                    break;
+            let link_candidates: Vec<String> = cited_ids(&action)
+                .into_iter()
+                .filter(|id| links.linkable_component(id).is_some())
+                .collect();
+            let reuse = match link_candidates.as_slice() {
+                [only] => match owner(only) {
+                    // `#todoids`: one open todo per tracked id — a second add
+                    // for the same gate folds into the existing item.
+                    Some(existing) if existing.state.is_open() => {
+                        return Ok(TodoAddOutcome {
+                            content: ensured.clone(),
+                            inserted: false,
+                            created_component,
+                            id: Some(only.clone()),
+                            linked: links.linkable_component(only).map(str::to_string),
+                        });
+                    }
+                    // A checked todo already owns the id: this is a follow-up
+                    // action, minted below and still citing the gate.
+                    Some(_) => None,
+                    None => Some(only.clone()),
+                },
+                _ => None,
+            };
+            match reuse {
+                Some(id) => {
+                    let linked = links.linkable_component(&id).map(str::to_string);
+                    (id, linked)
+                }
+                None => {
+                    let taken = body_id_tokens(&ensured);
+                    let mut chosen = None;
+                    for counter in 0..256u64 {
+                        let candidate = id_for(&action, counter).to_ascii_lowercase();
+                        if is_valid_todo_id(&candidate)
+                            && !taken.contains(&candidate)
+                            && !reserved.contains(&candidate)
+                            && !links.knows(&candidate)
+                        {
+                            chosen = Some(candidate);
+                            break;
+                        }
+                    }
+                    (
+                        chosen.context("--todo-add could not derive a collision-free todo id")?,
+                        None,
+                    )
                 }
             }
-            chosen.context("--todo-add could not derive a collision-free todo id")?
         }
     };
     let mut new_body = String::with_capacity(body.len() + action.len() + 16);
@@ -418,6 +588,7 @@ pub fn add_todo_item_to_document(
         inserted: true,
         created_component,
         id: Some(id),
+        linked,
     })
 }
 
@@ -955,6 +1126,228 @@ pub fn todo_unreferenced_ids(content: &str, ids: &[String]) -> Vec<String> {
     missing
 }
 
+/// Whether a `before` item is the same todo as an `after` item for the
+/// sticky-check rule: the same own id, or — when the `after` item has no own
+/// id — an id-less `before` item with the same action text.
+fn same_item_identity(before: &LocatedItem, after: &LocatedItem) -> bool {
+    match (&before.own_id, &after.own_id) {
+        (Some(x), Some(y)) => x == y,
+        (None, None) => normalize_action_text(&before.action) == normalize_action_text(&after.action),
+        // An id-less `after` copy of an id-bearing item (the agent dropped the
+        // id while reproducing it) is still that item when the text matches.
+        (Some(_), None) => normalize_action_text(&before.action) == normalize_action_text(&after.action),
+        (None, Some(_)) => false,
+    }
+}
+
+/// `#todoids`: keep every operator `[x]` that a `patch:todo` replacement
+/// carries open.
+///
+/// `before` is the todo body the patch replaces (the document as the write
+/// read it) and `after` the patched body. An `after` item that is `[ ]`/`[/]`
+/// while the same item is `[x]` in `before` is rewritten to `[x]` in place, so
+/// an agent patch built from a stale read can never revert the operator's
+/// check. Text edits the patch made are kept. Only `--todo-reopen` unchecks an
+/// item. Returns the body and how many items were re-checked.
+pub fn preserve_checked_todo_items(before: &str, after: &str) -> (String, usize) {
+    let checked: Vec<LocatedItem> = TodoBody::parse(before)
+        .items
+        .into_iter()
+        .filter(|item| !item.state.is_open())
+        .collect();
+    if checked.is_empty() {
+        return (after.to_string(), 0);
+    }
+    let mut parsed = TodoBody::parse(after);
+    let mut restored = 0usize;
+    for item in parsed.items.clone() {
+        if !item.state.is_open() {
+            continue;
+        }
+        if checked.iter().any(|done| same_item_identity(done, &item)) {
+            parsed.rewrite_line(item.line, TodoState::Done, item.own_id.as_deref(), &item.action);
+            restored += 1;
+        }
+    }
+    if restored == 0 {
+        return (after.to_string(), 0);
+    }
+    (parsed.render(), restored)
+}
+
+/// `#todoids`: actions of items a `patch:todo` ADDED without an own id — items
+/// in `after` with no `[#id]` whose text no `before` item carries. The write
+/// path reports them (the id-bearing path is `--todo-add`); it does not mint
+/// ids for them, because the keyed merge keys an id-less item by its text and
+/// re-keying a line the operator may be editing would duplicate it.
+pub fn new_idless_todo_items(before: &str, after: &str) -> Vec<String> {
+    let known: std::collections::HashSet<String> = TodoBody::parse(before)
+        .items
+        .into_iter()
+        .map(|item| normalize_action_text(&item.action))
+        .collect();
+    TodoBody::parse(after)
+        .items
+        .into_iter()
+        .filter(|item| item.own_id.is_none())
+        .map(|item| normalize_action_text(&item.action))
+        .filter(|text| !known.contains(text))
+        .collect()
+}
+
+/// What a todo's link to tracked work says should happen next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TodoLinkFindingKind {
+    /// The operator checked a todo whose own id is an OPEN `agent:review`
+    /// gate: the agent resolves the gate (or records the follow-up) — the
+    /// binary does not, because which outcome the operator chose is judgement.
+    OperatorDoneReviewOpen,
+    /// The operator checked a todo whose own id is OPEN `agent:backlog` work:
+    /// the operator prerequisite is done, so the item is unblocked.
+    OperatorDoneBacklogOpen,
+    /// An OPEN todo whose OWN id is resolved tracked work: the operator prompt
+    /// is finished or moot. A closeout auto-completes it.
+    LinkedWorkResolved,
+    /// An OPEN todo that only CITES tracked work, all of it resolved: surfaced
+    /// only, because the action may cover more than the cited work.
+    CitedWorkResolved,
+}
+
+impl TodoLinkFindingKind {
+    /// Stable snake_case name for preflight JSON and ops.log.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OperatorDoneReviewOpen => "operator_done_review_open",
+            Self::OperatorDoneBacklogOpen => "operator_done_backlog_open",
+            Self::LinkedWorkResolved => "linked_work_resolved",
+            Self::CitedWorkResolved => "cited_work_resolved",
+        }
+    }
+}
+
+/// One todo whose tracked-work link calls for an action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TodoLinkFinding {
+    pub kind: TodoLinkFindingKind,
+    /// The tracked-work ids the finding is about (the own id, or the cited ids).
+    pub ids: Vec<String>,
+    /// The `--todo-*` selector for the item: its own id, else its action text.
+    pub selector: String,
+    /// `#id` or quoted action of the item, for receipts.
+    pub label: String,
+}
+
+/// `#todoids`: evaluate every `agent:todo` item against `links`.
+///
+/// Pure and deterministic: the same document and index always yield the same
+/// findings in item order. A document without `agent:todo` yields none; a
+/// document whose components do not parse is an error (never "no findings"),
+/// so a caller can fail closed.
+pub fn todo_link_findings(content: &str, links: &TodoLinkIndex) -> Result<Vec<TodoLinkFinding>> {
+    let Some(todo) = find_todo_component(content)? else {
+        return Ok(Vec::new());
+    };
+    let body = TodoBody::parse(todo.content(content));
+    let mut out = Vec::new();
+    for item in &body.items {
+        let selector = item.own_id.clone().unwrap_or_else(|| item.action.clone());
+        let label = item_label(item.own_id.as_deref(), &item.action);
+        let own = item.own_id.as_deref();
+        let finding = |kind, ids: Vec<String>| TodoLinkFinding {
+            kind,
+            ids,
+            selector: selector.clone(),
+            label: label.clone(),
+        };
+        if !item.state.is_open() {
+            if let Some(own) = own {
+                match links.open_component(own) {
+                    Some("review") => {
+                        out.push(finding(TodoLinkFindingKind::OperatorDoneReviewOpen, vec![own.to_string()]))
+                    }
+                    Some("backlog" | "pending") => {
+                        out.push(finding(TodoLinkFindingKind::OperatorDoneBacklogOpen, vec![own.to_string()]))
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        if let Some(own) = own
+            && links.is_resolved(own)
+        {
+            out.push(finding(TodoLinkFindingKind::LinkedWorkResolved, vec![own.to_string()]));
+            continue;
+        }
+        if own.is_some_and(|own| links.knows(own)) {
+            // Linked to OPEN work: nothing to do until the operator acts.
+            continue;
+        }
+        let cited: Vec<String> = cited_ids(&item.action)
+            .into_iter()
+            .filter(|id| Some(id.as_str()) != own && links.knows(id))
+            .collect();
+        if !cited.is_empty() && cited.iter().all(|id| links.is_resolved(id)) {
+            out.push(finding(TodoLinkFindingKind::CitedWorkResolved, cited));
+        }
+    }
+    Ok(out)
+}
+
+/// Result of [`auto_complete_linked_todos`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TodoAutoCompleteOutcome {
+    /// The document after the auto-completion (unchanged when none applied).
+    pub content: String,
+    /// Own ids of the items checked off, in item order.
+    pub completed: Vec<String>,
+    /// Duplicate copies folded afterwards (`#tododupdone`).
+    pub reconciled: usize,
+}
+
+/// `#todoids`: check off every OPEN todo whose OWN id is resolved tracked work
+/// in `links` ([`TodoLinkFindingKind::LinkedWorkResolved`]), in place, then
+/// fold duplicate copies.
+///
+/// This is the only automatic todo completion. It never touches an item that
+/// merely cites resolved work, an id-less item, or an item whose id `links`
+/// does not know (fail closed: missing evidence is never resolution).
+pub fn auto_complete_linked_todos(
+    content: &str,
+    links: &TodoLinkIndex,
+) -> Result<TodoAutoCompleteOutcome> {
+    let unchanged = |content: &str| TodoAutoCompleteOutcome {
+        content: content.to_string(),
+        completed: Vec::new(),
+        reconciled: 0,
+    };
+    let Some(todo) = find_todo_component(content)? else {
+        return Ok(unchanged(content));
+    };
+    let mut body = TodoBody::parse(todo.content(content));
+    let mut completed = Vec::new();
+    for item in body.items.clone() {
+        let Some(own) = item.own_id.as_deref() else {
+            continue;
+        };
+        if item.state.is_open() && links.is_resolved(own) {
+            body.rewrite_line(item.line, TodoState::Done, Some(own), &item.action);
+            if !completed.iter().any(|seen: &String| seen == own) {
+                completed.push(own.to_string());
+            }
+        }
+    }
+    if completed.is_empty() {
+        return Ok(unchanged(content));
+    }
+    let (folded, reconciled) = reconcile_todo_body(&body.render());
+    Ok(TodoAutoCompleteOutcome {
+        content: todo.replace_content(content, &folded),
+        completed,
+        reconciled,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -973,7 +1366,17 @@ mod tests {
     }
 
     fn add(content: &str, text: &str) -> Result<TodoAddOutcome> {
-        add_todo_item_to_document(content, text, &test_id, &std::collections::HashSet::new())
+        add_todo_item_to_document(
+            content,
+            text,
+            &test_id,
+            &std::collections::HashSet::new(),
+            &TodoLinkIndex::default(),
+        )
+    }
+
+    fn add_linked(content: &str, text: &str, links: &TodoLinkIndex) -> Result<TodoAddOutcome> {
+        add_todo_item_to_document(content, text, &test_id, &std::collections::HashSet::new(), links)
     }
 
     fn wrap(body: &str) -> String {
@@ -1147,7 +1550,14 @@ mod tests {
         let content = wrap(&format!("- [ ] Check (#t0{len_digit})\n"));
         let reserved: std::collections::HashSet<String> =
             [format!("t1{len_digit}")].into_iter().collect();
-        let outcome = add_todo_item_to_document(&content, action, &test_id, &reserved).unwrap();
+        let outcome = add_todo_item_to_document(
+            &content,
+            action,
+            &test_id,
+            &reserved,
+            &TodoLinkIndex::default(),
+        )
+        .unwrap();
         assert_eq!(outcome.id, Some(format!("t2{len_digit}")));
     }
 
@@ -1472,5 +1882,189 @@ mod tests {
         assert_eq!(checklist_item_text("12. [ ] d"), Some("d"));
         assert_eq!(checklist_item_text("- plain bullet"), None);
         assert_eq!(checklist_item_text("[ ] no marker"), None);
+    }
+    fn links(open: &[(&str, &str)], resolved: &[&str]) -> TodoLinkIndex {
+        let mut index = TodoLinkIndex::default();
+        for (id, component) in open {
+            index.mark_open(id, component);
+        }
+        for id in resolved {
+            index.mark_resolved(id);
+        }
+        index
+    }
+
+    #[test]
+    fn link_index_treats_contradictory_evidence_as_open() {
+        let index = links(&[("gate1", "review")], &["gate1", "#Done2"]);
+        assert_eq!(index.open_component("#GATE1"), Some("review"));
+        assert!(!index.is_resolved("gate1"), "open evidence wins");
+        assert!(index.is_resolved("done2"));
+        assert!(index.knows("gate1") && index.knows("done2"));
+        assert!(!index.knows("k3vd"));
+    }
+
+    #[test]
+    fn add_reuses_the_one_open_review_or_backlog_id_the_action_cites() {
+        let index = links(&[("gate1", "review"), ("work", "backlog")], &[]);
+        let review = add_linked(&wrap(""), "Verify [#gate1] in a live pane", &index).unwrap();
+        assert!(review.inserted);
+        assert_eq!(review.id.as_deref(), Some("gate1"));
+        assert_eq!(review.linked.as_deref(), Some("review"));
+        assert_eq!(
+            todo_body(&review.content),
+            "- [ ] [#gate1] Verify [#gate1] in a live pane\n"
+        );
+        let backlog = add_linked(&wrap(""), "Grant CI access for (#work)", &index).unwrap();
+        assert_eq!(backlog.id.as_deref(), Some("work"));
+        assert_eq!(backlog.linked.as_deref(), Some("backlog"));
+    }
+
+    #[test]
+    fn add_mints_when_the_action_links_nothing_or_several_things() {
+        let index = links(
+            &[("gate1", "review"), ("gate2", "review"), ("cold", "icebox")],
+            &["old"],
+        );
+        // Two open gates: the action spans both, so it gets its own id.
+        let two = add_linked(&wrap(""), "Decide #gate1 vs #gate2", &index).unwrap();
+        assert_eq!(two.linked, None);
+        assert!(two.id.as_deref().is_some_and(|id| id.starts_with('t')));
+        // Icebox work, resolved work, and unknown ids (GitHub numbers) never link.
+        for action in ["Thaw (#cold)", "Re-check (#old)", "Watch GH #267"] {
+            let outcome = add_linked(&wrap(""), action, &index).unwrap();
+            assert_eq!(outcome.linked, None, "{action}");
+            assert!(outcome.id.as_deref().is_some_and(|id| id.starts_with('t')), "{action}");
+        }
+    }
+
+    #[test]
+    fn add_for_an_already_linked_open_todo_folds_into_it() {
+        let index = links(&[("gate1", "review")], &[]);
+        let content = wrap("- [ ] [#gate1] Verify [#gate1] in a live pane\n");
+        let again = add_linked(&content, "Verify [#gate1] in the 263 IDE", &index).unwrap();
+        assert!(!again.inserted, "one open todo per tracked id");
+        assert_eq!(again.id.as_deref(), Some("gate1"));
+        assert_eq!(again.content, content);
+        // Once the operator checked it, a new action for the gate is a follow-up
+        // with its own minted id that still cites the gate.
+        let checked = wrap("- [x] [#gate1] Verify [#gate1] in a live pane\n");
+        let follow = add_linked(&checked, "Re-verify [#gate1] after the fix", &index).unwrap();
+        assert!(follow.inserted);
+        assert_ne!(follow.id.as_deref(), Some("gate1"));
+        assert_eq!(follow.linked, None);
+    }
+
+    #[test]
+    fn add_explicit_id_links_open_work_mints_custom_and_rejects_resolved_work() {
+        let index = links(&[("gate1", "review")], &["shipped"]);
+        let linked = add_linked(&wrap(""), "id=gate1 Verify live", &index).unwrap();
+        assert_eq!(linked.linked.as_deref(), Some("review"));
+        assert_eq!(todo_body(&linked.content), "- [ ] [#gate1] Verify live\n");
+        let custom = add_linked(&wrap(""), "id=rotate Rotate the key", &index).unwrap();
+        assert_eq!(custom.linked, None);
+        assert_eq!(custom.id.as_deref(), Some("rotate"));
+        let err = add_linked(&wrap(""), "id=shipped Verify the release", &index).unwrap_err();
+        assert!(err.to_string().contains("already resolved"), "{err}");
+    }
+
+    #[test]
+    fn minted_ids_avoid_every_document_token_and_known_link_id() {
+        let action = "Rotate key";
+        let d = action.len() % 10;
+        // `t0d` is cited outside agent:todo, `t1d` is a resolved (archived) id.
+        let content = format!(
+            "<!-- agent:exchange -->\nsee #t0{d}\n<!-- /agent:exchange -->\n<!-- agent:todo -->\n<!-- /agent:todo -->\n"
+        );
+        let index = links(&[], &[&format!("t1{d}")]);
+        let outcome = add_linked(&content, action, &index).unwrap();
+        assert_eq!(outcome.id, Some(format!("t2{d}")));
+    }
+
+    #[test]
+    fn preserve_checked_keeps_an_operator_check_a_stale_patch_carries_open() {
+        let before = "- [x] [#a] Rotate key\n- [x] Call the vendor\n- [ ] [#b] Publish\n";
+        let after = "- [ ] [#a] Rotate key — note\n- [ ] Call the vendor\n- [ ] [#b] Publish\n- [ ] [#c] New\n";
+        let (body, restored) = preserve_checked_todo_items(before, after);
+        assert_eq!(restored, 2);
+        assert_eq!(
+            body,
+            "- [x] [#a] Rotate key — note\n- [x] Call the vendor\n- [ ] [#b] Publish\n- [ ] [#c] New\n"
+        );
+        // Nothing checked before: the patch is untouched.
+        assert_eq!(preserve_checked_todo_items("- [ ] x\n", after), (after.to_string(), 0));
+        // A patch that drops the id while reproducing the checked item still keeps the check.
+        let (body, restored) = preserve_checked_todo_items("- [x] [#a] Rotate key\n", "- [ ] Rotate key\n");
+        assert_eq!((body.as_str(), restored), ("- [x] Rotate key\n", 1));
+    }
+
+    #[test]
+    fn new_idless_items_lists_only_patch_added_items_without_an_id() {
+        let before = "- [ ] Call the vendor\n- [ ] [#a] Rotate\n";
+        let after = "- [ ] Call the vendor\n- [ ] [#a] Rotate\n- [ ] [#n] Has id\n- [ ] Publish  draft\n";
+        assert_eq!(new_idless_todo_items(before, after), vec!["Publish draft".to_string()]);
+    }
+
+    #[test]
+    fn link_findings_map_each_state_to_one_documented_kind() {
+        let index = links(
+            &[("gate1", "review"), ("work", "backlog"), ("open2", "review")],
+            &["shipped", "gone"],
+        );
+        let content = wrap(concat!(
+            "- [x] [#gate1] Verify the gate\n",
+            "- [x] [#work] Grant access\n",
+            "- [ ] [#shipped] Verify the release\n",
+            "- [ ] [#k3vd] Re-check (#gone)\n",
+            "- [ ] [#k4vd] Decide (#gone) and (#open2)\n",
+            "- [ ] [#open2] Pending operator\n",
+            "- [ ] Watch GH #267\n",
+            "- [x] [#k5vd] Done, unlinked\n",
+        ));
+        let findings = todo_link_findings(&content, &index).unwrap();
+        let summary: Vec<(&str, Vec<String>, String)> = findings
+            .iter()
+            .map(|f| (f.kind.as_str(), f.ids.clone(), f.selector.clone()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("operator_done_review_open", vec!["gate1".to_string()], "gate1".to_string()),
+                ("operator_done_backlog_open", vec!["work".to_string()], "work".to_string()),
+                ("linked_work_resolved", vec!["shipped".to_string()], "shipped".to_string()),
+                ("cited_work_resolved", vec!["gone".to_string()], "k3vd".to_string()),
+            ]
+        );
+        assert!(todo_link_findings("no components", &index).unwrap().is_empty());
+    }
+
+    #[test]
+    fn auto_complete_checks_only_open_items_whose_own_id_is_resolved() {
+        let index = links(&[("open2", "review")], &["shipped", "gone"]);
+        let content = wrap(concat!(
+            "- [ ] [#shipped] Verify the release\n",
+            "- [ ] [#k3vd] Re-check (#gone)\n",
+            "- [ ] [#open2] Pending operator\n",
+            "- [ ] Re-check gone\n",
+            "- [x] [#shipped] Verify the release — done\n",
+        ));
+        let outcome = auto_complete_linked_todos(&content, &index).unwrap();
+        assert_eq!(outcome.completed, vec!["shipped".to_string()]);
+        assert_eq!(outcome.reconciled, 1, "the checked copy folds into the item");
+        assert_eq!(
+            todo_body(&outcome.content),
+            concat!(
+                "- [x] [#shipped] Verify the release — done\n",
+                "- [ ] [#k3vd] Re-check (#gone)\n",
+                "- [ ] [#open2] Pending operator\n",
+                "- [ ] Re-check gone\n",
+            )
+        );
+        // Idempotent, and a no-op without evidence.
+        let again = auto_complete_linked_todos(&outcome.content, &index).unwrap();
+        assert!(again.completed.is_empty());
+        assert_eq!(again.content, outcome.content);
+        let none = auto_complete_linked_todos(&content, &TodoLinkIndex::default()).unwrap();
+        assert_eq!(none.content, content);
     }
 }

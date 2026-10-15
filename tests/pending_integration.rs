@@ -1311,7 +1311,13 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
         "{content}"
     );
     let id = todo_item_id(&content, "Verify [#rvw1] in a live pane");
-    assert_ne!(id, "rvw1", "the own id is fresh, not the cited gate id");
+    // `#todoids`: the action cites exactly one open review gate, so the todo
+    // REUSES that gate's id instead of minting a second identity for it.
+    assert_eq!(id, "rvw1", "the todo reuses the open gate id it cites");
+    assert!(
+        stderr.contains("(reuses agent:review #rvw1)"),
+        "the receipt names the reused id: {stderr}"
+    );
     assert_eq!(
         component_body(&content, "todo"),
         format!("- [ ] [#{id}] Verify [#rvw1] in a live pane")
@@ -1489,9 +1495,10 @@ fn write_todo_done_edit_reopen_remove_round_trip_preserves_operator_items() {
         .failure();
 }
 
-/// `#tododone`: resolving tracked work that an open todo cites prints a
-/// non-blocking advisory naming the `--todo-done` command; checking the todo
-/// off in the same closeout silences it.
+/// `#tododone`: resolving tracked work that an open todo only CITES (its own
+/// id is a custom one) prints a non-blocking advisory naming the
+/// `--todo-done` command and never writes; checking the todo off in a later
+/// closeout silences it.
 #[test]
 fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
     let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
@@ -1503,12 +1510,13 @@ fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
             "--review-add",
             "id=rvw3 needs live verification",
             "--todo-add",
-            "Verify [#rvw3] in a live pane",
+            "id=vrfy3 Verify [#rvw3] in a live pane",
         ])
         .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
         .assert()
         .success();
     let id = todo_item_id(&fs::read_to_string(&doc).unwrap(), "Verify [#rvw3] in a live pane");
+    assert_eq!(id, "vrfy3", "an explicit custom id is kept");
     let resolved = agent_doc()
         .args([
             "write",
@@ -1526,6 +1534,7 @@ fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
         "stderr: {stderr}"
     );
     assert!(stderr.contains(&format!("--todo-done {id}")), "stderr: {stderr}");
+    assert!(!stderr.contains("[todo] auto-done"), "cite-only todos are never auto-completed: {stderr}");
     // The advisory never writes: the item is still open.
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
@@ -1549,6 +1558,128 @@ fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
         component_body(&fs::read_to_string(&doc).unwrap(), "todo")
             .starts_with(&format!("- [x] [#{id}]"))
     );
+}
+
+/// `#todoids` end to end: a todo that reuses a review gate's id is the
+/// operator prompt for that gate.
+/// 1. `--todo-add` citing the open gate reuses its id; a second add for the
+///    same gate folds into it; an explicit id naming resolved work is refused.
+/// 2. The operator checks the box in the editor (here: on disk). Preflight
+///    recognises it with no agent write and signals that the gate is ready to
+///    resolve; a later stale `patch:todo` carrying the item open cannot
+///    uncheck it.
+/// 3. A todo linked to a gate the closeout resolves is checked off in that
+///    same closeout, with an `ops.log` reason.
+#[test]
+fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let write = |args: &[&str], stdin: &str| {
+        let mut full = vec!["write", doc.to_str().unwrap(), "--force-disk"];
+        full.extend_from_slice(args);
+        agent_doc().args(&full).write_stdin(stdin.to_string()).assert().success()
+    };
+    let exchange = "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n";
+    write(
+        &[
+            "--review-add",
+            "id=gatea launcher policy decision pending",
+            "--review-add",
+            "id=gateb live verification pending",
+            "--todo-add",
+            "Decide the launcher policy (#gatea)",
+            "--todo-add",
+            "Verify [#gateb] in the 263 IDE",
+        ],
+        exchange,
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        component_body(&content, "todo"),
+        "- [ ] [#gatea] Decide the launcher policy (#gatea)\n- [ ] [#gateb] Verify [#gateb] in the 263 IDE"
+    );
+    // A second todo for an already-prompted gate folds into the open item.
+    let again = write(&["--backlog-only", "--todo-add", "Verify [#gateb] again"], "");
+    let stderr = String::from_utf8_lossy(&again.get_output().stderr);
+    assert!(stderr.contains("already present"), "{stderr}");
+    assert_eq!(component_body(&fs::read_to_string(&doc).unwrap(), "todo").lines().count(), 2);
+
+    // 2. The operator checks gatea's box; no agent write happens.
+    let checked = fs::read_to_string(&doc).unwrap().replace(
+        "- [ ] [#gatea] Decide",
+        "- [x] [#gatea] Decide",
+    );
+    fs::write(&doc, &checked).unwrap();
+    // Preflight reads the same document in a fresh project (the write cycles
+    // above were never committed, which preflight would otherwise recover first).
+    // The OPEN `[#gateb]` todo stays: a todo own id is tracked, so the
+    // shadow-backlog guard admits it, and a todo linked to OPEN work signals
+    // nothing until the operator acts.
+    let (_preflight_tmp, preflight_doc) = setup_doc("");
+    fs::write(&preflight_doc, &checked).unwrap();
+    let preflight = agent_doc()
+        .args(["preflight", preflight_doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&preflight.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
+        panic!(
+            "preflight JSON ({err}): stdout={stdout} stderr={}",
+            String::from_utf8_lossy(&preflight.stderr)
+        )
+    });
+    let signals = parsed
+        .get("todo_signals")
+        .and_then(|v| v.as_array())
+        .unwrap_or_else(|| panic!("todo_signals missing: {stdout}"));
+    assert_eq!(signals.len(), 1, "{stdout}");
+    assert_eq!(signals[0]["kind"], "operator_done_review_open");
+    assert_eq!(signals[0]["todo"], "gatea");
+    assert!(
+        signals[0]["action"].as_str().unwrap().contains("--review-resolve gatea"),
+        "{stdout}"
+    );
+    // A stale patch:todo (built before the check) carries gatea open; the
+    // operator's check survives.
+    write(
+        &[],
+        "<!-- patch:exchange -->\nstale\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] [#gatea] Decide the launcher policy (#gatea)\n- [ ] [#gateb] Verify [#gateb] in the 263 IDE\n<!-- /patch:todo -->\n",
+    );
+    assert!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo")
+            .starts_with("- [x] [#gatea] Decide"),
+        "an agent write must not revert the operator's check"
+    );
+
+    // 3. Resolving gateb checks its linked todo off in the same closeout.
+    let resolved = write(&["--backlog-only", "--review-resolve", "gateb"], "");
+    let stderr = String::from_utf8_lossy(&resolved.get_output().stderr);
+    assert!(stderr.contains("[todo] auto-done: #gateb"), "{stderr}");
+    assert!(!stderr.contains("(#tododone): this closeout"), "{stderr}");
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        component_body(&content, "todo").contains("- [x] [#gateb] Verify [#gateb] in the 263 IDE"),
+        "{content}"
+    );
+    let ops_log = fs::read_to_string(
+        doc.parent().unwrap().join(".agent-doc/logs/ops.log"),
+    )
+    .unwrap_or_default();
+    assert!(
+        ops_log.contains("todo_auto_done") && ops_log.contains("id=gateb reason=linked_work_resolved"),
+        "{ops_log}"
+    );
+    // An explicit todo id naming resolved work is moot and refused.
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+            "--todo-add",
+            "id=gateb Verify again",
+        ])
+        .assert()
+        .failure();
 }
 
 /// `#tododupdone`, anonymized from the live 2026-10-15 session: a `patch:todo`

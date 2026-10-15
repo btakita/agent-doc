@@ -1463,18 +1463,66 @@ pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     Ok(outcome.inserted.then_some(outcome.id))
 }
 
-/// `#operatortodo`: append one operator action to `agent:todo` as
-/// `- [ ] [#<id>] <action>`, creating the component when the document has none.
+/// `#todoids`: the tracked-work evidence todo ids are evaluated against.
+///
+/// File-IO adapter over [`agent_doc_element_done::todo_link_index_in_content`]
+/// (which owns the component policy): with `include_archive`, each
+/// `agent:done archive=` file is read (its staged content inside a
+/// tracked-work transaction); a missing archive contributes nothing.
+/// `extra_resolved` adds this closeout's `--done` / `--review-resolve` ids.
+///
+/// Fail closed: a document that does not parse, or an archive that exists but
+/// cannot be read, is an error, never an empty index.
+pub fn todo_link_index_in_content(
+    file: &Path,
+    content: &str,
+    include_archive: bool,
+    extra_resolved: &[String],
+) -> Result<agent_doc_element::todo::TodoLinkIndex> {
+    let mut read_archive = |archive_path: &str| -> Result<Option<String>> {
+        if !include_archive {
+            return Ok(None);
+        }
+        let target = crate::done_archive::resolve_done_archive_target(file, archive_path)?;
+        if let Some(staged) = deferred_raw_content(&target) {
+            return Ok(Some(staged));
+        }
+        match std::fs::read_to_string(&target) {
+            Ok(text) => Ok(Some(text)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err)
+                .with_context(|| format!("failed to read done archive {}", target.display())),
+        }
+    };
+    agent_doc_element_done::todo_link_index_in_content(content, &mut read_archive, extra_resolved)
+}
+
+/// `#operatortodo` / `#todoids`: append one operator action to `agent:todo`
+/// as `- [ ] [#<id>] <action>`, creating the component when the document has
+/// none.
 ///
 /// Every existing todo line is preserved byte-for-byte, and an action already
 /// present (in any checkbox state) is a no-op, so a replayed closeout never
-/// duplicates or resurrects a todo. The id is derived like a backlog id and is
-/// collision-free against the document's tracked-work ids. Returns whether a
-/// line was appended.
+/// duplicates or resurrects a todo. The own id REUSES the one open
+/// `agent:review` / `agent:backlog` id the action cites (or an explicit
+/// `id=<open id>`), else is MINTED like a backlog id, collision-free against
+/// the document's ids and every tracked id the done archive holds. An explicit
+/// id naming resolved work is rejected. Returns whether a line was appended.
 pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
     let full_content = read_command_document(file, "todo_add")?;
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let reserved = backlog::document_reserved_identity_ids(&full_content);
+    // An unreadable archive only weakens minted-id reservation and the
+    // resolved-id rejection; it never links anything, so it is not fatal.
+    let links = match todo_link_index_in_content(file, &full_content, true, &[]) {
+        Ok(links) => links,
+        Err(err) => {
+            eprintln!(
+                "[todo] todo-add: done archive unreadable ({err:#}); linking against the document only"
+            );
+            todo_link_index_in_content(file, &full_content, false, &[])?
+        }
+    };
     let id_for =
         |action: &str, counter: u64| backlog::generate_hash_n(action, &doc_id, counter, 4);
     let outcome = agent_doc_element::todo::add_todo_item_to_document(
@@ -1482,12 +1530,13 @@ pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
         text,
         &id_for,
         &reserved,
+        &links,
     )?;
-    let id_label = outcome
-        .id
-        .as_deref()
-        .map(|id| format!(" [#{id}]"))
-        .unwrap_or_default();
+    let id_label = match (outcome.id.as_deref(), outcome.linked.as_deref()) {
+        (Some(id), Some(component)) => format!(" [#{id}] (reuses agent:{component} #{id})"),
+        (Some(id), None) => format!(" [#{id}]"),
+        (None, _) => String::new(),
+    };
     if outcome.inserted {
         persist_pending_write(file, &full_content, &outcome.content)?;
         pending_receipt!(
@@ -1506,6 +1555,80 @@ pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
         );
     }
     Ok(outcome.inserted)
+}
+
+/// `#todoids`: check off every OPEN `agent:todo` item whose OWN id is resolved
+/// tracked work — the operator prompt for a gate or backlog item that is now
+/// finished. `resolved_this_cycle` carries this closeout's `--done` /
+/// `--review-resolve` ids. Each completion prints a held receipt; the caller
+/// logs `todo_auto_done` to `ops.log` once the envelope publishes (a
+/// validation pass must leave no trace).
+///
+/// Fail closed: when the link evidence cannot be read, nothing is completed
+/// and `None` is returned so the caller can log
+/// `todo_auto_done_skipped reason=link_evidence_unreadable`; the closeout
+/// continues. Items that only cite resolved work are left to the `#tododone`
+/// advisory. Returns the completed ids.
+pub fn todo_auto_complete_linked(
+    file: &Path,
+    resolved_this_cycle: &[String],
+) -> Result<Option<Vec<String>>> {
+    let full_content = read_command_document(file, "todo_auto_complete")?;
+    if agent_doc_element::todo::find_todo_component(&full_content)
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        return Ok(Some(Vec::new()));
+    }
+    let links = match todo_link_index_in_content(file, &full_content, true, resolved_this_cycle) {
+        Ok(links) => links,
+        Err(err) => {
+            eprintln!(
+                "[todo] auto-done skipped: tracked-work evidence unreadable ({err:#}); no todo was completed"
+            );
+            return Ok(None);
+        }
+    };
+    let outcome = agent_doc_element::todo::auto_complete_linked_todos(&full_content, &links)?;
+    if outcome.completed.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    persist_pending_write(file, &full_content, &outcome.content)?;
+    for id in &outcome.completed {
+        pending_receipt!(
+            "[todo] auto-done: #{id} in agent:todo (its linked tracked work #{id} is resolved)"
+        );
+    }
+    Ok(Some(outcome.completed))
+}
+
+/// `#todoids`: record a closeout's automatic todo completions in `ops.log`
+/// after its tracked-work envelope published (a validation pass must leave no
+/// trace). `None` means the link evidence was unreadable and nothing was
+/// completed (fail closed).
+pub fn log_todo_auto_done(file: &Path, completed: Option<&[String]>) {
+    match completed {
+        None => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "todo_auto_done_skipped file={} reason=link_evidence_unreadable",
+                file.display()
+            ),
+        ),
+        Some(ids) => {
+            for id in ids {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "todo_auto_done file={} id={} reason=linked_work_resolved",
+                        file.display(),
+                        id
+                    ),
+                );
+            }
+        }
+    }
 }
 
 /// Persist one todo item mutation and print its receipt.
@@ -3470,8 +3593,9 @@ mod tests {
         )));
         let after = fs::read_to_string(&doc).unwrap();
         let id = todo_own_id(&after, "Verify [#aa11] in a live pane");
-        // A fresh id: not the cited gate id and not any tracked-work id.
-        assert!(id != "aa11" && id != "keep1", "{id}");
+        // `#todoids`: the action cites exactly one open review gate, so the
+        // todo reuses that gate's id as its own (never an unrelated one).
+        assert_eq!(id, "aa11", "{after}");
         assert!(
             after.contains(&format!(
                 "<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n- [ ] [#{id}] Verify [#aa11] in a live pane\n<!-- /agent:todo -->\n\n<!-- agent:review -->"

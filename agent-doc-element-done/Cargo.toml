@@ -11,5 +11,6 @@ publish = false
 name = "agent_doc_element_done"
 
 [dependencies]
+anyhow = "1"
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.509" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.509" }

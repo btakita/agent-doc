@@ -161,21 +161,91 @@ present in any checkbox state is a no-op). Template patches may also update
 count, so an agent MUST preserve every existing item when emitting `patch:todo`.
 
 **Todo item identity.** A todo item's own id is the LEADING `[#<id>]` token
-after its checkbox: `- [ ] [#k3vd] Verify [#gate1] in a live pane`. `--todo-add`
-derives it like a backlog id (collision-free against every id the todo body
-cites and the document's tracked-work ids) unless the action starts with
-`id=<custom> ` or `[#<custom>] `. An id cited later in the action
-(`[#gate1]`, `(#gate1)`) is a reference to tracked work, not the item's
-identity. Operator-written and legacy items may have no own id. A todo own id
-is a tracked id everywhere a backlog id is: the shadow-backlog guard never
-reports it as an open backlog item outside `agent:backlog`, the coined-id
-guards (`session-check` warn and the `PreToolUse` source/commit hook) resolve
-it, and a queue line citing it (`- [#<id>]: note`) is a reference, not stray
-work. The keyed
-document merge splits `agent:todo` per item like the list components, so a
-concurrent operator edit and agent write to the checklist merge item by item
+after its checkbox: `- [ ] [#gate1] Verify [#gate1] in a live pane`. An id
+cited later in the action (`[#gate1]`, `(#gate1)`) is a reference to tracked
+work; only the leading token is the item's identity. Operator-written and
+legacy items may have no own id. A todo own id is a tracked id everywhere a
+backlog id is: the shadow-backlog guard never reports it as an open backlog
+item outside `agent:backlog`, the coined-id guards (`session-check` warn and
+the `PreToolUse` source/commit hook) resolve it, and a queue line citing it
+(`- [#<id>]: note`) is a reference, not stray work. A todo that reuses a
+review/backlog id (`#todoids` below) shares that id with its tracked item by
+design; it is the operator prompt for that item, not a duplicate of it. The
+keyed document merge splits `agent:todo` per item like the list components, so
+a concurrent operator edit and agent write to the checklist merge item by item
 instead of character by character (which could duplicate an edit both sides
 made, `#tododupdone`).
+
+**Todo id discipline (`#todoids`).** Every todo an agent adds with
+`--todo-add` carries an own id: it either REUSES the id of the tracked work it
+is the operator prompt for, or MINTS a new one. An id-less add is never written
+(auto-mint, not rejection). The binary decides from the document's tracked
+work (open `agent:review` / `agent:backlog` / `agent:icebox` ids; resolved ids
+from `[x]` items, inline `agent:done` entries, and the `agent:done archive=`
+file):
+
+| `--todo-add` input | Own id |
+|---|---|
+| Action cites exactly one OPEN `agent:review` or `agent:backlog` id (`Verify [#gate1] live`) | Reuses it: `- [ ] [#gate1] Verify [#gate1] live`. The todo text is the actionable operator prompt for that item. |
+| …and an OPEN todo already owns that id | No-op: duplicate todos for one id fold into the existing item (`--todo-edit` changes its text). |
+| …and only a CHECKED todo owns that id | A follow-up action: minted id, still citing the gate. |
+| Action cites no open review/backlog id, several, or only icebox/resolved/unknown ids (`GH #267`) | Minted, like a backlog id. |
+| Explicit `id=<id>` / `[#<id>]` naming open review/backlog work | Reuses it. |
+| Explicit id naming nothing tracked | A custom minted id. |
+| Explicit id naming RESOLVED tracked work | Rejected: a todo for finished work is moot. |
+| Explicit id already owned by a todo item | Rejected; use `--todo-edit`. |
+
+Minted ids avoid every `#id` token in the document, the active tracked-work
+ids, and every id in the done archive, so a minted id is never mistaken for a
+link. A `patch:todo` that adds an item without an own id prints a
+non-blocking `[todo] advisory (#todoids)`; the binary does not mint ids into a
+patch, because the keyed merge keys an id-less item by its text and re-keying a
+line the operator may be editing would duplicate it. Operator-written and
+legacy items may stay id-less; they are selected by their exact text.
+
+**Operator done signal (`#todoids`).** The operator declares a todo done by
+checking its box (`- [x]`) in the editor. No agent turn is needed: the
+checkbox IS the record, the item stays in `agent:todo`, and a checklist edit
+inside `agent:todo` is never a prompt. The binary reconciles it at the next
+preflight with this mapping:
+
+| Operator-checked todo | Preflight signal | What happens |
+|---|---|---|
+| Own id is an OPEN `agent:review` gate | `operator_done_review_open` | The agent resolves the gate that cycle (`--review-resolve <id>`) after reading any operator note, or records the follow-up. The binary never resolves a gate from a checkbox: which outcome the operator chose is judgement. |
+| Own id is OPEN `agent:backlog` work | `operator_done_backlog_open` | The operator prerequisite is done; the item is unblocked (`--backlog-ungate <id>` when gated). |
+| No link, or linked work already resolved | none | Nothing; the operator prunes checked items. |
+
+An operator check is never reverted by an agent write. A `patch:todo` that
+carries an item the document holds `[x]` as `[ ]`/`[/]` keeps it `[x]`
+(matched by own id, else by exact text; the patch's text edits still land),
+and the keyed merge keeps an operator check made concurrently with an agent
+write. Only `--todo-reopen` unchecks an item.
+
+**Todo link checks (`#todoids`).** Agents check todos at two opportune events,
+using only deterministic, cheap evidence — the document's tracked-work state
+and its done archive; no network, no clock, no prose heuristics:
+
+- **Preflight** (read-only) emits `todo_signals` in its JSON and a
+  `[preflight] todo:` stderr line per signal: the two operator-done signals
+  above, `linked_work_resolved` (an OPEN todo whose OWN id is resolved
+  tracked work), and `cited_work_resolved` (an OPEN todo that only CITES
+  tracked work, all of it resolved). Signals are state, not events, so they
+  repeat until the state changes.
+- **Closeout** (any write that carries tracked-work flags) checks off every
+  OPEN todo whose OWN id is resolved — including ids this closeout resolved with
+  `--done` / `--review-resolve` — in the same transaction, prints
+  `[todo] auto-done: #<id>`, and logs `todo_auto_done ... reason=linked_work_resolved`
+  to `ops.log` once the envelope publishes. This is the only automatic todo
+  completion. A todo that only cites resolved work is never auto-completed —
+  its action may cover more than the resolved item, which needs human
+  judgement — and keeps the `#tododone` advisory below.
+
+Unreadable evidence is not absent evidence: when the document's components or
+an existing done archive cannot be read, preflight emits no todo signal and the
+closeout completes nothing (logging `todo_auto_done_skipped
+reason=link_evidence_unreadable`); neither path treats the failure as "nothing
+is open" or "nothing is resolved". An id that is both open and resolved counts
+as open.
 
 **Completing a todo (`#tododone`).** When the operator action is finished, the
 agent MUST check the existing item off in the same closeout, never append a
@@ -237,8 +307,9 @@ fails the closeout: a gate blocked on CI or an external party rather than the
 operator simply needs no todo.
 
 **Todo-done advisory.** When a closeout resolves tracked work (`--done`,
-`--review-resolve`) and an OPEN `agent:todo` item has that id as its own id or
-cites it, the write prints a non-blocking `[todo] advisory (#tododone)` line
+`--review-resolve`) and an OPEN `agent:todo` item still cites it (an item that
+owns the id was already checked off by the `#todoids` closeout check), the
+write prints a non-blocking `[todo] advisory (#tododone)` line
 naming the ids and the exact `--todo-done <selector>` command, and logs
 `operator_todo_done_advisory` to `ops.log`. Like the gate advisory it is
 id-based, never writes, and never fails the closeout.

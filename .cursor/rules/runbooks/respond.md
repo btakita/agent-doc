@@ -536,11 +536,38 @@ in the same cycle. Start with the action and keep only the context needed to act
 
 Record it with the closeout flag `--todo-add "<action>"` (repeatable), for
 example `agent-doc write --commit <FILE> --todo-add "Verify [#gate1] in a live pane"`.
-The binary appends `- [ ] [#<id>] <action>` (a fresh own id; `id=<custom> `
-picks one), creates `agent:todo` when the document has none (right below
-`agent:backlog`), keeps every existing checklist item, and skips an action that
-is already listed. A missing `agent:todo` component is never a reason to skip
-the TODO.
+The binary appends `- [ ] [#<id>] <action>`, creates `agent:todo` when the
+document has none (right below `agent:backlog`), keeps every existing checklist
+item, and skips an action that is already listed. A missing `agent:todo`
+component is never a reason to skip the TODO.
+
+**Todo ids (`#todoids`).** Every todo you add carries an own id. When the
+action cites exactly one open `agent:review` or `agent:backlog` id, the todo
+REUSES it — the example above becomes `- [ ] [#gate1] Verify [#gate1] in a
+live pane`, the actionable operator prompt for that gate. A second add for an
+id an open todo already owns is a no-op (edit it with `--todo-edit` instead).
+Otherwise the binary mints a fresh id. `id=<id> ` reuses open work or picks a
+custom id, and is rejected when `<id>` is already resolved. Prefer
+`--todo-add` over `patch:todo` for new items: a patch line without an own id
+gets a `[todo] advisory (#todoids)`.
+
+**The operator finishes a todo by checking its box.** `- [x]` in the editor is
+the done signal; no agent turn is needed and no agent write may undo it (a
+`patch:todo` carrying the item open keeps it checked; only `--todo-reopen`
+unchecks). Preflight reconciles it in `todo_signals`:
+
+- `operator_done_review_open` — the operator checked the todo for an open
+  review gate: read any operator note, then resolve the gate this cycle
+  (`--review-resolve <id>`) or record the follow-up. The binary never resolves
+  a gate from a checkbox.
+- `operator_done_backlog_open` — the operator prerequisite for a backlog item
+  is done; treat it as unblocked (`--backlog-ungate <id>` when gated).
+- `linked_work_resolved` — the todo's own id is resolved work; the next
+  closeout with tracked-work flags checks it off automatically
+  (`[todo] auto-done`), or run `--todo-done <id>` now.
+- `cited_work_resolved` — every tracked item the todo cites is resolved; check
+  it off with `--todo-done` only if the operator action itself is finished.
+  These are never auto-completed.
 
 **Mark it complete when it is finished (`#tododone`).** When the operator says
 an action is done, or you verify it is (the gate it cites resolved, the draft is
@@ -564,6 +591,7 @@ When a closeout opens an `agent:review` gate that `agent:todo` does not mention,
 the write prints `[todo] advisory (#operatortodo)`. If that gate waits on the
 operator, add the TODO next cycle (`--backlog-only --todo-add ...` for a
 tracked-work-only closeout); a gate waiting on CI or a third party needs none.
-When a closeout resolves work (`--done`, `--review-resolve`) that an OPEN todo
-still cites, the write prints `[todo] advisory (#tododone)` with the exact
-`--todo-done` command; if the operator action is finished, run it next cycle.
+When a closeout resolves work (`--done`, `--review-resolve`), an OPEN todo that
+owns that id is checked off in the same closeout (`[todo] auto-done`); one that
+only cites it gets `[todo] advisory (#tododone)` with the exact `--todo-done`
+command — if the operator action is finished, run it next cycle.

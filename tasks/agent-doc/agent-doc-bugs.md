@@ -173,6 +173,29 @@ Done items stay checked in `agent:todo`; they do not move to `agent:done`, becau
 - **The issue:** after `agent-doc upgrade` swaps the exact-263 plugin under a live IDE, every Run Agent Doc is refused with `plugin_bytes_superseded` until restart. That same IDE pid had hot-reloaded the new native library and was still replicating edits.
 - **The fix:** the subagent will make the gate decide from the editor's live capability evidence instead of "the jar on disk changed". It keeps fail-closed behavior when the process genuinely cannot publish the route's observations, and it covers both cases with regression tests.
 - **Coordinator steps:** integration, `make install`, and closing #267 come back to the coordinator.
+
+### Re: GH #267 fixed and closed; v0.35.508 released — opus-5-5 · 2026-10-15T10:58-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/267
+
+**Fixed and closed.** The fix is commit `2d23778ecb`, shipped in v0.35.508.
+- **Root cause:** the superseded-plugin gate (#76) refused `editor_route` as soon as the IDE's mapped jar was no longer the installed one. But the endpoint the controller sends to (`persist_current`, `observe_lazily_current`, …) belongs to the native library, not the jar. The exact-263 IDE keeps the old jar until restart but hot-reloads the native library, so in the issue it was fully able to serve the route, and was refused anyway.
+- **The fix:** before refusing, admission sends one hello to that pid's native endpoint (`probe_editor_endpoint_build_for_pid`), using the same project root that controller→editor sends use.
+  - **The endpoint answers with the controller's build:** the route is admitted. It logs `editor_route_superseded_editor_admitted reason=native_endpoint_current`, and the route output carries a `plugin_bytes_superseded_advisory` saying a restart only loads the new plugin UI.
+  - **Another build, no answer, or no endpoint:** the route is still refused before dispatch, and the refusal names which case it saw. For a stale native build it suggests `agent-doc admin reload-lib` first; otherwise it gives the existing restart/reinstall remedy.
+- **Tests:** a real-listener probe test covers no endpoint, another build, and the current build. A superseded jar is admitted when the native endpoint is current, and refused with the exact remedy when there is none. Making the gate ignore the endpoint fails the admitted test.
+- **Spec:** updated in `specs/07-session-tmux-commands.md`. There is no Kotlin change, so no plugin version bump.
+- GitHub issue #267 is closed with a comment.
+
+> **Queue prompt:** release + publish
+
+**Released v0.35.508**: commit `a5910b7c10`, a fast-forward on `main`, tag `v0.35.508` pushed. I read the queue order (#267 above this head) as fix #267 first, then release. v0.35.507 had already shipped the earlier batch.
+- **Notes:** VERSIONS.md and the release-parity row were written before the check.
+- **Checks:** the full `make check` on the version-projected tree passed: exit 0, 10610 passed, 167 skipped, no `result: FAILED`.
+- **Installed:** `make install-full` exited 0, and `agent-doc --version` reports `agent-doc 0.35.508`.
+- **CI:** the tag-push workflows are running. Book has already succeeded; CI is in progress.
+
+**Operator verification:** a live restart-free check on a real 263 IDE is now in `agent:todo`. The probe proves the native endpoint is reachable and current. If an old plugin turns out to break the route at the Kotlin layer despite a current native library, the gate will also need to check the plugin version.
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
@@ -181,7 +204,7 @@ Done items stay checked in `agent:todo`; they do not move to `agent:done`, becau
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/267
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/267~~
 - 🚧 release + publish
 <!-- /agent:queue -->
 

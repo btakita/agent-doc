@@ -2500,6 +2500,30 @@ pub fn replay_editor_ops(base: &str, ops: &[EditorOp]) -> Option<String> {
     Some(buf)
 }
 
+/// Visit every replay state of `ops` from `base`: `base` itself, then the text
+/// after each op, in order (`#keylogrebase`). `visit` returns `false` to stop
+/// early. Returns `false` when an op does not apply (stale or misaligned ops),
+/// in which case the states already visited are the valid prefix.
+pub fn for_each_editor_replay_state(
+    base: &str,
+    ops: &[EditorOp],
+    visit: &mut dyn FnMut(&str) -> bool,
+) -> bool {
+    let mut buf = base.to_string();
+    if !visit(&buf) {
+        return true;
+    }
+    for op in ops {
+        if apply_editor_op_to_text(&mut buf, op).is_none() {
+            return false;
+        }
+        if !visit(&buf) {
+            return true;
+        }
+    }
+    true
+}
+
 /// Text the operator's own editor ops inserted and that still survives the
 /// later ops of the same burst, as contiguous runs in document order
 /// (`#retypestruck`).

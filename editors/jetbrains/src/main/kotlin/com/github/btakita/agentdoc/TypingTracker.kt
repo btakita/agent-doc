@@ -155,6 +155,14 @@ internal object OpCaptureRefusal {
     const val DOC_ADVANCED_DURING_DRAIN = "doc_advanced_during_drain"
     const val BASE_HASH_UNAVAILABLE = "base_hash_unavailable"
     const val BASE_HASH_RETRIES_EXHAUSTED = "base_hash_retries_exhausted"
+
+    /**
+     * `#keylogrebase`: every operator op in the burst preceded a non-operator
+     * mutation (a projection, an agent write, a reload). The projection fenced the
+     * op epoch those keystrokes belonged to, so they are not relative to any text
+     * the ledger can name; only operator ops AFTER the last non-operator op are.
+     */
+    const val OPERATOR_OPS_FENCED_BY_PROJECTION = "operator_ops_fenced_by_projection"
 }
 
 /**
@@ -294,6 +302,111 @@ internal fun prepareEditorOpReports(
 
     if (shadow != finalText) return null
     return reports
+}
+
+/**
+ * A burst's operator ops together with the exact text they were typed into
+ * (`#keylogrebase`).
+ *
+ * [preText] is the buffer immediately before [reports]' first op and [postText]
+ * the buffer after the last, so `replay(preText, reports) == postText` holds by
+ * construction. The ledger labels the ops with [preText]'s hash, never with the
+ * merge baseline the reporter looked up: that baseline lags the buffer after
+ * every non-operator projection until the next commit checkpoint, which is how a
+ * compaction left the 2026-10-15 ledger labelled `merge_base=97b41a5fa5b6` while
+ * its offsets were relative to the compacted text.
+ */
+internal data class EditorOpLineageBurst(
+    val reports: List<PreparedEditorOp>,
+    val preText: String,
+    val postText: String,
+)
+
+/**
+ * The lineage-attestable suffix of a burst: the operator ops after its last
+ * non-operator op, and the text they were typed into. `null` when the burst does
+ * not reconstruct [finalText] (same diagnosis as [prepareEditorOpReports]).
+ *
+ * A non-operator op inside a burst is a projection the editor applied between
+ * two keystrokes. It fenced the epoch the earlier keystrokes were captured in,
+ * so they are dropped here rather than reported against a text that never held
+ * them; the CRDT still carries them, only the op ledger does not.
+ */
+internal fun prepareEditorOpLineageUtil(
+    finalText: String,
+    ops: List<PendingEditorOp>,
+): EditorOpLineageBurst? {
+    var shadow = reverseApplyEditorOps(finalText, ops) ?: return null
+    var preText = shadow
+    val reports = mutableListOf<PreparedEditorOp>()
+    for (op in ops) {
+        val offset = op.offset
+        if (offset < 0 || offset > shadow.length) return null
+        val oldEnd = offset + op.oldFragment.length
+        if (oldEnd > shadow.length) return null
+        if (shadow.substring(offset, oldEnd) != op.oldFragment) return null
+        val byteOffset = shadow.substring(0, offset).toByteArray(Charsets.UTF_8).size.toLong()
+        val next = shadow.substring(0, offset) + op.newFragment + shadow.substring(oldEnd)
+        if (op.nonOperatorMutation) {
+            reports.clear()
+            preText = next
+        } else {
+            if (op.oldFragment.isNotEmpty()) {
+                reports.add(
+                    PreparedEditorOp(
+                        opKind = "delete",
+                        byteOffset = byteOffset,
+                        insertText = null,
+                        deleteBytes = op.oldFragment.toByteArray(Charsets.UTF_8).size.toLong(),
+                    )
+                )
+            }
+            if (op.newFragment.isNotEmpty()) {
+                reports.add(
+                    PreparedEditorOp(
+                        opKind = "insert",
+                        byteOffset = byteOffset,
+                        insertText = op.newFragment,
+                        deleteBytes = 0L,
+                    )
+                )
+            }
+        }
+        shadow = next
+    }
+    if (shadow != finalText) return null
+    return EditorOpLineageBurst(reports = reports, preText = preText, postText = finalText)
+}
+
+/** SHA-256 hex of [text]'s UTF-8 bytes; the same function as Rust `agent_doc_hash::content_hash`. */
+internal fun contentHashUtil(text: String): String =
+    java.security.MessageDigest.getInstance("SHA-256")
+        .digest(text.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+
+/**
+ * The `ops_json` argument for `agent_doc_record_editor_ops_json`: the burst's ops
+ * with the editor's attestation of the text they were typed into and the text
+ * they produced (`#keylogrebase`).
+ */
+internal fun attestedEditorOpsJsonUtil(burst: EditorOpLineageBurst): JsonObject {
+    val ops = JsonArray()
+    for (op in burst.reports) {
+        ops.add(JsonObject().apply {
+            addProperty("kind", op.opKind)
+            addProperty("offset", op.byteOffset)
+            if (op.opKind == "insert") {
+                addProperty("text", op.insertText ?: "")
+            } else {
+                addProperty("len", op.deleteBytes)
+            }
+        })
+    }
+    return JsonObject().apply {
+        addProperty("pre_hash", contentHashUtil(burst.preText))
+        addProperty("post_hash", contentHashUtil(burst.postText))
+        add("ops", ops)
+    }
 }
 
 private fun reverseApplyEditorOps(finalText: String, ops: List<PendingEditorOp>): String? {
@@ -865,8 +978,20 @@ object TypingTracker : DocumentListener {
             return
         }
         val operatorOps = drainedOps.count { !it.nonOperatorMutation }
+        // `#keylogrebase`: only the ops after the burst's last non-operator op are
+        // relative to a text the ledger can name; attest exactly that text.
+        val lineage = prepareEditorOpLineageUtil(snapshot.text, drainedOps)
+        if (lineage == null || lineage.reports.isEmpty()) {
+            logOpCaptureRefusal(
+                lib,
+                filePath,
+                OpCaptureRefusal.OPERATOR_OPS_FENCED_BY_PROJECTION,
+                "ops=${drainedOps.size} operator_ops=$operatorOps",
+            )
+            return
+        }
         val outcome =
-            reportEditorOps(lib, filePath, opReports, operatorOps, drainedOps.size - operatorOps)
+            reportEditorOps(lib, filePath, lineage, operatorOps, drainedOps.size - operatorOps)
         if (outcome == ReportOutcome.RETRYABLE) {
             // `#basehashdropsops`: the burst is intact and still replayable — only
             // the merge base was unresolvable at this boundary. Keep it, exactly as
@@ -899,10 +1024,11 @@ object TypingTracker : DocumentListener {
 private fun reportEditorOps(
     lib: AgentDocLib,
     filePath: String,
-    ops: List<PreparedEditorOp>,
+    lineage: EditorOpLineageBurst,
     operatorOps: Int,
     nonOperatorOps: Int,
 ): ReportOutcome {
+    val ops = lineage.reports
     if (ops.isEmpty()) return ReportOutcome.TERMINAL
     // Resolve the base hash captured ops must align to; skip (diff-guess
     // fallback) when unavailable. One burst resolves this once, rather than
@@ -932,18 +1058,9 @@ private fun reportEditorOps(
         return ReportOutcome.RETRYABLE
     }
 
-    val batch = JsonArray()
-    for (op in ops) {
-        batch.add(JsonObject().apply {
-            addProperty("kind", op.opKind)
-            addProperty("offset", op.byteOffset)
-            if (op.opKind == "insert") {
-                addProperty("text", op.insertText ?: "")
-            } else {
-                addProperty("len", op.deleteBytes)
-            }
-        })
-    }
+    // `#keylogrebase`: [baseHash] is only the merge baseline the memo resolved;
+    // the native side labels the ops with the attested pre-text instead.
+    val batch = attestedEditorOpsJsonUtil(lineage)
     // `#opcaptureliveread`: state the four facts BEFORE the record call, so a proof
     // receipt with no `editor_ops_recorded` beside it is itself the diagnosis —
     // the reporter got all the way here and the FFI still wrote nothing.

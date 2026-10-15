@@ -438,6 +438,64 @@ class TypingTrackerEdtBudgetTest {
     }
 
     @Test
+    fun `an attested burst names the exact text its offsets are relative to`() {
+        // #keylogrebase: a compaction (a non-operator projection) lands, then the
+        // operator types. The ledger must be labelled with the text the keystrokes
+        // were typed into -- the compacted buffer -- never with the merge baseline
+        // the reporter looked up, which still names the pre-compaction text.
+        val compacted = "queue:\n"
+        val burst = prepareEditorOpLineageUtil(
+            finalText = "queue:\n- é fix\n",
+            ops = listOf(
+                PendingEditorOp(offset = 0, oldFragment = "long history\n", newFragment = "", nonOperatorMutation = true),
+                PendingEditorOp(offset = 7, oldFragment = "", newFragment = "- é dix\n", nonOperatorMutation = false),
+                PendingEditorOp(offset = 11, oldFragment = "d", newFragment = "f", nonOperatorMutation = false),
+            ),
+        )!!
+        assertEquals(compacted, burst.preText)
+        assertEquals("queue:\n- é fix\n", burst.postText)
+        assertEquals(
+            listOf(
+                PreparedEditorOp(opKind = "insert", byteOffset = 7L, insertText = "- é dix\n", deleteBytes = 0L),
+                PreparedEditorOp(opKind = "delete", byteOffset = 12L, insertText = null, deleteBytes = 1L),
+                PreparedEditorOp(opKind = "insert", byteOffset = 12L, insertText = "f", deleteBytes = 0L),
+            ),
+            burst.reports,
+        )
+        val json = attestedEditorOpsJsonUtil(burst)
+        assertEquals(contentHashUtil(compacted), json.get("pre_hash").asString)
+        assertEquals(contentHashUtil("queue:\n- é fix\n"), json.get("post_hash").asString)
+        assertEquals(3, json.getAsJsonArray("ops").size())
+    }
+
+    @Test
+    fun `keystrokes before a projection inside one burst are never attested`() {
+        // The projection fenced the epoch the earlier keystroke belonged to; it is
+        // relative to no text the ledger can name.
+        val burst = prepareEditorOpLineageUtil(
+            finalText = "ab",
+            ops = listOf(
+                PendingEditorOp(offset = 0, oldFragment = "", newFragment = "a", nonOperatorMutation = false),
+                PendingEditorOp(offset = 1, oldFragment = "", newFragment = "b", nonOperatorMutation = true),
+            ),
+        )!!
+        assertTrue(burst.reports.isEmpty())
+        assertEquals("ab", burst.preText)
+    }
+
+    @Test
+    fun `the attested hash is the same function as the native content hash`() {
+        assertEquals(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            contentHashUtil(""),
+        )
+        assertEquals(
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            contentHashUtil("abc"),
+        )
+    }
+
+    @Test
     fun `an unreplayable burst is refused explicitly instead of returning no ops`() {
         // #opcapturedormant: `null` (the ops do not reconstruct the reported buffer)
         // and `emptyList()` (the burst held no operator op) are different diagnoses.
@@ -718,7 +776,7 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "the isOperatorDocumentEvent split must reach the proof, not be recomputed there",
             source.contains("val operatorOps = drainedOps.count { !it.nonOperatorMutation }") &&
-                source.contains("reportEditorOps(lib, filePath, opReports, operatorOps, drainedOps.size - operatorOps)"),
+                source.contains("reportEditorOps(lib, filePath, lineage, operatorOps, drainedOps.size - operatorOps)"),
         )
         val reportBody = source.substringAfter("private fun reportEditorOps")
         assertTrue(

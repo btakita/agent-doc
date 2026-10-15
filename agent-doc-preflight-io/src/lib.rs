@@ -3440,11 +3440,29 @@ fn merge_admission_three_way_split(
 ) -> Result<Option<String>> {
     let durable = agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
     let durable_authority = durable(authority);
+    // `#keylogrebase`: provenance for a component only DISK changed. Cut
+    // exclusivity cannot see it -- text alone cannot tell the editor's
+    // in-flight typing on disk from independent disk work -- so it used to be
+    // merged as new CRDT items and then land again when the in-flight ops
+    // arrived. A correctly based, editor-attested op ledger whose replay passes
+    // through the authority's cut tells them apart: a disk-only component whose
+    // body is a state of that lineage is the editor's own text, and keeps the
+    // authority's body. Formal model: `formal/tla/AdmissionCutExclusivity.tla`
+    // (`AdmissionCutExclusivityResidual.cfg`).
+    let provenance =
+        editor_provenance_projection(file, baseline, authority, disk, op_replayed_authority);
+    let disk_after_provenance = provenance
+        .as_ref()
+        .map_or(disk, |projection| projection.disk_text.as_str());
+    let editor_attributed = provenance
+        .as_ref()
+        .map(|projection| projection.editor_attributed.clone())
+        .unwrap_or_default();
     let lineage_projection = authority_ops
         .map(|ops| {
             agent_doc_merge::document_cell::suppress_superseded_disk_queue_revisions(
                 baseline,
-                disk,
+                disk_after_provenance,
                 authority,
                 op_replayed_authority,
                 ops,
@@ -3452,7 +3470,7 @@ fn merge_admission_three_way_split(
         })
         .unwrap_or_else(
             || agent_doc_merge::document_cell::AdmissionDiskLineageProjection {
-                disk_text: disk.to_string(),
+                disk_text: disk_after_provenance.to_string(),
                 suppressed_queue_revisions: 0,
                 authority_lineage_proven: false,
             },
@@ -3473,6 +3491,16 @@ fn merge_admission_three_way_split(
 
     let mut adopted = None;
     let mut rungs = Vec::new();
+    if !editor_attributed.is_empty() {
+        rungs.push(format!(
+            "EditorProvenance=authority_kept({})",
+            editor_attributed
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
     if lineage_projection.suppressed_queue_revisions > 0 {
         rungs.push(format!(
             "EditorOpLineage=suppressed_queue_revisions({})",
@@ -3535,6 +3563,21 @@ fn merge_admission_three_way_split(
             // authority, which never stalls.
             rungs.push(format!(
                 "{:?}=would_mix_component_versions({mixed})",
+                plan.engine
+            ));
+            continue;
+        } else if let Some(changed) =
+            agent_doc_document::component_exclusivity::merge_changes_editor_attributed(
+                authority,
+                &plan.merged_doc,
+                &editor_attributed,
+            )
+        {
+            // `#keylogrebase` fail-closed guard: a component the provenance
+            // projection attributed to the editor's in-flight typing reaches
+            // the authority only through the editor's own ops.
+            rungs.push(format!(
+                "{:?}=would_readd_editor_typing({changed})",
                 plan.engine
             ));
             continue;
@@ -3610,6 +3653,57 @@ fn merge_admission_three_way_split(
         ),
     );
     Ok(adopted)
+}
+
+/// `#keylogrebase`: the provenance projection for admission, or `None` when no
+/// provenance exists.
+///
+/// Provenance requires all three of: an editor-op epoch based on the baseline
+/// whose replay reproduces the editor's attested tip
+/// ([`agent_doc_op_capture_io::verified_editor_ops_for_base`]), and a replay that
+/// passes through the authority's cut. A ledger labelled with the wrong base --
+/// the pre-`#keylogrebase` failure after a compaction -- fails the first two, so
+/// admission keeps the provenance-free behaviour instead of trusting it.
+fn editor_provenance_projection(
+    file: &Path,
+    baseline: &str,
+    authority: &str,
+    disk: &str,
+    op_replayed_authority: &str,
+) -> Option<agent_doc_document::component_exclusivity::EditorProvenanceProjection> {
+    let ops = match agent_doc_op_capture_io::verified_editor_ops_for_base(file, baseline) {
+        Ok(Some(ops)) => ops,
+        Ok(None) => return None,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "admission_editor_provenance unavailable=ledger_read_failed error={err:#} #keylogrebase"
+                ),
+            );
+            return None;
+        }
+    };
+    if !agent_doc_merge::document_cell::replay_reaches_cut(baseline, &ops, op_replayed_authority) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "admission_editor_provenance unavailable=lineage_misses_authority_cut ops={} #keylogrebase",
+                ops.len()
+            ),
+        );
+        return None;
+    }
+    Some(
+        agent_doc_document::component_exclusivity::project_disk_for_editor_provenance(
+            baseline,
+            authority,
+            disk,
+            |visit| {
+                agent_doc_merge::crdt::for_each_editor_replay_state(baseline, &ops, visit);
+            },
+        ),
+    )
 }
 
 /// Short hash of a plane's DURABLE content — transient agent-doc markers removed.
@@ -10178,6 +10272,171 @@ mod tests {
             component_body(&merged, "notes").contains("- disk-only note\n"),
             "{merged}"
         );
+    }
+
+    /// Record one attested editor burst the way the JetBrains reporter does:
+    /// typed into `pre`, stamped with whatever merge baseline the editor's
+    /// memo resolved. Returns the buffer after the burst.
+    fn record_attested_burst(
+        doc: &Path,
+        stamped_merge_base: &str,
+        pre: &str,
+        ops: Vec<agent_doc_merge::crdt::EditorOp>,
+    ) -> String {
+        let post = agent_doc_merge::crdt::replay_editor_ops(pre, &ops).expect("burst applies");
+        agent_doc_op_capture_io::record_editor_ops_retaining_with_lineage(
+            doc,
+            stamped_merge_base,
+            ops,
+            Some(agent_doc_state_backbone::EditorOpBurstLineage {
+                pre_hash: agent_doc_hash::content_hash(pre),
+                post_hash: agent_doc_hash::content_hash(&post),
+            }),
+        )
+        .unwrap();
+        post
+    }
+
+    /// `#keylogrebase` end to end: compaction -> ledger reopen -> admission
+    /// proof -> the cut-exclusivity residual closed.
+    ///
+    /// Replays the 2026-10-15 shape. A compaction fences the op epoch while the
+    /// merge baseline still names the pre-compaction text. The operator types a
+    /// queue line into the compacted buffer (the authority's cut holds it),
+    /// corrects it, and types a note; the native save holds all of it, the
+    /// authority only the first burst. The queue is a component BOTH planes
+    /// changed (cut exclusivity keeps the authority's). The notes component is
+    /// one only DISK changed: before provenance it was merged as new CRDT items
+    /// and the in-flight note ops then landed it a second time. The reopened
+    /// ledger must be based on the compacted text, prove the authority's
+    /// lineage, and keep the editor's in-flight note out of the merge.
+    #[test]
+    fn admission_keeps_in_flight_typing_in_a_disk_only_component_with_a_rebased_ledger() {
+        let (compacted, _, _) = admission_typing_fork_docs("", "");
+        let pre_compaction = compacted.replace(
+            "Prior answer.\n",
+            "Prior answer.\n\n### Re: older\n\nA long exchange the compaction archived.\n",
+        );
+        assert_ne!(pre_compaction, compacted);
+        let queue_close = compacted.find("<!-- /agent:queue -->").unwrap();
+        const DIX: &str = "- #gh-dixhttps://x/issues/268\n";
+        const NOTE: &str = "- in-flight note the authority has not received\n";
+
+        let replay = |rebased: bool| {
+            let dir = setup_project();
+            let doc = dir.path().join("agent-doc-bugs.md");
+            std::fs::write(&doc, &compacted).unwrap();
+            let stale = agent_doc_hash::content_hash(&pre_compaction);
+            let committed = agent_doc_hash::content_hash(&compacted);
+            let burst1 = vec![agent_doc_merge::crdt::EditorOp::Insert {
+                offset: queue_close,
+                text: DIX.to_string(),
+            }];
+            let fix_at = queue_close + "- #gh-".len();
+            let burst2 = vec![
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset: fix_at,
+                    len: 3,
+                },
+                agent_doc_merge::crdt::EditorOp::Insert {
+                    offset: fix_at,
+                    text: "fix ".to_string(),
+                },
+            ];
+            // Compaction fenced the epoch the operator was typing in before it.
+            agent_doc_op_capture_io::clear_op_capture_for_editor_projection(&doc).unwrap();
+            let (authority, disk) = if rebased {
+                let after1 = record_attested_burst(&doc, &stale, &compacted, burst1);
+                let after2 = record_attested_burst(&doc, &committed, &after1, burst2);
+                let notes_close = after2.find("<!-- /agent:notes -->").unwrap();
+                let burst3 = vec![agent_doc_merge::crdt::EditorOp::Insert {
+                    offset: notes_close,
+                    text: NOTE.to_string(),
+                }];
+                let after3 = record_attested_burst(&doc, &committed, &after2, burst3);
+                (after1, after3)
+            } else {
+                // The pre-fix ledger: every burst stamped with the merge
+                // baseline the editor looked up, never with its own text.
+                agent_doc_op_capture_io::record_editor_ops(&doc, &stale, burst1.clone()).unwrap();
+                let after1 = agent_doc_merge::crdt::replay_editor_ops(&compacted, &burst1).unwrap();
+                agent_doc_op_capture_io::record_editor_ops(&doc, &committed, burst2.clone())
+                    .unwrap();
+                let after2 = agent_doc_merge::crdt::replay_editor_ops(&after1, &burst2).unwrap();
+                let notes_close = after2.find("<!-- /agent:notes -->").unwrap();
+                let burst3 = vec![agent_doc_merge::crdt::EditorOp::Insert {
+                    offset: notes_close,
+                    text: NOTE.to_string(),
+                }];
+                agent_doc_op_capture_io::record_editor_ops(&doc, &committed, burst3.clone())
+                    .unwrap();
+                let after3 = agent_doc_merge::crdt::replay_editor_ops(&after2, &burst3).unwrap();
+                (after1, after3)
+            };
+            std::fs::write(&doc, &disk).unwrap();
+            let merged = merge_admission_three_way_split(
+                &doc, &compacted, &authority, &disk, &authority, None,
+            )
+            .unwrap();
+            let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+                .unwrap_or_default();
+            (authority, merged, log)
+        };
+
+        // Without a correctly based ledger there is no provenance: the note
+        // only disk changed is merged as new items -- the stated residual.
+        let (authority, merged, log) = replay(false);
+        let merged = merged.expect("the provenance-free ladder merges disk-only work");
+        assert!(component_body(&merged, "notes").contains(NOTE), "{merged}");
+        assert_eq!(
+            component_body(&merged, "queue"),
+            component_body(&authority, "queue")
+        );
+        assert!(!log.contains("EditorProvenance="), "{log}");
+
+        // With the rebased ledger: verified provenance keeps the authority's
+        // notes, so the editor's own in-flight ops land the note exactly once.
+        let (_, merged, log) = replay(true);
+        assert_eq!(merged, None, "admission proceeds on the authority:\n{log}");
+        assert!(
+            log.contains("EditorProvenance=authority_kept(notes:0)"),
+            "the provenance projection must be what kept the note out:\n{log}"
+        );
+        assert!(
+            log.contains("CutExclusive=authority_kept(queue:0)"),
+            "the queue both planes changed is still cut exclusivity's:\n{log}"
+        );
+    }
+
+    /// Reach for `#keylogrebase`: with a verified lineage, disk work that is NOT
+    /// on it (an independent write) still merges.
+    #[test]
+    fn admission_with_provenance_still_merges_independent_disk_work() {
+        let dir = setup_project();
+        let doc = dir.path().join("sdk.md");
+        let (baseline, _, _) = admission_typing_fork_docs("", "");
+        std::fs::write(&doc, &baseline).unwrap();
+        let queue_close = baseline.find("<!-- /agent:queue -->").unwrap();
+        let authority = record_attested_burst(
+            &doc,
+            &agent_doc_hash::content_hash(&baseline),
+            &baseline,
+            vec![agent_doc_merge::crdt::EditorOp::Insert {
+                offset: queue_close,
+                text: "- operator line\n".to_string(),
+            }],
+        );
+        let disk = baseline.replace(
+            "<!-- agent:notes -->\n",
+            "<!-- agent:notes -->\n- independent note\n",
+        );
+        std::fs::write(&doc, &disk).unwrap();
+        let merged =
+            merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
+                .unwrap()
+                .expect("independent disk work must still merge");
+        assert!(component_body(&merged, "notes").contains("- independent note\n"));
+        assert!(component_body(&merged, "queue").contains("- operator line\n"));
     }
 
     /// A disk revision NEWER than the authority's (a native save ahead of the

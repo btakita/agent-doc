@@ -255,6 +255,9 @@ must_pass=(
     # Target design for ADC-fence (NOT in code yet): a fenced commit is what
     # makes one-commit-per-cycle hold; the Fence wedge below shows the gap.
     AgentDocCloseoutNet:AgentDocCloseoutNetFencedTarget
+    # `#keylogrebase`: a correctly based op ledger closes the disk-only
+    # residual of `#queuecutexclusive`.
+    AdmissionCutExclusivity:AdmissionCutExclusivityResidual
 )
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
@@ -362,12 +365,17 @@ must_violate=(
     AdmissionSplitMerge:AdmissionSplitMergeTwinOutputWedge
     # `#queuecutexclusive`: the pre-fix ladder with every heuristic guard on
     # still duplicates (stale cut, and the 2026-10-15 in-flight cut); the
-    # shipped rule still merges independent disk work (Reach); and the stated
-    # boundary -- a disk-only component's in-flight typing -- is real.
+    # shipped rule still merges independent disk work (Reach).
+    # `#keylogrebase`: the text-only rule cannot close the disk-only residual
+    # (ResidualTextOnly), provenance over the pre-fix mislabelled ledger cannot
+    # either (ResidualMislabelled), and the remaining boundary -- an uncovered
+    # ledger, or typing and independent work in one component -- is real.
     AdmissionCutExclusivity:AdmissionCutExclusivityLadderWedge
     AdmissionCutExclusivity:AdmissionCutExclusivityInflightWedge
     AdmissionCutExclusivity:AdmissionCutExclusivityReach
-    AdmissionCutExclusivity:AdmissionCutExclusivityResidual
+    AdmissionCutExclusivity:AdmissionCutExclusivityResidualTextOnly
+    AdmissionCutExclusivity:AdmissionCutExclusivityResidualMislabelled
+    AdmissionCutExclusivity:AdmissionCutExclusivityBoundary
     AdmissionSplitMerge:AdmissionSplitMergeTwinReach
     # `#editorauthority`: adopting the CRDT over an open editor rolls it back
     # (api.md, 2026-09-29); forward merging still delivers agent work.

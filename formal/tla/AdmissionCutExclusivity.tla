@@ -63,13 +63,32 @@ editor's own ops then roll A[C] forward to the editor's final text exactly once
 B[C] before any rung runs) plus a fail-closed guard every candidate must clear
 (merged[C] is A[C] or D[C], never a third body built from both).
 
-WHAT IT DOES NOT CLAIM (stated, and checked)
---------------------------------------------
+WHAT THE TEXT RULE DOES NOT CLAIM, AND THE PROVENANCE THAT CLOSES IT
+-------------------------------------------------------------------
 A component only DISK changed is still merged, so independent disk work lands
 (`Reach`). If that disk-only change is itself the editor's in-flight typing,
-it can still arrive twice (`Residual`): a text-only policy cannot tell the
-editor's next keystrokes on disk from an independent writer's line. Closing
-that needs provenance (a correctly based op ledger), not a better text rule.
+it can still arrive twice: a text-only policy cannot tell the editor's next
+keystrokes on disk from an independent writer's line (`ResidualTextOnly`).
+
+Closing it needs provenance: the editor's own op ledger (`#keylogrebase`).
+The ledger records the editor's steps keystroke by keystroke, so it can run
+ahead of the authority's batched cut and cover the native save. Policy
+"provenance" adds one projection: a component only disk changed whose disk
+body is a state of the ledger's replay (and the replay passes through the
+authority's cut) is the editor's own text, so disk's body reverts to the
+baseline and the editor's ops land it exactly once (`ConvergesAttributed`).
+
+That proof exists only if the ledger is labelled with the text its offsets
+are relative to. Live 2026-10-15 it was not: a compaction fenced the epoch
+while the merge baseline still named the pre-compaction text, and the
+reopened ledger was stamped `merge_base=97b41a5fa5b6` while its offsets were
+relative to the compacted buffer. Such a ledger never replays onto the
+baseline, so no component is attributed (`LedgerBased = FALSE`,
+`ResidualMislabelled`). With a correctly based ledger that covers the disk
+cut, no component holding only the editor's text is ever duplicated
+(`NoDuplicateWhenCovered`, `Residual`). What remains is stated and checked
+(`Boundary`): a ledger that does not yet hold the saved keystrokes, and one
+component holding both the editor's in-flight typing and independent work.
 
   AdmissionCutExclusivity.cfg           shipped rule; NoDuplicateInConcurrent
                                         Component and ConvergesConcurrent hold.
@@ -90,15 +109,27 @@ that needs provenance (a correctly based op ledger), not a better text rule.
                                         a@2 -- two a@2.
   AdmissionCutExclusivityReach.cfg      MUST violate ExternalNeverLands:
                                         independent disk work in a component the
-                                        authority left alone still lands.
-  AdmissionCutExclusivityResidual.cfg   MUST violate NoDuplicateItem: the
-                                        boundary above, so the claim is exact.
+                                        authority left alone still lands, with
+                                        provenance on.
+  AdmissionCutExclusivityResidual.cfg   provenance with a correctly based ledger:
+                                        NoDuplicateWhenCovered and
+                                        ConvergesAttributed hold.
+  AdmissionCutExclusivityResidualTextOnly.cfg  the text-only rule ("exclusive");
+                                        MUST violate NoDuplicateWhenCovered.
+  AdmissionCutExclusivityResidualMislabelled.cfg  provenance over a ledger
+                                        stamped with the lagging merge baseline
+                                        (`#keylogrebase`); MUST violate
+                                        NoDuplicateWhenCovered.
+  AdmissionCutExclusivityBoundary.cfg   provenance on; MUST violate the
+                                        all-cases NoDuplicateItem, so the
+                                        remaining boundary is exact.
 ***************************************************************************)
 
-CONSTANTS Policy, N
+CONSTANTS Policy, N, LedgerBased
 
-ASSUME Policy \in {"ladder", "exclusive"}
+ASSUME Policy \in {"ladder", "exclusive", "provenance"}
 ASSUME N \in 2..4
+ASSUME LedgerBased \in BOOLEAN
 
 \* Editor steps. `appA` extends item a at its end (a typing burst: the textual
 \* twin test can see it); `midA` edits it mid-line (a correction: it cannot).
@@ -106,9 +137,9 @@ Steps == {"addA", "appA", "midA", "addR", "noop"}
 Comps == {"Q", "R"}
 CompOf(it) == IF it = "a" THEN "Q" ELSE "R"
 
-VARIABLES steps, baseA, tA, tD, ext, auth, next, phase
+VARIABLES steps, baseA, tA, tD, tL, ext, auth, next, phase
 
-vars == <<steps, baseA, tA, tD, ext, auth, next, phase>>
+vars == <<steps, baseA, tA, tD, tL, ext, auth, next, phase>>
 
 Apply(s, st) ==
     CASE st = "addA" /\ s.a = 0 -> [s EXCEPT !.a = 1]
@@ -145,11 +176,28 @@ TwinSees(v1, v2) ==
           (Effective(k) /\ steps[k] \in {"appA", "midA"} /\ HistAt(k).a \in lo..(hi - 1))
               => steps[k] = "appA"
 
+\* `#keylogrebase` provenance. The op ledger holds the editor's steps
+\* 1..tL-1, so its replay states are HistAt(1..tL). It is usable only when it
+\* is labelled with the text its offsets are relative to (LedgerBased) and its
+\* replay passes through the authority's cut.
+LineageProven == LedgerBased /\ \E k \in 1..tL : Lines(HistAt(k)) = LA
+
+\* A component only disk changed whose disk body is a ledger replay state is
+\* the editor's own text.
+Attributed(c) ==
+    /\ Policy = "provenance"
+    /\ LineageProven
+    /\ ~Changed(LA, c)
+    /\ Changed(LD, c)
+    /\ \E k \in 1..tL : Comp(Lines(HistAt(k)), c) = Comp(LD, c)
+
 \* `#queuecutexclusive` input projection: disk's version of a component both
 \* planes changed reverts to the baseline, so no rung can see two versions.
+\* With provenance, so does disk's version of an attributed component.
 ProjectedD ==
-    IF Policy = "exclusive"
-    THEN UNION {IF Concurrent(c) THEN Comp(LB, c) ELSE Comp(LD, c) : c \in Comps}
+    IF Policy \in {"exclusive", "provenance"}
+    THEN UNION {IF Concurrent(c) \/ Attributed(c) THEN Comp(LB, c) ELSE Comp(LD, c)
+                : c \in Comps}
     ELSE LD
 
 \* `typingforkdup` input projection: drop a disk line that is an EARLIER twin of
@@ -187,8 +235,11 @@ PairOK(cand) == ~\E l1, l2 \in cand : /\ l1[2] = "a" /\ l2[2] = "a"
 \* `#queuecutexclusive` fail-closed guard: a concurrently changed component is
 \* exactly one plane's version, never a body built from both.
 ExclusiveOK(cand) ==
-    Policy # "exclusive"
-    \/ \A c \in Comps : Concurrent(c) => Comp(cand, c) \in {Comp(LA, c), Comp(LD, c)}
+    /\ \/ Policy = "ladder"
+       \/ \A c \in Comps : Concurrent(c) => Comp(cand, c) \in {Comp(LA, c), Comp(LD, c)}
+    \* `#keylogrebase` fail-closed guard: an attributed component is the
+    \* authority's body; it reaches the authority only through the editor's ops.
+    /\ \A c \in Comps : Attributed(c) => Comp(cand, c) = Comp(LA, c)
 
 Adoptable(cand) ==
     /\ LA \subseteq cand
@@ -209,7 +260,7 @@ Elem(l, src) == [c |-> l[1], item |-> l[2], ver |-> l[3], src |-> src]
 TypeOK ==
     /\ steps \in [1..(N - 1) -> Steps]
     /\ baseA \in {0, 1}
-    /\ tA \in 1..N /\ tD \in 1..N
+    /\ tA \in 1..N /\ tD \in 1..N /\ tL \in 1..N
     /\ ext \in BOOLEAN
     /\ phase \in {"merge", "deliver", "done"}
     /\ next \in 1..N
@@ -221,6 +272,7 @@ Init ==
     /\ baseA \in {0, 1}
     /\ tA \in 1..N
     /\ tD \in 1..N
+    /\ tL \in 1..N
     /\ ext \in BOOLEAN
     /\ LA # LB
     /\ LD # LB
@@ -236,7 +288,7 @@ MergeWrite ==
     /\ phase = "merge"
     /\ auth' = auth \cup {Elem(l, "srv") : l \in Adopted \ LA}
     /\ phase' = "deliver"
-    /\ UNCHANGED <<steps, baseA, tA, tD, ext, next>>
+    /\ UNCHANGED <<steps, baseA, tA, tD, tL, ext, next>>
 
 \* The editor's ops past the authority's cut arrive, in order, and act on the
 \* editor's OWN items -- never on the copies admission inserted.
@@ -251,13 +303,13 @@ Deliver ==
                    [] st = "addR" -> auth \cup {Elem(<<"R", "r", 1>>, "ed")}
                    [] OTHER -> (auth \ mine) \cup {[e EXCEPT !.ver = e.ver + 1] : e \in mine}
     /\ next' = next + 1
-    /\ UNCHANGED <<steps, baseA, tA, tD, ext, phase>>
+    /\ UNCHANGED <<steps, baseA, tA, tD, tL, ext, phase>>
 
 Finish ==
     /\ phase = "deliver"
     /\ next = N
     /\ phase' = "done"
-    /\ UNCHANGED <<steps, baseA, tA, tD, ext, auth, next>>
+    /\ UNCHANGED <<steps, baseA, tA, tD, tL, ext, auth, next>>
 
 Done == phase = "done" /\ UNCHANGED vars
 
@@ -284,6 +336,23 @@ NoDuplicateWhenDiskAhead == tD > tA => NoDuplicateInConcurrentComponent
 \* component is exactly the editor's final text.
 ConvergesConcurrent ==
     phase = "done" => \A c \in Comps : Concurrent(c) => Text(c) = Comp(Lines(HistAt(N)), c)
+
+\* Exactly-once for provenance: an attributed component is exactly the
+\* editor's final text once its ops have arrived.
+ConvergesAttributed ==
+    phase = "done" => \A c \in Comps : Attributed(c) => Text(c) = Comp(Lines(HistAt(N)), c)
+
+\* Disk's body of `c` is purely the editor's native save (no independent work).
+EditorOnly(c) == Comp(LD, c) = Comp(Lines(HistAt(tD)), c)
+
+\* The ledger holds every editor step through both cuts.
+Covered == tL >= tD /\ tL >= tA
+
+\* `#keylogrebase`: with a ledger covering both cuts, no component holding only
+\* the editor's own text ever holds an item twice.
+NoDuplicateWhenCovered ==
+    (phase = "done" /\ Covered) =>
+        \A it \in {"a", "r", "x"} : EditorOnly(CompOf(it)) => Cardinality(Live(it)) <= 1
 
 \* Reach obligation: independent disk work can still land.
 ExternalNeverLands == phase = "done" => Live("x") = {}

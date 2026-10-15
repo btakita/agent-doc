@@ -1167,15 +1167,40 @@ candidate that lost an aligned component is refused too. Refusing a rung only
 means admission proceeds on the authority. Components whose occurrence count
 differs between planes are structural changes and are left to the merge.
 
-What it does not claim: a component only disk changed still merges, so
-independent disk work lands. If that disk-only change is itself the editor's
-in-flight typing in a component the authority has not yet received any op for,
-it can still arrive twice. A text-only rule cannot tell that from an independent
-write; closing it needs provenance (a correctly based op ledger).
+A component only disk changed still merges by text, so independent disk work
+lands. If that disk-only change is itself the editor's in-flight typing in a
+component the authority has not yet received any op for, a text-only rule cannot
+tell it from an independent write, and it used to arrive twice.
+
+**Provenance closes it (`#keylogrebase`).** The op ledger records keystroke by
+keystroke, so it routinely runs ahead of the authority's batched cut and covers
+the native save. Admission reads the epoch for the baseline through
+`verified_editor_ops_for_base` and requires its replay to pass through the
+authority's cut (`replay_reaches_cut`). With that proof,
+`project_disk_for_editor_provenance` reverts disk's body of every component only
+disk changed whose body is the same component in some replay state of the
+ledger: that body is the editor's own text, so the authority's (unchanged) body
+is kept and the editor's in-flight ops land it exactly once. It runs on the
+original disk before the op-lineage queue suppression and cut exclusivity, logs
+`EditorProvenance=authority_kept(<component>:<ordinal>)` in the rung list, and
+every candidate must clear `merge_changes_editor_attributed` (an attributed
+component is the authority's body). Without the proof -- no epoch, the pre-fix
+mislabelled ledger, a ledger that does not pass through the authority's cut --
+the projection is skipped (`admission_editor_provenance unavailable=...`) and
+admission behaves exactly as the text-only rule.
+
+What it still does not claim: a ledger that has not yet recorded the saved
+keystrokes proves nothing about them, and one component holding both the
+editor's in-flight typing and independent work matches no ledger state; both
+are merged by text as before.
 `formal/tla/AdmissionCutExclusivity.tla` checks the rule (`NoDuplicateInConcurrentComponent`,
-`ConvergesConcurrent`), two wedges for the pre-fix ladder with all three heuristic
-guards on (a stale cut, and the 2026-10-15 in-flight cut), a reach obligation for
-disk work in an untouched component, and the stated boundary as a must-violate
+`ConvergesConcurrent`, `ConvergesAttributed`), two wedges for the pre-fix ladder
+with all three heuristic guards on (a stale cut, and the 2026-10-15 in-flight
+cut), a reach obligation for disk work in an untouched component with provenance
+on, the closed residual (`AdmissionCutExclusivityResidual.cfg`:
+`NoDuplicateWhenCovered` holds with a correctly based ledger that covers both
+cuts), must-violate configs for the text-only rule and for the mislabelled
+ledger (`LedgerBased = FALSE`), and the remaining boundary as a must-violate
 config.
 
 `authority_subsumes_disk` is what a **blocked commit** looks like. When the
@@ -1500,11 +1525,48 @@ Later operator operations therefore cannot be concatenated onto an old snapshot
 base across an intervening agent projection. The newest CP/CRDT current text
 remains the authority/fallback when an op epoch is unavailable.
 
+**An epoch is based on the text its offsets are relative to (`#keylogrebase`).**
+The reporter used to stamp every burst with the merge baseline it looked up
+(`agent_doc_document_base_hash`, memoized by `#qbasehashmemo`). That baseline
+lags the buffer whenever a non-operator projection lands before its commit
+checkpoint: live 2026-10-15 on `agent-doc-bugs.md`, the 16:29:43Z compaction
+(`crdt_cp_write source=compact content_hash=c9a1a6...`, retained without a
+snapshot) fenced the epoch (`editor_op_epoch_closed cause=non_operator_projection`),
+the operator typed into the compacted buffer, and the reopened ledger recorded
+`editor_ops_recorded count=1 base=97b41a5fa5b6 ... offsets=1829` -- the
+pre-compaction hash on offsets relative to the compacted text. When the commit
+advanced the baseline (16:30:18Z `merge_base=c9a1a6fa210d`), the changed stamp
+reset the epoch and dropped the bursts before it, and the new epoch's offsets
+were relative to the compacted text plus that typing. No consumer could ever
+replay either ledger, so admission had no op-lineage proof.
+
+The editor now attests each burst: `ops_json` is
+`{"pre_hash","post_hash","ops"}`, where `pre_hash` is the SHA-256 of the buffer
+immediately before the burst's first op and `post_hash` of the buffer after its
+last. Only operator ops after the burst's last non-operator op are attested
+(the projection fenced the earlier ones). One shared rule
+(`agent_doc_state_backbone::plan_editor_op_epoch_append`, used by the controller
+and the cold path) decides the epoch: the burst continues the active epoch only
+when that epoch's attested tip equals `pre_hash`, and otherwise opens a fresh
+epoch based on `pre_hash` itself; the stamped baseline never labels attested
+ops. A consumer clear, a projection fence, a lost burst or a restart therefore
+re-bases the ledger on the text the editor actually typed into, and a later
+baseline change cannot reset it. The checkpoint fact carries the tip
+(`tip_hash`), and `verified_editor_ops_for_base` returns ops only when the epoch
+is based on the given text AND replaying the ops onto it reproduces the
+attested tip. A legacy producer (a bare op array, no attestation) keeps the
+stamped-base rule but leaves no tip, so its epoch is never verified provenance.
+Receipts name both views: `editor_ops_recorded count=<n> base=<stamped>
+lineage_pre=<hash12> lineage_post=<hash12> #keylogrebase` (or `lineage=none`).
+A difference between `base=` and `lineage_pre=` is the window between a
+projection and its commit checkpoint, not an error.
+
 Capture has two producers and `verify-op-capture` accepts either
 (`#opcaptureverifybatchproducer`). The one-op FFI
 `agent_doc_record_editor_op` writes `editor_op_recorded ... #qnodemerge4wire`;
 the batch FFI `agent_doc_record_editor_ops_json` writes
-`editor_ops_recorded count=<n> base=<hash> transaction=batch #qbasehashmemo`,
+`editor_ops_recorded count=<n> base=<hash> lineage_pre=<hash> lineage_post=<hash> transaction=batch #qbasehashmemo`
+(`lineage=none` for an unattested producer, see `#keylogrebase` above),
 and the JetBrains `TypingTracker` drives ONLY the batch form. A verifier that
 demands the singular marker therefore fails on every real JetBrains session
 however much was captured, so both markers prove capture and both

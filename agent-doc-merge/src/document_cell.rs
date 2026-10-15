@@ -1863,7 +1863,7 @@ fn queue_item_counts(doc: &str) -> std::collections::HashMap<String, usize> {
 
 /// True when replaying `ops` onto `base` passes through `cut` at any op
 /// boundary, including before the first op and after the last (`opcutahead`).
-fn replay_reaches_cut(base: &str, ops: &[EditorOp], cut: &str) -> bool {
+pub fn replay_reaches_cut(base: &str, ops: &[EditorOp], cut: &str) -> bool {
     let mut running = base.to_string();
     if running == cut {
         return true;

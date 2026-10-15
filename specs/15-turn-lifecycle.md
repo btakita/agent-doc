@@ -281,6 +281,43 @@ head identity relevant to each turn. Edits to `agent:exchange` are different:
 `ExchangeUpdated` and `MixedExchangeAndQueueUpdate` are always prompt-bearing
 active-turn input, even if the same source epoch also edits future queue heads.
 
+### Repairable findings defer to operator intent (`#rundocsstop`)
+
+A preflight finding that loses nothing and that the admitted turn can repair
+itself must not refuse a turn whose prompt is the operator's intent. The verdict
+is `TurnAdmission::repairable_finding` in `agent-doc-turn` (the same
+closed-cycle verdict `#admissionsteeringagree` derives): `ContinueWithSteering`
+and `ContinueWithExplicitRoute` give `AdmitWithRepairDirective`;
+`RequireCleanCloseout`, `OpenCycle`, and a probe with no entry admission give
+`Refuse`. Preflight reads the entry verdict (step 0d), not a later re-read,
+because the entry cut is the one the operator's Run Agent Doc submitted.
+
+The finding routed through this rule is the shadow-backlog gate
+(`agent_doc_preflight_io::shadow_open_backlog_admission`): an open
+`- [ ] [#id]` row outside the live `agent:backlog` (and the other tracked
+components) is still in the document, so it is a placement problem, not lost
+work. Admitted, it appears in the cycle contract as warning code
+`shadow_open_backlog_repair`, which tells the agent to answer the operator's edit
+and, in the same turn, move each listed row back into `agent:backlog` or mark it
+complete. The closeout `session-check` shadow guard is unchanged and keeps
+reporting the rows until they are restored. Without operator intent the refusal
+stands, so an unattended run still stops for a person.
+
+Integrity guards are not routed through this rule and keep refusing:
+`enforce_no_dropped_backlog` (rows lost from history), closeout drift without
+operator intent, retained-write reconciliation, authority or replica faults, and
+deadline refusals.
+
+Observed 2026-10-15 21:39Z and 21:41Z on haiven-dev `tasks/docs.md` (0.35.509):
+the operator pressed Run Agent Doc (`preflight_turn_admission
+stage=closeout_drift_check admission=continue_with_explicit_route`), and
+preflight then refused on `#todopr49answers` / `#todopr49automerge`, two rows
+the binary had written into `agent:todo`. The hook printed `cycle contract
+UNAVAILABLE`, the agent stopped as instructed, and the operator's edit went
+unanswered while the only party allowed to fix the rows was the operator. The
+`agent:todo` false positive itself is `#todoshadowguard`; this rule covers the
+whole class, so a genuine shadow row no longer ends the operator's turn either.
+
 ## Commit Ownership
 
 The document turn lifecycle owns commits because commit meaning depends on more

@@ -7,9 +7,9 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_preflight_io::{
     PendingMaintenanceReport, PreflightResponseContract, QueueAuthorityUnavailable, QueueState,
     check_linked_docs, checkpoint_baseline_content, enforce_no_dropped_backlog,
-    enforce_no_shadow_open_backlog, explicit_backlog_target_requirements, inspect_queue_state,
-    read_and_truncate_claims, read_claims, resolve_pipeline_state, run_gate_verify,
-    run_pending_maintenance, run_queue_maintenance_with_coin_gate,
+    explicit_backlog_target_requirements, inspect_queue_state, read_and_truncate_claims,
+    read_claims, resolve_pipeline_state, run_gate_verify, run_pending_maintenance,
+    run_queue_maintenance_with_coin_gate, shadow_open_backlog_admission,
     sweep::{
         current_sweep_budget, current_sweep_owner, load_sweep_cursor,
         log_and_skip_foreign_owned_sweep_if_needed, order_from_cursor, run_bounded_sweep,
@@ -971,7 +971,17 @@ fn run_with_options_to_writer_in_pass(
             active_harness: None,
         });
     }
-    enforce_no_shadow_open_backlog(file)?;
+    // `#rundocsstop`: a shadow-only open backlog row is a placement finding the
+    // admitted turn can repair. With the operator's edit or explicit route as this
+    // turn's prompt (the entry verdict, as at step 1b2), admit and carry it as a
+    // repair directive; refusing here ended the operator's Run Agent Doc with the
+    // edit unread. No operator intent keeps the refusal.
+    if let Some(warning) = shadow_open_backlog_admission(
+        file,
+        entry_admission.as_ref().map(|verdict| verdict.admission),
+    )? {
+        warnings.push(warning);
+    }
     enforce_no_dropped_backlog(
         file,
         rc.head_content().as_deref().map(String::as_str),
@@ -9885,6 +9895,83 @@ mod tests {
         assert!(
             journal.iter().all(|intent| intent.target_content == clean),
             "any remaining intent must be only the exact lazy controller projection: {journal:?}",
+        );
+    }
+
+    /// `#rundocsstop` (haiven-dev `tasks/docs.md`, 2026-10-15 21:39Z): two open
+    /// `- [ ] [#id]` rows outside `agent:backlog` made preflight refuse the
+    /// operator's Run Agent Doc, so the hook told the agent not to respond and the
+    /// operator's edit went unanswered. Operator steering after a closed cycle is
+    /// now admitted with the finding as a repair directive in the contract; the
+    /// same document with no steering still refuses.
+    #[test]
+    fn preflight_admits_operator_steering_over_shadow_backlog_rows_as_a_repair() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior\n\nDone.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live1] Real backlog work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Parked\n\n",
+            "- [ ] [#todopr49answers] Answer the ADR 0025 questions\n",
+            "- [ ] [#todopr49automerge] Disarm squash auto-merge\n",
+        );
+        std::fs::write(&doc, committed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        commit_all(root, "committed", None);
+
+        let refused =
+            run_with_options_to_writer(&doc, PreflightOptions::default(), &mut Vec::new())
+                .expect_err("no operator steering keeps the shadow-backlog refusal")
+                .to_string();
+        assert!(
+            refused.contains("exist only outside live agent:backlog")
+                && refused.contains("#todopr49answers"),
+            "{refused}"
+        );
+
+        let steered = committed.replace(
+            "<!-- agent:boundary:committed -->",
+            "<!-- agent:boundary:committed -->\nWhy did the agent suggest int32 in the ADR?",
+        );
+        std::fs::write(&doc, &steered).unwrap();
+        let verdict = agent_doc_session_check_io::turn_admission(&doc, false).unwrap();
+        assert!(verdict.continues_with_steering(), "{verdict:?}");
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions::default(), &mut output)
+            .expect("operator steering must be admitted over shadow backlog rows");
+        let contract: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(contract["no_changes"], false, "{contract:#}");
+        let repair = contract["warnings"]
+            .as_array()
+            .and_then(|warnings| {
+                warnings.iter().find(|warning| {
+                    warning["code"] == agent_doc_preflight_io::SHADOW_OPEN_BACKLOG_REPAIR_WARNING
+                })
+            })
+            .unwrap_or_else(|| panic!("contract must carry the repair directive: {contract:#}"));
+        let message = repair["message"].as_str().unwrap();
+        assert!(
+            message.contains("#todopr49answers") && message.contains("#todopr49automerge"),
+            "{message}"
+        );
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("Why did the agent suggest int32 in the ADR?"),
+            "the operator's edit stays this turn's prompt"
         );
     }
 }

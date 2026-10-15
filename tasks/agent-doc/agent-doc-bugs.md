@@ -86,9 +86,9 @@ We are on the new `agent-doc 0.35.502` locally. One precise release boundary: th
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/259
 - #gh-fix https://github.com/btakita/agent-doc/issues/260
-- Make .agent-doc/project.md work with nested projects...such as boost-client or haiven-dev. The parent project.md should be picked up with the child project.md presets overlaid on top.
-- tmux pane auto-sync not working
-- release + publish
+- ~~Make .agent-doc/project.md work with nested projects...such as boost-client or haiven-dev. The parent project.md should be picked up with the child project.md presets overlaid on top.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~tmux pane auto-sync not working~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

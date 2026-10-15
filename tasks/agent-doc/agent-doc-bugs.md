@@ -249,14 +249,14 @@ This response uses it. It adds one real operator action, a live Remote Dev check
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/261~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/262
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/263
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/264
-- 🚧 tmux pane auto-sync not working
-- 🚧 Add a `priority` attribute to `agent:review`.
-- 🚧 Is `agent:todo` implemented? I don't see it being used. Please fix. There should be todo's when the operator needs to take an action. If a agent:todo is not in the document, agent-doc should add it.
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/262~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/263~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/264~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~tmux pane auto-sync not working~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Add a `priority` attribute to `agent:review`.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Is `agent:todo` implemented? I don't see it being used. Please fix. There should be todo's when the operator needs to take an action. If a agent:todo is not in the document, agent-doc should add it.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 do your formal logic suggestions
-- 🚧 release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#ctrltimingflakes]
 <!-- /agent:queue -->
 

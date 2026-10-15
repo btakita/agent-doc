@@ -287,7 +287,125 @@ The exchange is large (221 lines, 13 sections). I'm noting that here, not stoppi
 **`#todo` (Sync agent:todo: use ids in the agent-doc todo format):** done inline. It edits this session document, which subagents may not touch. Both checked items now carry ids: `#gh262tabtmux` and `#sdkmdcleanup`. The open item already used the format (`[#ahfe]`). No item was dropped, and no state changed. New open todo ids are safe again once `fix/todo-id-guard` is installed. It is merged in `batch-0.35.510`, awaiting the batch's single `make check` + `make install`.
 
 **In flight (all claimed):** 10 subagents: gh274, todo-ids, keylogrebase, gh275, queue-schedule (`#pollintervalattribute`; its claim followed your rename), clear-context error, IDEA snappiness, stale controller / tmux 2→1→2, cold-launch test flakes, captured-delta livelock, plus `#rundocsstop`. `#claimfollowedit`, `#execfailpipe`, `#rearmreadfailclosed2` and `#staleplugwarnflake` are already in `batch-0.35.510`. They close at the batch install.
-<!-- agent:boundary:be166be1 -->
+
+### Re: Subagent completed: `subagent:gh275` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=97b19dc240ac1cef54974e5c057324a9d94eb02148893777a16d59480e61fc24 -->
+
+### Re: Subagent completed: `subagent:todoids` returned work for queue item “🚧 `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=7187d25387231014829d409ce008c12a413db7d72e68a24cc0077251806ef5b8 -->
+
+### Re: Subagent completed: `subagent:keylogrebase` returned work for queue item “🚧 do [#keylogrebase]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=4497b8046b848562916487cf8510ba9da1dc615714750f1ed0410ff20501229a -->
+
+### Re: Subagent completed: `subagent:gh274` returned work for queue item “🚧 #gh-fix https://github.com/btakita/agent-doc/issues/274” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=9e25a44287a6f904a740ca548d3540efc2adcde78b9931ca918e7af63c9b76d8 -->
+
+### Re: Subagent completed: `subagent:clearctxerr` returned work for queue item “Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=0cecbcdf7ad3463470033aaa31804de8af70c26d449ba5af3fcbda2e275e5eab -->
+
+### Re: Subagent completed: `subagent:queueschedule` returned work for queue item “do [#pollintervalattribute]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=cfcdbc246239a444000b2ae23b98a29e084c4aef30b0e4cc7ff9f745c577cd9a -->
+
+### Re: Subagent completed: `subagent:rundocsstop` returned work for queue item “do [#rundocsstop]” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=a8455ce3b81e60ef71eb025b00ce202b4ae179a899b0bdd0e555fa0348da133a -->
+
+### Re: Subagent completed: `subagent:stalecontroller` returned work for queue item “tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=26c1061762af31bf3327338bb0096e34d3dcde0f7e008ee15c89db413a25cc24 -->
+
+### Re: Subagent completed: `subagent:ideacpu` returned work for queue item “idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?” — agent-doc
+Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
+<!-- agent-doc-subagent-completion key=6c963ebb93240c7ec4b29be66244d98388e3f8068257c7c726c843784a246121 -->
+> **Chat prompt (#chatprompt):** cont
+
+### Re: batch-0.35.510 integrated, checked, installed, pushed to main — opus-5-5 · 2026-10-15T19:50-04:00
+
+**Done.** Every finished subagent branch is merged into `batch-0.35.510`.
+- **One full `make check`:** exit 0, 10790/10790 tests passed. TLA+ was skipped because its models are identical to a run that passed earlier.
+- **One `make install`:**
+  - JetBrains 0.2.642 hot-upgraded in the live IDE. 262 0.2.643 was written to Rider and loads at its next start. 263 is 0.2.644.
+  - VS Code 0.2.82 installed.
+  - 27 supervisors and 3 controllers recycle at their next idle boundary.
+- **`main`:** fast-forwarded to `8cc279f603`. CI for that push is still running; I recorded that rather than waiting on it.
+- **GitHub:** GH 274 and GH 275 are closed with fix commits. No tag yet: this is a local install, and the release is the next step whenever you want it.
+
+**What landed**
+- **GH 274 (`?` duplicate response):** the JetBrains plugin passed native strings in the JVM locale. An ASCII-locale backend turned non-ASCII into `?`, and repair later committed that copy beside the real one. Now UTF-8 is explicit and strict at the JNA boundary. The projection and repair also refuse a second exact copy, or a lossy copy, of a committed response.
+- **GH 275 and the `agent:todo` guard:** todo rows are no longer shadow backlog. A committed closeout whose session check still refuses now exits nonzero instead of printing "superseded".
+- **Todo ids:**
+  - `--todo-add` reuses the open review/backlog id it cites, or mints a fresh id.
+  - Checking the box is the operator's done signal, and no agent write unchecks it.
+  - Preflight reports todo signals, and closeout auto-checks a todo only when its own id is resolved.
+- **`keylogrebase`:** a keystroke log reopened after compaction now restarts on its real base. Admission trusts it only when replay reproduces the recorded tip. This closes the disk-only double-arrival gap, and the TLA+ residual config now passes.
+- **`rundocsstop`:** a Run Agent Doc or operator edit is admitted past shadow-backlog rows, with a repair directive, instead of having its turn stopped. The closeout guard still flags the rows.
+- **Queue scheduling:**
+  - `interval=`, `time=HH:MM[,…]`, `loop` and `loop=N` on `agent:queue`.
+  - One sleeping scheduler per controller, with a 60 s floor and a 300 s cap. Missed ticks coalesce, and failures back off.
+  - Pass counts survive restarts. Attribute edits reschedule live.
+- **Clear Session Context:**
+  - The first press was correctly queued behind a not-yet-started Run, but the notice described a live turn. It now says the clear runs after that Run.
+  - JetBrains and VS Code no longer "cancel" the Run, which only dropped its outcome and allowed a second trigger. VS Code had the same bug, and I fixed it there too.
+- **Stale controller / tmux 2→1→2:**
+  - `[X, X]` layouts collapse to one column, and projection retries are capped at 12.
+  - A per-window claim stops an older layout from another project's controller overriding a newer one.
+  - The stale-supervisor marker on `%180` was five weeks old (pane ids get reused); markers now require a live writer.
+- **Captured-delta livelock:** a typing burst whose acknowledgement was lost under load froze the plugin's baseline. The response then sat in the replica but never reached the visible buffer. The plugin now re-sends the unacknowledged burst and advances only on proof, with a bound. Your 17:51 response did survive (it is in HEAD).
+- **IDE snappiness:**
+  - Build, test and gradle entrypoints run at low priority with core headroom left for the IDE.
+  - Visual highlights reconcile incrementally.
+  - New operator doc: `docs/development/ide-responsiveness.md`.
+- **Test reliability:**
+  - Lib tests no longer cold-launch a separate controller (498 launches → 0), and a guard rejects new ones.
+  - Two wall-clock tests that failed every subagent's `make check` now take an injected clock. Each subagent had "fixed" one its own way; I kept the injected-clock versions.
+- **Already in the batch:** `claimfollowedit`, `splicesessionack` (GH 273 remainder), `rearmreadfailclosed2`, `execfailpipe`, `staleplugwarnflake`.
+
+**sdk.md and `#todo`:** bracketed todo ids are safe again once sdk.md's supervisor picks up the new build. The `#todo` sync was done last cycle (`#gh262tabtmux`, `#sdkmdcleanup`). This echo closes its queue head.
+
+**In flight (next batch):** the docs.md Stop-hook item (an answer released but not persisted) is with `subagent:docsstophook` on `fix/docs-stophook-unpersisted`.
+
+**Follow-ups added** at the end of the backlog: test binaries reaching live project sockets, integration tests still cold-launching controllers, and a recommended tightening of the shadow scan's inline-code skip.
+
+The exchange is large (over 290 lines). Noting it, not stopping for it.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/274
+
+Fixed and closed (above).
+
+> **Queue prompt:** `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.
+
+Done: id reuse or mint, the operator check as the done signal, and preflight signals plus closeout auto-done (above).
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.
+
+Fixed and closed. The new comment (only rows without backticks tripped the guard) is covered: `agent:todo` is now excluded as a whole component.
+
+> **Queue prompt:** Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked
+
+Fixed (above).
+
+> **Queue prompt:** idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?
+
+Yes, it was the builds. Fixed (above). The guide is `docs/development/ide-responsiveness.md`.
+
+> **Queue prompt:** sdk.md issue: I asked the agent to add ids on the todo items:
+
+Fixed with option 1 (fix the guard), now installed.
+
+> **Queue prompt:** tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.
+
+Fixed (above). Restarting IDEA could not help: the stuck controller was in haiven-dev, not the IDE.
+
+> **Queue prompt:** #todo
+
+Done last cycle.
+<!-- agent:boundary:0710c595 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -295,16 +413,16 @@ The exchange is large (221 lines, 13 sections). I'm noting that here, not stoppi
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#pollintervalattribute]
-- do [#rundocsstop]
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/274
+- ~~do [#pollintervalattribute]~~
+- ~~do [#rundocsstop]~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/274~~
 - 🚧 `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.
-- 🚧 do [#keylogrebase]
-- 🚧 do [#claimfollowedit]
-- 🚧 do [#splicesessionack]
-- 🚧 do [#rearmreadfailclosed2]
-- 🚧 do [#execfailpipe]
-- 🚧 do [#staleplugwarnflake]
+- ~~do [#keylogrebase]~~
+- ~~do [#claimfollowedit]~~
+- ~~do [#splicesessionack]~~
+- ~~do [#rearmreadfailclosed2]~~
+- ~~do [#execfailpipe]~~
+- ~~do [#staleplugwarnflake]~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.
 - 🚧 Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked
 - 🚧 idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?
@@ -343,6 +461,23 @@ The exchange is large (221 lines, 13 sections). I'm noting that here, not stoppi
 ---
 - 🚧 tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.
 - #todo
+---
+docs.md issue:
+```
+• Blocked by hook
+  └ agent-doc Stop hook found fresh unresolved exchange work for /home/brian/work/btakita/agent-loop/src/haiven-dev/
+tasks/docs.md after the previous cycle was already committed. Continue THIS turn in-pane: answer "Does the page status
+enum have an archived value? What are the values?" in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md
+and persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md` (or `agent-doc
+write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md`). Do NOT send the final answer yet.
+
+• The stop hook found that the status-enum result was released but not yet persisted into the session document. I’m
+  recording that answer now with the official schema distinction and live Haiven evidence, then I’ll run the required
+  terminal-state check.
+```
+- do [#testisolationleaks]
+- do [#integrationtesttargets]
+- do [#shadowbacklogscan]
 <!-- /agent:queue -->
 
 ## Todo
@@ -356,15 +491,9 @@ The exchange is large (221 lines, 13 sections). I'm noting that here, not stoppi
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#pollintervalattribute] Add `agent:queue` `interval` which sets the poll interval. Add a `time` attribute to set time of day. Allow multiple times of day. Make the loop efficiently run in the Controller. Ideally a single loop. Make sure the loop does not "go rogue" and thrash the CPU. Jobs use background workers. Add a `loop` attribute which loops through the items per interval/schedule and keeps the items in the queue. `loop` without a value will loop indefinately. `loop=3` will loop 3 times. Make sure realtime updates are supported. Use lazily for state management.
-- [ ] [#rundocsstop] Run Agent Doc on docs.md: agent-doc should not stop the turn. Preflight refused this turn and the document is now settled. No response was written. It should treat user edits realtime steering.
-- [ ] [#todobracketguard] Preflight shadow-backlog guard (`detect_shadow_open_items`, agent-doc-element-backlog/src/backlog.rs:2391, raised from agent-doc-preflight-io `enforce_no_shadow_open_backlog`) refuses `- [ ] [#id]` items in `agent:todo` as "open backlog item(s) exist only outside live agent:backlog" because `todo` is not in its excluded-component list (backlog/review/icebox/exchange/queue). It hard-wedged haiven-dev tasks/sdk.md on agent-doc 0.35.509 (21 todo ids); the same `[ ] [#id]` format works on the operator coder instance, so compare versions/guard paths. Fix: exclude `agent:todo` (or parse its own `[#id]` as todo ids, not backlog ids) in the guard, add a regression test with bracketed todo ids, and reconcile with the #todo id/done-flow work (feat/todo-ids). Workaround in place: sdk.md todos use a bare `#id`.
-- [ ] 🚧 [#keylogrebase] Keystroke log reopened after a compaction keeps the pre-compaction base hash (`merge_base=97b41a5fa5b6` after the 2026-10-15 16:29:43Z compaction), so admission has no op-lineage proof. Fixing it also closes the documented gap where a disk-only component can still arrive twice (see specs/14-realtime-workflow.md "Cut exclusivity" and the TLA+ `AdmissionCutExclusivityResidual` config).
-- [ ] 🚧 [#claimfollowedit] Queue claims are keyed by exact line text, so editing a claimed line drops the claim (`queue_claim_prune pruned=1`; GH #272 line 2026-10-15). Claims should follow the edited item (node identity) the way steering forward_to_owner already does.
-- [ ] 🚧 [#splicesessionack] GH #273 remainder: session-check still reports "acknowledgement pending" after the controller logs `retained_persistence_replica_rebuild_exhausted ... editor_holds_unmerged_visible_text`; give session-check a durable read of that state and name the operator action.
-- [ ] 🚧 [#rearmreadfailclosed2] Two remaining rearm-evidence reads in agent-doc-document-realtime-io/src/lib.rs (around lines 4167 and 5334) still use `.ok().flatten()`, treating a failed read as "no evidence"; apply the fail-closed rule from fix/preflight-io-load-flakes (6f54959182).
-- [ ] 🚧 [#execfailpipe] Verify and fix: `close_inherited_fds_on_exec` closes fds >= 3 in the child before exec, likely including Rust spawn's CLOEXEC exec-failure pipe, so an exec ENOENT may report as a successful spawn and defeat the launch-ENOENT retry.
-- [ ] 🚧 [#staleplugwarnflake] `warnings::tests::stale_plugin_warning_end_to_end_from_reliable_registration` failed 1/96 whole-crate runs under load (2026-10-15); find and fix the nondeterminism, never rerun to green.
+- [ ] [#testisolationleaks] Test isolation leaks into live project roots: haiven-dev ops.log shows bare 0.35.509 clients (no build hash) connecting and being rejected for build mismatch, and supervisor install recycles fired at 19:40, 19:56 and 20:27Z with no install to ~/.cargo/bin (found by fix/stale-controller-hot-update). Find the test binaries reaching live sockets/state.db and confine them to their tmp roots.
+- [ ] [#integrationtesttargets] Integration-test targets still cold-launch a CLI controller serve (~540 launches per full nextest run; fix/cold-launch-test-flakes covered lib tests only). Route them through the in-process controller or a readiness-based wait and extend the cold-launch guard to integration tests.
+- [ ] [#shadowbacklogscan] [recommended] The shadow-backlog scan skips any line overlapping inline code, so a genuinely drifted open backlog row containing backticks is never caught (found during the GH 275 fix). Tighten it without refusing live documents that legitimately quote ids in code.
 <!-- /agent:backlog -->
 
 ## Review

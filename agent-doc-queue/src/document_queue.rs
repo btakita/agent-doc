@@ -3445,6 +3445,32 @@ pub fn operator_rearmed_queue_identities(
         .collect()
 }
 
+/// Live queue identities the committed snapshot holds struck
+/// (`#unstrikelost`, unreadable evidence).
+///
+/// These are exactly the heads whose fate in
+/// [`converge_queue_via_lifecycle_with_operator_rearmed`] depends on operator
+/// re-arm evidence: without it, snapshot-struck dominance (`#qeditdupguard`)
+/// re-strikes them; with it (`#unstrikelost`), they stay live. When this set is
+/// empty the evidence cannot change the outcome and need not be read; when it
+/// is not, a caller that cannot read the evidence must not converge at all —
+/// "unreadable" is not "absent".
+pub fn live_snapshot_struck_identities(
+    entries: &[QueueEntry],
+    snapshot_entries: &[QueueEntry],
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    let snapshot_struck = snapshot_struck_representatives(snapshot_entries);
+    if snapshot_struck.is_empty() {
+        return std::collections::HashSet::new();
+    }
+    entries
+        .iter()
+        .filter(|entry| matches!(entry, QueueEntry::Prompt(_)))
+        .filter_map(queue_item_identity)
+        .filter(|identity| snapshot_struck.contains_key(identity))
+        .collect()
+}
+
 /// Snapshot-struck identities the operator RE-TYPED as a fresh live line
 /// (`#retypestruck`).
 ///
@@ -7603,6 +7629,53 @@ mod tests {
                 "{not_evidence:?}"
             );
         }
+    }
+
+    /// `#unstrikelost` (unreadable evidence): the contested set is exactly the live heads
+    /// whose convergence outcome depends on operator re-arm evidence. Outside
+    /// it, converging with every snapshot-struck identity re-armed and with
+    /// none re-armed must agree, so a maintenance pass may skip reading the
+    /// evidence; inside it they disagree, so unreadable evidence must refuse.
+    #[test]
+    fn live_snapshot_struck_identities_are_exactly_the_evidence_dependent_heads() {
+        let snapshot = vec![c("release + publish"), p("do [#open]"), c("do [#done]")];
+        let all_struck: std::collections::HashSet<_> = snapshot
+            .iter()
+            .filter(|entry| matches!(entry, QueueEntry::Completed(_)))
+            .filter_map(queue_item_identity)
+            .collect();
+        let converge_with = |entries: &[QueueEntry], rearmed| {
+            converge_queue_via_lifecycle_with_operator_rearmed(
+                entries,
+                &snapshot,
+                &Default::default(),
+                rearmed,
+            )
+            .unwrap_or_else(|| entries.to_vec())
+        };
+
+        let settled = vec![c("release + publish"), p("do [#open]"), c("do [#done]")];
+        let none_rearmed = std::collections::HashSet::new();
+        assert!(live_snapshot_struck_identities(&settled, &snapshot).is_empty());
+        assert_eq!(
+            converge_with(&settled, &all_struck),
+            converge_with(&settled, &none_rearmed),
+            "no contested head: evidence cannot change the outcome"
+        );
+
+        let unstruck = vec![p("release + publish"), p("do [#open]"), c("do [#done]")];
+        let contested = live_snapshot_struck_identities(&unstruck, &snapshot);
+        assert_eq!(contested.len(), 1);
+        assert!(
+            contested.contains(&agent_doc_element_queue::QueueItemIdentity::from_prompt(
+                "release + publish"
+            ))
+        );
+        assert_ne!(
+            converge_with(&unstruck, &all_struck),
+            converge_with(&unstruck, &none_rearmed),
+            "a contested head: evidence decides between live and re-struck"
+        );
     }
 
     /// Without operator op evidence the same live copy is indistinguishable from

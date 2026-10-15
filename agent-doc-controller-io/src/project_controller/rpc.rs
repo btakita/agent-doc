@@ -15461,8 +15461,12 @@ fn handoff_controller_generation(
         replacement.pid,
         new_generation,
     );
-    let _temp_stream =
-        wait_for_controller_path_with_launch(&temp_sock, HANDOFF_CONNECT_WAIT, &replacement)?;
+    let _temp_stream = wait_for_controller_path_with_launch(
+        &temp_sock,
+        HANDOFF_CONNECT_WAIT,
+        &replacement,
+        "replacement",
+    )?;
     let replacement_status: ControllerStatus = serde_json::from_str(
         &request_path(&temp_sock, "handoff_status")
             .context("failed to read replacement handoff status")?,
@@ -16047,8 +16051,18 @@ fn connect_or_launch_with_claim_wait_and_before_claim(
         }
     }
 
-    launch_detached(project_root, launch_mode)?;
-    wait_for_controller_after_launch(project_root)
+    // Launch exit masked as a timeout: keep the child handle. A controller that exits during
+    // startup (a corrupt `state.db`, a refused bind) can never publish the
+    // socket; polling the bare path then spent the whole launch budget and
+    // reported "timed out waiting for project controller", hiding the real
+    // cause the child wrote to its stderr log.
+    let launch = launch_detached(project_root, launch_mode)?;
+    wait_for_controller_path_with_launch(
+        &socket_path(project_root),
+        LAUNCH_CONNECT_WAIT,
+        &launch,
+        "launched",
+    )
 }
 
 fn log_launch_claim_waiter_adopted(
@@ -16222,7 +16236,10 @@ fn active_public_controller_blocks_public_launch(project_root: &Path) -> Option<
         .then_some(active_status)
 }
 
-pub(crate) fn launch_detached(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
+pub(crate) fn launch_detached(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+) -> Result<DetachedControllerLaunch> {
     launch_detached_at(
         project_root,
         launch_mode,
@@ -16231,7 +16248,6 @@ pub(crate) fn launch_detached(project_root: &Path, launch_mode: LaunchMode) -> R
         None,
         ControllerHandoffState::Stable,
     )
-    .map(|_| ())
 }
 
 pub(crate) struct DetachedControllerLaunch {
@@ -16616,10 +16632,19 @@ pub(crate) fn wait_for_controller_path_with_timeout(
     }
 }
 
+/// Wait for a controller this process just spawned to publish `path`.
+///
+/// Unlike [`wait_for_controller_path_with_timeout`], the wait is tied to the
+/// child: the moment its exit is observed (and a final connect proves no peer
+/// published the socket instead) it fails with the exit status and the tail of
+/// the controller's stderr log, rather than waiting out the budget and
+/// reporting a timeout. `role` names the child in the error ("replacement" for
+/// a handoff, "launched" for a cold start).
 fn wait_for_controller_path_with_launch(
     path: &Path,
     timeout: Duration,
     launch: &DetachedControllerLaunch,
+    role: &str,
 ) -> Result<interprocess::local_socket::Stream> {
     if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(path) {
         anyhow::bail!(reason);
@@ -16628,55 +16653,87 @@ fn wait_for_controller_path_with_launch(
         "project_controller_connect",
         timeout,
     )?;
+    let stderr_log = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("logs/controller-stderr.log");
     let start = Instant::now();
     loop {
         if let Ok(stream) = connect_path(path) {
             return Ok(stream);
         }
-        if let Some(exit) = launch.exit.as_ref() {
+        let exited: Option<String> = if let Some(exit) = launch.exit.as_ref() {
             match exit.try_recv() {
-                Ok(Ok(status)) => anyhow::bail!(
-                    "replacement controller pid {} exited before reporting ready at {}: {status}; stderr: {}",
-                    launch.pid,
-                    path.display(),
-                    path.parent()
-                        .unwrap_or_else(|| Path::new("."))
-                        .join("logs/controller-stderr.log")
-                        .display(),
-                ),
-                Ok(Err(err)) => anyhow::bail!(
-                    "replacement controller pid {} could not be observed before reporting ready at {}: {err}",
-                    launch.pid,
-                    path.display(),
-                ),
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => anyhow::bail!(
-                    "replacement controller pid {} exit observer disconnected before reporting ready at {}",
-                    launch.pid,
-                    path.display(),
-                ),
-                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Ok(Ok(status)) => Some(format!("exited before reporting ready: {status}")),
+                Ok(Err(err)) => Some(format!(
+                    "could not be observed before reporting ready: {err}"
+                )),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    Some("exit observer disconnected before reporting ready".to_string())
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
             }
         } else if !process_is_alive(launch.pid) {
+            Some("exited before reporting ready".to_string())
+        } else {
+            None
+        };
+        if let Some(exited) = exited {
+            // A launch that lost the race to a peer exits once the peer owns
+            // the socket; adopt that peer rather than reporting the exit.
+            if let Ok(stream) = connect_path(path) {
+                return Ok(stream);
+            }
             anyhow::bail!(
-                "replacement controller pid {} exited before reporting ready at {}; stderr: {}",
+                "{role} controller pid {} {exited} at {}; stderr: {}{}",
                 launch.pid,
                 path.display(),
-                path.parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join("logs/controller-stderr.log")
-                    .display(),
+                stderr_log.display(),
+                controller_stderr_tail(&stderr_log),
             );
         }
         if start.elapsed() >= timeout {
             agent_doc_debounce::admission_deadline::ensure_remaining("project_controller_connect")?;
             anyhow::bail!(
-                "timed out waiting for replacement controller pid {} at {}",
+                "timed out waiting for {role} controller pid {} at {}",
                 launch.pid,
                 path.display()
             );
         }
         std::thread::sleep(CONNECT_POLL);
     }
+}
+
+/// The last few lines of a controller stderr log, formatted for an error
+/// message (launch exit masked as a timeout). Empty when the log is missing or empty.
+fn controller_stderr_tail(stderr_log: &Path) -> String {
+    const TAIL_LINES: usize = 12;
+    const TAIL_BYTES: u64 = 4096;
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(stderr_log) else {
+        return String::new();
+    };
+    let len = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    if file
+        .seek(SeekFrom::Start(len.saturating_sub(TAIL_BYTES)))
+        .is_err()
+    {
+        return String::new();
+    }
+    let mut raw = Vec::new();
+    if file.read_to_end(&mut raw).is_err() {
+        return String::new();
+    }
+    let text = String::from_utf8_lossy(&raw);
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let tail = &lines[lines.len().saturating_sub(TAIL_LINES)..];
+    format!("\n  stderr tail:\n    {}", tail.join("\n    "))
 }
 
 #[allow(dead_code)]
@@ -37491,14 +37548,80 @@ mod tests {
         };
 
         let started = Instant::now();
-        let err = wait_for_controller_path_with_launch(&sock, Duration::from_secs(30), &launch)
-            .expect_err("an exited replacement can never report ready");
+        let err = wait_for_controller_path_with_launch(
+            &sock,
+            Duration::from_secs(30),
+            &launch,
+            "replacement",
+        )
+        .expect_err("an exited replacement can never report ready");
 
         assert!(started.elapsed() < Duration::from_secs(30) / 2);
         let message = format!("{err:#}");
         assert!(message.contains("pid 424242 exited"), "{message}");
         assert!(message.contains("exit status"), "{message}");
         assert!(message.contains("controller-stderr.log"), "{message}");
+    }
+
+    /// Launch exit masked as a timeout (the load flake of
+    /// `run_queue_maintenance_strikes_free_text_head_tracked_by_backlog_item`,
+    /// 2026-10-15): a cold-launched controller exited at startup on a corrupt
+    /// `state.db`, and the client polled the bare socket path for the whole
+    /// launch budget, then reported "timed out waiting for project controller".
+    /// The launched child's exit must end the wait with its stderr.
+    #[test]
+    fn launch_wait_reports_the_launched_controllers_exit_and_stderr_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = socket_path(dir.path());
+        let logs = sock.parent().unwrap().join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(
+            logs.join("controller-stderr.log"),
+            "Error: authoritative state db is unavailable; refusing automatic replacement\n\n    0: state db is corrupt\n",
+        )
+        .unwrap();
+        let status = Command::new("false").status().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Ok(status)).unwrap();
+        let launch = DetachedControllerLaunch {
+            pid: 424_243,
+            exit: Some(rx),
+        };
+
+        let budget = Duration::from_secs(30);
+        let started = Instant::now();
+        let err = wait_for_controller_path_with_launch(&sock, budget, &launch, "launched")
+            .expect_err("an exited launch can never report ready");
+
+        assert!(started.elapsed() < budget / 2, "the exit must end the wait");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("launched controller pid 424243 exited"),
+            "{message}"
+        );
+        assert!(!message.contains("timed out"), "{message}");
+        assert!(message.contains("state db is corrupt"), "{message}");
+    }
+
+    /// A launch that lost the race exits once a peer owns the socket; the
+    /// wait adopts that peer instead of reporting the exit.
+    #[test]
+    fn launch_wait_adopts_a_peer_published_after_the_child_exited() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = socket_path(dir.path());
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let name = sock.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let _listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let status = Command::new("true").status().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Ok(status)).unwrap();
+        let launch = DetachedControllerLaunch {
+            pid: 424_244,
+            exit: Some(rx),
+        };
+
+        wait_for_controller_path_with_launch(&sock, Duration::from_secs(30), &launch, "launched")
+            .expect("the published peer is adopted");
     }
 
     /// A single connect must name the cause too: a bare OS error here is what

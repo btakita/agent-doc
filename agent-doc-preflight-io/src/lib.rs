@@ -3865,32 +3865,36 @@ fn queue_entries_for_id(
 /// A head the operator typed again as a fresh line in the active epoch is a
 /// re-arm as well (`#retypestruck`), whatever the epoch's base. With no
 /// matching op evidence the set is empty and `#qeditdupguard` applies.
+///
+/// `#unstrikelost` (unreadable evidence): an epoch that cannot be READ is an error, never
+/// an empty set. Empty evidence re-strikes every contested head, so mapping a
+/// dead controller (or an unreadable `state.db`) to "no evidence" silently
+/// re-struck the operator's unstrike and persisted it.
 fn operator_rearmed_queue_identities(
     file: &Path,
     snapshot_text: &str,
     snapshot_queue_entries: &[agent_doc_queue::document_queue::QueueEntry],
-) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
-    let operator_cut = agent_doc_op_capture_io::editor_ops_for_base(file, snapshot_text)
-        .ok()
-        .flatten()
+) -> Result<std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity>> {
+    #[cfg(test)]
+    rearm_evidence_fault::take()?;
+    let active_ops = agent_doc_op_capture_io::editor_ops_for_base(file, snapshot_text)
+        .context("read the active editor-op epoch")?;
+    let operator_cut = match active_ops
         .and_then(|ops| agent_doc_merge::crdt::replay_editor_ops(snapshot_text, &ops))
-        .or_else(|| {
-            agent_doc_op_capture_io::last_editor_text_for_base(file, snapshot_text)
-                .ok()
-                .flatten()
-        });
+    {
+        Some(cut) => Some(cut),
+        None => agent_doc_op_capture_io::last_editor_text_for_base(file, snapshot_text)
+            .context("read the retained editor-op checkpoint")?,
+    };
     // `#retypestruck`: a head the operator typed again as a fresh line is a
     // re-arm too. This evidence is base-independent, so it survives the common
     // case where the active epoch's base is not the committed snapshot and the
     // exact-base replay above has nothing to offer.
-    let retyped = agent_doc_op_capture_io::active_operator_inserted_runs(file)
-        .map(|runs| {
-            agent_doc_queue::document_queue::operator_retyped_queue_identities(
-                snapshot_queue_entries,
-                &runs,
-            )
-        })
-        .unwrap_or_default();
+    let retyped = agent_doc_queue::document_queue::operator_retyped_queue_identities(
+        snapshot_queue_entries,
+        &agent_doc_op_capture_io::active_operator_inserted_runs(file)
+            .context("read the active editor-op epoch's inserted runs")?,
+    );
     if !retyped.is_empty() {
         agent_doc_ops_log_io::log_op(
             file,
@@ -3902,7 +3906,7 @@ fn operator_rearmed_queue_identities(
         );
     }
     let Some(operator_cut) = operator_cut else {
-        return retyped;
+        return Ok(retyped);
     };
     let mut rearmed = agent_doc_queue::document_queue::operator_rearmed_queue_identities(
         snapshot_queue_entries,
@@ -3919,7 +3923,112 @@ fn operator_rearmed_queue_identities(
         );
     }
     rearmed.extend(retyped);
-    rearmed
+    Ok(rearmed)
+}
+
+/// Operator re-arm evidence for the live heads the snapshot holds struck
+/// (`#unstrikelost`, unreadable evidence).
+///
+/// Reads nothing when no live head is snapshot-struck: the evidence cannot
+/// change the outcome there. Otherwise the read is retried a bounded number of
+/// times (re-ensuring the controller in between, since the usual cause is a
+/// controller that died after this pass launched it) and then refused with
+/// [`QueueAuthorityUnavailable`]: preflight must not converge, and so must not
+/// re-strike or resurrect a contested head, on evidence it could not read.
+fn operator_rearm_evidence_for_maintenance(
+    file: &Path,
+    snapshot_text: &str,
+    snapshot_queue_entries: &[agent_doc_queue::document_queue::QueueEntry],
+    live_entries: &[agent_doc_queue::document_queue::QueueEntry],
+) -> Result<std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity>> {
+    let contested = agent_doc_queue::document_queue::live_snapshot_struck_identities(
+        live_entries,
+        snapshot_queue_entries,
+    );
+    if contested.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    let attempts = queue_authority_attempts();
+    let mut attempt = 1;
+    loop {
+        match operator_rearmed_queue_identities(file, snapshot_text, snapshot_queue_entries) {
+            Ok(rearmed) => return Ok(rearmed),
+            Err(err) => {
+                let admission = if attempt < attempts {
+                    "retrying"
+                } else {
+                    "refused"
+                };
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_rearm_evidence_unavailable file={} contested={} attempt={attempt}/{attempts} admission={admission} error={} (#unstrikelost)",
+                        file.display(),
+                        contested.len(),
+                        compact_error_for_log(&err),
+                    ),
+                );
+                if attempt >= attempts {
+                    return Err(QueueAuthorityUnavailable::new(format!(
+                        "operator re-arm evidence for {} snapshot-struck live queue head(s) \
+                         is unreadable after {attempts} attempt(s); converging without it \
+                         would re-strike an operator unstrike: {err:#}",
+                        contested.len()
+                    ))
+                    .into());
+                }
+            }
+        }
+        // Best effort: the read retries either way, and its error is what
+        // the refusal reports.
+        let _ensured =
+            agent_doc_controller_io::project_controller::ensure_controller_running_for_file(file);
+        std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
+        attempt += 1;
+    }
+}
+
+fn compact_error_for_log(err: &anyhow::Error) -> String {
+    format!("{err:#}").replace(['\n', '\r'], " ")
+}
+
+/// Deterministic fault injection for the re-arm evidence read
+/// (`#unstrikelost`, unreadable evidence): the live trigger is a controller that dies
+/// between this pass launching it and the evidence read, which no test can
+/// schedule. Thread-local, because queue maintenance runs on the test thread.
+#[cfg(test)]
+mod rearm_evidence_fault {
+    use std::cell::Cell;
+
+    thread_local! {
+        static REMAINING: Cell<u32> = const { Cell::new(0) };
+        static TAKEN: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Fail the next `count` evidence reads on this thread.
+    pub(super) fn arm(count: u32) {
+        REMAINING.with(|remaining| remaining.set(count));
+        TAKEN.with(|taken| taken.set(0));
+    }
+
+    /// Evidence reads attempted on this thread since [`arm`].
+    pub(super) fn taken() -> u32 {
+        TAKEN.with(Cell::get)
+    }
+
+    pub(super) fn take() -> anyhow::Result<()> {
+        TAKEN.with(|taken| taken.set(taken.get() + 1));
+        REMAINING.with(|remaining| {
+            let left = remaining.get();
+            if left == 0 {
+                return Ok(());
+            }
+            remaining.set(left - 1);
+            Err(anyhow::anyhow!(
+                "injected: Lazily actor socket refused the editor-op projection read"
+            ))
+        })
+    }
 }
 
 pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
@@ -4902,10 +5011,15 @@ pub fn run_queue_maintenance_with_coin_gate(
     // `#unstrikelost`: the operator's own captured ops decide whether a live copy
     // of a snapshot-struck head is a re-arm (operator unstrike) or a stale
     // re-emit. Only the former may survive snapshot-struck dominance.
-    let operator_rearmed = snapshot_text
-        .as_deref()
-        .map(|snap| operator_rearmed_queue_identities(file, snap, &snapshot_queue_entries))
-        .unwrap_or_default();
+    let operator_rearmed = match snapshot_text.as_deref() {
+        Some(snap) => operator_rearm_evidence_for_maintenance(
+            file,
+            snap,
+            &snapshot_queue_entries,
+            &activation.entries_after,
+        )?,
+        None => std::collections::HashSet::new(),
+    };
     if let Some(converged_entries) =
         agent_doc_queue::document_queue::converge_queue_via_lifecycle_with_operator_rearmed(
             &activation.entries_after,
@@ -6800,6 +6914,39 @@ fn queue_maintenance_head_label(current: &agent_doc_crdt_relay_io::CurrentText) 
     }
 }
 
+/// Operator re-arm keys for [`rebase_queue_maintenance_target`]
+/// (`#unstrikelost`, unreadable evidence).
+///
+/// Re-arm keys only ever name queue items struck in the merge base, so a base
+/// with no struck queue item needs no evidence. Otherwise an unreadable epoch
+/// aborts the rebase rather than joining an operator unstrike back to struck.
+fn rebase_operator_rearmed_keys(
+    file: &Path,
+    source: &str,
+    expected_current: &str,
+) -> Result<std::collections::HashSet<String>> {
+    let base_has_struck_item = queue_entries_in_content(expected_current)
+        .iter()
+        .any(|entry| {
+            matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Completed(_)
+            )
+        });
+    if !base_has_struck_item {
+        return Ok(std::collections::HashSet::new());
+    }
+    agent_doc_op_capture_io::try_operator_rearmed_queue_item_keys(file, expected_current).map_err(
+        |err| {
+            QueueAuthorityUnavailable::new(format!(
+                "{source}: operator re-arm evidence is unreadable; refusing to rebase queue \
+                 maintenance over the live head without it: {err:#}"
+            ))
+            .into()
+        },
+    )
+}
+
 fn rebase_queue_maintenance_target(
     file: &Path,
     source: &str,
@@ -6815,7 +6962,7 @@ fn rebase_queue_maintenance_target(
         Some(&base_state),
         content,
         current,
-        agent_doc_op_capture_io::operator_rearmed_queue_item_keys(file, expected_current),
+        rebase_operator_rearmed_keys(file, source, expected_current)?,
     )
     .with_context(|| {
         format!("{source}: failed to rebase queue maintenance over the live Lazily head")
@@ -10664,6 +10811,36 @@ mod tests {
         );
     }
 
+    /// `#unstrikelost` (unreadable evidence): the CAS rebase joins a base-struck item
+    /// back to struck unless operator evidence re-arms it, so evidence it
+    /// cannot read (here: no project state at all) must abort the rebase.
+    #[test]
+    fn rebase_over_a_struck_base_refuses_when_rearm_evidence_is_unreadable() {
+        let expected = concat!(
+            "<!-- agent:exchange -->\nold\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#stillopen]\n",
+            "- ~~release + publish~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let target = expected.replace("- do [#stillopen]", "- 🚧 do [#stillopen]");
+        let live = expected.replace("~~release + publish~~", "release + publish");
+
+        let err = rebase_queue_maintenance_target(
+            Path::new("missing-dir/session.md"),
+            "test",
+            expected,
+            &target,
+            &live,
+        )
+        .expect_err("unreadable evidence over a struck base must not rebase");
+
+        assert!(
+            err.downcast_ref::<QueueAuthorityUnavailable>().is_some(),
+            "{err:#}"
+        );
+    }
+
     #[test]
     fn marker_only_rebase_projects_one_row_without_joining_its_tracked_neighbor() {
         let expected = concat!(
@@ -10996,6 +11173,170 @@ mod tests {
             "the second maintenance pass re-struck the operator's unstrike:\n{}",
             std::fs::read_to_string(&doc).unwrap()
         );
+    }
+
+    /// The `#unstrikelost` fixture: the snapshot holds `~~release + publish~~`,
+    /// the operator's captured editor ops un-strike it, and disk carries the
+    /// unstruck queue.
+    fn operator_unstruck_release_fixture() -> (TempDir, PathBuf) {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — claude\n\n",
+            "> **Queue prompt:** release + publish\n\n",
+            "Released.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#stillopen]\n",
+            "- ~~release + publish~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, snapshot_content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let struck_at = snapshot_content.find("~~release + publish~~").unwrap();
+        let close_at = struck_at + "~~release + publish".len();
+        agent_doc_op_capture_io::record_editor_ops(
+            &doc,
+            &agent_doc_hash::content_hash(snapshot_content),
+            vec![
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset: close_at,
+                    len: 2,
+                },
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset: struck_at,
+                    len: 2,
+                },
+            ],
+        )
+        .unwrap();
+        std::fs::write(
+            &doc,
+            snapshot_content.replace("~~release + publish~~", "release + publish"),
+        )
+        .unwrap();
+        (dir, doc)
+    }
+
+    fn release_head_is_live(doc: &Path) -> bool {
+        read_queue_entries(doc).iter().any(|entry| {
+            matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                    if prompt.text.contains("release + publish")
+            )
+        })
+    }
+
+    /// `#unstrikelost`, unreadable evidence (the load flake of
+    /// `unstrike_then_a_closeout_with_no_quote_keeps_the_head_live`, 2026-10-15):
+    /// the controller this pass launched died before the `#unstrikelost`
+    /// evidence read, the read failed, the failure was mapped to "no
+    /// evidence", and `#qeditdupguard` re-struck and persisted the operator's
+    /// unstrike. An unreadable epoch must refuse admission and leave the
+    /// queue untouched instead.
+    #[test]
+    fn unreadable_rearm_evidence_refuses_instead_of_restriking_an_unstrike() {
+        let (dir, doc) = operator_unstruck_release_fixture();
+        let before = std::fs::read_to_string(&doc).unwrap();
+
+        rearm_evidence_fault::arm(u32::MAX);
+        let err = run_queue_maintenance(&doc, None)
+            .expect_err("maintenance must not converge on unreadable re-arm evidence");
+        let reads = rearm_evidence_fault::taken();
+        rearm_evidence_fault::arm(0);
+
+        assert!(
+            err.downcast_ref::<QueueAuthorityUnavailable>().is_some(),
+            "the refusal must be the admission-refusing error class: {err:#}"
+        );
+        assert_eq!(
+            reads,
+            queue_authority_attempts(),
+            "bounded retries, then refuse"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            before,
+            "a refused pass must not persist anything"
+        );
+        assert!(release_head_is_live(&doc));
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("queue_rearm_evidence_unavailable") && ops.contains("admission=refused"),
+            "the refusal must be logged:\n{ops}"
+        );
+    }
+
+    /// A transiently unreadable epoch (one failed read) recovers on retry and
+    /// keeps the operator's unstrike live.
+    #[test]
+    fn transiently_unreadable_rearm_evidence_recovers_and_keeps_the_unstrike() {
+        let (_dir, doc) = operator_unstruck_release_fixture();
+
+        rearm_evidence_fault::arm(1);
+        let result = run_queue_maintenance(&doc, None);
+        let reads = rearm_evidence_fault::taken();
+        rearm_evidence_fault::arm(0);
+
+        result.expect("a retry reads the evidence");
+        assert_eq!(reads, 2);
+        assert!(
+            release_head_is_live(&doc),
+            "{}",
+            std::fs::read_to_string(&doc).unwrap()
+        );
+    }
+
+    /// With no live head the snapshot holds struck, the evidence cannot change
+    /// the outcome, so it is not read and cannot block maintenance.
+    #[test]
+    fn rearm_evidence_is_not_read_when_no_live_head_is_snapshot_struck() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — claude\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#stillopen]\n",
+            "- ~~release + publish~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        rearm_evidence_fault::arm(u32::MAX);
+        let result = run_queue_maintenance(&doc, None);
+        let reads = rearm_evidence_fault::taken();
+        rearm_evidence_fault::arm(0);
+
+        result.expect("uncontested maintenance never depends on re-arm evidence");
+        assert_eq!(reads, 0);
     }
 
     /// `#retypestruck` (live, agent-doc-bugs.md 2026-10-11 06:20-06:21Z): the

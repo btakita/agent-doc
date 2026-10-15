@@ -117,6 +117,15 @@ pub fn args_have_preparing_handoff(args: &[String]) -> bool {
         .any(|window| window[0] == "--handoff-state" && window[1] == "preparing")
 }
 
+/// The `--controller-generation` a `controller serve` process was launched
+/// with. An orphaned-preparing reap names the reaped process by this, not by
+/// the bootstrap record, which belongs to a different controller (GH #269).
+pub fn controller_generation_from_args(args: &[String]) -> Option<u64> {
+    args.windows(2)
+        .find(|window| window[0] == "--controller-generation")
+        .and_then(|window| window[1].parse().ok())
+}
+
 /// True only for the controller process that can legitimately replace
 /// `previous_controller_pid` at `generation` during a two-phase handoff.
 ///
@@ -781,6 +790,36 @@ mod tests {
             4242,
             8
         ));
+    }
+
+    /// GH #269: an orphan reap names the process by its own launch generation.
+    #[test]
+    fn controller_generation_from_args_reads_the_launch_generation() {
+        let args = |tail: &[&str]| {
+            ["agent-doc", "controller", "serve"]
+                .iter()
+                .chain(tail)
+                .map(|arg| arg.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            controller_generation_from_args(&args(&[
+                "--controller-generation",
+                "103",
+                "--handoff-state",
+                "preparing",
+            ])),
+            Some(103)
+        );
+        assert_eq!(controller_generation_from_args(&args(&[])), None);
+        assert_eq!(
+            controller_generation_from_args(&args(&["--controller-generation", "x"])),
+            None
+        );
+        assert_eq!(
+            controller_generation_from_args(&args(&["--controller-generation"])),
+            None
+        );
     }
 
     #[test]

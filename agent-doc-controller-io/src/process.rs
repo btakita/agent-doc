@@ -159,6 +159,10 @@ pub fn cmdline_has_preparing_handoff(pid: u32) -> bool {
     agent_doc_controller::command_line::args_have_preparing_handoff(&args)
 }
 
+pub fn cmdline_controller_generation(pid: u32) -> Option<u64> {
+    agent_doc_controller::command_line::controller_generation_from_args(&read_cmdline_args(pid)?)
+}
+
 pub fn is_preparing_handoff_successor_pid(
     project_root: &Path,
     pid: u32,

@@ -356,6 +356,28 @@ mod tests {
     }
 
     #[test]
+    fn a_write_into_a_nested_component_is_attributed_through_its_parent() {
+        // #264: `agent:salient-response` nests inside `agent:exchange`; with the
+        // node on both sides, deriving the scope used to panic.
+        const SALIENT: &str =
+            "<!-- agent:salient-response -->\nSalient.\n<!-- /agent:salient-response -->\n";
+        let baseline = doc(&format!("Done.\n{SALIENT}"), BACKLOG, "");
+        let before = baseline.clone();
+        let after = doc(
+            &format!(
+                "Done.\n{}",
+                SALIENT.replace("Salient.", "Salient, revised.")
+            ),
+            BACKLOG,
+            "",
+        );
+        assert_eq!(
+            attribute_component_write(&baseline, &before, &after),
+            BaselineAttribution::Patched(after.clone())
+        );
+    }
+
+    #[test]
     fn an_identical_write_attributes_nothing() {
         let before = doc("Done.\n", BACKLOG, "");
         assert_eq!(

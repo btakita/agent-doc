@@ -35,6 +35,15 @@ projections, and tmux transcript inference.
   synchronous command-plane Run route has the same invariant through its
   controller request thread. Replaying an entire route after an ambiguous
   timeout is forbidden because pane dispatch may already have occurred.
+- A panic while handling one controller request is answered, not dropped. The
+  request handler runs under a panic boundary that converts the unwind into an
+  ordinary `ok: false` error envelope naming the command and the request's
+  document (``project controller request `<command>` for document <file>
+  panicked: <message>``). A dropped connection (`closed connection without a
+  response`) is reserved for a controller that actually went away, which
+  clients classify as a retryable transport drop; a request panic is a
+  deterministic failure of that request and must not be retried as one
+  (GH #264).
 
 ### Bootstrap publication is adoptable before status hydration (GH #146)
 

@@ -2590,6 +2590,13 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
                 // (#qheadsync orphan-shadow). The shadow guard targets stray prose
                 // (HTML comments, non-component sections), so exclude the queue too.
                 || component.name == "queue"
+                // `agent:todo` is the operator checklist, a live component in
+                // its own right. `--todo-add` writes `- [ ] [#id] <action>`,
+                // where the leading `[#id]` is the todo item's OWN id, not a
+                // backlog item that drifted out of `agent:backlog`. Scanning
+                // it hard-wedged preflight and session-check on every
+                // document whose open todos carry ids.
+                || agent_doc_element::todo::is_todo_component(&component.name)
         })
         .map(|component| (component.open_start, component.close_end))
         .collect();
@@ -7829,6 +7836,92 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["lost1"]
         );
+    }
+
+    /// The `tasks/sdk.md` shape that wedged a live session: ~21 open
+    /// `agent:todo` items carrying their own `[#id]` (the `--todo-add` form),
+    /// queue lines citing two of them, plus one genuinely orphaned backlog row
+    /// parked in a comment.
+    fn todo_ids_document(with_orphan: bool) -> String {
+        let mut doc = String::from(concat!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- [#tdsdkdevrename]: rename to sdk-dev\n",
+            "- [#tdue427go]: go ahead\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Todo\n\n<!-- agent:todo -->\n",
+            "- [ ] [#tdsdkdevrename] Rename the repo to sdk-dev\n",
+            "- [ ] [#tdue427go] Approve the go-ahead\n",
+            "- [x] [#tddone1] Already finished operator action\n",
+            "- [ ] Legacy todo without an id\n",
+        ));
+        for n in 0..19 {
+            doc.push_str(&format!("- [ ] [#tditem{n}] Operator action {n}\n"));
+        }
+        doc.push_str(concat!(
+            "<!-- /agent:todo -->\n\n",
+            "## Backlog\n\n<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#live1] Real backlog work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n<!-- /agent:review -->\n",
+        ));
+        if with_orphan {
+            doc.push_str("\n<!-- parked copy\n- [ ] [#lost1] Drifted out of backlog\n-->\n");
+        }
+        doc
+    }
+
+    #[test]
+    fn detect_shadow_open_items_ignores_agent_todo_own_ids() {
+        let doc = todo_ids_document(false);
+        let report = detect_shadow_open_items(&doc).unwrap();
+        assert!(
+            report.shadow_only.is_empty(),
+            "open agent:todo [#id] items are tracked, not shadow backlog: {:?}",
+            report.shadow_only
+        );
+        assert!(
+            report.duplicated_in_live_backlog.is_empty(),
+            "{:?}",
+            report.duplicated_in_live_backlog
+        );
+    }
+
+    #[test]
+    fn detect_shadow_open_items_still_refuses_orphan_beside_todo_ids() {
+        let doc = todo_ids_document(true);
+        let report = detect_shadow_open_items(&doc).unwrap();
+        assert_eq!(
+            report
+                .shadow_only
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["lost1"],
+            "only the genuinely orphaned backlog row is shadow_only"
+        );
+    }
+
+    #[test]
+    fn dropped_from_history_counts_a_backlog_row_moved_into_agent_todo() {
+        // Moving an open backlog row into the operator checklist keeps its id
+        // in the project: the historical-loss guard must not call it dropped.
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n- [ ] [#moved1] Needs the operator\n<!-- /agent:backlog -->\n\n",
+            "<!-- agent:todo -->\n<!-- /agent:todo -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n",
+            "<!-- agent:todo -->\n- [ ] [#moved1] Needs the operator\n<!-- /agent:todo -->\n",
+        );
+        let report = detect_dropped_from_history_with_extra_current_ids(
+            current,
+            baseline,
+            &HashSet::new(),
+            &HashSet::new(),
+        )
+        .unwrap();
+        assert!(report.dropped.is_empty(), "{:?}", report.dropped);
     }
 
     #[test]

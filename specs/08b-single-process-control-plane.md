@@ -653,6 +653,27 @@ Invariants:
   `inherited_fds::tests` replays the interleaving in a fresh process, with a
   negative control that runs the old policy and reproduces the production
   bytes.
+- **L9 — a launcher marks descriptors close-on-exec, never closes them before
+  exec (`#execfailpipe`).** The detached controller launch
+  (`close_inherited_fds_on_exec`, used by `launch_detached_at` and
+  `launch_detached_via_helper`) starts a new session in `pre_exec` and then
+  marks every descriptor above stderr `FD_CLOEXEC`, through
+  `close_range(3, ~0, CLOSE_RANGE_CLOEXEC)` on Linux 5.11+ and an `fcntl`
+  loop below the fd limit elsewhere. A successful `execve` still drops every
+  launcher descriptor, so a descriptor an editor leaked without `CLOEXEC`
+  never reaches the controller. A failed `execve` leaves std's own
+  exec-failure pipe open, so `spawn()` returns the real errno and the
+  launch-ENOENT retry (`#ctrlrespawnenoent`) runs while `make install`
+  replaces the binary. Violated before: the hook closed every descriptor from
+  3 up to the fd limit, which included that pipe. An exec of a missing or
+  non-executable binary returned `Ok(child)`, the child aborted writing to the
+  dead pipe (SIGABRT, core dumped), and the retry loop never retried. A
+  launch that raced an install looked like a controller that started and
+  died. Regression: `project_controller::rpc::tests` checks that ENOENT and
+  EACCES come back as spawn errors, drives the retry loop through the real
+  hook against a binary that appears on the second attempt, and checks that a
+  non-`CLOEXEC` sentinel descriptor reaches `sh` without the hook (negative
+  control) and does not reach it with the hook or with the `fcntl` fallback.
 
 Known open hazard (not changed by `#supthrash`): a route-owned supervisor on a
 superseded binary defers its re-exec until a turn boundary

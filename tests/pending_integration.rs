@@ -1358,6 +1358,73 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
     );
 }
 
+/// GH #275: `--todo-add` rows (`- [ ] [#id] <action>`, no inline code span)
+/// must not read as open backlog items outside the live backlog. Before the
+/// fix, the committed document made every later `session-check` exit 1 with
+/// `INTERRUPTED: open backlog item(s) exist only outside live agent:backlog`.
+#[test]
+fn write_todo_add_rows_keep_session_check_clean() {
+    let (tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let root = tmp.path();
+    let actions = [
+        "Approve or decline the draft reply",
+        "Open the preview in MS Edge",
+        "Reply to the reviewer",
+    ];
+    let mut args = vec![
+        "write",
+        doc.to_str().unwrap(),
+        "--force-disk",
+        "--backlog-only",
+    ];
+    for action in actions {
+        args.extend(["--todo-add", action]);
+    }
+    agent_doc().args(&args).assert().success();
+    let content = fs::read_to_string(&doc).unwrap();
+    for action in actions {
+        let id = todo_item_id(&content, action);
+        assert!(
+            content.contains(&format!("- [ ] [#{id}] {action}\n")),
+            "{content}"
+        );
+    }
+
+    let git = |git_args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .current_dir(root)
+            .args(git_args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {git_args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "test@example.com"]);
+    git(&["config", "user.name", "Test User"]);
+    git(&["add", "session.md"]);
+    git(&["commit", "-q", "-m", "todo rows", "--no-verify"]);
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/state/cycles")).unwrap();
+    agent_doc_snapshot_io::checkpoint_document_baseline(&doc, &content, |_, _| {}).unwrap();
+
+    let check = agent_doc()
+        .current_dir(root)
+        .args(["session-check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    assert!(
+        !stdout.contains("outside live agent:backlog")
+            && !stderr.contains("outside live agent:backlog"),
+        "todo rows must not be shadow backlog items:\n{stdout}\n{stderr}"
+    );
+    assert!(
+        check.status.success() && stdout.contains("[session-check] ok"),
+        "session-check must stay clean after --todo-add:\n{stdout}\n{stderr}"
+    );
+}
+
 /// `#tododone`: the granular todo flags close the operator action loop —
 /// add, check off in place, edit, reopen, remove — and never touch an
 /// operator-authored item they did not select.

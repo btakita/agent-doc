@@ -180,9 +180,9 @@ Done items stay checked in `agent:todo`; they do not move to `agent:done`, becau
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/267
-- release + publish
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/267
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog

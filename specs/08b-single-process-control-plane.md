@@ -630,6 +630,29 @@ Invariants:
   in any project ran retention over every root that had a `preparing`
   controller (one ledger was 380 MB), and a test project's CLI wrote the
   operator's real ledgers.
+- **L8 — a controller closes only descriptors it proved it inherited
+  (`#statedbfdclobber`).** `main` first calls
+  `agent_doc_controller_io::inherited_fds::capture_process_entry_fds()`, before
+  it starts a thread or opens a file. That call records each descriptor above
+  stderr with the device and inode it names, and reopens a closed fd 0-2 onto
+  `/dev/null`. `controller serve` then closes only snapshot entries that still
+  name the same file. The snapshot is consumed, so no entry is closed twice.
+  Without a snapshot, nothing is closed. Stdio is never closed. Violated
+  before: `run_serve` listed `/proc/self/fd` and closed everything above
+  stderr. With `AGENT_DOC_LOG` set, that list held the debug-log file that
+  `init_tracing` had already opened and given to the `tracing_appender`
+  worker thread, which is why every controller logged
+  `controller_serve_inherited_fds_closed count=1`. SQLite's next open reused
+  that number. When the worker ran late (under load), its queued
+  `agent-doc tracing initialized (filter: debug)` line landed at offset 0 of
+  `state.db`, and every later open failed with `file is not a database`. This
+  hit the operator's real ledger twice during controller replacement, and it
+  caused the `complete_idle_queue_slash_command_head_consumes_and_commits`
+  flake (2/300 under load). In that test, the debug log was 0 bytes and the
+  first 104 bytes of `state.db` were the tracing line. Regression:
+  `inherited_fds::tests` replays the interleaving in a fresh process, with a
+  negative control that runs the old policy and reproduces the production
+  bytes.
 
 Known open hazard (not changed by `#supthrash`): a route-owned supervisor on a
 superseded binary defers its re-exec until a turn boundary

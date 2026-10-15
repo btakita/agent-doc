@@ -27559,19 +27559,36 @@ fn test_controller_serve_sanitizes_inherited_fds_in_child_process() {
         .find("serve_with_options(")
         .expect("run_serve should call serve_with_options");
     let sanitize_call = controller_rpc_source[run_serve_start..]
-        .find("sanitize_controller_serve_inherited_fds()")
+        .find("crate::inherited_fds::close_process_entry_fds()")
         .expect("run_serve should sanitize inherited file descriptors");
     assert!(
         sanitize_call < serve_call,
         "controller serve must close inherited IDE file descriptors before opening the controller listener"
     );
+    // `#statedbfdclobber`: the live descriptor table at serve time includes this
+    // process's own debug-log appender. Closing from it let SQLite reuse that
+    // number under the appender's worker, which wrote over state.db's header.
     assert!(
-        controller_rpc_source.contains("fn controller_serve_inherited_fds_to_close()")
-            && controller_rpc_source.contains("std::fs::read_dir(\"/proc/self/fd\")")
-            && controller_rpc_source.contains("controller_serve_inherited_fds_closed")
-            && controller_rpc_source.contains("#[cfg(any(not(unix), test))]\nfn sanitize_controller_serve_inherited_fds() -> usize"),
-        "controller child process should own a production fd sanitizer without closing test harness descriptors"
+        !controller_rpc_source.contains("std::fs::read_dir(\"/proc/self/fd\")"),
+        "controller serve must not choose descriptors to close from the live fd table"
     );
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    let main_start = main_source
+        .find("fn main() -> ExitCode {")
+        .expect("binary main should exist");
+    let main_body = &main_source[main_start..];
+    let capture = main_body
+        .find("agent_doc_controller_io::inherited_fds::capture_process_entry_fds();")
+        .expect("main must snapshot inherited descriptors");
+    for later in ["register_source_anchors(", "try_main()"] {
+        let at = main_body
+            .find(later)
+            .unwrap_or_else(|| panic!("main should call {later}"));
+        assert!(
+            capture < at,
+            "main must snapshot inherited descriptors before {later} (and so before init_tracing opens the debug log)"
+        );
+    }
 }
 
 #[test]

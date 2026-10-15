@@ -1401,6 +1401,35 @@ hold it. Any batch that still refuses keeps the retained delta, and the
 controller's bounded rebuild budget above turns it into an operator-visible
 state instead of a loop.
 
+An unacknowledged local delta is settled before it is rebased
+(`#captureddeltalivelock`). When the plugin replica applies a captured burst but
+the durable document-op push is refused or times out, the burst is not lost and
+not necessarily missing from canonical: under load the controller can ingest the
+frame after the client gave up (live 2026-10-15, agent-doc-bugs.md: a 61-splice
+burst at `durable=false` was `crdt_document_op_delta_ingested ... changed: true`
+five seconds later). The shadow stays at the pre-burst text, so the operator's
+later typing queues behind the burst, and rebasing `shadow -> burst + later
+typing` onto a canonical that holds the burst refuses by rule 2 above on every
+retry; the stale-native-baseline recovery then repeated every 30 s for 54
+minutes and a later response never reached the visible buffer. The plugin
+therefore records a checkpoint naming the holding endpoint, the shadow, and the
+exact captured prefix the replica applied. The endpoint keeps the frontier
+before those ops and re-sends exactly them (a remote apply never counts as their
+acknowledgement); the controller's ingest is idempotent. Before the retained
+burst is forwarded again, the checkpoint settles only on proof: canonical equals
+the burst's result, or the native containment proof shows canonical carries
+every burst change from the shadow. The publish result alone is never proof.
+Settling advances the shadow to the burst's result and leaves only the later
+splices owed, which rebase from that baseline onto canonical (response included)
+and are projected into the visible buffer by ordinary remote delivery; the
+visible buffer is never overwritten with the controller's copy. Without proof
+the whole burst stays retained, and after
+`UNDURABLE_LOCAL_FORWARD_SETTLE_ATTEMPTS` (8) flush retries the checkpoint is
+dropped with `recovery=undurable-local-delta-unsettled` and the whole burst is
+rebased from the shadow, which is the correct base when the controller truly
+never received it. A checkpoint whose shadow, projection epoch, or captured
+prefix no longer matches is discarded without a canonical read.
+
 Before reaching that semantic overlap gate, an exact JetBrains event batch whose
 base disappeared from the replica may reconstruct its base by reversing the
 captured events from the current visible cut. This fallback runs even when an

@@ -448,4 +448,123 @@ class CrdtLocalEditorSpliceTest {
         val batch = rebaseOperatorEditsPastAgentPatchUtil(lineageShadow, visible, listOf(edit), lineageOf(patched))
         assertEquals(lineageShadow.replace("> cancel", "> please cancel"), batch!!.resultingText)
     }
+
+    /**
+     * `#captureddeltalivelock` (live 2026-10-15, agent-doc-bugs.md): the replica
+     * applied a typing burst, the durable push timed out, and the controller
+     * ingested the frame anyway. The operator kept typing behind the retained
+     * burst and the controller later wrote a response. Rebasing
+     * `shadow -> burst + later typing` onto that canonical refuses forever, so
+     * the checkpoint must settle the burst by canonical proof and leave only the
+     * later typing owed against the settled baseline.
+     */
+    @Test
+    fun `an unacknowledged burst settles by canonical proof and only later typing stays owed`() {
+        val shadow = "queue:\n\n"
+        val burst = listOf(CapturedLocalEditorEdit(7, "", "fix", 3, shadow.length))
+        val settled = prepareLocalEditorEditsUtil(shadow, burst)!!.resultingText
+        assertEquals("queue:\nfix\n", settled)
+        val laterTyping = listOf(CapturedLocalEditorEdit(10, "", " the wedge", 3, settled.length))
+        val retained = burst + laterTyping
+        val visible = prepareLocalEditorEditsUtil(shadow, retained)!!.resultingText
+        assertEquals("queue:\nfix the wedge\n", visible)
+
+        var proofs = 0
+        val settlement =
+            undurableLocalForwardSettlementUtil(
+                checkpointShadow = shadow,
+                checkpointCapturedEdits = burst,
+                checkpointResultText = settled,
+                checkpointEpoch = 3,
+                currentEpoch = 3,
+                shadow = shadow,
+                capturedEdits = retained,
+                attempts = 0,
+                canonicalCarriesCheckpoint = { proofs++; true },
+            )
+        assertEquals(1, proofs)
+        assertTrue(settlement is UndurableLocalForwardSettlement.Settled)
+        settlement as UndurableLocalForwardSettlement.Settled
+        assertEquals("the native baseline advances to the burst's result", settled, settlement.settledShadow)
+        assertEquals("only the typing after the burst is still owed", laterTyping, settlement.remaining)
+        // The owed splices replay exactly from the settled baseline, so the
+        // visible buffer converges to the replica (response + operator text)
+        // without the burst being inserted a second time.
+        assertEquals(visible, prepareLocalEditorEditsUtil(settlement.settledShadow, settlement.remaining)!!.resultingText)
+
+        // A burst with no later typing settles with nothing owed.
+        val alone =
+            undurableLocalForwardSettlementUtil(shadow, burst, settled, 3, 3, shadow, burst, 0) { true }
+        assertEquals(UndurableLocalForwardSettlement.Settled(settled, emptyList()), alone)
+    }
+
+    @Test
+    fun `an unacknowledged burst never settles without proof and the wait is bounded`() {
+        val shadow = "queue:\n\n"
+        val burst = listOf(CapturedLocalEditorEdit(7, "", "fix", 3, shadow.length))
+        val settled = prepareLocalEditorEditsUtil(shadow, burst)!!.resultingText
+        val retained = burst + CapturedLocalEditorEdit(10, "", "!", 3, settled.length)
+
+        fun settle(attempts: Int) =
+            undurableLocalForwardSettlementUtil(shadow, burst, settled, 3, 3, shadow, retained, attempts) { false }
+
+        for (attempt in 0 until UNDURABLE_LOCAL_FORWARD_SETTLE_ATTEMPTS - 1) {
+            assertEquals(UndurableLocalForwardSettlement.Pending, settle(attempt))
+        }
+        assertEquals(
+            "a delta canonical never carries falls back to rebasing the whole burst from the shadow",
+            UndurableLocalForwardSettlement.Abandoned,
+            settle(UNDURABLE_LOCAL_FORWARD_SETTLE_ATTEMPTS - 1),
+        )
+
+        var proofs = 0
+        val proof = { proofs++; true }
+        assertEquals(
+            "the shadow moved: the checkpoint no longer names the burst's base",
+            UndurableLocalForwardSettlement.NotApplicable,
+            undurableLocalForwardSettlementUtil(shadow, burst, settled, 3, 3, settled, retained, 0, proof),
+        )
+        assertEquals(
+            "a whole-buffer publication advanced the projection epoch",
+            UndurableLocalForwardSettlement.NotApplicable,
+            undurableLocalForwardSettlementUtil(shadow, burst, settled, 3, 4, shadow, retained, 0, proof),
+        )
+        assertEquals(
+            "the retained burst does not start with the checkpoint's splices",
+            UndurableLocalForwardSettlement.NotApplicable,
+            undurableLocalForwardSettlementUtil(shadow, burst, settled, 3, 3, shadow, retained.drop(1), 0, proof),
+        )
+        assertEquals("a non-applicable checkpoint costs no canonical read", 0, proofs)
+    }
+
+    @Test
+    fun `local flush settles an unacknowledged delta before forwarding and retains only owed splices`() {
+        val source = java.nio.file.Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt",
+        ).toFile().readText()
+        val flush = source.substringAfter("private fun scheduleLocalEditorFlush(")
+            .substringBefore("private fun recordLocalEditorEdit(")
+        assertTrue(
+            flush.indexOf("settleUndurableLocalForward(filePath, capturedEdits)") in
+                0 until flush.indexOf("forwardLocalEditsFromShadow("),
+        )
+        assertTrue(flush.contains("retainedEdits = owedEdits"))
+        assertTrue(flush.contains("prependLocalEditorEdits(filePath, retainedEdits)"))
+        assertFalse(flush.contains("prependLocalEditorEdits(filePath, capturedEdits)"))
+
+        val forward = source.substringAfter("private fun forwardLocalEditsFromShadow(")
+            .substringBefore("fun requestRemoteDrain(")
+        assertTrue(forward.contains("forwarder.holdsUndurableLocalEdits"))
+        assertTrue(forward.contains("onUndurableForward = { holder -> undurableHolder = holder }"))
+        assertTrue(forward.contains("undurableLocalForwards[filePath] ="))
+        assertTrue(forward.contains("replacement.holdsUndurableLocalEdits"))
+
+        val proof = source.substringAfter("private fun canonicalCarriesUndurableLocalForward(")
+            .substringBefore("private fun forwardLocalEditsFromShadow(")
+        assertTrue(proof.contains("republishUndurableLocalEdits()"))
+        assertTrue(
+            "settlement requires the native containment proof, never the publish result alone",
+            proof.contains("NativePatching.capturedSplicesContained(checkpoint.shadowText, canonical, checkpoint.batch) == true"),
+        )
+    }
 }

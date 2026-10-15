@@ -82,6 +82,19 @@ class CrdtReplicaForwarder(
 ) {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaForwarder::class.java)
     private var pushedVersion: ByteArray? = null
+    /**
+     * `#captureddeltalivelock`: the frontier preceding local splices this replica
+     * applied whose durable document-op publish went unacknowledged.
+     *
+     * A refused or timed-out `pushDocumentOps` is not proof the controller lacks
+     * the ops: under load the controller can ingest the frame after the client
+     * gave up (a lost receipt). The splices are already in this replica under
+     * their own CRDT identity, so the only safe retry re-sends exactly them from
+     * this frontier; the controller's ingest is idempotent. A remote apply
+     * advances [pushedVersion] past them, so the frontier is kept separately
+     * until some publish is acknowledged.
+     */
+    private var undurableLocalFrontier: ByteArray? = null
     private var lineage: String? = null
     /**
      * Exact visible text of [node] after the last successful mutation.
@@ -334,6 +347,25 @@ class CrdtReplicaForwarder(
         return publish.durable
     }
 
+    /**
+     * `#captureddeltalivelock`: true while this replica holds local splices whose
+     * durable publish has not been acknowledged (see [undurableLocalFrontier]).
+     */
+    internal val holdsUndurableLocalEdits: Boolean
+        get() = attached && undurableLocalFrontier != null
+
+    /**
+     * Re-send this replica's unacknowledged local splices from their original
+     * frontier. Never re-authors text: the same CRDT ops are published again, so a
+     * controller that already ingested them (lost receipt) is unchanged. True once
+     * the reliable document-op plane acknowledges the publish.
+     */
+    internal fun republishUndurableLocalEdits(): Boolean {
+        if (!attached) return false
+        if (undurableLocalFrontier == null) return true
+        return publishIncremental("undurable-local-republish").durable
+    }
+
     /** Publish an already-fenced local editor delta against this replica. */
     fun ensureEditorText(editorText: String): Boolean {
         if (!attached) return false
@@ -391,14 +423,19 @@ class CrdtReplicaForwarder(
     }
 
     private fun publishIncremental(reason: String): IncrementalPublishResult {
-        val frontier = pushedVersion ?: node.stateVector() ?: return IncrementalPublishResult(0, false)
+        val frontier =
+            undurableLocalFrontier ?: pushedVersion ?: node.stateVector() ?: return IncrementalPublishResult(0, false)
         val diffStarted = System.nanoTime()
         val update = node.diff(frontier) ?: return IncrementalPublishResult(0, false)
         logSlow("native.diff", diffStarted, details = "reason=$reason update_bytes=${update.size}")
         val durable = transport.pushDocumentOps(filePath, lineage, update.toString(Charsets.UTF_8))
         if (!durable) {
+            // `#captureddeltalivelock`: keep the oldest unacknowledged frontier so a
+            // later publish (or [republishUndurableLocalEdits]) still covers these ops.
+            if (undurableLocalFrontier == null) undurableLocalFrontier = frontier
             return IncrementalPublishResult(update.size, false)
         }
+        undurableLocalFrontier = null
         pushedVersion = node.stateVector()
         val broadcastStarted = System.nanoTime()
         try {
@@ -522,6 +559,7 @@ class CrdtReplicaForwarder(
         val closeStarted = System.nanoTime()
         node.close(clientId)
         pushedVersion = null
+        undurableLocalFrontier = null
         lineage = null
         knownReplicaText = null
         logSlow("native.close", closeStarted)

@@ -1503,4 +1503,91 @@ mod tests {
             );
         }
     }
+
+    /// `#captureddeltalivelock` (live 2026-10-15, agent-doc-bugs.md). The plugin
+    /// replica applied an operator burst that rewrote a queue line, the durable
+    /// push timed out, and the controller ingested the frame anyway. The plugin
+    /// kept its shadow at the pre-burst text while the operator kept typing on
+    /// the same line, then the controller appended a response. Rebasing the
+    /// whole retained stream from the stale shadow must keep refusing: canonical
+    /// already carries part of the operator's text, and this planner cannot tell
+    /// a lost receipt from a duplicate. The plugin's exit is exact instead: the
+    /// containment proof settles the burst, and only the later typing rebases
+    /// from the burst's result onto canonical, keeping the response and every
+    /// operator character exactly once.
+    #[test]
+    fn settled_burst_rebases_only_later_typing_over_a_response() {
+        let shadow = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier\n",
+            "done\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "investigate the stale replica wedge on bugs\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let line = "investigate the stale replica wedge on bugs";
+        let at = shadow.find(line).unwrap();
+        let line_start = shadow[..at].chars().count();
+        // The ingested burst: delete the old line text, type a new one.
+        let burst = batch(
+            shadow,
+            vec![
+                edit(line_start, line.chars().count(), ""),
+                edit(line_start, 0, "root-cause the"),
+            ],
+        );
+        let settled = burst.resulting_text.clone();
+        // Later typing, same line, never acknowledged anywhere.
+        let tail_at = line_start + "root-cause the".chars().count();
+        let later = batch(&settled, vec![edit(tail_at, 0, " captured-delta livelock")]);
+        let visible = later.resulting_text.clone();
+        let mut whole_edits = burst.edits.clone();
+        whole_edits.extend(later.edits.clone());
+        let whole = batch(shadow, whole_edits);
+        assert_eq!(whole.resulting_text, visible);
+
+        let response = "### Re: wedge\nfixed\n";
+        let canonical = settled.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{response}<!-- /agent:exchange -->"),
+        );
+
+        let refusal = rebase(shadow, &canonical, &whole)
+            .expect_err("the stale-shadow rebase of the whole stream refuses (the livelock)");
+        assert!(
+            format!("{refusal:#}").contains("canonical already carries captured operator text"),
+            "{refusal:#}"
+        );
+
+        assert!(
+            canonical_contains_captured(shadow, &canonical, &burst).unwrap(),
+            "the settle proof: canonical carries the unacknowledged burst"
+        );
+        assert!(
+            !canonical_contains_captured(shadow, &canonical, &whole).unwrap(),
+            "the later typing is not in canonical"
+        );
+        // A canonical that never received the burst proves nothing.
+        let lost = shadow.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{response}<!-- /agent:exchange -->"),
+        );
+        assert!(!canonical_contains_captured(shadow, &lost, &burst).unwrap());
+
+        let out = rebase(&settled, &canonical, &later)
+            .expect("only the later typing rebases from the settled baseline");
+        let expected = visible.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{response}<!-- /agent:exchange -->"),
+        );
+        assert_eq!(out.resulting_text, expected);
+        assert_eq!(out.resulting_text.matches("root-cause the").count(), 1);
+        assert_eq!(out.resulting_text.matches("### Re: wedge").count(), 1);
+        let mut replay: Vec<char> = canonical.chars().collect();
+        for edit in &out.edits {
+            apply(&mut replay, edit).unwrap();
+        }
+        assert_eq!(replay.iter().collect::<String>(), expected);
+    }
 }

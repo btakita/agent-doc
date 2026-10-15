@@ -162,6 +162,13 @@ class CrdtReplicaForwarderTest {
 
         override fun stateVector(): ByteArray? = "sv:${buffer}".toByteArray()
 
+        val diffFrontiers = mutableListOf<String>()
+
+        override fun diff(theirStateVector: ByteArray): ByteArray? {
+            diffFrontiers.add(String(theirStateVector))
+            return encodeState()
+        }
+
         override fun text(): String? {
             textReads++
             return buffer.toString()
@@ -183,7 +190,7 @@ class CrdtReplicaForwarderTest {
         private val retainedReplicaReseedPending: Boolean = false,
         private val canonicalCoversRetainedFrontier: Boolean? = null,
         private val canonicalContentHash: String? = null,
-        private val durablePushSucceeds: Boolean = true,
+        var durablePushSucceeds: Boolean = true,
         private val broadcastFails: Boolean = false,
     ) : ReplicaTransport {
         var registered = false
@@ -474,6 +481,51 @@ class CrdtReplicaForwarderTest {
         assertEquals("Queue: item", fwd.replicaText())
         assertTrue("durable submission was attempted", transport.sentLineages.isNotEmpty())
         assertTrue("an unacknowledged operation must not enter the fan-out plane", transport.sentUpdates.isEmpty())
+    }
+
+    /**
+     * `#captureddeltalivelock`: a lost durable receipt leaves the splices in the
+     * replica. They stay owed from their original frontier even after a remote
+     * update advances the pushed version, and a republish re-sends exactly that
+     * frontier's ops instead of re-authoring the text.
+     */
+    @Test
+    fun `undurable local splices stay owed from their frontier across a remote apply`() {
+        val node = FakeNode()
+        val transport = CapturingTransport(
+            bootstrap = "Queue: ".toByteArray(),
+            durablePushSucceeds = false,
+        )
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:1", node, transport)
+        assertTrue(fwd.register())
+        assertFalse(fwd.holdsUndurableLocalEdits)
+
+        assertFalse(
+            fwd.forwardLocalEdits(
+                PreparedLocalEditorBatch(listOf(PreparedLocalEditorEdit(7, 0, "item")), "Queue: item"),
+            ),
+        )
+        assertTrue("the replica holds the splices without a receipt", fwd.holdsUndurableLocalEdits)
+        assertEquals("Queue: item", fwd.replicaText())
+
+        // The controller's response arrives while the receipt is still missing.
+        assertEquals("Queue: item\nresponse", fwd.applyRemoteUpdate("\nresponse".toByteArray()))
+        assertTrue("a remote apply never acknowledges local ops", fwd.holdsUndurableLocalEdits)
+
+        assertFalse("a refused republish keeps the ops owed", fwd.republishUndurableLocalEdits())
+        assertTrue(fwd.holdsUndurableLocalEdits)
+
+        transport.durablePushSucceeds = true
+        assertTrue(fwd.republishUndurableLocalEdits())
+        assertFalse(fwd.holdsUndurableLocalEdits)
+        assertEquals(
+            "every publish of the owed ops diffs from the pre-splice frontier",
+            listOf("sv:Queue: ", "sv:Queue: ", "sv:Queue: "),
+            node.diffFrontiers,
+        )
+        assertEquals("the replica text is never re-authored", 1, node.localEdits.size)
+        assertTrue("an acknowledged republish has nothing left to send", fwd.republishUndurableLocalEdits())
+        assertEquals(3, node.diffFrontiers.size)
     }
 
     @Test

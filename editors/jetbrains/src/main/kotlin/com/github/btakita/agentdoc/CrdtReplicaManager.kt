@@ -524,6 +524,91 @@ internal fun localReplicaBaselineDecisionUtil(
         LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward
     }
 
+/**
+ * `#captureddeltalivelock`: how many local-flush retries an unacknowledged local
+ * delta waits for its controller receipt before recovery falls back to the
+ * canonical rebase of the whole captured burst. With the retry backoff this is
+ * roughly half a minute.
+ */
+internal const val UNDURABLE_LOCAL_FORWARD_SETTLE_ATTEMPTS = 8
+
+/** `#captureddeltalivelock`: the outcome of settling an unacknowledged local delta. */
+internal sealed interface UndurableLocalForwardSettlement {
+    /** The checkpoint no longer describes the retained burst; forward that burst unchanged. */
+    data object NotApplicable : UndurableLocalForwardSettlement
+
+    /** Canonical does not carry the delta yet; retain the whole burst and retry. */
+    data object Pending : UndurableLocalForwardSettlement
+
+    /**
+     * The bounded wait expired without proof. Fall back to rebasing the whole
+     * burst from the retained shadow, which is the correct base when the
+     * controller really never received the delta.
+     */
+    data object Abandoned : UndurableLocalForwardSettlement
+
+    /**
+     * Canonical carries the delta. The shadow advances to [settledShadow] (the
+     * text the delta produced) and only [remaining], the splices typed after it,
+     * are still owed.
+     */
+    data class Settled(
+        val settledShadow: String,
+        val remaining: List<CapturedLocalEditorEdit>,
+    ) : UndurableLocalForwardSettlement
+}
+
+/**
+ * `#captureddeltalivelock`: decide what an unacknowledged local delta means for
+ * the retained captured burst.
+ *
+ * Live 2026-10-15 (agent-doc-bugs.md, load average ~115): the replica applied a
+ * 61-splice burst and published it, the durable push timed out client-side, and
+ * the controller ingested the frame five seconds later. The manager kept the
+ * shadow at the pre-burst text and re-queued the burst, the operator kept
+ * typing behind it, and every retry rebased `shadow -> burst + later typing`
+ * onto a canonical that already held the burst. The rebase correctly refused
+ * ("canonical already carries captured operator text"), so the
+ * stale-native-baseline recovery repeated every 30 s for 54 minutes, and the
+ * response written later was never projected into the visible buffer.
+ *
+ * The checkpoint records exactly which captured splices the replica applied.
+ * Once canonical provably carries them ([canonicalCarriesCheckpoint]), the shadow
+ * is that burst's result and only the later splices are rebased. Proof is
+ * required, never assumed, so a delta the controller truly lost is still
+ * rebased from the original shadow. The wait is bounded by
+ * [UNDURABLE_LOCAL_FORWARD_SETTLE_ATTEMPTS].
+ */
+internal fun undurableLocalForwardSettlementUtil(
+    checkpointShadow: String,
+    checkpointCapturedEdits: List<CapturedLocalEditorEdit>,
+    checkpointResultText: String,
+    checkpointEpoch: Long,
+    currentEpoch: Long,
+    shadow: String?,
+    capturedEdits: List<CapturedLocalEditorEdit>,
+    attempts: Int,
+    canonicalCarriesCheckpoint: () -> Boolean,
+): UndurableLocalForwardSettlement {
+    val owed = checkpointCapturedEdits.size
+    if (
+        shadow != checkpointShadow ||
+        currentEpoch != checkpointEpoch ||
+        capturedEdits.size < owed ||
+        capturedEdits.subList(0, owed) != checkpointCapturedEdits
+    ) {
+        return UndurableLocalForwardSettlement.NotApplicable
+    }
+    if (canonicalCarriesCheckpoint()) {
+        return UndurableLocalForwardSettlement.Settled(checkpointResultText, capturedEdits.drop(owed))
+    }
+    return if (attempts + 1 >= UNDURABLE_LOCAL_FORWARD_SETTLE_ATTEMPTS) {
+        UndurableLocalForwardSettlement.Abandoned
+    } else {
+        UndurableLocalForwardSettlement.Pending
+    }
+}
+
 internal fun localEditorRetryDelayMsUtil(failureCount: Int): Long {
     val exponent = (failureCount.coerceAtLeast(1) - 1).coerceAtMost(12)
     return (LOCAL_EDITOR_RETRY_BASE_MS * (1L shl exponent))
@@ -725,6 +810,21 @@ internal fun reconstructCapturedLocalEditorBatchUtil(
     val batch = prepareLocalEditorEditsUtil(base, edits) ?: return null
     if (batch.resultingText != visible) return null
     return ReconstructedLocalEditorBatch(base, batch)
+}
+
+/**
+ * `#captureddeltalivelock`: a captured burst [forwarder] applied from [shadowText]
+ * whose durable publish was not acknowledged. [capturedEdits] is the exact
+ * prefix of the retained burst those splices came from.
+ */
+private class UndurableLocalForward(
+    val forwarder: CrdtReplicaForwarder,
+    val shadowText: String,
+    val capturedEdits: List<CapturedLocalEditorEdit>,
+    val batch: PreparedLocalEditorBatch,
+    val projectionEpoch: Long,
+) {
+    var settleAttempts: Int = 0
 }
 
 private enum class LocalEditorForwardResult {
@@ -981,6 +1081,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val localEditorRetryFailureCounts = ConcurrentHashMap<String, Int>()
     private val pendingLocalEditorEdits =
         ConcurrentHashMap<String, MutableList<CapturedLocalEditorEdit>>()
+    private val undurableLocalForwards = ConcurrentHashMap<String, UndurableLocalForward>()
     private val remoteEditorEffectGenerations = ConcurrentHashMap<String, AtomicLong>()
 
     /** Latest published remote-editor effect generation for [filePath], or `-1`. */
@@ -1059,6 +1160,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         localEditorFlushVersions.clear()
         localEditorRetryFailureCounts.clear()
         pendingLocalEditorEdits.clear()
+        undurableLocalForwards.clear()
         localEditorFlushPendingPaths.clear()
         pendingLocalEdits.clear()
         fileContentReloadingPaths.clear()
@@ -1237,13 +1339,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         }
                         val workerStarted = System.nanoTime()
                         val capturedEdits = drainLocalEditorEdits(filePath)
+                        // `#captureddeltalivelock`: the splices still owed after an
+                        // unacknowledged delta settles; a retry retains only these.
+                        var retainedEdits = capturedEdits
                         var retrySplices = false
                         try {
-                            retrySplices =
-                                forwardLocalEditsFromShadow(
-                                    filePath,
-                                    capturedEdits,
-                                ) == LocalEditorForwardResult.Retry
+                            val owedEdits = settleUndurableLocalForward(filePath, capturedEdits)
+                            if (owedEdits == null) {
+                                retrySplices = true
+                            } else {
+                                retainedEdits = owedEdits
+                                retrySplices =
+                                    forwardLocalEditsFromShadow(
+                                        filePath,
+                                        owedEdits,
+                                    ) == LocalEditorForwardResult.Retry
+                            }
                         } catch (error: Exception) {
                             retrySplices = true
                             log.warn(
@@ -1252,7 +1363,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             )
                         } finally {
                     if (retrySplices) {
-                        prependLocalEditorEdits(filePath, capturedEdits)
+                        prependLocalEditorEdits(filePath, retainedEdits)
                         localEditorRetryFailureCounts.compute(filePath) { _, failures ->
                             ((failures ?: 0) + 1).coerceAtMost(13)
                         }
@@ -1519,6 +1630,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 localEditorFlushTasks.remove(oldPath)?.cancel(false)
                 localEditorFlushVersions.remove(oldPath)
                 pendingLocalEditorEdits.remove(oldPath)
+                undurableLocalForwards.remove(oldPath)
                 if (localEditorFlushPendingPaths.remove(oldPath)) {
                     clearLocalPending(oldPath)
                 }
@@ -1692,6 +1804,104 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
     }
 
+    /**
+     * `#captureddeltalivelock`: settle a local delta the replica applied whose
+     * durable publish was not acknowledged, before the retained burst is
+     * forwarded again. Answers the captured splices still owed (all of
+     * [capturedEdits] when no checkpoint applies), or null to retain the whole
+     * burst and retry. See [undurableLocalForwardSettlementUtil].
+     */
+    private fun settleUndurableLocalForward(
+        filePath: String,
+        capturedEdits: List<CapturedLocalEditorEdit>,
+    ): List<CapturedLocalEditorEdit>? {
+        val checkpoint = undurableLocalForwards[filePath] ?: return capturedEdits
+        val settlement =
+            undurableLocalForwardSettlementUtil(
+                checkpointShadow = checkpoint.shadowText,
+                checkpointCapturedEdits = checkpoint.capturedEdits,
+                checkpointResultText = checkpoint.batch.resultingText,
+                checkpointEpoch = checkpoint.projectionEpoch,
+                currentEpoch = nonOperatorMutationEpoch(filePath),
+                shadow = shadows[filePath],
+                capturedEdits = capturedEdits,
+                attempts = checkpoint.settleAttempts,
+                canonicalCarriesCheckpoint = { canonicalCarriesUndurableLocalForward(filePath, checkpoint) },
+            )
+        return when (settlement) {
+            UndurableLocalForwardSettlement.NotApplicable -> {
+                undurableLocalForwards.remove(filePath, checkpoint)
+                capturedEdits
+            }
+
+            UndurableLocalForwardSettlement.Pending -> {
+                checkpoint.settleAttempts++
+                requestRemoteDrain(filePath, "undurable-local-delta-retry")
+                null
+            }
+
+            UndurableLocalForwardSettlement.Abandoned -> {
+                undurableLocalForwards.remove(filePath, checkpoint)
+                log.warn(
+                    "[crdt-replica] unacknowledged local delta for ${File(filePath).name} was not carried by " +
+                        "canonical after ${checkpoint.settleAttempts + 1} attempts; " +
+                        "shadow_hash=${contentHash(checkpoint.shadowText)} " +
+                        "delta_hash=${contentHash(checkpoint.batch.resultingText)} " +
+                        "recovery=undurable-local-delta-unsettled (rebasing the whole captured burst)",
+                )
+                capturedEdits
+            }
+
+            is UndurableLocalForwardSettlement.Settled -> {
+                undurableLocalForwards.remove(filePath, checkpoint)
+                val settledShadow = settlement.settledShadow
+                shadows[filePath] = settledShadow
+                log.warn(
+                    "[crdt-replica] controller canonical carries the unacknowledged local delta for " +
+                        "${File(filePath).name}; advancing the native baseline. " +
+                        "shadow_hash=${contentHash(checkpoint.shadowText)} " +
+                        "settled_hash=${contentHash(settledShadow)} " +
+                        "remaining_splices=${settlement.remaining.size} recovery=undurable-local-delta-settled",
+                )
+                val current = forwarders[filePath]
+                if (current?.replicaText() != settledShadow) {
+                    // Canonical advanced past the delta (a response, say). The
+                    // remaining splices rebase from the settled baseline; the
+                    // ordinary remote delivery then projects the replica.
+                    retainedCanonicalProjectionPaths.add(filePath)
+                    requestRemoteDrain(filePath, "undurable-local-delta-settled")
+                } else if (
+                    settlement.remaining.isEmpty() &&
+                    runCatching { projectSettledVisibleState(filePath, current, settledShadow) }.getOrDefault(false)
+                        .not()
+                ) {
+                    requestRemoteDrain(filePath, "local-visible-projection-retry")
+                }
+                settlement.remaining
+            }
+        }
+    }
+
+    /**
+     * `#captureddeltalivelock`: true when controller canonical provably carries
+     * [checkpoint]'s splices. The holding endpoint, while still attached,
+     * re-sends the identical CRDT ops first; that publish result is not trusted
+     * alone, only the canonical text is.
+     */
+    private fun canonicalCarriesUndurableLocalForward(
+        filePath: String,
+        checkpoint: UndurableLocalForward,
+    ): Boolean {
+        val current = forwarders[filePath]
+        if (current === checkpoint.forwarder && current.holdsUndurableLocalEdits) {
+            current.republishUndurableLocalEdits()
+        }
+        val root = resolveProjectRoot(filePath) ?: return false
+        val canonical = CpSocketReplicaTransport(root).currentCanonicalText(filePath) ?: return false
+        if (canonical == checkpoint.batch.resultingText) return true
+        return NativePatching.capturedSplicesContained(checkpoint.shadowText, canonical, checkpoint.batch) == true
+    }
+
     private fun forwardLocalEditsFromShadow(
         filePath: String,
         capturedEdits: List<CapturedLocalEditorEdit>,
@@ -1740,6 +1950,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return LocalEditorForwardResult.Retry
         }
         val replicaText = forwarder.replicaText()
+        // `#captureddeltalivelock`: the endpoint that applied this burst's splices
+        // without a durable receipt, if any.
+        var undurableHolder: CrdtReplicaForwarder? = null
         val forwarded =
             when {
                 reconstructedMissingBase != null ->
@@ -1753,7 +1966,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 localReplicaBaselineDecisionUtil(replicaText, beforeText) ==
                     LocalReplicaBaselineDecision.ForwardLocal -> {
                     currentEpoch == nonOperatorMutationEpoch(filePath) &&
-                        forwarder.forwardLocalEdits(batch)
+                        forwarder.forwardLocalEdits(batch).also { durable ->
+                            if (!durable && forwarder.holdsUndurableLocalEdits) undurableHolder = forwarder
+                        }
                 }
                 else ->
                     rebootstrapCanonicalAndForwardCapturedLocalEdit(
@@ -1762,6 +1977,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         visibleEditorText = editorText,
                         staleForwarder = forwarder,
                         batch = batch,
+                        onUndurableForward = { holder -> undurableHolder = holder },
                     )
             }
         if (!forwarded) {
@@ -1769,6 +1985,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // delta reaches a canonical replica loses the only safe rebase
             // proof and turns the next retry into whole-editor adoption.
             shadows[filePath] = beforeText
+            undurableHolder?.let { holder ->
+                // `#captureddeltalivelock`: the replica applied this burst but the
+                // controller receipt was lost or refused. Record exactly which
+                // splices it holds so the retry settles them by canonical proof
+                // instead of rebasing them (plus later typing) over a canonical
+                // that may already carry them.
+                undurableLocalForwards[filePath] =
+                    UndurableLocalForward(
+                        forwarder = holder,
+                        shadowText = beforeText,
+                        capturedEdits = capturedEdits,
+                        batch = batch,
+                        projectionEpoch = currentEpoch,
+                    )
+                log.warn(
+                    "[crdt-replica] local delta reached the replica without a durable receipt for " +
+                        "${File(filePath).name}; shadow_hash=${contentHash(beforeText)} " +
+                        "delta_hash=${contentHash(editorText)} splices=${batch.edits.size} " +
+                        "recovery=settle-undurable-local-delta",
+                )
+            }
             if (replicaText != beforeText) {
                 retainedCanonicalProjectionPaths.add(filePath)
                 log.warn(
@@ -1935,6 +2172,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         visibleEditorText: String,
         staleForwarder: CrdtReplicaForwarder,
         batch: PreparedLocalEditorBatch,
+        onUndurableForward: (CrdtReplicaForwarder) -> Unit = {},
     ): Boolean {
         if (forwarders[filePath] !== staleForwarder) return false
         val root = resolveProjectRoot(filePath) ?: return false
@@ -1954,7 +2192,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // Re-registering from a full bootstrap (6.4 MB for sdk.md, 12 s)
             // raced every controller write, failed promotion, and churned the
             // replica the controller was waiting on.
-            return forwarders[filePath] === staleForwarder && staleForwarder.forwardLocalEdits(rebased)
+            return forwarders[filePath] === staleForwarder &&
+                staleForwarder.forwardLocalEdits(rebased).also { durable ->
+                    if (!durable && staleForwarder.holdsUndurableLocalEdits) onUndurableForward(staleForwarder)
+                }
         }
         val replacement =
             forwarderFor(
@@ -1974,7 +2215,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         ) {
             return false
         }
-        return replacement.forwardLocalEdits(rebased)
+        return replacement.forwardLocalEdits(rebased).also { durable ->
+            if (!durable && replacement.holdsUndurableLocalEdits) onUndurableForward(replacement)
+        }
     }
 
     fun requestRemoteDrain(filePath: String? = null, reason: String = "event") {

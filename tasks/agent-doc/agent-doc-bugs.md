@@ -93,6 +93,36 @@ Not yet. Tagging and the push to `main` are done; the GitHub build and publish a
 - **Local install:** still compiling.
 
 When the run is green I'll close GH #268–#272. #273 should close on its own from its `Fixes` commit, and I'll check that. Then I'll close the queue items and add the follow-ups to the backlog.
+
+### Re: v0.35.509 integrated, GH #268–#273 closed — opus-5-5 · 2026-10-15T15:05-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/268
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/269
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/270
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/271
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/272
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/273
+
+> **Queue prompt:** The content of the queue were duplicated by agent-doc on Run Agent Doc. This has been a reoccurring issue with multiple fix attempts. Use formal logic to prevent this from happening again.
+
+All seven are fixed, on `main`, and tagged in **v0.35.509** (`62cfd2af54`). The fixes, mechanisms and test evidence are in the previous response and in `VERSIONS.md` 0.35.509.
+
+- **`make release`:** exit 0. `make check` passed on the version-bumped tree (10662 tests, 0 failed, 168 skipped). `make tmux-ci` passed. The tag and `main` were pushed, and the local `install-full` completed, so `agent-doc --version` now reports 0.35.509.
+- **GitHub issues (#gh-fix "fix then close"):** I closed #268–#272 with each one's commit and the release. #273 closed itself from its `Fixes` commit.
+- **Still open:** `release + publish`. Release run `38788644925` is still building the platform archives (`plugins` passed). GitHub Releases and PyPI still show 0.35.508. I'll close that item once the run publishes.
+
+**Follow-ups filed** (appended to the backlog and queue, behind `release + publish`), all found by the subagents:
+- `keylogrebase`: after a compaction the keystroke log keeps the old base hash. Fixing it also closes the documented gap where a disk-only component can still duplicate.
+- `claimfollowedit`: editing a claimed queue line drops its claim, which is what happened to #272.
+- `splicesessionack`: the #273 remainder, where session-check still says "acknowledgement pending".
+- `rearmreadfailclosed2`: two more rearm-evidence reads that treat a failed read as no evidence.
+- `execfailpipe`: the exec-time fd close may also close Rust's exec-failure pipe. Needs verification.
+- `staleplugwarnflake`: one more flaky test under load.
 <!-- agent:boundary:956b73e3 -->
 <!-- /agent:exchange -->
 
@@ -101,7 +131,7 @@ When the run is green I'll close GH #268–#272. #273 should close on its own fr
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/268
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/268~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/269
 - #gh-fix https://github.com/btakita/agent-doc/issues/270
 - #gh-fix https://github.com/btakita/agent-doc/issues/271
@@ -109,11 +139,24 @@ When the run is green I'll close GH #268–#272. #273 should close on its own fr
 - #gh-fix https://github.com/btakita/agent-doc/issues/273
 - The content of the queue were duplicated by agent-doc on Run Agent Doc. This has been a reoccurring issue with multiple fix attempts. Use formal logic to prevent this from happening again.
 - 🚧 release + publish
- <!-- /agent:queue -->
+ 
+- do [#keylogrebase]
+- do [#claimfollowedit]
+- do [#splicesessionack]
+- do [#rearmreadfailclosed2]
+- do [#execfailpipe]
+- do [#staleplugwarnflake]
+<!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#keylogrebase] Keystroke log reopened after a compaction keeps the pre-compaction base hash (`merge_base=97b41a5fa5b6` after the 2026-10-15 16:29:43Z compaction), so admission has no op-lineage proof. Fixing it also closes the documented gap where a disk-only component can still arrive twice (see specs/14-realtime-workflow.md "Cut exclusivity" and the TLA+ `AdmissionCutExclusivityResidual` config).
+- [ ] [#claimfollowedit] Queue claims are keyed by exact line text, so editing a claimed line drops the claim (`queue_claim_prune pruned=1`; GH #272 line 2026-10-15). Claims should follow the edited item (node identity) the way steering forward_to_owner already does.
+- [ ] [#splicesessionack] GH #273 remainder: session-check still reports "acknowledgement pending" after the controller logs `retained_persistence_replica_rebuild_exhausted ... editor_holds_unmerged_visible_text`; give session-check a durable read of that state and name the operator action.
+- [ ] [#rearmreadfailclosed2] Two remaining rearm-evidence reads in agent-doc-document-realtime-io/src/lib.rs (around lines 4167 and 5334) still use `.ok().flatten()`, treating a failed read as "no evidence"; apply the fail-closed rule from fix/preflight-io-load-flakes (6f54959182).
+- [ ] [#execfailpipe] Verify and fix: `close_inherited_fds_on_exec` closes fds >= 3 in the child before exec, likely including Rust spawn's CLOEXEC exec-failure pipe, so an exec ENOENT may report as a successful spawn and defeat the launch-ENOENT retry.
+- [ ] [#staleplugwarnflake] `warnings::tests::stale_plugin_warning_end_to_end_from_reliable_registration` failed 1/96 whole-crate runs under load (2026-10-15); find and fix the nondeterminism, never rerun to green.
 <!-- /agent:backlog -->
 
 ## Review

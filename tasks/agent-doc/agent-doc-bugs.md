@@ -192,6 +192,48 @@ Dispatched to a background subagent on branch `fix/stale-controller-hot-update` 
 3. Why `%180`'s supervisor stayed `⚠ STALE SUPERVISOR`.
 
 It also takes ownership of your queued "tmux auto sync … back to 1 pane" item. The 11 queue items you added during this turn get dispatched next cycle.
+
+### Re: correction — todo ids are NOT safe yet on 0.35.509 — opus-5-5 · 2026-10-15T16:42-04:00
+
+**Correction to my last answer.** The sdk.md transcript you queued shows that `[#id]` tags on open `agent:todo` items **do** break on 0.35.509. The orphaned-backlog guard reads them as stray backlog items, and preflight refuses the whole document (`INTERRUPTED: open backlog item(s) exist only outside live agent:backlog: #tdidsasstrings …`). My check only covered the `--todo-*` write flags, not the admission guards. Until the fix ships, **don't add todo `[#id]`s to other documents**. sdk.md stays blocked until then. Stripping the ids (its option 2) would unblock it now, but it loses the two queue links.
+
+The fix went to `subagent:todoguard` (`fix/todo-id-guard`) at top priority, with the option you picked (fix the guard). It is a minimal change: todo-declared ids, and queue references to them, count as tracked in the orphan guard and in the coined-id checks. The broader `feat/todo-ids` design builds on it. I'll install it as soon as it lands.
+
+### Re: queue items added this turn — opus-5-5 · 2026-10-15T16:42-04:00
+
+**Dispatched to subagents** (claimed, each in its own worktree from v0.35.509, builds told to run under `nice -n 19 ionice -c3`):
+- `subagent:todoguard`: the sdk.md todo-id guard false positive (above).
+- `subagent:gh275`: GH #275 plus the new comment on the issue.
+- `subagent:queueschedule`: `agent:queue` `interval=` / `time=HH:MM[,…]` / `loop` / `loop=N`. It runs as a single deadline-sleeping scheduler loop per controller, with a minimum interval, tick coalescing after suspend/hot-update, and back-off. Jobs go to background workers, `loop=N` pass counts are persisted, edits reschedule in real time, and state lives in lazily.
+- `subagent:clearctxerr`: the sdk.md first-press Clear Session Context error. It checks whether the haiven-dev layout retry storm or the stale `%180` supervisor caused it.
+- `subagent:ideacpu`: IDEA lag. It attributes the CPU (builds vs IDEA vs agent-doc), moves any plugin work off the EDT, and makes the Makefile/gradle/nextest entrypoints run at low priority with core headroom. It also writes operator guidance for keeping IDEA snappy.
+- **tmux auto-sync back to 1 pane:** claimed for `subagent:stalecontroller`, which already owns that fix (the `[X, X]` layout, bounded retries, and cross-project pane ownership).
+
+**IDEA lag, immediate relief:** I reniced the ~10 running rustc/cargo/nextest processes to +19. Load average went from 115 (15-min) to 29 (1-min).
+
+> **Queue prompt:** #todo
+
+`#todo` is not a defined preset (the presets are `#actionable-review`, `#agent-doc-causes`, `#do-backlog`, `#gh-fix`, `#release`, `#self`, and the two `#spec-…` ones). I read it as "process the todo answers below", and did that.
+
+> **Queue prompt:** sdk.md cleanup: delete the leftover half-typed `> **Queue prompt:** ... which is not f` echo (~line 1167; the full question is ~line 1147), and the open `[ ]` copies of #apimigrationcollide / #publicbundleadopt whose `[x]` duplicates exist: done?
+
+Yes, it's done. sdk.md has no `which is not f` echo, no open `[ ]` copy of `#apimigrationcollide`, and `#publicbundleadopt` remains only as its single gated `[/]` item. I checked that todo off.
+
+> **Queue prompt:** Next Remote Dev session: confirm tab switches move tmux (GH #262 fix, plugin 263 0.2.617 after v0.35.504 is installed on the backend): confirmed
+
+Thanks. I checked that todo off.
+
+> **Queue prompt:** [#ahfe]: did not work I believe. Look out for bug reports
+
+I recorded the outcome on `#ahfe` and left it open. I'll watch for bug reports before reopening GH #267, and I didn't start a fix on a suspected failure.
+
+> **Queue prompt:** Does the queue have a way to represent the equilavent of `[/]`? `~...~` is equivalent to `[x]`.
+
+Partly. The queue has two states of its own:
+- **`~~…~~` (done):** the binary strikes the line when the item closes.
+- **`🚧` (in flight):** the binary adds this prefix when a worker claims the line (`agent-doc queue claim`) and removes it on release. That is what you see on the dispatched items now.
+
+There is no queue marker for `[/]` meaning *gated, waiting on something external*. A gated item lives in `agent:review` or as a `[/]` backlog item and leaves the queue. A queue line tagged `[operator-verify]` stays in the queue but is never drained by the agent. If you want a first-class gated queue state (for example `[/]` on a queue line that the drain skips and that re-arms when the gate clears), say so and I'll queue it.
 <!-- agent:boundary:2e8e3946 -->
 <!-- /agent:exchange -->
 

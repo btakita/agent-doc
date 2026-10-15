@@ -123,6 +123,24 @@ All seven are fixed, on `main`, and tagged in **v0.35.509** (`62cfd2af54`). The 
 - `rearmreadfailclosed2`: two more rearm-evidence reads that treat a failed read as no evidence.
 - `execfailpipe`: the exec-time fd close may also close Rust's exec-failure pipe. Needs verification.
 - `staleplugwarnflake`: one more flaky test under load.
+
+### Re: follow-ups + GH #274 — dispatched to 7 subagents — opus-5-5 · 2026-10-15T15:12-04:00
+
+All six follow-up items and the newly queued GH #274 are claimed. Each runs in its own background subagent and worktree, based on `origin/main` = v0.35.509 (`62cfd2af54`).
+
+| Claim owner | Item | Branch |
+|---|---|---|
+| `subagent:keylogrebase` | Keystroke log keeps the pre-compaction base hash; then close the disk-only Residual gap | `fix/keylogrebase` |
+| `subagent:claimfollowedit` | Claims bind to the queue item's identity, so an edit carries the claim; ambiguous duplicates are refused | `fix/claimfollowedit` |
+| `subagent:splicesessionack` | session-check reads the #273 rebuild-exhausted state and names the operator action | `fix/splicesessionack` |
+| `subagent:rearmreadfailclosed2` | Remaining rearm-evidence reads fail closed | `fix/rearmreadfailclosed2` |
+| `subagent:execfailpipe` | Verify whether the pre-exec fd close hides exec ENOENT; fix if confirmed | `fix/execfailpipe` |
+| `subagent:staleplugwarnflake` | Find and fix the load flake's nondeterminism | `fix/staleplugwarnflake` |
+| `subagent:gh274` | GH #274: non-ASCII → `?` projection + duplicate committed response committed by preflight repair | `fix/gh274` |
+
+For #274, the subagent first checks whether 0.35.509 already blocks the sequence, since the #273 merge-forward and cut-exclusivity rules are both new. It then fixes what remains at two choke points: byte-exact UTF-8 projection that fails closed instead of substituting, and a repair commit that refuses a duplicate committed section.
+
+**`release + publish` (v0.35.509):** the tag and `main` are pushed and the local install is done. Release run `38788644925` is still building platform archives, and GitHub Releases and PyPI still show 0.35.508. I'll close this item once it publishes. This batch goes into the next release.
 <!-- agent:boundary:956b73e3 -->
 <!-- /agent:exchange -->
 
@@ -131,21 +149,15 @@ All seven are fixed, on `main`, and tagged in **v0.35.509** (`62cfd2af54`). The 
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/268~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/269~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/270~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/271~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/272~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/273~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~The content of the queue were duplicated by agent-doc on Run Agent Doc. This has been a reoccurring issue with multiple fix attempts. Use formal logic to prevent this from happening again.~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 release + publish
- 
+- #gh-fix https://github.com/btakita/agent-doc/issues/274
+- `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune ev.
 - do [#keylogrebase]
 - do [#claimfollowedit]
 - do [#splicesessionack]
 - do [#rearmreadfailclosed2]
 - do [#execfailpipe]
 - do [#staleplugwarnflake]
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog

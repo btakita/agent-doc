@@ -236,9 +236,17 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   the provisional base (GH #253).
 - In the exact-262/263 modular package, an accepted frontend surface snapshot is the
   authoritative Remote Dev selection/layout source. If no frontend generation has delivered an
-  accepted snapshot (including a one-sided backend install), the backend subscribes to each guest
-  `ClientFileEditorManager.getSelectedEditorWithProviderFlow()` and routes those selection edges
-  through the same `EditorTabSyncListener`. The fallback is disabled reactively as soon as frontend
+  accepted snapshot (including a one-sided backend install), the backend subscribes to each remote
+  client session's `ClientFileEditorManager.getSelectedEditorWithProviderFlow()` and routes those
+  selection edges through the same `EditorTabSyncListener`. "Remote" is `ClientType.isRemote`: a
+  JetBrains Remote Dev client session is `CONTROLLER` and a Code With Me participant is `GUEST`, so
+  the fallback must admit both and exclude only the local and frontend-process sessions; a
+  guest-only filter never observed a Remote Dev client (GH #262). Existing sessions and
+  `RemoteClientSessionListener.projectSessionInitialized` pass through the same pure gate
+  (`BackendRemoteSessionGate`), at most one subscription per client id. Install logs one
+  `[layout-sync] backend selection fallback installed` line naming the observed sessions
+  (`clientId:type`) or `observing=none`, plus the skipped ones, so a filtered-out install is
+  distinguishable from a fallback that never installed. The fallback is disabled reactively as soon as frontend
   authority appears and resumes when that authority retires; it never races the pane-tagged source.
   This preserves main-layout tab switching, but cannot invent detached-window identities or
   frontend presentation capability. An empty backend `EditorWindow` collection in this topology is

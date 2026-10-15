@@ -89,8 +89,9 @@ val generateModularLifecycle by tasks.registering {
         val replacement = """
         // The frontend module remains the preferred pane-tagged surface authority. A one-sided
         // Remote Dev install has no frontend bridge, though, and GuestFileEditorManager does not
-        // publish the project FileEditorManager topic. Observe that guest selection flow only
-        // while no frontend snapshot generation is accepted.
+        // publish the project FileEditorManager topic. Observe that remote (Remote Dev controller
+        // or Code With Me guest) selection flow only while no frontend snapshot generation is
+        // accepted.
         val editorTabSync = EditorTabSyncListener.install(project)
         com.github.btakita.agentdoc.split.backend.BackendGuestSelectionFallback.install(
             project,

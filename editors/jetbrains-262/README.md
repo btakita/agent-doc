@@ -82,7 +82,8 @@ backend or only JetBrains Client does not copy it to the other process. For
 local ZIP testing, install the same ZIP explicitly in both backend and
 Client/Gateway, or use `runIdeSplitMode`. A one-sided install is unsupported and
 the pane-tagged surface bridge must be treated as unavailable. The backend still
-observes guest selection changes while no frontend snapshot has been accepted, so
+observes remote-client selection changes (Remote Dev `CONTROLLER` and Code With Me
+`GUEST` sessions; GH #262) while no frontend snapshot has been accepted, so
 main-layout tab switching continues for diagnostic/local installs. Detached-window
 identity and frontend presentation remain unavailable until the matching frontend
 module connects; accepted frontend authority automatically suppresses the fallback.

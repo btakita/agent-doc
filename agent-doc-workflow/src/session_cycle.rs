@@ -55,6 +55,10 @@ pub struct FinalizeRerunCommand<'a> {
     pub review_add: &'a [String],
     pub review_edit: &'a [String],
     pub todo_add: &'a [String],
+    pub todo_done: &'a [String],
+    pub todo_edit: &'a [String],
+    pub todo_reopen: &'a [String],
+    pub todo_remove: &'a [String],
     pub allow_replace_pending: bool,
     pub pending_only: bool,
     pub status: Option<&'a str>,
@@ -410,6 +414,10 @@ pub fn finalize_rerun_command_base(command: FinalizeRerunCommand<'_>) -> Option<
     push_repeated_args(&mut args, "--review-add", command.review_add);
     push_repeated_args(&mut args, "--review-edit", command.review_edit);
     push_repeated_args(&mut args, "--todo-add", command.todo_add);
+    push_repeated_args(&mut args, "--todo-done", command.todo_done);
+    push_repeated_args(&mut args, "--todo-edit", command.todo_edit);
+    push_repeated_args(&mut args, "--todo-reopen", command.todo_reopen);
+    push_repeated_args(&mut args, "--todo-remove", command.todo_remove);
     if command.allow_replace_pending {
         args.push("--allow-replace-pending".to_string());
     }
@@ -1129,6 +1137,10 @@ mod tests {
             review_add: &empty,
             review_edit: &empty,
             todo_add: &empty,
+            todo_done: &empty,
+            todo_edit: &empty,
+            todo_reopen: &empty,
+            todo_remove: &empty,
             allow_replace_pending: false,
             pending_only: false,
             status: None,
@@ -1159,6 +1171,10 @@ mod tests {
         let review_add = vec!["review me".to_string()];
         let review_edit = vec!["review1=fix it".to_string()];
         let todo_add = vec!["Publish draft docs/note.md".to_string()];
+        let todo_done = vec!["k3vd".to_string()];
+        let todo_edit = vec!["k3vd=Rotate the key".to_string()];
+        let todo_reopen = vec!["q1".to_string()];
+        let todo_remove = vec!["old1".to_string()];
         let command = FinalizeRerunCommand {
             required_commit: true,
             file: Path::new("tasks/doc.md"),
@@ -1191,6 +1207,10 @@ mod tests {
             review_add: &review_add,
             review_edit: &review_edit,
             todo_add: &todo_add,
+            todo_done: &todo_done,
+            todo_edit: &todo_edit,
+            todo_reopen: &todo_reopen,
+            todo_remove: &todo_remove,
             allow_replace_pending: true,
             pending_only: true,
             status: Some("working hard"),
@@ -1225,6 +1245,10 @@ mod tests {
         assert!(rendered.contains("--review-add 'review me'"));
         assert!(rendered.contains("--review-edit 'review1=fix it'"));
         assert!(rendered.contains("--todo-add 'Publish draft docs/note.md'"));
+        assert!(rendered.contains("--todo-done k3vd"));
+        assert!(rendered.contains("--todo-edit 'k3vd=Rotate the key'"));
+        assert!(rendered.contains("--todo-reopen q1"));
+        assert!(rendered.contains("--todo-remove old1"));
         assert!(rendered.contains("--allow-replace-pending"));
         assert!(rendered.contains("--backlog-only"));
         assert!(rendered.contains("--status 'working hard'"));

@@ -2126,12 +2126,28 @@ struct WriteArgs {
     /// `agent:done` (the completion path; repeatable).
     #[arg(long = "review-resolve")]
     review_resolve: Vec<String>,
-    /// Append an operator action to `agent:todo` as `- [ ] <action>`
+    /// Append an operator action to `agent:todo` as `- [ ] [#id] <action>`
     /// (`#operatortodo`, repeatable). Creates the `agent:todo` component when the
     /// document has none; existing items are preserved and an identical action
-    /// is a no-op.
+    /// is a no-op. Prefix with `id=<custom> ` to choose the item's id.
     #[arg(long = "todo-add")]
     todo_add: Vec<String>,
+    /// Check an `agent:todo` item off (`[x]`) in place once the operator action
+    /// is finished (`#tododone`, repeatable). Selects by the item's own id, a
+    /// `#id` it cites, or its exact text. Idempotent; folds duplicate copies.
+    #[arg(long = "todo-done")]
+    todo_done: Vec<String>,
+    /// Edit an `agent:todo` item's text: `id=new text` (repeatable). Keeps the
+    /// item's id, checkbox state, and position.
+    #[arg(long = "todo-edit")]
+    todo_edit: Vec<String>,
+    /// Uncheck an `agent:todo` item (`[ ]`) in place (repeatable).
+    #[arg(long = "todo-reopen")]
+    todo_reopen: Vec<String>,
+    /// Delete an `agent:todo` item that no longer applies (repeatable). A
+    /// finished item uses `--todo-done` instead.
+    #[arg(long = "todo-remove")]
+    todo_remove: Vec<String>,
     /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
     #[arg(long = "allow-replace-pending", hide = true)]
     allow_replace_pending: bool,
@@ -5822,6 +5838,10 @@ fn try_main() -> anyhow::Result<()> {
                     review_remove: args.review_remove,
                     review_resolve: args.review_resolve,
                     todo_add: args.todo_add,
+                    todo_done: args.todo_done,
+                    todo_edit: args.todo_edit,
+                    todo_reopen: args.todo_reopen,
+                    todo_remove: args.todo_remove,
                     queue_completion_ids: Vec::new(),
                     allow_replace_pending: args.allow_replace_pending,
                     pending_only: args.pending_only,
@@ -5893,6 +5913,10 @@ fn try_main() -> anyhow::Result<()> {
                     review_remove: args.review_remove,
                     review_resolve: args.review_resolve,
                     todo_add: args.todo_add,
+                    todo_done: args.todo_done,
+                    todo_edit: args.todo_edit,
+                    todo_reopen: args.todo_reopen,
+                    todo_remove: args.todo_remove,
                     queue_completion_ids: Vec::new(),
                     allow_replace_pending: args.allow_replace_pending,
                     pending_only: args.pending_only,

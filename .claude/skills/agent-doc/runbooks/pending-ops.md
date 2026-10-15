@@ -60,7 +60,11 @@ Combine any number of flags in one `agent-doc write` call:
 | `--review-add "text"` | Add a new `[/]` item directly to `agent:review`; usually prefer `--backlog-gate`. |
 | `--review-edit "id=new text"` | Rewrite a review item's text, preserve hash. |
 | `--review-resolve <id>` | Resolve a review item: remove it from `agent:review` and archive to `agent:done` (the completion path when the gated work is actually finished). |
-| `--todo-add "action"` | `#operatortodo`: append `- [ ] <action>` to `agent:todo` for something the operator must do. The binary creates `agent:todo` if the document has none, keeps every existing item, and skips an action already listed. |
+| `--todo-add "action"` | `#operatortodo`: append `- [ ] [#id] <action>` to `agent:todo` for something the operator must do (`id=<custom> ` chooses the id). The binary creates `agent:todo` if the document has none, keeps every existing item, and skips an action already listed. |
+| `--todo-done <id>` | `#tododone`: check an `agent:todo` item off (`[x]`) in place in the same closeout that the operator action was finished. Selects by own `[#id]`, a cited `#id`, or exact text; idempotent; folds duplicate copies of the item. Never append a second `[x]` copy instead. |
+| `--todo-edit "id=new text"` | Rewrite an `agent:todo` item's text, keeping its id, checkbox state, and position. |
+| `--todo-reopen <id>` | Uncheck an `agent:todo` item (`[ ]`) in place. |
+| `--todo-remove <id>` | Delete an `agent:todo` item that no longer applies (a finished one uses `--todo-done`). |
 | `--review-remove <id>` | Delete a review item by id, clearing **every** entry that shares the id — use for a stale or duplicate review entry (e.g. the identical `[/]` pair an interleaved finalize leaves behind, flagged as `preset_item_id_collision`). |
 
 Finalize also auto-dedupes identical same-id review entries during closeout maintenance, so an interleaved-finalize duplicate collapses without an explicit flag; distinct items that merely share an id are preserved so the ambiguity warning still surfaces.

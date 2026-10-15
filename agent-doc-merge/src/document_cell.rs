@@ -46,8 +46,8 @@ use lazily::{
 use std::fmt;
 
 use crate::crdt::{
-    EditorOp, PREAMBLE_KEY, is_list_component, replay_editor_ops, split_exchange_children,
-    split_list_children,
+    EditorOp, PREAMBLE_KEY, is_keyed_item_component, is_list_component, replay_editor_ops,
+    split_exchange_children, split_list_children,
 };
 use agent_doc_element::element::{self, Component};
 use agent_doc_element_queue::QueueItemLifecycle;
@@ -696,7 +696,7 @@ pub fn project_document_spans(doc: &str) -> Option<Vec<ItemSpan>> {
 fn split_keyed_children(name: &str, body: &str) -> Option<Vec<(String, String)>> {
     let children = if name == "exchange" {
         split_exchange_children(body)
-    } else if is_list_component(name) {
+    } else if is_keyed_item_component(name) {
         split_list_children(body)
     } else {
         None

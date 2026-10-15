@@ -210,6 +210,29 @@ mod tests {
     }
 
     #[test]
+    fn resume_drops_a_todo_remove_whose_item_is_already_gone() {
+        // `#tododone`: `--todo-remove` errors once its item is gone, so a resume
+        // after the removal landed must drop it; one still present is kept, and
+        // the idempotent todo flags always stay in the replay.
+        let applied = concat!(
+            "<!-- agent:todo -->\n",
+            "- [x] [#k3vd] Rotate the deploy key\n",
+            "- [ ] Keep me\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let mut options = replay_options();
+        options.todo_remove = vec!["gone1".to_string(), "Keep me".to_string()];
+        options.todo_done = vec!["k3vd".to_string()];
+
+        let dropped =
+            agent_doc_repair_command_io::drop_already_applied_mutations(&mut options, applied);
+
+        assert_eq!(dropped, vec!["todo-remove:#gone1".to_string()]);
+        assert_eq!(options.todo_remove, vec!["Keep me".to_string()]);
+        assert_eq!(options.todo_done, vec!["k3vd".to_string()]);
+    }
+
+    #[test]
     fn resume_keeps_a_typed_gate_replay_the_gated_id_set_cannot_see() {
         // `collect_gated_review_ids` matches only `- [/]`, so witnessing from it
         // would classify this unlanded typed-gate replay as already applied.

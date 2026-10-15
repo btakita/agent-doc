@@ -1165,6 +1165,26 @@ pub fn apply_patches_with_overrides_pure(
         result = comp.replace_content(&result, &new_content);
     }
 
+    // `#tododupdone`: a `patch:todo` that completes an item by APPENDING its
+    // checked copy (`- [x] <action> — note`) instead of checking the original
+    // used to leave the open original beside it, and the preserve-every-item
+    // rule kept both. Fold same-item copies so completion lands on the
+    // existing item; distinct operator items are never touched.
+    if ops
+        .iter()
+        .any(|(_, patch)| agent_doc_element::todo::is_todo_component(&patch.name))
+    {
+        let (folded, removed) = agent_doc_element::todo::reconcile_todo_in_document(&result)
+            .context("failed to reconcile agent:todo after patch:todo")?;
+        if removed > 0 {
+            eprintln!(
+                "[template] patch:todo folded {removed} duplicate todo cop{} into the existing item(s)",
+                if removed == 1 { "y" } else { "ies" }
+            );
+            result = folded;
+        }
+    }
+
     // Merge overflow (from missing-component patches) with unmatched content
     let mut all_unmatched = String::new();
     let exchange_patch_present = patches.iter().any(|patch| patch.name == "exchange");
@@ -2368,6 +2388,47 @@ All green.
         assert_eq!(result.matches("## Todo").count(), 1, "{result}");
         assert!(
             result.contains("<!-- agent:todo -->\n- [ ] Rotate key\n- [ ] Publish draft docs/note.md\n<!-- /agent:todo -->"),
+            "{result}"
+        );
+    }
+    /// `#tododupdone`, anonymized from the live 2026-10-15 session: the patch
+    /// completes two items by appending checked, annotated copies. The open
+    /// originals must be checked in place, not kept beside their copies, and a
+    /// follow-up item citing the same tracked id must survive.
+    #[test]
+    fn apply_patches_todo_patch_completion_copy_checks_the_existing_item() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:exchange -->\nprevious\n<!-- /agent:exchange -->\n\n",
+            "## Todo\n\n<!-- agent:todo -->\n",
+            "- [ ] Decide the api merge order of #645 vs #715 (#apimigrate)\n",
+            "- [ ] Approve/merge contracts #160 and pick the version bump (#bundleadopt)\n",
+            "- [ ] Rotate key\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc_path, doc).unwrap();
+        let patches = vec![PatchBlock::new(
+            "todo",
+            concat!(
+                "- [ ] Decide the api merge order of #645 vs #715 (#apimigrate)\n",
+                "- [ ] Approve/merge contracts #160 and pick the version bump (#bundleadopt)\n",
+                "- [ ] Rotate key\n",
+                "- [x] Decide the api merge order of #645 vs #715 (#apimigrate) — moot: either order works\n",
+                "- [x] Approve/merge contracts #160 and pick the version bump (#bundleadopt) — merged; continues as #162\n",
+                "- [ ] Approve/merge contracts #162 once CI can run (#bundleadopt)\n",
+            ),
+        )];
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
+        assert!(
+            result.contains(concat!(
+                "<!-- agent:todo -->\n",
+                "- [x] Decide the api merge order of #645 vs #715 (#apimigrate) — moot: either order works\n",
+                "- [x] Approve/merge contracts #160 and pick the version bump (#bundleadopt) — merged; continues as #162\n",
+                "- [ ] Rotate key\n",
+                "- [ ] Approve/merge contracts #162 once CI can run (#bundleadopt)\n",
+                "<!-- /agent:todo -->",
+            )),
             "{result}"
         );
     }

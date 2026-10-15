@@ -9826,6 +9826,96 @@ mod tests {
         );
     }
 
+    /// `opcutahead` (sdk.md, 2026-10-15): the operator pressed Run while typing
+    /// a new queue line. A native save put `...which is not f` on disk; the
+    /// operator then backspaced the `f` and typed on. The authority's CRDT cut
+    /// held `...which is not to be b`, and the op epoch -- read after the cut was
+    /// observed -- was already a few keystrokes further. The backspaced cut is not
+    /// a prefix of the operator's line, so the textual revision-twin projection
+    /// cannot see it, and the op-lineage projection used to demand that the FINAL
+    /// replay equal the cut, so it bailed too. The ladder logged
+    /// `RevisionTwin=collapsed(1) Cell=equals_authority Semantic=adopted` and the
+    /// adopted revision carried the line twice (completed line, then the cut).
+    #[test]
+    fn admission_split_merge_drops_a_backspaced_typing_cut_when_ops_run_ahead_of_the_cut() {
+        let dir = setup_project();
+        let doc = dir.path().join("sdk.md");
+        const FIRST: &str = "- If a merge gets changes requested, do I amend?\n";
+        const STALE: &str = "- Can the host support two review modes? One which is not f\n";
+        let (baseline, _, _) = admission_typing_fork_docs("", "");
+        let (_, _, disk) = admission_typing_fork_docs(&format!("{FIRST}{STALE}"), "");
+        let close = baseline.find("<!-- /agent:queue -->").unwrap();
+        let f_at = close + FIRST.len() + STALE.len() - 2;
+        let ops = vec![
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: close,
+                text: FIRST.to_string(),
+            },
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: close + FIRST.len(),
+                text: STALE.to_string(),
+            },
+            agent_doc_merge::crdt::EditorOp::Delete {
+                offset: f_at,
+                len: 1,
+            },
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: f_at,
+                text: "to be b".to_string(),
+            },
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: f_at + "to be b".len(),
+                text: "locked on a review".to_string(),
+            },
+        ];
+        let authority = agent_doc_merge::crdt::replay_editor_ops(&baseline, &ops[..4]).unwrap();
+        assert!(authority.contains("which is not to be b\n"), "{authority}");
+        std::fs::write(&doc, &disk).unwrap();
+        const LINE: &str = "- Can the host support two review modes?";
+
+        // Precondition: without op lineage the ladder reproduces the incident.
+        let unproven =
+            merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
+                .unwrap()
+                .unwrap_or_else(|| authority.clone());
+        assert_eq!(
+            queue_lines_starting(&unproven, LINE),
+            2,
+            "the unproven ladder must reproduce the fork:\n{unproven}"
+        );
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains(
+                "rungs=[RevisionTwin=collapsed(1) Cell=equals_authority Semantic=adopted("
+            ),
+            "the fixture must reproduce the live rung sequence:\n{log}"
+        );
+
+        let merged = merge_admission_three_way_split(
+            &doc,
+            &baseline,
+            &authority,
+            &disk,
+            &authority,
+            Some(&ops),
+        )
+        .unwrap()
+        .unwrap_or_else(|| authority.clone());
+        assert_eq!(
+            queue_lines_starting(&merged, LINE),
+            1,
+            "exactly one revision of the operator's line may survive:\n{merged}"
+        );
+        assert_eq!(merged, authority, "operator text is authoritative");
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("EditorOpLineage=suppressed_queue_revisions(1)"),
+            "the op-lineage suppression must be what removed the cut:\n{log}"
+        );
+    }
+
     /// Independent disk work saved in the SAME native save as the stale cut still
     /// lands; only the cut is projected out (`AdmissionSplitMergeTwinReach`).
     #[test]

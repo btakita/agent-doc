@@ -1861,6 +1861,24 @@ fn queue_item_counts(doc: &str) -> std::collections::HashMap<String, usize> {
     counts
 }
 
+/// True when replaying `ops` onto `base` passes through `cut` at any op
+/// boundary, including before the first op and after the last (`opcutahead`).
+fn replay_reaches_cut(base: &str, ops: &[EditorOp], cut: &str) -> bool {
+    let mut running = base.to_string();
+    if running == cut {
+        return true;
+    }
+    for op in ops {
+        if crate::crdt::apply_editor_op_to_text(&mut running, op).is_none() {
+            return false;
+        }
+        if running == cut {
+            return true;
+        }
+    }
+    false
+}
+
 /// Suppress stale disk queue revisions proven to be intermediate states of the
 /// live authority's captured editor-op lineage (`#admissionopancestor`).
 ///
@@ -1873,6 +1891,19 @@ fn queue_item_counts(doc: &str) -> std::collections::HashMap<String, usize> {
 /// proved by the ops. At most the lineage-proven occurrence count is removed,
 /// so unrelated disk additions (including additional identical rows) survive
 /// for the ordinary three-way merge.
+///
+/// The lineage is proven when `op_replayed_authority` is ANY replay state of the
+/// ops from `base` -- the final one or an intermediate one (`opcutahead`). The
+/// op epoch is recorded keystroke by keystroke while the authority's CRDT cut
+/// advances in batched deltas, and admission reads the ops AFTER it observes the
+/// authority. An operator still typing during admission therefore leaves the
+/// epoch a few keystrokes ahead of the cut. Requiring the final replay to equal
+/// the cut threw the proof away exactly when the operator was mid-burst, which is
+/// when a native save is most likely to hold a stale revision (live 2026-10-15:
+/// disk held `...which is not f`, the operator had backspaced the `f` and typed
+/// on, and the adopted merge carried both lines). A suppressed row must be absent
+/// from both the cut and the final replay: the newest operator text never loses a
+/// row the operator still has.
 pub fn suppress_superseded_disk_queue_revisions(
     base: &str,
     disk: &str,
@@ -1910,18 +1941,23 @@ pub fn suppress_superseded_disk_queue_revisions(
         .collect();
     if candidates.is_empty() {
         return AdmissionDiskLineageProjection {
-            authority_lineage_proven: crate::crdt::replay_editor_ops(base, authority_ops)
-                .is_some_and(|replayed| replayed == op_replayed_authority),
+            authority_lineage_proven: replay_reaches_cut(
+                base,
+                authority_ops,
+                op_replayed_authority,
+            ),
             ..unchanged()
         };
     }
 
     let mut running = base.to_string();
+    let mut cut_reached = running == op_replayed_authority;
     let mut intermediate_max = std::collections::HashMap::<String, usize>::new();
     for op in authority_ops {
         if crate::crdt::apply_editor_op_to_text(&mut running, op).is_none() {
             return unchanged();
         }
+        cut_reached = cut_reached || running == op_replayed_authority;
         if candidates
             .iter()
             .any(|candidate| running.contains(candidate))
@@ -1936,9 +1972,12 @@ pub fn suppress_superseded_disk_queue_revisions(
             }
         }
     }
-    if running != op_replayed_authority {
+    if !cut_reached {
         return unchanged();
     }
+    // `opcutahead`: ops past the cut are the operator's newer keystrokes. A row
+    // either the cut or the newest replay still holds is not superseded.
+    let final_replay_counts = queue_item_counts(&running);
 
     let mut quotas = std::collections::HashMap::<String, usize>::new();
     for candidate in candidates {
@@ -1957,7 +1996,8 @@ pub fn suppress_superseded_disk_queue_revisions(
                 op_replayed_authority_counts
                     .get(&candidate)
                     .copied()
-                    .unwrap_or(0),
+                    .unwrap_or(0)
+                    .max(final_replay_counts.get(&candidate).copied().unwrap_or(0)),
             );
         let suppress = excess_disk.min(disappeared_from_lineage);
         if suppress > 0 {
@@ -4348,6 +4388,99 @@ working on it
                 .disk_text
                 .contains("- independent disk addition\n")
         );
+    }
+
+    /// `opcutahead` (live 2026-10-15): the operator typed `...which is not f`,
+    /// a native save put that cut on disk, then the operator backspaced the `f`
+    /// and kept typing. The authority's CRDT cut lags the op epoch by a few
+    /// keystrokes, so the final replay is NOT the cut. The disk row is still an
+    /// op-proven intermediate revision (and not a prefix of the operator's text,
+    /// so the textual revision-twin projection cannot see it).
+    fn op_cut_ahead_fixture() -> (String, Vec<EditorOp>, usize, String) {
+        let base = "<!-- agent:queue -->\n<!-- /agent:queue -->\n".to_string();
+        let close = base.find("<!-- /agent:queue -->").unwrap();
+        let first = "- If a merge gets changes requested, do I amend?\n";
+        let stale = "- Can the host support two review modes? One which is not f\n";
+        let f_at = close + first.len() + stale.len() - 2;
+        let ops = vec![
+            EditorOp::Insert {
+                offset: close,
+                text: first.to_string(),
+            },
+            EditorOp::Insert {
+                offset: close + first.len(),
+                text: stale.to_string(),
+            },
+            EditorOp::Delete {
+                offset: f_at,
+                len: 1,
+            },
+            EditorOp::Insert {
+                offset: f_at,
+                text: "to be b".to_string(),
+            },
+            // The authority's CRDT cut is here; the operator kept typing.
+            EditorOp::Insert {
+                offset: f_at + "to be b".len(),
+                text: "locked on a review".to_string(),
+            },
+        ];
+        let disk = base.replace(
+            "<!-- /agent:queue -->",
+            &format!("{first}{stale}<!-- /agent:queue -->"),
+        );
+        (base, ops, 4, disk)
+    }
+
+    #[test]
+    fn admission_lineage_suppresses_a_backspaced_revision_when_ops_run_ahead_of_the_cut() {
+        let (base, ops, cut_len, disk) = op_cut_ahead_fixture();
+        let cut = crate::crdt::replay_editor_ops(&base, &ops[..cut_len]).unwrap();
+        assert!(cut.contains("which is not to be b\n"), "{cut}");
+        let stale = "- Can the host support two review modes? One which is not f\n";
+        assert!(
+            !crate::revision_twin::is_revision_twin(
+                stale,
+                "- Can the host support two review modes? One which is not to be b"
+            ),
+            "precondition: the textual twin test cannot see a backspaced revision"
+        );
+
+        let projection = suppress_superseded_disk_queue_revisions(&base, &disk, &cut, &cut, &ops);
+        assert!(projection.authority_lineage_proven);
+        assert_eq!(projection.suppressed_queue_revisions, 1);
+        assert!(
+            !projection.disk_text.contains(stale),
+            "{}",
+            projection.disk_text
+        );
+        assert!(
+            projection
+                .disk_text
+                .contains("- If a merge gets changes requested, do I amend?\n")
+        );
+    }
+
+    #[test]
+    fn admission_lineage_ahead_of_the_cut_keeps_independent_and_newest_rows() {
+        let (base, ops, cut_len, _) = op_cut_ahead_fixture();
+        let cut = crate::crdt::replay_editor_ops(&base, &ops[..cut_len]).unwrap();
+        let newest = crate::crdt::replay_editor_ops(&base, &ops).unwrap();
+        let newest_row =
+            "- Can the host support two review modes? One which is not to be blocked on a review\n";
+        assert!(newest.contains(newest_row), "{newest}");
+        // Disk holds the operator's NEWEST revision (saved after the cut) plus an
+        // independent row: neither is a superseded intermediate revision.
+        let disk = base.replace(
+            "<!-- /agent:queue -->",
+            &format!(
+                "- If a merge gets changes requested, do I amend?\n{newest_row}- independent disk row\n<!-- /agent:queue -->"
+            ),
+        );
+        let projection = suppress_superseded_disk_queue_revisions(&base, &disk, &cut, &cut, &ops);
+        assert!(projection.authority_lineage_proven);
+        assert_eq!(projection.suppressed_queue_revisions, 0);
+        assert_eq!(projection.disk_text, disk);
     }
 
     #[test]

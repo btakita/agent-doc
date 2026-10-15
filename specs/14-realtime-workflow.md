@@ -1064,7 +1064,7 @@ Four classifications, each naming itself in `ops.log` as
 | `verbatim_branch_unchanged` | A plane still matches another byte-for-byte. | Proceed, or fast-forward a proven newer durable save. Not logged — it is the every-preflight case. |
 | `transient_markers_only` | The planes differ only by transient markers; a durable branch is unchanged. | Same as above, decided on durable content. |
 | `authority_subsumes_disk` | Three durably distinct revisions, but the live buffer preserves every durable disk line in order. | Proceed on the authority; adopt nothing. Disk is an ancestor, and adopting it would drop the operator's newer steering. |
-| `three_way_split_merged` | Three durably distinct revisions with content on disk the authority never received: two writers genuinely diverged. | First use an exact-base editor-op epoch to remove only disk queue rows proven to be intermediate revisions of the initial authority cut; then three-way merge the remaining disk branch into live authority against the baseline ancestor. Independent disk additions are preserved. The merge engine itself then projects out revision twins (below) — no op proof needed. Every rung must clear count conservation and twin-pair conservation, both computed against the projected disk. The initial operator cut and op epoch remain fixed across the bounded CAS retry. The merge records `admission_three_way_merge … outcome=<adopted\|…>` and its rung diagnostics (`RevisionTwin=collapsed(N)`, `<Engine>=would_duplicate_items(…)`, `<Engine>=would_duplicate_revision(…)`); an unadoptable merge proceeds on authority. Never refuses. |
+| `three_way_split_merged` | Three durably distinct revisions with content on disk the authority never received: two writers genuinely diverged. | First use an exact-base editor-op epoch to remove only disk queue rows proven to be intermediate revisions of the initial authority cut (the cut may be any replay state of the epoch, not only its final one: `opcutahead`, below); then three-way merge the remaining disk branch into live authority against the baseline ancestor. Independent disk additions are preserved. The merge engine itself then projects out revision twins (below) — no op proof needed. Every rung must clear count conservation and twin-pair conservation, both computed against the projected disk. The initial operator cut and op epoch remain fixed across the bounded CAS retry. The merge records `admission_three_way_merge … outcome=<adopted\|…>` and its rung diagnostics (`RevisionTwin=collapsed(N)`, `<Engine>=would_duplicate_items(…)`, `<Engine>=would_duplicate_revision(…)`); an unadoptable merge proceeds on authority. Never refuses. |
 
 **Revision twins (`typingforkdup`).** Every item a merge emits is the image of
 exactly one authored item. An item the operator is typing passes through many
@@ -1101,6 +1101,26 @@ The textual test assumes an independently authored item is never a prefix of
 an item the operator added in the same window. Prose components are out of
 scope for the same streaming reason. `formal/tla/AdmissionSplitMerge.tla` checks
 both rules with one wedge per rule and two reach obligations.
+
+**Op epoch ahead of the authority cut (`opcutahead`).** The textual twin test
+only sees a cut that is a *prefix* of the operator's line. A cut taken before a
+backspace is not: live 2026-10-15 on `sdk.md`, a native save put `...which is not f`
+on disk, the operator backspaced the `f` and typed on, and the authority held
+`...which is not to be b`. Only the op lineage can prove that row superseded. The
+epoch is recorded keystroke by keystroke, the authority's CRDT cut advances in
+batched deltas, and admission reads the ops *after* observing the cut, so an
+operator still typing leaves the epoch a few keystrokes ahead. The lineage
+projection used to require the final replay to equal the cut and discarded the
+proof in exactly that case. The ladder then logged
+`RevisionTwin=collapsed(1) Cell=equals_authority Semantic=adopted(...)` and the
+adopted revision held the completed line followed by the cut.
+
+The rule: the lineage is proven when the cut equals the replay at ANY op
+boundary (before the first op through after the last). A disk row is suppressed
+only when it appeared in some replay state and is absent from both the cut and
+the final replay. Ops past the cut are the operator's own newer keystrokes, so a
+row the newest replay still holds is never treated as superseded. Ops that never
+pass through the cut prove nothing, and the disk branch is left unchanged.
 
 `authority_subsumes_disk` is what a **blocked commit** looks like. When the
 controller reports `NativeSaveRequired` with `disk_projection_ready=false`, the

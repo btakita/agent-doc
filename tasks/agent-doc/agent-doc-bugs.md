@@ -18,6 +18,7 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -195,6 +196,14 @@ Done items stay checked in `agent:todo`; they do not move to `agent:done`, becau
 - **CI:** the tag-push workflows are running. Book has already succeeded; CI is in progress.
 
 **Operator verification:** a live restart-free check on a real 263 IDE is now in `agent:todo`. The probe proves the native endpoint is reachable and current. If an old plugin turns out to break the route at the Kotlin layer despite a current native library, the gate will also need to check the plugin version.
+
+### Re: Clear Session Context slow + IDEA error prompt — dispatched — opus-5-5 · 2026-10-15T10:52-04:00
+
+The new queue item (Clear Session Context on `sdk.md` is slow and shows an error prompt in IDEA) is claimed for `subagent:clear-ctx-slow`. It is now running as a background subagent under the queue preset `#spec-test-build-install-commit-push`.
+
+- The subagent works in its own worktree outside agent-loop, on branch `fix/clear-ctx-slow` in `btakita/agent-doc`.
+- It will find the JetBrains action and the binary command/IPC behind it. It will pull the actual error text from the IDEA/ops logs. Then it fixes the root cause (likely blocking work on the EDT and/or a benign condition shown as an error dialog), updates the spec and tests, then commits and pushes its branch.
+- When it reports back I integrate the branch, run one `make install`, release the claim, and close the item next cycle.
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
@@ -202,7 +211,8 @@ Done items stay checked in `agent:todo`; they do not move to `agent:done`, becau
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
+- Clear Session Context on sdk.md is slow and shows an error prompt in Idea. 
 <!-- /agent:queue -->
 
 ## Backlog

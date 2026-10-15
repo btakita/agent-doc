@@ -15,9 +15,11 @@ use anyhow::{Context, Result, bail};
 
 const SOURCE: &str = "queue_subagent_completion_feedback";
 const COMPLETION_LOCK_WAIT: Duration = Duration::from_secs(5);
-const COMPLETION_HEADING_PREFIX: &str = "### Re: Subagent completed — agent-doc:";
-const COMPLETION_BODY: &str = "Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.";
-const COMPLETION_MARKER_PREFIX: &str = "<!-- agent-doc-subagent-completion key=";
+// The cell grammar and its structural recognition are shared with every
+// recovery/closeout classifier (`agent_doc_document::subagent_completion`).
+use agent_doc_document::subagent_completion::{
+    BODY as COMPLETION_BODY, LEGACY_HEADING_PREFIX as LEGACY_COMPLETION_HEADING_PREFIX,
+};
 
 #[derive(Debug)]
 pub(crate) struct CompletionFeedbackOutcome {
@@ -78,18 +80,19 @@ fn append_completion_feedback(file: &Path, current: &str, claim: &QueueClaim) ->
     let identity = serde_json::to_string(&claim.identity).context("serialize claim identity")?;
     let key_material = format!("{identity}\n{}\n{}", claim.owner, claim.claimed_at_secs);
     let key = agent_doc_hash::content_hash(&key_material);
-    let marker = format!("<!-- agent-doc-subagent-completion key={key} -->");
-    let item = one_line(&claim.item_text).replace(['“', '”'], "'");
-    let owner = claim.owner.replace('`', "'");
+    let marker = agent_doc_document::subagent_completion::marker(&key);
     // Keep the heading, body, and marker contiguous. The existing N-1 diff
     // classifier treats a block beginning with `### Re:` as a recovery
     // artifact, while the structural/session-check gate requires substantive
     // body text after every response heading. A blank line here would split
     // the old controller's annotated diff block and make the body look like a
-    // new operator prompt during a rolling upgrade.
-    let note = format!(
-        "{COMPLETION_HEADING_PREFIX} `{owner}` returned work for queue item “{item}”; coordinator integration and closeout are pending.\n{COMPLETION_BODY}\n{marker}"
-    );
+    // new operator prompt during a rolling upgrade. The contiguous
+    // heading+body+marker shape is also what lets recovery recognize the cell
+    // as binary-owned feedback rather than an agent response.
+    //
+    // The heading's topic names the worker and item (`### Re: topic —
+    // agent-doc`), so several cells never collapse to one replay topic.
+    let note = agent_doc_document::subagent_completion::cell(&claim.owner, &claim.item_text, &key);
     let pending_target = agent_doc_document_realtime_io::pending_document_write(file)
         .map(|pending| pending.target_content);
     if current.contains(&marker)
@@ -223,7 +226,7 @@ fn repair_legacy_completion_feedback_content(content: &str) -> (String, usize) {
     while let Some(line) = lines.next() {
         let bare = line.trim_end_matches(['\r', '\n']);
         let Some(_detail) = bare
-            .strip_prefix(COMPLETION_HEADING_PREFIX)
+            .strip_prefix(LEGACY_COMPLETION_HEADING_PREFIX)
             .map(str::trim)
             .filter(|detail| !detail.is_empty())
         else {
@@ -250,11 +253,7 @@ fn repair_legacy_completion_feedback_content(content: &str) -> (String, usize) {
 }
 
 fn is_completion_marker_line(line: &str) -> bool {
-    let trimmed = line.trim();
-    trimmed
-        .strip_prefix(COMPLETION_MARKER_PREFIX)
-        .and_then(|rest| rest.strip_suffix(" -->"))
-        .is_some_and(|key| !key.is_empty() && !key.chars().any(char::is_whitespace))
+    agent_doc_document::subagent_completion::is_marker_line(line)
 }
 
 fn completion_lock_path(file: &Path) -> Result<PathBuf> {
@@ -265,10 +264,6 @@ fn completion_lock_path(file: &Path) -> Result<PathBuf> {
     Ok(root
         .join(".agent-doc/locks")
         .join(format!("subagent-completion-{document_hash}.lock")))
-}
-
-fn one_line(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
@@ -306,11 +301,10 @@ mod tests {
             claim.owner, claim.claimed_at_secs
         ));
         let marker = format!("<!-- agent-doc-subagent-completion key={key} -->");
-        let note = format!(
-            "{COMPLETION_HEADING_PREFIX} `{}` returned work for queue item “{}”; coordinator integration and closeout are pending.\n{COMPLETION_BODY}\n{marker}",
-            claim.owner,
-            one_line(&claim.item_text)
-        );
+        let note =
+            agent_doc_document::subagent_completion::cell(&claim.owner, &claim.item_text, &key);
+        assert!(note.ends_with(&marker));
+        assert!(note.contains("“finish sdk.md with deterministic tests” — agent-doc\n"));
         let after =
             agent_doc_element_exchange::insert_prompt_line_before_boundary(before, &note).unwrap();
 
@@ -381,7 +375,10 @@ mod tests {
 
         let (repaired, count) = repair_legacy_completion_feedback_content(&before);
         assert_eq!(count, 2);
-        assert_eq!(repaired.matches(COMPLETION_HEADING_PREFIX).count(), 2);
+        assert_eq!(
+            repaired.matches(LEGACY_COMPLETION_HEADING_PREFIX).count(),
+            2
+        );
         assert_eq!(repaired.matches(COMPLETION_BODY).count(), 2);
         assert!(repaired.contains("`subagent:sdk` returned work"));
         assert!(repaired.contains("`subagent:dev` returned work"));

@@ -249,7 +249,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      its cross-process document owner and editor/CRDT authority while leaving
      the claim active; the worker never edits the session document. The
      feedback is a structurally complete, N−1-inert response cell (heading,
-     non-empty status body, binary marker). If an earlier v0.34 binary wrote
+     non-empty status body, binary marker) whose heading topic names the
+     worker and item. It is binary-owned feedback, not your response: never
+     hand-commit, edit, or replay it — the next preflight's document-only
+     auto-commit (or your closeout) lands it, however many workers reported.
+     If an earlier v0.34 binary wrote
      bodyless completion headings, migrate those exact artifacts with
      `agent-doc queue repair-completion-feedback <FILE>`; this does not replay
      the committed closeout or change cycle/claim state. Then

@@ -16,6 +16,7 @@ pub mod outline_projection;
 pub mod queue_projection;
 pub mod singleton_repair;
 pub mod status_projection;
+pub mod subagent_completion;
 pub mod tracked_work_projection;
 pub mod transient_markers;
 pub mod watch_projection;

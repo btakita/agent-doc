@@ -188,3 +188,247 @@ fn repair_completion_feedback_cli_migrates_bodyless_notices_without_replaying_cl
     assert!(String::from_utf8_lossy(&second.stderr).contains("0 artifacts repaired"));
     assert_eq!(fs::read_to_string(&doc).unwrap(), repaired);
 }
+
+fn git(root: &std::path::Path, args: &[&str]) -> std::process::Output {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output
+}
+
+/// A committed, baselined session document in a git repository: the shape the
+/// coordinator's document has between turns, when the background workers
+/// report back.
+fn committed_session(dir: &std::path::Path, items: &[&str]) -> std::path::PathBuf {
+    fs::create_dir_all(dir.join(".agent-doc/locks")).unwrap();
+    let doc = dir.join("session.md");
+    let queue = items
+        .iter()
+        .map(|item| format!("- {item}\n"))
+        .collect::<String>();
+    let content = format!(
+        concat!(
+            "---\nagent_doc_session: completion-feedback-admission\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append subagents -->\n",
+            "### Re: dispatch — gpt-5 · 2026-10-14T22:00-04:00\n\nDispatched four subagents.\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents -->\n",
+            "{}",
+            "<!-- /agent:queue -->\n",
+        ),
+        queue,
+    );
+    fs::write(&doc, &content).unwrap();
+    git(dir, &["init", "-q"]);
+    git(dir, &["config", "user.email", "test@example.com"]);
+    git(dir, &["config", "user.name", "Test User"]);
+    git(dir, &["add", "session.md"]);
+    git(dir, &["commit", "-q", "--no-verify", "-m", "initial"]);
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        &content,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+    doc
+}
+
+fn run_agent_doc(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+fn assert_session_check_does_not_accuse_patchback(dir: &std::path::Path, doc: &std::path::Path) {
+    let output = run_agent_doc(dir, &["session-check", doc.to_str().unwrap()]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stdout.contains("direct response patchback")
+            && !stderr.contains("direct response patchback"),
+        "binary-owned completion feedback is not an agent's direct patchback: stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        !stdout.contains("uncommitted exchange changes")
+            && !stderr.contains("uncommitted exchange changes"),
+        "binary-owned completion feedback is admissible exchange drift: stdout={stdout} stderr={stderr} doc={}",
+        fs::read_to_string(doc).unwrap()
+    );
+}
+
+fn assert_preflight_admits(dir: &std::path::Path, doc: &std::path::Path, expected_cells: usize) {
+    let output = run_agent_doc(dir, &["preflight", doc.to_str().unwrap()]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "preflight must admit a document carrying binary completion feedback: stderr={stderr}"
+    );
+    assert!(!stderr.contains("failed closed"), "stderr={stderr}");
+    assert!(!stderr.contains("refused to replay"), "stderr={stderr}");
+    assert!(
+        !dir.join(".agent-doc/repair-blocked").exists()
+            || fs::read_dir(dir.join(".agent-doc/repair-blocked"))
+                .unwrap()
+                .next()
+                .is_none(),
+        "no payload may be quarantined as a blocked replay"
+    );
+    let content = fs::read_to_string(doc).unwrap();
+    assert_eq!(
+        content
+            .matches("<!-- agent-doc-subagent-completion key=")
+            .count(),
+        expected_cells,
+        "preflight must neither drop nor duplicate completion feedback: {content}"
+    );
+    assert_eq!(
+        content.matches("### Re: Subagent completed").count(),
+        expected_cells,
+        "{content}"
+    );
+}
+
+/// Binary-owned feedback is committed by the binary: the next preflight's
+/// document-only auto-commit lands it in `HEAD`, so it never lingers as
+/// uncommitted drift for a later recovery pass to misread.
+fn assert_cells_committed(dir: &std::path::Path, expected_cells: usize) {
+    let head = String::from_utf8(git(dir, &["show", "HEAD:session.md"]).stdout).unwrap();
+    assert_eq!(
+        head.matches("<!-- agent-doc-subagent-completion key=")
+            .count(),
+        expected_cells,
+        "{head}"
+    );
+}
+
+/// The live wedge (0.35.503): four `report-complete` calls on one document,
+/// then the coordinator's next turn. Preflight's visible-response recovery read
+/// the four binary cells as one orphaned agent response, and the replay guard
+/// refused it because every heading normalized to the topic `subagent
+/// completed`; session-check called the same cells a direct patchback.
+#[test]
+fn several_reports_then_preflight_admits_the_next_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let items = [
+        "#gh-fix https://github.com/example/project/issues/262",
+        "#gh-fix https://github.com/example/project/issues/264",
+        "#gh-fix https://github.com/example/project/issues/263",
+        "#gh-fix https://github.com/example/project/issues/261",
+    ];
+    let doc = committed_session(dir.path(), &items);
+    for (index, item) in items.iter().enumerate() {
+        let owner = format!("subagent:gh26{index}");
+        let claim = run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "claim",
+                doc.to_str().unwrap(),
+                "--item",
+                item,
+                "--owner",
+                &owner,
+            ],
+        );
+        assert!(
+            claim.status.success(),
+            "claim failed: {}",
+            String::from_utf8_lossy(&claim.stderr)
+        );
+    }
+    for item in items {
+        let report = run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "report-complete",
+                doc.to_str().unwrap(),
+                "--item",
+                item,
+            ],
+        );
+        assert!(
+            report.status.success(),
+            "report-complete failed: {}",
+            String::from_utf8_lossy(&report.stderr)
+        );
+    }
+    let reported = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        reported.matches("### Re: Subagent completed").count(),
+        items.len()
+    );
+
+    assert_session_check_does_not_accuse_patchback(dir.path(), &doc);
+    assert_preflight_admits(dir.path(), &doc, items.len());
+    assert_cells_committed(dir.path(), items.len());
+    assert_session_check_does_not_accuse_patchback(dir.path(), &doc);
+}
+
+/// Recovery for a document already wedged by the old heading grammar: the exact
+/// four-heading payload the 0.35.503 binary wrote, left uncommitted, must be
+/// admitted without the false duplicate-topic refusal.
+#[test]
+fn preflight_admits_a_document_wedged_by_old_format_completion_feedback() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = committed_session(dir.path(), &["finish"]);
+    let committed = fs::read_to_string(&doc).unwrap();
+    let mut cells = String::new();
+    for (owner, issue) in [
+        ("gh262", "262"),
+        ("gh264", "264"),
+        ("gh263", "263"),
+        ("gh261", "261"),
+    ] {
+        // The 0.35.503 writer put a blank separator before every cell.
+        cells.push_str(&format!(
+            concat!(
+                "\n",
+                "### Re: Subagent completed — agent-doc: `subagent:{owner}` returned work for queue item “#gh-fix https://github.com/example/project/issues/{issue}”; coordinator integration and closeout are pending.\n",
+                "Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.\n",
+                "<!-- agent-doc-subagent-completion key=old{issue} -->\n",
+            ),
+            owner = owner,
+            issue = issue,
+        ));
+    }
+    let wedged = committed.replacen(
+        "<!-- agent:boundary:keep -->",
+        &format!("{cells}<!-- agent:boundary:keep -->"),
+        1,
+    );
+    assert_ne!(wedged, committed);
+    fs::write(&doc, &wedged).unwrap();
+
+    // The live refusal came from orphaned-response recovery: it read the four
+    // cells as one visible response and the replay guard refused the payload
+    // as "repeated the assistant response heading `subagent completed`".
+    let repair = run_agent_doc(dir.path(), &["repair", doc.to_str().unwrap()]);
+    let repair_stderr = String::from_utf8_lossy(&repair.stderr);
+    assert!(
+        repair.status.success(),
+        "recovery must not treat binary completion feedback as an orphaned response: {repair_stderr}"
+    );
+    assert!(
+        !repair_stderr.contains("refused to replay")
+            && !repair_stderr.contains("Found orphaned response"),
+        "{repair_stderr}"
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), wedged);
+
+    assert_session_check_does_not_accuse_patchback(dir.path(), &doc);
+    assert_preflight_admits(dir.path(), &doc, 4);
+    assert_cells_committed(dir.path(), 4);
+    assert_session_check_does_not_accuse_patchback(dir.path(), &doc);
+}

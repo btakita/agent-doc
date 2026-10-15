@@ -232,7 +232,14 @@ The Clear Session Context fix is not in any version yet. Its subagent is still w
 **Installed:** `make install` exit 0. The IDEA plugin was upgraded in the live IDE, and 27 supervisors plus 4 controllers are marked to recycle at the next idle boundary. This is not in a published release; the next release will carry it.
 
 **To check:** cancel a Run on a Claude document, then press Clear. The notice should show a countdown, not "the turn … ends".
-<!-- agent:boundary:f8ebbf0a -->
+> **Chat prompt (#chatprompt):** is the release published?
+
+### Re: v0.35.508 release published — opus-5-5 · 2026-10-15T11:35-04:00
+
+Yes. **v0.35.508** is published. Release run `38752593519` finished successfully (every job green), and the GitHub Release (marked Latest at 15:14Z) and PyPI both show **0.35.508**.
+
+The Clear Session Context fix (`d5f4cf9743`) landed on main after the v0.35.508 release commit, so it is **not** in this release. It is installed locally and will go out in the next release.
+<!-- agent:boundary:06765b07 -->
 <!-- /agent:exchange -->
 
 <!--

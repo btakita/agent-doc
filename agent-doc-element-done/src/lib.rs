@@ -284,9 +284,106 @@ pub fn collect_done_document_own_ids(document: &str) -> HashSet<String> {
         .collect()
 }
 
+/// `#todoids`: the tracked-work evidence `agent:todo` ids are evaluated
+/// against, built from one document.
+///
+/// Open ids come from `agent:review` (`review`), `agent:backlog` / legacy
+/// `agent:pending` (`backlog`), and `agent:icebox` (`icebox`); resolved ids
+/// come from `[x]` items in those components, the OWN ids of inline
+/// `agent:done` entries, and the own ids of each `agent:done archive=` file
+/// that `read_archive` returns for its `archive` attribute (`Ok(None)` when the
+/// file does not exist or the caller skips archives). `extra_resolved` adds ids
+/// the caller knows were resolved (a closeout's `--done` / `--review-resolve`).
+///
+/// Pure policy: the only IO is the caller's `read_archive`. Fail closed: a
+/// document that does not parse, or a `read_archive` error, is an error, never
+/// an empty index that reads as "nothing is resolved" or "nothing is open".
+pub fn todo_link_index_in_content(
+    content: &str,
+    read_archive: &mut dyn FnMut(&str) -> anyhow::Result<Option<String>>,
+    extra_resolved: &[String],
+) -> anyhow::Result<agent_doc_element::todo::TodoLinkIndex> {
+    use agent_doc_element_backlog::backlog;
+    let components = element::parse(content)
+        .map_err(|err| anyhow::anyhow!("failed to parse components: {err:#}"))?;
+    let mut index = agent_doc_element::todo::TodoLinkIndex::default();
+    for component in &components {
+        let label = if element::is_review_component(&component.name) {
+            "review"
+        } else if element::is_backlog_component(&component.name) {
+            "backlog"
+        } else if element::is_icebox_component(&component.name) {
+            "icebox"
+        } else if element::is_backlog_done_component(&component.name) {
+            for id in collect_done_item_own_ids(component.content(content)) {
+                index.mark_resolved(&id);
+            }
+            if let Some(archive) = component.attrs.get("archive")
+                && let Some(archived) = read_archive(archive)?
+            {
+                for id in collect_done_item_own_ids(&archived) {
+                    index.mark_resolved(&id);
+                }
+            }
+            continue;
+        } else {
+            continue;
+        };
+        let (_, items, _) = backlog::parse_items(component.content(content));
+        for item in items {
+            let id = backlog::normalize_pending_id(&item.id);
+            if id.is_empty() {
+                continue;
+            }
+            if item.is_done() {
+                index.mark_resolved(&id);
+            } else {
+                index.mark_open(&id, label);
+            }
+        }
+    }
+    for id in extra_resolved {
+        index.mark_resolved(&backlog::normalize_pending_id(id));
+    }
+    Ok(index)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#todoids`: the link index classifies open/resolved tracked work from
+    /// every component, reads the done archive through the caller, and fails
+    /// closed when the archive read fails.
+    #[test]
+    fn todo_link_index_classifies_tracked_work_and_fails_closed_on_archive_error() {
+        let doc = concat!(
+            "<!-- agent:review -->\n- [/] [#gate1] verify live\n- [x] [#gate0] old gate\n<!-- /agent:review -->\n",
+            "<!-- agent:backlog -->\n- [ ] [#work] build it\n<!-- /agent:backlog -->\n",
+            "<!-- agent:icebox -->\n- [ ] [#cold] later\n<!-- /agent:icebox -->\n",
+            "<!-- agent:done archive=done.md -->\n- [#inline] shipped\n<!-- /agent:done -->\n",
+            "<!-- agent:todo -->\n- [ ] [#tdx] not tracked work\n<!-- /agent:todo -->\n",
+        );
+        let mut archive = |path: &str| -> anyhow::Result<Option<String>> {
+            assert_eq!(path, "done.md");
+            Ok(Some("- [#archived] long ago\n".to_string()))
+        };
+        let index = todo_link_index_in_content(doc, &mut archive, &["Work".to_string()]).unwrap();
+        assert_eq!(index.open_component("gate1"), Some("review"));
+        assert_eq!(index.open_component("cold"), Some("icebox"));
+        assert!(index.is_resolved("gate0") && index.is_resolved("inline"));
+        assert!(index.is_resolved("archived"));
+        // `work` is open in the document and resolved by the caller: open wins.
+        assert_eq!(index.open_component("work"), Some("backlog"));
+        assert!(!index.is_resolved("work"));
+        assert!(!index.knows("tdx"), "agent:todo ids are not tracked-work evidence");
+
+        let mut missing = |_: &str| -> anyhow::Result<Option<String>> { Ok(None) };
+        assert!(!todo_link_index_in_content(doc, &mut missing, &[]).unwrap().knows("archived"));
+        let mut broken =
+            |_: &str| -> anyhow::Result<Option<String>> { anyhow::bail!("permission denied") };
+        assert!(todo_link_index_in_content(doc, &mut broken, &[]).is_err());
+    }
 
     /// `#donemirrorbytext`: a new item that only shares an archived id is not a
     /// mirror of that done work.

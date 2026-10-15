@@ -60,7 +60,7 @@ Combine any number of flags in one `agent-doc write` call:
 | `--review-add "text"` | Add a new `[/]` item directly to `agent:review`; usually prefer `--backlog-gate`. |
 | `--review-edit "id=new text"` | Rewrite a review item's text, preserve hash. |
 | `--review-resolve <id>` | Resolve a review item: remove it from `agent:review` and archive to `agent:done` (the completion path when the gated work is actually finished). |
-| `--todo-add "action"` | `#operatortodo`: append `- [ ] [#id] <action>` to `agent:todo` for something the operator must do (`id=<custom> ` chooses the id). The binary creates `agent:todo` if the document has none, keeps every existing item, and skips an action already listed. |
+| `--todo-add "action"` | `#operatortodo`: append `- [ ] [#id] <action>` to `agent:todo` for something the operator must do. `#todoids`: when the action cites exactly one open `agent:review`/`agent:backlog` id, the todo reuses it as its own id (one open todo per id; a repeat is a no-op); otherwise an id is minted. `id=<id> ` reuses open work or picks a custom id, and is rejected for resolved work. The binary creates `agent:todo` if the document has none, keeps every existing item, and skips an action already listed. |
 | `--todo-done <id>` | `#tododone`: check an `agent:todo` item off (`[x]`) in place in the same closeout that the operator action was finished. Selects by own `[#id]`, a cited `#id`, or exact text; idempotent; folds duplicate copies of the item. Never append a second `[x]` copy instead. |
 | `--todo-edit "id=new text"` | Rewrite an `agent:todo` item's text, keeping its id, checkbox state, and position. |
 | `--todo-reopen <id>` | Uncheck an `agent:todo` item (`[ ]`) in place. |

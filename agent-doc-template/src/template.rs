@@ -1180,7 +1180,33 @@ pub fn apply_patches_with_overrides_pure(
             result = comp.append_with_boundary(&result, &patch_content, &bid);
             continue;
         }
-        let new_content = apply_mode(mode, comp.content(&result), &patch_content);
+        let mut new_content = apply_mode(mode, comp.content(&result), &patch_content);
+        if agent_doc_element::todo::is_todo_component(&patch.name) {
+            let before = comp.content(&result);
+            // `#todoids`: an operator `[x]` is sticky. A patch built from a
+            // read that predates the check must not uncheck the item; only
+            // `--todo-reopen` reopens one.
+            let (kept, restored) =
+                agent_doc_element::todo::preserve_checked_todo_items(before, &new_content);
+            if restored > 0 {
+                eprintln!(
+                    "[template] patch:todo kept {restored} operator-checked todo item(s) checked (use --todo-reopen to uncheck)"
+                );
+                new_content = kept;
+            }
+            let idless = agent_doc_element::todo::new_idless_todo_items(before, &new_content);
+            if !idless.is_empty() {
+                eprintln!(
+                    "[todo] advisory (#todoids): patch:todo added {} todo item(s) without an own [#id] ({}). Record operator actions with --todo-add so each one reuses its review/backlog id or gets a minted one.",
+                    idless.len(),
+                    idless
+                        .iter()
+                        .map(|text| format!("{text:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+        }
         result = comp.replace_content(&result, &new_content);
     }
 
@@ -2486,6 +2512,41 @@ All green.
         assert_eq!(result.matches("## Todo").count(), 1, "{result}");
         assert!(
             result.contains("<!-- agent:todo -->\n- [ ] Rotate key\n- [ ] Publish draft docs/note.md\n<!-- /agent:todo -->"),
+            "{result}"
+        );
+    }
+
+    /// `#todoids`: the operator checked a todo in the editor after the agent
+    /// read the document; the agent's `patch:todo` still carries it open (and
+    /// rewords it). The check survives, the agent's text edit lands, and an
+    /// unrelated open item stays open.
+    #[test]
+    fn apply_patches_todo_patch_never_unchecks_an_operator_checked_item() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:exchange -->\nprevious\n<!-- /agent:exchange -->\n\n",
+            "## Todo\n\n<!-- agent:todo -->\n",
+            "- [x] [#gate1] Verify [#gate1] in a live pane\n",
+            "- [ ] [#k3vd] Publish draft docs/note.md\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc_path, doc).unwrap();
+        let patches = vec![PatchBlock::new(
+            "todo",
+            concat!(
+                "- [ ] [#gate1] Verify [#gate1] in a live pane (263 IDE)\n",
+                "- [ ] [#k3vd] Publish draft docs/note.md\n",
+            ),
+        )];
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
+        assert!(
+            result.contains(concat!(
+                "<!-- agent:todo -->\n",
+                "- [x] [#gate1] Verify [#gate1] in a live pane (263 IDE)\n",
+                "- [ ] [#k3vd] Publish draft docs/note.md\n",
+                "<!-- /agent:todo -->"
+            )),
             "{result}"
         );
     }

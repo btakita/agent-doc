@@ -4172,6 +4172,38 @@ Second answer line three.
         assert!(!merged.contains("- [ ] Decide the merge order"), "{merged}");
     }
 
+    /// `#todoids`: the operator's editor-native done signal is checking the
+    /// box. A concurrent agent write that rewords the same id-keyed item (or
+    /// leaves it untouched) must merge with the check kept, exactly once.
+    #[test]
+    fn merge_by_component_keeps_an_operator_todo_check_against_a_concurrent_agent_edit() {
+        let doc = |todo: &str| {
+            format!(
+                "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n\n## Todo\n\n<!-- agent:todo -->\n{todo}<!-- /agent:todo -->\n"
+            )
+        };
+        let base = doc("- [ ] [#gate1] Verify [#gate1] live\n- [ ] [#k3vd] Publish the draft\n");
+        let theirs = doc("- [x] [#gate1] Verify [#gate1] live\n- [ ] [#k3vd] Publish the draft\n");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        // Agent rewords the checked item.
+        let ours = doc(
+            "- [ ] [#gate1] Verify [#gate1] live in the 263 IDE\n- [ ] [#k3vd] Publish the draft\n",
+        );
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(
+            merged.contains("- [x] [#gate1] Verify [#gate1] live in the 263 IDE\n"),
+            "{merged}"
+        );
+        assert_eq!(merged.matches("[#gate1] Verify").count(), 1, "{merged}");
+        // Agent touches only another item.
+        let ours = doc("- [ ] [#gate1] Verify [#gate1] live\n- [x] [#k3vd] Publish the draft\n");
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(
+            merged.contains("- [x] [#gate1] Verify [#gate1] live\n- [x] [#k3vd] Publish the draft\n"),
+            "{merged}"
+        );
+    }
+
     #[test]
     fn merge_by_component_isolates_concurrent_cross_component_edits() {
         // Side A (agent) appends to `exchange`; side B (operator) appends a

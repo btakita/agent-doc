@@ -4108,6 +4108,126 @@ mod retained_queue_retry_model {
     }
 }
 
+/// `#todoids` operator done flow: the operator's editor-native done signal is
+/// checking an `agent:todo` box. Agent writes interleave with it two ways — a
+/// `patch:todo` built from a STALE cut (taken before the check) delivered
+/// through the keyed CRDT merge against the live editor, and a `patch:todo`
+/// built from a FRESH read applied directly (the template path's sticky
+/// check). Both carry the item open and reword it. The invariant: once the
+/// operator checked the box, no agent write ever unchecks it, and the item
+/// exists exactly once.
+mod operator_todo_check_model {
+    use agent_doc_merge::crdt::{CrdtDoc, merge_by_component};
+    use std::path::Path;
+
+    const BASE: &str = concat!(
+        "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n\n",
+        "## Todo\n\n<!-- agent:todo -->\n",
+        "- [ ] [#gate1] Verify [#gate1] live\n",
+        "- [ ] [#k3vd] Publish the draft\n",
+        "<!-- /agent:todo -->\n",
+    );
+    const RESPONSE: &str = concat!(
+        "<!-- patch:todo -->\n",
+        "- [ ] [#gate1] Verify [#gate1] live in the 263 IDE\n",
+        "- [ ] [#k3vd] Publish the draft\n",
+        "<!-- /patch:todo -->\n",
+    );
+
+    #[derive(Clone, Copy, Debug)]
+    enum Action {
+        OperatorChecks,
+        AgentReads,
+        AgentWritesFromStaleCut,
+        AgentWritesFromFreshRead,
+    }
+
+    const ACTIONS: [Action; 4] = [
+        Action::OperatorChecks,
+        Action::AgentReads,
+        Action::AgentWritesFromStaleCut,
+        Action::AgentWritesFromFreshRead,
+    ];
+
+    #[derive(Clone, Debug)]
+    struct World {
+        editor: String,
+        agent_cut: String,
+        operator_checked: bool,
+    }
+
+    fn apply_response(doc: &str) -> String {
+        let (patches, unmatched) = agent_doc_template::parse_patches(RESPONSE).unwrap();
+        agent_doc_template_io::apply_patches(doc, &patches, &unmatched, Path::new("sim.md"))
+            .unwrap()
+    }
+
+    impl World {
+        fn new() -> Self {
+            Self {
+                editor: BASE.to_string(),
+                agent_cut: BASE.to_string(),
+                operator_checked: false,
+            }
+        }
+
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::OperatorChecks => {
+                    self.editor = self.editor.replacen("- [ ] [#gate1]", "- [x] [#gate1]", 1);
+                    self.operator_checked = true;
+                }
+                Action::AgentReads => self.agent_cut = self.editor.clone(),
+                Action::AgentWritesFromStaleCut => {
+                    let ours = apply_response(&self.agent_cut);
+                    let base = CrdtDoc::from_text(&self.agent_cut).encode_state();
+                    self.editor = merge_by_component(Some(&base), &ours, &self.editor)
+                        .expect("todo merge");
+                    self.agent_cut = self.editor.clone();
+                }
+                Action::AgentWritesFromFreshRead => {
+                    self.editor = apply_response(&self.editor);
+                    self.agent_cut = self.editor.clone();
+                }
+            }
+            assert_eq!(
+                self.editor.matches("[#gate1] Verify").count(),
+                1,
+                "the todo item must exist exactly once:\n{}",
+                self.editor
+            );
+            if self.operator_checked {
+                assert!(
+                    self.editor.contains("- [x] [#gate1] Verify"),
+                    "an agent write reverted the operator's check after {action:?}:\n{}",
+                    self.editor
+                );
+            }
+        }
+    }
+
+    fn explore(world: World, depth: usize) {
+        if depth == 0 {
+            return;
+        }
+        for action in ACTIONS {
+            let mut next = world.clone();
+            next.step(action);
+            explore(next, depth - 1);
+        }
+    }
+
+    #[test]
+    fn bounded_interleavings_never_revert_an_operator_todo_check() {
+        let mut direct = World::new();
+        direct.step(Action::OperatorChecks);
+        direct.step(Action::AgentWritesFromStaleCut);
+        direct.step(Action::AgentWritesFromFreshRead);
+        assert!(direct.editor.contains("- [x] [#gate1] Verify [#gate1] live in the 263 IDE\n"));
+        explore(World::new(), 4);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CyclePhase {
     Idle,

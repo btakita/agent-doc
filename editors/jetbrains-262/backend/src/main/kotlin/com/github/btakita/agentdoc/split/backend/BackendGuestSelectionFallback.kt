@@ -8,6 +8,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.client.ClientKind
 import com.intellij.openapi.client.ClientProjectSession
 import com.intellij.openapi.client.ClientSessionsManager
+import com.intellij.openapi.client.ClientType
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.ClientFileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -31,10 +32,15 @@ import kotlinx.coroutines.launch
  * Restores the classic editor-selection edge when a Remote Dev frontend module is unavailable.
  *
  * Marketplace plugin synchronization normally installs the modular frontend, but a local ZIP or
- * custom-repository install can leave only the backend module present. Guest selection lives in
- * [ClientFileEditorManager] and does not publish the project [FileEditorManager] topic in that
- * topology. The frontend snapshot remains authoritative whenever it has delivered an accepted
- * generation; this fallback observes the guest flow only while that authority is absent.
+ * custom-repository install can leave only the backend module present. Remote client selection
+ * lives in [ClientFileEditorManager] (the platform's `GuestFileEditorManager`) and does not publish
+ * the project [FileEditorManager] topic in that topology. The frontend snapshot remains
+ * authoritative whenever it has delivered an accepted generation; this fallback observes the
+ * remote selection flow only while that authority is absent.
+ *
+ * "Remote" means every session [BackendRemoteSessionGate] admits: a JetBrains Remote Dev client
+ * (`ClientType.CONTROLLER`) as well as a Code With Me guest (`ClientType.GUEST`). Observing only
+ * guests left Remote Dev with no selection edge at all (GH #262).
  */
 internal object BackendGuestSelectionFallback {
     private val log = Logger.getInstance(BackendGuestSelectionFallback::class.java)
@@ -56,15 +62,19 @@ internal object BackendGuestSelectionFallback {
                 }
         }
 
-        fun observe(session: ClientProjectSession) {
-            if (session.project !== project || !session.isGuest) return
+        fun observe(session: ClientProjectSession): Boolean {
+            if (session.project !== project || !BackendRemoteSessionGate.observes(session.type)) return false
             val sessionId = session.clientId.toString()
             jobs.computeIfAbsent(sessionId) {
+                log.info("[layout-sync] backend selection fallback observing client=$sessionId type=${session.type}")
                 scope.launch {
                     val manager = try {
                         session.getService(ClientFileEditorManager::class.java)
                     } catch (error: Throwable) {
-                        log.warn("[layout-sync] guest editor manager unavailable client=$sessionId", error)
+                        log.warn(
+                            "[layout-sync] guest editor manager unavailable client=$sessionId type=${session.type}",
+                            error,
+                        )
                         return@launch
                     }
                     val gate = BackendGuestSelectionGate<FileEditorWithProvider>()
@@ -82,6 +92,7 @@ internal object BackendGuestSelectionFallback {
                                 }
                                 log.info(
                                     "[layout-sync] backend guest selection fallback client=$sessionId " +
+                                        "type=${session.type} " +
                                         "file=${edge.second.fileEditor.file?.name ?: "<none>"}",
                                 )
                                 listener.selectionChanged(
@@ -95,9 +106,11 @@ internal object BackendGuestSelectionFallback {
                         }
                 }
             }
+            return true
         }
 
-        ClientSessionsManager.getProjectSessions(project, ClientKind.GUEST).forEach(::observe)
+        // Subscribe before enumerating so a session initialized in between is not lost; the
+        // per-client job map makes the overlap idempotent.
         ApplicationManager.getApplication()
             .messageBus
             .connect(lifecycle)
@@ -105,7 +118,12 @@ internal object BackendGuestSelectionFallback {
                 RemoteClientSessionListener.TOPIC,
                 object : RemoteClientSessionListener {
                     override fun projectSessionInitialized(lifetime: Lifetime, session: ClientProjectSession) {
-                        observe(session)
+                        if (session.project === project && !observe(session)) {
+                            log.info(
+                                "[layout-sync] backend selection fallback skipped client=${session.clientId} " +
+                                    "type=${session.type}",
+                            )
+                        }
                     }
 
                     override fun beforeProjectSessionDestroyed(session: ClientProjectSession) {
@@ -113,7 +131,30 @@ internal object BackendGuestSelectionFallback {
                     }
                 },
             )
+        // Enumerate every session, not only the observed kind, so the install line distinguishes
+        // "installed but filtered everything out" from "never installed" (GH #262).
+        val existing = ClientSessionsManager.getProjectSessions(project, ClientKind.ALL)
+        val observed = existing.filter(::observe)
+        log.info(
+            "[layout-sync] backend selection fallback installed project=${project.name} " +
+                "observing=${BackendRemoteSessionGate.describe(observed.map { it.clientId.toString() to it.type })} " +
+                "skipped=${BackendRemoteSessionGate.describe((existing - observed.toSet()).map { it.clientId.toString() to it.type })}",
+        )
     }
+}
+
+/**
+ * Pure session-kind gate for [BackendGuestSelectionFallback] (GH #262).
+ *
+ * A Remote Dev client session is `ClientType.CONTROLLER`, not `GUEST`, so the gate admits every
+ * remote type (`ClientType.isRemote` = controller or guest) and excludes the local session, whose
+ * selection already reaches the project [FileEditorManager] topic, and the frontend-process type.
+ */
+internal object BackendRemoteSessionGate {
+    fun observes(type: ClientType): Boolean = type.isRemote
+
+    fun describe(sessions: List<Pair<String, ClientType>>): String =
+        if (sessions.isEmpty()) "none" else sessions.joinToString(",", "[", "]") { (id, type) -> "$id:$type" }
 }
 
 /** Pure authority gate kept separate so frontend/fallback handoff is regression-testable. */

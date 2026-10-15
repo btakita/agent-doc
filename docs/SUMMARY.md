@@ -23,6 +23,7 @@
 # Development
 
 - [Building](development/building.md)
+- [IDE Responsiveness Under Build Load](development/ide-responsiveness.md)
 - [Conventions](development/conventions.md)
 - [FFI Relocation Pattern](development/ffi-relocation.md)
 

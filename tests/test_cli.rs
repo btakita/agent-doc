@@ -14307,7 +14307,7 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
         .expect("cleanup-build-artifacts target")
         .0;
     let build = install_target
-        .find("( cd editors/jetbrains && ./gradlew buildPlugin ) || {")
+        .find("( cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) buildPlugin ) || {")
         .expect("JetBrains build must fail closed");
     let install = install_target
         .find("agent-doc plugin install jetbrains --local --all-installed")
@@ -14324,7 +14324,7 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
     // closed) before the all-installed convergence, so a 262 IDE is never handed
     // the classic package as a substitute.
     let modular_build = install_target
-        .find("( cd editors/jetbrains-262 && gradle --no-daemon --console=plain buildPlugin verifySplitArtifact ) || {")
+        .find("( cd editors/jetbrains-262 && gradle $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain buildPlugin verifySplitArtifact ) || {")
         .expect("JetBrains 262 build must fail closed");
     assert!(
         modular_build < install,

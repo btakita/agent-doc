@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
@@ -39,6 +40,8 @@ class RunWithJunieAction : AnAction(), DumbAware {
         TerminalUtil.runWithAgent(project, "junie", file, onComplete = { running.set(false) })
         TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "run-with-junie")
     }
+
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun update(e: AnActionEvent) {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)

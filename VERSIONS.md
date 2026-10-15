@@ -2,6 +2,42 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.504
+
+- **A promoted predecessor controller retires instead of lingering (GH #261).**
+  After an upgrade self-handoff the predecessor stops its supervisor watchdog
+  and orphan drain, releases the editor's authority streams so clients
+  reconnect to the successor, retires its frozen relay hubs (in-process reads
+  go to the successor instead of answering stale text as converged), and
+  bounds its client drain by the drain lease instead of waiting forever on
+  pooled connections.
+- **Remote Dev tab switches reach tmux again (GH #262).** The backend
+  selection fallback observes Remote Dev `CONTROLLER` sessions as well as
+  guests, and logs once at install which sessions it observes.
+- **Process start time comes from `/proc/<pid>/stat` (GH #263).** The
+  restart-verdict check, unchanged-install outcome, stale-plugin warning and
+  controller keep checks no longer read the `/proc/<pid>` directory mtime,
+  which Linux sets near "now"; a recorded restart verdict is honoured again.
+- **Nested components no longer panic component scope (GH #264).** Scope uses
+  top-level body ranges, so an `agent:salient-response` inside
+  `agent:exchange` cannot panic `changed_component_scope`; a panic on a
+  controller request thread now returns an error naming the document.
+- **tmux auto-sync no longer mutes itself after a quick tab switch.** The
+  JetBrains plugin retires its surface only after a real frontend handoff,
+  and rejected surface observations log `rejected=retired_endpoint|
+  stale_generation|stale_sequence`.
+- **`agent:review` accepts `priority`**, sorted like backlog and icebox, with
+  `agent-doc review set-attr|unset-attr`.
+- **Operator TODOs work.** `--todo-add` appends to `agent:todo` (idempotent,
+  never rewrites operator items), the component is created when missing, a
+  `patch:todo` no longer spills into the exchange, and a review gate without a
+  matching todo prints an advisory.
+- **Several `queue report-complete` cells no longer wedge the document.**
+  Completion feedback is recognised structurally, gets a unique heading per
+  worker, and is excluded from the direct-patchback detector, replay
+  extraction, and the duplicate-heading replay guard; old-format cells recover
+  without repair.
+
 ## 0.35.502
 
 - **Nested projects inherit workspace prompt presets.** Every ancestor

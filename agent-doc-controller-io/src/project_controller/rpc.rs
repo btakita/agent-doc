@@ -552,6 +552,51 @@ impl ControllerDocumentPathTransitionGraph {
     }
 }
 
+/// Why the controller editor-surface graph fenced an observation
+/// (`#tmuxautosyncretired`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SurfaceObservationRejection {
+    /// The exact `(client, surface)` endpoint was retired by `editor_surface_forget`
+    /// at this or a newer connection generation. Retirement is terminal for that
+    /// generation: only a newer plugin generation (or a fresh controller) can
+    /// publish this endpoint again, so an editor that keeps publishing here has
+    /// lost tab-switch auto-sync.
+    RetiredEndpoint,
+    /// The observation belongs to an older connection generation than the
+    /// endpoint's current one.
+    StaleGeneration,
+    /// A duplicate or reordered observation within the current generation.
+    StaleSequence,
+}
+
+impl SurfaceObservationRejection {
+    fn classify(
+        retired: bool,
+        current_generation: u64,
+        current_sequence: u64,
+        generation: u64,
+        sequence: u64,
+    ) -> Option<Self> {
+        if retired && generation <= current_generation {
+            Some(Self::RetiredEndpoint)
+        } else if generation < current_generation {
+            Some(Self::StaleGeneration)
+        } else if generation == current_generation && sequence <= current_sequence {
+            Some(Self::StaleSequence)
+        } else {
+            None
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::RetiredEndpoint => "retired_endpoint",
+            Self::StaleGeneration => "stale_generation",
+            Self::StaleSequence => "stale_sequence",
+        }
+    }
+}
+
 impl ControllerEditorSurfaceGraph {
     pub(super) fn new(run_intent: ControllerEditorSurfaceIntentRunner) -> Self {
         Self {
@@ -684,6 +729,8 @@ impl ControllerEditorSurfaceGraph {
             .map(|owner| owner.installation)
     }
 
+    /// [`Self::observe_classified`] reduced to the accepted verdict.
+    #[cfg(test)]
     fn observe(
         &self,
         scope: &agent_doc_state_scope::ProcessScope,
@@ -691,6 +738,26 @@ impl ControllerEditorSurfaceGraph {
         observation: EditorSurfaceObservation,
         tmux: Option<TmuxLayout>,
     ) -> (bool, SurfaceObservationReceipt) {
+        let (rejection, receipt) = self.observe_classified(scope, project_root, observation, tmux);
+        (rejection.is_none(), receipt)
+    }
+
+    /// [`Self::observe`] with the reason a rejected observation was fenced.
+    ///
+    /// `#tmuxautosyncretired`: a bare `accepted=false` could not tell a benign
+    /// duplicate from an endpoint that was retired while its editor kept
+    /// publishing, and only the latter mutes tab-switch auto-sync until the
+    /// plugin generation or the controller is replaced.
+    fn observe_classified(
+        &self,
+        scope: &agent_doc_state_scope::ProcessScope,
+        project_root: &Path,
+        observation: EditorSurfaceObservation,
+        tmux: Option<TmuxLayout>,
+    ) -> (
+        Option<SurfaceObservationRejection>,
+        SurfaceObservationReceipt,
+    ) {
         let key = (
             project_root.to_path_buf(),
             observation.client_id.clone(),
@@ -698,14 +765,17 @@ impl ControllerEditorSurfaceGraph {
         );
         let mut roots = self.roots.lock();
 
-        if let Some(current) = roots.get(&key)
-            && ((current.retired && observation.generation <= current.generation)
-                || observation.generation < current.generation
-                || (observation.generation == current.generation
-                    && observation.sequence <= current.sequence))
-        {
+        if let Some(rejection) = roots.get(&key).and_then(|current| {
+            SurfaceObservationRejection::classify(
+                current.retired,
+                current.generation,
+                current.sequence,
+                observation.generation,
+                observation.sequence,
+            )
+        }) {
             return (
-                false,
+                Some(rejection),
                 SurfaceObservationReceipt {
                     intent: SurfaceIntent::Idle,
                     idle: true,
@@ -797,7 +867,7 @@ impl ControllerEditorSurfaceGraph {
             .or_default()
             .observe(terminal_observation);
         (
-            true,
+            None,
             SurfaceObservationReceipt {
                 idle: intent.is_idle(),
                 intent,
@@ -26539,12 +26609,13 @@ fn handle_editor_surface_observe(
     // converge, so the editor socket request never blocks on a tmux survey.
     // Cold start (no retained observation) derives `Sync`, which schedules the
     // worker through the in-process publish below.
-    let (accepted, mut receipt) = runtime.editor_surface_graph.observe(
+    let (rejection, mut receipt) = runtime.editor_surface_graph.observe_classified(
         &runtime._scope,
         &bootstrap.project_root,
         observation,
         None,
     );
+    let accepted = rejection.is_none();
     // `#idefocusowner`: a deferred observation's installation does not own the
     // shared tmux surface, so a retained retry of its earlier failed effect must
     // not drive tmux either.
@@ -26586,19 +26657,22 @@ fn handle_editor_surface_observe(
         },
     );
     let surface_observation_key = format!(
-        "{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}",
         projection_identity.0,
         projection_identity.2,
         accepted,
         surface_intent_label(&receipt.intent),
         surface_layout_authority,
         receipt.deferred_to.as_deref().unwrap_or(""),
+        rejection
+            .map(SurfaceObservationRejection::label)
+            .unwrap_or(""),
     );
     if let Some(repeats) = fold_repeated_surface_observation(&surface_observation_key) {
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "controller_editor_surface_observed client={} generation={} sequence={} accepted={} layout={} pane_action={}{}{}",
+                "controller_editor_surface_observed client={} generation={} sequence={} accepted={} layout={} pane_action={}{}{}{}",
                 projection_identity.0,
                 projection_identity.2,
                 projection_identity.3,
@@ -26609,6 +26683,9 @@ fn handle_editor_surface_observe(
                     SurfaceIntent::Focus { .. } => "focus_only",
                     SurfaceIntent::Sync { .. } => "structural_sync",
                 },
+                rejection
+                    .map(|rejection| format!(" rejected={}", rejection.label()))
+                    .unwrap_or_default(),
                 receipt
                     .deferred_to
                     .as_deref()
@@ -42207,6 +42284,89 @@ mod tests {
             "a retirement must leave its own receipt, since a stray forget is what \
              makes every later observation reject: {ops_log}"
         );
+        // `#tmuxautosyncretired`: the rejected receipt names WHY, so an editor that
+        // keeps publishing into its own retired endpoint is distinguishable from a
+        // benign duplicate without correlating the forget line by hand.
+        assert!(
+            receipts[1].contains(" rejected=retired_endpoint"),
+            "a fact fenced by a retired endpoint must say so: {receipts:?}"
+        );
+        assert!(
+            !receipts[0].contains(" rejected="),
+            "an accepted fact carries no rejection reason: {receipts:?}"
+        );
+    }
+
+    #[test]
+    fn surface_observation_rejection_classifies_each_fence() {
+        use SurfaceObservationRejection as R;
+        // (retired, current_generation, current_sequence, generation, sequence)
+        assert_eq!(R::classify(true, 7, 3, 7, 4), Some(R::RetiredEndpoint));
+        assert_eq!(
+            R::classify(true, 7, 3, 7, u64::MAX),
+            Some(R::RetiredEndpoint)
+        );
+        assert_eq!(R::classify(true, 7, 3, 6, 9), Some(R::RetiredEndpoint));
+        assert_eq!(
+            R::classify(true, 7, 3, 8, 1),
+            None,
+            "a newer generation rejoins"
+        );
+        assert_eq!(R::classify(false, 7, 3, 6, 9), Some(R::StaleGeneration));
+        assert_eq!(R::classify(false, 7, 3, 7, 3), Some(R::StaleSequence));
+        assert_eq!(R::classify(false, 7, 3, 7, 2), Some(R::StaleSequence));
+        assert_eq!(R::classify(false, 7, 3, 7, 4), None);
+        assert_eq!(R::classify(false, 7, 3, 8, 1), None);
+    }
+
+    /// `#tmuxautosyncretired`: retiring a still-live frame endpoint at the
+    /// editor's live connection generation mutes every later tab switch from
+    /// that frame. The controller fence is deliberate (a retired generation
+    /// cannot regain effect authority), so the editor must never retire an
+    /// endpoint it is about to publish again; this pins the consequence.
+    #[test]
+    fn controller_editor_surface_graph_mutes_a_live_endpoint_retired_at_its_generation() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let effects = Arc::new(Mutex::new(Vec::<SurfaceIntent>::new()));
+        let recorded = Arc::clone(&effects);
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(move |_, intent| {
+            recorded.lock().push(intent.clone());
+            Ok("recorded".to_string())
+        }));
+        let root = Path::new("/project");
+        let observation =
+            |generation: u64, sequence: u64, focused: &str| EditorSurfaceObservation {
+                client_id: "jetbrains@IU.abc-pid:7".to_string(),
+                surface_id: "frame-1".to_string(),
+                generation,
+                sequence,
+                surface: test_editor_surface(focused),
+            };
+
+        let (accepted, _) = graph.observe(&scope, root, observation(5, 27, "/project/a.md"), None);
+        assert!(accepted);
+        let effects_before = effects.lock().len();
+
+        let (forgotten, _) = graph.forget_surface(root, "jetbrains@IU.abc-pid:7", "frame-1", 5);
+        assert!(forgotten);
+
+        let (rejection, receipt) =
+            graph.observe_classified(&scope, root, observation(5, 28, "/project/b.md"), None);
+        assert_eq!(
+            rejection,
+            Some(SurfaceObservationRejection::RetiredEndpoint)
+        );
+        assert!(receipt.idle);
+        assert_eq!(
+            effects.lock().len(),
+            effects_before,
+            "the next tab switch from the retired frame drives no tmux effect"
+        );
+
+        let (rejoined, _) =
+            graph.observe_classified(&scope, root, observation(6, 1, "/project/b.md"), None);
+        assert_eq!(rejoined, None, "only a newer connection generation rejoins");
+        assert!(effects.lock().len() > effects_before);
     }
 
     fn document_turn_authority_frame(

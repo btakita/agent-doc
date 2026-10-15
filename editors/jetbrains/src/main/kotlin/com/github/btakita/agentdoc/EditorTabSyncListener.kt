@@ -90,6 +90,14 @@ class EditorTabSyncListener : FileEditorManagerListener {
      * project's pending observation.
      */
     private val generation = AtomicLong(0)
+
+    /**
+     * Advances only when this listener's controller projection is retired as a whole (an
+     * authenticated frontend surface took authority). Unlike [generation], a newer editor
+     * observation never advances it: superseding an in-flight delivery is not a reason to retire
+     * the endpoint that delivery published (`#tmuxautosyncretired`).
+     */
+    private val projectionAuthorityEpoch = AtomicLong(0)
     private val focusProjectionGeneration = AtomicLong(0)
     private val selectionFocusProbeGeneration = AtomicLong(0)
     private val surfaceDeliveryRetryAttempt = AtomicLong(0)
@@ -318,6 +326,37 @@ companion object {
             slot: AtomicReference<T?>,
             captured: T,
         ): Boolean = slot.compareAndSet(null, captured)
+    }
+
+    /**
+     * What a controller-accepted delivery does with the endpoint it just published, once it
+     * returns from the controller call (`#tmuxautosyncretired`).
+     *
+     * `editor_surface_forget` of an exact `(client, surface)` endpoint is terminal for the
+     * plugin's process-lifetime connection generation: the controller rejects every later
+     * observation of that endpoint (`rejected=retired_endpoint`) until a new plugin generation or
+     * a fresh controller. So the delivery may retire its endpoint only when this listener's
+     * whole projection was retired while it was in flight (an authority handoff). A newer
+     * observation from the same editor merely superseded it; that observation publishes the same
+     * endpoint at a higher sequence, so retiring here muted every later tab switch (the GH #260
+     * regression).
+     */
+    internal object InFlightSurfaceDelivery {
+        enum class Decision {
+            RecordEndpoint,
+            RetireEndpoint,
+        }
+
+        /** Deliberately blind to the observation generation: a newer observation is not a retirement. */
+        fun decide(
+            requestedAuthorityEpoch: Long,
+            currentAuthorityEpoch: Long,
+        ): Decision =
+            if (requestedAuthorityEpoch != currentAuthorityEpoch) {
+                Decision.RetireEndpoint
+            } else {
+                Decision.RecordEndpoint
+            }
     }
 
     internal class SurfaceRootOwnership {
@@ -878,6 +917,7 @@ private data class CapturedSurface(
                     log("socket delivery: observation superseded before enqueue gen=$requestedGeneration")
                     return@invokeLater
                 }
+            val requestedAuthorityEpoch = projectionAuthorityEpoch.get()
             surfaceDeliveryExecutor.execute {
                 if (generation.get() != requestedGeneration) {
                     log("socket delivery: superseded gen=$requestedGeneration")
@@ -944,20 +984,38 @@ private data class CapturedSurface(
                         return@execute
                     }
                     surfaceDeliveryRetryAttempt.set(0)
-                    if (generation.get() != requestedGeneration) {
-                        // A newer observation or a frontend-authority handoff superseded this
-                        // delivery while the controller call was in flight. The serialized worker
-                        // guarantees the replacement has not published yet, so retire this exact
-                        // endpoint before allowing the newer source to proceed.
+                    val publishedEndpoint = SurfaceEndpoint(pending.projectRoot, pending.surfaceId)
+                    // Decide under the lock that retireControllerProjection drains under: either
+                    // this endpoint is recorded before the drain (and the handoff forgets it), or
+                    // the handoff already happened and this delivery retires its own endpoint.
+                    val retiredEndpoints =
+                        synchronized(lifecycleLock) {
+                            when (
+                                InFlightSurfaceDelivery.decide(
+                                    requestedAuthorityEpoch = requestedAuthorityEpoch,
+                                    currentAuthorityEpoch = projectionAuthorityEpoch.get(),
+                                )
+                            ) {
+                                InFlightSurfaceDelivery.Decision.RetireEndpoint -> null
+                                InFlightSurfaceDelivery.Decision.RecordEndpoint ->
+                                    surfaceEndpoints.markPublished(
+                                        publishedEndpoint,
+                                        pending.liveSurfaceIds,
+                                    )
+                            }
+                        }
+                    if (retiredEndpoints == null) {
+                        // A frontend-authority handoff retired this listener's projection while
+                        // the controller call was in flight; the handoff's own drain could not see
+                        // this endpoint, so retire it here before the frontend source proceeds.
                         CpRouteClient.forgetEditorSurface(pending.projectRoot, pending.surfaceId)
                         CpRouteClient.forgetEditorFocus(pending.projectRoot, pending.surfaceId)
+                        log(
+                            "observe: retired in-flight endpoint after authority handoff " +
+                                "root=${pending.projectRoot} surface=${pending.surfaceId}",
+                        )
                         return@execute
                     }
-                    val retiredEndpoints =
-                        surfaceEndpoints.markPublished(
-                            SurfaceEndpoint(pending.projectRoot, pending.surfaceId),
-                            pending.liveSurfaceIds,
-                        )
                     retireClosedSurfaceEndpoints(observation.project, retiredEndpoints)
                     val obsoleteRoots =
                         synchronized(lifecycleLock) {
@@ -1465,6 +1523,7 @@ private data class CapturedSurface(
         invalidateFocusProjection()
         latestSurfaceObservation.set(null)
         val (roots, endpoints) = synchronized(lifecycleLock) {
+            projectionAuthorityEpoch.incrementAndGet()
             surfaceRoots.drain() to surfaceEndpoints.drain()
         }
         Thread(

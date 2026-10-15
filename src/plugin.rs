@@ -6320,9 +6320,20 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             "exact-263 package has no restart-free upgrade entry point\n",
         )
         .unwrap();
+        // GH #263: the owner's start time is the kernel's `starttime` plus
+        // `btime` (booted 1_699_990_000, started 10_000 s later =
+        // 1_700_000_000), not the `/proc/<pid>` mtime, which procfs stamps at
+        // read time. Give that mtime a fresh, read-time value to prove it is
+        // ignored.
+        agent_doc_fs::process_start::fixture::write_fake_process_start(
+            &proc_root,
+            pid,
+            1_699_990_000,
+            agent_doc_fs::process_start::fixture::ticks_after_boot(10_000),
+        );
         filetime::set_file_mtime(
             proc_root.join(pid.to_string()),
-            filetime::FileTime::from_unix_time(1_700_000_000, 0),
+            filetime::FileTime::from_system_time(std::time::SystemTime::now()),
         )
         .unwrap();
         filetime::set_file_mtime(

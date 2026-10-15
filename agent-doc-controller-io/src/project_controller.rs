@@ -19074,6 +19074,36 @@ agent:queue\n\
         let _ = sentinel.kill();
         let _ = sentinel.wait();
     }
+    /// GH #263: the keep check must age a preparing controller by its kernel
+    /// start time. With the old `/proc/<pid>` mtime read, a controller's age was
+    /// about "now" minus the last procfs inode instantiation, so an orphan could
+    /// look freshly launched indefinitely.
+    #[test]
+    fn orphan_reaper_ages_preparing_sentinel_by_kernel_start_time() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        assert!(crate::process::cmdline_has_preparing_handoff(pid));
+        std::thread::sleep(Duration::from_millis(1100));
+
+        let age = crate::process::process_start_age_secs(pid);
+        // No bootstrap owns it and no handoff is fresh: only age decides.
+        let (reaped, kept) =
+            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), true).unwrap();
+        let _ = sentinel.kill();
+        let _ = sentinel.wait();
+
+        assert!(
+            age.is_some_and(|age| age >= 1),
+            "a sentinel running >1s must read >=1s old: {age:?}"
+        );
+        assert_eq!(
+            (reaped, kept),
+            (1, 0),
+            "an orphan past stale_after must not be kept as freshly launched"
+        );
+    }
     #[test]
     fn orphan_reaper_ignores_non_preparing_controller() {
         let dir = tempfile::TempDir::new().unwrap();

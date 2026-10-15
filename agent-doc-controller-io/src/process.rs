@@ -39,15 +39,22 @@ pub fn process_is_alive(pid: u32) -> bool {
     Path::new("/proc").join(pid.to_string()).exists()
 }
 
+/// Whole seconds `pid` has been running, from the kernel's `starttime`
+/// (`/proc/<pid>/stat` field 22) plus boot time.
+///
+/// GH #263: this used to read the `/proc/<pid>` directory mtime, which procfs
+/// stamps when it instantiates the inode (about "now"), so every controller
+/// looked freshly launched and the "freshly-launched replacement" keep checks
+/// always kept. `None` (process gone, non-Linux, unreadable `stat`) is left to
+/// the caller; the controller reapers treat it as age 0, i.e. keep, because a
+/// process whose age cannot be proven is never reaped on age alone.
 pub fn process_start_age_secs(pid: u32) -> Option<u64> {
-    let modified = std::fs::metadata(format!("/proc/{pid}"))
-        .ok()?
-        .modified()
-        .ok()?;
-    SystemTime::now()
-        .duration_since(modified)
-        .ok()
-        .map(|elapsed| elapsed.as_secs())
+    process_start_age_secs_at(Path::new("/proc"), pid, SystemTime::now())
+}
+
+/// [`process_start_age_secs`] over an explicit proc root and clock.
+pub fn process_start_age_secs_at(proc_root: &Path, pid: u32, now: SystemTime) -> Option<u64> {
+    agent_doc_fs::process_start::process_start_age_secs_at(proc_root, pid, now)
 }
 
 /// How far a pid's observed start time may sit after a recorded claim before the
@@ -105,15 +112,9 @@ fn recorded_process_alive_from_stat(
     started_secs <= recorded_since_secs.saturating_add(PID_REUSE_START_SLACK_SECS)
 }
 
-/// `(state, starttime)` from a `/proc/<pid>/stat` line. `comm` (field 2) may
-/// contain spaces and parentheses, so fields are counted from the last `)`.
+/// `(state, starttime)` from a `/proc/<pid>/stat` line (shared reader, GH #263).
 fn parse_proc_stat_state_and_start(stat: &str) -> Option<(char, u64)> {
-    let rest = &stat[stat.rfind(')')? + 1..];
-    let mut fields = rest.split_whitespace();
-    let state = fields.next()?.chars().next()?;
-    // After `state` (field 3), `starttime` is field 22: skip fields 4..=21.
-    let start_ticks = fields.nth(18)?.parse::<u64>().ok()?;
-    Some((state, start_ticks))
+    agent_doc_fs::process_start::parse_proc_stat_state_and_start_ticks(stat)
 }
 
 // The fork-image rule lives with supervisor discovery (the lower crate) so both
@@ -126,16 +127,8 @@ fn read_proc_stat(pid: u32) -> Option<String> {
     std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()
 }
 
-#[cfg(unix)]
 fn clock_ticks_per_sec() -> Option<u64> {
-    // SAFETY: `sysconf` reads a process-constant configuration value.
-    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    u64::try_from(ticks).ok().filter(|ticks| *ticks > 0)
-}
-
-#[cfg(not(unix))]
-fn clock_ticks_per_sec() -> Option<u64> {
-    None
+    agent_doc_fs::process_start::clock_ticks_per_sec()
 }
 
 pub fn system_boot_timestamp_secs(now_secs: u64) -> Option<u64> {
@@ -413,6 +406,59 @@ mod tests {
             without_unexeced_fork_images([11], |_| None, cmdline_of),
             vec![11]
         );
+    }
+
+    /// GH #263: the controller reapers' "freshly-launched replacement" keep
+    /// check compares this age against `stale_after`. A controller started an
+    /// hour ago must read as an hour old even though its `/proc/<pid>` directory
+    /// was just instantiated (fresh mtime), or the check keeps it forever.
+    #[test]
+    fn process_start_age_comes_from_kernel_starttime_not_proc_dir_mtime() {
+        let proc_root = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        let now_secs = now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let boot_secs = now_secs - 86_400;
+        // Started 23h after boot = one hour before `now`; the pid directory
+        // the fixture creates right now carries a fresh mtime.
+        agent_doc_fs::process_start::fixture::write_fake_process_start(
+            proc_root.path(),
+            9_001,
+            boot_secs,
+            agent_doc_fs::process_start::fixture::ticks_after_boot(82_800),
+        );
+        let age = process_start_age_secs_at(proc_root.path(), 9_001, now).unwrap();
+        assert!((3_599..=3_601).contains(&age), "age_secs={age}");
+        let stale_after = std::time::Duration::from_secs(45);
+        assert!(
+            age > stale_after.as_secs(),
+            "an hour-old preparing controller must be past the keep window"
+        );
+        // Unreadable start time: `None`, which the reapers treat as keep.
+        assert_eq!(
+            process_start_age_secs_at(proc_root.path(), 9_002, now),
+            None
+        );
+    }
+
+    /// The live kernel: a child that has been running for over a second reads
+    /// as at least one second old. The old `/proc/<pid>` mtime read instead
+    /// reported roughly the time of the first `/proc` lookup.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_start_age_of_a_live_child_counts_from_its_spawn() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        std::thread::sleep(std::time::Duration::from_millis(1_200));
+        let age = process_start_age_secs(child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+        let age = age.expect("live child start age");
+        assert!((1..30).contains(&age), "age_secs={age}");
     }
 
     #[test]

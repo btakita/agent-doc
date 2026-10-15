@@ -20,6 +20,7 @@ parking_lot = "0.12"
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.503" }
 anyhow = "1"
 fs2 = "0.4"
+libc = "0.2"
 zstd = "0.13"
 
 [dev-dependencies]

@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -339,9 +338,7 @@ This is done. The v0.35.505 Release workflow (run 38690867071) finished successf
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Place the TODO: below the backlog in the agent-doc template.~~
-- 🚧 release + publish
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

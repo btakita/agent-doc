@@ -71,6 +71,14 @@ impl TerminalFilter {
         self.carryover.is_empty()
     }
 
+    /// Take the incomplete sequence buffered between reads, leaving the filter
+    /// at a boundary. `#reexecptybridge`: a temporary forwarder that must hand
+    /// the stream to a fresh filter flushes these bytes rather than dropping
+    /// half a control sequence.
+    pub fn take_carryover(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.carryover)
+    }
+
     pub fn filter(&mut self, input: &[u8], output: &mut Vec<u8>) -> Vec<TerminalFilterTrace> {
         let mut trace = Vec::new();
         self.filter_with_trace(input, output, &mut trace);

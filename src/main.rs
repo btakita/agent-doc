@@ -5003,6 +5003,18 @@ fn write_terminal_error_report(writer: &mut impl Write, report: &str) -> std::io
 fn try_main() -> anyhow::Result<()> {
     // `#supresilience` — crash resilience before any output (SIGPIPE reset + panic hook).
     crash_resilience::install();
+    // `#reexecptybridge` (GH #270): a supervisor `execve` hot-reload hands this
+    // image a live harness child's PTY master. Service it before anything that
+    // can wait on `state.db` (the CLI-entry freshness probe below, config, start
+    // admission); otherwise the pane freezes for every 30 s busy-timeout step.
+    // `run_with_reap_policy_resume_and_harness` stops it at adoption.
+    #[cfg(unix)]
+    agent_doc_supervisor_process::reexec_bridge::start_early_reexec_pty_bridge_from_env(
+        std::env::args_os()
+            .nth(1)
+            .as_deref()
+            .and_then(|arg| arg.to_str()),
+    );
     // Initialize structured logging via AGENT_DOC_LOG env var.
     // Examples: AGENT_DOC_LOG=debug, AGENT_DOC_LOG=agent_doc::preflight=debug
     // When set, logs to .agent-doc/logs/debug.log (auto-rotated).
@@ -7658,6 +7670,29 @@ mod controller_auto_start_policy_tests {
             authority < lease,
             "wrong-pane admission must reject before the drain lease is claimed"
         );
+    }
+
+    /// `#reexecptybridge` (GH #270): the replacement image of a supervisor
+    /// `execve` must service the inherited PTY before ANY step that can wait on
+    /// `state.db`. The CLI-entry stale-supervisor probe and config load run for
+    /// every document command, including the replayed `start`; a bridge started
+    /// after them leaves the pane frozen for the same busy-timeout steps.
+    #[test]
+    fn reexec_pty_bridge_starts_before_any_state_db_step() {
+        let source = include_str!("main.rs");
+        let body = &source[source.find("fn try_main()").expect("try_main")..];
+        let bridge = body
+            .find(concat!("start_early_reexec_pty_bridge", "_from_env("))
+            .expect("try_main starts the reexec PTY bridge");
+        for later in [
+            "init_tracing();",
+            "recycle_stale_supervisor_for_command(",
+            "upgrade::warn_if_outdated();",
+            "agent_doc_config::load()",
+        ] {
+            let at = body.find(later).unwrap_or_else(|| panic!("{later} in try_main"));
+            assert!(bridge < at, "the bridge must start before `{later}`");
+        }
     }
 
     /// `#commitsilentfirstrun`: neither commit outcome may be silent.

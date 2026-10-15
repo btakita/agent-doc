@@ -13,6 +13,7 @@ pub mod io_handoff;
 pub mod io_threads;
 pub mod output_state;
 pub mod pty;
+pub mod reexec_bridge;
 pub mod resize;
 pub mod route_owned_completion;
 pub mod screen;
@@ -51,6 +52,15 @@ pub const REEXEC_CAPABILITY_PROOF_CONTRACT_ENV: &str = "AGENT_DOC_REEXEC_CAPABIL
 /// conversation as an unused layout placeholder and reaped it at the next commit.
 pub const REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV: &str =
     "AGENT_DOC_REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED";
+/// Harness binary of the preserved child, so the replacement image's
+/// `#reexecptybridge` applies the same output filter policy before start
+/// admission resolves the harness. Absent from an older outgoing image: the
+/// bridge then uses the default policy.
+pub const REEXEC_HARNESS_ENV: &str = "AGENT_DOC_REEXEC_HARNESS";
+/// PID of the outgoing supervisor image. `execve` preserves it, so the
+/// replacement proves it is that image (not a subprocess that inherited the
+/// handoff environment) before its `#reexecptybridge` touches the master fd.
+pub const REEXEC_SUPERVISOR_PID_ENV: &str = "AGENT_DOC_REEXEC_SUPERVISOR_PID";
 pub const ROUTE_BIN_ENV: &str = "AGENT_DOC_ROUTE_BIN";
 
 /// Start purpose the supervisor runs under after (re)entry.

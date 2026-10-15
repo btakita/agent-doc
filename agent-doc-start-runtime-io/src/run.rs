@@ -860,6 +860,93 @@ pub fn run_with_reap_policy_and_resume(
     )
 }
 
+/// `#reexecptybridge` (GH #270): the bridge servicing a preserved child's PTY
+/// during start admission, tagged with where it started. The CLI entry starts
+/// it before anything can wait on `state.db`; this entry point starts one when
+/// that did not happen (another caller, or a handoff it could not prove). A
+/// bridge for any other master — or any bridge when no live child is being
+/// adopted — is stopped here, so it can never compete with this image's I/O.
+#[cfg(unix)]
+fn reexec_pty_bridge_for_reentry(
+    pending_adopt: Option<ReexecState>,
+    preserved_child_survived: bool,
+) -> Option<(
+    agent_doc_supervisor_process::reexec_bridge::ReexecPtyBridge,
+    &'static str,
+)> {
+    use agent_doc_supervisor_process::reexec_bridge::{
+        ReexecPtyBridge, ReexecPtyBridgeFds, take_early_reexec_pty_bridge,
+    };
+    let master_fd = pending_adopt
+        .filter(|_| preserved_child_survived)
+        .map(|state| state.master_fd);
+    if let Some(bridge) = take_early_reexec_pty_bridge(master_fd) {
+        return Some((bridge, "cli_entry"));
+    }
+    let harness = std::env::var(agent_doc_supervisor_process::REEXEC_HARNESS_ENV).ok();
+    ReexecPtyBridge::start(
+        ReexecPtyBridgeFds {
+            master: master_fd?,
+            input: libc::STDIN_FILENO,
+            output: libc::STDOUT_FILENO,
+        },
+        harness.as_deref(),
+    )
+    .ok()
+    .map(|bridge| (bridge, "start_entry"))
+}
+
+#[cfg(unix)]
+fn reexec_pty_bridge_handoff_log(
+    origin: &str,
+    adopting: bool,
+    report: &agent_doc_supervisor_process::reexec_bridge::ReexecPtyBridgeReport,
+) -> String {
+    format!(
+        "supervisor_reexec_pty_bridge_handoff origin={origin} adopting={adopting} serviced_ms={} \
+         bytes_to_output={} bytes_to_child={} ctrl_d_dropped={} pending_output={} \
+         pending_to_child={} child_output_closed={} input_closed={} output_failed={} \
+         (#reexecptybridge)",
+        report.serviced.as_millis(),
+        report.bytes_to_output,
+        report.bytes_to_child,
+        report.ctrl_d_dropped,
+        report.pending_output.len(),
+        report.pending_to_child.len(),
+        report.child_output_closed,
+        report.input_closed,
+        report.output_failed,
+    )
+}
+
+/// Settle what the bridge still owes the adopted child before this
+/// generation's reader/writer threads start: bytes it read but could not
+/// write, and the output tail for the terminal-screen model so prompt and
+/// readiness detection see the screen the pane already shows.
+#[cfg(unix)]
+fn apply_reexec_pty_bridge_report<O>(
+    report: &agent_doc_supervisor_process::reexec_bridge::ReexecPtyBridgeReport,
+    observer: &O,
+    harness: &agent_doc_harness::HarnessConfig,
+    writer: &Mutex<SharedPtyWriter>,
+) where
+    O: agent_doc_supervisor_process::io_threads::PtyReaderObserver,
+{
+    use std::io::Write;
+    if !report.pending_output.is_empty() {
+        let mut stdout = std::io::stdout().lock();
+        let _ = stdout
+            .write_all(&report.pending_output)
+            .and_then(|()| stdout.flush());
+    }
+    if !report.pending_to_child.is_empty() {
+        let _ = writer.lock().write_all_blocking(&report.pending_to_child);
+    }
+    if !report.replay.is_empty() {
+        observer.on_filtered_pty_output(harness, &report.replay);
+    }
+}
+
 pub fn run_with_reap_policy_resume_and_harness(
     file: &Path,
     force: bool,
@@ -877,6 +964,11 @@ pub fn run_with_reap_policy_resume_and_harness(
     let preserved_child_survived = pending_adopt
         .as_ref()
         .is_some_and(|state| state.child_survived());
+    // `#reexecptybridge` (GH #270): keep the preserved child's PTY serviced
+    // through start admission, which can wait on `state.db` for whole
+    // busy-timeout steps. Declared before any such step; finished at adoption.
+    #[cfg(unix)]
+    let mut reexec_bridge = reexec_pty_bridge_for_reentry(pending_adopt, preserved_child_survived);
     // `#reexecrenameadopt`: execve necessarily replays the outgoing argv, but
     // the document may have been renamed while its child remained live. Only a
     // genuine preserved-child reentry may consult the durable same-PID lease;
@@ -1061,6 +1153,8 @@ pub fn run_with_reap_policy_resume_and_harness(
             std::env::remove_var(REEXEC_MASTER_FD_ENV);
             std::env::remove_var(REEXEC_REDISPATCH_IF_CHILD_DIED_ENV);
             std::env::remove_var(REEXEC_CAPABILITY_PROOF_CONTRACT_ENV);
+            std::env::remove_var(agent_doc_supervisor_process::REEXEC_HARNESS_ENV);
+            std::env::remove_var(agent_doc_supervisor_process::REEXEC_SUPERVISOR_PID_ENV);
         }
         log_event(&mut session_log, "supervisor_reexec_reentry detected");
     }
@@ -1927,6 +2021,19 @@ pub fn run_with_reap_policy_resume_and_harness(
             size: initial_size,
         };
         child_launch_count += 1;
+        // `#reexecptybridge`: the bridge must stop before this generation's
+        // reader/writer threads exist, on every path (adopt or fresh spawn), so
+        // two pumps never compete for the pane's bytes. Only an adoption of the
+        // bridged child applies what the bridge still owes it.
+        #[cfg(unix)]
+        let reexec_bridge_report = reexec_bridge.take().and_then(|(bridge, origin)| {
+            let report = bridge.finish();
+            log_event(
+                &mut session_log,
+                &reexec_pty_bridge_handoff_log(origin, pending_adopt.is_some(), &report),
+            );
+            pending_adopt.is_some().then_some(report)
+        });
         let mut session = if let Some(state) = pending_adopt.take() {
             // `#ctlrecycle` R3 re-entry: adopt the harness child preserved across the
             // supervisor's self-`execve` rather than spawning a fresh one. `first_run`
@@ -2044,6 +2151,15 @@ pub fn run_with_reap_policy_resume_and_harness(
         let process_io_observer = Arc::new(
             agent_doc_supervisor_process_io::SupervisorProcessIoObserver::new(shared.clone()),
         );
+        #[cfg(unix)]
+        if let Some(report) = reexec_bridge_report.as_ref() {
+            apply_reexec_pty_bridge_report(
+                report,
+                process_io_observer.as_ref(),
+                &harness,
+                &writer_arc,
+            );
+        }
         let reader_thread = spawn_reader_thread(
             process_io_observer.clone(),
             harness.clone(),
@@ -3183,6 +3299,49 @@ mod tests {
             resolve_resume_request_from_sources(Some(&latest), Some("cold-seed"), None),
             Some(agent_doc_harness::ResumeRequest::Id("cold-seed".into()))
         );
+    }
+
+    /// `#reexecptybridge` (GH #270): in the start entry point the bridge is
+    /// up before start admission (registry publish, session re-entry: the
+    /// `state.db` waits that froze every recycled pane for 31-90 s), and it is
+    /// finished before this generation's I/O threads exist, so the two pumps
+    /// never compete for the pane's bytes.
+    #[test]
+    fn reexec_pty_bridge_spans_start_admission_and_ends_before_adoption() {
+        let source = include_str!("run.rs");
+        let body = &source[source
+            .find(concat!(
+                "pub fn run_with_reap_policy_resume",
+                "_and_harness("
+            ))
+            .expect("start entry point")..];
+        let bridge = body
+            .find(concat!("reexec_pty_bridge_for", "_reentry(pending_adopt"))
+            .expect("the bridge starts in the start entry point");
+        for admission in [
+            concat!("authoritative_reentry_document", "_for_pid("),
+            concat!("prepare_start_runtime", "_reentry(&reentry_file"),
+        ] {
+            let at = body.find(admission).expect(admission);
+            assert!(bridge < at, "the bridge must start before `{admission}`");
+        }
+        let finish = body
+            .find(concat!("bridge", ".finish()"))
+            .expect("the bridge is finished at the spawn site");
+        let adopt = body
+            .find(concat!("PtySession::", "adopt("))
+            .expect("adoption");
+        let reader = body
+            .find(concat!("spawn_reader", "_thread("))
+            .expect("reader thread");
+        let writer = body
+            .find(concat!("spawn_writer", "_thread("))
+            .expect("writer thread");
+        assert!(finish < adopt, "stop the bridge before adopting the master");
+        let apply = body
+            .find(concat!("apply_reexec_pty_bridge", "_report("))
+            .expect("the handoff report is applied");
+        assert!(adopt < apply && apply < reader && apply < writer);
     }
 
     #[test]

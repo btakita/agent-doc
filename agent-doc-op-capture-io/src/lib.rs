@@ -1024,14 +1024,28 @@ pub fn operator_text_for_base(doc: &Path, base_text: &str) -> Result<Option<Stri
 /// a non-operator projection already closed. Ops captured against any other base
 /// are not evidence, so the set is empty and the merge keeps the
 /// anti-resurrection `Live < Struck` join.
+///
+/// This form maps an unreadable epoch to "no evidence". A caller whose outcome
+/// re-strikes an operator unstrike on empty evidence must use
+/// [`try_operator_rearmed_queue_item_keys`] and fail closed instead
+/// (`#unstrikelost`, unreadable evidence).
 pub fn operator_rearmed_queue_item_keys(
     doc: &Path,
     base_text: &str,
 ) -> std::collections::HashSet<String> {
-    let operator_cut = operator_text_for_base(doc, base_text).ok().flatten();
-    operator_cut
+    try_operator_rearmed_queue_item_keys(doc, base_text).unwrap_or_default()
+}
+
+/// [`operator_rearmed_queue_item_keys`], keeping "the evidence could not be
+/// read" (a dead or wedged controller, an unreadable `state.db`) distinct from
+/// "there is no evidence" (`#unstrikelost`, unreadable evidence).
+pub fn try_operator_rearmed_queue_item_keys(
+    doc: &Path,
+    base_text: &str,
+) -> Result<std::collections::HashSet<String>> {
+    Ok(operator_text_for_base(doc, base_text)?
         .map(|cut| agent_doc_merge::crdt::operator_rearmed_queue_item_keys(base_text, &cut))
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 /// `#retypestruck`: text the operator typed or pasted in the ACTIVE editor-op

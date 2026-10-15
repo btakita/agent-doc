@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 pub mod install_freshness;
 pub mod jetbrains_install;
 pub mod plugin_jar;
+pub mod process_start;
 pub mod root_ceiling;
 pub mod rotating_log;
 

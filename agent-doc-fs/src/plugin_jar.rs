@@ -218,6 +218,13 @@ fn plugins_dir_for_mapped_jar(path: &str) -> Option<&std::path::Path> {
 
 /// The refusal an install recorded in `plugins_dir`, when that record is newer
 /// than the process (so it was this process that refused).
+///
+/// The process start time is the kernel's `starttime` (`/proc/<pid>/stat`
+/// field 22) plus boot time, never the `/proc/<pid>` directory mtime: procfs
+/// stamps that when it instantiates the inode, roughly "now", which made every
+/// recorded verdict look older than its process (GH #263). When the start time
+/// cannot be read the verdict is withheld (`None`): without proof that the
+/// marker post-dates this process, the restart-free ladder is the safe advice.
 pub fn recorded_restart_verdict_for_plugins_dir(
     pid: u32,
     plugins_dir: &std::path::Path,
@@ -233,10 +240,7 @@ pub fn recorded_restart_verdict_for_plugins_dir_at(
 ) -> Option<String> {
     let marker = plugins_dir.join(PLUGIN_RESTART_REQUIRED_MARKER);
     let recorded_at = std::fs::metadata(&marker).ok()?.modified().ok()?;
-    let started_at = std::fs::metadata(proc_root.join(pid.to_string()))
-        .ok()?
-        .modified()
-        .ok()?;
+    let started_at = crate::process_start::process_start_time_at(proc_root, pid)?;
     if recorded_at < started_at {
         return None;
     }
@@ -388,16 +392,16 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let plugins = root.path().join("IntelliJIdea2026.3");
         let proc_root = root.path().join("proc");
-        let pid_dir = proc_root.join("42");
-        std::fs::create_dir_all(&pid_dir).unwrap();
+        // Booted at 1_699_990_000, started 10_000 s later = 1_700_000_000.
+        crate::process_start::fixture::write_fake_process_start(
+            &proc_root,
+            42,
+            1_699_990_000,
+            crate::process_start::fixture::ticks_after_boot(10_000),
+        );
         std::fs::create_dir_all(&plugins).unwrap();
         let marker = plugins.join(PLUGIN_RESTART_REQUIRED_MARKER);
         std::fs::write(&marker, "exact-263 package requires restart\nmetadata\n").unwrap();
-        filetime::set_file_mtime(
-            &pid_dir,
-            filetime::FileTime::from_unix_time(1_700_000_000, 0),
-        )
-        .unwrap();
         filetime::set_file_mtime(
             &marker,
             filetime::FileTime::from_unix_time(1_700_000_100, 0),
@@ -452,6 +456,75 @@ mod tests {
         assert_ne!(
             plugins_dir_for_mapped_jar(&unrelated.display().to_string()),
             Some(plugins.as_path())
+        );
+    }
+
+    /// GH #263: on Linux the `/proc/<pid>` directory mtime is when procfs made
+    /// the inode (seconds before the read), not when the process started. A
+    /// marker recorded after the real start (`starttime` + `btime`) must yield
+    /// the verdict even though the pid directory looks brand new; a marker from
+    /// before the real start must not.
+    #[test]
+    fn recorded_restart_verdict_uses_kernel_start_time_not_proc_dir_mtime() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("IntelliJIdea2026.3");
+        let proc_root = root.path().join("proc");
+        std::fs::create_dir_all(&plugins).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        // The editor started two hours ago (booted a day before that) ...
+        let started = now - 7_200;
+        crate::process_start::fixture::write_fake_process_start(
+            &proc_root,
+            3_575_950,
+            started - 86_400,
+            crate::process_start::fixture::ticks_after_boot(86_400),
+        );
+        // ... while its /proc directory carries a fresh, read-time mtime.
+        filetime::set_file_mtime(
+            proc_root.join("3575950"),
+            filetime::FileTime::from_unix_time(now as i64, 0),
+        )
+        .unwrap();
+        let marker = plugins.join(PLUGIN_RESTART_REQUIRED_MARKER);
+        std::fs::write(&marker, "modular package has no restart-free upgrade\n").unwrap();
+        // The install recorded the refusal an hour ago: after the start, before
+        // the procfs mtime.
+        filetime::set_file_mtime(
+            &marker,
+            filetime::FileTime::from_unix_time((now - 3_600) as i64, 0),
+        )
+        .unwrap();
+        let backup = MappedPluginJar::Deleted {
+            path: plugins
+                .join(".agent-doc-jetbrains-install/backup-1-2/lib/agent.doc-0.2.600.jar")
+                .display()
+                .to_string(),
+        };
+        assert_eq!(
+            recorded_restart_verdict_at(3_575_950, &backup, &proc_root).as_deref(),
+            Some("modular package has no restart-free upgrade")
+        );
+
+        // A marker from before the real start belongs to an earlier process.
+        filetime::set_file_mtime(
+            &marker,
+            filetime::FileTime::from_unix_time((started - 60) as i64, 0),
+        )
+        .unwrap();
+        assert_eq!(
+            recorded_restart_verdict_at(3_575_950, &backup, &proc_root),
+            None
+        );
+
+        // An unreadable start time withholds the verdict (restart-free ladder).
+        std::fs::write(&marker, "modular package has no restart-free upgrade\n").unwrap();
+        std::fs::remove_file(proc_root.join("3575950/stat")).unwrap();
+        assert_eq!(
+            recorded_restart_verdict_at(3_575_950, &backup, &proc_root),
+            None
         );
     }
 

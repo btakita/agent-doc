@@ -36,18 +36,10 @@ fn request_path(file: &Path, supervisor_pid: u32) -> Result<PathBuf> {
         .join(format!("{hash}.{supervisor_pid}.{REQUEST_SUFFIX}")))
 }
 
-#[cfg(unix)]
+/// The kernel `starttime` of `pid`: stable for the process's life, so it pins a
+/// request to one process across pid reuse (shared reader, GH #263).
 fn process_start_ticks(pid: u32) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let after_comm = stat.rsplit_once(')')?.1;
-    // Fields after `comm` begin at proc field 3 (`state`); starttime is field
-    // 22, therefore the twentieth token in this suffix.
-    after_comm.split_whitespace().nth(19)?.parse().ok()
-}
-
-#[cfg(not(unix))]
-fn process_start_ticks(_pid: u32) -> Option<u64> {
-    None
+    agent_doc_fs::process_start::process_start_ticks(pid)
 }
 
 fn parse_string(value: &serde_json::Value, field: &str) -> Option<String> {

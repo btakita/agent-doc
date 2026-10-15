@@ -82,6 +82,46 @@ fail-closed; socket-only adoption applies only while status is not yet ready.
   controller state. They never establish ownership and never block command
   admission.
 
+### Queue scheduler (`#queueschedule`)
+
+The controller runs **one** queue scheduler per process for every scheduled
+`agent:queue` (document format: `02-document-format.md` §2.5 Queue schedule).
+
+- **One loop, deadline-sleeping.** A single thread
+  (`agent-doc-queue-scheduler`) parks on a condvar until the earliest wake
+  across every scheduled document, a graph change, or a 300 s ceiling. There is
+  no per-document timer and no busy polling: wakeups track distinct deadlines,
+  not documents. A wake that dispatched nothing parks at least 1 s; a document
+  is dispatched at most once per second, and a document whose tick is in
+  flight is excluded from the earliest wake, so a wedged or buggy worker cannot
+  spin the loop.
+- **Background worker.** The loop never reads a document, touches `state.db`,
+  or writes the queue. It hands each due document to one worker thread
+  (`agent-doc-queue-schedule-worker`), which loads the document, applies the
+  pure transition (`agent_doc_queue::queue_schedule`), and commits it in a
+  `BEGIN IMMEDIATE` read-modify-write of the `queue_schedule` row. A tick only
+  opens a pass window; the heads drain through the ordinary drain paths.
+  Completed `loop` passes restore their items through the binary-owned queue
+  write path (the live CRDT replica while an editor holds the document) via the
+  `ProjectControllerRuntimeEffects::restore_queue_loop_items` port.
+- **Lazily state.** Scheduler state lives in a Lazily graph
+  (`QueueScheduleGraph`): `Source` maps for each document's parsed spec,
+  durable state, and in-flight mark; one `Computed` for the earliest wake; one
+  `Effect` on that `Computed` that notifies the parked loop. No observers.
+- **Realtime ingress.** Every relay-hub operation publishes a per-document
+  queue-region change key (a hash of the `agent:queue` region, plus a schedule
+  hint) into a Lazily `Source`; an `Effect` enqueues a worker refresh when a
+  region changes, so typing outside the queue never reaches the scheduler. The
+  commit frontier and watch-daemon disk signals enqueue refreshes for detached
+  documents. On start the controller hydrates every document with a durable
+  `queue_schedule` row.
+- **Exactly-once across controllers.** The durable row is the authority: a
+  deadline at or before `last_fired_due_secs` is never fired again, and a pass
+  completion sets `passes_completed = max(passes_completed, pass)`. A handoff
+  predecessor and successor running side by side, or a restarted controller,
+  therefore neither refire a tick nor double-count a pass. A missed-tick gap
+  (suspend, hot update) coalesces into one tick.
+
 ## Cross-process Lazily state plane
 
 - Editor plugins and other external peers publish Lazily `Snapshot`/`Delta`

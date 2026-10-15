@@ -643,9 +643,18 @@ pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItem
     // The queue-level subagents attribute holds heads back (cap full, or an
     // `after=` predecessor still queued). A held head is out of the in-session
     // loop exactly like a claimed one: never drained inline, never counted.
-    match crate::subagent_dispatch::queue_attr_subagent_plan(file, content) {
+    let claimed = match crate::subagent_dispatch::queue_attr_subagent_plan(file, content) {
         Some(plan) if !plan.held.is_empty() => claimed.with_heads(&plan.held),
         _ => claimed,
+    };
+    // `#queueschedule`: a scheduled queue's closed window holds every head the
+    // same way — out of the in-session loop, the supervisor drain, preflight
+    // selection, and the Stop-hook continuation until a tick opens a pass.
+    let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
+    if schedule_held.is_empty() {
+        claimed
+    } else {
+        claimed.with_heads(&schedule_held)
     }
 }
 

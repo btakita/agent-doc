@@ -122,7 +122,10 @@ fn queue_attr_subagent_plan_with_presets(
 ) -> Option<agent_doc_queue::subagent_intent::QueueSubagentPlan> {
     let (mode, eligible, live) =
         core::queue_attr_subagent_heads_with_presets(content, prompt_presets)?;
-    let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content);
+    // `#queueschedule`: a closed schedule window dispatches nothing.
+    let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
+    let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content)
+        .with_heads(&schedule_held);
     let after_deps = agent_doc_element::element::parse(content)
         .map(|components| agent_doc_queue::backlog_sync::collect_after_deps(&components, content))
         .unwrap_or_default();

@@ -1712,6 +1712,31 @@ fn queue_component_bodies(text: &str) -> Vec<&str> {
     bodies
 }
 
+/// Queue items struck in `base_text`: list-child key -> instruction text.
+fn base_struck_queue_items(base_text: &str) -> std::collections::HashMap<String, String> {
+    use agent_doc_element_queue::QueueItemLifecycle;
+    queue_component_bodies(base_text)
+        .into_iter()
+        .filter_map(split_list_children)
+        .flatten()
+        .filter(|child| {
+            child.key != PREAMBLE_KEY
+                && QueueItemLifecycle::classify(&child.text) == QueueItemLifecycle::Struck
+        })
+        .map(|child| (child.key.clone(), queue_instruction_text(&child.text)))
+        .collect()
+}
+
+/// `#unstrikelost` (unreadable evidence): whether `base_text` holds a struck
+/// queue item. [`operator_rearmed_queue_item_keys`] only ever names such items,
+/// so when this is false the re-arm evidence is empty for every operator cut
+/// and cannot change a merge over this base. A caller may then skip reading the
+/// evidence; when it is true, a caller that cannot read the evidence must fail
+/// closed instead of merging as if it were absent.
+pub fn base_holds_struck_queue_item(base_text: &str) -> bool {
+    !base_struck_queue_items(base_text).is_empty()
+}
+
 /// `#unstrikelost`: queue items struck in `base_text` that are live in
 /// `operator_cut`, keyed by [`queue_instruction_text`].
 ///
@@ -1724,16 +1749,10 @@ pub fn operator_rearmed_queue_item_keys(
     operator_cut: &str,
 ) -> std::collections::HashSet<String> {
     use agent_doc_element_queue::QueueItemLifecycle;
-    let base_struck: std::collections::HashMap<String, String> = queue_component_bodies(base_text)
-        .into_iter()
-        .filter_map(split_list_children)
-        .flatten()
-        .filter(|child| {
-            child.key != PREAMBLE_KEY
-                && QueueItemLifecycle::classify(&child.text) == QueueItemLifecycle::Struck
-        })
-        .map(|child| (child.key.clone(), queue_instruction_text(&child.text)))
-        .collect();
+    let base_struck = base_struck_queue_items(base_text);
+    if base_struck.is_empty() {
+        return std::collections::HashSet::new();
+    }
     queue_component_bodies(operator_cut)
         .into_iter()
         .filter_map(split_list_children)
@@ -5506,6 +5525,29 @@ Second answer line three.
             unscoped.contains("~~release + publish~~"),
             "evidence must not leak past its scope:\n{unscoped}"
         );
+    }
+
+    /// `#unstrikelost` (unreadable evidence): with no struck queue item in the
+    /// base, re-arm evidence is empty for every operator cut, so a caller may
+    /// skip the read. A struck item makes the evidence decisive.
+    #[test]
+    fn base_without_struck_queue_item_admits_no_rearm_evidence() {
+        let open =
+            "<!-- agent:queue -->\n- do [#open]\n- release + publish\n<!-- /agent:queue -->\n";
+        let struck = open.replace("- release + publish", "- ~~release + publish~~");
+        let outside =
+            "~~release + publish~~\n\n<!-- agent:queue -->\n- do [#open]\n<!-- /agent:queue -->\n";
+        assert!(!base_holds_struck_queue_item(open));
+        assert!(
+            !base_holds_struck_queue_item(outside),
+            "a strike outside the queue component is not a queue item"
+        );
+        for cut in [open, struck.as_str(), outside] {
+            assert!(operator_rearmed_queue_item_keys(open, cut).is_empty());
+            assert!(operator_rearmed_queue_item_keys(outside, cut).is_empty());
+        }
+        assert!(base_holds_struck_queue_item(&struck));
+        assert_eq!(operator_rearmed_queue_item_keys(&struck, open).len(), 1);
     }
 
     /// Operator evidence never covers an item the operator left struck, nor a

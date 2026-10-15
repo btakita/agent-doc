@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.506
+
+- **Clear Session Context proves a Claude Code `/clear` on long panes (GH #266).**
+  Claude Code keeps tmux scrollback after `/clear`, so the old cleared-state
+  fallback, which required at most 200 lines of history, could never pass on a
+  real session, and every clear was reported "not proven submitted" although it
+  ran. A Claude Code fresh-chat proof now reads only the tail after the last
+  startup banner `/clear` redraws: it requires the `❯ /clear` echo followed by
+  nothing but prompt/status chrome and a ready prompt, and still fails closed
+  when the old conversation is visible. It also covers blank-viewport
+  (`pane_not_rendered`) observations. The probe logs `result=fresh_chat_proven`.
+- **Queued-input detection reads only the live input line.** Stale
+  `Press up to edit queued messages` copies left in scrollback by finished turns
+  no longer report `harness_queued_input` for a clear that ran.
+- **Session commands resolve the real harness instead of `default`.** `default`
+  (ambient detection outside any harness, e.g. the JetBrains backend) no longer
+  wins; resolution falls through the document `agent:`, the actor record, the
+  supervisor's reported harness, then ambient detection.
+
 ## 0.35.505
 
 - **tmux auto-sync recovers from a retired endpoint by construction.** A

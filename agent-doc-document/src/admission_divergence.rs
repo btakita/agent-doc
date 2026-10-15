@@ -86,9 +86,11 @@ pub enum AdmissionDivergence {
     /// proceed on the authority and the next commit converges disk.
     AuthoritySubsumesDisk,
     /// Baseline, authority, and disk are three durably distinct revisions with
-    /// content on disk the authority does not carry: two writers genuinely
-    /// diverged. Admission reconciles them with a three-way merge against the
-    /// baseline ancestor, so neither writer is dropped and nothing stalls.
+    /// content on disk the authority does not carry. Admission reconciles them
+    /// with a three-way merge against the baseline ancestor, so nothing stalls.
+    /// With a live editor the two branches are two cuts of ONE editor history,
+    /// so a component both changed keeps the authority's version
+    /// (`crate::component_exclusivity`, `#queuecutexclusive`).
     ThreeWaySplitMerged,
 }
 

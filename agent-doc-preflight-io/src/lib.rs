@@ -3417,6 +3417,18 @@ fn merge_invents_list_items(
 /// non-stalling outcome when no rung produces an adoptable revision: disk then
 /// converges at the next commit, exactly as it does for `AuthoritySubsumesDisk`.
 /// It is never an error — an admission that cannot merge still must not refuse.
+///
+/// `#queuecutexclusive`: admission only runs with a live editor, and agent-doc
+/// never writes disk behind a live buffer, so disk and the authority are two
+/// cuts of ONE editor history, not two writers. Every rung therefore sees disk
+/// with each component BOTH planes changed reverted to the baseline (the
+/// authority's version is kept and the editor's own ops roll it forward), and
+/// every candidate must clear `merge_mixes_component_versions`: such a
+/// component is exactly one plane's body, never a union of the two cuts. The
+/// count, revision-twin and op-lineage guards below are textual classifiers
+/// that each missed the next incident shape; they stay as defense in depth for
+/// components only disk changed. Formal model:
+/// `formal/tla/AdmissionCutExclusivity.tla`.
 fn merge_admission_three_way_split(
     file: &Path,
     baseline: &str,
@@ -3444,7 +3456,18 @@ fn merge_admission_three_way_split(
                 authority_lineage_proven: false,
             },
         );
-    let merge_disk = lineage_projection.disk_text.as_str();
+    // `#queuecutexclusive`: with a live editor, disk and the authority are two
+    // cuts of ONE editor history. A component both changed keeps the
+    // authority's version (the editor's own ops roll it forward exactly once);
+    // disk's version of it reverts to the baseline before any rung runs, so no
+    // rung can union the two cuts. Formal model:
+    // `formal/tla/AdmissionCutExclusivity.tla`.
+    let cut_exclusive = agent_doc_document::component_exclusivity::project_disk_for_cut_exclusivity(
+        baseline,
+        authority,
+        &lineage_projection.disk_text,
+    );
+    let merge_disk = cut_exclusive.disk_text.as_str();
     let durable_disk = durable(merge_disk);
 
     let mut adopted = None;
@@ -3453,6 +3476,17 @@ fn merge_admission_three_way_split(
         rungs.push(format!(
             "EditorOpLineage=suppressed_queue_revisions({})",
             lineage_projection.suppressed_queue_revisions
+        ));
+    }
+    if !cut_exclusive.authority_kept.is_empty() {
+        rungs.push(format!(
+            "CutExclusive=authority_kept({})",
+            cut_exclusive
+                .authority_kept
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
         ));
     }
     let mut twins_logged = false;
@@ -3488,6 +3522,21 @@ fn merge_admission_three_way_split(
         } else if durable_merged == durable_authority {
             // Nothing from disk survived: the compare-and-swap write is a no-op.
             "equals_authority"
+        } else if let Some(mixed) =
+            agent_doc_document::component_exclusivity::merge_mixes_component_versions(
+                baseline, authority, disk, &plan.merged_doc,
+            )
+        {
+            // `#queuecutexclusive` fail-closed guard, checked against the
+            // ORIGINAL disk: a component both planes changed must be exactly one
+            // plane's body. A body built from both cuts is the duplicate every
+            // incident since 2026-09-30 adopted; refusing it proceeds on the
+            // authority, which never stalls.
+            rungs.push(format!(
+                "{:?}=would_mix_component_versions({mixed})",
+                plan.engine
+            ));
+            continue;
         } else if let Some(invented) =
             merge_invents_list_items(baseline, authority, &plan.merged_agent, &plan.merged_doc)
         {
@@ -9820,9 +9869,11 @@ mod tests {
         assert_eq!(merged, authority, "operator text is authoritative");
         let log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        // `#queuecutexclusive`: both planes changed the queue, so disk's cut never
+        // reaches a rung (the textual twin collapse is no longer what saves it).
         assert!(
-            log.contains("RevisionTwin=collapsed(1)"),
-            "the collapse must be visible in the admission log:\n{log}"
+            log.contains("CutExclusive=authority_kept(queue:0)"),
+            "the cut-exclusivity projection must be visible in the admission log:\n{log}"
         );
     }
 
@@ -9873,23 +9924,30 @@ mod tests {
         std::fs::write(&doc, &disk).unwrap();
         const LINE: &str = "- Can the host support two review modes?";
 
-        // Precondition: without op lineage the ladder reproduces the incident.
+        // Precondition: the raw line rung on this triple reproduces the fork.
+        let raw = agent_doc_merge::merge(agent_doc_merge::MergeRequest::semantic(
+            &baseline, &disk, &authority,
+        ))
+        .merged_doc;
+        assert_eq!(queue_lines_starting(&raw, LINE), 2, "{raw}");
+
+        // `#queuecutexclusive`: WITHOUT op lineage the ladder no longer forks
+        // either -- the op-ledger proof stopped being load-bearing for safety.
         let unproven =
             merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
                 .unwrap()
                 .unwrap_or_else(|| authority.clone());
         assert_eq!(
             queue_lines_starting(&unproven, LINE),
-            2,
-            "the unproven ladder must reproduce the fork:\n{unproven}"
+            1,
+            "the unproven ladder must keep one revision:\n{unproven}"
         );
+        assert_eq!(unproven, authority, "operator text is authoritative");
         let log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            log.contains(
-                "rungs=[RevisionTwin=collapsed(1) Cell=equals_authority Semantic=adopted("
-            ),
-            "the fixture must reproduce the live rung sequence:\n{log}"
+            log.contains("rungs=[CutExclusive=authority_kept(queue:0) "),
+            "the cut-exclusivity projection must be what kept one revision:\n{log}"
         );
 
         let merged = merge_admission_three_way_split(
@@ -9912,14 +9970,20 @@ mod tests {
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             log.contains("EditorOpLineage=suppressed_queue_revisions(1)"),
-            "the op-lineage suppression must be what removed the cut:\n{log}"
+            "the op-lineage suppression still runs first when a proof exists:\n{log}"
         );
     }
 
-    /// Independent disk work saved in the SAME native save as the stale cut still
-    /// lands; only the cut is projected out (`AdmissionSplitMergeTwinReach`).
+    /// `#queuecutexclusive` reverses `AdmissionSplitMergeTwinReach` for the
+    /// queue the operator is typing in: disk's `- disk branch` saved in the
+    /// SAME component as a stale cut of the operator's line is not merged by
+    /// admission. Text alone cannot tell it from the editor's own next
+    /// keystrokes (which would then arrive twice); with a live editor, an
+    /// independent disk write reaches the authority through the editor's own
+    /// reload and op stream. Disk work in a component the authority did not
+    /// change still lands (`admission_split_merge_still_merges_disk_work_in_an_untouched_component`).
     #[test]
-    fn admission_split_merge_keeps_disk_work_saved_beside_a_typing_cut() {
+    fn admission_split_merge_keeps_the_authority_queue_when_disk_adds_beside_a_typing_cut() {
         let dir = setup_project();
         let doc = dir.path().join("sdk.md");
         let (baseline, authority, disk) = admission_typing_fork_docs(
@@ -9928,15 +9992,44 @@ mod tests {
         );
         let merged =
             merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
+                .unwrap();
+        assert_eq!(merged, None, "admission proceeds on the authority");
+    }
+
+    /// Reach for `#queuecutexclusive` (`AdmissionCutExclusivityReach`): disk
+    /// work in a component the authority did NOT change still merges, beside
+    /// the authority's version of the queue both planes changed.
+    #[test]
+    fn admission_split_merge_still_merges_disk_work_in_an_untouched_component() {
+        let dir = setup_project();
+        let doc = dir.path().join("sdk.md");
+        let (baseline, authority, disk_queue_only) = admission_typing_fork_docs(
+            &format!("{TYPING_CUT}\n"),
+            &format!("{TYPING_FULL}\n"),
+        );
+        let disk = disk_queue_only.replace(
+            "<!-- agent:notes -->\n",
+            "<!-- agent:notes -->\n- disk-only note\n",
+        );
+        assert_ne!(disk, disk_queue_only, "fixture must carry a notes component");
+        let merged =
+            merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
                 .unwrap()
-                .expect("independent disk work must merge");
+                .expect("disk work in an untouched component must merge");
         assert_eq!(
             queue_lines_starting(&merged, "- We also need documentation"),
             1,
             "{merged}"
         );
-        assert!(merged.contains(TYPING_FULL), "{merged}");
-        assert!(merged.contains("- disk branch\n"), "{merged}");
+        assert_eq!(
+            component_body(&merged, "queue"),
+            component_body(&authority, "queue"),
+            "the queue both planes changed is the authority's"
+        );
+        assert!(
+            component_body(&merged, "notes").contains("- disk-only note\n"),
+            "{merged}"
+        );
     }
 
     /// A disk revision NEWER than the authority's (a native save ahead of the
@@ -9967,18 +10060,25 @@ mod tests {
         assert_eq!(merged, authority, "operator text is authoritative");
         let log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        // `#queuecutexclusive`: the newer disk revision never reaches a rung, so
+        // the twin-pair guard is no longer the edge that refuses it.
         assert!(
-            log.contains("Semantic=would_duplicate_revision(revision_twin_pairs:1>0)"),
-            "the twin-pair guard must be what refused the line rung:\n{log}"
+            log.contains("CutExclusive=authority_kept(queue:0)"),
+            "the cut-exclusivity projection must be what kept the authority:\n{log}"
         );
     }
 
     /// `#admissionsplitmerge`: end-to-end through the real CRDT relay. Both branches
     /// durably advanced past the baseline, which used to be a typed fail-closed
-    /// refusal. It must now merge: the live authority ends up carrying BOTH queue
-    /// additions, the observation succeeds, and disk is never written by admission.
+    /// refusal. It must not stall, and disk is never written by admission.
+    ///
+    /// `#queuecutexclusive`: both planes changed the QUEUE, so the authority's
+    /// queue is kept. This test used to require the union of the two queue
+    /// additions; that union is exactly the body every live duplicate since
+    /// 2026-09-30 adopted, where disk was the editor's own native save. Disk work
+    /// in a component the authority left alone still merges (next test).
     #[test]
-    fn queue_authority_merges_two_advanced_branches() {
+    fn queue_authority_keeps_the_editor_queue_when_both_branches_changed_it() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let baseline = concat!(
@@ -10018,18 +10118,18 @@ mod tests {
             3,
             |file| agent_doc_crdt_relay_io::current_text_for_file(file).map(Some),
         )
-        .expect("two advanced branches must merge, not refuse admission");
+        .expect("two advanced branches must not refuse admission");
         let text = match observed {
             Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
             other => panic!("expected a live current authority, got {other:?}"),
         };
         assert!(
             text.contains("- authority branch"),
-            "the merged authority must keep the editor's branch:\n{text}"
+            "the authority must keep the editor's branch:\n{text}"
         );
         assert!(
-            text.contains("- disk branch"),
-            "the merged authority must keep the disk branch:\n{text}"
+            !text.contains("- disk branch"),
+            "a second version of the queue both planes changed must not be merged in:\n{text}"
         );
         assert_eq!(
             std::fs::read_to_string(&doc).unwrap(),
@@ -10038,9 +10138,236 @@ mod tests {
         );
     }
 
+    /// `#queuecutexclusive` reach, end to end: the authority changed the queue
+    /// and disk changed only the exchange. The disk branch merges into the live
+    /// authority beside the editor's queue.
+    #[test]
+    fn queue_authority_merges_disk_work_in_a_component_the_editor_left_alone() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\nPrior answer.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (identity, replica) = publish_test_live_buffer(&doc, "jetbrains-disjoint", baseline);
+        let authority = baseline.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue -->\n- authority branch\n",
+        );
+        replica.apply_local_edit(0, baseline.len() as u32, &authority);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &doc,
+            &identity,
+            &replica.encode_state(),
+        )
+        .unwrap();
+        let disk = baseline.replace("Prior answer.\n", "Prior answer.\nDisk branch.\n");
+        std::fs::write(&doc, &disk).unwrap();
+
+        let observed = observe_queue_authority_after_native_save_with_bounded_retry(
+            &doc,
+            "test_disjoint_native_save",
+            3,
+            |file| agent_doc_crdt_relay_io::current_text_for_file(file).map(Some),
+        )
+        .expect("two advanced branches must merge, not refuse admission");
+        let text = match observed {
+            Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+            other => panic!("expected a live current authority, got {other:?}"),
+        };
+        assert!(text.contains("- authority branch"), "{text}");
+        assert!(text.contains("Disk branch."), "{text}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), disk);
+    }
+
+    /// `#queuecutexclusive` fixture: the 2026-10-15 incident shape with neutral
+    /// text. The baseline queue is empty. The operator added six issue lines,
+    /// typed `#gh-dix` on all six with a multi-caret, then corrected them to
+    /// `#gh-fix ` and pressed Run. The authority's cut holds the `#gh-dix`
+    /// revision (the correction's ops are still in flight); the native save on
+    /// disk holds the corrected lines. Neither is a prefix of the other, so the
+    /// textual revision-twin guards cannot pair them, and both sides "added" six
+    /// items, so the count bound admits twelve.
+    fn admission_inflight_correction_docs() -> (String, String, String) {
+        let doc = |queue: &str| {
+            format!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+                 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior\n\nPrior answer.\n\
+                 <!-- agent:boundary:06765b07 -->\n<!-- /agent:exchange -->\n\n\
+                 ## Pending\n<!-- agent:queue subagents preset=\"#spec\" priority go -->\n{queue}<!-- /agent:queue -->\n\n\
+                 ## Backlog\n\n<!-- agent:backlog priority queue -->\n<!-- /agent:backlog -->\n"
+            )
+        };
+        let lines = |tag: &str| -> String {
+            (268..=273)
+                .map(|n| format!("- {tag}https://example.test/agent-doc/issues/{n}\n"))
+                .collect()
+        };
+        (doc(""), doc(&lines("#gh-dix")), doc(&lines("#gh-fix ")))
+    }
+
+    fn issue_line_counts(merged: &str) -> Vec<usize> {
+        let body = component_body(merged, "queue");
+        (268..=273)
+            .map(|n| {
+                body.lines()
+                    .filter(|line| line.ends_with(&format!("/agent-doc/issues/{n}")))
+                    .count()
+            })
+            .collect()
+    }
+
+    /// `#queuecutexclusive`: the admission ladder never unions two cuts of one
+    /// editor history. Pre-fix it logged `Cell=equals_authority
+    /// Semantic=adopted(...)` and adopted every issue twice (both revisions).
+    #[test]
+    fn admission_split_merge_never_unions_an_inflight_mid_line_correction() {
+        let dir = setup_project();
+        let doc = dir.path().join("bugs.md");
+        let (baseline, authority, disk) = admission_inflight_correction_docs();
+        std::fs::write(&doc, &disk).unwrap();
+        // Precondition: the raw line rung on the triple duplicates every issue --
+        // the incident must stay reproducible or this test proves nothing.
+        let raw = agent_doc_merge::merge(agent_doc_merge::MergeRequest::semantic(
+            &baseline, &disk, &authority,
+        ))
+        .merged_doc;
+        assert_eq!(issue_line_counts(&raw), vec![2; 6], "{raw}");
+
+        let merged =
+            merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
+                .unwrap()
+                .unwrap_or_else(|| authority.clone());
+        assert_eq!(issue_line_counts(&merged), vec![1; 6], "{merged}");
+        assert_eq!(merged, authority, "the authority's cut is kept whole");
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("rungs=[CutExclusive=authority_kept(queue:0) Cell=equals_authority Semantic=equals_authority]"),
+            "the projection must be what kept the authority:\n{log}"
+        );
+        assert!(log.contains("outcome=proceed_on_authority"), "{log}");
+    }
+
+    /// `#queuecutexclusive` fail-closed guard, independent of the projection:
+    /// a candidate whose concurrently changed queue is a body built from both
+    /// cuts is refused, while either cut alone is admitted.
+    #[test]
+    fn the_cut_exclusivity_guard_refuses_the_logged_union_of_both_cuts() {
+        let (baseline, authority, disk) = admission_inflight_correction_docs();
+        let union = agent_doc_merge::merge(agent_doc_merge::MergeRequest::semantic(
+            &baseline, &disk, &authority,
+        ))
+        .merged_doc;
+        assert_eq!(
+            agent_doc_document::component_exclusivity::merge_mixes_component_versions(
+                &baseline, &authority, &disk, &union
+            )
+            .as_deref(),
+            Some("queue:0")
+        );
+        for cut in [&authority, &disk] {
+            assert_eq!(
+                agent_doc_document::component_exclusivity::merge_mixes_component_versions(
+                    &baseline, &authority, &disk, cut
+                ),
+                None
+            );
+        }
+    }
+
+    /// `#queuecutexclusive` end to end through the real CRDT relay, including
+    /// the step that completed the live duplicate: the editor's in-flight
+    /// correction ops arriving AFTER admission. Pre-fix, admission inserted the
+    /// six `#gh-fix ` lines as new CRDT items and the late ops then rewrote the
+    /// editor's own six `#gh-dix` items into the same text -- twelve `#gh-fix`
+    /// lines. Now admission proceeds on the authority and the late ops roll it
+    /// forward exactly once.
+    #[test]
+    fn queue_authority_never_duplicates_a_correction_whose_ops_arrive_after_admission() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let (baseline, authority, disk) = admission_inflight_correction_docs();
+        std::fs::write(&doc, &baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (identity, replica) = publish_test_live_buffer(&doc, "jetbrains-inflight", &baseline);
+        // The operator's `#gh-dix` typing reached the authority.
+        let close = replica.text().find("<!-- /agent:queue -->").unwrap();
+        let dix_block = component_body(&authority, "queue");
+        replica.apply_local_edit(close as u32, 0, &dix_block);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &doc,
+            &identity,
+            &replica.encode_state(),
+        )
+        .unwrap();
+        // The native save already holds the corrected lines.
+        std::fs::write(&doc, &disk).unwrap();
+
+        let observed = observe_queue_authority_after_native_save_with_bounded_retry(
+            &doc,
+            "test_inflight_correction",
+            3,
+            |file| agent_doc_crdt_relay_io::current_text_for_file(file).map(Some),
+        )
+        .expect("admission must not stall");
+        let admitted = match observed {
+            Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+            other => panic!("expected a live current authority, got {other:?}"),
+        };
+        assert_eq!(issue_line_counts(&admitted), vec![1; 6], "{admitted}");
+
+        // The correction's ops arrive late, on the editor's own items.
+        loop {
+            let text = replica.text();
+            let Some(at) = text.find("#gh-dixhttps") else {
+                break;
+            };
+            let d_at = at + "#gh-".len();
+            replica.apply_local_edit(d_at as u32, 1, "f");
+            replica.apply_local_edit((d_at + "fix".len()) as u32, 0, " ");
+        }
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &doc,
+            &identity,
+            &replica.encode_state(),
+        )
+        .unwrap();
+        let settled = match agent_doc_crdt_relay_io::current_text_for_file(&doc).unwrap() {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+            other => panic!("expected a live current authority, got {other:?}"),
+        };
+        assert_eq!(
+            issue_line_counts(&settled),
+            vec![1; 6],
+            "every issue line must be held exactly once after the late ops:\n{settled}"
+        );
+        assert_eq!(
+            component_body(&settled, "queue"),
+            component_body(&disk, "queue"),
+            "the editor's final text is the authority's, exactly once"
+        );
+    }
+
     /// GH #198: disk can be an intermediate save from the same editor-op
-    /// lineage while also carrying an independent addition. Admission must
-    /// suppress only the superseded intermediate row and retain the addition.
+    /// lineage while also carrying another addition. Admission must never
+    /// re-add the superseded intermediate row. Since `#queuecutexclusive` the
+    /// queue both planes changed is the authority's, so the other same-queue
+    /// addition is not merged by admission either.
     #[test]
     fn admission_merge_drops_an_op_proven_stale_queue_revision_only() {
         let dir = setup_project();
@@ -10114,10 +10441,14 @@ mod tests {
             ),
         );
         std::fs::write(&doc, &disk).unwrap();
-        let first_projection = disk_edit_newer_than_registered_authority(&doc, &authority)
-            .unwrap()
-            .expect("the split requires a reconciled authority projection");
-        assert!(!first_projection.contains(stale_row));
+        // `#queuecutexclusive`: both planes changed the queue, so admission
+        // proceeds on the authority. The op-proven stale row is not re-added
+        // (the original GH #198 failure); the same-component disk addition is
+        // not merged by admission either (see
+        // `admission_split_merge_keeps_the_authority_queue_when_disk_adds_beside_a_typing_cut`).
+        let first_projection =
+            disk_edit_newer_than_registered_authority(&doc, &authority).unwrap();
+        assert_eq!(first_projection, None);
 
         let observed = observe_queue_authority_after_native_save_with_bounded_retry(
             &doc,
@@ -10136,8 +10467,8 @@ mod tests {
             "the final operator revision must survive:\n{text}"
         );
         assert!(
-            text.contains("- independent disk addition\n"),
-            "the unrelated disk addition must survive:\n{text}"
+            !text.contains("- independent disk addition\n"),
+            "a second version of the queue both planes changed is not merged in:\n{text}"
         );
         assert!(
             !text.contains("- Add me to channen under team.\n"),
@@ -16892,32 +17223,27 @@ mod tests {
         )
     }
 
-    /// `#admissionsplitmerge`: the gate still protects a real second writer, but by
-    /// MERGING rather than refusing. This is the shape of the 2026-09-27 incident on
-    /// `tasks/agent-doc/agent-doc-bugs.md`: the operator's queue edit reached disk
-    /// while the live editor buffer held a different revision of the same queue.
-    /// BOTH edits must survive into the adopted candidate.
+    /// `#admissionsplitmerge`: a durable three-plane split never refuses. This is
+    /// the shape of the 2026-09-27 incident on `tasks/agent-doc/agent-doc-bugs.md`:
+    /// the operator's queue edit reached disk while the live editor buffer held a
+    /// different revision of the same queue.
+    ///
+    /// `#queuecutexclusive`: both revisions are the operator's, typed in the one
+    /// live editor -- two cuts of one history, not two writers. This test used to
+    /// require their union; that union is the body every admission duplicate
+    /// since adopted. The queue both planes changed keeps the authority's cut and
+    /// admission proceeds on it; the editor's own ops carry the rest exactly once.
     #[test]
-    fn genuinely_divergent_durable_content_merges_both_writers() {
+    fn genuinely_divergent_durable_queue_keeps_the_authority_cut() {
         let (_dir, outcome, log) = admission_gate(
             &queue_document("- do [#one]\n- do [#two]\n"),
             &queue_document("- do [#one]\n- Fix Run Agent Doc\n- do [#two]\n"),
             &queue_document("- do [#one]\n- do [#two]: automate\n"),
         );
-        let adopted = outcome
-            .expect("durably divergent planes must merge, never refuse")
-            .expect("the merge of two genuinely divergent writers must be adopted");
-        assert!(
-            adopted.contains("do [#two]: automate"),
-            "the merge must keep the live editor buffer's edit:\n{adopted}"
-        );
-        assert!(
-            adopted.contains("Fix Run Agent Doc"),
-            "the merge must keep the second writer's disk edit:\n{adopted}"
-        );
-        assert!(
-            adopted.contains("intro"),
-            "the merge must not drop an untouched component body:\n{adopted}"
+        let adopted = outcome.expect("durably divergent planes must never refuse");
+        assert_eq!(
+            adopted, None,
+            "a queue both planes changed proceeds on the authority's cut"
         );
         assert!(
             log.contains(&expected_fields(
@@ -16928,9 +17254,9 @@ mod tests {
         );
         assert!(
             log.contains("admission_three_way_merge ")
-                && log.contains("outcome=adopted")
-                && log.contains("Cell=adopted("),
-            "the merge must record its outcome and which engine produced it:\n{log}"
+                && log.contains("outcome=proceed_on_authority")
+                && log.contains("rungs=[CutExclusive=authority_kept(queue:0) "),
+            "the merge must record why it kept the authority:\n{log}"
         );
     }
 

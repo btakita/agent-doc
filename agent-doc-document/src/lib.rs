@@ -10,6 +10,7 @@ pub mod commit_integrity;
 pub mod commit_normalization;
 pub mod compact_archive;
 pub mod compact_projection;
+pub mod component_exclusivity;
 pub mod component_patches;
 pub mod element_models;
 pub mod outline_projection;

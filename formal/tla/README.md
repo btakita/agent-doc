@@ -229,6 +229,23 @@ for a newer disk revision when the twin-pair guard is off.
 beside a stale cut still lands. With the projection off, that property holds,
 so the projection is load-bearing for progress.
 
+`AdmissionCutExclusivity.tla` (`#queuecutexclusive`) models the mechanism the
+five admission duplicates above share instead of another text shape: disk and
+the live authority are two CUTS of one editor history (the native save and the
+editor's own op stream), the merge write copies disk lines in as NEW CRDT
+items, and the editor's in-flight ops then act on its own items. The pre-fix
+ladder is checked with the count guard, the prefix-twin collapse and the
+twin-pair guard all on. `AdmissionCutExclusivityLadderWedge.cfg` (stale disk
+cut, GH #198 / `opcutahead`) and `AdmissionCutExclusivityInflightWedge.cfg`
+(disk cut ahead, the 2026-10-15 `#gh-dix` -> `#gh-fix` correction) must violate.
+The shipped rule, CutExclusivity (a component both planes changed takes the
+authority's version), holds `NoDuplicateInConcurrentComponent` and
+`ConvergesConcurrent`. `AdmissionCutExclusivityReach.cfg` must show independent
+disk work in a component the authority left alone still lands, and
+`AdmissionCutExclusivityResidual.cfg` must violate the all-component
+`NoDuplicateItem`: a disk-only component's in-flight typing is the stated
+boundary a text-only rule cannot close.
+
 `RemoteLayoutProvisional.tla` checks the recurring Coder/Remote Dev ordering
 race from GH #250. It exhausts every ordered two-column layout over four
 documents, either focused side, every selection absent from the lagging visible
@@ -457,6 +474,7 @@ For the D/Du/R/Rc column (Drop, Duplicate, Reorder, Reconnect): `y` = yes,
 | Model | Cross-process interaction: channel (cite) | D / Du / R / Rc | Constant that a safety property depends on | Safety proven only for a perfect network? |
 |---|---|---|---|---|
 | AdmissionSplitMerge | none. Fixed auth+disk snapshots in `Init` (106-113) | - / - / - / - | none | n/a. Assumes one consistent snapshot |
+| AdmissionCutExclusivity | editor ops past the authority cut delivered in order after the merge write (`Deliver`) | - / - / - / - | none | n/a. Ops are delayed, never lost or reordered |
 | AgentDocCloseout | installer→editor `installCompleted` SV (37→47); editor restart SV (50→62); `RevalidateGeneration` SV (64). The ack is a local countdown, then `acked := TRUE` (67-74) | p / - / - / p | `MaxAckFailures` (29): after it runs out, the ack is decreed | **yes**. The ack always lands |
 | CloseoutChurn | all SV awaits. `ackLanded=TRUE` at Init (28); `replacementAckQueueEmpty := TRUE` by decree (124) | - / - / - / p | none | **yes**. A straight-line script |
 | ConflictReconciliation (+ Lean) | none. Merge is a pure function (133-138; `ConflictReconciliation.lean:95`) | - / p (identical edit applies once, 104-105) / - / - | none | n/a |

@@ -8294,6 +8294,7 @@ struct SimWorld {
 mod engine;
 mod fuzz;
 mod net;
+mod run_while_typing_replica_hold_model;
 mod steering_delivery_model;
 
 #[derive(Debug)]

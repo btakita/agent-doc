@@ -20,7 +20,7 @@ use agent_doc_preflight_runtime_io::{
     relocate_out_of_exchange_prompt_before_diff,
     remove_duplicate_answered_exchange_prompt_tail_for_preflight,
     remove_post_exchange_duplicate_prompt_comments_for_preflight,
-    resolve_current_preflight_document,
+    resolve_admission_preflight_document, resolve_current_preflight_document,
 };
 use agent_doc_prompt_contract::{push_unique_prompt_bearing_changes, push_unique_strings};
 use agent_doc_queue::no_changes_explanation::{
@@ -437,7 +437,19 @@ fn run_with_options_to_writer_in_pass(
     // #rtwwire (rung 3): classify against the realtime document model. When an
     // editor is active, the CRDT relay is the authority and disk is not read as
     // a substitute; with no editor attached, disk is the fallback replica.
-    let mut content = resolve_current_preflight_document(file, "initial")?;
+    //
+    // GH #272 (`#runtypingadmit`): a `Run Agent Doc` pressed while the editor's
+    // replica is briefly unavailable (a rebuild in flight after a controller
+    // recycle, a plugin re-registration racing the operator's keystrokes) is
+    // held for that replica instead of refused outright. The hold observes
+    // only; the content still comes from the editor tier once it answers.
+    // Probes stay read-only and never wait.
+    let (mut content, admission_replica_hold) = if options.probe {
+        (resolve_current_preflight_document(file, "initial")?, None)
+    } else {
+        let admitted = resolve_admission_preflight_document(file, "initial")?;
+        (admitted.content, admitted.replica_hold)
+    };
     // A retained response replay may transiently duplicate only response cells
     // and/or protocol boundary markers. Normalize that evidence-backed shape
     // through Lazily before the generic integrity gate; otherwise the gate
@@ -574,6 +586,20 @@ fn run_with_options_to_writer_in_pass(
         &active_harness,
         initial_frontmatter.codex_network_access.is_some(),
     ) {
+        eprintln!("[preflight] warning: {}", warning.message);
+        warnings.push(warning);
+    }
+    if let Some(report) = &admission_replica_hold {
+        let warning = PreflightWarning {
+            code: "admitted_after_replica_hold".to_string(),
+            message: format!(
+                "Run Agent Doc arrived while this document's editor replica was unavailable;                  preflight held admission {}ms until it answered ({}) and read the editor's                  current text. The operator may still have been editing the prompt: later                  edits reach this turn as mid-turn steering snapshots under the typing gate,                  so treat a prompt that looks unfinished as still in progress (GH #272).",
+                report.waited.as_millis(),
+                report.final_state,
+            ),
+            document_agent: None,
+            active_harness: None,
+        };
         eprintln!("[preflight] warning: {}", warning.message);
         warnings.push(warning);
     }
@@ -1064,11 +1090,31 @@ fn run_with_options_to_writer_in_pass(
         // pause so the diff does not admit a half-typed queue item.
         // `#halftypedcoin`: keep what the wait saw so queue maintenance does not
         // coin a backlog id from a line the operator is still typing.
-        operator_edit_evidence =
+        let (quiescence, evidence) =
             agent_doc_preflight_io::debounce::wait_for_operator_edit_quiescence_with_evidence(
                 file, &content,
-            )
-            .1;
+            );
+        operator_edit_evidence = evidence;
+        // GH #272 (`#runtypingadmit`): the operator was still typing when the
+        // quiescence ceiling ran out. Admit the turn, but say so in the
+        // contract instead of presenting the text as final.
+        if let agent_doc_preflight_io::debounce::OperatorEditQuiescence::CeilingReached {
+            waited,
+            changes,
+        } = quiescence
+        {
+            let warning = PreflightWarning {
+                code: "operator_still_editing".to_string(),
+                message: format!(
+                    "the operator was still editing this document when preflight admitted the                      turn ({changes} change(s) over {}ms without a settled pause): the prompt                      text in this cycle may be a partial snapshot. Later edits arrive as                      mid-turn steering under the typing gate; answer the settled intent and                      re-read a prompt that looks unfinished before acting on it (GH #272).",
+                    waited.as_millis(),
+                ),
+                document_agent: None,
+                active_harness: None,
+            };
+            eprintln!("[preflight] warning: {}", warning.message);
+            warnings.push(warning);
+        }
     }
 
     crate::progress::enter("related_documents")?;

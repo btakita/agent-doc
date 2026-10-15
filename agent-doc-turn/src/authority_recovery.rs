@@ -104,6 +104,83 @@ pub const fn decide_attached_editor_recovery(
     }
 }
 
+/// GH #272 (`#runtypingadmit`): what preflight admission does when its initial
+/// read meets the attached-editor refusal.
+///
+/// The refusal is correct at the instant it is taken: the editor holds the
+/// document, its replica is not answering, and disk must not be adopted. But
+/// for some recovery classes the replica comes back on its own seconds later —
+/// a rebuild still in flight after a controller recycle, or a plugin
+/// re-registration racing the operator's keystrokes. Refusing outright there
+/// dropped the operator's `Run Agent Doc` ("did not run") for a state nobody
+/// had to fix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdmissionReplicaHold {
+    /// The replica can return without operator action. Hold admission for a
+    /// bounded window, observing only, and resolve again when it returns.
+    Hold,
+    /// Waiting cannot change the facts behind the refusal (superseded plugin
+    /// bytes, an unreachable endpoint, a build-mismatch refusal). Refuse now
+    /// with the named remedy instead of spending the admission budget.
+    RefuseNow,
+}
+
+/// Decide whether an admission refusal is worth holding for.
+pub const fn decide_admission_replica_hold(
+    recovery: AttachedEditorRecoveryDecision,
+) -> AdmissionReplicaHold {
+    match recovery {
+        AttachedEditorRecoveryDecision::ReloadEditor
+        | AttachedEditorRecoveryDecision::ReregisterEditor => AdmissionReplicaHold::Hold,
+        AttachedEditorRecoveryDecision::RestartEditor
+        | AttachedEditorRecoveryDecision::WaitForSenderRecycle
+        | AttachedEditorRecoveryDecision::WaitForEndpointGeneration => {
+            AdmissionReplicaHold::RefuseNow
+        }
+    }
+}
+
+/// One step of the bounded admission hold (`#runtypingadmit`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdmissionReplicaHoldStep {
+    /// The authority answers again: resolve the document through the normal
+    /// precedence (editor buffer first), which is the only path that may admit.
+    Reresolve,
+    /// Still unavailable and inside the hold budget: keep observing.
+    Wait,
+    /// The budget is spent with the replica still unavailable: the refusal
+    /// stands, with its cause named.
+    Expired,
+}
+
+/// Decide the next hold step from an observation-only authority read.
+///
+/// The hold never reads disk and never admits on its own: `Reresolve` hands the
+/// decision back to [`decide_authority_recovery`], so a replica that returns is
+/// read as the editor's coherent current text and a proven-detached editor is
+/// the only way to disk, exactly as without the hold.
+pub fn admission_replica_hold_step(
+    observation: AuthorityObservation,
+    held: std::time::Duration,
+    budget: std::time::Duration,
+) -> AdmissionReplicaHoldStep {
+    match observation {
+        AuthorityObservation::Current | AuthorityObservation::Detached => {
+            AdmissionReplicaHoldStep::Reresolve
+        }
+        AuthorityObservation::MissingReplica
+        | AuthorityObservation::SyncPending
+        | AuthorityObservation::Error
+            if held < budget =>
+        {
+            AdmissionReplicaHoldStep::Wait
+        }
+        AuthorityObservation::MissingReplica
+        | AuthorityObservation::SyncPending
+        | AuthorityObservation::Error => AdmissionReplicaHoldStep::Expired,
+    }
+}
+
 /// Decide the next read-authority transition.
 ///
 /// The load-bearing invariant is that disk is reachable only after the editor is
@@ -156,6 +233,58 @@ pub const fn decide_authority_recovery(facts: AuthorityRecoveryFacts) -> Authori
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GH #272: only the recovery classes whose replica can return on its own
+    /// hold admission; every class that needs an operator action refuses now.
+    #[test]
+    fn admission_replica_hold_is_limited_to_self_healing_recovery_classes() {
+        use AttachedEditorRecoveryDecision::{
+            ReloadEditor, ReregisterEditor, RestartEditor, WaitForEndpointGeneration,
+            WaitForSenderRecycle,
+        };
+        for (recovery, expected) in [
+            (ReloadEditor, AdmissionReplicaHold::Hold),
+            (ReregisterEditor, AdmissionReplicaHold::Hold),
+            (RestartEditor, AdmissionReplicaHold::RefuseNow),
+            (WaitForSenderRecycle, AdmissionReplicaHold::RefuseNow),
+            (WaitForEndpointGeneration, AdmissionReplicaHold::RefuseNow),
+        ] {
+            assert_eq!(decide_admission_replica_hold(recovery), expected, "{recovery:?}");
+        }
+    }
+
+    /// GH #272: the hold only ever re-resolves (never reads or admits by
+    /// itself), waits while unavailable inside the budget, and expires at it.
+    #[test]
+    fn admission_replica_hold_step_reresolves_waits_and_expires() {
+        use std::time::Duration;
+        let budget = Duration::from_secs(20);
+        let early = Duration::from_secs(3);
+        for observation in OBSERVATIONS {
+            let expected_early = match observation {
+                AuthorityObservation::Current | AuthorityObservation::Detached => {
+                    AdmissionReplicaHoldStep::Reresolve
+                }
+                _ => AdmissionReplicaHoldStep::Wait,
+            };
+            assert_eq!(
+                admission_replica_hold_step(observation, early, budget),
+                expected_early,
+                "{observation:?}"
+            );
+            let expected_late = match observation {
+                AuthorityObservation::Current | AuthorityObservation::Detached => {
+                    AdmissionReplicaHoldStep::Reresolve
+                }
+                _ => AdmissionReplicaHoldStep::Expired,
+            };
+            assert_eq!(
+                admission_replica_hold_step(observation, budget, budget),
+                expected_late,
+                "{observation:?}"
+            );
+        }
+    }
 
     #[test]
     fn definitive_build_mismatch_refusals_override_reload_shaped_fallbacks() {

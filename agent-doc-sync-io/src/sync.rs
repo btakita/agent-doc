@@ -5398,9 +5398,50 @@ fn run_with_options_internal_at_root(
         }
         true
     };
+    // `#stalecontrollerhotupdate` (c): tmux-router consults `protect_pane` only
+    // for panes this layout does not want. A pane whose live owner document
+    // belongs to a FOREIGN project root (neither this root nor nested beneath
+    // it) is another controller's column: never stash or swap it out. Observed
+    // live (2026-10-15): haiven-dev's controller stashed agent-loop's
+    // agent-doc-bugs.md pane on every one of 292 retries while agent-loop's
+    // controller kept restoring it.
+    //
+    // "Another project's controller owns it" means that controller holds the
+    // window's layout claim. When THIS root holds it (the editor's newest frame
+    // is this root's, e.g. the operator went from 2 panes to 1), the foreign
+    // pane is an ordinary extra and may be stashed.
+    let window_driven_by_other_root = window.is_some_and(|window| {
+        agent_doc_controller_io::project_controller::window_layout_driven_by_other_root(
+            tmux,
+            window,
+            project_root,
+        )
+    });
+    let logged_foreign_panes: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    let protect_foreign_pane = |pane_id: &str| -> bool {
+        if !window_driven_by_other_root {
+            return false;
+        }
+        let Some(document) = agent_doc_controller_io::project_controller::foreign_pane_owner_document(
+            tmux,
+            pane_id,
+            project_root,
+        ) else {
+            return false;
+        };
+        if logged_foreign_panes.borrow_mut().insert(pane_id.to_string()) {
+            sync_log(&format!(
+                "layout_foreign_pane_protected pane={} document={} project_root={} (#stalecontrollerhotupdate)",
+                pane_id,
+                document.display(),
+                project_root.display(),
+            ));
+        }
+        true
+    };
     let allow_open_cycle_detach = |pane_id: &str| {
         let _ = log_open_cycle_detach(pane_id);
-        false
+        protect_foreign_pane(pane_id)
     };
     let tmux_router_options = tmux_router::SyncOptions {
         protect_pane: Some(&allow_open_cycle_detach),
@@ -8222,6 +8263,137 @@ mod tests {
         assert!(pane_runs_other_document_owner(&iso, &bare_pane, &doc));
         assert!(pane_runs_other_document_owner(&iso, &owner_pane, &doc));
         assert!(!pane_runs_other_document_owner(&iso, &shell_pane, &doc));
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn foreign_root_pane_is_protected_from_a_nested_controller_only() {
+        // `#stalecontrollerhotupdate` (c): agent-loop's agent-doc-bugs.md pane
+        // shares a window with haiven-dev's panes. haiven-dev (nested) must
+        // treat it as foreign and never stash it; agent-loop (enclosing) owns
+        // the window and treats haiven-dev panes as its own.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let outer = tmp.path().canonicalize().unwrap();
+        let inner = outer.join("src").join("haiven-dev");
+        std::fs::create_dir_all(outer.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(inner.join(".agent-doc")).unwrap();
+        let bugs = outer.join("tasks").join("agent-doc-bugs.md");
+        let sdk = inner.join("tasks").join("sdk.md");
+        for doc in [&bugs, &sdk] {
+            std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+            std::fs::write(doc, "---\nagent_doc_session: s\n---\n").unwrap();
+        }
+        let iso = agent_doc_tmux_io::isolated_test_tmux("stalecontroller-foreign-pane");
+        let shell_pane = iso.new_session("test", &outer).unwrap();
+        let bugs_pane = iso.split_window(&shell_pane, &outer, "-dh").unwrap();
+        let sdk_pane = iso.split_window(&shell_pane, &inner, "-dh").unwrap();
+        // Run each fake supervisor as the pane's own process (no interactive
+        // shell startup to race), named `agent-doc` so tmux reports a live
+        // agent rather than a bare shell, with a route-owned start command line.
+        for (pane, doc) in [(&bugs_pane, &bugs), (&sdk_pane, &sdk)] {
+            let command = format!(
+                "bash -c \"exec -a agent-doc perl -e 'sleep 60' start --route-owned -- {}\"",
+                doc.display()
+            );
+            iso.raw_cmd(&["respawn-pane", "-k", "-t", pane, &command])
+                .unwrap();
+        }
+        let foreign = |pane: &str, root: &Path| {
+            agent_doc_controller_io::project_controller::foreign_pane_owner_document(
+                &iso, pane, root,
+            )
+        };
+        assert!(
+            wait_for(Duration::from_secs(15), || foreign(&bugs_pane, &inner)
+                .is_some_and(|document| document == bugs)),
+            "the superproject document's pane is foreign to the nested controller"
+        );
+        assert!(
+            wait_for(Duration::from_secs(15), || {
+                agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(
+                    &iso, &sdk_pane,
+                )
+            }),
+            "the nested document's fake supervisor is live"
+        );
+        assert_eq!(foreign(&bugs_pane, &outer), None, "agent-loop owns its own pane");
+        assert_eq!(foreign(&sdk_pane, &outer), None, "agent-loop owns the main window");
+        assert_eq!(foreign(&sdk_pane, &inner), None, "haiven-dev's own pane");
+        assert_eq!(foreign(&shell_pane, &inner), None, "a shell owns no document");
+
+        // The haiven-dev controller realises its own `[sdk]` in the shared
+        // window: the foreign pane is protected from the stash, the unmanaged
+        // shell is not.
+        let window = agent_doc_tmux_io::target_window_id(&*iso, &sdk_pane).unwrap();
+        let registry = tmp.path().join("registry.json");
+        let pre_resolved: HashMap<PathBuf, String> =
+            [(sdk.clone(), sdk_pane.clone())].into_iter().collect();
+        let resolve = |_: &Path| {
+            Some(tmux_router::FileResolution::Registered {
+                key: "sdk".to_string(),
+                tmux_session: None,
+            })
+        };
+        let realise = |protect: &dyn Fn(&str) -> bool| {
+            tmux_router::sync_with_options(
+                &[sdk.display().to_string()],
+                Some(&window),
+                None,
+                &iso,
+                &registry,
+                &resolve,
+                &tmux_router::SyncOptions {
+                    protect_pane: Some(protect),
+                    pre_resolved_panes: Some(&pre_resolved),
+                    ..tmux_router::SyncOptions::default()
+                },
+            )
+            .unwrap();
+            iso.list_window_panes(&window).unwrap()
+        };
+        let protect = |pane: &str| foreign(pane, &inner).is_some();
+        let panes = realise(&protect);
+        assert!(panes.contains(&bugs_pane), "foreign pane kept: {panes:?}");
+        assert!(panes.contains(&sdk_pane), "own column realised: {panes:?}");
+        assert!(!panes.contains(&shell_pane), "unmanaged shell stashed: {panes:?}");
+        // Sensitivity: without the guard the same pass stashes the foreign pane.
+        let panes = realise(&|_: &str| false);
+        assert!(!panes.contains(&bugs_pane), "unguarded pass stashes it: {panes:?}");
+
+        // The guard is armed only while another root holds the window claim:
+        // a nested controller that holds it (the editor went 2 -> 1 pane onto
+        // its document) may drop the foreign pane.
+        use agent_doc_controller::layout_owner::{WINDOW_LAYOUT_CLAIM_OPTION, WindowLayoutClaim};
+        let driven_by_other = |root: &Path| {
+            agent_doc_controller_io::project_controller::window_layout_driven_by_other_root(
+                &iso, &window, root,
+            )
+        };
+        assert!(!driven_by_other(&inner), "no claim: unarmed");
+        let claim = |root: &Path| WindowLayoutClaim {
+            project_root: root.to_path_buf(),
+            stamp_ms: 1,
+            generation: 1,
+            publication: None,
+        };
+        agent_doc_tmux_io::set_window_user_option(
+            &*iso,
+            &window,
+            WINDOW_LAYOUT_CLAIM_OPTION,
+            &claim(&outer).encode(),
+        )
+        .unwrap();
+        assert!(driven_by_other(&inner));
+        assert!(!driven_by_other(&outer));
+        agent_doc_tmux_io::set_window_user_option(
+            &*iso,
+            &window,
+            WINDOW_LAYOUT_CLAIM_OPTION,
+            &claim(&inner).encode(),
+        )
+        .unwrap();
+        assert!(!driven_by_other(&inner));
+        assert!(driven_by_other(&outer));
     }
 
     #[test]

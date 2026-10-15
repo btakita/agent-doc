@@ -25,8 +25,8 @@ use agent_doc_sqlite::state_store::{
 use agent_doc_turn::turn_status::{
     TRANSCRIPT_TAIL_PROBE_BYTES, TranscriptTailEvidence, TurnActiveMarker,
     abandoned_prompt_settle_remaining_secs, classify_transcript_tail, pane_title_for_status,
-    transcript_turn_end_reason, turn_active_expiry_cutoff, turn_active_marker_is_fresh,
-    turn_active_marker_matches_pane, turn_lease_ended_by_interrupt,
+    stale_supervisor_marker_holder_is_live, transcript_turn_end_reason, turn_active_expiry_cutoff,
+    turn_active_marker_is_fresh, turn_active_marker_matches_pane, turn_lease_ended_by_interrupt,
     turn_lease_ended_by_withdrawn_prompt,
 };
 use anyhow::Result;
@@ -686,15 +686,46 @@ pub fn set_supervisor_stale_marker(base: &Path, pane: &str, stale: bool) -> Resu
 }
 
 /// True when the stale-supervisor marker is present under `base` (`#suptmuxstale`).
-/// Read-only display probe — absent / unreadable reads as fresh (not stale).
+/// Display probe — absent / unreadable reads as fresh (not stale).
+///
+/// `#stalecontrollerhotupdate` (3): a row whose writer no longer runs (or whose
+/// pid now names a younger process) is a leftover keyed by a reusable tmux pane
+/// id, not evidence about the pane's current supervisor. It reads as fresh and
+/// is pruned so a reused pane id cannot inherit it.
 pub fn supervisor_stale(base: &Path, pane: &str) -> bool {
+    supervisor_stale_with(base, pane, agent_doc_tmux_io::process_started_at_unix_secs)
+}
+
+fn supervisor_stale_with(
+    base: &Path,
+    pane: &str,
+    process_started_at_secs: impl Fn(u32) -> Option<u64>,
+) -> bool {
     let Ok(conn) = open_state_db(base) else {
         return false;
     };
-    load_coordination_lease_from_db(&conn, SUPERVISOR_STALE_SCOPE, pane)
+    let Some(lease) = load_coordination_lease_from_db(&conn, SUPERVISOR_STALE_SCOPE, pane)
         .ok()
         .flatten()
-        .is_some()
+    else {
+        return false;
+    };
+    let holder_started_at = lease.holder_pid.and_then(&process_started_at_secs);
+    if stale_supervisor_marker_holder_is_live(
+        lease.holder_pid,
+        holder_started_at,
+        lease.heartbeat_secs,
+    ) {
+        return true;
+    }
+    // Best-effort prune of the orphaned row; a failed delete still reads fresh.
+    let _ = clear_coordination_lease_if_heartbeat_at_or_before_in_db(
+        &conn,
+        SUPERVISOR_STALE_SCOPE,
+        pane,
+        lease.heartbeat_secs,
+    );
+    false
 }
 
 /// Effect sink for the process-owned freshness projection. This marker is display
@@ -1114,6 +1145,51 @@ mod tests {
         );
         // Clearing an absent marker is a no-op, not an error.
         clear_turn_active_marker(base, "%7").unwrap();
+    }
+
+    /// `#stalecontrollerhotupdate` (3): the live `%180` incident. A row left by
+    /// a supervisor that died stale (pid 261721, five weeks earlier) must not
+    /// title a reused pane id `⚠ STALE SUPERVISOR`, and it is pruned.
+    #[test]
+    fn orphaned_stale_marker_from_a_dead_or_reused_pid_reads_fresh_and_is_pruned() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
+        let seed = |pane: &str, pid: u32, written: u64| {
+            let conn = open_state_db(base).unwrap();
+            upsert_coordination_lease_in_db(
+                &conn,
+                &CoordinationLeaseRecord {
+                    scope_kind: SUPERVISOR_STALE_SCOPE.to_string(),
+                    scope_id: pane.to_string(),
+                    holder: "stale".to_string(),
+                    holder_pid: Some(pid),
+                    heartbeat_secs: written,
+                },
+            )
+            .unwrap();
+        };
+        let present = |pane: &str| {
+            let conn = open_state_db(base).unwrap();
+            load_coordination_lease_from_db(&conn, SUPERVISOR_STALE_SCOPE, pane)
+                .unwrap()
+                .is_some()
+        };
+
+        // Writer gone.
+        seed("%180", 261_721, 1_788_995_686);
+        assert!(!supervisor_stale_with(base, "%180", |_| None));
+        assert!(!present("%180"), "the orphaned row is pruned");
+
+        // Pid reused by a process younger than the row.
+        seed("%181", 4242, 1_000);
+        assert!(!supervisor_stale_with(base, "%181", |_| Some(9_000)));
+        assert!(!present("%181"));
+
+        // The writer still runs: the marker is honored and kept.
+        seed("%182", 4243, 1_000);
+        assert!(supervisor_stale_with(base, "%182", |_| Some(900)));
+        assert!(present("%182"));
     }
 
     #[test]

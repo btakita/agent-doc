@@ -15,6 +15,26 @@ pub const TURN_ACTIVE_PANE_SUFFIX: &str = " — turn in progress";
 /// running a stale binary.
 pub const STALE_SUPERVISOR_PANE_MARKER: &str = "⚠ STALE SUPERVISOR";
 
+/// `#stalecontrollerhotupdate` (3): a stale-supervisor marker is evidence only
+/// while the supervisor that wrote it is still running.
+///
+/// The marker is keyed by tmux pane id alone. Pane ids are reused across tmux
+/// server restarts, and a supervisor that died stale never cleared its row:
+/// observed live (2026-10-15) a fresh, current supervisor's pane `%180` was
+/// titled `⚠ STALE SUPERVISOR` from a 2026-09-09 row whose writer (pid 261721)
+/// had been gone for five weeks. `holder_started_at_secs` is the start time of
+/// the process now holding `holder_pid` (`None` when no such process exists);
+/// a process that started after the marker was written cannot be its writer
+/// (pid reuse). The one-second slack absorbs start-time rounding.
+pub fn stale_supervisor_marker_holder_is_live(
+    holder_pid: Option<u32>,
+    holder_started_at_secs: Option<u64>,
+    written_at_secs: u64,
+) -> bool {
+    holder_pid.is_some()
+        && holder_started_at_secs.is_some_and(|started| started <= written_at_secs.saturating_add(1))
+}
+
 /// Self-expiry window. A missed idle hook must not wedge the session busy.
 pub const TURN_ACTIVE_TTL_SECS: u64 = 3600;
 
@@ -662,6 +682,20 @@ pub fn transcript_turn_end_reason(evidence: TranscriptTailEvidence) -> Option<&'
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_marker_counts_only_while_its_writer_runs() {
+        // The writer is still running (started before it wrote the row).
+        assert!(stale_supervisor_marker_holder_is_live(Some(7), Some(100), 200));
+        // Start-time rounding slack.
+        assert!(stale_supervisor_marker_holder_is_live(Some(7), Some(201), 200));
+        // The writer is gone.
+        assert!(!stale_supervisor_marker_holder_is_live(Some(7), None, 200));
+        // The pid was reused by a process that started after the write.
+        assert!(!stale_supervisor_marker_holder_is_live(Some(7), Some(5_000), 200));
+        // No writer recorded.
+        assert!(!stale_supervisor_marker_holder_is_live(None, Some(100), 200));
+    }
 
     /// `#runctrlclaude`: only boundaries that end the conversation which ran
     /// preflight are receipts. `Stop` can be blocked into a continuation and

@@ -62,6 +62,13 @@ from the session-actor contract rather than from the old phased rollout notes.
   derived only from editor-published columns. When those columns are unknown, pane membership is
   unchanged; when they are known, exact-visible reconciliation stashes non-member panes, and the
   purpose-aware rule above reaps only a proven stashed orphan.
+- The stale-supervisor marker is keyed by tmux pane id alone, and pane ids are reused across tmux
+  server restarts, so it is evidence only while the supervisor that wrote it still runs
+  (`#stalecontrollerhotupdate`, `stale_supervisor_marker_holder_is_live`). A row whose writer pid is
+  gone, or names a process that started after the row was written (pid reuse), reads as fresh and
+  is pruned by the display probe: observed 2026-10-15, a current supervisor's pane `%180` was
+  titled `⚠ STALE SUPERVISOR` from a 2026-09-09 row whose writer (pid 261721) had been gone for
+  five weeks.
 - Not a replacement for `ipc_socket.rs` — that socket handles write-path IPC between the binary and editor plugins. Supervisor IPC is a different socket, scoped to claude lifecycle control.
 
 ## Architecture

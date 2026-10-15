@@ -821,6 +821,52 @@ pub fn display_message_value_nonempty(
     display_message_value(runner, target, format).filter(|value| !value.is_empty())
 }
 
+/// Read a window-scoped tmux user option (`@name`). `None` when the option is
+/// unset or the window cannot be read. The value is server-wide state scoped
+/// to exactly one window, so every agent-doc process on the server observes
+/// the same fact and it disappears with the window.
+pub fn window_user_option(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    window: &str,
+    option: &str,
+) -> Option<String> {
+    display_message_value_nonempty(runner, Some(window), &format!("#{{{option}}}"))
+}
+
+/// Set a window-scoped tmux user option (`@name`).
+pub fn set_window_user_option(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    window: &str,
+    option: &str,
+    value: &str,
+) -> Result<(), TmuxIoError> {
+    runner
+        .run(&TmuxCommand::new([
+            "set-option",
+            "-w",
+            "-q",
+            "-t",
+            window,
+            option,
+            value,
+        ]))
+        .map(|_| ())
+}
+
+/// Start time of process `pid`, in whole Unix seconds; `None` when no such
+/// process runs. Pane-scoped markers record the pid of the process that wrote
+/// them, and tmux pane ids are reused across server restarts, so a reader must
+/// prove the writer is still that process before trusting the marker
+/// (`#stalecontrollerhotupdate`).
+pub fn process_started_at_unix_secs(pid: u32) -> Option<u64> {
+    agent_doc_fs::process_start::process_start_time(pid).map(|started| {
+        started
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default()
+    })
+}
+
 pub fn project_root_for_pane_current_path(output: &str) -> Option<PathBuf> {
     let current_path = output.trim();
     if current_path.is_empty() {

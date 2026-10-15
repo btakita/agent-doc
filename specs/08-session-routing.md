@@ -298,6 +298,60 @@ typed (never as a transport error) and is terminal for the route
 launches the owner: when no owning controller is reachable nothing competes
 for the window, so the route publishes locally as before and logs
 `controller_editor_route_layout_delegation_failed ... fallback=local_publish`.
+
+**One window, one driver, in the editor's order (`#stalecontrollerhotupdate`):**
+delegation orders only layouts that NAME an enclosing root's document. A nested
+controller whose layout names only its own documents still projects locally,
+and the editor sends its next cross-root frame only to the enclosing
+controller, so nothing superseded the nested controller's generation: observed
+2026-10-15, the operator switched the editor 2 -> 1 -> 2 panes, haiven-dev's
+generation 4 (`[sdk.md, sdk.md]`, a JetBrains split showing one file twice)
+re-applied itself 292 times over 33 minutes, stashing agent-loop's pane on every
+attempt and collapsing the window back to 1 pane after each "Sync Tmux Panes";
+an IDE restart did not help because the stale generation lived in the
+controller. The invariants:
+
+- A desired layout names each document at most once
+  (`collapse_duplicate_layout_documents`; the first occurrence keeps its
+  column; `pane_layout_publication_duplicate_columns_collapsed`).
+- One desired generation spends at most `PROJECTION_RETRY_ATTEMPT_LIMIT` (12)
+  projection attempts. The count, the retirement and the window-claim stamp
+  live in the layout graph's `ProjectionAttemptLedger`, not on the worker
+  thread, so a restarted worker never re-applies a retired generation. A
+  retirement writes a terminal `Refused` receipt and one
+  `pane_layout_projection_retired reason=retry_budget_exhausted|yielded_to_newer_window_claim|editor_surface_forgotten`
+  line.
+- Every controller that projects into a window stamps it with a
+  `WindowLayoutClaim` (tmux window option `@agent_doc_layout_claim`: root,
+  generation, publication stamp, editor order). Before each attempt a
+  controller whose generation is older than another root's claim yields
+  (`window_claim_requires_yield`). "Older" is the editor's own frame order when
+  both generations came from the same editor client: the JetBrains plugin
+  publishes every frame from one process-wide client with one monotonic
+  `(generation, sequence)` counter, whichever controller it targets, so that
+  order is independent of which controller got CPU time first. Without it, the
+  stamp minted when the generation was PUBLISHED decides (never the first
+  projection attempt: a loaded machine could run an older frame's first
+  attempt after a newer frame was already projected elsewhere, which is the
+  reported "auto syncs back to 1 pane").
+- The editor forgets the previous root before publishing to a new one
+  (`editor_surface_forget`). A controller told to forget a client retires the
+  retained generation that client's frame published, in every navigation lane.
+  An identical later frame from that editor mints a fresh generation instead of
+  coalescing into the retired one; a budget-exhausted generation does not
+  re-arm on an identical frame, which would rebuild the unbounded loop.
+- A pane whose live owner document belongs to a root that is neither the
+  controller's own nor nested beneath it (`pane_owner_is_foreign`) is protected
+  from that controller's stash and ignored by its convergence check ONLY while
+  another root holds the window claim (`window_layout_driven_by_other_root`,
+  `layout_foreign_pane_protected`). When the controller holds the claim, the
+  editor's newest frame is its own and the foreign pane is an ordinary extra:
+  going from 2 panes to 1 onto a nested-root document must still drop it.
+
+The reference model is `sim_world::stale_controller_shared_window_model`: both
+round trips settle on the editor's newest frame under every seeded delivery
+interleaving, and each relaxed policy (no editor order, an unconditional
+foreign-pane guard, the pre-fix code) reproduces its own failure.
 Delegation is decided per publication and terminates on the owner (no column
 root encloses it). A layout of only the controller's own or nested roots (the
 superproject showing submodule columns), a sibling root, and a document whose

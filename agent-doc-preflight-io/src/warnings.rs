@@ -2019,6 +2019,17 @@ mod tests {
             Some(&serde_json::to_string(&ops).unwrap()),
         )
         .unwrap();
+        // Read the registration through this process's liveness projection, which
+        // `reliable_sync_editor_live_for_file` hydrates from the durable frame
+        // above. Without an embedded relay route, the registration lookup asks the
+        // project controller over RPC, so this test cold-launched a SEPARATE
+        // `agent-doc controller serve` (whatever `AGENT_DOC_BIN`/`PATH` resolves)
+        // and raced its socket bind against a fixed wall-clock launch budget.
+        // Under load the launch timed out ("timed out waiting for launched
+        // controller pid N"), `live_plugin_generation_statuses` folded that
+        // error into "no live editors", and the assertion below saw `[]`. The
+        // subject here is frame -> projection -> warning, not process launch.
+        agent_doc_crdt_relay_io::register_embedded_relay_route_for_file(&canonical).unwrap();
 
         let warnings = stale_plugin_warnings(&doc);
         assert_eq!(
@@ -2028,5 +2039,14 @@ mod tests {
         );
         assert_eq!(warnings[0].code, "stale_plugin");
         assert!(warnings[0].message.contains("0.2.100"));
+        // Hermeticity: no controller process was launched for this project, so
+        // the verdict depends on no other process and no launch deadline. The
+        // launcher creates this log synchronously before it spawns.
+        assert!(
+            !dir.path()
+                .join(".agent-doc/logs/controller-stderr.log")
+                .exists(),
+            "the end-to-end warning must not depend on launching a project controller"
+        );
     }
 }

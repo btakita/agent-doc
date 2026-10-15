@@ -199,6 +199,47 @@ What 0.35.504 adds:
 - **Agent instructions:** the skill and runbooks now tell agents to use `--todo-add`, and every harness copy was regenerated.
 
 This response uses it. It adds one real operator action, a live Remote Dev check for the GH #262 fix, so agent-doc should create the `## Todo` section in this document now.
+
+### Re: v0.35.504 released — closing the batch — opus-5.5 · 2026-10-15T01:26-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/261
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/262
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/263
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/264
+
+> **Queue prompt:** tmux pane auto-sync not working
+
+> **Queue prompt:** Add a `priority` attribute to `agent:review`.
+
+> **Queue prompt:** Is `agent:todo` implemented? I don't see it being used. Please fix. There should be todo's when the operator needs to take an action. If a agent:todo is not in the document, agent-doc should add it.
+
+> **Queue prompt:** release + publish
+
+**v0.35.504 is released.**
+- `make release` passed release preflight (version projection and editor parity), one full `make check` (nextest: 10,563 passed, 167 skipped, plus the batched controller tests and `make tla`) and `make tmux-ci`.
+- It then tagged `v0.35.504` and pushed `main` (now `3f763c4649`), and the local `install-full` completed. `agent-doc --version` reports 0.35.504.
+- The tag push started the GitHub `Release v0.35.504` workflow, which publishes to GitHub Releases and PyPI. It was still running when this was written. CI on `main` is also running.
+
+**Spec + tests, build + install, commit + push (`#spec-test-build-install-commit-push`), fix then close (`#gh-fix`).** Each item updated its spec text and added regression tests, verified with targeted tests, clippy and `make check-fast`. The batch then had one full `make check` and was built and installed locally. Everything is committed and pushed to `main`. **GH #261, #262, #263 and #264 are closed**, each with a comment naming its fix commit.
+
+| item | fix |
+|---|---|
+| GH #261 | A promoted predecessor controller stops its watchdog and orphan drain, releases the editor's authority streams, retires its frozen relay hubs, and bounds its drain (`58b8d5467a`). The new stream test was then made independent of timing (`d61cc95fc8`). |
+| GH #262 | The Remote Dev fallback observes `CONTROLLER` sessions as well as guests (`9f62473873`). |
+| GH #263 | Process start time comes from `/proc/<pid>/stat`, not the `/proc/<pid>` mtime (`a6b585f71e`). |
+| GH #264 | A nested component no longer panics component scope; a panicked controller request returns an error naming the document (`14baa6eecc`). |
+| tmux pane auto-sync | The JetBrains plugin no longer retires its own live surface after a quick tab switch, and rejections name their reason (`9ad4fdcd04`). After the install, `ops.log` shows every observation accepted and `caller_kind=automatic` layouts converging. |
+| `agent:review` `priority` | Sorted like backlog and icebox; new `agent-doc review set-attr` / `unset-attr` (`774258e24e`). |
+| `agent:todo` | `--todo-add`, the section created when missing, and an advisory when a review gate has no todo (`0f889d24d7`). This document now has its own `## Todo` section. |
+| release + publish | Done as above. Also in this release: the fix that stops several `report-complete` entries from blocking the document (`9bfa3cf4d9`) and the deterministic-escape proposal (`798a46bb91`). |
+
+**Still open:**
+- **"do your formal logic suggestions":** done on `feat/surface-retire-formal` (`3eaf5a0dfb`), but not in v0.35.504 because you said "ship now". It includes the TLA+ retirement model (wedge and reach configs, `make tla` 145 checks as declared), recovery by re-registering on `retired_endpoint`, the model-to-code conformance test, replay of the two wedge traces, and the muted-endpoint monitor. It will be merged and released in v0.35.505.
+- **`#ctrltimingflakes`:** a subagent is still fixing the two older timing-dependent controller tests.
+- **Wording note:** the subagent's spec drafts use "precedent" where your question said "precedence".
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
@@ -207,7 +248,7 @@ This response uses it. It adds one real operator action, a live Remote Dev check
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/261
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/261~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/262
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/263
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/264

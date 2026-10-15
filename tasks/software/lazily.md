@@ -118,7 +118,23 @@ Acknowledged: `agent: codex` → `agent: claude`. This cycle's only change was t
 Queue state at admission: `go` with 4 heads (`#lzcoreevidencedarttimeout`, `#lzcoreciactivationfixes`, `release + publish`, the restored `#gh-fix` for agent-doc issue 249). No claims are active. The earlier subagent claims (`darttimeout`, `ciactivation`, `issue249`, `releasepublish`) have all expired or been released, so every head can be picked up again. Preflight reported `queue_auto_clear_yield: true`, so I'm handing the next head to the supervisor's auto-clear path to dispatch to this Claude pane. I'm not draining it here.
 
 The queue-wide `#spec-test-commit-push` preset is still undefined (`#lzcommitpresetresolve`). Until it's defined, queue workers can implement and verify but cannot commit, push, install, or release.
-<!-- agent:boundary:74d7308e -->
+> **Chat prompt (#chatprompt):** Cancel the tmux pane auto-sync not working
+
+### Re: queue fan-out — opus-5-5 · 2026-10-14T20:58-04:00
+
+> **Queue prompt:** tmux pane auto-sync not working
+
+Cancelled at your request. Its subagent claim (`subagent:tmuxautosync`) was released before anything was dispatched, so no work was started. This echo strikes the head.
+
+Dispatched to background subagents, all claimed. Each resumes its earlier worktree instead of starting over:
+
+- `#lzcoreevidencedarttimeout` → `subagent:darttimeout`, resuming in `~/worktrees/lzcoreevidencedarttimeout-20261012`.
+- `#lzcoreciactivationfixes` → `subagent:ciactivation`, resuming in `~/worktrees/lzcoreciactivationfixes-20261013`. The Phase 5 `lzcoreciactivation-consumer-*` worktrees are reference only.
+- `release + publish` → `subagent:releasepublish`. This is a refreshed release-readiness report only: per-repo tags, published versions, unreleased commits, CI, and the exact release commands. The subagent rules forbid a worker from cutting the release itself.
+- agent-doc issue 249 (`#gh-fix`) → `subagent:issue249`, resuming `~/worktrees/agent-doc-gh249-20261013` (branch `fix/gh249-jetbrains-263-frame-isolation`, uncommitted changes in `src/plugin.rs`, `editors/jetbrains/SPEC.md`, and `scripts/jetbrains-custom-repository.py`). It first checks whether another live session owns that worktree.
+
+`#spec-test-commit-push` is still undefined (`#lzcommitpresetresolve`). Every worker got the unresolved-authorization preamble, so none of them will commit, push, install, or release. Results land as uncommitted worktree diffs plus reports. Integrating and releasing needs that preset defined, or an explicit commit/push authorization.
+<!-- agent:boundary:02e242a9 -->
 <!-- /agent:exchange -->
  
 ## Queue

@@ -1427,6 +1427,48 @@ fn derive_owned_layout_assignments(
         .collect()
 }
 
+thread_local! {
+    /// `#stalecontrollerhotupdate` (d): the editor frame whose `Sync` intent is
+    /// being published on this thread. Scoped by
+    /// [`with_pane_layout_editor_publication`] around the in-process publish, so
+    /// the graph records the frame's order for exactly the generation that
+    /// publish mints, before the effect worker can see it, without threading a
+    /// new argument through every publisher.
+    static PANE_LAYOUT_EDITOR_PUBLICATION: std::cell::RefCell<
+        Option<agent_doc_controller::layout_owner::EditorPublicationOrder>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
+/// Run `publish` with `order` as the publishing editor frame (see
+/// [`PANE_LAYOUT_EDITOR_PUBLICATION`]). The previous value is restored even if
+/// `publish` panics.
+pub(crate) fn with_pane_layout_editor_publication<T>(
+    order: agent_doc_controller::layout_owner::EditorPublicationOrder,
+    publish: impl FnOnce() -> T,
+) -> T {
+    struct Restore(Option<agent_doc_controller::layout_owner::EditorPublicationOrder>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            PANE_LAYOUT_EDITOR_PUBLICATION.with(|slot| *slot.borrow_mut() = previous);
+        }
+    }
+    let _restore = Restore(PANE_LAYOUT_EDITOR_PUBLICATION.with(|slot| slot.replace(Some(order))));
+    publish()
+}
+
+fn current_pane_layout_editor_publication()
+-> Option<agent_doc_controller::layout_owner::EditorPublicationOrder> {
+    PANE_LAYOUT_EDITOR_PUBLICATION.with(|slot| slot.borrow().clone())
+}
+
+fn pane_layout_publication_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis().try_into().unwrap_or(u64::MAX))
+        .unwrap_or_default()
+}
+
 /// Controller-lifetime Lazily graph for the pane layout projection.
 ///
 /// IDE observations set `desired`; tmux observations set `observed`; the
@@ -1470,6 +1512,11 @@ struct ControllerPaneLayoutGraph {
     /// GH #136 follow-up (a)/(d): the last pass's observed width and gated
     /// documents, retained across generations.
     width_memory: Mutex<PaneLayoutWidthMemory>,
+    /// `#stalecontrollerhotupdate` (b)/(d): per-generation attempt count,
+    /// retirement, and window-claim stamp. Held by the graph, not the worker
+    /// thread, so a restarted worker cannot re-apply a retired generation or
+    /// re-stamp an old one as the newest publication.
+    attempt_ledger: Mutex<agent_doc_controller::pane_layout::ProjectionAttemptLedger>,
     waiters: Condvar,
     wait_lock: Mutex<()>,
     /// The navigation lane this graph belongs to. Its status is published on
@@ -1721,6 +1768,7 @@ impl ControllerPaneLayoutGraph {
             plane_seen: AtomicU64::new(0),
             published_generation: Arc::new(AtomicU64::new(0)),
             width_memory: Mutex::new(PaneLayoutWidthMemory::default()),
+            attempt_ledger: Mutex::new(Default::default()),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
             lane,
@@ -1881,10 +1929,25 @@ impl ControllerPaneLayoutGraph {
         claim: PaneLayoutClaim,
     ) -> PaneLayoutDesired {
         let publisher = claim.publisher;
+        let editor_publication = current_pane_layout_editor_publication();
         if publication == PaneLayoutPublication::CoalesceIdentical
             && let Some(mut current) = self.ctx.get(&self.desired)
             && current.invocation == invocation
+            // `#stalecontrollerhotupdate` (d): a generation that yielded the
+            // window or was forgotten by its editor lost to something newer;
+            // a later identical frame is a new decision and needs its own
+            // generation, or the retired one would swallow it forever.
+            && !self
+                .attempt_ledger
+                .lock()
+                .retired(current.generation)
+                .is_some_and(|retired| retired.rearms_on_identical_republication())
         {
+            self.attempt_ledger.lock().note_published(
+                current.generation,
+                pane_layout_publication_now_ms(),
+                editor_publication,
+            );
             if source_plane_version > current.source_plane_version {
                 current.source_plane_version = source_plane_version;
             }
@@ -1947,6 +2010,16 @@ impl ControllerPaneLayoutGraph {
             invocation,
             provenance,
         };
+        // `#stalecontrollerhotupdate` (d): the window-claim stamp and editor
+        // order are the PUBLICATION's, recorded before the worker can observe
+        // the generation. Stamping at the first projection attempt let a busy
+        // controller's older frame outrank a newer one another controller had
+        // already projected.
+        self.attempt_ledger.lock().note_published(
+            generation,
+            pane_layout_publication_now_ms(),
+            editor_publication,
+        );
         self.ctx.batch(|ctx| {
             ctx.set(&self.observed, None);
             ctx.set(
@@ -2148,6 +2221,70 @@ impl ControllerPaneLayoutGraph {
 
     fn width_memory(&self) -> PaneLayoutWidthMemory {
         self.width_memory.lock().clone()
+    }
+
+    /// `#stalecontrollerhotupdate` (b): admit the next projection attempt for
+    /// `generation`, or report that it already retired.
+    pub(crate) fn begin_projection_attempt(
+        &self,
+        generation: u64,
+    ) -> agent_doc_controller::pane_layout::ProjectionAttemptAdmission {
+        self.attempt_ledger.lock().begin_attempt(generation)
+    }
+
+    /// True when `generation` has spent its whole retry budget.
+    pub(crate) fn projection_retry_budget_spent(&self, generation: u64) -> bool {
+        self.attempt_ledger.lock().retry_budget_spent(generation)
+    }
+
+    /// Retire `generation`; true only the first time (log once).
+    pub(crate) fn retire_projection(
+        &self,
+        generation: u64,
+        reason: agent_doc_controller::pane_layout::ProjectionRetirement,
+    ) -> bool {
+        self.attempt_ledger.lock().retire(generation, reason)
+    }
+
+    /// The editor publication order of `generation`, when an editor frame
+    /// published it.
+    pub(crate) fn projection_publication(
+        &self,
+        generation: u64,
+    ) -> Option<agent_doc_controller::layout_owner::EditorPublicationOrder> {
+        self.attempt_ledger.lock().publication(generation).cloned()
+    }
+
+    /// `#stalecontrollerhotupdate` (d): the editor told this controller to
+    /// forget `client_id`'s surface. When the retained generation was published
+    /// by that client's frame, retire it (first time only) and return it so the
+    /// caller can record the terminal receipt; the editor's later frame, here or
+    /// on another controller, is the layout it actually shows.
+    pub(crate) fn retire_generation_forgotten_by_editor(
+        &self,
+        client_id: &str,
+    ) -> Option<PaneLayoutDesired> {
+        let desired = self.desired()?;
+        if desired.provenance.publisher != PaneLayoutPublisher::EditorSurface {
+            return None;
+        }
+        let mut ledger = self.attempt_ledger.lock();
+        let published_by_client = ledger
+            .publication(desired.generation)
+            .is_some_and(|publication| publication.client_id == client_id);
+        (published_by_client
+            && ledger.retire(
+                desired.generation,
+                agent_doc_controller::pane_layout::ProjectionRetirement::EditorSurfaceForgotten,
+            ))
+        .then_some(desired)
+    }
+
+    /// The window-claim stamp of `generation` (minted once).
+    pub(crate) fn projection_claim_stamp_ms(&self, generation: u64, now_ms: u64) -> u64 {
+        self.attempt_ledger
+            .lock()
+            .claim_stamp_ms(generation, now_ms)
     }
 
     /// GH #136 follow-up (d): claim the right to republish for one gated

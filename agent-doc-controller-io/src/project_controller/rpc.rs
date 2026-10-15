@@ -8208,12 +8208,64 @@ fn recycle_controllers_install_fanout(
             }
             continue;
         }
-        match recycle(&root) {
-            Ok(true) => recycled += 1,
-            _ => skipped += 1,
+        if recycle_fanout_root_with_retry(&root, "install_fanout", &mut recycle) {
+            recycled += 1;
+        } else {
+            skipped += 1;
         }
     }
     (recycled, skipped)
+}
+
+/// `#stalecontrollerhotupdate` (1): pause before the one retry of a fan-out
+/// recycle request that failed in transport.
+const RECYCLE_FANOUT_RETRY_PAUSE: Duration = Duration::from_millis(500);
+
+/// `#stalecontrollerhotupdate` (1): send one fan-out `recycle` to `root`,
+/// retrying a transport failure once, and never let a root that was not
+/// recycled go unreported.
+///
+/// A fan-out used to fold every non-`Ok(true)` answer into a bare `skipped`
+/// count: a controller process whose socket timed out or refused the request
+/// looked exactly like one that politely declined because it already runs the
+/// installed binary. Each non-recycled root now gets a
+/// `controller_recycle_fanout_unrecycled` line in its own ops log naming the
+/// outcome (`declined` = the controller answered and declined, or no
+/// controller socket answered; `failed` = transport error after the retry),
+/// and a failure is also printed to the installer's stderr.
+fn recycle_fanout_root_with_retry(
+    root: &Path,
+    fanout: &str,
+    recycle: &mut impl FnMut(&Path) -> Result<bool>,
+) -> bool {
+    let mut attempts = 1;
+    let mut answer = recycle(root);
+    if answer.is_err() {
+        std::thread::sleep(RECYCLE_FANOUT_RETRY_PAUSE);
+        attempts += 1;
+        answer = recycle(root);
+    }
+    let (outcome, detail) = match &answer {
+        Ok(true) => return true,
+        Ok(false) => ("declined", "controller_declined_or_socket_unanswered".to_string()),
+        Err(error) => ("failed", format!("{error:#}").replace('\n', " ")),
+    };
+    if root.join(".agent-doc").is_dir() {
+        agent_doc_ops_log_io::log_op(
+            root,
+            &format!(
+                "controller_recycle_fanout_unrecycled project_root={} fanout={fanout} outcome={outcome} attempts={attempts} detail={detail:?} (#stalecontrollerhotupdate)",
+                root.display(),
+            ),
+        );
+    }
+    if outcome == "failed" {
+        eprintln!(
+            "[agent-doc] warning: {fanout} recycle of the controller for {} failed after {attempts} attempt(s): {detail}; it keeps serving its current image until a client or its idle tick detects the stale binary",
+            root.display(),
+        );
+    }
+    false
 }
 
 /// Recycle only controllers whose roots have a live editor endpoint after that
@@ -8262,9 +8314,10 @@ fn recycle_controllers_live_plugin_fanout(
             }
             continue;
         }
-        match recycle(&root) {
-            Ok(true) => recycled += 1,
-            _ => skipped += 1,
+        if recycle_fanout_root_with_retry(&root, "live_plugin_update", &mut recycle) {
+            recycled += 1;
+        } else {
+            skipped += 1;
         }
     }
     (recycled, skipped)
@@ -8307,9 +8360,12 @@ pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usi
     let mut recycled = 0;
     let mut skipped = 0;
     for root in roots {
-        match recycle_controller_force(&root, force) {
-            Ok(true) => recycled += 1,
-            _ => skipped += 1,
+        if recycle_fanout_root_with_retry(&root, "all_projects", &mut |root| {
+            recycle_controller_force(root, force)
+        }) {
+            recycled += 1;
+        } else {
+            skipped += 1;
         }
     }
     // #stuckhandoff2: orphan reaping is project-scoped inside `recycle_controller`,
@@ -25943,6 +25999,33 @@ fn layout_sync_state_expected_documents(
     .collect()
 }
 
+/// `#stalecontrollerhotupdate` (c): drop the panes whose observed document is
+/// not expected and belongs to a project root foreign to `project_root`
+/// (`document_root` resolves a canonical document to its project root).
+fn layout_sync_state_without_foreign_extras(
+    project_root: &Path,
+    expected_documents: &[String],
+    panes: Vec<String>,
+    actual_documents: Vec<String>,
+    document_root: impl Fn(&str) -> Option<PathBuf>,
+) -> (Vec<String>, Vec<String>) {
+    let controller_root = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    panes
+        .into_iter()
+        .zip(actual_documents)
+        .filter(|(_, document)| {
+            document.is_empty()
+                || expected_documents.contains(document)
+                || !agent_doc_controller::layout_owner::pane_owner_is_foreign(
+                    &controller_root,
+                    document_root(document).as_deref(),
+                )
+        })
+        .unzip()
+}
+
 fn layout_sync_state_actual_document_for_pane(
     project_root: &Path,
     tmux: &tmux_router::Tmux,
@@ -26993,15 +27076,26 @@ fn handle_editor_surface_observe(
             } => {
                 let invocation =
                     automatic_editor_surface_sync_invocation(&columns, &document, preserve_focus);
-                let publish_result = publish_pane_layout_desired_invocation_in_lane(
-                    bootstrap,
-                    runtime,
-                    &navigation_lane,
-                    invocation,
-                    None,
-                    PaneLayoutPublication::CoalesceIdentical,
-                    PaneLayoutPublisher::EditorSurface,
-                );
+                // `#stalecontrollerhotupdate` (d): the generation this mints is
+                // ordered by the editor's own frame order, which is shared by
+                // every controller this editor publishes to.
+                let editor_order = agent_doc_controller::layout_owner::EditorPublicationOrder {
+                    client_id: projection_identity.0.clone(),
+                    generation: projection_identity.2,
+                    sequence: projection_identity.3,
+                };
+                let publish_result =
+                    super::with_pane_layout_editor_publication(editor_order, || {
+                        publish_pane_layout_desired_invocation_in_lane(
+                            bootstrap,
+                            runtime,
+                            &navigation_lane,
+                            invocation,
+                            None,
+                            PaneLayoutPublication::CoalesceIdentical,
+                            PaneLayoutPublisher::EditorSurface,
+                        )
+                    });
                 record_editor_surface_effect(
                     &bootstrap.project_root,
                     &focus_client_id,
@@ -27225,6 +27319,13 @@ fn handle_editor_surface_forget(
             SurfaceTerminalDecision::Idle,
         )
     };
+    if forgotten_clients > 0 {
+        retire_pane_layout_generations_forgotten_by_editor(
+            &bootstrap.project_root,
+            runtime,
+            &client_id,
+        );
+    }
     // `#surfaceobservesilent`: a stray or early retirement is the leading cause of
     // a surface graph that silently rejects every later observation, so the forget
     // side needs a receipt in the same log.
@@ -27244,6 +27345,48 @@ fn handle_editor_surface_forget(
         "forgotten_clients": forgotten_clients,
         "terminal_decision": terminal_decision,
     }))
+}
+
+/// `#stalecontrollerhotupdate` (d): the editor moved its frame away from this
+/// controller (it forgets the old root before publishing to the new one), so a
+/// desired generation that frame published is no longer anything the editor
+/// shows. Retire it in every lane instead of letting the effect worker keep
+/// re-applying it: live 2026-10-15, haiven-dev was told to forget at 19:57 and
+/// re-applied the forgotten `[sdk, sdk]` generation 292 times until 20:30,
+/// collapsing the operator's 2-pane window back to 1 pane on every attempt.
+fn retire_pane_layout_generations_forgotten_by_editor(
+    project_root: &Path,
+    runtime: &ControllerRuntime,
+    client_id: &str,
+) {
+    use agent_doc_controller::pane_layout::ProjectionRetirement;
+    for lane in runtime.pane_layout_lane_ids() {
+        let graph = runtime.pane_layout_graph_for_lane(&lane);
+        let Some(desired) = graph.retire_generation_forgotten_by_editor(client_id) else {
+            continue;
+        };
+        let retirement = ProjectionRetirement::EditorSurfaceForgotten;
+        graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: desired.generation,
+            actor_bindings: graph.actor_bindings(),
+            attempt: 0,
+            phase: PaneLayoutEffectPhase::Refused,
+            reason: format!("{}; client={client_id}", retirement.as_str()),
+            file_panes: Vec::new(),
+            focus_required: false,
+            focus_applied: false,
+        });
+        publish_pane_layout_lane_status(runtime, &lane);
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "pane_layout_projection_retired generation={} attempts=0 reason={} {} client={client_id} (#stalecontrollerhotupdate)",
+                desired.generation,
+                retirement.as_str(),
+                pane_layout_projection_provenance(&desired),
+            ),
+        );
+    }
 }
 
 fn editor_view_identity(
@@ -28402,6 +28545,28 @@ fn tmux_layout_sync_state_for_invocation_in_session(
             )
         })
         .collect::<Vec<_>>();
+    // `#stalecontrollerhotupdate` (c): while ANOTHER project root holds this
+    // window's layout claim, a pane owned by a foreign root that this layout
+    // does not name is that controller's column. The layout effect does not
+    // stash it then, so convergence must not demand its removal (that demand
+    // is what made a nested controller retry forever). When this controller
+    // holds the claim (the editor's newest frame is its own, e.g. the operator
+    // went from 2 panes to 1), the foreign pane is an ordinary extra.
+    let (panes, actual_documents) =
+        if window_layout_driven_by_other_root(tmux, &window_id_value, &bootstrap.project_root) {
+            layout_sync_state_without_foreign_extras(
+                &bootstrap.project_root,
+                &expected_documents,
+                panes,
+                actual_documents,
+                |document| {
+                    agent_doc_project_root_io::project_root_containing(Path::new(document))
+                        .map(|root| root.canonicalize().unwrap_or(root))
+                },
+            )
+        } else {
+            (panes, actual_documents)
+        };
     // `#panewindowdrift`: an effect/reuse assignment is a record of where a pane
     // was placed, and it keeps naming that pane after the operator stashes it.
     // `panes` is the target window's own ordered pane list, so an assignment
@@ -30843,8 +31008,6 @@ fn pane_layout_effect_worker(
     wake: Arc<Condvar>,
     executing_revision: &AtomicU64,
 ) {
-    let mut attempt = 0_u64;
-    let mut active_generation = 0_u64;
     loop {
         let work_revision = state.lock().pending_revision();
         executing_revision.store(work_revision, Ordering::SeqCst);
@@ -30864,10 +31027,6 @@ fn pane_layout_effect_worker(
             state.lock().deactivate();
             return;
         };
-        if desired.generation != active_generation {
-            active_generation = desired.generation;
-            attempt = 0;
-        }
         let already_terminal = matches!(
             graph.projection(),
             PaneLayoutProjection::Refused(ref terminal)
@@ -30881,14 +31040,26 @@ fn pane_layout_effect_worker(
             {
                 return;
             }
-            attempt = 0;
             continue;
         }
         if state.lock().is_superseded(work_revision) {
-            attempt = 0;
             continue;
         }
-        attempt = attempt.saturating_add(1);
+        // `#stalecontrollerhotupdate` (b)/(d): the attempt count and any
+        // retirement are per generation and survive a worker restart, so a
+        // generation that spent its retry budget or yielded its window is never
+        // re-applied until a newer generation replaces it.
+        let attempt = match graph.begin_projection_attempt(desired.generation) {
+            agent_doc_controller::pane_layout::ProjectionAttemptAdmission::Attempt { number } => {
+                number
+            }
+            agent_doc_controller::pane_layout::ProjectionAttemptAdmission::Retired(_) => {
+                if state.lock().retire_if_current(work_revision) {
+                    return;
+                }
+                continue;
+            }
+        };
 
         let bootstrap = match runtime.bootstrap_snapshot() {
             Ok(bootstrap) => bootstrap,
@@ -30946,7 +31117,6 @@ fn pane_layout_effect_worker(
                     PaneLayoutAttemptCompletion::Retire => return,
                     PaneLayoutAttemptCompletion::RetryCurrent
                     | PaneLayoutAttemptCompletion::Superseded => {
-                        attempt = 0;
                         continue;
                     }
                 }
@@ -31095,12 +31265,57 @@ fn pane_layout_effect_worker(
                 PaneLayoutAttemptCompletion::Retire => return,
                 PaneLayoutAttemptCompletion::RetryCurrent
                 | PaneLayoutAttemptCompletion::Superseded => {
-                    attempt = 0;
                     continue;
                 }
             }
         }
         let lane_observation_session = lane_route.observation_session().map(str::to_string);
+        // `#stalecontrollerhotupdate` (c)/(d): one tmux window, one driver. The
+        // newest publication to drive the window owns it; a controller whose
+        // generation is older than another root's claim yields instead of
+        // re-applying (two controllers sharing a window used to stash each
+        // other's panes on every retry).
+        if let Some(claim_window) = pane_layout_target_window_id_for_lane(
+            &bootstrap.project_root,
+            &lane_tmux,
+            desired.invocation.window.as_deref(),
+            lane_observation_session.as_deref(),
+        ) && let Some(newer) = pane_layout_window_claim_gate(
+            &bootstrap.project_root,
+            &lane_tmux,
+            &claim_window,
+            &graph,
+            desired.generation,
+            pane_layout_now_ms(),
+        ) {
+            retire_pane_layout_generation(
+                &bootstrap.project_root,
+                &runtime,
+                &lane,
+                &graph,
+                &desired,
+                attempt,
+                agent_doc_controller::pane_layout::ProjectionRetirement::YieldedToNewerWindowClaim,
+                &format!(
+                    "window={claim_window} owner_root={} owner_generation={} owner_stamp_ms={}",
+                    newer.project_root.display(),
+                    newer.generation,
+                    newer.stamp_ms,
+                ),
+            );
+            match pane_layout_effect_worker_complete(
+                &graph,
+                &state,
+                work_revision,
+                desired.generation,
+            ) {
+                PaneLayoutAttemptCompletion::Retire => return,
+                PaneLayoutAttemptCompletion::RetryCurrent
+                | PaneLayoutAttemptCompletion::Superseded => {
+                    continue;
+                }
+            }
+        }
         if desired.invocation.caller_kind == "automatic" {
             let observation_invocation = pane_layout_state_invocation(&desired);
             // Ownership is a retained join over effect receipts and live actors,
@@ -31115,7 +31330,6 @@ fn pane_layout_effect_worker(
             ) && !report.operator_owned_documents.is_empty()
             {
                 if state.lock().is_superseded(work_revision) {
-                    attempt = 0;
                     continue;
                 }
                 let operator_owned_documents = report.operator_owned_documents.clone();
@@ -31170,7 +31384,6 @@ fn pane_layout_effect_worker(
                     PaneLayoutAttemptCompletion::Retire => return,
                     PaneLayoutAttemptCompletion::RetryCurrent
                     | PaneLayoutAttemptCompletion::Superseded => {
-                        attempt = 0;
                         continue;
                     }
                 }
@@ -31325,19 +31538,16 @@ fn pane_layout_effect_worker(
                 ) {
                     PaneLayoutAttemptCompletion::Retire => return,
                     PaneLayoutAttemptCompletion::Superseded => {
-                        attempt = 0;
                     }
                     PaneLayoutAttemptCompletion::RetryCurrent => {
-                        if pane_layout_effect_worker_wait_for_retry(
+                        let _superseded = pane_layout_effect_worker_wait_for_retry(
                             &bootstrap.project_root,
                             &state,
                             &wake,
                             work_revision,
                             desired.generation,
                             attempt,
-                        ) {
-                            attempt = 0;
-                        }
+                        );
                     }
                 }
                 continue;
@@ -31352,7 +31562,6 @@ fn pane_layout_effect_worker(
                     desired.generation
                 ),
             );
-            attempt = 0;
             continue;
         }
         agent_doc_process_owner_io::set_structural_effect_generation(
@@ -31408,7 +31617,6 @@ fn pane_layout_effect_worker(
                     desired.generation
                 ),
             );
-            attempt = 0;
             continue;
         }
         let focus_receipt = if effect_result.is_ok() {
@@ -31630,22 +31838,149 @@ fn pane_layout_effect_worker(
         {
             PaneLayoutAttemptCompletion::Retire => return,
             PaneLayoutAttemptCompletion::Superseded => {
-                attempt = 0;
                 continue;
             }
             PaneLayoutAttemptCompletion::RetryCurrent => {
-                if pane_layout_effect_worker_wait_for_retry(
+                // `#stalecontrollerhotupdate` (b): a generation that has not
+                // converged within its retry budget cannot be satisfied by
+                // re-applying the same effect. Retire it (logged once); the
+                // next publication is a new generation and re-arms the worker.
+                if graph.projection_retry_budget_spent(desired.generation) {
+                    retire_pane_layout_generation(
+                        &bootstrap.project_root,
+                        &runtime,
+                        &lane,
+                        &graph,
+                        &desired,
+                        attempt,
+                        agent_doc_controller::pane_layout::ProjectionRetirement::RetryBudgetExhausted,
+                        &format!(
+                            "observation={observation_reason} effect={effect_reason} focus={focus_reason}"
+                        ),
+                    );
+                    match pane_layout_effect_worker_complete(
+                        &graph,
+                        &state,
+                        work_revision,
+                        desired.generation,
+                    ) {
+                        PaneLayoutAttemptCompletion::Retire => return,
+                        PaneLayoutAttemptCompletion::RetryCurrent
+                        | PaneLayoutAttemptCompletion::Superseded => {
+                            continue;
+                        }
+                    }
+                }
+                let _superseded = pane_layout_effect_worker_wait_for_retry(
                     &bootstrap.project_root,
                     &state,
                     &wake,
                     work_revision,
                     desired.generation,
                     attempt,
-                ) {
-                    attempt = 0;
-                }
+                );
             }
         }
+    }
+}
+
+fn pane_layout_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis().try_into().unwrap_or(u64::MAX))
+        .unwrap_or_default()
+}
+
+/// `#stalecontrollerhotupdate` (c)/(d): stamp `window` with this controller's
+/// claim for `generation`, or return the newer claim of another project root
+/// that this generation must yield to
+/// ([`agent_doc_controller::layout_owner::window_claim_requires_yield`]).
+///
+/// The stamp is minted once per generation (its first attempt), so a retry or
+/// a restarted worker never re-stamps an old generation as the newest.
+fn pane_layout_window_claim_gate(
+    project_root: &Path,
+    tmux: &tmux_router::Tmux,
+    window: &str,
+    graph: &ControllerPaneLayoutGraph,
+    generation: u64,
+    now_ms: u64,
+) -> Option<agent_doc_controller::layout_owner::WindowLayoutClaim> {
+    use agent_doc_controller::layout_owner::{
+        WINDOW_LAYOUT_CLAIM_OPTION, WindowLayoutClaim, window_claim_requires_yield,
+    };
+    let own_root = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    let own_stamp_ms = graph.projection_claim_stamp_ms(generation, now_ms);
+    let own_publication = graph.projection_publication(generation);
+    let current = agent_doc_tmux_io::window_user_option(tmux, window, WINDOW_LAYOUT_CLAIM_OPTION)
+        .and_then(|value| WindowLayoutClaim::decode(&value));
+    if window_claim_requires_yield(
+        &own_root,
+        own_stamp_ms,
+        own_publication.as_ref(),
+        current.as_ref(),
+    ) {
+        return current;
+    }
+    let own = WindowLayoutClaim {
+        project_root: own_root,
+        stamp_ms: own_stamp_ms,
+        generation,
+        publication: own_publication,
+    };
+    if current.as_ref() != Some(&own)
+        && let Err(error) = agent_doc_tmux_io::set_window_user_option(
+            tmux,
+            window,
+            WINDOW_LAYOUT_CLAIM_OPTION,
+            &own.encode(),
+        )
+    {
+        eprintln!("[controller] pane-layout window claim on {window} failed: {error}");
+    }
+    None
+}
+
+/// `#stalecontrollerhotupdate` (b)/(d): retire one desired generation without
+/// converging it. The retirement is sticky in the graph's attempt ledger, the
+/// receipt is terminal (`Refused`) so the worker retires, and the
+/// `pane_layout_projection_retired` line is written once per generation.
+#[allow(clippy::too_many_arguments)]
+fn retire_pane_layout_generation(
+    project_root: &Path,
+    runtime: &ControllerRuntime,
+    lane: &agent_doc_editor_surface::NavigationLane,
+    graph: &ControllerPaneLayoutGraph,
+    desired: &PaneLayoutDesired,
+    attempt: u64,
+    retirement: agent_doc_controller::pane_layout::ProjectionRetirement,
+    detail: &str,
+) {
+    let first = graph.retire_projection(desired.generation, retirement);
+    graph.record_receipt(PaneLayoutEffectReceipt {
+        generation: desired.generation,
+        actor_bindings: graph.actor_bindings(),
+        attempt,
+        phase: PaneLayoutEffectPhase::Refused,
+        reason: format!("{}; {detail}", retirement.as_str()),
+        file_panes: Vec::new(),
+        focus_required: false,
+        focus_applied: false,
+    });
+    publish_pane_layout_lane_status(runtime, lane);
+    if first {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "pane_layout_projection_retired generation={} attempts={} reason={} {} {detail} (#stalecontrollerhotupdate)",
+                desired.generation,
+                attempt,
+                retirement.as_str(),
+                pane_layout_projection_provenance(desired),
+            ),
+        );
     }
 }
 
@@ -32408,6 +32743,52 @@ fn active_pane_process_owner_document(
         project_root,
         &canonical.to_string_lossy(),
     ))
+}
+
+/// `#stalecontrollerhotupdate` (c): the live owner document of `pane_id` when
+/// that document belongs to a project root FOREIGN to `controller_root`
+/// ([`agent_doc_controller::layout_owner::pane_owner_is_foreign`]): neither the
+/// controller's own root nor nested beneath it. Such a pane is another
+/// controller's to arrange, so this controller never stashes or swaps it out
+/// and does not count it toward convergence. `None` when the pane has no live
+/// agent-doc owner or its root is unknown.
+pub fn foreign_pane_owner_document(
+    tmux: &tmux_router::Tmux,
+    pane_id: &str,
+    controller_root: &Path,
+) -> Option<PathBuf> {
+    let document = live_pane_process_owner_document(tmux, pane_id, controller_root)?;
+    let controller_root = controller_root
+        .canonicalize()
+        .unwrap_or_else(|_| controller_root.to_path_buf());
+    let owner_root = agent_doc_project_root_io::project_root_containing(&document)
+        .map(|root| root.canonicalize().unwrap_or(root));
+    agent_doc_controller::layout_owner::pane_owner_is_foreign(
+        &controller_root,
+        owner_root.as_deref(),
+    )
+    .then_some(document)
+}
+
+/// `#stalecontrollerhotupdate` (c): true when `window`'s layout claim
+/// ([`agent_doc_controller::layout_owner::WindowLayoutClaim`]) is held by a
+/// project root other than `project_root`, i.e. another controller's
+/// publication is the newest to drive this window. Foreign-pane protection
+/// applies only then: once this controller holds the claim, the editor's newest
+/// frame is its own and a foreign pane it does not name is an ordinary extra
+/// (the editor going from 2 panes to 1 must still be able to drop it).
+pub fn window_layout_driven_by_other_root(
+    tmux: &tmux_router::Tmux,
+    window: &str,
+    project_root: &Path,
+) -> bool {
+    use agent_doc_controller::layout_owner::{WINDOW_LAYOUT_CLAIM_OPTION, WindowLayoutClaim};
+    let own_root = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    agent_doc_tmux_io::window_user_option(tmux, window, WINDOW_LAYOUT_CLAIM_OPTION)
+        .and_then(|value| WindowLayoutClaim::decode(&value))
+        .is_some_and(|claim| claim.project_root != own_root)
 }
 
 fn live_pane_process_owner_document(
@@ -33290,6 +33671,11 @@ fn publish_pane_layout_desired_invocation_in_lane(
     let eligibility = runtime.main_layout_eligibility();
     invocation.columns =
         main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &invocation.columns);
+    // `#stalecontrollerhotupdate` (a): a desired layout names each document at
+    // most once. An editor split showing the same file twice publishes
+    // `[X, X]`, which tmux (one pane per document) can never satisfy.
+    invocation.columns =
+        collapse_duplicate_pane_layout_columns(&bootstrap.project_root, &invocation);
     invocation.focus = invocation.focus.filter(|document| {
         document_is_main_layout_eligible(&bootstrap.project_root, &eligibility, document)
     });
@@ -33373,6 +33759,30 @@ fn publish_pane_layout_desired_invocation_in_lane(
     publish_pane_layout_lane_status(runtime, lane);
     let applied_invocation = desired.invocation.clone();
     Ok((desired, applied_invocation))
+}
+
+/// `#stalecontrollerhotupdate` (a): apply
+/// [`agent_doc_controller::pane_layout::collapse_duplicate_layout_documents`]
+/// to one publication and log the collapse once per publication.
+fn collapse_duplicate_pane_layout_columns(
+    project_root: &Path,
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+) -> Vec<String> {
+    let (columns, dropped) =
+        agent_doc_controller::pane_layout::collapse_duplicate_layout_documents(
+            &invocation.columns,
+            |file| canonical_layout_document_id(project_root, file),
+        );
+    if !dropped.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "pane_layout_publication_duplicate_columns_collapsed caller_kind={} incoming={:?} columns={:?} dropped={:?} (#stalecontrollerhotupdate)",
+                invocation.caller_kind, invocation.columns, columns, dropped,
+            ),
+        );
+    }
+    columns
 }
 
 /// GH #136 follow-up (a): apply [`agent_doc_controller::pane_layout::bound_layout_width`]
@@ -45694,6 +46104,290 @@ mod tests {
             "pane_layout_projection_narrowed generation={} publisher=plugin_publication plane_version=115964117045 columns=1 retained_columns=2",
             narrowed.generation
         )));
+    }
+
+    /// `#stalecontrollerhotupdate` (a): the live haiven-dev generation 4 was
+    /// `[sdk.md, sdk.md]` (a JetBrains split showing the same file twice). A
+    /// desired layout names each document once, whatever its spelling.
+    #[test]
+    fn same_document_in_two_columns_publishes_one_column() {
+        let fixture = RouteLayoutFixture::new(&["sdk", "api"]);
+        let invocation = automatic_layout_sync_invocation(
+            vec![fixture.id("sdk"), "sdk.md".to_string()],
+            &fixture.id("sdk"),
+            false,
+        );
+        let (desired, applied) = publish_pane_layout_desired_invocation(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            invocation,
+            Some(7),
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(desired.invocation.columns, vec![fixture.id("sdk")]);
+        assert_eq!(applied.columns, vec![fixture.id("sdk")]);
+        let log = fixture.ops_log();
+        assert!(
+            log.contains("pane_layout_publication_duplicate_columns_collapsed")
+                && log.contains("dropped=[\"sdk.md\"]"),
+            "{log}"
+        );
+
+        // Distinct documents are untouched and log nothing new.
+        let before = fixture.ops_log().matches("duplicate_columns_collapsed").count();
+        let (distinct, _) = publish_pane_layout_desired_invocation(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            automatic_layout_sync_invocation(
+                vec![fixture.id("api"), fixture.id("sdk")],
+                &fixture.id("sdk"),
+                false,
+            ),
+            Some(8),
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(
+            distinct.invocation.columns,
+            vec![fixture.id("api"), fixture.id("sdk")]
+        );
+        assert_eq!(
+            fixture.ops_log().matches("duplicate_columns_collapsed").count(),
+            before
+        );
+    }
+
+    /// `#stalecontrollerhotupdate` (c): a nested controller's observation does
+    /// not count a pane owned by an enclosing (or sibling) root unless its own
+    /// layout names that document. The enclosing controller still counts its
+    /// nested-root panes.
+    #[test]
+    fn layout_observation_tolerates_only_unexpected_foreign_root_panes() {
+        let inner = PathBuf::from("/w/agent-loop/src/haiven-dev");
+        let outer = PathBuf::from("/w/agent-loop");
+        let bugs = "/w/agent-loop/tasks/agent-doc/agent-doc-bugs.md".to_string();
+        let sdk = "/w/agent-loop/src/haiven-dev/tasks/sdk.md".to_string();
+        let infra = "/w/agent-loop/src/haiven-dev/tasks/infra.md".to_string();
+        let root_of = |document: &str| {
+            Some(if document.starts_with("/w/agent-loop/src/haiven-dev/") {
+                PathBuf::from("/w/agent-loop/src/haiven-dev")
+            } else {
+                PathBuf::from("/w/agent-loop")
+            })
+        };
+        let panes = vec!["%203".to_string(), "%180".to_string(), "%152".to_string()];
+        let actual = vec![bugs.clone(), sdk.clone(), infra.clone()];
+
+        // haiven-dev's [sdk]: agent-loop's pane is tolerated, its own extra
+        // pane (infra) still counts.
+        let (kept_panes, kept_docs) = layout_sync_state_without_foreign_extras(
+            &inner,
+            std::slice::from_ref(&sdk),
+            panes.clone(),
+            actual.clone(),
+            root_of,
+        );
+        assert_eq!(kept_panes, vec!["%180".to_string(), "%152".to_string()]);
+        assert_eq!(kept_docs, vec![sdk.clone(), infra.clone()]);
+
+        // A foreign document the layout names is still required.
+        let (kept_panes, _) = layout_sync_state_without_foreign_extras(
+            &inner,
+            &[bugs.clone(), sdk.clone()],
+            panes.clone(),
+            actual.clone(),
+            root_of,
+        );
+        assert_eq!(kept_panes, panes);
+
+        // agent-loop owns the main window: nested-root panes are its own.
+        let (kept_panes, _) = layout_sync_state_without_foreign_extras(
+            &outer,
+            std::slice::from_ref(&bugs),
+            panes.clone(),
+            actual,
+            root_of,
+        );
+        assert_eq!(kept_panes, panes);
+    }
+
+    /// `#stalecontrollerhotupdate` (c)/(d), real tmux: two controllers (a
+    /// superproject and its nested root) drive ONE window. The newest
+    /// publication owns it; the other yields on its next attempt, and a newer
+    /// generation re-arms the yielded controller.
+    #[test]
+    fn two_controllers_sharing_a_window_yield_to_the_newest_publication() {
+        use agent_doc_controller::layout_owner::{WINDOW_LAYOUT_CLAIM_OPTION, WindowLayoutClaim};
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("stalecontroller-window-claim");
+        tmux.raw_cmd(&["new-session", "-d", "-s", "agent-doc", "-n", "agent-doc"])
+            .unwrap();
+        let window = agent_doc_tmux_io::target_window_id(&*tmux, "agent-doc:agent-doc")
+            .expect("agent-doc window id");
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(outer_dir.path().join(".agent-doc")).unwrap();
+        let outer = outer_dir.path().canonicalize().unwrap();
+        let inner = outer.join("src/haiven-dev");
+        std::fs::create_dir_all(inner.join(".agent-doc")).unwrap();
+        let outer_runtime = ControllerRuntime::new_arc(test_bootstrap(&outer_dir)).unwrap();
+        let inner_dir = tempfile::TempDir::new().unwrap();
+        let inner_runtime = ControllerRuntime::new_arc(test_bootstrap(&inner_dir)).unwrap();
+        let outer_graph = outer_runtime.pane_layout_graph();
+        let inner_graph = inner_runtime.pane_layout_graph();
+        let claim = || {
+            agent_doc_tmux_io::window_user_option(&*tmux, &window, WINDOW_LAYOUT_CLAIM_OPTION)
+                .and_then(|value| WindowLayoutClaim::decode(&value))
+        };
+
+        // haiven-dev generation 4 drives the window first.
+        assert!(
+            pane_layout_window_claim_gate(&inner, &tmux, &window, inner_graph, 4, 1_000).is_none()
+        );
+        assert_eq!(claim().map(|claim| claim.project_root), Some(inner.clone()));
+        // agent-loop's later cross-root publication takes the window.
+        assert!(
+            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, 36, 2_000)
+                .is_none()
+        );
+        assert_eq!(claim().map(|claim| claim.generation), Some(36));
+        // haiven-dev's retry of generation 4, however late it runs, yields:
+        // its stamp was minted at its first attempt and never moves.
+        let newer = pane_layout_window_claim_gate(&inner, &tmux, &window, inner_graph, 4, 9_000)
+            .expect("an older generation yields to a newer foreign claim");
+        assert_eq!(newer.project_root, outer);
+        assert_eq!(newer.generation, 36);
+        // The owner never yields, and its claim is untouched by the loser.
+        assert!(
+            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, 36, 9_500)
+                .is_none()
+        );
+        assert_eq!(claim().map(|claim| claim.project_root), Some(outer.clone()));
+        // A genuinely newer haiven-dev publication takes the window back.
+        assert!(
+            pane_layout_window_claim_gate(&inner, &tmux, &window, inner_graph, 5, 3_000).is_none()
+        );
+        assert_eq!(claim().map(|claim| claim.generation), Some(5));
+        assert!(
+            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, 36, 9_900)
+                .is_some()
+        );
+    }
+
+    /// `#stalecontrollerhotupdate` (d), the queue item: the editor goes 2 -> 1
+    /// -> 2 panes. Its 1-pane frame (seq 84) goes to haiven-dev, its 2-pane
+    /// frame (seq 86) to agent-loop. Under load agent-loop publishes FIRST and
+    /// haiven-dev's older frame is delivered late. The editor's frame order,
+    /// not delivery order, decides: haiven-dev yields and the window keeps 2
+    /// panes. Its forgotten generation stays retired, and a genuinely newer
+    /// identical frame re-arms it with a fresh generation.
+    #[test]
+    fn late_delivered_one_pane_frame_never_collapses_a_newer_two_pane_window() {
+        use agent_doc_controller::layout_owner::{
+            EditorPublicationOrder, WINDOW_LAYOUT_CLAIM_OPTION, WindowLayoutClaim,
+        };
+        use agent_doc_controller::pane_layout::{
+            ProjectionAttemptAdmission, ProjectionRetirement,
+        };
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("stalecontroller-editor-order");
+        tmux.raw_cmd(&["new-session", "-d", "-s", "agent-doc", "-n", "agent-doc"])
+            .unwrap();
+        let window = agent_doc_tmux_io::target_window_id(&*tmux, "agent-doc:agent-doc")
+            .expect("agent-doc window id");
+        let outer_fixture = RouteLayoutFixture::new(&["bugs", "api"]);
+        let inner_fixture = RouteLayoutFixture::new(&["sdk"]);
+        let outer = outer_fixture.bootstrap.project_root.canonicalize().unwrap();
+        let inner = inner_fixture.bootstrap.project_root.canonicalize().unwrap();
+        let client = "jetbrains@IU.8cfed3c3-pid:3190782";
+        let order = |sequence| EditorPublicationOrder {
+            client_id: client.to_string(),
+            generation: 1_454_943_840_525_411,
+            sequence,
+        };
+        let publish = |fixture: &RouteLayoutFixture, columns: Vec<String>, focus: String, seq| {
+            super::super::with_pane_layout_editor_publication(order(seq), || {
+                publish_pane_layout_desired_invocation(
+                    &fixture.bootstrap,
+                    fixture.runtime.as_ref(),
+                    automatic_layout_sync_invocation(columns, &focus, false),
+                    None,
+                    PaneLayoutPublication::CoalesceIdentical,
+                    PaneLayoutPublisher::EditorSurface,
+                )
+            })
+            .unwrap()
+            .0
+        };
+        let outer_graph = outer_fixture.runtime.pane_layout_graph();
+        let inner_graph = inner_fixture.runtime.pane_layout_graph();
+
+        // agent-loop's 2-pane frame (seq 86) is processed and projected first.
+        let two_pane = publish(
+            &outer_fixture,
+            vec![outer_fixture.id("bugs"), outer_fixture.id("api")],
+            outer_fixture.id("bugs"),
+            86,
+        );
+        assert!(
+            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, two_pane.generation, 1)
+                .is_none()
+        );
+        // haiven-dev's older 1-pane frame (seq 84) arrives late and its worker
+        // runs with a much later clock: it still yields.
+        let one_pane = publish(
+            &inner_fixture,
+            vec![inner_fixture.id("sdk")],
+            inner_fixture.id("sdk"),
+            84,
+        );
+        let owner = pane_layout_window_claim_gate(
+            &inner,
+            &tmux,
+            &window,
+            inner_graph,
+            one_pane.generation,
+            u64::MAX / 2,
+        )
+        .expect("a late, older editor frame yields the window");
+        assert_eq!(owner.project_root, outer);
+        assert_eq!(owner.publication, Some(order(86)));
+        let stored = agent_doc_tmux_io::window_user_option(&*tmux, &window, WINDOW_LAYOUT_CLAIM_OPTION)
+            .and_then(|value| WindowLayoutClaim::decode(&value))
+            .unwrap();
+        assert_eq!(stored.project_root, outer, "the loser never overwrites the claim");
+
+        // The editor forgets haiven-dev's surface: its generation retires.
+        let retired = inner_graph
+            .retire_generation_forgotten_by_editor(client)
+            .expect("the forgotten frame's generation retires");
+        assert_eq!(retired.generation, one_pane.generation);
+        assert!(inner_graph.retire_generation_forgotten_by_editor(client).is_none());
+        assert_eq!(
+            inner_graph.begin_projection_attempt(one_pane.generation),
+            ProjectionAttemptAdmission::Retired(ProjectionRetirement::EditorSurfaceForgotten)
+        );
+        // Another client's forget never touches it.
+        assert!(outer_graph.retire_generation_forgotten_by_editor("vscode-1").is_none());
+
+        // The editor really does go back to 1 pane (seq 92): the identical
+        // layout mints a NEW generation that outranks the 2-pane claim.
+        let back_to_one = publish(
+            &inner_fixture,
+            vec![inner_fixture.id("sdk")],
+            inner_fixture.id("sdk"),
+            92,
+        );
+        assert!(back_to_one.generation > one_pane.generation);
+        assert!(
+            pane_layout_window_claim_gate(&inner, &tmux, &window, inner_graph, back_to_one.generation, 2)
+                .is_none()
+        );
+        assert!(
+            pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, two_pane.generation, 3)
+                .is_some(),
+            "agent-loop's older 2-pane generation now yields"
+        );
     }
 
     #[test]
@@ -58683,6 +59377,64 @@ mod install_fanout_idle_root_tests {
             idle_log.contains("install_fanout_recycle_skipped")
                 && idle_log.contains("reason=idle_project_root"),
             "{idle_log}"
+        );
+    }
+
+    /// `#stalecontrollerhotupdate` (1): a root that was not recycled is never a
+    /// silent `skipped`. A transport failure is retried once; a root that still
+    /// fails, or that declined, names its outcome in its own ops log.
+    #[test]
+    fn install_recycle_fanout_retries_failures_and_reports_every_unrecycled_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = |name: &str| {
+            let root = tmp.path().join(name);
+            std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+            root
+        };
+        let flaky = root("flaky");
+        let wedged = root("wedged");
+        let current = root("current");
+        let calls = std::cell::RefCell::new(BTreeMap::<PathBuf, usize>::new());
+        let (recycled, skipped) = recycle_controllers_install_fanout(
+            [flaky.clone(), wedged.clone(), current.clone()]
+                .into_iter()
+                .collect(),
+            |_| agent_doc_controller::recycle::ProjectRootUseEvidence {
+                live_editor_endpoints: 1,
+                open_supervisors: 1,
+            },
+            |root| {
+                let mut calls = calls.borrow_mut();
+                let n = calls.entry(root.to_path_buf()).or_default();
+                *n += 1;
+                match root.file_name().and_then(|name| name.to_str()) {
+                    Some("flaky") if *n == 1 => anyhow::bail!("controller RPC timed out"),
+                    Some("flaky") => Ok(true),
+                    Some("wedged") => anyhow::bail!("controller RPC timed out"),
+                    _ => Ok(false),
+                }
+            },
+        );
+        assert_eq!((recycled, skipped), (1, 2));
+        let calls = calls.into_inner();
+        assert_eq!(calls[&flaky], 2, "a transport failure is retried once");
+        assert_eq!(calls[&wedged], 2);
+        assert_eq!(calls[&current], 1, "a declined recycle is not retried");
+        let log = |root: &Path| {
+            std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default()
+        };
+        assert!(!log(&flaky).contains("controller_recycle_fanout_unrecycled"));
+        let wedged_log = log(&wedged);
+        assert!(
+            wedged_log.contains("controller_recycle_fanout_unrecycled")
+                && wedged_log.contains("outcome=failed")
+                && wedged_log.contains("attempts=2"),
+            "{wedged_log}"
+        );
+        let current_log = log(&current);
+        assert!(
+            current_log.contains("outcome=declined") && current_log.contains("attempts=1"),
+            "{current_log}"
         );
     }
 

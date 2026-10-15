@@ -475,6 +475,498 @@ mod cross_root_main_window_layout_model {
     }
 }
 
+/// `#stalecontrollerhotupdate` reference model: the 2026-10-15 incident where
+/// the nested haiven-dev controller kept re-applying a stale layout for 33
+/// minutes after the operator switched the editor 2 -> 1 -> 2 panes, and
+/// neither "Sync Tmux Panes" nor an IDE restart stopped it.
+///
+/// Two controllers share ONE tmux window. The editor publishes every frame
+/// from one client with one monotonic sequence, to the controller that owns the
+/// frame's documents, after telling the previous root to forget its surface.
+/// Delivery to each controller is FIFO but the two queues interleave on a
+/// seeded schedule, so a busy controller can process an OLDER frame after the
+/// other controller already projected a newer one (the "heavy CPU load" in the
+/// report). Each controller runs a retrying projection worker.
+///
+/// The fixed policy is the production one:
+/// [`collapse_duplicate_layout_documents`], [`ProjectionAttemptLedger`]
+/// (bounded retries, stamps minted at publication, editor order),
+/// [`window_claim_requires_yield`], forget-retirement and claim-conditional
+/// foreign-pane protection ([`pane_owner_is_foreign`]). The other policies are
+/// the pre-fix code and the intermediate designs, each kept to prove which rule
+/// does which work.
+mod stale_controller_shared_window_model {
+    use agent_doc_controller::layout_owner::{
+        EditorPublicationOrder, WindowLayoutClaim, pane_owner_is_foreign,
+        window_claim_requires_yield,
+    };
+    use agent_doc_controller::pane_layout::{
+        PROJECTION_RETRY_ATTEMPT_LIMIT, ProjectionAttemptAdmission, ProjectionAttemptLedger,
+        ProjectionRetirement, collapse_duplicate_layout_documents,
+    };
+    use std::collections::VecDeque;
+    use std::path::{Path, PathBuf};
+
+    const OUTER: &str = "/w/agent-loop";
+    const INNER: &str = "/w/agent-loop/src/haiven-dev";
+    const BUGS: &str = "/w/agent-loop/tasks/agent-doc/agent-doc-bugs.md";
+    const SDK: &str = "/w/agent-loop/src/haiven-dev/tasks/sdk.md";
+    /// A document whose pane can never be realised (its supervisor never
+    /// starts), so no attempt can converge a layout naming it.
+    const UNSTARTABLE: &str = "/w/agent-loop/src/haiven-dev/tasks/unstartable.md";
+    const CLIENT: &str = "jetbrains@IU.8cfed3c3-pid:3190782";
+    const INNER_INDEX: usize = 0;
+    const OUTER_INDEX: usize = 1;
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Protection {
+        Never,
+        Always,
+        WhileAnotherRootClaimsTheWindow,
+    }
+
+    #[derive(Clone, Copy)]
+    struct Policy {
+        collapse_duplicates: bool,
+        retry_budget: bool,
+        window_claim: bool,
+        editor_order: bool,
+        stamp_at_publication: bool,
+        forget_retires: bool,
+        protection: Protection,
+    }
+
+    /// The code before `#stalecontrollerhotupdate`.
+    const LEGACY: Policy = Policy {
+        collapse_duplicates: false,
+        retry_budget: false,
+        window_claim: false,
+        editor_order: false,
+        stamp_at_publication: false,
+        forget_retires: false,
+        protection: Protection::Never,
+    };
+    /// The first attempt: claim stamped at the first projection attempt and an
+    /// unconditional foreign-pane guard.
+    const ATTEMPT_STAMPS: Policy = Policy {
+        collapse_duplicates: true,
+        retry_budget: true,
+        window_claim: true,
+        editor_order: false,
+        stamp_at_publication: false,
+        forget_retires: false,
+        protection: Protection::Always,
+    };
+    /// Everything but the editor's own frame order.
+    const NO_EDITOR_ORDER: Policy = Policy {
+        editor_order: false,
+        stamp_at_publication: false,
+        ..FIXED
+    };
+    const FIXED: Policy = Policy {
+        collapse_duplicates: true,
+        retry_budget: true,
+        window_claim: true,
+        editor_order: true,
+        stamp_at_publication: true,
+        forget_retires: true,
+        protection: Protection::WhileAnotherRootClaimsTheWindow,
+    };
+
+    fn root_of(document: &str) -> PathBuf {
+        if document.starts_with(INNER) {
+            PathBuf::from(INNER)
+        } else {
+            PathBuf::from(OUTER)
+        }
+    }
+
+    fn order(sequence: u64) -> EditorPublicationOrder {
+        EditorPublicationOrder {
+            client_id: CLIENT.to_string(),
+            generation: 1,
+            sequence,
+        }
+    }
+
+    enum Message {
+        Publish { sequence: u64, columns: Vec<String> },
+        Forget,
+    }
+
+    struct Controller {
+        root: PathBuf,
+        generation: u64,
+        desired: Vec<String>,
+        by_editor: Option<EditorPublicationOrder>,
+        done: bool,
+        ledger: ProjectionAttemptLedger,
+        inbox: VecDeque<Message>,
+        attempts: u64,
+    }
+
+    impl Controller {
+        fn new(root: &str) -> Self {
+            Self {
+                root: PathBuf::from(root),
+                generation: 0,
+                desired: Vec::new(),
+                by_editor: None,
+                done: true,
+                ledger: ProjectionAttemptLedger::default(),
+                inbox: VecDeque::new(),
+                attempts: 0,
+            }
+        }
+    }
+
+    struct World {
+        policy: Policy,
+        clock: u64,
+        window: Vec<String>,
+        claim: Option<WindowLayoutClaim>,
+        controllers: [Controller; 2],
+    }
+
+    impl World {
+        fn new(policy: Policy, window: &[&str]) -> Self {
+            Self {
+                policy,
+                clock: 0,
+                window: window.iter().map(|d| d.to_string()).collect(),
+                claim: None,
+                controllers: [Controller::new(INNER), Controller::new(OUTER)],
+            }
+        }
+
+        fn claimed_by_other_root(&self, index: usize) -> bool {
+            self.claim
+                .as_ref()
+                .is_some_and(|claim| claim.project_root != self.controllers[index].root)
+        }
+
+        /// A pane the layout effect leaves alone and convergence ignores.
+        fn protected(&self, index: usize, document: &str) -> bool {
+            let armed = match self.policy.protection {
+                Protection::Never => false,
+                Protection::Always => true,
+                Protection::WhileAnotherRootClaimsTheWindow => self.claimed_by_other_root(index),
+            };
+            let controller = &self.controllers[index];
+            armed
+                && !controller.desired.iter().any(|d| d == document)
+                && pane_owner_is_foreign(&controller.root, Some(root_of(document).as_path()))
+        }
+
+        fn converged(&self, index: usize) -> bool {
+            let visible: Vec<&String> = self
+                .window
+                .iter()
+                .filter(|document| !self.protected(index, document))
+                .collect();
+            visible.len() == self.controllers[index].desired.len()
+                && visible
+                    .iter()
+                    .zip(&self.controllers[index].desired)
+                    .all(|(a, b)| *a == b)
+        }
+
+        fn deliver(&mut self, index: usize) {
+            self.clock += 1;
+            let policy = self.policy;
+            let clock = self.clock;
+            let controller = &mut self.controllers[index];
+            let Some(message) = controller.inbox.pop_front() else {
+                return;
+            };
+            match message {
+                Message::Forget => {
+                    if policy.forget_retires
+                        && controller.by_editor.is_some()
+                        && controller.ledger.retire(
+                            controller.generation,
+                            ProjectionRetirement::EditorSurfaceForgotten,
+                        )
+                    {
+                        controller.done = true;
+                    }
+                }
+                Message::Publish { sequence, columns } => {
+                    let columns = if policy.collapse_duplicates {
+                        collapse_duplicate_layout_documents(&columns, str::to_string).0
+                    } else {
+                        columns
+                    };
+                    let publication = policy.editor_order.then(|| order(sequence));
+                    let rearm = controller
+                        .ledger
+                        .retired(controller.generation)
+                        .is_some_and(|retired| retired.rearms_on_identical_republication());
+                    let coalesce = controller.generation > 0
+                        && columns == controller.desired
+                        && (!policy.forget_retires || !rearm);
+                    if !coalesce {
+                        controller.generation += 1;
+                        controller.desired = columns;
+                        controller.done = false;
+                    }
+                    controller.by_editor = Some(order(sequence));
+                    if policy.stamp_at_publication {
+                        controller
+                            .ledger
+                            .note_published(controller.generation, clock, publication);
+                    }
+                }
+            }
+        }
+
+        /// One projection attempt of controller `index`'s worker.
+        fn attempt(&mut self, index: usize) {
+            if self.controllers[index].done {
+                return;
+            }
+            self.clock += 1;
+            let policy = self.policy;
+            let generation = self.controllers[index].generation;
+            if policy.window_claim {
+                let clock = self.clock;
+                let controller = &mut self.controllers[index];
+                let stamp = controller.ledger.claim_stamp_ms(generation, clock);
+                let publication = controller.ledger.publication(generation).cloned();
+                if window_claim_requires_yield(
+                    &controller.root,
+                    stamp,
+                    publication.as_ref(),
+                    self.claim.as_ref(),
+                ) {
+                    controller
+                        .ledger
+                        .retire(generation, ProjectionRetirement::YieldedToNewerWindowClaim);
+                    controller.done = true;
+                    return;
+                }
+                self.claim = Some(WindowLayoutClaim {
+                    project_root: controller.root.clone(),
+                    stamp_ms: stamp,
+                    generation,
+                    publication,
+                });
+            }
+            if policy.retry_budget
+                && let ProjectionAttemptAdmission::Retired(_) =
+                    self.controllers[index].ledger.begin_attempt(generation)
+            {
+                self.controllers[index].done = true;
+                return;
+            }
+            self.controllers[index].attempts += 1;
+            // Realise: protected panes stay, then the desired documents once
+            // each (tmux has one pane per document); everything else stashes.
+            let mut next: Vec<String> = self
+                .window
+                .iter()
+                .filter(|document| self.protected(index, document))
+                .cloned()
+                .collect();
+            for document in &self.controllers[index].desired {
+                if document != UNSTARTABLE && !next.contains(document) {
+                    next.push(document.clone());
+                }
+            }
+            self.window = next;
+            if self.converged(index) {
+                self.controllers[index].done = true;
+            } else if policy.retry_budget
+                && self.controllers[index].ledger.retry_budget_spent(generation)
+            {
+                self.controllers[index]
+                    .ledger
+                    .retire(generation, ProjectionRetirement::RetryBudgetExhausted);
+                self.controllers[index].done = true;
+            }
+        }
+    }
+
+    /// Editor frames in publication order. Each goes to the controller owning
+    /// its documents, after a forget to the previously published root.
+    fn script(frames: &[&[&str]]) -> Vec<(usize, Message)> {
+        let mut messages = Vec::new();
+        let mut previous = None;
+        for (sequence, columns) in frames.iter().enumerate() {
+            let target = if columns.iter().all(|d| root_of(d) == Path::new(INNER)) {
+                INNER_INDEX
+            } else {
+                OUTER_INDEX
+            };
+            if let Some(previous) = previous
+                && previous != target
+            {
+                messages.push((previous, Message::Forget));
+            }
+            previous = Some(target);
+            messages.push((
+                target,
+                Message::Publish {
+                    sequence: sequence as u64 + 1,
+                    columns: columns.iter().map(|d| d.to_string()).collect(),
+                },
+            ));
+        }
+        messages
+    }
+
+    /// 2 -> 1 -> 2 panes, with the split briefly showing `sdk.md` twice, then
+    /// the operator's "Sync Tmux Panes" re-sending the 2-pane frame.
+    const TWO_ONE_TWO: &[&[&str]] = &[&[BUGS, SDK], &[SDK], &[SDK, SDK], &[BUGS, SDK], &[BUGS, SDK]];
+    /// The reverse round trip ends on the nested root's 1-pane frame.
+    const ONE_TWO_ONE: &[&[&str]] = &[&[SDK], &[BUGS, SDK], &[SDK]];
+
+    fn run(policy: Policy, frames: &[&[&str]], seed: u64, settle_steps: usize) -> World {
+        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut world = World::new(policy, &[BUGS, SDK]);
+        // The editor sends every frame before the controllers drain them: the
+        // queues are what a loaded machine leaves behind.
+        for (target, message) in script(frames) {
+            world.controllers[target].inbox.push_back(message);
+        }
+        let mut settle = 0;
+        while settle < settle_steps {
+            let index = (next() % 2) as usize;
+            let pending = world.controllers.iter().any(|c| !c.inbox.is_empty());
+            if next() % 3 == 0 && !world.controllers[index].inbox.is_empty() {
+                world.deliver(index);
+            } else {
+                world.attempt(index);
+            }
+            if !pending {
+                settle += 1;
+            }
+        }
+        // Drain anything a skewed schedule left undelivered.
+        for index in [INNER_INDEX, OUTER_INDEX] {
+            while !world.controllers[index].inbox.is_empty() {
+                world.deliver(index);
+            }
+        }
+        for _ in 0..settle_steps {
+            let index = (next() % 2) as usize;
+            world.attempt(index);
+        }
+        world
+    }
+
+    fn expected(frames: &[&[&str]]) -> Vec<String> {
+        collapse_duplicate_layout_documents(
+            &frames
+                .last()
+                .unwrap()
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>(),
+            str::to_string,
+        )
+        .0
+    }
+
+    #[test]
+    fn the_window_settles_on_the_editors_newest_frame_for_every_schedule() {
+        for frames in [TWO_ONE_TWO, ONE_TWO_ONE] {
+            for seed in 0..512 {
+                let world = run(FIXED, frames, seed, 400);
+                assert_eq!(
+                    world.window,
+                    expected(frames),
+                    "seed {seed}: the window shows the editor's newest frame"
+                );
+                assert!(world.controllers.iter().all(|c| c.done), "seed {seed}");
+                for controller in &world.controllers {
+                    assert!(
+                        controller.attempts <= 6 * PROJECTION_RETRY_ATTEMPT_LIMIT,
+                        "seed {seed}: retries are bounded ({})",
+                        controller.attempts
+                    );
+                }
+            }
+        }
+    }
+
+    /// The reported regression: without the editor's frame order, a busy
+    /// nested controller's older 1-pane frame outranks the newer 2-pane one
+    /// and "auto syncs back to 1 pane".
+    #[test]
+    fn projection_time_ordering_lets_a_late_one_pane_frame_win() {
+        let collapsed = (0..512)
+            .map(|seed| run(NO_EDITOR_ORDER, TWO_ONE_TWO, seed, 400))
+            .filter(|world| world.window == vec![SDK.to_string()])
+            .count();
+        assert!(collapsed > 0, "some schedule must reproduce the 1-pane collapse");
+    }
+
+    /// An unconditional foreign-pane guard makes the nested root's genuine
+    /// 1-pane frame unreachable: it may never drop the superproject's pane.
+    #[test]
+    fn an_unconditional_foreign_pane_guard_blocks_two_to_one() {
+        let blocked = (0..512)
+            .map(|seed| run(ATTEMPT_STAMPS, ONE_TWO_ONE, seed, 400))
+            .filter(|world| world.window != vec![SDK.to_string()])
+            .count();
+        assert!(blocked > 0, "the guard must be able to keep a stale pane");
+    }
+
+    /// The pre-fix code: `[sdk, sdk]` can never converge, so the nested worker
+    /// retries forever and the window ends wherever the fight left it.
+    #[test]
+    fn legacy_controllers_retry_an_unsatisfiable_layout_forever() {
+        for seed in 0..64 {
+            let world = run(LEGACY, TWO_ONE_TWO, seed, 400);
+            let inner = &world.controllers[INNER_INDEX];
+            assert!(
+                !inner.done || world.window != expected(TWO_ONE_TWO),
+                "seed {seed}: legacy must either still be retrying or have lost the frame"
+            );
+        }
+        assert!(
+            (0..64).any(|seed| !run(LEGACY, TWO_ONE_TWO, seed, 400).controllers[INNER_INDEX].done),
+            "the unsatisfiable generation never retires"
+        );
+    }
+
+    /// The live recycle survivor: a hot update whose installed binary is
+    /// unchanged declines every controller recycle (`binary_already_current`),
+    /// so a recycle can never be what stops a wedged generation. The retry
+    /// budget does, whether or not any recycle happens, and the retired
+    /// generation is never re-applied by later worker wake-ups.
+    #[test]
+    fn a_current_controller_wedged_on_a_stale_generation_stops_without_a_recycle() {
+        let mut world = World::new(FIXED, &[BUGS, SDK]);
+        world.controllers[INNER_INDEX].inbox.push_back(Message::Publish {
+            sequence: 1,
+            columns: vec![SDK.to_string(), UNSTARTABLE.to_string()],
+        });
+        world.deliver(INNER_INDEX);
+        for _ in 0..(10 * PROJECTION_RETRY_ATTEMPT_LIMIT) {
+            world.attempt(INNER_INDEX);
+        }
+        let inner = &world.controllers[INNER_INDEX];
+        assert!(inner.done, "the worker retired without any recycle");
+        assert!(inner.attempts <= PROJECTION_RETRY_ATTEMPT_LIMIT);
+        let generation = inner.generation;
+        assert!(world.controllers[INNER_INDEX].ledger.retired(generation).is_some());
+        // Many more idle ticks re-apply nothing.
+        let window = world.window.clone();
+        for _ in 0..100 {
+            world.attempt(INNER_INDEX);
+        }
+        assert_eq!(world.window, window);
+    }
+}
+
 /// Adversarial model for `#percellconverge` phase 3. The retained agent
 /// transition owns only `exchange`; the editor changes `queue` on every tick.
 /// The survival assertion is paired with an ownership-overclaim mutation proof

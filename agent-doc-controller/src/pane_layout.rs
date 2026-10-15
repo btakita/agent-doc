@@ -313,9 +313,382 @@ pub fn recycle_settle_republishes_layout(
         && republished_for_gated_generation < gated_generation
 }
 
+/// `#stalecontrollerhotupdate` (a): collapse a document that a desired layout
+/// names in more than one column.
+///
+/// A JetBrains "split" opens the SAME file in both splits, so an editor frame
+/// can honestly report `[X, X]`. tmux binds one pane per document, so that
+/// layout is unsatisfiable: observed live (haiven-dev generation 4,
+/// 2026-10-15) the controller retried `[sdk.md, sdk.md]` 292 times
+/// (`observation=pane_count_mismatch`), re-applying the layout and stashing a
+/// foreign pane on every attempt. The invariant: every desired layout names
+/// each document at most once. The first occurrence keeps its column; a later
+/// duplicate is dropped from its column, and a column left empty disappears.
+///
+/// `identity` maps one column file to its canonical document identity
+/// (absolute and root-relative spellings must agree). Returns the collapsed
+/// columns and the dropped duplicate files, in input order.
+pub fn collapse_duplicate_layout_documents(
+    columns: &[String],
+    identity: impl Fn(&str) -> String,
+) -> (Vec<String>, Vec<String>) {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut collapsed = Vec::with_capacity(columns.len());
+    let mut dropped = Vec::new();
+    for column in columns {
+        let mut kept = Vec::new();
+        for file in column.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+            if seen.insert(identity(file)) {
+                kept.push(file);
+            } else {
+                dropped.push(file.to_string());
+            }
+        }
+        if kept.is_empty() {
+            continue;
+        }
+        // Preserve the column's original spelling when nothing was dropped.
+        if kept.len() == column.split(',').filter(|f| !f.trim().is_empty()).count() {
+            collapsed.push(column.clone());
+        } else {
+            collapsed.push(kept.join(","));
+        }
+    }
+    (collapsed, dropped)
+}
+
+/// `#stalecontrollerhotupdate` (b): attempts one desired generation may spend
+/// projecting before the controller stops retrying it.
+///
+/// With the 250ms..5s exponential retry delay this is roughly 40s of effort,
+/// far beyond a supervisor start or a stash promotion. A generation that has
+/// not converged by then cannot be satisfied by retrying the same effect; the
+/// next editor publication (a new generation) re-arms the worker.
+pub const PROJECTION_RETRY_ATTEMPT_LIMIT: u64 = 12;
+
+/// Why a desired generation's projection stopped without converging.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectionRetirement {
+    /// The retry budget ([`PROJECTION_RETRY_ATTEMPT_LIMIT`]) was spent.
+    RetryBudgetExhausted,
+    /// Another project root's controller published a newer layout for the
+    /// same tmux window ([`crate::layout_owner::window_claim_requires_yield`]).
+    YieldedToNewerWindowClaim,
+    /// The editor surface that published this generation told this controller
+    /// to forget it (`editor_surface_forget`): the editor moved its frame to
+    /// another controller, so this layout is no longer anything it shows.
+    /// Observed live (2026-10-15): haiven-dev was told to forget at 19:57 and
+    /// still re-applied the forgotten frame's generation 4 until 20:30.
+    EditorSurfaceForgotten,
+    /// A newer generation was already published; the ledger only follows the
+    /// newest one.
+    SupersededByNewerGeneration,
+}
+
+impl ProjectionRetirement {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RetryBudgetExhausted => "retry_budget_exhausted",
+            Self::YieldedToNewerWindowClaim => "yielded_to_newer_window_claim",
+            Self::EditorSurfaceForgotten => "editor_surface_forgotten",
+            Self::SupersededByNewerGeneration => "superseded_by_newer_generation",
+        }
+    }
+
+    /// Whether a re-publication of the SAME layout must mint a fresh
+    /// generation instead of coalescing into this retired one. A yielded or
+    /// forgotten generation lost to something newer, so a later identical
+    /// editor frame is a new decision. A budget-exhausted one did not: an
+    /// identical re-publication cannot satisfy it either, and re-arming it per
+    /// editor heartbeat would rebuild the unbounded retry loop.
+    pub fn rearms_on_identical_republication(self) -> bool {
+        !matches!(self, Self::RetryBudgetExhausted)
+    }
+}
+
+/// Whether the worker may run another projection attempt for a generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectionAttemptAdmission {
+    /// Run attempt `number` (1-based, counted per generation).
+    Attempt { number: u64 },
+    /// The generation already retired; never re-apply it.
+    Retired(ProjectionRetirement),
+}
+
+/// Per-generation projection memory that survives worker restarts.
+///
+/// The effect worker's own attempt counter lived on the worker thread and was
+/// reset whenever the worker restarted (actor-binding churn makes a terminal
+/// receipt non-current and re-wakes the sink). That made "stop after N" and
+/// "stop after yielding" unenforceable. This ledger is held by the layout
+/// graph, keyed by generation, so a retired generation stays retired until a
+/// newer generation replaces it, and the window-claim stamp of a generation is
+/// minted exactly once.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProjectionAttemptLedger {
+    generation: u64,
+    attempts: u64,
+    claim_stamp_ms: Option<u64>,
+    publication: Option<crate::layout_owner::EditorPublicationOrder>,
+    retired: Option<ProjectionRetirement>,
+}
+
+impl ProjectionAttemptLedger {
+    /// Move the ledger to `generation` when it is newer. Returns false for an
+    /// OLDER generation, which never rewinds the ledger: a worker that read
+    /// generation N just before N+1 was published must not erase N+1's
+    /// publication stamp and editor order.
+    fn track(&mut self, generation: u64) -> bool {
+        if generation < self.generation {
+            return false;
+        }
+        if self.generation != generation {
+            *self = Self {
+                generation,
+                ..Self::default()
+            };
+        }
+        true
+    }
+
+    /// Admit (and count) the next attempt for `generation`, or report that the
+    /// generation already retired. Exceeding the attempt limit retires it.
+    pub fn begin_attempt(&mut self, generation: u64) -> ProjectionAttemptAdmission {
+        if !self.track(generation) {
+            return ProjectionAttemptAdmission::Retired(
+                ProjectionRetirement::SupersededByNewerGeneration,
+            );
+        }
+        if let Some(retired) = self.retired {
+            return ProjectionAttemptAdmission::Retired(retired);
+        }
+        if self.attempts >= PROJECTION_RETRY_ATTEMPT_LIMIT {
+            self.retired = Some(ProjectionRetirement::RetryBudgetExhausted);
+            return ProjectionAttemptAdmission::Retired(ProjectionRetirement::RetryBudgetExhausted);
+        }
+        self.attempts += 1;
+        ProjectionAttemptAdmission::Attempt {
+            number: self.attempts,
+        }
+    }
+
+    /// True when the attempt just run was the last one the budget allows, so
+    /// an unconverged result must retire instead of scheduling a retry.
+    pub fn retry_budget_spent(&self, generation: u64) -> bool {
+        self.generation == generation && self.attempts >= PROJECTION_RETRY_ATTEMPT_LIMIT
+    }
+
+    /// Retire `generation`. Returns true only for the first retirement, so the
+    /// caller logs it once.
+    pub fn retire(&mut self, generation: u64, reason: ProjectionRetirement) -> bool {
+        if !self.track(generation) || self.retired.is_some() {
+            return false;
+        }
+        self.retired = Some(reason);
+        true
+    }
+
+    pub fn retired(&self, generation: u64) -> Option<ProjectionRetirement> {
+        (self.generation == generation).then_some(self.retired).flatten()
+    }
+
+    /// The window-claim stamp of `generation`, minted from `now_ms` on first
+    /// use and stable afterwards (a worker restart must not re-stamp an old
+    /// generation as the newest publication). The publisher mints it through
+    /// [`Self::note_published`] before the worker can see the generation; this
+    /// fallback only covers a generation that reached the worker another way.
+    pub fn claim_stamp_ms(&mut self, generation: u64, now_ms: u64) -> u64 {
+        if !self.track(generation) {
+            return now_ms;
+        }
+        *self.claim_stamp_ms.get_or_insert(now_ms)
+    }
+
+    /// Record that `generation` was published (or identically re-published)
+    /// at `now_ms`, by the editor frame `publication` when it came from one.
+    ///
+    /// The stamp is the FIRST publication's: a re-publication of the same
+    /// value is not a newer layout. The editor order only moves forward: a
+    /// re-publication carries the editor's latest frame for that value, which
+    /// is what a competing controller has to beat.
+    pub fn note_published(
+        &mut self,
+        generation: u64,
+        now_ms: u64,
+        publication: Option<crate::layout_owner::EditorPublicationOrder>,
+    ) {
+        if !self.track(generation) {
+            return;
+        }
+        self.claim_stamp_ms.get_or_insert(now_ms);
+        if let Some(publication) = publication {
+            let newer = self
+                .publication
+                .as_ref()
+                .is_none_or(|current| publication.is_newer_than(current) != Some(false));
+            if newer {
+                self.publication = Some(publication);
+            }
+        }
+    }
+
+    /// The editor publication order of `generation`, if an editor frame
+    /// published it.
+    pub fn publication(
+        &self,
+        generation: u64,
+    ) -> Option<&crate::layout_owner::EditorPublicationOrder> {
+        (self.generation == generation)
+            .then_some(self.publication.as_ref())
+            .flatten()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn same(file: &str) -> String {
+        file.trim_start_matches("/root/").to_string()
+    }
+
+    #[test]
+    fn duplicate_document_columns_collapse_to_first_occurrence() {
+        let (columns, dropped) = collapse_duplicate_layout_documents(
+            &["/root/tasks/sdk.md".to_string(), "tasks/sdk.md".to_string()],
+            same,
+        );
+        assert_eq!(columns, vec!["/root/tasks/sdk.md".to_string()]);
+        assert_eq!(dropped, vec!["tasks/sdk.md".to_string()]);
+    }
+
+    #[test]
+    fn distinct_columns_and_stacked_columns_are_preserved_verbatim() {
+        let input = vec!["a.md, b.md".to_string(), "c.md".to_string()];
+        let (columns, dropped) = collapse_duplicate_layout_documents(&input, same);
+        assert_eq!(columns, input);
+        assert!(dropped.is_empty());
+
+        let (columns, dropped) = collapse_duplicate_layout_documents(
+            &["a.md,b.md".to_string(), "b.md,c.md".to_string()],
+            same,
+        );
+        assert_eq!(columns, vec!["a.md,b.md".to_string(), "c.md".to_string()]);
+        assert_eq!(dropped, vec!["b.md".to_string()]);
+    }
+
+    /// Invariant: no collapsed layout names a document twice, and every input
+    /// document survives exactly once.
+    #[test]
+    fn collapsed_layout_names_every_document_exactly_once() {
+        let docs = ["a.md", "b.md", "c.md"];
+        for mask in 0..(3u32.pow(4)) {
+            let mut m = mask;
+            let columns: Vec<String> = (0..4)
+                .map(|_| {
+                    let doc = docs[(m % 3) as usize];
+                    m /= 3;
+                    doc.to_string()
+                })
+                .collect();
+            let (collapsed, _) = collapse_duplicate_layout_documents(&columns, same);
+            let mut flat: Vec<&str> = collapsed.iter().map(String::as_str).collect();
+            let unique: std::collections::BTreeSet<&str> = flat.iter().copied().collect();
+            assert_eq!(flat.len(), unique.len(), "{columns:?} -> {collapsed:?}");
+            let input: std::collections::BTreeSet<&str> =
+                columns.iter().map(String::as_str).collect();
+            flat.sort_unstable();
+            assert_eq!(unique, input);
+        }
+    }
+
+    #[test]
+    fn ledger_bounds_attempts_per_generation_and_stays_retired() {
+        let mut ledger = ProjectionAttemptLedger::default();
+        for n in 1..=PROJECTION_RETRY_ATTEMPT_LIMIT {
+            assert_eq!(
+                ledger.begin_attempt(4),
+                ProjectionAttemptAdmission::Attempt { number: n }
+            );
+        }
+        assert!(ledger.retry_budget_spent(4));
+        assert_eq!(
+            ledger.begin_attempt(4),
+            ProjectionAttemptAdmission::Retired(ProjectionRetirement::RetryBudgetExhausted)
+        );
+        // A restarted worker still sees the retirement.
+        assert_eq!(
+            ledger.begin_attempt(4),
+            ProjectionAttemptAdmission::Retired(ProjectionRetirement::RetryBudgetExhausted)
+        );
+        // A newer generation re-arms.
+        assert_eq!(
+            ledger.begin_attempt(5),
+            ProjectionAttemptAdmission::Attempt { number: 1 }
+        );
+    }
+
+    #[test]
+    fn ledger_retires_once_and_keeps_the_claim_stamp_stable() {
+        let mut ledger = ProjectionAttemptLedger::default();
+        assert_eq!(ledger.claim_stamp_ms(7, 1_000), 1_000);
+        assert_eq!(ledger.claim_stamp_ms(7, 9_000), 1_000, "never re-stamped");
+        assert!(ledger.retire(7, ProjectionRetirement::YieldedToNewerWindowClaim));
+        assert!(!ledger.retire(7, ProjectionRetirement::RetryBudgetExhausted));
+        assert_eq!(
+            ledger.retired(7),
+            Some(ProjectionRetirement::YieldedToNewerWindowClaim)
+        );
+        assert_eq!(ledger.retired(8), None);
+        assert_eq!(ledger.claim_stamp_ms(8, 9_000), 9_000);
+    }
+
+    /// `#stalecontrollerhotupdate` (d): the stamp is the publication's, not the
+    /// first attempt's, and the editor order only moves forward.
+    #[test]
+    fn ledger_stamps_at_publication_and_keeps_the_newest_editor_order() {
+        use crate::layout_owner::EditorPublicationOrder;
+        let order = |sequence| EditorPublicationOrder {
+            client_id: "jetbrains@IU-pid:1".to_string(),
+            generation: 3,
+            sequence,
+        };
+        let mut ledger = ProjectionAttemptLedger::default();
+        ledger.note_published(4, 1_000, Some(order(84)));
+        // The worker's first attempt, much later, does not re-stamp.
+        assert_eq!(ledger.claim_stamp_ms(4, 50_000), 1_000);
+        // An identical re-publication advances the editor order, not the stamp.
+        ledger.note_published(4, 60_000, Some(order(90)));
+        assert_eq!(ledger.claim_stamp_ms(4, 70_000), 1_000);
+        assert_eq!(ledger.publication(4), Some(&order(90)));
+        // A late-delivered older frame never rewinds it; a non-editor
+        // re-publication keeps it.
+        ledger.note_published(4, 61_000, Some(order(85)));
+        ledger.note_published(4, 62_000, None);
+        assert_eq!(ledger.publication(4), Some(&order(90)));
+        assert_eq!(ledger.publication(5), None);
+        // A new generation starts clean.
+        ledger.note_published(5, 80_000, None);
+        assert_eq!(ledger.publication(5), None);
+        assert_eq!(ledger.claim_stamp_ms(5, 99_000), 80_000);
+        // A worker still holding generation 4 never rewinds the ledger.
+        assert_eq!(
+            ledger.begin_attempt(4),
+            ProjectionAttemptAdmission::Retired(ProjectionRetirement::SupersededByNewerGeneration)
+        );
+        assert!(!ledger.retire(4, ProjectionRetirement::RetryBudgetExhausted));
+        ledger.note_published(4, 1, Some(order(99)));
+        assert_eq!(ledger.claim_stamp_ms(5, 99_000), 80_000);
+        assert_eq!(ledger.retired(5), None);
+        assert_eq!(ledger.begin_attempt(5), ProjectionAttemptAdmission::Attempt { number: 1 });
+    }
+
+    #[test]
+    fn only_lost_generations_rearm_on_an_identical_republication() {
+        assert!(ProjectionRetirement::YieldedToNewerWindowClaim.rearms_on_identical_republication());
+        assert!(ProjectionRetirement::EditorSurfaceForgotten.rearms_on_identical_republication());
+        assert!(!ProjectionRetirement::RetryBudgetExhausted.rearms_on_identical_republication());
+    }
 
     /// GH #136 follow-up (d), exhaustive: republish exactly when the settling
     /// document was gated by the current generation's pass and that pass has

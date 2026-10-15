@@ -402,7 +402,20 @@ only with a listening PID-scoped editor socket or an open `agent-doc start`
 supervisor serving a document in it. Idle roots are skipped by the recycle
 (`install_fanout_recycle_skipped reason=idle_project_root` in their `ops.log`)
 and are reached by `reload_library` through an already-running controller only
-(`reload_library_idle_root_skipped` when none answers). A controller on a
+(`reload_library_idle_root_skipped` when none answers). No in-use root may
+end a fan-out as a silent `skipped` (`#stalecontrollerhotupdate`): a recycle
+request that fails in transport is retried once after 500 ms, and every root
+that still was not recycled gets `controller_recycle_fanout_unrecycled
+fanout=install_fanout|live_plugin_update|all_projects outcome=declined|failed
+attempts=N detail=...` in its own `ops.log` (a failure is also printed to the
+installer's stderr). `declined` is the controller answering that it already
+runs the installed binary, or no controller socket answering. A declined
+recycle never repairs controller state other than the binary: the 2026-10-15
+haiven-dev controller that "survived" a hot update ran the current binary
+(launched by that update's `live_plugin_update` recycle) and was wedged on a
+stale pane-layout generation, which the bounded projection retry and the
+editor-ordered window claim now stop without any recycle
+(`specs/08-session-routing.md`, "One window, one driver"). A controller on a
 replaced binary whose root is idle, that owns no documents, and that has had no
 client for 60s retires instead of handing off
 (`controller_idle_root_retired_instead_of_handoff`). Test fixtures that launch a

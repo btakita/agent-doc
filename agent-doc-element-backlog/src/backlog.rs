@@ -8150,7 +8150,11 @@ mod tests {
         let mut ids = Vec::new();
         for action in actions {
             let outcome = agent_doc_element::todo::add_todo_item_to_document(
-                &doc, action, &id_for, &reserved,
+                &doc,
+                action,
+                &id_for,
+                &reserved,
+                &agent_doc_element::todo::TodoLinkIndex::default(),
             )
             .unwrap();
             assert!(outcome.inserted, "{action}");

@@ -3,6 +3,7 @@ mutation-report network-suite network-suite-pr network-suite-merge network-suite
 
 NETWORK_SEED ?= 17
 NETWORK_TIER ?= local
+NETWORK_PREPARE_TIMEOUT_MS ?= 120000
 REPORT_DIR ?= reports
 
 check: fmt-check clippy test schema-check mutation-check
@@ -31,6 +32,8 @@ mutation-report:
 prepare-network-peers:
 	cmake -S ../lazily-cpp -B ../lazily-cpp/build
 	cmake --build ../lazily-cpp/build --target lazily_interop_peer --parallel
+	cargo run --quiet -- prepare --scenario scenarios/nine-way-convergence.json \
+		--timeout-ms $(NETWORK_PREPARE_TIMEOUT_MS)
 
 network-suite: prepare-network-peers
 	mkdir -p $(REPORT_DIR)

@@ -1,9 +1,87 @@
+use std::fs;
 use std::process::Command;
 
 use serde_json::Value;
 
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_lazily-interop")
+}
+
+#[test]
+fn prepare_warms_every_peer_before_the_strict_hello_deadline() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let registry = temp.path().join("peers.toml");
+    let wrapper = |marker: &str| {
+        format!(
+            "command = [\"sh\", \"-c\", \"if [ ! -e {marker} ]; then sleep 2; touch {marker}; fi; exec \\\"$1\\\" reference-peer\", \"sh\", \"{{self}}\"]\ncwd = \".\"\n"
+        )
+    };
+    fs::write(
+        &registry,
+        format!(
+            "[peers.left]\n{}\n[peers.right]\n{}",
+            wrapper("left.prepared"),
+            wrapper("right.prepared")
+        ),
+    )
+    .expect("write registry");
+
+    let prepare = Command::new(binary())
+        .args([
+            "prepare",
+            "--registry",
+            registry.to_str().expect("registry path"),
+            "--scenario",
+            "scenarios/reference-convergence.json",
+            "--timeout-ms",
+            "5000",
+        ])
+        .output()
+        .expect("prepare peers");
+    assert!(
+        prepare.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&prepare.stdout),
+        String::from_utf8_lossy(&prepare.stderr),
+    );
+    assert!(temp.path().join("left.prepared").is_file());
+    assert!(temp.path().join("right.prepared").is_file());
+
+    let run = Command::new(binary())
+        .args([
+            "run",
+            "--registry",
+            registry.to_str().expect("registry path"),
+            "--scenario",
+            "scenarios/reference-convergence.json",
+            "--timeout-ms",
+            "1000",
+        ])
+        .output()
+        .expect("run warmed peers");
+    assert!(
+        run.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr),
+    );
+}
+
+#[test]
+fn network_suite_prepares_the_nine_way_peer_set_before_running_it() {
+    let makefile = fs::read_to_string("Makefile").expect("read Makefile");
+    assert!(makefile.contains("network-suite: prepare-network-peers"));
+
+    let prepare = makefile
+        .find("cargo run --quiet -- prepare --scenario scenarios/nine-way-convergence.json")
+        .expect("nine-way preparation command");
+    let run = makefile
+        .find("cargo run --quiet -- run --scenario scenarios/nine-way-convergence.json")
+        .expect("nine-way strict run command");
+    assert!(
+        prepare < run,
+        "peer preparation must precede the strict run"
+    );
 }
 
 #[test]
@@ -123,6 +201,26 @@ fn one_stdlib_implementation_is_insufficient_and_other_peers_are_staged() {
 
 #[test]
 fn durable_client_v1_replays_all_portable_proof_dimensions() {
+    // The real go/js/py peers may compile or sync on first launch, which is not
+    // a protocol answer. Warm them under the preparation budget first, exactly
+    // like `make network-suite`; only then enforce the strict hello deadline.
+    let prepare = Command::new(binary())
+        .args([
+            "prepare",
+            "--scenario",
+            "scenarios/durable-client-v1.json",
+            "--timeout-ms",
+            "300000",
+        ])
+        .output()
+        .expect("prepare durable client peers");
+    assert!(
+        prepare.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&prepare.stdout),
+        String::from_utf8_lossy(&prepare.stderr),
+    );
+
     let output = Command::new(binary())
         .args([
             "run",

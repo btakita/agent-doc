@@ -44,6 +44,47 @@ pub fn load_scenario(path: &Path, schemas: &Schemas) -> Result<Scenario> {
     serde_json::from_value(value).with_context(|| format!("decode scenario {}", path.display()))
 }
 
+/// Launch and gracefully stop every active peer selected by a scenario.
+///
+/// Network gates call this with a generous timeout before starting their
+/// deadline-bound run. Commands such as `cargo run`, `zig build`, `uv run`,
+/// Gradle, `dart run`, `go run`, and `dotnet run` can therefore populate their
+/// build caches without consuming the protocol's per-command deadline.
+pub fn prepare_scenario_peers(
+    scenario: &Scenario,
+    registry: &Registry,
+    schemas: &Schemas,
+    timeout: Duration,
+) -> Result<Vec<String>, Failure> {
+    let mut prepared = Vec::new();
+
+    for scenario_peer in &scenario.peers {
+        let config = registry.peers.get(&scenario_peer.name).ok_or_else(|| {
+            Failure::new(
+                ErrorCategory::PeerLaunch,
+                Plane::Harness,
+                &scenario_peer.name,
+                "scenario peer is absent from registry",
+            )
+        })?;
+        if config.staged {
+            continue;
+        }
+
+        let peer = PeerProcess::start(
+            &scenario_peer.name,
+            config,
+            scenario_peer.peer_id,
+            timeout,
+            schemas,
+        )?;
+        peer.close(schemas)?;
+        prepared.push(scenario_peer.name.clone());
+    }
+
+    Ok(prepared)
+}
+
 pub fn run_scenario(
     scenario: &Scenario,
     registry: &Registry,

@@ -9,7 +9,9 @@ use clap::{Parser, Subcommand, ValueEnum};
 use lazily_interop::mutation::run_mutation_check;
 use lazily_interop::reference::run_reference_peer;
 use lazily_interop::report::{console_report, json_report, junit_report, mutation_console};
-use lazily_interop::scenario::{load_registry, load_scenario, resolve_default_paths, run_scenario};
+use lazily_interop::scenario::{
+    load_registry, load_scenario, prepare_scenario_peers, resolve_default_paths, run_scenario,
+};
 use lazily_interop::schema::{Schemas, validate_schema_files};
 use lazily_interop::types::{ErrorCategory, Failure, Plane, RunReport, RunStatus};
 
@@ -22,6 +24,17 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Warm every scenario peer before enforcing the protocol deadline.
+    Prepare {
+        #[arg(long)]
+        registry: Option<PathBuf>,
+        #[arg(long)]
+        scenario: Option<PathBuf>,
+        #[arg(long)]
+        spec: Option<PathBuf>,
+        #[arg(long, default_value_t = 120_000)]
+        timeout_ms: u64,
+    },
     /// Run one deterministic semantic scenario.
     Run {
         #[arg(long)]
@@ -82,6 +95,32 @@ fn run() -> Result<bool> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let (_, _, default_spec) = resolve_default_paths(&root);
     match cli.command {
+        Command::Prepare {
+            registry,
+            scenario,
+            spec,
+            timeout_ms,
+        } => {
+            let (default_registry, default_scenario, _) = resolve_default_paths(&root);
+            let registry_path = registry.unwrap_or(default_registry);
+            let scenario_path = scenario.unwrap_or(default_scenario);
+            let spec_root = spec.unwrap_or(default_spec);
+            let schemas = Schemas::load(&root, &spec_root)?;
+            let executable = std::env::current_exe().context("locate orchestrator executable")?;
+            let registry = load_registry(&registry_path, &executable)?;
+            let scenario = load_scenario(&scenario_path, &schemas)?;
+            let prepared = prepare_scenario_peers(
+                &scenario,
+                &registry,
+                &schemas,
+                Duration::from_millis(timeout_ms),
+            )
+            .map_err(|failure| {
+                anyhow::anyhow!("could not prepare {}: {}", failure.culprit, failure.message)
+            })?;
+            println!("prepared {} peers: {}", prepared.len(), prepared.join(", "));
+            Ok(true)
+        }
         Command::ReferencePeer => {
             run_reference_peer()?;
             Ok(true)

@@ -13,6 +13,11 @@ cargo run -- run
 make network-suite
 ```
 
+The network target first launches every selected peer with a generous
+preparation timeout, then runs the scenarios with the strict 10-second command
+deadline. This keeps build-on-launch work out of the protocol timeout while
+still failing preparation when a peer cannot start or complete its handshake.
+
 The default run launches two instances of the intentionally independent
 reference peer and executes `scenarios/reference-convergence.json`. Production
 bindings join by adding commands to `peers.toml`; the scenario language remains

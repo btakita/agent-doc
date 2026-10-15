@@ -885,7 +885,7 @@ pub fn load_document_projection(
         ProjectionPart::<agent_doc_state_backbone::DocumentStateProjection> {
             command: DOCUMENT_STATE_PROJECTION_COMMAND,
             extract: |projection| projection,
-            local: agent_doc_state_wire::local_document_projection,
+            local: agent_doc_state_wire::local_document_projection_in,
         },
     )
 }
@@ -919,7 +919,7 @@ pub fn load_document_closeout_projection(
         ProjectionPart::<agent_doc_state_backbone::CloseoutProjection> {
             command: DOCUMENT_CLOSEOUT_PROJECTION_COMMAND,
             extract: |projection| projection.closeout,
-            local: agent_doc_state_wire::local_document_closeout_projection,
+            local: agent_doc_state_wire::local_document_closeout_projection_in,
         },
     ) {
         Err(err) if is_unknown_controller_command(&err) => {
@@ -939,8 +939,9 @@ fn is_unknown_controller_command(err: &anyhow::Error) -> bool {
 struct ProjectionPart<T> {
     command: &'static str,
     extract: fn(agent_doc_state_backbone::DocumentStateProjection) -> T,
-    /// The in-controller-process reader for this part.
-    local: fn(&str) -> Option<Option<T>>,
+    /// The in-controller-process reader for this part, scoped to the
+    /// document's project root (`#ctrltimingflakes`).
+    local: fn(&Path, &str) -> Option<Option<T>>,
 }
 
 fn load_document_projection_part<T: serde::de::DeserializeOwned>(
@@ -1022,7 +1023,8 @@ fn load_document_projection_part<T: serde::de::DeserializeOwned>(
     // worker logging about one document replayed that document's whole event
     // ledger once per line, and only threads carrying the request context's
     // memo escaped it.
-    if served_by_this_process && let Some(projection) = (part.local)(&document_hash) {
+    if served_by_this_process && let Some(projection) = (part.local)(&project_root, &document_hash)
+    {
         return Ok(projection);
     }
     if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
@@ -5755,10 +5757,14 @@ mod project_root_symmetry_tests {
 
         let expected_hash = cycle_document_hash(&doc).unwrap().expect("document hash");
         let served = expected_hash.clone();
-        agent_doc_state_wire::set_process_document_projection_reader(move |document_hash| {
-            (document_hash == served)
-                .then(|| agent_doc_state_backbone::DocumentStateProjection::new("live-authority"))
-        });
+        agent_doc_state_wire::set_process_document_projection_reader(
+            dir.path(),
+            move |document_hash| {
+                (document_hash == served).then(|| {
+                    agent_doc_state_backbone::DocumentStateProjection::new("live-authority")
+                })
+            },
+        );
 
         let from_a_worker = std::thread::spawn(move || load_document_projection(&doc))
             .join()
@@ -5793,7 +5799,7 @@ mod project_root_symmetry_tests {
 
         let whole_reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counted = std::sync::Arc::clone(&whole_reads);
-        agent_doc_state_wire::set_process_document_projection_reader(move |_| {
+        agent_doc_state_wire::set_process_document_projection_reader(dir.path(), move |_| {
             counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Some(agent_doc_state_backbone::DocumentStateProjection::new(
                 "whole",
@@ -5804,7 +5810,9 @@ mod project_root_symmetry_tests {
             ..Default::default()
         };
         let served = expected.clone();
-        agent_doc_state_wire::set_process_document_closeout_reader(move |_| Some(served.clone()));
+        agent_doc_state_wire::set_process_document_closeout_reader(dir.path(), move |_| {
+            Some(served.clone())
+        });
 
         let doc_for_worker = doc.clone();
         let closeout =
@@ -5824,6 +5832,75 @@ mod project_root_symmetry_tests {
             0,
             "a closeout read must not clone the whole projection"
         );
+
+        agent_doc_state_wire::clear_process_document_projection_reader_for_tests();
+        agent_doc_state_wire::clear_controller_process_root_for_tests();
+    }
+
+    /// `#ctrltimingflakes`: the process root and the process-wide readers are
+    /// separate slots, so with two controllers in one process (every parallel
+    /// in-process controller test) the root could name one controller while
+    /// the readers served another. A read for the first root then took the
+    /// other runtime's "no state" as the live answer, and
+    /// `mark_write_applied` reported "applied through the command plane but no
+    /// cycle state was read back". A reader installed for another root must
+    /// never answer; the read falls back to the durable ledger instead.
+    #[cfg(unix)]
+    #[test]
+    fn controller_process_read_ignores_a_reader_installed_for_another_root() {
+        let _registry = controller_process_registry_guard();
+        let dir = tempfile::TempDir::new().unwrap();
+        let other = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "# doc\n").unwrap();
+        agent_doc_state_wire::clear_process_document_projection_reader_for_tests();
+        agent_doc_state_wire::set_controller_process_root(dir.path());
+        assert!(
+            !agent_doc_sqlite::state_store::state_db_path(dir.path()).exists(),
+            "the ledger must be absent so a non-None answer can only come from a reader",
+        );
+
+        let foreign = agent_doc_state_backbone::CloseoutProjection {
+            cycle_id: Some("cycle-from-another-controller".to_string()),
+            ..Default::default()
+        };
+        let served = foreign.clone();
+        agent_doc_state_wire::set_process_document_closeout_reader(other.path(), move |_| {
+            Some(served.clone())
+        });
+        agent_doc_state_wire::set_process_document_projection_reader(other.path(), move |_| {
+            Some(agent_doc_state_backbone::DocumentStateProjection::new(
+                "another-controller",
+            ))
+        });
+
+        let doc_for_worker = doc.clone();
+        let closeout =
+            std::thread::spawn(move || load_document_closeout_projection(&doc_for_worker))
+                .join()
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            closeout, None,
+            "a closeout read for this root must not be answered by another root's reader",
+        );
+        assert_eq!(
+            load_document_projection(&doc).unwrap(),
+            None,
+            "a projection read for this root must not be answered by another root's reader",
+        );
+
+        // The same reader installed for this root does answer.
+        let live = agent_doc_state_backbone::CloseoutProjection {
+            cycle_id: Some("cycle-live".to_string()),
+            ..Default::default()
+        };
+        let served = live.clone();
+        agent_doc_state_wire::set_process_document_closeout_reader(dir.path(), move |_| {
+            Some(served.clone())
+        });
+        assert_eq!(load_document_closeout_projection(&doc).unwrap(), Some(live));
 
         agent_doc_state_wire::clear_process_document_projection_reader_for_tests();
         agent_doc_state_wire::clear_controller_process_root_for_tests();

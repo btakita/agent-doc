@@ -340,6 +340,15 @@ a closed actor record is replaceable through the stale-authority path.
   command answers `unknown controller command` and the client falls back to the
   whole projection. Request-admission turn-attribution priming in the
   controller uses the same closeout reader.
+- The process-wide live projection and closeout readers are bound to the
+  project root of the controller runtime that installed them
+  (`#ctrltimingflakes`). A read inside the controller process for a document of
+  root R uses them only when they were installed for R; a reader installed for
+  another root never answers, and the read falls back to the durable ledger.
+  The process root and the readers are written separately during `serve`, so
+  with two controllers in one process (parallel in-process controller tests)
+  an unscoped reader let one controller's "no state" answer a read for the
+  other's root.
 - The controller's orphan-drain sweep (`#orphandrain`, every 10s) probes
   supervisor liveness (a full `/proc` scan) only when the cheap facts leave a
   dispatch possible (`orphan_drain_may_dispatch`: active queue and a drainable

@@ -143,16 +143,52 @@ pub fn process_is_controller_for(root: &Path) -> bool {
 /// holds a `Weak` to the runtime, so it is `Send + Sync` and every thread in
 /// the controller reads the same authority without anyone remembering to wire
 /// it up.
+///
+/// `#ctrltimingflakes`: the reader is bound to the project root of the runtime
+/// it reads. The process root ([`CONTROLLER_PROCESS_ROOT`]) and this reader are
+/// separate slots written at different points of `serve`, so two controllers
+/// in one process (every in-process controller test running in parallel) could
+/// leave the root naming one controller and the reader serving another; a read
+/// for the first root then answered "no state" from the second runtime. A
+/// root-scoped read ([`local_document_projection_in`]) uses this reader only
+/// when it was installed for that root.
 static PROCESS_DOCUMENT_PROJECTION_READER: std::sync::RwLock<
-    Option<SharedDocumentProjectionReader>,
+    Option<RootScopedReader<SharedDocumentProjectionReader>>,
 > = std::sync::RwLock::new(None);
 
-/// Install the process-wide live projection reader.
+/// A process-wide reader together with the canonical project root whose
+/// controller runtime it reads.
+struct RootScopedReader<R> {
+    root: std::path::PathBuf,
+    reader: R,
+}
+
+impl<R> RootScopedReader<R> {
+    fn new(root: &Path, reader: R) -> Self {
+        Self {
+            root: canonical_root(root),
+            reader,
+        }
+    }
+
+    /// The reader, only when it serves `root` (already canonical).
+    fn for_root(&self, root: &Path) -> Option<&R> {
+        (self.root == root).then_some(&self.reader)
+    }
+}
+
+fn canonical_root(root: &Path) -> std::path::PathBuf {
+    root.canonicalize().unwrap_or_else(|_| root.to_path_buf())
+}
+
+/// Install the process-wide live projection reader for the controller serving
+/// `root`.
 pub fn set_process_document_projection_reader(
+    root: &Path,
     reader: impl Fn(&str) -> Option<DocumentStateProjection> + Send + Sync + 'static,
 ) {
     match PROCESS_DOCUMENT_PROJECTION_READER.write() {
-        Ok(mut slot) => *slot = Some(Box::new(reader)),
+        Ok(mut slot) => *slot = Some(RootScopedReader::new(root, Box::new(reader))),
         Err(err) => eprintln!(
             "[agent-doc] process projection reader registry poisoned ({err}) — controller-owned threads will replay cold state.db instead of reading the live projection"
         ),
@@ -215,7 +251,7 @@ pub fn local_document_projection(document_hash: &str) -> Option<Option<DocumentS
         return Some(projection);
     }
     match PROCESS_DOCUMENT_PROJECTION_READER.read() {
-        Ok(slot) => slot.as_ref().map(|reader| reader(document_hash)),
+        Ok(slot) => slot.as_ref().map(|scoped| (scoped.reader)(document_hash)),
         Err(err) => {
             eprintln!(
                 "[agent-doc] process projection reader registry poisoned ({err}) — falling back to the durable ledger"
@@ -236,18 +272,21 @@ pub fn local_document_projection(document_hash: &str) -> Option<Option<DocumentS
 type SharedDocumentCloseoutReader =
     Box<dyn Fn(&str) -> Option<agent_doc_state_backbone::CloseoutProjection> + Send + Sync>;
 
-static PROCESS_DOCUMENT_CLOSEOUT_READER: std::sync::RwLock<Option<SharedDocumentCloseoutReader>> =
-    std::sync::RwLock::new(None);
+static PROCESS_DOCUMENT_CLOSEOUT_READER: std::sync::RwLock<
+    Option<RootScopedReader<SharedDocumentCloseoutReader>>,
+> = std::sync::RwLock::new(None);
 
-/// Install the process-wide live closeout reader.
+/// Install the process-wide live closeout reader for the controller serving
+/// `root`.
 pub fn set_process_document_closeout_reader(
+    root: &Path,
     reader: impl Fn(&str) -> Option<agent_doc_state_backbone::CloseoutProjection>
     + Send
     + Sync
     + 'static,
 ) {
     match PROCESS_DOCUMENT_CLOSEOUT_READER.write() {
-        Ok(mut slot) => *slot = Some(Box::new(reader)),
+        Ok(mut slot) => *slot = Some(RootScopedReader::new(root, Box::new(reader))),
         Err(err) => eprintln!(
             "[agent-doc] process closeout reader registry poisoned ({err}) — closeout reads will clone the whole live projection"
         ),
@@ -283,11 +322,65 @@ pub fn local_document_closeout_projection(
         return Some(projection.map(|projection| projection.closeout));
     }
     if let Ok(slot) = PROCESS_DOCUMENT_CLOSEOUT_READER.read()
-        && let Some(reader) = slot.as_ref()
+        && let Some(scoped) = slot.as_ref()
+    {
+        return Some((scoped.reader)(document_hash));
+    }
+    local_document_projection(document_hash)
+        .map(|projection| projection.map(|projection| projection.closeout))
+}
+
+/// [`local_document_projection`] for a document of project `root`: the
+/// thread-local reader answers as before, but the process-wide reader answers
+/// only when it was installed for `root` (`#ctrltimingflakes`). `None` means no
+/// reader for `root` is installed in this process.
+pub fn local_document_projection_in(
+    root: &Path,
+    document_hash: &str,
+) -> Option<Option<DocumentStateProjection>> {
+    if let Some(projection) = LOCAL_DOCUMENT_PROJECTION_READER
+        .with(|slot| slot.borrow().as_ref().map(|r| r(document_hash)))
+    {
+        return Some(projection);
+    }
+    let root = canonical_root(root);
+    match PROCESS_DOCUMENT_PROJECTION_READER.read() {
+        Ok(slot) => slot
+            .as_ref()
+            .and_then(|scoped| scoped.for_root(&root))
+            .map(|reader| reader(document_hash)),
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] process projection reader registry poisoned ({err}) — falling back to the durable ledger"
+            );
+            None
+        }
+    }
+}
+
+/// [`local_document_closeout_projection`] for a document of project `root`,
+/// with the root scoping of [`local_document_projection_in`].
+pub fn local_document_closeout_projection_in(
+    root: &Path,
+    document_hash: &str,
+) -> Option<Option<agent_doc_state_backbone::CloseoutProjection>> {
+    if let Some(closeout) =
+        LOCAL_DOCUMENT_CLOSEOUT_READER.with(|slot| slot.borrow().as_ref().map(|r| r(document_hash)))
+    {
+        return Some(closeout);
+    }
+    if let Some(projection) = LOCAL_DOCUMENT_PROJECTION_READER
+        .with(|slot| slot.borrow().as_ref().map(|r| r(document_hash)))
+    {
+        return Some(projection.map(|projection| projection.closeout));
+    }
+    let canonical = canonical_root(root);
+    if let Ok(slot) = PROCESS_DOCUMENT_CLOSEOUT_READER.read()
+        && let Some(reader) = slot.as_ref().and_then(|scoped| scoped.for_root(&canonical))
     {
         return Some(reader(document_hash));
     }
-    local_document_projection(document_hash)
+    local_document_projection_in(root, document_hash)
         .map(|projection| projection.map(|projection| projection.closeout))
 }
 

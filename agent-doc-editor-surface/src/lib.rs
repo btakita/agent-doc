@@ -29,6 +29,7 @@
 //! observation arrived rather than because a caller remembered to ask.
 
 pub mod editor_view_policy;
+pub mod endpoint_retirement;
 pub mod graph;
 pub mod installation_focus;
 pub mod navigation_lane;
@@ -43,6 +44,10 @@ pub use editor_view_policy::{
     EditorViewPresentation, EditorViewReleaseDestination, EditorViewReleaseReason,
     EditorViewSessionKey, EditorViewSnapshot, EditorViewSurface, EditorViewSurfaceKey,
     MainLayoutEligibility, isolated_view_session_name,
+};
+pub use endpoint_retirement::{
+    MutedLiveEndpoint, RETIRED_ENDPOINT_MUTE_THRESHOLD, RetiredEndpointMonitor,
+    SurfaceObservationRejection, reregistration_generation,
 };
 pub use graph::{EditorSurfaceState, SurfaceFold};
 pub use installation_focus::{
@@ -352,6 +357,17 @@ pub struct SurfaceObservationReceipt {
     /// consequence until its own installation gains focus again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deferred_to: Option<String>,
+    /// Why the controller fenced this observation, when it did
+    /// (`#surfaceretireformal`). Absent on an accepted observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejected: Option<SurfaceObservationRejection>,
+    /// Re-registration directive, set only with
+    /// [`SurfaceObservationRejection::RetiredEndpoint`]: the endpoint is retired
+    /// at this generation, so a still-live editor must publish again at a
+    /// generation strictly above it ([`reregistration_generation`]) instead of
+    /// staying muted until a plugin reload or controller recycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reregister_above_generation: Option<u64>,
 }
 
 /// Controller-published reactive projection for an accepted editor fact.

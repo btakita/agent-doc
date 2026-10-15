@@ -178,12 +178,53 @@ internal object CpRouteClient {
      */
     internal val navigationClientId: String
         get() = editorSurfaceClientId
-    private val editorSurfaceGeneration = System.nanoTime().coerceAtLeast(1L)
+    /**
+     * Connection generation of this process's editor-surface client. Seeded once per process; only a
+     * re-registration after a typed `retired_endpoint` receipt moves it (`#surfaceretireformal`).
+     */
+    private val editorSurfaceGeneration =
+        java.util.concurrent.atomic.AtomicLong(System.nanoTime().coerceAtLeast(1L))
     private val editorSurfaceSequence = java.util.concurrent.atomic.AtomicLong(0)
     private val editorFocusClientId =
         editorSurfaceClientId("jetbrains-focus", editorInstallationId, ProcessHandle.current().pid())
-    private val editorFocusGeneration = System.nanoTime().coerceAtLeast(1L)
+    private val editorFocusGeneration =
+        java.util.concurrent.atomic.AtomicLong(System.nanoTime().coerceAtLeast(1L))
     private val editorFocusSequence = java.util.concurrent.atomic.AtomicLong(0)
+
+    /**
+     * Re-registration of a retired editor-surface endpoint (`#surfaceretireformal`, model:
+     * `formal/tla/PassiveTmuxSyncRetireNet.tla`, action `EditorReregister`).
+     *
+     * The controller fences a retired `(client, surface)` endpoint at every generation `<=` the
+     * retired one, so a frame that is in fact still live (a self-retirement, or a Remote Dev backend
+     * fallback resuming on a frame a frontend handoff retired) stays muted until it publishes at a
+     * newer generation. The controller's typed receipt names that generation
+     * (`rejected = "retired_endpoint"`, `reregister_above_generation`); a live listener re-registers
+     * strictly above it and re-sends the same observation once, so tab-switch auto-sync is muted for
+     * at most one round trip. A frame the listener no longer owns never re-registers, which keeps
+     * retirement a correct fence for genuinely ended frames.
+     */
+    internal object SurfaceEndpointReregistration {
+        /** The retired generation named by a typed retired-endpoint receipt, else null. */
+        fun retiredGeneration(receipt: JsonObject): Long? =
+            if (jsonStringFieldOrNull(receipt, "rejected") == "retired_endpoint") {
+                jsonLongFieldOrNull(receipt, "reregister_above_generation")
+            } else {
+                null
+            }
+
+        fun retiredGeneration(receiptJson: String): Long? =
+            runCatching { retiredGeneration(JsonParser.parseString(receiptJson).asJsonObject) }
+                .getOrNull()
+
+        /**
+         * Strictly above the retired generation and never below this client's own (a racing
+         * receipt may have moved it already): idempotent and monotone, so concurrent receipts
+         * converge on one generation.
+         */
+        fun nextGeneration(current: Long, retiredGeneration: Long): Long =
+            maxOf(current, retiredGeneration + 1)
+    }
 
     /**
      * `#idearidereditors`: the controller retires a whole client *family* when a replacement JVM
@@ -236,6 +277,7 @@ internal object CpRouteClient {
         projectRoot: String,
         surfaceJson: String,
         surfaceId: String = "project",
+        mayReregister: () -> Boolean = { false },
     ): CpEditorRouteResult =
         observeEditorSurfaceWithClient(
             projectRoot = projectRoot,
@@ -243,8 +285,9 @@ internal object CpRouteClient {
             surfaceId = surfaceId,
             clientId = editorSurfaceClientId,
             generation = editorSurfaceGeneration,
-            sequence = editorSurfaceSequence.incrementAndGet(),
+            sequence = editorSurfaceSequence,
             logLabel = "layout-sync",
+            mayReregister = mayReregister,
         )
 
     /**
@@ -258,6 +301,7 @@ internal object CpRouteClient {
         projectRoot: String,
         surfaceJson: String,
         surfaceId: String = "project",
+        mayReregister: () -> Boolean = { false },
     ): CpEditorRouteResult =
         observeEditorSurfaceWithClient(
             projectRoot = projectRoot,
@@ -265,34 +309,41 @@ internal object CpRouteClient {
             surfaceId = surfaceId,
             clientId = editorFocusClientId,
             generation = editorFocusGeneration,
-            sequence = editorFocusSequence.incrementAndGet(),
+            sequence = editorFocusSequence,
             logLabel = "focus-projection",
             timeoutMs = EDITOR_FOCUS_OBSERVE_TIMEOUT_MS,
             selfHeal = true,
+            mayReregister = mayReregister,
         )
 
+    /**
+     * Publish one observation; on a typed retired-endpoint receipt from a frame [mayReregister]
+     * still owns, re-register above the retired generation and re-send it ONCE
+     * ([SurfaceEndpointReregistration]).
+     */
     private fun observeEditorSurfaceWithClient(
         projectRoot: String,
         surfaceJson: String,
         surfaceId: String,
         clientId: String,
-        generation: Long,
-        sequence: Long,
+        generation: java.util.concurrent.atomic.AtomicLong,
+        sequence: java.util.concurrent.atomic.AtomicLong,
         logLabel: String,
         timeoutMs: Long = SOCKET_REQUEST_TIMEOUT_MS,
         selfHeal: Boolean = false,
+        mayReregister: () -> Boolean = { false },
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
-        val request =
-            editorSurfaceObserveRequest(
-                surfaceJson = surfaceJson,
-                surfaceId = surfaceId,
-                clientId = clientId,
-                generation = generation,
-                sequence = sequence,
-            )
-        return try {
-            val receipt = if (selfHeal) {
+        fun publish(publishGeneration: Long): JsonObject {
+            val request =
+                editorSurfaceObserveRequest(
+                    surfaceJson = surfaceJson,
+                    surfaceId = surfaceId,
+                    clientId = clientId,
+                    generation = publishGeneration,
+                    sequence = sequence.incrementAndGet(),
+                )
+            return if (selfHeal) {
                 sendOperatorRequestDataToSocket(
                     socket,
                     request,
@@ -301,6 +352,47 @@ internal object CpRouteClient {
                 )
             } else {
                 sendRequestDataToSocketWithTimeout(socket, request, timeoutMs)
+            }
+        }
+        return try {
+            val publishedGeneration = generation.get()
+            var receipt = publish(publishedGeneration)
+            val retiredGeneration = SurfaceEndpointReregistration.retiredGeneration(receipt)
+            if (retiredGeneration != null) {
+                if (mayReregister()) {
+                    val reregistered =
+                        generation.updateAndGet {
+                            SurfaceEndpointReregistration.nextGeneration(it, retiredGeneration)
+                        }
+                    log.info(
+                        "[$logLabel] re-registering retired editor-surface endpoint " +
+                            "surface=$surfaceId retired_generation=$retiredGeneration " +
+                            "generation=$publishedGeneration->$reregistered",
+                    )
+                    receipt = publish(reregistered)
+                    if (!mayReregister()) {
+                        // A frontend handoff overtook the re-registration: its forget may have
+                        // carried the old generation, so retire the re-registered endpoint at the
+                        // generation it now holds (the transport twin of the in-flight delivery
+                        // retirement in EditorTabSyncListener).
+                        forgetEditorSurfaceClient(
+                            projectRoot = projectRoot,
+                            clientId = clientId,
+                            generation = reregistered,
+                            surfaceId = surfaceId,
+                        )
+                        log.info(
+                            "[$logLabel] re-registered endpoint retired after a handoff overtook it " +
+                                "surface=$surfaceId generation=$reregistered",
+                        )
+                    }
+                } else {
+                    log.info(
+                        "[$logLabel] retired editor-surface endpoint left retired " +
+                            "surface=$surfaceId retired_generation=$retiredGeneration: " +
+                            "the frame is not this listener's to publish",
+                    )
+                }
             }
             CpEditorRouteResult(
                 exitCode = 0,
@@ -321,7 +413,7 @@ internal object CpRouteClient {
         return forgetEditorSurfaceClient(
             projectRoot = projectRoot,
             clientId = editorSurfaceClientId,
-            generation = editorSurfaceGeneration,
+            generation = editorSurfaceGeneration.get(),
             surfaceId = surfaceId,
         )
     }
@@ -330,7 +422,7 @@ internal object CpRouteClient {
         return forgetEditorSurfaceClient(
             projectRoot = projectRoot,
             clientId = editorFocusClientId,
-            generation = editorFocusGeneration,
+            generation = editorFocusGeneration.get(),
             surfaceId = surfaceId,
         )
     }
@@ -340,7 +432,7 @@ internal object CpRouteClient {
         val request =
             editorSurfaceForgetRequest(
                 clientId = editorFocusClientId,
-                generation = editorFocusGeneration,
+                generation = editorFocusGeneration.get(),
                 retireClientFamily = false,
                 surfaceId = surfaceId,
             )
@@ -397,7 +489,7 @@ internal object CpRouteClient {
                 oldPath = oldPath,
                 newPath = newPath,
                 clientId = editorSurfaceClientId,
-                generation = editorSurfaceGeneration,
+                generation = editorSurfaceGeneration.get(),
                 sequence = editorSurfaceSequence.incrementAndGet(),
             )
         return try {

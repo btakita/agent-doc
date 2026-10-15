@@ -2073,6 +2073,45 @@ exchange leaf; it cannot re-merge an already-composed queue as flat text.
   `rejected=<reason>`; a run of `rejected=retired_endpoint` from a live editor
   means the editor retired an endpoint it kept publishing, which disables
   automatic tab-switch sync for that frame (`#tmuxautosyncretired`).
+- Retirement is a correct fence for an ended frame and must never mute a live
+  one beyond one round trip (`#surfaceretireformal`, model
+  `formal/tla/PassiveTmuxSyncRetireNet.tla`):
+  - A `retired_endpoint` rejection is typed in the receipt the editor reads:
+    `SurfaceObservationReceipt.rejected = "retired_endpoint"` plus the
+    re-registration directive `reregister_above_generation = <retired
+    generation>`. The other fences set `rejected` only (`stale_generation`,
+    `stale_sequence`: nothing was applied, nothing to recover).
+  - An editor that still owns the frame (JetBrains: `projectionLive`, false
+    after a frontend authority handoff until the backend fallback resumes)
+    re-registers at `max(current, retired + 1)` and re-sends the same
+    observation once. A newer generation replaces the retired root, so the
+    re-sent observation is accepted; the retired generation stays fenced, and a
+    frame the editor no longer owns never re-registers. An editor that
+    predates the directive ignores both fields.
+  - `editor_surface_forget` at generation `g` (exact surface, client-wide, or
+    client family) retires an endpoint registered at any generation `<= g` and
+    RAISES its fence to `g`; a root registered at a newer generation is never
+    touched. The former exact-generation match ignored a forget newer than the
+    root, which let a re-registering observation the forget overtook drive tmux
+    from a frame the editor had declared ended (the model's `ExactForget`
+    wedge).
+  - Runtime monitor of `LiveEndpointNeverMuted`: after
+    `RETIRED_ENDPOINT_MUTE_THRESHOLD` (3) consecutive `retired_endpoint`
+    rejections of one endpoint the controller writes one
+    `controller_editor_surface_muted_live_endpoint client= surface=
+    generation= sequence= consecutive= threshold= recovery=reregister_directive
+    reregister_above_generation= operator_action=reload_editor_plugin_if_persistent`
+    record per streak. Every rejection already carries the directive, so the
+    record means the editor ignored it K times (a pre-directive plugin, or a
+    client publishing a frame it does not consider its own); any other verdict
+    ends the streak. K = 3 because one rejection is expected after any
+    retirement the editor did not see coming and a re-registering editor may
+    have one more observation in flight at the old generation.
+  - `controller_editor_surface_observed` names the endpoint's `surface=`.
+  - Every code site that mutates endpoint state is bound to a named model
+    action by `formal/tla/PassiveTmuxSyncRetireNet.conformance.tsv`; the
+    sites are derived from the sources, so an unmodeled transition fails
+    `make check`.
 
 ## Realtime Parse State
 

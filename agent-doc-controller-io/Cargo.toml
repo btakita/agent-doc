@@ -76,4 +76,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 agent-doc-sim-net = { path = "../agent-doc-sim-net", version = "0.35.503" }
 rusqlite = { version = "0.40", features = ["bundled"] }
+# `#surfaceretireformal`: the editor-surface action-set conformance test parses
+# `project_controller/rpc.rs` with the real Rust grammar instead of grepping it.
+syn = { version = "2", features = ["full", "visit"] }
 tempfile = "3"

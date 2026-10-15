@@ -95,6 +95,11 @@ internal object BackendGuestSelectionFallback {
                                         "type=${session.type} " +
                                         "file=${edge.second.fileEditor.file?.name ?: "<none>"}",
                                 )
+                                // The fallback owns the selection edge again: frames the earlier
+                                // frontend handoff retired are live, so a retired-endpoint receipt
+                                // must re-register instead of muting auto-sync at this process's
+                                // generation (`#surfaceretireformal`, model action `Fallback`).
+                                listener.resumeControllerProjection()
                                 listener.selectionChanged(
                                     FileEditorManagerEvent(
                                         FileEditorManager.getInstance(project),

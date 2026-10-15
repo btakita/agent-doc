@@ -355,6 +355,7 @@ modules prove the transport around it.
 | `RecycleSettleDispatchNet` | settle-wait RPC, one request per connection | `Unreachable` (RSD-1: two lost round trips refused a pending recycle), `Ttl` (R9: TTL read as proof; fixed by `#netadv5`, abandonment needs the supervisor gone) |
 | `AgentDocCloseoutNet` | closeout owner claim and heartbeat | `OneShotClaim` (F4), `HeartbeatBreak` (F5a), `IgnoreLoss` (F5b), `Fence` (ADC-fence, not fixed: needs a commit fenced by owner id; `FencedTarget` is the passing target) |
 | `PassiveTmuxSyncNet` | editor focus/layout observation and its effect | `AdvanceFirst` (F14/F15: tracking advances before the effect; fixed by retaining the exact failed `SurfaceIntent` until a later observation applies it), `Reorder` (sequence fence) |
+| `PassiveTmuxSyncRetireNet` | editor-surface observation, `editor_surface_forget`, and the observation receipt | `WrongRetire` (v0.35.502/503 self-retirement of a live endpoint, the 02:54:03Z trace), `FallbackMute` (Remote Dev fallback on a handoff-retired frame), `ExactForget` (forget must raise the fence), `NoFence` (the retired fence stays). See below |
 | `LifecycleSequence` | lifecycle, heartbeat and queue-control level updates | `Reorder` (SIM-F1/SIM-F2: fixed by a monotonic send-stamp fence within each generation) |
 
 Each module also has a reach config that must be violated, so the happy path
@@ -365,6 +366,68 @@ The atomic `RecycleSettleDispatch` no longer treats an elapsed TTL as a fact
 with it alive the gate refuses with a retryable verdict
 (`RefuseOwnerStillRecycling`). `RecycleSettleDispatchTtlWedge` restores the old
 reading and must violate `NeverProceedsPastALiveRecycle`.
+
+## Editor-surface retirement (`PassiveTmuxSyncRetireNet`, `#surfaceretireformal`)
+
+`PassiveTmuxSyncNet` had no retire/forget transition, so it proved
+`<>[](visible = desired)` while v0.35.502/503 wedged: the JetBrains plugin
+retired its OWN live frame endpoint when a delivery returned after a newer
+observation was admitted, and the controller fenced that endpoint forever at
+the plugin's per-process connection generation (`retired && g <= current`).
+The shipped code took an action the model did not contain.
+`PassiveTmuxSyncRetireNet` models one frame endpoint over `NetChannel`:
+`Obs(g, s)`, `Retire(g)` and typed receipts (`"ok"` / `"retired"`), the
+controller fence exactly as `SurfaceObservationRejection::classify` codes it,
+a per-process generation that only a re-registration changes, a frontend
+`Handoff` (the legitimate retire), the backend `Fallback`, and `EndFrame`.
+
+Properties: `LiveEndpointNeverMuted` (`(live /\ pendingIntent) ~> (~live \/
+acceptedSeq >= seq)`), the parent's `VisibleEventuallyMatchesEditor`,
+`NoRetiredResurrection` (nothing from a generation the editor declared ended
+drives tmux again) and `ControllerGenerationNeverAheadOfEditor`.
+
+| Config | Knobs | Verdict |
+|---|---|---|
+| `PassiveTmuxSyncRetireNet` | fixed; one handoff | pass (liveness + safety) |
+| `...DuplicateLive` | fixed, `MaxCopies = 2` | pass |
+| `...Safety` / `...DuplicateSafety` | fixed; reconnect / duplication, two handoffs | pass (invariants) |
+| `...SelfHeal` | `RetireOnNewerReply = TRUE` + re-registration | pass: recovery holds even with the bug's edge put back |
+| `...WrongRetireWedge` | `RetireOnNewerReply = TRUE`, no re-registration, no handoff | MUST violate: TLC finds the 02:54:03Z trace (refocus, refocus, superseded receipt retires, retire lands, next observation fenced, read as done) |
+| `...FallbackMuteWedge` | no re-registration, one handoff | MUST violate: the Remote Dev sibling |
+| `...ExactForgetWedge` | exact-generation forget + re-registration | MUST violate `NoRetiredResurrection` |
+| `...NoFenceWedge` | `RetiredFence = FALSE` | MUST violate `NoRetiredResurrection` |
+| `...Reach` | fixed | MUST violate `NeverReregisters` |
+
+Fairness is strong fairness on delivering the editor's CURRENT observation and
+a receipt for it, not `C!FairLossy(Msgs)`: TLC's liveness tableau is
+exponential in fairness conjuncts and reported the per-message form (~40
+conjuncts) as a "tautology" with 0 branches. The stated form admits every
+behaviour `FairLossy` admits and lets the adversary starve every other message
+(including every `Retire`) forever, so it is the weaker assumption.
+Duplication (`MaxCopies = 2`) and reconnect are checked in separate configs
+because together they exceed 10^8 states.
+
+The model is bound to the code three ways (agent-doc-controller-io
+`project_controller::rpc::surface_retire_conformance`):
+
+- **Action-set conformance.** Every site that mutates editor-surface endpoint
+  state is derived from the sources: graph mutators, their callers and dispatch
+  commands from `rpc.rs` parsed with `syn`; `CpRouteClient` RPCs, their call
+  sites and the listener's liveness transitions from the JetBrains Kotlin
+  sources. Each must have a row in `PassiveTmuxSyncRetireNet.conformance.tsv`
+  naming leaf actions of the model; stale rows, unknown actions and unmapped
+  actions fail too. A fake graph mutator, a fake dispatch command and a fake
+  listener forget each make it fail.
+- **Next-state transcription.** `ControllerRecvObs` / `ControllerRecvRetire`
+  are transcribed in Rust, pinned to the `.tla` text, equal to the production
+  classification on every small input, and driven against the production graph
+  over every 4-step run of a 9-operation domain.
+- **Trace validation.** The real 00:45:43Z and 02:54:03Z wedges are anonymized
+  fixtures in `formal/traces/passive_tmux_sync_retire/`. Replayed through the
+  transcription and the production graph, every logged verdict reproduces, the
+  shipped behaviour reaches the muted state (and the runtime monitor fires on
+  the third logged rejection), and under the re-registration rule each trace
+  needs exactly one re-registration and never trips the monitor.
 
 ## Network channel assumptions
 

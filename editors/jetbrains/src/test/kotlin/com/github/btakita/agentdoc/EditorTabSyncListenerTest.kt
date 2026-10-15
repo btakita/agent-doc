@@ -516,6 +516,56 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `a frontend handoff fences the listener's frames and the fallback makes them live again`() {
+        // #surfaceretireformal (model: PassiveTmuxSyncRetireNet `live`): a retired-endpoint receipt
+        // re-registers only while the listener owns its frames. After a handoff it must stay a
+        // fence; once the backend selection fallback resumes, it must self-heal.
+        val listener = EditorTabSyncListener()
+        assertTrue("a classic listener is live from the start", listener.projectionLive())
+        listener.retireControllerProjection()
+        assertFalse("a handed-off listener must not re-register", listener.projectionLive())
+        listener.resumeControllerProjection()
+        assertTrue("the fallback owns the selection edge again", listener.projectionLive())
+        listener.resumeControllerProjection()
+        assertTrue("resuming a live listener is a no-op", listener.projectionLive())
+    }
+
+    @Test
+    fun `both editor-surface publishers let a live listener re-register a retired endpoint`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        for (publisher in listOf("CpRouteClient.observeEditorSurface(", "CpRouteClient.observeEditorFocus(")) {
+            val call = source.substringAfter(publisher).substringBefore(")")
+            assertTrue(
+                "$publisher must hand the transport the listener's liveness: $call",
+                call.contains("mayReregister = ::projectionLive"),
+            )
+        }
+        val live =
+            source
+                .substringAfter("internal fun projectionLive(): Boolean")
+                .substringBefore("private val surfaceDeliveryExecutor")
+        assertTrue(
+            "liveness is read under the lock the handoff writes it under",
+            live.contains("synchronized(lifecycleLock)") && live.contains("!closed && !projectionRetired"),
+        )
+        val retire =
+            source
+                .substringAfter("internal fun retireControllerProjection()")
+                .substringBefore("internal fun resumeControllerProjection()")
+        assertTrue(
+            "the handoff marks the projection retired under the drain lock",
+            retire.contains("projectionRetired = true\n            projectionAuthorityEpoch.incrementAndGet()"),
+        )
+    }
+
+    @Test
     fun `surface capture delegates authoritative liveness to the shared adapter`() {
         val source =
             Files.readString(

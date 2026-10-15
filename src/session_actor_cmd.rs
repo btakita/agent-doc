@@ -6869,6 +6869,55 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         }
     }
 
+    /// gh-271 end to end through the real `HarnessConfig` predicates: the
+    /// captured pane of a Claude Code `/clear` that ran, whose footer carries
+    /// an operator-configured `statusLine` and the `✔ Update installed`
+    /// notice. Neither row matches a Claude chrome rule, and both sit below
+    /// the closed composer frame (`#claudeclearfooter`), so the clear is
+    /// proven instead of `conversation_retained`.
+    #[test]
+    fn unobserved_claude_clear_with_a_custom_statusline_footer_is_proven() {
+        let tail = include_str!(
+            "../agent-doc-turn-executor-tmux/src/fixtures/claude_clear_custom_statusline_tail.txt"
+        );
+        let config = agent_doc_harness::HarnessConfig::from_agent_name("claude-code");
+        for footer_row in tail
+            .lines()
+            .filter(|line| line.contains("<(^*)__") || line.contains("Update installed"))
+        {
+            assert!(
+                !config.is_ignorable_output_line(footer_row),
+                "fixture row {footer_row:?} must not be per-string chrome"
+            );
+        }
+        let history = format!("{}{tail}", claude_pane_history(800));
+        let verdict = unobserved_clear_history_verdict(&config, &history, None, "/clear");
+        assert_eq!(
+            verdict.status,
+            ContextClearSubmitStatus::AcceptedClearedState,
+            "{verdict:?}"
+        );
+        assert_eq!(verdict.probe, UnobservedClearProbe::FreshChatProven);
+
+        // The same footer under the retained conversation is still retained.
+        let footer: String = tail
+            .lines()
+            .rev()
+            .take(3)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let retained = format!(
+            "{}\u{2500}\u{2500}\u{2500}\u{2500}\n\u{276f} \n\u{2500}\u{2500}\u{2500}\u{2500}\n{footer}",
+            claude_pane_history(800)
+        );
+        let verdict = unobserved_clear_history_verdict(&config, &retained, None, "/clear");
+        assert_eq!(verdict.status, ContextClearSubmitStatus::Unobserved);
+        assert_eq!(verdict.probe, UnobservedClearProbe::ConversationRetained);
+    }
+
     /// The fail-closed half: when the old conversation is still the latest
     /// thing in the pane, the verdict stays `Unobserved`; a genuinely queued
     /// clear stays `HarnessQueuedInput`.

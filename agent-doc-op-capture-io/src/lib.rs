@@ -1025,20 +1025,11 @@ pub fn operator_text_for_base(doc: &Path, base_text: &str) -> Result<Option<Stri
 /// are not evidence, so the set is empty and the merge keeps the
 /// anti-resurrection `Live < Struck` join.
 ///
-/// This form maps an unreadable epoch to "no evidence". A caller whose outcome
-/// re-strikes an operator unstrike on empty evidence must use
-/// [`try_operator_rearmed_queue_item_keys`] and fail closed instead
-/// (`#unstrikelost`, unreadable evidence).
-pub fn operator_rearmed_queue_item_keys(
-    doc: &Path,
-    base_text: &str,
-) -> std::collections::HashSet<String> {
-    try_operator_rearmed_queue_item_keys(doc, base_text).unwrap_or_default()
-}
-
-/// [`operator_rearmed_queue_item_keys`], keeping "the evidence could not be
-/// read" (a dead or wedged controller, an unreadable `state.db`) distinct from
-/// "there is no evidence" (`#unstrikelost`, unreadable evidence).
+/// `Err` means the evidence could not be read (a dead or wedged controller, an
+/// unreadable `state.db`); it is never "no evidence". An empty set re-strikes
+/// every operator unstrike, so callers must fail closed on `Err` rather than
+/// default it (`#unstrikelost`, unreadable evidence). There is deliberately no
+/// infallible form.
 pub fn try_operator_rearmed_queue_item_keys(
     doc: &Path,
     base_text: &str,

@@ -4148,6 +4148,116 @@ fn agent_projection_integrity_valid(content: &str) -> bool {
     boundary_singleton && single_exchange
 }
 
+/// Attempts at reading operator re-arm evidence before a merge over a struck
+/// queue item refuses (`#unstrikelost`, unreadable evidence).
+const OPERATOR_REARM_EVIDENCE_ATTEMPTS: u32 = 3;
+const OPERATOR_REARM_EVIDENCE_RETRY_BACKOFF: std::time::Duration =
+    std::time::Duration::from_millis(50);
+
+/// Operator re-arm evidence for a component merge over `merge_base`
+/// (`#unstrikelost`, unreadable evidence).
+///
+/// Unreadable evidence is not absent evidence. An empty set lets the
+/// `Live < Struck` join re-strike a queue item the operator un-struck, so a read
+/// that failed (a controller that died or wedged before answering, an
+/// unreadable `state.db`) must never become an empty set. Re-arm keys only ever
+/// name items struck in `merge_base`, so a base without one needs no evidence
+/// and nothing is read. Otherwise the read is retried a bounded number of times
+/// (each read reconnects to, or relaunches, the project controller) and then
+/// the merge is refused: the caller's write fails before it projects anything,
+/// so the operator's text stays as it is.
+fn operator_rearm_evidence_for_merge(
+    file: &Path,
+    merge_base: &str,
+    source: &str,
+) -> Result<std::collections::HashSet<String>> {
+    if !agent_doc_merge::crdt::base_holds_struck_queue_item(merge_base) {
+        return Ok(std::collections::HashSet::new());
+    }
+    let mut attempt = 1;
+    loop {
+        match read_operator_rearm_evidence(file, merge_base) {
+            Ok(keys) => return Ok(keys),
+            Err(err) => {
+                let error = format!("{err:#}").replace('\n', " ");
+                let outcome = if attempt < OPERATOR_REARM_EVIDENCE_ATTEMPTS {
+                    "retrying"
+                } else {
+                    "refused"
+                };
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_rearm_evidence_unavailable file={} base_hash={} attempt={attempt}/{OPERATOR_REARM_EVIDENCE_ATTEMPTS} outcome={outcome} error={} (#unstrikelost)",
+                        file.display(),
+                        agent_doc_hash::content_hash(merge_base),
+                        error,
+                    ),
+                );
+                if attempt >= OPERATOR_REARM_EVIDENCE_ATTEMPTS {
+                    return Err(err.context(format!(
+                        "{source}: operator re-arm evidence for {} is unreadable after \
+                         {OPERATOR_REARM_EVIDENCE_ATTEMPTS} attempt(s); refusing to merge over a \
+                         struck queue item without it, which could re-strike an operator unstrike",
+                        file.display()
+                    )));
+                }
+            }
+        }
+        std::thread::sleep(OPERATOR_REARM_EVIDENCE_RETRY_BACKOFF);
+        attempt += 1;
+    }
+}
+
+fn read_operator_rearm_evidence(
+    file: &Path,
+    merge_base: &str,
+) -> Result<std::collections::HashSet<String>> {
+    #[cfg(test)]
+    rearm_evidence_fault::take()?;
+    agent_doc_op_capture_io::try_operator_rearmed_queue_item_keys(file, merge_base)
+}
+
+/// Deterministic fault injection for the re-arm evidence read
+/// (`#unstrikelost`, unreadable evidence). The live trigger is a controller
+/// that dies between the write path reaching it and the evidence read, which
+/// no test can schedule. Thread-local, because the merge runs on the caller's
+/// thread.
+#[cfg(test)]
+mod rearm_evidence_fault {
+    use std::cell::Cell;
+
+    thread_local! {
+        static REMAINING: Cell<u32> = const { Cell::new(0) };
+        static TAKEN: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Fail the next `count` evidence reads on this thread.
+    pub(super) fn arm(count: u32) {
+        REMAINING.with(|remaining| remaining.set(count));
+        TAKEN.with(|taken| taken.set(0));
+    }
+
+    /// Evidence reads attempted on this thread since [`arm`].
+    pub(super) fn taken() -> u32 {
+        TAKEN.with(Cell::get)
+    }
+
+    pub(super) fn take() -> anyhow::Result<()> {
+        TAKEN.with(|taken| taken.set(taken.get() + 1));
+        REMAINING.with(|remaining| {
+            let left = remaining.get();
+            if left == 0 {
+                return Ok(());
+            }
+            remaining.set(left - 1);
+            Err(anyhow::anyhow!(
+                "injected: Lazily actor socket refused the editor-op projection read"
+            ))
+        })
+    }
+}
+
 /// Rebase one binary-owned document candidate onto Lazily's current operator
 /// cut. Response delivery is a semantic cell, not a whole-document replay:
 /// once that response is already present, the live cut wins byte-for-byte; if
@@ -4157,6 +4267,7 @@ fn agent_projection_integrity_valid(content: &str) -> bool {
 /// `#unstrikelost`: the merge runs inside the operator re-arm evidence scope
 /// recovered from `file`'s captured editor ops against `merge_base`, so an
 /// operator un-strike of a struck head survives a concurrent response write.
+/// Unreadable evidence refuses the rebase (see [`operator_rearm_evidence_for_merge`]).
 fn rebase_agent_candidate_over_editor_cut(
     file: &Path,
     merge_base: &str,
@@ -4164,7 +4275,7 @@ fn rebase_agent_candidate_over_editor_cut(
     editor_cut: &str,
 ) -> Result<String> {
     agent_doc_merge::crdt::with_operator_rearmed_queue_items(
-        agent_doc_op_capture_io::operator_rearmed_queue_item_keys(file, merge_base),
+        operator_rearm_evidence_for_merge(file, merge_base, "agent_rebase")?,
         || {
             write_policy::rebase_agent_candidate_over_editor_cut(
                 merge_base,
@@ -5331,7 +5442,7 @@ fn ensure_deferred_document_write_intent_with_mode(
                     Some(&base_state),
                     &pending.target_content,
                     content,
-                    agent_doc_op_capture_io::operator_rearmed_queue_item_keys(file, &merge_base),
+                    operator_rearm_evidence_for_merge(file, &merge_base, source)?,
                 )
                 .with_context(|| {
                     format!(
@@ -11296,6 +11407,184 @@ mod tests {
             rebase_agent_candidate_over_editor_cut(&file, base, &agent_target, &editor_cut)
                 .unwrap();
         assert_queue(&merged, true);
+    }
+
+    /// The `#unstrikelost` fixture: a struck free-text head the operator
+    /// un-struck in the editor (and whose `~~` deletions are durable editor
+    /// ops), and an agent target that strikes only `do [#stillopen]`.
+    fn operator_unstrike_fixture() -> (&'static str, String, String) {
+        let base = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#stillopen]\n",
+            "- ~~release + publish~~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n\n> **Queue prompt:** release + publish\n\nReleased.\n",
+            "### Re: dispatch\n\n> **Queue prompt:** do [#stillopen]\n\nDispatched to a subagent.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let agent_target = base.replacen("- do [#stillopen]\n", "- ~~do [#stillopen]~~\n", 1);
+        let editor_cut = base.replacen("~~release + publish~~", "release + publish", 1);
+        (base, agent_target, editor_cut)
+    }
+
+    fn record_operator_unstrike(file: &Path, base: &str) {
+        let struck_at = base.find("~~release + publish~~").unwrap();
+        let close_at = struck_at + "~~release + publish".len();
+        agent_doc_op_capture_io::record_editor_ops(
+            file,
+            &agent_doc_hash::content_hash(base),
+            vec![
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset: close_at,
+                    len: 2,
+                },
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset: struck_at,
+                    len: 2,
+                },
+            ],
+        )
+        .unwrap();
+    }
+
+    fn ops_log(file: &Path) -> String {
+        std::fs::read_to_string(file.parent().unwrap().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default()
+    }
+
+    /// `#unstrikelost` (unreadable evidence), agent rebase: the evidence read
+    /// used to map a failed read to "no evidence", so the `Live < Struck` join
+    /// re-struck the operator's unstrike of `release + publish`. Every read
+    /// failing must refuse the rebase after bounded retries instead.
+    #[test]
+    fn unreadable_rearm_evidence_refuses_the_agent_rebase_instead_of_restriking() {
+        let (base, agent_target, editor_cut) = operator_unstrike_fixture();
+        let (_dir, file, _) = temp_doc(base);
+        record_operator_unstrike(&file, base);
+
+        rearm_evidence_fault::arm(u32::MAX);
+        let result =
+            rebase_agent_candidate_over_editor_cut(&file, base, &agent_target, &editor_cut);
+        let reads = rearm_evidence_fault::taken();
+        rearm_evidence_fault::arm(0);
+
+        let err = result.expect_err("an unreadable epoch must not merge as if it were empty");
+        assert!(format!("{err:#}").contains("re-arm evidence"), "{err:#}");
+        assert_eq!(
+            reads, OPERATOR_REARM_EVIDENCE_ATTEMPTS,
+            "bounded retries, then refuse"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), base);
+        let ops = ops_log(&file);
+        assert!(
+            ops.contains("agent_rebase_rearm_evidence_unavailable")
+                && ops.contains("outcome=refused"),
+            "the refusal must be logged:\n{ops}"
+        );
+    }
+
+    /// One failed read recovers on retry and keeps the operator's unstrike.
+    #[test]
+    fn transiently_unreadable_rearm_evidence_recovers_the_agent_rebase() {
+        let (base, agent_target, editor_cut) = operator_unstrike_fixture();
+        let (_dir, file, _) = temp_doc(base);
+        record_operator_unstrike(&file, base);
+
+        rearm_evidence_fault::arm(1);
+        let result =
+            rebase_agent_candidate_over_editor_cut(&file, base, &agent_target, &editor_cut);
+        let reads = rearm_evidence_fault::taken();
+        rearm_evidence_fault::arm(0);
+
+        let merged = result.expect("the retry reads the evidence");
+        assert_eq!(reads, 2);
+        assert!(merged.contains("- release + publish\n"), "{merged}");
+        assert!(!merged.contains("~~release + publish~~"), "{merged}");
+        assert!(merged.contains("- ~~do [#stillopen]~~\n"), "{merged}");
+    }
+
+    /// A base with no struck queue item cannot be re-armed, so the evidence is
+    /// not read and an unreadable epoch cannot block the rebase.
+    #[test]
+    fn rearm_evidence_is_not_read_when_the_merge_base_holds_no_struck_item() {
+        let (struck_base, agent_target, editor_cut) = operator_unstrike_fixture();
+        let base = struck_base.replacen("~~release + publish~~", "release + publish", 1);
+        let agent_target = agent_target.replacen("~~release + publish~~", "release + publish", 1);
+        let (_dir, file, _) = temp_doc(&base);
+
+        rearm_evidence_fault::arm(u32::MAX);
+        let result =
+            rebase_agent_candidate_over_editor_cut(&file, &base, &agent_target, &editor_cut);
+        let reads = rearm_evidence_fault::taken();
+        rearm_evidence_fault::arm(0);
+
+        let merged = result.expect("no struck item: the evidence cannot change the merge");
+        assert_eq!(reads, 0);
+        assert!(merged.contains("- ~~do [#stillopen]~~\n"), "{merged}");
+    }
+
+    /// `#unstrikelost` (unreadable evidence), deferred-write composition: a
+    /// second retained target composed over a prior one reads the same
+    /// evidence. An unreadable epoch must refuse the composition and leave the
+    /// prior intent untouched, never retain a composed target that re-strikes
+    /// the operator's unstrike. The unfaulted run is the positive control that
+    /// the fixture reaches the composition at all.
+    #[test]
+    fn unreadable_rearm_evidence_refuses_deferred_write_composition() {
+        let (base, agent_target, editor_cut) = operator_unstrike_fixture();
+        let compose = |fault: u32| {
+            let (dir, file, _) = temp_doc(base);
+            ensure_deferred_document_write_intent(
+                &file,
+                base,
+                &agent_target,
+                "rearm_compose_agent_test",
+                DocumentWriteDeferredReason::EditorProjectionPending,
+            )
+            .unwrap();
+            record_operator_unstrike(&file, base);
+            rearm_evidence_fault::arm(fault);
+            let result = ensure_deferred_document_write_intent(
+                &file,
+                base,
+                &editor_cut,
+                "rearm_compose_editor_test",
+                DocumentWriteDeferredReason::EditorProjectionPending,
+            );
+            let reads = rearm_evidence_fault::taken();
+            rearm_evidence_fault::arm(0);
+            (dir, file, result, reads)
+        };
+
+        let (_ok_dir, ok_file, composed, _) = compose(0);
+        composed.expect("readable evidence composes the two targets");
+        let pending = pending_document_write(&ok_file).unwrap();
+        assert!(
+            pending.target_content.contains("- release + publish\n")
+                && pending.target_content.contains("- ~~do [#stillopen]~~\n"),
+            "{}",
+            pending.target_content
+        );
+        assert!(ops_log(&ok_file).contains("rearm_compose_editor_test_deferred_write_composed"));
+
+        let (_dir, file, refused, reads) = compose(u32::MAX);
+        let err = refused.expect_err("an unreadable epoch must not compose as if it were empty");
+        assert!(format!("{err:#}").contains("re-arm evidence"), "{err:#}");
+        assert_eq!(reads, OPERATOR_REARM_EVIDENCE_ATTEMPTS);
+        let pending = pending_document_write(&file).unwrap();
+        assert_eq!(
+            pending.target_content, agent_target,
+            "the refused composition must leave the prior intent as it was"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), base);
+        assert!(
+            ops_log(&file).contains("rearm_compose_editor_test_rearm_evidence_unavailable"),
+            "{}",
+            ops_log(&file)
+        );
     }
 
     #[test]

@@ -268,6 +268,12 @@ Both branches are integrated into `main` (`d0f92c9fe5`) and installed locally. O
 **New queue items:**
 - **GH #265:** claimed and dispatched to a subagent in its own worktree. The fix makes `getActionUpdateThread() = BGT` explicit on the JetBrains actions that are missing it, and adds a test derived from the source that fails if any action lacks it.
 - **"release + publish":** I claimed it for myself. v0.35.505 will ship once #265 is merged.
+
+### Re: closing the formal-logic queue item — opus-5.5 · 2026-10-15T01:48-04:00
+
+> **Queue prompt:** do your formal logic suggestions
+
+This one is done; the details are in the response above. The previous closeout didn't strike it because its worker claim was still active, so I released the claim (`subagent:surfaceformal`) and am closing it here.
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 

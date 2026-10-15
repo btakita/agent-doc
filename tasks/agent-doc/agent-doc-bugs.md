@@ -100,6 +100,59 @@ Here is what the issue says is wrong, and what the subagent was asked to fix:
 **Still in flight (claimed):**
 - **`agent:todo` completion API**, plus the sdk.md todo duplicate-on-done bug (`#apimigrationcollide` / `#publicbundleadopt`): one subagent, branch `feat/todo-complete-api`. Its full `make check` is running.
 - **Compact Exchange "Unknown close tag `/agent:salient-response`"**: one subagent, branch `fix/salient-response-close-tag`. Its full `make check` is running.
+
+### Re: todo completion API, todo duplicate-on-done, salient-response lint — on main and installed — opus-5-5 · 2026-10-15T05:08-04:00
+
+> **Queue prompt:** Make sure agent:todo items are marked complete as they are finished. Provide a similar api as agent:backlog + agent:icebox + agent:reviews.
+
+**Done** (`72a8f99d2a`): granular `agent-doc write` flags for `agent:todo`. They are wired into the replayable closeout plan, the MCP finalize tool, and the finalize rerun command.
+
+| Flag | Effect |
+|---|---|
+| `--todo-done <sel>` | Checks the item off where it sits. Running it again changes nothing, and it merges any duplicate copies into one line. |
+| `--todo-edit "sel=text"` | Replaces the text and keeps the id, checkbox state, and position. |
+| `--todo-reopen <sel>` | Unchecks the item where it sits. Running it again changes nothing. |
+| `--todo-remove <sel>` | Deletes the item and its indented notes. It errors on no match. |
+| `--todo-add` | Now gives each item a leading `[#id]`, the same way backlog ids are generated. |
+
+A selector `<sel>` is resolved in this order: the item's own id, then the single item that mentions `#id`, then the exact text. Operator-written items without an id still work. No match, or more than one, is an error that lists the candidates.
+
+Done items stay checked in `agent:todo`; they do not move to `agent:done`, because that component records agent work. `SKILL.md`, the runbooks and the specs now tell agents to check a todo off in the same closeout the action finishes. A non-blocking `[todo] advisory` prints the exact `--todo-done` command when a `--done` resolves an id that an open todo still mentions.
+
+> **Queue prompt:** In sdk.md the "Decide the haiven-api merge order of #645 vs #715" todo item was duplicated. The duplicate was marked done but the original not marked done:
+
+**Fixed** (same commit). The agent's 03:53 `patch:todo` was a correct full replace that checked both items where they sat.
+- **Root cause:** you were editing the todo during that turn, so the write went through the merge that reconciles agent and editor edits. That merge splits queue, backlog, review and done into items, but not `agent:todo`, which it merged character by character. That can insert an edit both sides made twice, or drop the agent's update entirely.
+- **Fix, part 1:** `agent:todo` now merges per item.
+- **Fix, part 2:** after any `patch:todo` and after `--todo-done`, copies of the same item collapse into one line at the original's position. The line is checked if any copy was, and keeps the longer text. Two lines count as copies when they have the same own id, the same text, or one is the other plus a completion note.
+- **Not matched:** a shared referenced id alone is not a copy. `(#publicbundleadopt)` names both the finished #160 item and the new #162 item, and those stay separate.
+- **Tests:** both examples are covered by anonymized regressions. The merge test fails without the fix.
+- **sdk.md:** your working tree no longer has the two open originals. Two identical open copies of "Decide provisional token-bearing sessions, option 3…" remain for you to collapse.
+
+> **Queue prompt:** Compact Exchange error on sdk.md: `agent:salient-response cycle="cycle-1792051137843"` tag in the exchange.
+
+**Fixed** (`7fee5a2623`). The lint gate that runs before compact and write only knew top-level components, so any lint-gated command run while a live salient checkpoint was in the exchange failed with your exact error. `agent:referral` had the same gap.
+- **What happened** (from ops.log, UTC):
+  - 08:01–08:03: the checkpoint was written.
+  - 08:10–08:11: compact was refused three times.
+  - 08:11–08:12: you deleted the markers by hand. The editor guard restored the opening marker twice, and then both went.
+  - 08:12:26: a compact succeeded and archived the leftover "Live response (not final)" text as history.
+
+  Closeout was not at fault: the normal response path already strips every salient block.
+- **Lint gate:** the registry now lists binary-written nested markers (`salient-response`, `referral`). A source-scanning test fails if any `agent:NAME` literal the binary writes is rejected by the gate.
+- **Compaction:** compact (full and `--keep N`) never archives or commits salient blocks. The open cycle's block stays visible, and blocks from other cycles are dropped.
+- **Patch fallback:** fallback response paths that apply patches (force-disk, replay, compact capture compose) now also strip salient blocks, so the next committed response sweeps stale ones.
+- **Mutation checks:** removing the registry entry, the compaction change, or the patch-path cleanup each fails its test.
+- **sdk.md:** it has no orphan block. The leftover text sits only in `src/haiven-dev/.agent-doc/archives/…-20261015-081226.md` (~line 1300); deleting it is optional.
+
+> **Queue prompt:** release + publish
+
+**Done earlier this session:** v0.35.506 is tagged and pushed (`a470c0dfa8`) and installed with `make install-full`; the earlier response has the details. This head stayed queued only because claimed items sat ahead of it.
+
+**Batch verification:** this batch merges `72a8f99d2a` and `7fee5a2623` onto main, on top of `86e24508ce`. Earlier this session, `86e24508ce` added the queue-line fork-dup fix and the compact-noun false-positive fix.
+- Full `make check`: exit 0, 10609 passed, 167 skipped, no `result: FAILED`.
+- Pushed to `main` as a fast-forward (`86e24508ce..929af28503`), and `make install` exited 0.
+- These fixes are on main but **unreleased**; they are not in v0.35.506.
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
@@ -109,8 +162,8 @@ Here is what the issue says is wrong, and what the subagent was asked to fix:
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#runsdkcaused]~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/266
-- 🚧 Make sure agent:todo items are marked complete as they are finished. Provide a similar api as agent:backlog + agent:icebox + agent:reviews.
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/266~~
+- ~~Make sure agent:todo items are marked complete as they are finished. Provide a similar api as agent:backlog + agent:icebox + agent:reviews.~~
 ---
 🚧 In sdk.md the "Decide the haiven-api merge order of #645 vs #715" todo item was duplicated. The duplicate was marked done but the original not marked done:
 ```

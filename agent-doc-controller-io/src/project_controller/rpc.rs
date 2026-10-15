@@ -47031,13 +47031,38 @@ mod tests {
         let (result, written) = stream.join().unwrap();
         result.unwrap();
         let frames = String::from_utf8(written).unwrap();
-        assert!(
-            frames.lines().count() <= 1,
-            "at most the wake frame, then EOF: {frames}"
-        );
-        // A later subscriber returns immediately instead of parking.
+        // The stream's own subscription publishes the initial projection
+        // asynchronously, so it may land before or after the stream first
+        // parks: an optional genuine projection frame, then at most one
+        // terminal wake. No frame may follow a timed-out (retirement) frame —
+        // that would be the stream spinning after promotion.
+        let parsed: Vec<serde_json::Value> = frames
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(parsed.len() <= 2, "a projection and one wake at most: {frames}");
+        for (index, frame) in parsed.iter().enumerate() {
+            let last = index + 1 == parsed.len();
+            if frame["data"]["timed_out"] == serde_json::Value::Bool(true) {
+                assert!(last, "a frame followed the retirement wake: {frames}");
+            } else {
+                assert!(
+                    !frame["data"]["projection"].is_null(),
+                    "a non-wake frame must carry a published projection: {frames}"
+                );
+            }
+        }
+        // A later subscriber returns immediately instead of parking. Its cursor
+        // is ahead of every frame in this generation, so only retirement can
+        // return it before the ceiling, whether or not the asynchronous initial
+        // projection has landed yet.
+        let generation = parsed
+            .last()
+            .and_then(|frame| frame["data"]["controller_generation"].as_u64())
+            .expect("the parked stream wrote at least one frame");
         let started = Instant::now();
-        let late = runtime.subscribe_state_plane(&channel, None, 0, HANG_CEILING);
+        let late =
+            runtime.subscribe_state_plane(&channel, Some(generation), u64::MAX, HANG_CEILING);
         assert!(late.timed_out);
         assert!(started.elapsed() < HANG_CEILING);
     }

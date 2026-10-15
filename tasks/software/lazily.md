@@ -17,7 +17,8 @@ prompt_presets:
   '#followup': Add follow-up work into the backlog + queue
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
-  'release': 'release + publish'
+  'release': 'release + publish any lazily packages that have pending work'
+queue: go
 ---
 
 ## Status
@@ -254,12 +255,48 @@ This green nine-binding `--require-all` run was the evidence `#lzrustcoreprofile
 - **Zig trust:** the worktree's `lazily-zig/.mise.toml` isn't mise-trusted. The run used `MISE_TRUSTED_CONFIG_PATHS` for that run only.
 
 All four dispatched heads have now reported. Everything integration-ready is waiting on commit authorization.
+
+
+### Re: #release scope — opus-5-5 · 2026-10-15T00:10-04:00
+
+I re-checked every repo just now. No Lazily public `main` has a release-worthy commit. Only two are past their tags:
+- rs: `87da9e7`, the `lazily-macros` 0.23.1 bump, already published.
+- go: `e5e082a`, test-only, and go `main` CI is red.
+
+All the real pending work is uncommitted in review worktrees, so I asked what `#release` ("release + publish any lazily packages that have pending work") should cover.
+
+**Question:** What should #release ('release + publish any lazily packages that have pending work') cover?
+
+- **Integrate, then release** ← **selected.** Commit and push Phases 1-5, CI activation, the Dart fix and interop cold-start, rebasing Zig/Go first. Get CI green, then do ordinary pre-1.0 minor releases of each binding. Not Core Beta, and no Phase 6 callers.
+- Go CI fix + go patch. Commit the one-line `#lzgocireachability` fix, then release go v0.29.1.
+- Main only (nothing now). Release only what's already on `main`, which today is nothing.
+
+**Plan for `#release`** (claimed as `subagent:releaseintegration`):
+
+1. **lazily-spec first.** It's dispatched now, because every binding Makefile reads `../lazily-spec`. It integrates into `~/worktrees/integrate-core-20261015/lazily-spec` on branch `integrate/core-cohort-20261015`, one commit per phase: Phase 1 profile → Phase 2 claims → Dart-timeout checker → Phase 3 → Phase 5 → CI activation → Phase 6 cohort, the last only if CI needs it. It runs the full check and pushes the branch, not `main`.
+2. **Then the nine bindings in parallel**, one agent per repo in sibling worktrees under the same root. Each carries over its repo's Phase 2–5 work plus CI activation, and the repo-specific fixes:
+   - rs: `#lzrustcoreprofiledivergence`
+   - go: `#lzgocireachability`
+   - dart: the timeout fix
+   - zig: the toolchain work
+
+   The Zig and Go worktrees get rebased onto current `main` first.
+3. **Then me, serially per repo:**
+   - Fast-forward each `main` once its branch is green.
+   - Bump to the next minor version, including the stale interop-peer version strings in cpp and zig.
+   - Tag, then publish (pub.dev runs under your login).
+   - Integrate interop cold-start plus a fresh set of release pins in the superproject.
+
+**Open for you:**
+- **lazily-rs publishing.** Its tag workflow still fails at the crates.io trusted-publishing login (`#lzrustpublish`). Before I release rs I need either crates.io Trusted Publishing configured, or your OK for one more manual `cargo publish` with the stored token.
+- **lazily-react.** It has Phase 3/4 changes, but it isn't one of the nine bindings, so it stays out of this round.
 <!-- agent:boundary:02e242a9 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-commit-push" priority -->
+<!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
+- #release
 <!-- /agent:queue -->
 
 ## Backlog
@@ -272,8 +309,8 @@ All four dispatched heads have now reported. Everything integration-ready is wai
 ## Review
 
 <!-- agent:review -->
-- [/] 🚧 [#lzcoreevidencedarttimeout] [operator-decision] Dart Core evidence timeout is fixed and verified but uncommitted in /home/brian/worktrees/lzcoreevidencedarttimeout-20261012 (branch task/lzcoreevidencedarttimeout-20261012, layered on the uncommitted #lzcoreclaims Phase 2 work). Root cause: the first dart on PATH, /usr/sbin/dart (the AUR flutter wrapper /opt/flutter/bin/aur_dart), re-execs itself forever when unionfs fails. Fix in lazily-dart scripts/generate-core-conformance-report.py: probe each dart candidate (DART= pins one), per-replay process groups capped by LAZILY_CORE_COMMAND_TIMEOUT_MS, SIGTERM cleanup, and a 10-test hermetic self-test (make core-conformance-report-self-test). Fix in lazily-spec scripts/check-core-evidence.mjs: pass the timeout budget through, reject stale reports/evidence/proofs via a start marker, extend --self-test. All nine reports were regenerated fresh in reports-final-20261014-212130 and --require-all passed (exit 0, 147.4s); mutation checks killed 6/6 (verifier) and 9/9 (generator). Blocked only on commit/push authorization (#lzcommitpresetresolve). On integration, wire core-conformance-report-self-test into lazily-dart CI alongside #lzcoreciactivationfixes.
-- [/] 🚧 [#lzcoreciactivationfixes] [operator-decision] Core Phase 1-5 CI activation is complete and verified but uncommitted in /home/brian/worktrees/lzcoreciactivationfixes-20261013/<repo> (branch task/lzcoreciactivationfixes-20261013 in all nine bindings plus lazily-spec). Every Core gate step is named, reach-pinned, and unconditional or has its step-level if:/continue-on-error: pinned. This run closed a guard bypass where those keys silently skipped steps in 7/9 bindings plus spec. All guards PASS and all mutation attacks are killed; logs are in _logs/. Remaining: (1) Phase 6 release-workflow callers, blocked on an operator design decision (see the #waypostrequest in exchange): the lazily-spec commit pin for core-cohort-publish-gate.yml, the candidate manifest location, the evidence artifact name, and whether cpp/dart/go/zig get new release workflows. (2) The wiring must land with or after the Phase 1-5 integration, since make check fails without their scripts. (3) Commit/push authorization (#lzcommitpresetresolve).
+- [/] [#lzcoreevidencedarttimeout] [operator-decision] Dart Core evidence timeout is fixed and verified but uncommitted in /home/brian/worktrees/lzcoreevidencedarttimeout-20261012 (branch task/lzcoreevidencedarttimeout-20261012, layered on the uncommitted #lzcoreclaims Phase 2 work). Root cause: the first dart on PATH, /usr/sbin/dart (the AUR flutter wrapper /opt/flutter/bin/aur_dart), re-execs itself forever when unionfs fails. Fix in lazily-dart scripts/generate-core-conformance-report.py: probe each dart candidate (DART= pins one), per-replay process groups capped by LAZILY_CORE_COMMAND_TIMEOUT_MS, SIGTERM cleanup, and a 10-test hermetic self-test (make core-conformance-report-self-test). Fix in lazily-spec scripts/check-core-evidence.mjs: pass the timeout budget through, reject stale reports/evidence/proofs via a start marker, extend --self-test. All nine reports were regenerated fresh in reports-final-20261014-212130 and --require-all passed (exit 0, 147.4s); mutation checks killed 6/6 (verifier) and 9/9 (generator). Blocked only on commit/push authorization (#lzcommitpresetresolve). On integration, wire core-conformance-report-self-test into lazily-dart CI alongside #lzcoreciactivationfixes.
+- [/] [#lzcoreciactivationfixes] [operator-decision] Core Phase 1-5 CI activation is complete and verified but uncommitted in /home/brian/worktrees/lzcoreciactivationfixes-20261013/<repo> (branch task/lzcoreciactivationfixes-20261013 in all nine bindings plus lazily-spec). Every Core gate step is named, reach-pinned, and unconditional or has its step-level if:/continue-on-error: pinned. This run closed a guard bypass where those keys silently skipped steps in 7/9 bindings plus spec. All guards PASS and all mutation attacks are killed; logs are in _logs/. Remaining: (1) Phase 6 release-workflow callers, blocked on an operator design decision (see the #waypostrequest in exchange): the lazily-spec commit pin for core-cohort-publish-gate.yml, the candidate manifest location, the evidence artifact name, and whether cpp/dart/go/zig get new release workflows. (2) The wiring must land with or after the Phase 1-5 integration, since make check fails without their scripts. (3) Commit/push authorization (#lzcommitpresetresolve).
 - [/] [#lzrustcoreprofiledivergence] Rust corrected-profile provenance is implemented and verified in /home/brian/worktrees/lzrustcoreprofiledivergence-rs-20261012 on branch task/lzrustcoreprofiledivergence-20261012 from base 87da9e7494f6cec0cc5deb981361519f5af9eedf; profile-derived compatibility, 30 reactive-graph runs, full async tests, profile checks, and diff checks pass. Blocked only on #lzcoreevidencedarttimeout for a green nine-binding --require-all rerun and explicit commit/integration authorization because #spec-test-commit-push is undefined.
 - [/] [#lzcorecireachaudit] After #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1-5 integration are complete, run the supplied per-binding post-integration CI audit matrix against settled commits; require every standalone Core target to have a named workflow step, exact reach mapping, mutation evidence, Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates before Phase 6 finalization.
 - [/] [#lzcoreintegration] Integrate the prepared Core work only after #lzcommitpresetresolve, #lzrustcoreprofiledivergence, and #lzcoreconsumers clear: Phase 5 currently lacks core-artifact-consumer-check in all nine binding worktrees, and Phase 6 is scaffold-only with no settled cohort manifest and is 20 spec commits behind the current profile base. Then land Phases 1-5 in dependency order, replay Phase 6 from settled exact commits, and rerun aggregate profile/cohort gates after each batch.

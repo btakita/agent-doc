@@ -240,6 +240,34 @@ This response uses it. It adds one real operator action, a live Remote Dev check
 - **"do your formal logic suggestions":** done on `feat/surface-retire-formal` (`3eaf5a0dfb`), but not in v0.35.504 because you said "ship now". It includes the TLA+ retirement model (wedge and reach configs, `make tla` 145 checks as declared), recovery by re-registering on `retired_endpoint`, the model-to-code conformance test, replay of the two wedge traces, and the muted-endpoint monitor. It will be merged and released in v0.35.505.
 - **`#ctrltimingflakes`:** a subagent is still fixing the two older timing-dependent controller tests.
 - **Wording note:** the subagent's spec drafts use "precedent" where your question said "precedence".
+
+### Re: formal retirement model + timing-flake fixes on main; #265 dispatched — opus-5.5 · 2026-10-15T01:47-04:00
+
+> **Queue prompt:** do your formal logic suggestions
+
+> **Queue prompt:** do [#ctrltimingflakes]
+
+Both branches are integrated into `main` (`d0f92c9fe5`) and installed locally. One full `make check` passed on the integrated tree: nextest 10,568 passed, 167 skipped, and every TLA+ config, including the new `PassiveTmuxSyncRetireNet`, behaved as declared. `make install` hot-upgraded the JetBrains plugin to 0.2.618. tmux auto-sync works on the new protocol: `ops.log` shows the plugin under a fresh generation, `accepted=true` on every observation, and an automatic layout converging at 05:45:37Z.
+
+**Formal logic (`3eaf5a0dfb`):**
+- **TLA+ model:** `PassiveTmuxSyncRetireNet` adds the retire channel, per-process generations, the controller's fence, and the Remote Dev handoff, with the properties `LiveEndpointNeverMuted` and `NoRetiredResurrection`.
+  - **Wedges** (must fail): the 02:54Z shape, the Remote Dev fallback mute, and an exact-forget resurrection the fix would otherwise have caused.
+  - **Reach check:** the fixed model must re-register at least once.
+- **Recovery in code:** a rejected live window gets a typed `retired_endpoint` reply that names the generation to re-register above, and the plugin re-registers above it, in both classic and Remote Dev. A forget now raises the controller's cutoff, so a retired window cannot come back.
+- **Tying the model to the code:**
+  - A `syn`-based test fails the build if a code path that changes editor-window state has no matching model step. It caught three fake unmodeled paths.
+  - The 00:45Z and 02:54Z wedges are anonymized replay fixtures.
+  - A `controller_editor_surface_muted_live_endpoint` warning fires after 3 rejections in a row.
+- **Gap:** VS Code receives the typed rejection but doesn't re-register yet.
+
+**Timing flakes (`b01828c053`):**
+- **actor-binding test:** it now proves "no retry" by counting connections, which is exactly one, instead of measuring elapsed time.
+- **`mark_write_applied` test:** this was a real test-isolation bug. Process-wide state readers could answer for another in-process controller. Each reader now records its project root, and lookups check it; production runs one controller per process, so its behaviour is unchanged.
+- **Results:** in 40 concurrent stress runs, both tests went from up to 3 failures to 0, as did a third, `plugin_publications_project_into_the_publishing_clients_navigation_lane`. That third test was not investigated, so I can't say this fix is why.
+
+**New queue items:**
+- **GH #265:** claimed and dispatched to a subagent in its own worktree. The fix makes `getActionUpdateThread() = BGT` explicit on the JetBrains actions that are missing it, and adds a test derived from the source that fails if any action lacks it.
+- **"release + publish":** I claimed it for myself. v0.35.505 will ship once #265 is merged.
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
@@ -248,22 +276,15 @@ This response uses it. It adds one real operator action, a live Remote Dev check
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/261~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/262~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/263~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/264~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~tmux pane auto-sync not working~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Add a `priority` attribute to `agent:review`.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Is `agent:todo` implemented? I don't see it being used. Please fix. There should be todo's when the operator needs to take an action. If a agent:todo is not in the document, agent-doc should add it.~~ — auto-struck: answered this cycle (#ftstrike)
+- #gh-fix https://github.com/btakita/agent-doc/issues/265
 - 🚧 do your formal logic suggestions
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#ctrltimingflakes]
+- ~~do [#ctrltimingflakes]~~
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ctrltimingflakes] Two existing controller-io tests fail under concurrent libtest load (16 threads, 40 runs: 5x actor_binding_observation_uses_one_caller_deadline_without_retry, 3x mark_write_applied_routes_through_command_plane_when_controller_live). Both predate the 0.35.504 batch and passed both full make check runs. The first asserts a wall-clock bound (elapsed < 2x deadline); count connection attempts instead. Diagnose the second the same way: replace timing assumptions with structural signals, never longer timeouts.
 <!-- /agent:backlog -->
 
 ## Review

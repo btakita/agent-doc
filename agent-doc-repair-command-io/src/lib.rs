@@ -517,6 +517,13 @@ pub fn drop_already_applied_mutations(
         &review_witness,
     );
     retain_witnessed("review-remove", &mut options.review_remove, &review_witness);
+    // `#tododone`: `--todo-remove` deletes its item, so "the selector still
+    // resolves in `agent:todo`" is its exact not-yet-applied witness. The other
+    // todo flags are idempotent against a present item (done/reopen set a
+    // state, edit sets a text) and stay in the replay.
+    retain_witnessed("todo-remove", &mut options.todo_remove, &|selector| {
+        agent_doc_element::todo::todo_selector_resolves(current_content, selector)
+    });
     // Ungate resolves against `agent:review` first and falls back to the backlog
     // component, so "absent from review" is the WRONG witness for it — an item
     // gated in the backlog would read as already ungated.

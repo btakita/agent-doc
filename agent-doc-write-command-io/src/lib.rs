@@ -45,6 +45,18 @@ pub struct CapturedCloseoutMutationPlan {
     /// `#operatortodo`: operator actions appended to `agent:todo`.
     #[serde(default)]
     pub todo_add: Vec<String>,
+    /// `#tododone`: `agent:todo` items checked off (`[x]`) in place.
+    #[serde(default)]
+    pub todo_done: Vec<String>,
+    /// `#tododone`: `selector=text` edits of `agent:todo` items.
+    #[serde(default)]
+    pub todo_edit: Vec<String>,
+    /// `#tododone`: `agent:todo` items unchecked (`[ ]`) in place.
+    #[serde(default)]
+    pub todo_reopen: Vec<String>,
+    /// `#tododone`: `agent:todo` items deleted.
+    #[serde(default)]
+    pub todo_remove: Vec<String>,
     pub queue_completion_ids: Vec<String>,
     pub allow_replace_pending: bool,
     pub status: Option<String>,
@@ -110,6 +122,17 @@ pub struct CommandOptions {
     /// `- [ ] <action>` (repeatable). The component is created when absent;
     /// existing items are never rewritten, and an identical action is a no-op.
     pub todo_add: Vec<String>,
+    /// `#tododone`: `agent:todo` items to check off (`[x]`) in place, by own
+    /// id, cited `#id`, or exact text (repeatable). Idempotent.
+    pub todo_done: Vec<String>,
+    /// `#tododone`: `selector=new text` edits of `agent:todo` items, keeping
+    /// each item's id, state, and position (repeatable).
+    pub todo_edit: Vec<String>,
+    /// `#tododone`: `agent:todo` items to uncheck (`[ ]`) in place (repeatable).
+    pub todo_reopen: Vec<String>,
+    /// `#tododone`: `agent:todo` items to delete because they no longer apply
+    /// (repeatable). A finished item uses `todo_done` instead.
+    pub todo_remove: Vec<String>,
     /// Queue-head completion ids proven by the response/route but not backed by
     /// a `pending` mutation such as `--done`.
     pub queue_completion_ids: Vec<String>,
@@ -162,6 +185,10 @@ impl CommandOptions {
             review_remove: self.review_remove.clone(),
             review_resolve: self.review_resolve.clone(),
             todo_add: self.todo_add.clone(),
+            todo_done: self.todo_done.clone(),
+            todo_edit: self.todo_edit.clone(),
+            todo_reopen: self.todo_reopen.clone(),
+            todo_remove: self.todo_remove.clone(),
             queue_completion_ids: self.queue_completion_ids.clone(),
             allow_replace_pending: self.allow_replace_pending,
             status: self.status.clone(),
@@ -209,6 +236,10 @@ impl CommandOptions {
             review_remove: plan.review_remove,
             review_resolve: plan.review_resolve,
             todo_add: plan.todo_add,
+            todo_done: plan.todo_done,
+            todo_edit: plan.todo_edit,
+            todo_reopen: plan.todo_reopen,
+            todo_remove: plan.todo_remove,
             queue_completion_ids: plan.queue_completion_ids,
             allow_replace_pending: plan.allow_replace_pending,
             pending_only: false,
@@ -263,6 +294,10 @@ impl CommandOptions {
             review_remove: Vec::new(),
             review_resolve: Vec::new(),
             todo_add: Vec::new(),
+            todo_done: Vec::new(),
+            todo_edit: Vec::new(),
+            todo_reopen: Vec::new(),
+            todo_remove: Vec::new(),
             queue_completion_ids: queue_completion_ids.to_vec(),
             allow_replace_pending: false,
             pending_only: false,
@@ -302,6 +337,16 @@ impl CommandOptions {
             || !self.review_remove.is_empty()
             || !self.review_resolve.is_empty()
             || !self.todo_add.is_empty()
+            || self.has_todo_item_mutation()
+    }
+
+    /// `#tododone`: the write checks off, edits, reopens, or removes an
+    /// existing `agent:todo` item.
+    pub fn has_todo_item_mutation(&self) -> bool {
+        !self.todo_done.is_empty()
+            || !self.todo_edit.is_empty()
+            || !self.todo_reopen.is_empty()
+            || !self.todo_remove.is_empty()
     }
 
     /// `#queuemirrororder`: the write carries a tracked-work mutation whose only
@@ -322,6 +367,10 @@ impl CommandOptions {
             || !self.pending_set_verify.is_empty()
             || !self.pending_upsert.is_empty()
             || !self.pending_set_gate_type.is_empty()
+            // `#tododone`: the operator did the work; checking it off (or
+            // editing/reopening/removing the line) is the agent's whole
+            // deliverable, with no code or command output to cite.
+            || self.has_todo_item_mutation()
     }
 }
 
@@ -379,9 +428,44 @@ mod tests {
             CommandOptions::recovery_from_captured_closeout_mutation_plan(file, plan.clone());
         assert_eq!(recovered.todo_add, options.todo_add);
 
+        for (field, values) in [
+            ("todo_done", vec!["k3vd".to_string()]),
+            ("todo_edit", vec!["k3vd=Rotate the key".to_string()]),
+            ("todo_reopen", vec!["k3vd".to_string()]),
+            ("todo_remove", vec!["k3vd".to_string()]),
+        ] {
+            let mut options = CommandOptions::repair_replay(file, false, false, false, &[]);
+            match field {
+                "todo_done" => options.todo_done = values.clone(),
+                "todo_edit" => options.todo_edit = values.clone(),
+                "todo_reopen" => options.todo_reopen = values.clone(),
+                _ => options.todo_remove = values.clone(),
+            }
+            assert!(options.has_pending_mutation(), "{field}");
+            assert!(options.has_todo_item_mutation(), "{field}");
+            assert!(options.has_metadata_only_mutation(), "{field}");
+            let recovered = CommandOptions::recovery_from_captured_closeout_mutation_plan(
+                file,
+                options.captured_closeout_mutation_plan(),
+            );
+            assert_eq!(
+                recovered.captured_closeout_mutation_plan(),
+                options.captured_closeout_mutation_plan(),
+                "{field}"
+            );
+        }
+
         // Plans captured before `--todo-add` existed still deserialize.
         let mut legacy = serde_json::to_value(&plan).unwrap();
-        legacy.as_object_mut().unwrap().remove("todo_add");
+        for field in [
+            "todo_add",
+            "todo_done",
+            "todo_edit",
+            "todo_reopen",
+            "todo_remove",
+        ] {
+            legacy.as_object_mut().unwrap().remove(field);
+        }
         let legacy: CapturedCloseoutMutationPlan = serde_json::from_value(legacy).unwrap();
         assert!(legacy.todo_add.is_empty());
     }

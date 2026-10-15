@@ -1264,9 +1264,24 @@ fn write_review_add_and_edit_mutate_review_component() {
     assert!(review.contains("- [/] [#rvw1] review text updated"));
 }
 
+/// The own id `--todo-add` gave the todo item whose action is `action`.
+fn todo_item_id(content: &str, action: &str) -> String {
+    let body = component_body(content, "todo");
+    let line = body
+        .lines()
+        .find(|line| line.ends_with(action))
+        .unwrap_or_else(|| panic!("no todo item {action:?}:\n{content}"));
+    let rest = line
+        .split_once("] [#")
+        .unwrap_or_else(|| panic!("todo item has no own id: {line:?}"))
+        .1;
+    rest.split_once(']').unwrap().0.to_string()
+}
+
 /// `#operatortodo`: `--todo-add` creates `agent:todo` (directly below the
-/// backlog, above `agent:review`) when the document has none, appends `- [ ] <action>`, keeps every existing
-/// item, and treats an identical action as a no-op.
+/// backlog, above `agent:review`) when the document has none, appends
+/// `- [ ] [#id] <action>`, keeps every existing item, and treats an identical
+/// action as a no-op.
 #[test]
 fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
     let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
@@ -1295,9 +1310,11 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
         1,
         "{content}"
     );
+    let id = todo_item_id(&content, "Verify [#rvw1] in a live pane");
+    assert_ne!(id, "rvw1", "the own id is fresh, not the cited gate id");
     assert_eq!(
         component_body(&content, "todo"),
-        "- [ ] Verify [#rvw1] in a live pane"
+        format!("- [ ] [#{id}] Verify [#rvw1] in a live pane")
     );
     let pending_close = content.find("<!-- /agent:pending -->").unwrap();
     let todo_open = content.find("## Todo\n\n<!-- agent:todo -->").unwrap();
@@ -1309,8 +1326,8 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
 
     // The operator checks the item off and adds their own note.
     let edited = content.replace(
-        "- [ ] Verify [#rvw1] in a live pane\n",
-        "- [x] Verify [#rvw1] in a live pane\noperator note\n",
+        &format!("- [ ] [#{id}] Verify [#rvw1] in a live pane\n"),
+        &format!("- [x] [#{id}] Verify [#rvw1] in a live pane\noperator note\n"),
     );
     fs::write(&doc, &edited).unwrap();
     agent_doc()
@@ -1332,9 +1349,186 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
         1,
         "{content}"
     );
+    let publish = todo_item_id(&content, "Publish draft docs/launch-note.md");
     assert_eq!(
         component_body(&content, "todo"),
-        "- [x] Verify [#rvw1] in a live pane\noperator note\n- [ ] Publish draft docs/launch-note.md"
+        format!(
+            "- [x] [#{id}] Verify [#rvw1] in a live pane\noperator note\n- [ ] [#{publish}] Publish draft docs/launch-note.md"
+        )
+    );
+}
+
+/// `#tododone`: the granular todo flags close the operator action loop —
+/// add, check off in place, edit, reopen, remove — and never touch an
+/// operator-authored item they did not select.
+#[test]
+fn write_todo_done_edit_reopen_remove_round_trip_preserves_operator_items() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let write = |args: &[&str]| {
+        let mut full = vec!["write", doc.to_str().unwrap(), "--force-disk", "--backlog-only"];
+        full.extend_from_slice(args);
+        agent_doc().args(&full).assert().success()
+    };
+    write(&["--todo-add", "Rotate the deploy key"]);
+    let content = fs::read_to_string(&doc).unwrap();
+    let id = todo_item_id(&content, "Rotate the deploy key");
+    // The operator adds their own items around the agent's.
+    let operator = content.replace(
+        &format!("- [ ] [#{id}] Rotate the deploy key\n"),
+        &format!(
+            "Operator note: after lunch\n- [ ] [#{id}] Rotate the deploy key\n- [ ] Call the vendor\n- [x] Already done by me\n"
+        ),
+    );
+    fs::write(&doc, &operator).unwrap();
+    let operator_tail = "- [ ] Call the vendor\n- [x] Already done by me";
+
+    let done = write(&["--todo-done", &id]);
+    let stderr = String::from_utf8_lossy(&done.get_output().stderr);
+    assert!(stderr.contains(&format!("[todo] todo-done: #{id}")), "{stderr}");
+    let body = component_body(&fs::read_to_string(&doc).unwrap(), "todo").to_string();
+    assert_eq!(
+        body,
+        format!("Operator note: after lunch\n- [x] [#{id}] Rotate the deploy key\n{operator_tail}")
+    );
+    // A replayed done is a no-op.
+    write(&["--todo-done", &format!("#{id}")]);
+    assert_eq!(component_body(&fs::read_to_string(&doc).unwrap(), "todo"), body);
+
+    write(&["--todo-edit", &format!("{id}=Rotate the deploy key (rotated Tue)")]);
+    write(&["--todo-reopen", &id]);
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        format!(
+            "Operator note: after lunch\n- [ ] [#{id}] Rotate the deploy key (rotated Tue)\n{operator_tail}"
+        )
+    );
+    // An id-less operator item is selected by its exact text.
+    write(&["--todo-done", "Call the vendor", "--todo-remove", &id]);
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        "Operator note: after lunch\n- [x] Call the vendor\n- [x] Already done by me"
+    );
+    // An unknown selector fails the write instead of silently passing.
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+            "--todo-done",
+            "no such item",
+        ])
+        .assert()
+        .failure();
+}
+
+/// `#tododone`: resolving tracked work that an open todo cites prints a
+/// non-blocking advisory naming the `--todo-done` command; checking the todo
+/// off in the same closeout silences it.
+#[test]
+fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--review-add",
+            "id=rvw3 needs live verification",
+            "--todo-add",
+            "Verify [#rvw3] in a live pane",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let id = todo_item_id(&fs::read_to_string(&doc).unwrap(), "Verify [#rvw3] in a live pane");
+    let resolved = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+            "--review-resolve",
+            "rvw3",
+        ])
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&resolved.get_output().stderr);
+    assert!(
+        stderr.contains("[todo] advisory (#tododone): this closeout resolved #rvw3"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains(&format!("--todo-done {id}")), "stderr: {stderr}");
+    // The advisory never writes: the item is still open.
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        component_body(&content, "todo").starts_with(&format!("- [ ] [#{id}]")),
+        "{content}"
+    );
+    let closed = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+            "--todo-done",
+            &id,
+        ])
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&closed.get_output().stderr);
+    assert!(!stderr.contains("(#tododone): this closeout"), "stderr: {stderr}");
+    assert!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo")
+            .starts_with(&format!("- [x] [#{id}]"))
+    );
+}
+
+/// `#tododupdone`, anonymized from the live 2026-10-15 session: a `patch:todo`
+/// that completes items by appending checked copies must check the existing
+/// items, not leave the open originals beside the copies. A follow-up that
+/// cites the same tracked id stays a separate item.
+#[test]
+fn write_patch_todo_completion_copy_checks_existing_item_without_duplicating() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let original = concat!(
+        "- [ ] Decide the api merge order of #645 vs #715 (#apimigrate)\n",
+        "- [ ] Approve/merge contracts #160 and pick the version bump (#bundleadopt)\n",
+        "- [ ] Decide provisional sessions, option 3. Talk to the leads. (#provauth)\n",
+    );
+    agent_doc()
+        .args(["write", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(format!(
+            "<!-- patch:exchange -->\nseed\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n{original}<!-- /patch:todo -->\n"
+        ))
+        .assert()
+        .success();
+    let patch = format!(
+        "{original}{}",
+        concat!(
+            "- [x] Decide the api merge order of #645 vs #715 (#apimigrate) — moot: either order works\n",
+            "- [x] Approve/merge contracts #160 and pick the version bump (#bundleadopt) — merged; continues as #162 below\n",
+            "- [ ] Decide provisional sessions, option 3. Talk to the leads. (#provauth)\n",
+            "- [ ] Approve/merge contracts #162 once CI can run (#bundleadopt)\n",
+        )
+    );
+    agent_doc()
+        .args(["write", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(format!(
+            "<!-- patch:exchange -->\nclosing\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n{patch}<!-- /patch:todo -->\n"
+        ))
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        component_body(&content, "todo"),
+        concat!(
+            "- [x] Decide the api merge order of #645 vs #715 (#apimigrate) — moot: either order works\n",
+            "- [x] Approve/merge contracts #160 and pick the version bump (#bundleadopt) — merged; continues as #162 below\n",
+            "- [ ] Decide provisional sessions, option 3. Talk to the leads. (#provauth)\n",
+            "- [ ] Approve/merge contracts #162 once CI can run (#bundleadopt)",
+        ),
+        "{content}"
     );
 }
 

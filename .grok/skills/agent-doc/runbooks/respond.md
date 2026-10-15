@@ -534,10 +534,24 @@ in the same cycle. Start with the action and keep only the context needed to act
 
 Record it with the closeout flag `--todo-add "<action>"` (repeatable), for
 example `agent-doc write --commit <FILE> --todo-add "Verify [#gate1] in a live pane"`.
-The binary appends `- [ ] <action>`, creates `agent:todo` when the document has
-none (right below `agent:backlog`), keeps every existing checklist item, and
-skips an action that is already listed. A missing `agent:todo` component is
-never a reason to skip the TODO.
+The binary appends `- [ ] [#<id>] <action>` (a fresh own id; `id=<custom> `
+picks one), creates `agent:todo` when the document has none (right below
+`agent:backlog`), keeps every existing checklist item, and skips an action that
+is already listed. A missing `agent:todo` component is never a reason to skip
+the TODO.
+
+**Mark it complete when it is finished (`#tododone`).** When the operator says
+an action is done, or you verify it is (the gate it cites resolved, the draft is
+published), check it off in the SAME closeout:
+`agent-doc write --commit <FILE> --todo-done <id>`. The selector is the item's
+own `[#id]`, a `#id` the item cites (`... (#gate1)`), or its exact text, so
+operator-written items without an id work too. The binary flips `[ ]` to `[x]`
+in place (position, id, and text kept; a repeat is a no-op) and folds any
+duplicate copy of the item. Never complete a todo by appending a second
+`- [x] ...` line — that leaves the open original behind. Related flags:
+`--todo-edit "id=new text"` (keeps id/state/position, e.g. to add a completion
+note), `--todo-reopen <id>`, and `--todo-remove <id>` for an item that no longer
+applies. Checked items stay in `agent:todo` for the operator to prune.
 
 `<!-- patch:todo -->` also works and also creates a missing component, but it is
 a guarded replacement: reproduce every existing checklist item plus the brief
@@ -548,3 +562,6 @@ When a closeout opens an `agent:review` gate that `agent:todo` does not mention,
 the write prints `[todo] advisory (#operatortodo)`. If that gate waits on the
 operator, add the TODO next cycle (`--backlog-only --todo-add ...` for a
 tracked-work-only closeout); a gate waiting on CI or a third party needs none.
+When a closeout resolves work (`--done`, `--review-resolve`) that an OPEN todo
+still cites, the write prints `[todo] advisory (#tododone)` with the exact
+`--todo-done` command; if the operator action is finished, run it next cycle.

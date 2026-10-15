@@ -30312,6 +30312,8 @@ fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfac
             "every existing checklist item",
             "--todo-add",
             "creates `agent:todo`",
+            "#tododone",
+            "--todo-done",
         ] {
             assert!(
                 surface.contains(required),
@@ -30334,6 +30336,13 @@ fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfac
         "`agent:review` is never",
         "**Default template order.**",
         "**Operator-todo advisory.**",
+        "**Completing a todo (`#tododone`).**",
+        "--todo-done <selector>",
+        "--todo-edit \"<selector>=<text>\"",
+        "--todo-reopen <selector>",
+        "--todo-remove <selector>",
+        "**Duplicate folding (`#tododupdone`).**",
+        "**Todo-done advisory.**",
     ] {
         assert!(
             document_spec.contains(required),

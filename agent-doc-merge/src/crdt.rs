@@ -1057,6 +1057,21 @@ pub(crate) fn is_list_component(name: &str) -> bool {
     matches!(name, "queue" | "backlog" | "review" | "done")
 }
 
+/// True for component kinds whose body is split into keyed list items for the
+/// three-way merge: the lifecycle-governed lists ([`is_list_component`]) plus
+/// the operator `agent:todo` checklist.
+///
+/// `agent:todo` is keyed but NOT lifecycle-governed: a matched item whose text
+/// differs is leaf-merged, and a delete is honored only against an unchanged
+/// base. Before `todo` was keyed it fell through to the flat character merge
+/// over a synthetic base, and an edit both sides made to the same checklist
+/// line (an operator rewording a todo while the agent's `patch:todo` carried
+/// the same rewording) was inserted twice — the duplicated
+/// `- [ ] Decide provisional ...` line observed live on 2026-10-15.
+pub(crate) fn is_keyed_item_component(name: &str) -> bool {
+    is_list_component(name) || name == "todo"
+}
+
 /// One keyed child within a component body. `text` is the exact source slice so
 /// that `children.iter().map(|c| &c.text).collect::<String>() == body` (lossless
 /// segmentation); `key` is the child's durable identity within the component.
@@ -1349,7 +1364,7 @@ fn reconcile_component(
     ours_text: &str,
     theirs_text: &str,
 ) -> Option<String> {
-    if name != "exchange" && !is_list_component(name) {
+    if name != "exchange" && !is_keyed_item_component(name) {
         return None;
     }
     let (ours_open, ours_body, ours_close) = component_framing(ours_text)?;
@@ -4110,6 +4125,51 @@ Second answer line three.
         format!(
             "---\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n"
         )
+    }
+
+    /// `#tododupdone`, anonymized from the live 2026-10-15 session. The agent's
+    /// `patch:todo` checked one item in place (with a completion note), carried
+    /// the operator's rewording of another, and appended a follow-up; the
+    /// operator reworded that same item in the live buffer meanwhile. Before
+    /// `todo` was a keyed-item component this went to the flat/cell merge,
+    /// which either kept the reworded line twice or dropped the agent's whole
+    /// checklist update. Keyed per item, each line merges once.
+    #[test]
+    fn merge_by_component_keys_todo_items_so_concurrent_edits_never_duplicate() {
+        let doc = |todo: &str| {
+            format!(
+                "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n\n## Todo\n\n<!-- agent:todo -->\n{todo}<!-- /agent:todo -->\n"
+            )
+        };
+        let base = doc(concat!(
+            "- [ ] Raise the CI limit\n",
+            "- [ ] Decide the merge order of #645 vs #715 (#apimigrate)\n",
+            "- [ ] Decide provisional sessions, option 3 (#provauth)\n",
+            "- [ ] Seed the runner folder\n",
+        ));
+        let reworded =
+            "- [ ] Decide provisional sessions, option 3. Talk to the leads. (#provauth)\n";
+        let theirs = base.replace(
+            "- [ ] Decide provisional sessions, option 3 (#provauth)\n",
+            reworded,
+        );
+        let ours = doc(&format!(
+            "- [ ] Raise the CI limit\n- [x] Decide the merge order of #645 vs #715 (#apimigrate) — moot\n{reworded}- [ ] Seed the runner folder\n- [ ] Approve the follow-up PR #162\n"
+        ));
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert!(
+            merged.contains(&format!(
+                "<!-- agent:todo -->\n- [ ] Raise the CI limit\n- [x] Decide the merge order of #645 vs #715 (#apimigrate) — moot\n{reworded}- [ ] Seed the runner folder\n- [ ] Approve the follow-up PR #162\n<!-- /agent:todo -->"
+            )),
+            "{merged}"
+        );
+        assert_eq!(
+            merged.matches("Decide provisional sessions").count(),
+            1,
+            "{merged}"
+        );
+        assert!(!merged.contains("- [ ] Decide the merge order"), "{merged}");
     }
 
     #[test]

@@ -1464,28 +1464,135 @@ pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
 }
 
 /// `#operatortodo`: append one operator action to `agent:todo` as
-/// `- [ ] <action>`, creating the component when the document has none.
+/// `- [ ] [#<id>] <action>`, creating the component when the document has none.
 ///
 /// Every existing todo line is preserved byte-for-byte, and an action already
 /// present (in any checkbox state) is a no-op, so a replayed closeout never
-/// duplicates or resurrects a todo. Returns whether a line was appended.
+/// duplicates or resurrects a todo. The id is derived like a backlog id and is
+/// collision-free against the document's tracked-work ids. Returns whether a
+/// line was appended.
 pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
     let full_content = read_command_document(file, "todo_add")?;
-    let outcome = agent_doc_element::todo::add_todo_item_to_document(&full_content, text)?;
+    let doc_id = agent_doc_hash::document_id_for_path(file);
+    let reserved = backlog::document_reserved_identity_ids(&full_content);
+    let id_for =
+        |action: &str, counter: u64| backlog::generate_hash_n(action, &doc_id, counter, 4);
+    let outcome = agent_doc_element::todo::add_todo_item_to_document(
+        &full_content,
+        text,
+        &id_for,
+        &reserved,
+    )?;
+    let id_label = outcome
+        .id
+        .as_deref()
+        .map(|id| format!(" [#{id}]"))
+        .unwrap_or_default();
     if outcome.inserted {
         persist_pending_write(file, &full_content, &outcome.content)?;
         pending_receipt!(
-            "[todo] todo-add: {}appended operator action to agent:todo",
+            "[todo] todo-add: {}appended operator action{} to agent:todo",
             if outcome.created_component {
                 "created agent:todo and "
             } else {
                 ""
+            },
+            id_label
+        );
+    } else {
+        pending_receipt!(
+            "[todo] todo-add: operator action{} already present in agent:todo",
+            id_label
+        );
+    }
+    Ok(outcome.inserted)
+}
+
+/// Persist one todo item mutation and print its receipt.
+fn persist_todo_mutation(
+    file: &Path,
+    full_content: &str,
+    outcome: agent_doc_element::todo::TodoMutationOutcome,
+    verb: &str,
+) -> Result<bool> {
+    if outcome.changed {
+        persist_pending_write(file, full_content, &outcome.content)?;
+        pending_receipt!(
+            "[todo] {verb}: {} in agent:todo{}",
+            outcome.label,
+            if outcome.reconciled > 0 {
+                format!(
+                    " (folded {} duplicate cop{})",
+                    outcome.reconciled,
+                    if outcome.reconciled == 1 { "y" } else { "ies" }
+                )
+            } else {
+                String::new()
             }
         );
     } else {
-        pending_receipt!("[todo] todo-add: operator action already present in agent:todo");
+        pending_receipt!("[todo] {verb}: {} already up to date", outcome.label);
     }
-    Ok(outcome.inserted)
+    Ok(outcome.changed)
+}
+
+/// `#tododone`: check one `agent:todo` item off (`[x]`) in place by its own id,
+/// a cited `#id`, or its exact text. Idempotent; folds any duplicate copy of
+/// the item (`#tododupdone`). Returns whether the document changed.
+pub fn todo_done(file: &Path, selector: &str) -> Result<bool> {
+    let full_content = read_command_document(file, "todo_done")?;
+    let outcome = agent_doc_element::todo::set_todo_item_state_in_document(
+        &full_content,
+        selector,
+        agent_doc_element::todo::TodoTransition::Done,
+    )?;
+    persist_todo_mutation(file, &full_content, outcome, "todo-done")
+}
+
+/// `#tododone`: uncheck one `agent:todo` item (`[ ]`) in place. Idempotent.
+pub fn todo_reopen(file: &Path, selector: &str) -> Result<bool> {
+    let full_content = read_command_document(file, "todo_reopen")?;
+    let outcome = agent_doc_element::todo::set_todo_item_state_in_document(
+        &full_content,
+        selector,
+        agent_doc_element::todo::TodoTransition::Reopen,
+    )?;
+    persist_todo_mutation(file, &full_content, outcome, "todo-reopen")
+}
+
+/// `#tododone`: replace one `agent:todo` item's text, keeping its id, state,
+/// and position. Re-applying the same text is a no-op.
+pub fn todo_edit(file: &Path, selector: &str, text: &str) -> Result<bool> {
+    let full_content = read_command_document(file, "todo_edit")?;
+    let outcome =
+        agent_doc_element::todo::edit_todo_item_in_document(&full_content, selector, text)?;
+    persist_todo_mutation(file, &full_content, outcome, "todo-edit")
+}
+
+/// `#tododone`: delete one `agent:todo` item that no longer applies. Errors when
+/// no item matches; a finished item is checked off with [`todo_done`] instead.
+pub fn todo_remove(file: &Path, selector: &str) -> Result<bool> {
+    let full_content = read_command_document(file, "todo_remove")?;
+    let outcome =
+        agent_doc_element::todo::remove_todo_item_from_document(&full_content, selector)?;
+    persist_todo_mutation(file, &full_content, outcome, "todo-remove")
+}
+
+/// `#tododone`: open `agent:todo` items tied to tracked-work ids this closeout
+/// resolved. Reads the same (possibly virtual) document as the surrounding
+/// tracked-work transaction.
+pub fn todo_open_references(
+    file: &Path,
+    ids: &[String],
+) -> Result<Vec<agent_doc_element::todo::OpenTodoReference>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let full_content = read_command_document(file, "todo_open_references")?;
+    Ok(agent_doc_element::todo::open_todo_items_referencing(
+        &full_content,
+        ids,
+    ))
 }
 
 /// `#operatortodo`: ids from `ids` that the current document's `agent:todo`
@@ -3341,6 +3448,16 @@ mod tests {
         assert_eq!(fs::read_to_string(&doc).unwrap(), before);
     }
 
+    /// The own id `--todo-add` assigned to the todo line carrying `action`.
+    fn todo_own_id(content: &str, action: &str) -> String {
+        let line = content
+            .lines()
+            .find(|line| line.ends_with(action) && line.starts_with("- [ ] [#"))
+            .unwrap_or_else(|| panic!("no id-carrying todo line for {action:?}:\n{content}"));
+        let parsed = agent_doc_element::todo::parse_todo_line(line).unwrap();
+        parsed.own_id.unwrap().to_string()
+    }
+
     #[test]
     fn todo_add_creates_missing_todo_below_backlog_and_is_idempotent() {
         let (_tmp, doc) = doc_with_review("- [/] [#aa11] gated work\n");
@@ -3352,10 +3469,13 @@ mod tests {
             "Verify [#aa11] in a live pane"
         )));
         let after = fs::read_to_string(&doc).unwrap();
+        let id = todo_own_id(&after, "Verify [#aa11] in a live pane");
+        // A fresh id: not the cited gate id and not any tracked-work id.
+        assert!(id != "aa11" && id != "keep1", "{id}");
         assert!(
-            after.contains(
-                "<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n- [ ] Verify [#aa11] in a live pane\n<!-- /agent:todo -->\n\n<!-- agent:review -->"
-            ),
+            after.contains(&format!(
+                "<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n- [ ] [#{id}] Verify [#aa11] in a live pane\n<!-- /agent:todo -->\n\n<!-- agent:review -->"
+            )),
             "{after}"
         );
         // Only the todo section was added; review/backlog are untouched.
@@ -3389,10 +3509,69 @@ mod tests {
             "Publish draft docs/note.md"
         )));
         let after = fs::read_to_string(&doc).unwrap();
+        let id = todo_own_id(&after, "Publish draft docs/note.md");
         assert!(
-            after.contains("<!-- agent:todo -->\n- [x] Done by operator\nnote line\n- [ ] Open one\n- [ ] Publish draft docs/note.md\n<!-- /agent:todo -->"),
+            after.contains(&format!("<!-- agent:todo -->\n- [x] Done by operator\nnote line\n- [ ] Open one\n- [ ] [#{id}] Publish draft docs/note.md\n<!-- /agent:todo -->")),
             "{after}"
         );
+        drop(tmp);
+    }
+
+    #[test]
+    fn todo_done_edit_reopen_remove_preserve_operator_items() {
+        let (tmp, doc) = setup_test_dir();
+        let operator = "<!-- agent:todo -->\nOperator note\n- [x] Done by operator\n- [ ] Open by operator\n<!-- /agent:todo -->\n";
+        fs::write(&doc, format!("---\nagent_doc_session: test\n---\n\n{operator}")).unwrap();
+        assert!(force_pending(|| todo_add(&doc, "Rotate the deploy key")));
+        let id = todo_own_id(&fs::read_to_string(&doc).unwrap(), "Rotate the deploy key");
+        let body = || {
+            let content = fs::read_to_string(&doc).unwrap();
+            let todo = agent_doc_element::todo::find_todo_component(&content)
+                .unwrap()
+                .unwrap();
+            todo.content(&content).to_string()
+        };
+        let operator_lines = "Operator note\n- [x] Done by operator\n- [ ] Open by operator\n";
+
+        assert!(force_pending(|| todo_done(&doc, &id)));
+        assert_eq!(body(), format!("{operator_lines}- [x] [#{id}] Rotate the deploy key\n"));
+        // Idempotent replay.
+        assert!(!force_pending(|| todo_done(&doc, &format!("#{id}"))));
+
+        assert!(force_pending(|| todo_edit(&doc, &id, "Rotate the deploy key (rotated Tue)")));
+        assert_eq!(
+            body(),
+            format!("{operator_lines}- [x] [#{id}] Rotate the deploy key (rotated Tue)\n")
+        );
+        assert!(force_pending(|| todo_reopen(&doc, &id)));
+        assert_eq!(
+            body(),
+            format!("{operator_lines}- [ ] [#{id}] Rotate the deploy key (rotated Tue)\n")
+        );
+        // An operator item without an id is addressable by its text.
+        assert!(force_pending(|| todo_done(&doc, "Open by operator")));
+        assert!(body().contains("- [x] Open by operator\n"), "{}", body());
+
+        assert!(force_pending(|| todo_remove(&doc, &id)));
+        assert_eq!(body(), "Operator note\n- [x] Done by operator\n- [x] Open by operator\n");
+        let err = with_test_effects(|| with_force_disk_pending_writes(true, || todo_remove(&doc, &id)))
+            .unwrap_err();
+        assert!(err.to_string().contains("no agent:todo item matches"), "{err}");
+        drop(tmp);
+    }
+
+    #[test]
+    fn todo_open_references_name_items_tied_to_resolved_ids() {
+        let (tmp, doc) = setup_test_dir();
+        fs::write(
+            &doc,
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:todo -->\n- [ ] Verify the gate live (#gate1)\n- [x] Done already (#gate1)\n<!-- /agent:todo -->\n",
+        )
+        .unwrap();
+        let refs = force_pending(|| todo_open_references(&doc, &["gate1".to_string()]));
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].selector, "Verify the gate live (#gate1)");
+        assert!(force_pending(|| todo_open_references(&doc, &[])).is_empty());
         drop(tmp);
     }
 }

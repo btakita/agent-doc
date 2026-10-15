@@ -147,10 +147,51 @@ draft file path, instead of duplicating its details; publishing an unpublished
 draft is the canonical example. Such a reference does not transfer ownership or
 scheduling out of the referenced component. The preferred write path is the
 granular `--todo-add "<action>"` closeout flag, which appends one
-`- [ ] <action>` line and never touches existing lines (an action already
+`- [ ] [#<id>] <action>` line and never touches existing lines (an action already
 present in any checkbox state is a no-op). Template patches may also update
 `todo`, but the write path rejects replacements that reduce its checklist-item
 count, so an agent MUST preserve every existing item when emitting `patch:todo`.
+
+**Todo item identity.** A todo item's own id is the LEADING `[#<id>]` token
+after its checkbox: `- [ ] [#k3vd] Verify [#gate1] in a live pane`. `--todo-add`
+derives it like a backlog id (collision-free against every id the todo body
+cites and the document's tracked-work ids) unless the action starts with
+`id=<custom> ` or `[#<custom>] `. An id cited later in the action
+(`[#gate1]`, `(#gate1)`) is a reference to tracked work, not the item's
+identity. Operator-written and legacy items may have no own id. The keyed
+document merge splits `agent:todo` per item like the list components, so a
+concurrent operator edit and agent write to the checklist merge item by item
+instead of character by character (which could duplicate an edit both sides
+made, `#tododupdone`).
+
+**Completing a todo (`#tododone`).** When the operator action is finished, the
+agent MUST check the existing item off in the same closeout, never append a
+second checked copy. The granular flags address one existing item by a
+selector: its own id; else the single item citing `#<id>` (narrowed to open
+items for done and checked items for reopen when several cite it); else the
+single item whose action text equals the selector. No match, or several, is an
+error naming the candidates.
+
+| Flag | Effect |
+|---|---|
+| `--todo-done <selector>` | `[ ]`/`[/]` → `[x]` in place; position, id, and text kept; a repeat is a no-op. Then folds duplicate copies of the item. |
+| `--todo-edit "<selector>=<text>"` | Replace the action text; id, state, and position kept. The text may repeat but not change the id. |
+| `--todo-reopen <selector>` | `[x]`/`[/]` → `[ ]` in place; a repeat is a no-op. |
+| `--todo-remove <selector>` | Delete the item and its deeper-indented continuation lines; errors when nothing matches. |
+
+Checked items stay in `agent:todo`; they are not archived to `agent:done`,
+which records agent work, and the operator prunes them. All four flags are part
+of the replayable closeout mutation plan; a resume drops a `--todo-remove`
+whose item is already gone.
+
+**Duplicate folding (`#tododupdone`).** After a `patch:todo` is applied, and
+after `--todo-done`, the binary folds copies of one todo into a single item:
+two items with the same own id, the same action text, or where one is the
+other plus a completion note (`<action> — note`, also ` - `, ` -- `, `: `, `; `,
+` (`) and at least one is checked. The folded item sits at the earlier copy's
+position, is `[x]` when any copy is, and keeps the longer text. Distinct items
+are never touched — two items that merely cite the same tracked id, and two
+open items that differ by a trailing note, both survive.
 
 **Auto-created `todo` component.** Most session documents predate `agent:todo`.
 Every agent-side todo write (`--todo-add` or `patch:todo`) therefore creates the
@@ -181,6 +222,13 @@ a non-blocking `[todo] advisory (#operatortodo)` line naming the ids and the
 is id-based only (no prose heuristics), never writes a todo by itself, and never
 fails the closeout: a gate blocked on CI or an external party rather than the
 operator simply needs no todo.
+
+**Todo-done advisory.** When a closeout resolves tracked work (`--done`,
+`--review-resolve`) and an OPEN `agent:todo` item has that id as its own id or
+cites it, the write prints a non-blocking `[todo] advisory (#tododone)` line
+naming the ids and the exact `--todo-done <selector>` command, and logs
+`operator_todo_done_advisory` to `ops.log`. Like the gate advisory it is
+id-based, never writes, and never fails the closeout.
 
 **Exchange prompt defaults.** `<!-- agent:exchange preset="#review" -->` applies
 the named frontmatter prompt preset to each new exchange prompt, including the

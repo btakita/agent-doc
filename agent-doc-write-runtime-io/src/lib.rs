@@ -1927,6 +1927,84 @@ fn emit_operator_todo_advisory(file: &Path, unreferenced_gate_ids: &[String]) {
     );
 }
 
+/// `#tododone`: tracked-work ids this closeout resolved (`--done`,
+/// `--review-resolve`), deduplicated in first-seen order.
+fn resolved_ids_this_cycle(pending_done: &[String], review_resolve: &[String]) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for id in pending_done.iter().chain(review_resolve.iter()) {
+        let id = agent_doc_element_backlog::backlog::normalize_pending_id(id);
+        if !id.is_empty() && !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// Quote one `--todo-done` selector for the advisory's copy-paste command.
+fn shell_quote_selector(selector: &str) -> String {
+    if selector
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        selector.to_string()
+    } else {
+        format!("'{}'", selector.replace('\'', "'\\''"))
+    }
+}
+
+/// `#tododone`: the advisory for open `agent:todo` items tied to work this
+/// closeout resolved. Pure so the wording is pinned by a unit test.
+fn operator_todo_done_advisory(
+    file: &Path,
+    open_refs: &[agent_doc_element::todo::OpenTodoReference],
+) -> Option<String> {
+    open_refs.first()?;
+    let mut resolved: Vec<String> = Vec::new();
+    for reference in open_refs {
+        let id = format!("#{}", reference.resolved_id);
+        if !resolved.contains(&id) {
+            resolved.push(id);
+        }
+    }
+    let flags = open_refs
+        .iter()
+        .map(|reference| format!("--todo-done {}", shell_quote_selector(&reference.selector)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(format!(
+        "[todo] advisory (#tododone): this closeout resolved {} but agent:todo still has {} open item{} tied to {}. If the operator action is finished, check it off in the next closeout: agent-doc write --commit {} --backlog-only {flags}",
+        resolved.join(", "),
+        open_refs.len(),
+        if open_refs.len() == 1 { "" } else { "s" },
+        if resolved.len() == 1 { "it" } else { "them" },
+        file.display(),
+    ))
+}
+
+fn emit_operator_todo_done_advisory(
+    file: &Path,
+    open_refs: &[agent_doc_element::todo::OpenTodoReference],
+) {
+    let Some(advisory) = operator_todo_done_advisory(file, open_refs) else {
+        return;
+    };
+    eprintln!("{advisory}");
+    let mut resolved: Vec<&str> = open_refs
+        .iter()
+        .map(|reference| reference.resolved_id.as_str())
+        .collect();
+    resolved.dedup();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "operator_todo_done_advisory file={} resolved_ids={} open_todo_items={}",
+            file.display(),
+            resolved.join(","),
+            open_refs.len()
+        ),
+    );
+}
+
 fn apply_pending_and_status_mutations_with_mode(
     file: &Path,
     options: &CommandOptions,
@@ -1998,6 +2076,9 @@ fn apply_pending_and_status_mutations_with_mode(
                     let composed_queue_completion = std::cell::RefCell::new(None);
                     let queue_projection_target = std::cell::RefCell::new(None);
                     let unreferenced_gate_ids = std::cell::RefCell::new(Vec::<String>::new());
+                    let open_todo_refs = std::cell::RefCell::new(Vec::<
+                        agent_doc_element::todo::OpenTodoReference,
+                    >::new());
                     let tracked_work_envelope = || {
                         if options.pending_clear {
                             backlog_cmd::clear(file)?;
@@ -2032,6 +2113,24 @@ fn apply_pending_and_status_mutations_with_mode(
                         // which `todo_add` creates when the document lacks it.
                         for text in &options.todo_add {
                             backlog_cmd::todo_add(file, text)?;
+                        }
+                        // `#tododone`: close operator actions in the same closeout
+                        // that finished them. Edits run first so a same-cycle
+                        // reword cannot hide an item from its done/reopen selector.
+                        for pair in &options.todo_edit {
+                            let (selector, text) = pair.split_once('=').with_context(|| {
+                                format!("--todo-edit expects 'id=text', got: {}", pair)
+                            })?;
+                            backlog_cmd::todo_edit(file, selector, text)?;
+                        }
+                        for selector in &options.todo_done {
+                            backlog_cmd::todo_done(file, selector)?;
+                        }
+                        for selector in &options.todo_reopen {
+                            backlog_cmd::todo_reopen(file, selector)?;
+                        }
+                        for selector in &options.todo_remove {
+                            backlog_cmd::todo_remove(file, selector)?;
                         }
                         for id in &options.pending_ungate {
                             backlog_cmd::ungate(file, id)?;
@@ -2276,6 +2375,15 @@ fn apply_pending_and_status_mutations_with_mode(
                         );
                         unreferenced_gate_ids
                             .replace(backlog_cmd::todo_unreferenced_ids(file, &opened_gate_ids)?);
+                        // `#tododone`: an operator action tied to work this closeout
+                        // resolved is usually finished too; name the open ones.
+                        open_todo_refs.replace(backlog_cmd::todo_open_references(
+                            file,
+                            &resolved_ids_this_cycle(
+                                &options.pending_done,
+                                &options.review_resolve,
+                            ),
+                        )?);
                         added_ids.replace(Some((
                             same_cycle_added_ids,
                             review_added_ids,
@@ -2339,6 +2447,7 @@ fn apply_pending_and_status_mutations_with_mode(
                     }
                     transaction?;
                     emit_operator_todo_advisory(file, &unreferenced_gate_ids.into_inner());
+                    emit_operator_todo_done_advisory(file, &open_todo_refs.into_inner());
                     // `#mutplanwitness`: the envelope published. Anything that
                     // retains or fails the mutation write propagates above and
                     // leaves this unset, which is exactly what the resume,
@@ -3132,6 +3241,10 @@ fn run_command_inner_within_pass(
             review_add: &options.review_add,
             review_edit: &options.review_edit,
             todo_add: &options.todo_add,
+            todo_done: &options.todo_done,
+            todo_edit: &options.todo_edit,
+            todo_reopen: &options.todo_reopen,
+            todo_remove: &options.todo_remove,
             allow_replace_pending: options.allow_replace_pending,
             pending_only: options.pending_only,
             status: options.status.as_deref(),
@@ -3164,6 +3277,7 @@ fn run_command_inner_within_pass(
         || !options.review_add.is_empty()
         || !options.review_edit.is_empty()
         || !options.todo_add.is_empty()
+        || options.has_todo_item_mutation()
         || options.status.is_some();
 
     let baseline = match guard_no_baseline_replay_after_committed_cycle(
@@ -5254,6 +5368,57 @@ mod tests {
         );
         assert_eq!(ids, vec!["rev1", "gat1", "mov1"]);
         assert!(operator_gate_ids_opened_this_cycle(&[], &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn resolved_ids_cover_done_and_review_resolve_once() {
+        assert_eq!(
+            resolved_ids_this_cycle(
+                &["#Gate1".to_string(), "gate2".to_string()],
+                &["gate1".to_string(), "rev1".to_string()],
+            ),
+            vec!["gate1", "gate2", "rev1"]
+        );
+        assert!(resolved_ids_this_cycle(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn operator_todo_done_advisory_names_open_items_and_the_todo_done_command() {
+        use agent_doc_element::todo::OpenTodoReference;
+        let file = Path::new("tasks/session.md");
+        assert_eq!(operator_todo_done_advisory(file, &[]), None);
+        let one = operator_todo_done_advisory(
+            file,
+            &[OpenTodoReference {
+                resolved_id: "gate1".to_string(),
+                selector: "k3vd".to_string(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(
+            one,
+            "[todo] advisory (#tododone): this closeout resolved #gate1 but agent:todo still has 1 open item tied to it. If the operator action is finished, check it off in the next closeout: agent-doc write --commit tasks/session.md --backlog-only --todo-done k3vd"
+        );
+        let two = operator_todo_done_advisory(
+            file,
+            &[
+                OpenTodoReference {
+                    resolved_id: "gate1".to_string(),
+                    selector: "k3vd".to_string(),
+                },
+                OpenTodoReference {
+                    resolved_id: "gate2".to_string(),
+                    selector: "Decide the order (#gate2)".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+        assert!(two.contains("resolved #gate1, #gate2"), "{two}");
+        assert!(two.contains("2 open items tied to them"), "{two}");
+        assert!(
+            two.ends_with("--todo-done k3vd --todo-done 'Decide the order (#gate2)'"),
+            "{two}"
+        );
     }
 
     #[test]

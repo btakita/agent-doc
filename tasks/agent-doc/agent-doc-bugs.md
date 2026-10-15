@@ -327,6 +327,25 @@ Subagent completion feedback was recorded by agent-doc; the claim remains active
 
 ### Re: batch-0.35.510 integrated, checked, installed, pushed to main — opus-5-5 · 2026-10-15T19:50-04:00
 
+> **Queue prompt:**
+>
+> do [#pollintervalattribute]
+>
+> do [#rundocsstop]
+>
+> do [#keylogrebase]
+>
+> do [#claimfollowedit]
+>
+> do [#splicesessionack]
+>
+> do [#rearmreadfailclosed2]
+>
+> do [#execfailpipe]
+>
+> do [#staleplugwarnflake]
+
+
 **Done.** Every finished subagent branch is merged into `batch-0.35.510`.
 - **One full `make check`:** exit 0, 10790/10790 tests passed. TLA+ was skipped because its models are identical to a run that passed earlier.
 - **One `make install`:**
@@ -405,6 +424,86 @@ Fixed (above). Restarting IDEA could not help: the stuck controller was in haive
 > **Queue prompt:** #todo
 
 Done last cycle.
+### Re: batch-0.35.510 integrated, checked, installed, pushed to main — opus-5-5 · 2026-10-15T19:50-04:00
+
+**Done.** Every finished subagent branch is merged into `batch-0.35.510`.
+- **One full `make check`:** exit 0, 10790/10790 tests passed. TLA+ was skipped because its models are identical to a run that passed earlier.
+- **One `make install`:**
+  - JetBrains 0.2.642 hot-upgraded in the live IDE. 262 0.2.643 was written to Rider and loads at its next start. 263 is 0.2.644.
+  - VS Code 0.2.82 installed.
+  - 27 supervisors and 3 controllers recycle at their next idle boundary.
+- **`main`:** fast-forwarded to `8cc279f603`. CI for that push is still running; I recorded that rather than waiting on it.
+- **GitHub:** GH 274 and GH 275 are closed with fix commits. No tag yet: this is a local install, and the release is the next step whenever you want it.
+
+❯ **What landed**
+- **GH 274 (`?` duplicate response):** the JetBrains plugin passed native strings in the JVM locale. An ASCII-locale backend turned non-ASCII into `?`, and repair later committed that copy beside the real one. Now UTF-8 is explicit and strict at the JNA boundary. The projection and repair also refuse a second exact copy, or a lossy copy, of a committed response.
+- **GH 275 and the `agent:todo` guard:** todo rows are no longer shadow backlog. A committed closeout whose session check still refuses now exits nonzero instead of printing "superseded".
+- **Todo ids:**
+  - `--todo-add` reuses the open review/backlog id it cites, or mints a fresh id.
+  - Checking the box is the operator's done signal, and no agent write unchecks it.
+  - Preflight reports todo signals, and closeout auto-checks a todo only when its own id is resolved.
+- **`keylogrebase`:** a keystroke log reopened after compaction now restarts on its real base. Admission trusts it only when replay reproduces the recorded tip. This closes the disk-only double-arrival gap, and the TLA+ residual config now passes.
+- **`rundocsstop`:** a Run Agent Doc or operator edit is admitted past shadow-backlog rows, with a repair directive, instead of having its turn stopped. The closeout guard still flags the rows.
+- **Queue scheduling:**
+  - `interval=`, `time=HH:MM[,…]`, `loop` and `loop=N` on `agent:queue`.
+  - One sleeping scheduler per controller, with a 60 s floor and a 300 s cap. Missed ticks coalesce, and failures back off.
+  - Pass counts survive restarts. Attribute edits reschedule live.
+- **Clear Session Context:**
+  - The first press was correctly queued behind a not-yet-started Run, but the notice described a live turn. It now says the clear runs after that Run.
+  - JetBrains and VS Code no longer "cancel" the Run, which only dropped its outcome and allowed a second trigger. VS Code had the same bug, and I fixed it there too.
+- **Stale controller / tmux 2→1→2:**
+  - `[X, X]` layouts collapse to one column, and projection retries are capped at 12.
+  - A per-window claim stops an older layout from another project's controller overriding a newer one.
+  - The stale-supervisor marker on `%180` was five weeks old (pane ids get reused); markers now require a live writer.
+- **Captured-delta livelock:** a typing burst whose acknowledgement was lost under load froze the plugin's baseline. The response then sat in the replica but never reached the visible buffer. The plugin now re-sends the unacknowledged burst and advances only on proof, with a bound. Your 17:51 response did survive (it is in HEAD).
+- **IDE snappiness:**
+  - Build, test and gradle entrypoints run at low priority with core headroom left for the IDE.
+  - Visual highlights reconcile incrementally.
+  - New operator doc: `docs/development/ide-responsiveness.md`.
+- **Test reliability:**
+  - Lib tests no longer cold-launch a separate controller (498 launches → 0), and a guard rejects new ones.
+  - Two wall-clock tests that failed every subagent's `make check` now take an injected clock. Each subagent had "fixed" one its own way; I kept the injected-clock versions.
+- **Already in the batch:** `claimfollowedit`, `splicesessionack` (GH 273 remainder), `rearmreadfailclosed2`, `execfailpipe`, `staleplugwarnflake`.
+
+❯ **sdk.md and `#todo`:** bracketed todo ids are safe again once sdk.md's supervisor picks up the new build. The `#todo` sync was done last cycle (`#gh262tabtmux`, `#sdkmdcleanup`). This echo closes its queue head.
+
+❯ **In flight (next batch):** the docs.md Stop-hook item (an answer released but not persisted) is with `subagent:docsstophook` on `fix/docs-stophook-unpersisted`.
+
+❯ **Follow-ups added** at the end of the backlog: test binaries reaching live project sockets, integration tests still cold-launching controllers, and a recommended tightening of the shadow scan's inline-code skip.
+
+❯ The exchange is large (over 290 lines). Noting it, not stopping for it.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/274
+
+Fixed and closed (above).
+
+> **Queue prompt:** `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.
+
+❯ Done: id reuse or mint, the operator check as the done signal, and preflight signals plus closeout auto-done (above).
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.
+
+Fixed and closed. The new comment (only rows without backticks tripped the guard) is covered: `agent:todo` is now excluded as a whole component.
+
+> **Queue prompt:** Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked
+
+Fixed (above).
+
+> **Queue prompt:** idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?
+
+❯ Yes, it was the builds. Fixed (above). The guide is `docs/development/ide-responsiveness.md`.
+
+> **Queue prompt:** sdk.md issue: I asked the agent to add ids on the todo items:
+
+Fixed with option 1 (fix the guard), now installed.
+
+> **Queue prompt:** tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.
+
+Fixed (above). Restarting IDEA could not help: the stuck controller was in haiven-dev, not the IDE.
+
+> **Queue prompt:** #todo
+
+❯ Done last cycle.
 <!-- agent:boundary:0710c595 -->
 <!-- /agent:exchange -->
 
@@ -415,19 +514,19 @@ Done last cycle.
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#pollintervalattribute]~~
 - ~~do [#rundocsstop]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/274~~
-- 🚧 `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/274~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~`agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#keylogrebase]~~
 - ~~do [#claimfollowedit]~~
 - ~~do [#splicesessionack]~~
 - ~~do [#rearmreadfailclosed2]~~
 - ~~do [#execfailpipe]~~
 - ~~do [#staleplugwarnflake]~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.
-- 🚧 Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked
-- 🚧 idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?
----
-🚧 sdk.md issue: I asked the agent to add ids on the todo items:
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/275: Also see new comment on issue.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Clear Session Context on sdk.md: 1st attempt had an error: 2nd attempt worked~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~idea typing is very laggy. 100% CPU usage. Due to build? Can we keep Idea snappy under heavy load?~~ — auto-struck: answered this cycle (#ftstrike)
+~~~done
+sdk.md issue: I asked the agent to add ids on the todo items:
 ```
 ❯ /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
 
@@ -458,9 +557,9 @@ Done last cycle.
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   5. Chat about this
 ```
----
-- 🚧 tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.
-- #todo
+~~~
+- ~~tmux auto sync got out of sync when switch the editor from 2 panes to 1 pane back to 2 panes under heavy cpu load. Sync Tmux Panes temporarily brings tmux to 2 panes but agent-doc incorrectly auto syncs back to 1 pane. Restarting Idea did not fix the issue.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#todo~~ — auto-struck: answered this cycle (#ftstrike)
 ---
 docs.md issue:
 ```
@@ -486,6 +585,8 @@ write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md`
 - [x] [#gh262tabtmux] Next Remote Dev session: confirm tab switches move tmux (GH #262 fix, plugin 263 0.2.617 after v0.35.504 is installed on the backend)
 - [x] [#sdkmdcleanup] sdk.md cleanup: delete the leftover half-typed `> **Queue prompt:** ... which is not f` echo (~line 1167; the full question is ~line 1147), and the open `[ ]` copies of #apimigrationcollide / #publicbundleadopt whose `[x]` duplicates exist
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
+- [ ] [#gq2c] After the haiven-dev supervisor recycles onto the new build, re-run Agent Doc on tasks/sdk.md: bracketed todo ids are admitted again (it currently uses bare ids as a workaround).
+- [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 <!-- /agent:todo -->
 
 ## Backlog

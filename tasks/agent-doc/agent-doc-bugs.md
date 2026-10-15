@@ -109,6 +109,7 @@ If you want this, I'd queue it as one item after the v0.35.504 release: (1) the 
 - tmux pane auto-sync not working
 - Add a `priority` attribute to `agent:review`.
 - Is `agent:todo` implemented? I don't see it being used. Please fix. There should be todo's when the operator needs to take an action. If a agent:todo is not in the document, agent-doc should add it.
+- do your formal logic suggestions
 - release + publish
 <!-- /agent:queue -->
 

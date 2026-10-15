@@ -230,7 +230,7 @@ work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 isolate_run "${work_dir}"
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutProvisional EditorTransportHealth ControllerLifecycle)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge AdmissionCutExclusivity StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutProvisional EditorTransportHealth ControllerLifecycle)
 
 # Library modules: INSTANCE'd by the models above, never checked on their own
 # (no Spec, no .cfg). They only need to sit next to the importing model.
@@ -360,6 +360,14 @@ must_violate=(
     AdmissionSplitMerge:AdmissionSplitMergeTwinWedge
     AdmissionSplitMerge:AdmissionSplitMergeTwinPairWedge
     AdmissionSplitMerge:AdmissionSplitMergeTwinOutputWedge
+    # `#queuecutexclusive`: the pre-fix ladder with every heuristic guard on
+    # still duplicates (stale cut, and the 2026-10-15 in-flight cut); the
+    # shipped rule still merges independent disk work (Reach); and the stated
+    # boundary -- a disk-only component's in-flight typing -- is real.
+    AdmissionCutExclusivity:AdmissionCutExclusivityLadderWedge
+    AdmissionCutExclusivity:AdmissionCutExclusivityInflightWedge
+    AdmissionCutExclusivity:AdmissionCutExclusivityReach
+    AdmissionCutExclusivity:AdmissionCutExclusivityResidual
     AdmissionSplitMerge:AdmissionSplitMergeTwinReach
     # `#editorauthority`: adopting the CRDT over an open editor rolls it back
     # (api.md, 2026-09-29); forward merging still delivers agent work.

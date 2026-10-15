@@ -4,6 +4,13 @@ EXTENDS Naturals, FiniteSets, TLC
 (***************************************************************************
 Whether preflight's admission three-way merge can duplicate a queue item.
 
+SUPERSEDED AS THE PRIMARY RULE (2026-10-15, `#queuecutexclusive`): this model
+assumes item identity is visible to the merge (independent work gets its own
+identity, twins are prefix-related). Both assumptions failed live -- a
+mid-line correction is not a prefix. `AdmissionCutExclusivity.tla` models the
+shared mechanism instead (two cuts of one editor history) and the rule that
+needs no identity test. The guards checked here stay as defense in depth.
+
 THE MEASURED FAILURE
 --------------------
 Observed 2026-09-30 on `src/haiven-dev/tasks/infra.md` (`#admissionmergedup`).

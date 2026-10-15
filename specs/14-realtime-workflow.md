@@ -1064,7 +1064,7 @@ Four classifications, each naming itself in `ops.log` as
 | `verbatim_branch_unchanged` | A plane still matches another byte-for-byte. | Proceed, or fast-forward a proven newer durable save. Not logged — it is the every-preflight case. |
 | `transient_markers_only` | The planes differ only by transient markers; a durable branch is unchanged. | Same as above, decided on durable content. |
 | `authority_subsumes_disk` | Three durably distinct revisions, but the live buffer preserves every durable disk line in order. | Proceed on the authority; adopt nothing. Disk is an ancestor, and adopting it would drop the operator's newer steering. |
-| `three_way_split_merged` | Three durably distinct revisions with content on disk the authority never received: two writers genuinely diverged. | First use an exact-base editor-op epoch to remove only disk queue rows proven to be intermediate revisions of the initial authority cut (the cut may be any replay state of the epoch, not only its final one: `opcutahead`, below); then three-way merge the remaining disk branch into live authority against the baseline ancestor. Independent disk additions are preserved. The merge engine itself then projects out revision twins (below) — no op proof needed. Every rung must clear count conservation and twin-pair conservation, both computed against the projected disk. The initial operator cut and op epoch remain fixed across the bounded CAS retry. The merge records `admission_three_way_merge … outcome=<adopted\|…>` and its rung diagnostics (`RevisionTwin=collapsed(N)`, `<Engine>=would_duplicate_items(…)`, `<Engine>=would_duplicate_revision(…)`); an unadoptable merge proceeds on authority. Never refuses. |
+| `three_way_split_merged` | Three durably distinct revisions with content on disk the authority never received. With a live editor these are two CUTS of one editor history (its op stream and its native save), not two writers (`#queuecutexclusive`, below). | First use an exact-base editor-op epoch to remove only disk queue rows proven to be intermediate revisions of the initial authority cut (the cut may be any replay state of the epoch, not only its final one: `opcutahead`, below). Then revert disk's body of every component BOTH planes changed to the baseline body (CutExclusivity: that component keeps the authority's version). Then three-way merge the remaining disk branch into live authority against the baseline ancestor; disk work in components the authority did not change is preserved. The merge engine itself then projects out revision twins (below) — no op proof needed. Every rung must clear the CutExclusivity guard (a component both planes changed is exactly one plane's body, checked against the ORIGINAL disk), count conservation and twin-pair conservation, the last two computed against the projected disk. The initial operator cut and op epoch remain fixed across the bounded CAS retry. The merge records `admission_three_way_merge … outcome=<adopted\|…>` and its rung diagnostics (`CutExclusive=authority_kept(<name>:<ordinal>,…)`, `RevisionTwin=collapsed(N)`, `<Engine>=would_mix_component_versions(…)`, `<Engine>=would_duplicate_items(…)`, `<Engine>=would_duplicate_revision(…)`); an unadoptable merge proceeds on authority. Never refuses. |
 
 **Revision twins (`typingforkdup`).** Every item a merge emits is the image of
 exactly one authored item. An item the operator is typing passes through many
@@ -1121,6 +1121,62 @@ only when it appeared in some replay state and is absent from both the cut and
 the final replay. Ops past the cut are the operator's own newer keystrokes, so a
 row the newest replay still holds is never treated as superseded. Ops that never
 pass through the cut prove nothing, and the disk branch is left unchanged.
+
+**Cut exclusivity (`#queuecutexclusive`).** Admission runs only while a live
+editor holds the document, and agent-doc never writes disk behind a live buffer
+(`queue add`, the write path and maintenance all go through the CRDT). So the
+authority and disk are two cuts of ONE editor history: the cut its op stream has
+delivered and the cut its native save wrote. Unioning them treats one history
+as two writers. A stale disk cut resurrects a revision the operator already
+replaced. A newer disk cut is worse: the merge write inserts disk's lines into
+the CRDT as NEW items, and the editor's in-flight ops then edit or insert its own
+items, so the same text lands twice once those ops arrive. Delivery of the
+editor's own ops is idempotent per CRDT item; adopting text copied from disk is
+not.
+
+Live 2026-10-15 on `agent-doc-bugs.md`: the operator added six issue lines, typed
+`#gh-dix` on all six with a multi-caret, corrected them to `#gh-fix `, and
+pressed Run. The authority's cut held `#gh-dix` (the correction's ops arrived
+11 s later); the native save held `#gh-fix `. `admission_divergence
+baseline_len=4411 authority_len=4753 disk_len=4759`, then `rungs=[Cell=equals_authority
+Semantic=adopted(...)]` and a 5101-byte write (4411 + 342 + 348): every issue
+twice, so preflight listed 12 queue heads. The late correction ops then rewrote
+the editor's own `#gh-dix` items into `#gh-fix`, leaving six `#gh-fix` lines,
+`release + publish`, and six `#gh-fix` lines again. Replayed byte-exact on the
+reconstructed triple, the pre-fix ladder returns the logged `merged_hash`.
+
+Every admission duplicate since the merge replaced the refusal has that rung
+sequence (2026-09-30 `infra.md`, GH #198, `typingforkdup`, `opcutahead`, and this
+one): the identity rung kept the authority, the line rung unioned two cuts. The
+count bound, the textual prefix test and the op-lineage proof are classifiers
+for "is this disk line a revision of that authority line?". Each was sound for
+the shape it came from and blind to the next one: a mid-line correction is not a
+prefix, both sides "added" six items so the count bound admits twelve, and the
+op ledger carried the pre-compaction base hash so no lineage proof existed.
+
+The rule needs no classifier. For every top-level component `C` (aligned by name
+and ordinal across the three planes, compared in the durable domain) with
+`A[C] != B[C]` and `D[C] != B[C]`, the adopted revision's `C` is `A[C]`. The
+editor's own ops then roll it forward exactly once. It is enforced twice in
+`agent_doc_document::component_exclusivity`: an input projection
+(`project_disk_for_cut_exclusivity`) reverts disk's body of such a component to
+the baseline before any rung runs, and a fail-closed guard
+(`merge_mixes_component_versions`) refuses any candidate whose such component is
+neither the authority's nor the original disk's body. Unparseable input or a
+candidate that lost an aligned component is refused too. Refusing a rung only
+means admission proceeds on the authority. Components whose occurrence count
+differs between planes are structural changes and are left to the merge.
+
+What it does not claim: a component only disk changed still merges, so
+independent disk work lands. If that disk-only change is itself the editor's
+in-flight typing in a component the authority has not yet received any op for,
+it can still arrive twice. A text-only rule cannot tell that from an independent
+write; closing it needs provenance (a correctly based op ledger).
+`formal/tla/AdmissionCutExclusivity.tla` checks the rule (`NoDuplicateInConcurrentComponent`,
+`ConvergesConcurrent`), two wedges for the pre-fix ladder with all three heuristic
+guards on (a stale cut, and the 2026-10-15 in-flight cut), a reach obligation for
+disk work in an untouched component, and the stated boundary as a must-violate
+config.
 
 `authority_subsumes_disk` is what a **blocked commit** looks like. When the
 controller reports `NativeSaveRequired` with `disk_projection_ready=false`, the

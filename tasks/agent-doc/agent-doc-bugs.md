@@ -60,14 +60,16 @@ Here is what the issue says is wrong, and what the subagent was asked to fix:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/266
+- 🚧 do [#runsdkcaused]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/266
+- Make sure agent:todo items are marked complete as they are finished. Provide a similar api as agent:backlog + agent:icebox + agent:reviews.
 - release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#runsdkcaused] Run Agent Doc on sdk.md caused queue item to partially duplicate. Note the "fork" between "not to" and "not f":
+- [ ] 🚧 [#runsdkcaused] Run Agent Doc on sdk.md caused queue item to partially duplicate. Note the "fork" between "not to" and "not f":
   ```
   - Does gh support 2 types of PR? One for our dev which is not to be blocked on a review...and a PR type for main which is for review?
   - Does gh support 2 types of PR? One for our dev which is not f

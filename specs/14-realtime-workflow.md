@@ -2062,6 +2062,17 @@ exchange leaf; it cannot re-merge an already-composed queue as flat text.
   consequences run outside the native-call generation, serialize per project
   root, and are latest-wins before execution; a blocked route cannot disable
   unrelated editor/CRDT calls or replay a superseded intermediate layout.
+- The controller editor-surface graph fences observations per
+  `(project root, client, surface)` endpoint. A duplicate or reordered sequence
+  (`stale_sequence`) or an older connection generation (`stale_generation`) is
+  rejected, and an endpoint retired by an exact `editor_surface_forget` stays
+  retired for that connection generation (`retired_endpoint`): a retired
+  generation never regains effect authority, so only a newer editor generation
+  or a fresh controller can publish that endpoint again. Every rejected
+  `controller_editor_surface_observed` receipt names its fence as
+  `rejected=<reason>`; a run of `rejected=retired_endpoint` from a live editor
+  means the editor retired an endpoint it kept publishing, which disables
+  automatic tab-switch sync for that frame (`#tmuxautosyncretired`).
 
 ## Realtime Parse State
 

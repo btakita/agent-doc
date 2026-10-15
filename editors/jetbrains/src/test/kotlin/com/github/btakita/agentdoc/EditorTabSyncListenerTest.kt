@@ -459,6 +459,63 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `a newer observation superseding an in-flight delivery keeps its endpoint live`() {
+        // #tmuxautosyncretired: a tab switch while the previous delivery is in the controller
+        // advances only the observation generation. Retiring the endpoint here made the
+        // controller fence every later observation of that frame (rejected=retired_endpoint),
+        // which silently disabled tab-switch auto-sync until a plugin reload or controller
+        // recycle.
+        assertEquals(
+            EditorTabSyncListener.InFlightSurfaceDelivery.Decision.RecordEndpoint,
+            EditorTabSyncListener.InFlightSurfaceDelivery.decide(
+                requestedAuthorityEpoch = 4,
+                currentAuthorityEpoch = 4,
+            ),
+        )
+    }
+
+    @Test
+    fun `an authority handoff during an in-flight delivery retires that endpoint`() {
+        assertEquals(
+            EditorTabSyncListener.InFlightSurfaceDelivery.Decision.RetireEndpoint,
+            EditorTabSyncListener.InFlightSurfaceDelivery.decide(
+                requestedAuthorityEpoch = 4,
+                currentAuthorityEpoch = 5,
+            ),
+        )
+    }
+
+    @Test
+    fun `in-flight delivery retires its endpoint only through the authority gate`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val accepted =
+            source
+                .substringAfter("CpRouteClient.observeEditorSurface(")
+                .substringBefore("retireClosedSurfaceEndpoints(observation.project, retiredEndpoints)")
+
+        assertTrue(accepted.contains("InFlightSurfaceDelivery.decide("))
+        assertFalse(
+            "a superseding observation must not retire the endpoint it is about to republish",
+            accepted.contains("generation.get() != requestedGeneration"),
+        )
+        val retire =
+            source
+                .substringAfter("internal fun retireControllerProjection()")
+                .substringBefore("private fun shutdown(")
+        assertTrue(
+            "the handoff must advance the authority epoch under the drain lock",
+            retire.contains("projectionAuthorityEpoch.incrementAndGet()\n            surfaceRoots.drain()"),
+        )
+    }
+
+    @Test
     fun `surface capture delegates authoritative liveness to the shared adapter`() {
         val source =
             Files.readString(

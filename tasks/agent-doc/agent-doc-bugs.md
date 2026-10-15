@@ -132,12 +132,12 @@ All seven are fixed, on `main`, and tagged in **v0.35.509** (`62cfd2af54`). The 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/268~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/269
-- #gh-fix https://github.com/btakita/agent-doc/issues/270
-- #gh-fix https://github.com/btakita/agent-doc/issues/271
-- #gh-fix https://github.com/btakita/agent-doc/issues/272
-- #gh-fix https://github.com/btakita/agent-doc/issues/273
-- The content of the queue were duplicated by agent-doc on Run Agent Doc. This has been a reoccurring issue with multiple fix attempts. Use formal logic to prevent this from happening again.
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/269~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/270~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/271~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/272~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/273~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~The content of the queue were duplicated by agent-doc on Run Agent Doc. This has been a reoccurring issue with multiple fix attempts. Use formal logic to prevent this from happening again.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 release + publish
  
 - do [#keylogrebase]

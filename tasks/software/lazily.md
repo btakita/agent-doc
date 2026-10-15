@@ -290,6 +290,56 @@ All the real pending work is uncommitted in review worktrees, so I asked what `#
 **Open for you:**
 - **lazily-rs publishing.** Its tag workflow still fails at the crates.io trusted-publishing login (`#lzrustpublish`). Before I release rs I need either crates.io Trusted Publishing configured, or your OK for one more manual `cargo publish` with the stored token.
 - **lazily-react.** It has Phase 3/4 changes, but it isn't one of the nine bindings, so it stays out of this round.
+
+### Re: #release progress (lazily-spec integrated) — opus-5-5 · 2026-10-15T14:48-04:00
+
+lazily-spec is integrated and pushed on branch `integrate/core-cohort-20261015` (HEAD `4d86e62`), on top of `origin/main` `90a2498`, in `~/worktrees/integrate-core-20261015/lazily-spec`:
+
+| Phase | Commit |
+|---|---|
+| Phase 1 profile | `be5cabf` |
+| Phase 2 claims | `ab2109e` |
+| Dart-timeout checker | `0a901a7` |
+| Phase 5 consumers | `746b37b` |
+| CI activation | `f1380cc` |
+| Phase 6 cohort | `4d86e62` |
+
+Phase 3 had no spec-side changes.
+
+**Why Phase 6 is in:** CI activation's reusable `core-cohort-publish-gate.yml` runs `verify_core_cohort.py`, and the pinned `make core-cohort-check` step would test nothing without it. No binding release-workflow callers were added.
+
+**Overlaps resolved:**
+- The FFI coverage row keeps Phase 2's partial-with-reason marks.
+- The Makefile targets from all phases are merged.
+- `docs/core-support.md` was regenerated, because the old copy listed a nonexistent JS entry point, `reactive-async`.
+
+**Verified:**
+- `make -k check`: green except `coverage-check`, which fails only because the sibling READMEs are stale.
+- Core CI reach: 10 gates, 7/7 mutations caught per workflow.
+- Evidence self-test: 16 negative probes.
+- Profile self-test: 11 negative cases rejected.
+- pytest: 420 passed.
+- Coverage-claims and corpus-floor `--require-all`: green.
+
+**Deferred** until the bindings land: the aggregate `core-evidence-check` and `core-artifact-consumers-check-all`.
+
+**One coordinator follow-up:** every binding's README coverage table is now stale. CI won't catch this, because it runs `coverage-check` before cloning the siblings. I'll run `make coverage-sync` once, across all siblings, after the bindings integrate.
+
+**Dispatched now:** nine binding integration agents, one per repo, in sibling worktrees under `~/worktrees/integrate-core-20261015/`:
+
+| Repo | What's included |
+|---|---|
+| rs | Phases 2–5, CI activation, and `#lzrustcoreprofiledivergence` |
+| py | Phases 2–5 and CI activation |
+| js | Phases 2–5 and CI activation |
+| go | Phases 2–5, CI activation, and `#lzgocireachability`, rebased onto `e5e082a` with the consumer-file conflict resolved |
+| kt | Phases 2–5 and CI activation |
+| cpp | Phases 2–5 and CI activation |
+| cs | Phases 2–5 and CI activation |
+| dart | Phases 2–5, CI activation, and the timeout fix, with its self-test wired into `check` and CI |
+| zig | Phases 2–5 and CI activation, rebased onto current `main`, with toolchain work and all three toolchains verified |
+
+Each agent pushes its own branch only. Fast-forwarding `main`, version bumps, tags and publishing stay with me.
 <!-- agent:boundary:02e242a9 -->
 <!-- /agent:exchange -->
  

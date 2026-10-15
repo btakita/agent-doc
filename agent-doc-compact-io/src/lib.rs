@@ -113,6 +113,9 @@ use agent_doc_document::compact_projection::{
 use agent_doc_element::element;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_frontmatter::lint::LintCliMode;
+use agent_doc_markdown_ast::exchange_tree::{
+    SalientPartition, partition_salient_responses, remove_all_salient_responses,
+};
 use agent_doc_sqlite::archive_index;
 
 use agent_doc_topic::parse_topic_sections_with_tail;
@@ -734,6 +737,9 @@ fn run_in_controller_scoped(
     )?;
 
     let content = compose_active_capture_for_compaction(file, &semantic_base_content)?;
+    // A salient node is display state for the open cycle,
+    // so compaction keeps only that cycle's node, and only in the live target.
+    let open_salient_cycle = open_salient_cycle_id(file);
 
     let (fm, body) = frontmatter::parse(&content)?;
 
@@ -748,9 +754,14 @@ fn run_in_controller_scoped(
             .find(|component| component.name == target)
             .ok_or_else(|| anyhow::anyhow!("component '{}' not found in document", target))?;
         let old_content = comp.content(&content);
+        let old_content = if target == "exchange" {
+            std::borrow::Cow::Owned(remove_all_salient_responses(old_content))
+        } else {
+            std::borrow::Cow::Borrowed(old_content)
+        };
         match keep {
-            Some(keep) => parse_topic_sections_with_tail(old_content).sections.len() <= keep,
-            None if target == "exchange" => split_component_content_at_boundary(old_content)
+            Some(keep) => parse_topic_sections_with_tail(&old_content).sections.len() <= keep,
+            None if target == "exchange" => split_component_content_at_boundary(&old_content)
                 .0
                 .trim()
                 .is_empty(),
@@ -794,15 +805,19 @@ fn run_in_controller_scoped(
                     keep: n,
                     message,
                     force_disk,
+                    open_salient_cycle: open_salient_cycle.as_deref(),
                 },
             ),
             None => run_component_compact_with_options(
                 file,
                 &content,
                 &observed_write_base_content,
-                target,
-                message,
-                force_disk,
+                ComponentCompactOptions {
+                    target,
+                    message,
+                    force_disk,
+                    open_salient_cycle: open_salient_cycle.as_deref(),
+                },
             ),
         }?
     } else {
@@ -2030,8 +2045,18 @@ fn run_component_compact(
     message: Option<&str>,
     _is_crdt: bool,
 ) -> Result<String> {
-    run_component_compact_with_options(file, content, content, target, message, false)
-        .map(|targets| targets.committed)
+    run_component_compact_with_options(
+        file,
+        content,
+        content,
+        ComponentCompactOptions {
+            target,
+            message,
+            force_disk: false,
+            open_salient_cycle: None,
+        },
+    )
+    .map(|targets| targets.committed)
 }
 
 #[cfg(test)]
@@ -2047,8 +2072,18 @@ fn run_component_compact_force_disk(
             file,
             "compact_test_force_disk_authorization",
         )?;
-    run_component_compact_with_options(file, content, content, target, message, true)
-        .map(|targets| targets.committed)
+    run_component_compact_with_options(
+        file,
+        content,
+        content,
+        ComponentCompactOptions {
+            target,
+            message,
+            force_disk: true,
+            open_salient_cycle: None,
+        },
+    )
+    .map(|targets| targets.committed)
 }
 
 /// Re-attach the exchange boundary marker at the end of the live compacted
@@ -2121,21 +2156,101 @@ fn drop_durable_context_reference(content: &mut String) {
 
 /// Returns both the live compacted document and the committed snapshot. They differ
 /// only when unresolved input follows the exchange boundary.
+/// The open cycle that owns a live salient node, if any.
+///
+/// An unreadable cycle state only costs the live display of an in-flight
+/// checkpoint; the cycle's final response is still the durable record.
+fn open_salient_cycle_id(file: &Path) -> Option<String> {
+    match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
+        Ok(state) => state
+            .filter(|state| state.is_open())
+            .map(|state| state.cycle_id),
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "compact_salient_cycle_state_unavailable file={} error={}",
+                    file.display(),
+                    format!("{error:#}").replace(char::is_whitespace, "_"),
+                ),
+            );
+            None
+        }
+    }
+}
+
+/// Separate salient nodes from exchange content before compaction
+///. Non-exchange targets are returned unchanged.
+fn partition_compact_salient(
+    file: &Path,
+    target: &str,
+    old_content: &str,
+    open_salient_cycle: Option<&str>,
+) -> SalientPartition {
+    if target != "exchange" {
+        return SalientPartition {
+            content: old_content.to_string(),
+            live: None,
+            dropped_stale: 0,
+        };
+    }
+    let partition = partition_salient_responses(old_content, open_salient_cycle);
+    if partition.live.is_some() || partition.dropped_stale > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "compact_salient_partitioned file={} open_cycle={} live_kept={} stale_dropped={}",
+                file.display(),
+                open_salient_cycle.unwrap_or("none"),
+                partition.live.is_some(),
+                partition.dropped_stale,
+            ),
+        );
+    }
+    partition
+}
+
+/// Append the open cycle's salient node to live-only compacted content.
+fn push_live_salient(content: &mut String, live_salient: Option<&str>) {
+    let Some(live) = live_salient else {
+        return;
+    };
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push('\n');
+    content.push_str(live.trim_end());
+    content.push('\n');
+}
+
+struct ComponentCompactOptions<'a> {
+    target: &'a str,
+    message: Option<&'a str>,
+    force_disk: bool,
+    open_salient_cycle: Option<&'a str>,
+}
+
 fn run_component_compact_with_options(
     file: &Path,
     content: &str,
     write_base_content: &str,
-    target: &str,
-    message: Option<&str>,
-    force_disk: bool,
+    options: ComponentCompactOptions<'_>,
 ) -> Result<CompactDocumentTargets> {
+    let ComponentCompactOptions {
+        target,
+        message,
+        force_disk,
+        open_salient_cycle,
+    } = options;
     let components = element::parse(content)?;
     let comp = components
         .iter()
         .find(|c| c.name == target)
         .ok_or_else(|| anyhow::anyhow!("component '{}' not found in document", target))?;
 
-    let old_content = comp.content(content);
+    let original_content = comp.content(content);
+    let salient = partition_compact_salient(file, target, original_content, open_salient_cycle);
+    let old_content = salient.content.as_str();
     let (archive_content, trailing) = if target == "exchange" {
         split_component_content_at_boundary(old_content)
     } else {
@@ -2184,11 +2299,12 @@ fn run_component_compact_with_options(
         visible_content.push_str(trailing.trim_end());
         visible_content.push('\n');
     }
+    push_live_salient(&mut visible_content, salient.live.as_deref());
     // `#compactboundary`: the live projection must carry a boundary even when it
     // reaches the document through the direct disk write instead of a
     // patch-applying write. Commit re-mints one on the committed blob either way,
     // so a boundary-less live document is a permanent marker-only dirty diff.
-    let visible_content = append_boundary_marker(&visible_content, target, old_content);
+    let visible_content = append_boundary_marker(&visible_content, target, original_content);
 
     let compacted = comp.replace_content(content, &visible_content);
     let mut compacted = agent_doc_template::repair_conversation_tail_outside_exchange(&compacted)?
@@ -2198,7 +2314,7 @@ fn run_component_compact_with_options(
     {
         compacted = reconciled;
     }
-    let mut snapshot_compacted = if trailing.trim().is_empty() {
+    let mut snapshot_compacted = if trailing.trim().is_empty() && salient.live.is_none() {
         compacted.clone()
     } else {
         let snapshot_content = comp.replace_content(content, &summary);
@@ -2245,6 +2361,7 @@ struct PartialCompactOptions<'a> {
     keep: usize,
     message: Option<&'a str>,
     force_disk: bool,
+    open_salient_cycle: Option<&'a str>,
 }
 
 fn run_component_compact_partial(
@@ -2258,6 +2375,7 @@ fn run_component_compact_partial(
         keep,
         message,
         force_disk,
+        open_salient_cycle,
     } = options;
     let components = element::parse(content)?;
     let comp = components
@@ -2265,7 +2383,9 @@ fn run_component_compact_partial(
         .find(|c| c.name == target)
         .ok_or_else(|| anyhow::anyhow!("component '{}' not found in document", target))?;
 
-    let old_content = comp.content(content);
+    let original_content = comp.content(content);
+    let salient = partition_compact_salient(file, target, original_content, open_salient_cycle);
+    let old_content = salient.content.as_str();
 
     let parsed = parse_topic_sections_with_tail(old_content);
     let preamble = parsed.preamble;
@@ -2343,8 +2463,9 @@ fn run_component_compact_partial(
         new_content.push_str(trailing.trim_end());
         new_content.push('\n');
     }
+    push_live_salient(&mut new_content, salient.live.as_deref());
     // `#compactboundary`: same live-boundary rule as the full component compact.
-    let new_content = append_boundary_marker(&new_content, target, old_content);
+    let new_content = append_boundary_marker(&new_content, target, original_content);
 
     let compacted = comp.replace_content(content, &new_content);
     let mut compacted = agent_doc_template::repair_conversation_tail_outside_exchange(&compacted)?
@@ -2354,7 +2475,7 @@ fn run_component_compact_partial(
     {
         compacted = reconciled;
     }
-    let mut snapshot_compacted = if trailing.trim().is_empty() {
+    let mut snapshot_compacted = if trailing.trim().is_empty() && salient.live.is_none() {
         compacted.clone()
     } else {
         let snapshot_content = comp.replace_content(content, &base_new_content);
@@ -3154,6 +3275,7 @@ mod tests {
                 keep: 1,
                 message: None,
                 force_disk: true,
+                open_salient_cycle: None,
             },
         )
         .unwrap();
@@ -3386,6 +3508,7 @@ mod tests {
                 keep: 1,
                 message: None,
                 force_disk: true,
+                open_salient_cycle: None,
             },
         )
         .unwrap();
@@ -3674,6 +3797,154 @@ mod tests {
                 .unwrap(),
             compacted
         );
+    }
+
+    fn salient_compact_fixture() -> (tempfile::TempDir, std::path::PathBuf, String) {
+        let live = agent_doc_markdown_ast::exchange_tree::render_salient_response(
+            "cycle-open",
+            "Live finding.",
+        );
+        let stale = agent_doc_markdown_ast::exchange_tree::render_salient_response(
+            "cycle-old",
+            "Abandoned finding.",
+        );
+        let doc = format!(
+            "---\nagent_doc_session: test-compact-salient\nagent_doc_format: template\n---\n\n\
+             ## Exchange\n\n\
+             <!-- agent:exchange patch=append -->\n\
+             ### Re: topic one\n\nResponse one.\n\n\
+             ### Re: topic two\n\nResponse two.\n\n\
+             {stale}\n{live}\
+             <!-- agent:boundary:0123abcd -->\n\
+             <!-- /agent:exchange -->\n"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, &doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        for sub in ["snapshots", "archives", "logs", "plugin-owner"] {
+            std::fs::create_dir_all(agent_doc_dir.join(sub)).unwrap();
+        }
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        (dir, file, doc)
+    }
+
+    fn archived_text(dir: &tempfile::TempDir) -> String {
+        std::fs::read_dir(dir.path().join(".agent-doc/archives"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "md"))
+            .map(|entry| std::fs::read_to_string(entry.path()).unwrap())
+            .collect()
+    }
+
+    fn assert_salient_compacted(dir: &tempfile::TempDir, targets: &CompactDocumentTargets) {
+        let archive = archived_text(dir);
+        assert!(
+            archive.contains("Response one."),
+            "history is archived:\n{archive}"
+        );
+        assert!(
+            !archive.contains("Live response (not final)") && !archive.contains("finding."),
+            "a salient node is display state, never archived history:\n{archive}"
+        );
+        assert!(
+            !targets.committed.contains("agent:salient-response")
+                && !targets.committed.contains("finding."),
+            "the committed target must not carry a non-final node:\n{}",
+            targets.committed
+        );
+        assert!(
+            agent_doc_merge::salient_response::salient_response_materialized(
+                &targets.live,
+                "cycle-open",
+                "Live finding."
+            )
+            .unwrap(),
+            "the open cycle's node stays live until its final response:\n{}",
+            targets.live
+        );
+        assert!(
+            !targets.live.contains("Abandoned finding."),
+            "a stale orphan from another cycle is dropped:\n{}",
+            targets.live
+        );
+        agent_doc_lint_io::validate_integrity_on_content_with_logger(
+            Path::new("test.md"),
+            &targets.live,
+            agent_doc_ops_log_io::log_op,
+        )
+        .expect("the live compacted target keeps a well-formed component tree");
+    }
+
+    /// Compacting while a cycle's salient checkpoint is
+    /// live must neither archive nor commit it, must keep it visible, and must
+    /// sweep orphans left by other cycles.
+    #[test]
+    fn component_compact_keeps_open_cycle_salient_live_only_and_drops_orphans() {
+        let (dir, file, doc) = salient_compact_fixture();
+        let _scope = agent_doc_document_realtime_io::begin_force_disk_authority_scope(
+            &file,
+            "compact_test_force_disk_authorization",
+        )
+        .unwrap();
+        let targets = run_component_compact_with_options(
+            &file,
+            &doc,
+            &doc,
+            ComponentCompactOptions {
+                target: "exchange",
+                message: Some("Compacted summary."),
+                force_disk: true,
+                open_salient_cycle: Some("cycle-open"),
+            },
+        )
+        .unwrap();
+        assert_salient_compacted(&dir, &targets);
+        assert!(targets.committed.contains("Compacted summary."));
+    }
+
+    #[test]
+    fn partial_compact_keeps_open_cycle_salient_live_only_and_drops_orphans() {
+        let (dir, file, doc) = salient_compact_fixture();
+        let _scope = agent_doc_document_realtime_io::begin_force_disk_authority_scope(
+            &file,
+            "compact_test_force_disk_authorization",
+        )
+        .unwrap();
+        let targets = run_component_compact_partial(
+            &file,
+            &doc,
+            &doc,
+            PartialCompactOptions {
+                target: "exchange",
+                keep: 1,
+                message: None,
+                force_disk: true,
+                open_salient_cycle: Some("cycle-open"),
+            },
+        )
+        .unwrap();
+        assert_salient_compacted(&dir, &targets);
+        assert!(
+            targets.committed.contains("Response two."),
+            "{}",
+            targets.committed
+        );
+    }
+
+    #[test]
+    fn open_salient_cycle_follows_the_open_cycle_state() {
+        let (_dir, file, doc) = salient_compact_fixture();
+        assert_eq!(open_salient_cycle_id(&file), None);
+        agent_doc_cycle_state_io::start_preflight(&file, Some(&doc), Some(&doc)).unwrap();
+        let state = agent_doc_cycle_state_io::load(&file).unwrap().unwrap();
+        assert_eq!(open_salient_cycle_id(&file), Some(state.cycle_id));
     }
 
     #[test]
@@ -4408,6 +4679,7 @@ mod tests {
                 keep: 2,
                 message: None,
                 force_disk: true,
+                open_salient_cycle: None,
             },
         )
         .unwrap();
@@ -4439,6 +4711,7 @@ mod tests {
                 keep: 1,
                 message: None,
                 force_disk: true,
+                open_salient_cycle: None,
             },
         )
         .unwrap();
@@ -4499,6 +4772,7 @@ mod tests {
                 keep: 1,
                 message: None,
                 force_disk: true,
+                open_salient_cycle: None,
             },
         )
         .unwrap();

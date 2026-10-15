@@ -52,6 +52,28 @@ pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     NOTES_DESCRIPTOR,
 ];
 
+/// Binary-written components that only ever appear nested inside another
+/// element and carry no element semantics of their own, so they have no
+/// [`ElementDescriptor`]:
+///
+/// - `salient-response` — the cycle-keyed, non-final `Live response (not
+///   final)` node that `salient-checkpoint` / `choice-checkpoint` upsert inside
+///   `agent:exchange` and that final response insertion removes.
+/// - `referral` — the pointer block `transfer --referral` inserts into the
+///   target component.
+///
+/// The document still contains their open/close markers, so every marker-level
+/// gate (the dialect lint above all) must accept them. A marker the binary
+/// writes but no gate knows turns an in-flight cycle into a "malformed
+/// directive" refusal.
+pub const NESTED_BINARY_COMPONENTS: &[&str] = &["salient-response", "referral"];
+
+/// Whether `name` (without the `agent:` prefix) is a nested binary-written
+/// component from [`NESTED_BINARY_COMPONENTS`].
+pub fn is_nested_binary_component(name: &str) -> bool {
+    NESTED_BINARY_COMPONENTS.contains(&name)
+}
+
 pub fn built_in_elements() -> &'static [ElementDescriptor] {
     BUILT_IN_ELEMENTS
 }
@@ -92,6 +114,20 @@ mod tests {
         assert_eq!(find_built_in("todo").unwrap().name, "todo");
         assert_eq!(find_built_in("notes").unwrap().name, "notes");
         assert_eq!(find_built_in("unknown"), None);
+    }
+
+    #[test]
+    fn nested_binary_components_are_known_but_not_descriptors() {
+        for name in NESTED_BINARY_COMPONENTS {
+            assert!(is_nested_binary_component(name));
+            assert_eq!(
+                find_built_in(name),
+                None,
+                "`{name}` is a nested marker, not a top-level element"
+            );
+        }
+        assert!(!is_nested_binary_component("operator-notes"));
+        assert!(!is_nested_binary_component("exchange"));
     }
 
     #[test]

@@ -1064,6 +1064,25 @@ pub fn apply_patches_with_overrides_pure(
     // at the end of the exchange. This is deterministic — belongs in the binary,
     // not the SKILL workflow.
     let mut result = remove_all_boundaries(doc);
+    // A response landing in the exchange is the final
+    // record that supersedes every non-final salient node, of this cycle or an
+    // abandoned one. The controller response-cell path already removes them;
+    // every patch-applying fallback (force-disk, retained replay, compact's
+    // active-capture compose) must too, or the node survives closeout.
+    let response_lands_in_exchange =
+        patches.iter().any(|patch| patch.name == "exchange") || !unmatched.trim().is_empty();
+    if response_lands_in_exchange
+        && let Ok(components) = element::parse(&result)
+        && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
+    {
+        let content = exchange.content(&result);
+        let without_salient =
+            agent_doc_markdown_ast::exchange_tree::remove_all_salient_responses(content);
+        if without_salient != content {
+            result = exchange.replace_content(&result, &without_salient);
+            eprintln!("[template] removed non-final salient response node(s) from exchange");
+        }
+    }
     if let Ok(components) = element::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
@@ -2052,6 +2071,85 @@ mod tests {
             twice.matches("Please investigate.").count(),
             1,
             "the operator prompt must never be duplicated by a retry:\n{twice}"
+        );
+    }
+
+    /// The patch-applying closeout fallback must remove
+    /// every non-final salient node exactly as the controller response-cell
+    /// path does, while a write that never touches the exchange keeps a live
+    /// cycle's node in place.
+    #[test]
+    fn exchange_patch_removes_salient_nodes_and_other_patches_keep_them() {
+        let live = agent_doc_markdown_ast::exchange_tree::render_salient_response(
+            "cycle-open",
+            "Live finding.",
+        );
+        let stale = agent_doc_markdown_ast::exchange_tree::render_salient_response(
+            "cycle-old",
+            "Abandoned finding.",
+        );
+        let doc = format!(
+            "---\nagent_doc_format: template\n---\n\n\
+             <!-- agent:status -->\nidle\n<!-- /agent:status -->\n\n\
+             <!-- agent:exchange patch=append -->\n\
+             ❯ Investigate.\n\n\
+             {stale}\n{live}\
+             <!-- agent:boundary:0123abcd -->\n\
+             <!-- /agent:exchange -->\n"
+        );
+        let configs = std::collections::HashMap::new();
+        let max_lines = std::collections::HashMap::new();
+        let patch = |name: &str, content: &str| PatchBlock {
+            name: name.to_string(),
+            content: content.to_string(),
+            attrs: std::collections::HashMap::new(),
+        };
+
+        let status_only = apply_patches_pure(
+            &doc,
+            &[patch("status", "working\n")],
+            "",
+            None,
+            &configs,
+            &max_lines,
+        )
+        .unwrap();
+        assert!(
+            status_only.contains("Live finding.") && status_only.contains("Abandoned finding."),
+            "a non-exchange write must not touch salient nodes:\n{status_only}"
+        );
+
+        let finalized = apply_patches_pure(
+            &doc,
+            &[patch(
+                "exchange",
+                "### Re: Investigate — opus\n\nConfirmed.\n",
+            )],
+            "",
+            None,
+            &configs,
+            &max_lines,
+        )
+        .unwrap();
+        assert!(
+            !finalized.contains("agent:salient-response")
+                && !finalized.contains("Live response (not final)"),
+            "the final response must remove every salient node:\n{finalized}"
+        );
+        assert!(finalized.contains("Confirmed.") && finalized.contains("❯ Investigate."));
+
+        let unmatched = apply_patches_pure(
+            &doc,
+            &[],
+            "### Re: Investigate — opus\n\nConfirmed.\n",
+            None,
+            &configs,
+            &max_lines,
+        )
+        .unwrap();
+        assert!(
+            !unmatched.contains("agent:salient-response"),
+            "an unmatched response routed to the exchange is final too:\n{unmatched}"
         );
     }
 

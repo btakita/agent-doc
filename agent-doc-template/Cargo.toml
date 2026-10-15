@@ -15,6 +15,7 @@ agent-doc-document = { path = "../agent-doc-document", version = "0.35.506" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.506" }
 agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.35.506" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.506" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.506" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }

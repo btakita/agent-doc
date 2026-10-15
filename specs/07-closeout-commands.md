@@ -27,6 +27,17 @@ queue heads, apply backlog/done mutations, update the baseline, or commit.
 and upserts a cycle-scoped `Live response (not final)` exchange node. The node is
 controller/CRDT materialized, never proves that queue work was answered, never
 commits, and is removed by final response application, including replay cleanup.
+Removal is path-independent: the controller response-cell
+insertion and every patch-applying fallback (force-disk writes, retained or
+captured-finalize replay, compact's active-capture compose) remove every
+salient node from `agent:exchange` whenever a response lands there (an
+`exchange` patch or unmatched response text), so the next committed response
+also sweeps orphans left by an abandoned cycle. A write that patches only other
+components leaves a live node in place. The node is binary-written protocol, so
+the dialect lint gate must accept its `agent:salient-response` open and close
+markers (see §2 element registry); the gate refusing it once told the operator
+to "fix the directive", and hand-deleting the markers turned the live node into
+plain exchange text that no cleanup could recognize.
 
 `choice-checkpoint <FILE>` is the structured native-question adapter for that
 same non-final node. It reads JSON containing only a concise public `context`, a
@@ -289,6 +300,7 @@ backlog edits continue to reject Review-only targets.
 - `#stale-capture-deadlock-autoretire`: a transaction already at `WriteApplied` resumes forward through visible proof, disk projection, and commit. If Lazily current no longer contains the semantic response cell, it stays typed `InterruptedBlocked`; recovery never rebuilds live CRDT state from files or alternates closeout commands.
 - `#stale-capture-captured-only-drift`: a `ResponseCaptured` transaction may retire as superseded only when Lazily current or a terminal transaction proves the same prompt was answered. The immutable response history stays in `state.db`, while `load_active` returns nothing for `Committed` or `Abandoned` cycles.
 - `#queueeditcap`: a `Captured` response whose write/commit was interrupted may still be replayed when the live file drift is proven to be queue-only. The safe signature is: the captured snapshot hash still matches the current snapshot, the live file hash drifted, and replacing the live `agent:queue` body with the snapshot's `agent:queue` body makes the documents byte-identical after managed pipeline stripping. In that case `capture::validate_replay` refreshes only the capture's file hash, logs `capture_baseline_refreshed_for_queue_only_drift`, and lets the normal replay path apply the preserved response onto the current queue-edited document. Any non-queue drift, missing/multiple queue components, snapshot drift, or structural marker drift stays on the existing fail-closed path.
+- A salient-response node is display state for one open cycle, never history. Before archiving, exchange compaction (full and `--keep N`) separates every salient node from the exchange: none is ever written to the archive or the committed target; the node owned by the still-open cycle (cycle state `is_open`) is re-appended to the live target only, so it stays visible until that cycle's final response removes it; a node owned by any other cycle is a stale orphan and is dropped. A semantic no-op check ignores salient nodes, so an exchange holding only a salient node is a no-op.
 - `--commit` proves only that the compacted document state itself crossed the commit boundary; it does not also persist any later human explanation.
 
 ## patch

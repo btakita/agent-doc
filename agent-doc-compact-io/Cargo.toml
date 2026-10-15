@@ -23,6 +23,7 @@ agent-doc-document = { path = "../agent-doc-document", version = "0.35.506" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.506" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.506" }
 agent-doc-lint-io = { path = "../agent-doc-lint-io", version = "0.35.506" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.506" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.506" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.506" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.506" }
@@ -53,7 +54,6 @@ agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.506", f
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.506" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.506" }
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.506", features = ["test-support"] }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.506" }
 agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.506" }
 agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.506" }
 agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.35.506", features = ["test-support"] }

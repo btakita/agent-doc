@@ -274,6 +274,23 @@ Both branches are integrated into `main` (`d0f92c9fe5`) and installed locally. O
 > **Queue prompt:** do your formal logic suggestions
 
 This one is done; the details are in the response above. The previous closeout didn't strike it because its worker claim was still active, so I released the claim (`subagent:surfaceformal`) and am closing it here.
+
+### Re: integrating the #265 subagent result — opus-5.5 · 2026-10-15T02:26-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/265
+
+This is fixed and released, and the issue is closed.
+
+- **Fix:** commit `e75e83f641`, `fix(jetbrains): declare BGT update thread on every action (#265)`. All eight actions named in the issue (Submit, Claim, ForceClaim, FixDocument, InitSession, LintDocument, RunWithJunie, LoadTmuxWindow) now override `getActionUpdateThread()` to return `BGT`. The runtime-built `DumbAwareGroup` does too.
+- **Guard against regressions:** `ActionUpdateThreadTest` builds the action list from the compiled plugin classes and from `plugin.xml`. It fails if any action falls back to the platform's update-thread default or returns `OLD_EDT`. `SPEC.md` now has an "Action update threading" rule.
+- **Landed:** the fix is on `main` through the `release-v0.35.505` merge and is tagged `v0.35.505`. The local `agent-doc` binary is already 0.35.505. Plugin builds: JetBrains 0.2.621, 262 0.2.622, 263 0.2.623.
+- **Closed:** GitHub issue #265 is closed with a comment that cites the commit and the release. I also released the `subagent:gh265` claim.
+
+> **Queue prompt:** release + publish
+
+**Deferred:** the `v0.35.505` tag is pushed and the Release workflow (run 38690867071) is still running. Its `plugins` job and the linux-gnu build have passed; the musl, aarch64, macOS and Windows builds are still going. The tag push publishes the GitHub Release and PyPI automatically, so nothing is left to do by hand. Once that run is green, this item can be closed. The claim `coordinator:release-v0.35.505` is still held, and I've kept it so that a fresh drain doesn't start a second release. It expires about two hours after it was taken.
+
+One more thing for you: preflight reports that the running JetBrains plugin is 0.2.618, and that's also the version installed on disk. That's behind the build this binary expects. To get the #265 fix into the IDE you'll need to install the new plugin (`agent-doc plugin install jetbrains`) and restart the IDE.
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
@@ -282,10 +299,10 @@ This one is done; the details are in the response above. The previous closeout d
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/265
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/265~~
 - ~~do your formal logic suggestions~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#ctrltimingflakes]~~
-- release + publish
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog

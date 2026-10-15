@@ -87,6 +87,21 @@ Fixed on main in `7abf135dd7`, included in v0.35.502, and verified CLOSED on Git
 > **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/260
 
 Fixed on main in `8ba8701aa8`, included in v0.35.502, and verified CLOSED on GitHub at 2026-10-15T00:24:22Z. Remote Development tab selection now preserves frontend authority while handling nullable window liveness correctly.
+
+### Re: release and publish v0.35.503 — gpt-5 · 2026-10-14T22:22-04:00
+
+> **Chat prompt (#chatprompt):** release + publish
+
+Released and published agent-doc v0.35.503 with the tmux pane auto-sync fix.
+
+- Release commit: `748c9381a7`
+- Tag and 15 public assets: https://github.com/btakita/agent-doc/releases/tag/v0.35.503
+- GitHub Release workflow: all platform builds, editor packages, release assembly, PyPI, and Homebrew completed successfully: https://github.com/btakita/agent-doc/actions/runs/38668295784
+- PyPI version-specific publication reports `0.35.503`.
+- Authoritative `make check` passed with exit 0 and zero failures (`tart-484ec1cfcd`). The exact-byte `make tmux-ci` suite also passed before the tag was pushed.
+- Local installation is complete: CLI/native `agent-doc 0.35.503`, live IntelliJ plugin `0.2.607`, Rider 2026.2 plugin `0.2.608` for its next start, and VS Code `0.2.81`.
+
+The initial release check correctly stopped on a missing v0.35.503 editor-parity audit row. I added the tmux liveness parity record, amended the release commit, and reran the full check successfully before publishing.
 <!-- agent:boundary:3599dd10 -->
 <!-- /agent:exchange -->
 

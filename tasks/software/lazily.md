@@ -425,7 +425,44 @@ Every bump passed all nine consumer checks, and cpp, go and zig also passed `mak
 **Still needed from you:**
 - **pub.dev:** `dart pub publish` for 0.34.0 needs your login.
 - **crates.io:** rs 0.60.0 needs Trusted Publishing configured, or your OK for a manual `cargo publish` (`#lzrustpublish`). The tag workflow will fail at OIDC otherwise.
-<!-- agent:boundary:02e242a9 -->
+> **Chat prompt (#chatprompt):** cont
+
+### Re: #release — all ten released — opus-5-5 · 2026-10-15T19:35-04:00
+
+**Question:** How should lazily-rs v0.60.0 reach crates.io? CI was green on `main`. Trusted Publishing has never been configured, and the last three releases were published by hand. A crates.io publish can't be undone.
+
+- **Manual publish now** ← **selected.** `cargo publish` with the passage crates.io token, then tag and create the GitHub release.
+- Configure TP first. You add the Trusted Publisher, then I tag.
+- Tag only, hold crate. Tag and GitHub release now; crates.io stays at 0.59.0.
+
+**Released (Lazily Core cohort, candidate `core-v1`, not Core Beta):**
+
+| Repo | Version | Where |
+|---|---|---|
+| lazily-spec | v0.42.0 | GitHub release |
+| lazily-rs | 0.60.0 | crates.io, published by hand (dry run first; confirmed live), plus tag and GitHub release |
+| lazily-py | 0.44.0 | PyPI (`wheels` workflow, confirmed live) |
+| lazily-js | 0.36.0 | npm (confirmed live) |
+| lazily-go | v0.30.0 | Go proxy warmed |
+| lazily-kt | 0.45.0 | GitHub Packages (confirmed) |
+| lazily-cpp | v0.32.0 | GitHub release |
+| lazily-cs | 0.8.0 | NuGet `Lazily` and `Lazily.R3` (confirmed) |
+| lazily-dart | v0.34.0 | Tag and GitHub release. **pub.dev is pending your `dart pub publish`.** |
+| lazily-zig | v0.38.0 | GitHub release |
+
+Every binding was tagged on a release commit whose `main` CI was green.
+
+**Fixes made on the way to green:**
+- **rs:** the hand-edited inventory carried the old `Cargo.lock` digest. It's regenerated with `make dependency-inventory`; only the digest changed (`aba5b1d`).
+- **Interop peer versions:** cpp, zig and go had stale version strings. They now report their new versions.
+- **Consumer pins:** kt and cs have new pins that move with the version.
+
+The rs tag's `Release` workflow will go red at the crates.io OIDC step, the same as on v0.57.1–v0.59.0. The crate is already published. `#lzrustpublish` (configure Trusted Publishing) still stands for future releases.
+
+**Still in progress:**
+- **Interop cold-start (`#lzinteropcoldstart`):** applied to a copy of `lazily-interop` that sits beside the nine release-commit worktrees. `make check` and `network-suite-merge` are now running against the released peers.
+- **Release pins (`#lzreleasepins`):** these get recorded next, through a temporary index. The shared superproject tree has another session's dirty submodule checkouts and pre-staged files, so only the 10 gitlinks and the 5 interop files will change; nothing else in that tree is touched.
+<!-- agent:boundary:97a21868 -->
 <!-- /agent:exchange -->
  
 ## Queue

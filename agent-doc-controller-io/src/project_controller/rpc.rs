@@ -33,8 +33,9 @@ use agent_doc_editor_surface::{
     EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
     EditorViewId, EditorViewPlaceholderReason, EditorViewPolicy, EditorViewPolicyBinding,
     EditorViewPolicyProjection, EditorViewPolicyStatus, EditorViewPresentation,
-    EditorViewSessionKey, EditorViewSnapshot, SurfaceColumn, SurfaceIntent,
-    SurfaceObservationReceipt, TmuxLayout, isolated_view_session_name,
+    EditorViewSessionKey, EditorViewSnapshot, MutedLiveEndpoint, RETIRED_ENDPOINT_MUTE_THRESHOLD,
+    RetiredEndpointMonitor, SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt,
+    SurfaceObservationRejection, TmuxLayout, isolated_view_session_name,
 };
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use std::collections::{BTreeMap, BTreeSet};
@@ -106,9 +107,15 @@ type ControllerEditorSurfaceIntentRunner =
     Arc<dyn Fn(&Path, &SurfaceIntent) -> Result<String> + Send + Sync>;
 
 struct ControllerEditorSurfaceRoot {
+    /// Connection generation of the last accepted observation, RAISED to a
+    /// newer `editor_surface_forget` generation when that forget retires the
+    /// endpoint (`#surfaceretireformal`, `RetireRaisesFence`).
     generation: u64,
     sequence: u64,
     retired: bool,
+    /// Runtime monitor of `LiveEndpointNeverMuted`
+    /// (`formal/tla/PassiveTmuxSyncRetireNet.tla`).
+    retired_monitor: RetiredEndpointMonitor,
     state: EditorSurfaceState,
     consequence: lazily::Effect,
     outcome: Arc<Mutex<Option<Result<String, String>>>>,
@@ -552,48 +559,52 @@ impl ControllerDocumentPathTransitionGraph {
     }
 }
 
-/// Why the controller editor-surface graph fenced an observation
-/// (`#tmuxautosyncretired`).
+#[cfg(test)]
+#[path = "surface_retire_conformance.rs"]
+mod surface_retire_conformance;
+
+/// What one `editor_surface_forget` did to one endpoint root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SurfaceObservationRejection {
-    /// The exact `(client, surface)` endpoint was retired by `editor_surface_forget`
-    /// at this or a newer connection generation. Retirement is terminal for that
-    /// generation: only a newer plugin generation (or a fresh controller) can
-    /// publish this endpoint again, so an editor that keeps publishing here has
-    /// lost tab-switch auto-sync.
-    RetiredEndpoint,
-    /// The observation belongs to an older connection generation than the
-    /// endpoint's current one.
-    StaleGeneration,
-    /// A duplicate or reordered observation within the current generation.
-    StaleSequence,
+enum RootRetirement {
+    /// A newer registration (or an equal-or-newer retirement): not this
+    /// forget's to touch.
+    Unchanged,
+    /// The root was already retired at an older generation; its fence moved up
+    /// to the forget's generation.
+    FenceRaised,
+    /// A live root was retired; `registered_generation` is the generation it
+    /// was registered at (the terminal-ownership key).
+    Retired { registered_generation: u64 },
 }
 
-impl SurfaceObservationRejection {
-    fn classify(
-        retired: bool,
-        current_generation: u64,
-        current_sequence: u64,
-        generation: u64,
-        sequence: u64,
-    ) -> Option<Self> {
-        if retired && generation <= current_generation {
-            Some(Self::RetiredEndpoint)
-        } else if generation < current_generation {
-            Some(Self::StaleGeneration)
-        } else if generation == current_generation && sequence <= current_sequence {
-            Some(Self::StaleSequence)
-        } else {
-            None
-        }
+/// `ControllerRecvRetire` in `formal/tla/PassiveTmuxSyncRetireNet.tla`.
+///
+/// A forget at generation `g` retires a root registered at any generation
+/// `<= g` and RAISES its fence to `g` (`RetireRaisesFence`). The shipped forget
+/// matched the generation exactly, which was harmless while one plugin process
+/// had one generation. Once a live endpoint re-registers above a retired
+/// generation (`#surfaceretireformal`), a handoff's forget at the re-registered
+/// generation can overtake the re-registering observation; an exact match then
+/// ignored it and the observation drove tmux from a frame the editor had
+/// declared ended (`PassiveTmuxSyncRetireNetExactForgetWedge`). A root
+/// registered at a NEWER generation than the forget stays untouched, so a
+/// delayed forget never retires a re-registration.
+fn retire_editor_surface_root(
+    current: &mut ControllerEditorSurfaceRoot,
+    generation: u64,
+) -> RootRetirement {
+    if current.generation > generation || (current.retired && current.generation == generation) {
+        return RootRetirement::Unchanged;
     }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::RetiredEndpoint => "retired_endpoint",
-            Self::StaleGeneration => "stale_generation",
-            Self::StaleSequence => "stale_sequence",
-        }
+    let registered_generation = current.generation;
+    current.generation = generation;
+    if current.retired {
+        return RootRetirement::FenceRaised;
+    }
+    current.state.stop(&current.consequence);
+    current.retired = true;
+    RootRetirement::Retired {
+        registered_generation,
     }
 }
 
@@ -742,12 +753,8 @@ impl ControllerEditorSurfaceGraph {
         (rejection.is_none(), receipt)
     }
 
-    /// [`Self::observe`] with the reason a rejected observation was fenced.
-    ///
-    /// `#tmuxautosyncretired`: a bare `accepted=false` could not tell a benign
-    /// duplicate from an endpoint that was retired while its editor kept
-    /// publishing, and only the latter mutes tab-switch auto-sync until the
-    /// plugin generation or the controller is replaced.
+    /// [`Self::observe_monitored`] without the muted-endpoint alert.
+    #[cfg(test)]
     fn observe_classified(
         &self,
         scope: &agent_doc_state_scope::ProcessScope,
@@ -758,6 +765,33 @@ impl ControllerEditorSurfaceGraph {
         Option<SurfaceObservationRejection>,
         SurfaceObservationReceipt,
     ) {
+        let (rejection, receipt, _) =
+            self.observe_monitored(scope, project_root, observation, tmux);
+        (rejection, receipt)
+    }
+
+    /// Fold one editor observation (`ControllerRecvObs` in
+    /// `formal/tla/PassiveTmuxSyncRetireNet.tla`).
+    ///
+    /// `#tmuxautosyncretired`: a bare `accepted=false` could not tell a benign
+    /// duplicate from an endpoint that was retired while its editor kept
+    /// publishing, and only the latter mutes tab-switch auto-sync. The rejected
+    /// receipt therefore names its fence, and a retired-endpoint rejection
+    /// carries the re-registration directive (`reregister_above_generation`)
+    /// a still-live editor acts on (`#surfaceretireformal`). The third value is
+    /// the runtime monitor's alert: this endpoint just reached
+    /// [`RETIRED_ENDPOINT_MUTE_THRESHOLD`] consecutive retired rejections.
+    fn observe_monitored(
+        &self,
+        scope: &agent_doc_state_scope::ProcessScope,
+        project_root: &Path,
+        observation: EditorSurfaceObservation,
+        tmux: Option<TmuxLayout>,
+    ) -> (
+        Option<SurfaceObservationRejection>,
+        SurfaceObservationReceipt,
+        Option<MutedLiveEndpoint>,
+    ) {
         let key = (
             project_root.to_path_buf(),
             observation.client_id.clone(),
@@ -765,15 +799,19 @@ impl ControllerEditorSurfaceGraph {
         );
         let mut roots = self.roots.lock();
 
-        if let Some(rejection) = roots.get(&key).and_then(|current| {
-            SurfaceObservationRejection::classify(
+        if let Some(current) = roots.get_mut(&key)
+            && let Some(rejection) = SurfaceObservationRejection::classify(
                 current.retired,
                 current.generation,
                 current.sequence,
                 observation.generation,
                 observation.sequence,
             )
-        }) {
+        {
+            let muted = current.retired_monitor.record(Some(rejection));
+            let reregister_above_generation = (rejection
+                == SurfaceObservationRejection::RetiredEndpoint)
+                .then_some(current.generation);
             return (
                 Some(rejection),
                 SurfaceObservationReceipt {
@@ -783,7 +821,10 @@ impl ControllerEditorSurfaceGraph {
                     error: None,
                     terminal_decision: SurfaceTerminalDecision::Stale,
                     deferred_to: None,
+                    rejected: Some(rejection),
+                    reregister_above_generation,
                 },
+                muted,
             );
         }
 
@@ -833,6 +874,7 @@ impl ControllerEditorSurfaceGraph {
                 generation: observation.generation,
                 sequence: 0,
                 retired: false,
+                retired_monitor: RetiredEndpointMonitor::default(),
                 state,
                 consequence,
                 outcome,
@@ -841,6 +883,7 @@ impl ControllerEditorSurfaceGraph {
 
         entry.generation = observation.generation;
         entry.sequence = observation.sequence;
+        entry.retired_monitor.record(None);
         *entry.outcome.lock() = None;
         match tmux {
             Some(layout) => entry
@@ -875,7 +918,10 @@ impl ControllerEditorSurfaceGraph {
                 error,
                 terminal_decision,
                 deferred_to,
+                rejected: None,
+                reregister_above_generation: None,
             },
+            None,
         )
     }
 
@@ -939,21 +985,25 @@ impl ControllerEditorSurfaceGraph {
     fn forget(&self, project_root: &Path, client_id: &str, generation: u64) -> bool {
         let mut roots = self.roots.lock();
         let mut retired_surfaces = Vec::new();
+        let mut fenced = false;
         for ((root, retained_client_id, surface_id), current) in roots.iter_mut() {
-            if root != project_root
-                || retained_client_id != client_id
-                || current.generation != generation
-                || current.retired
-            {
+            if root != project_root || retained_client_id != client_id {
                 continue;
             }
-            current.state.stop(&current.consequence);
-            current.retired = true;
-            retired_surfaces.push((
-                retained_client_id.clone(),
-                surface_id.clone(),
-                current.generation,
-            ));
+            match retire_editor_surface_root(current, generation) {
+                RootRetirement::Unchanged => {}
+                RootRetirement::FenceRaised => fenced = true,
+                RootRetirement::Retired {
+                    registered_generation,
+                } => {
+                    fenced = true;
+                    retired_surfaces.push((
+                        retained_client_id.clone(),
+                        surface_id.clone(),
+                        registered_generation,
+                    ));
+                }
+            }
         }
         drop(roots);
         if !retired_surfaces.is_empty() {
@@ -966,7 +1016,7 @@ impl ControllerEditorSurfaceGraph {
             drop(ownerships);
             self.retain_live_installations(project_root);
         }
-        !retired_surfaces.is_empty()
+        fenced
     }
 
     fn forget_surface(
@@ -985,18 +1035,20 @@ impl ControllerEditorSurfaceGraph {
         let Some(current) = roots.get_mut(&key) else {
             return (false, SurfaceTerminalDecision::Stale);
         };
-        if current.generation != generation || current.retired {
-            return (false, SurfaceTerminalDecision::Stale);
-        }
-        current.state.stop(&current.consequence);
-        current.retired = true;
+        let registered_generation = match retire_editor_surface_root(current, generation) {
+            RootRetirement::Unchanged => return (false, SurfaceTerminalDecision::Stale),
+            RootRetirement::FenceRaised => return (true, SurfaceTerminalDecision::Stale),
+            RootRetirement::Retired {
+                registered_generation,
+            } => registered_generation,
+        };
         drop(roots);
         let decision = self
             .terminal_ownership
             .lock()
             .entry(project_root.to_path_buf())
             .or_default()
-            .retire(client_id, surface_id, generation);
+            .retire(client_id, surface_id, registered_generation);
         self.retain_live_installations(project_root);
         (true, decision)
     }
@@ -1010,22 +1062,28 @@ impl ControllerEditorSurfaceGraph {
         let mut retired_surfaces = Vec::new();
         for ((root, retained_client_id, surface_id), current) in roots.iter_mut() {
             if root != project_root
-                || current.retired
-                || current.generation > generation
                 || !editor_surface_client_family(retained_client_id).is_some_and(
                     |retained_family| editor_surface_family_retires(client_family, retained_family),
                 )
             {
                 continue;
             }
-            current.state.stop(&current.consequence);
-            current.retired = true;
-            retired_surfaces.push((
-                retained_client_id.clone(),
-                surface_id.clone(),
-                current.generation,
-            ));
-            forgotten += 1;
+            match retire_editor_surface_root(current, generation) {
+                RootRetirement::Unchanged => {}
+                // A root this family already retired at an older generation:
+                // the fence moves up, but it was already counted as forgotten.
+                RootRetirement::FenceRaised => {}
+                RootRetirement::Retired {
+                    registered_generation,
+                } => {
+                    retired_surfaces.push((
+                        retained_client_id.clone(),
+                        surface_id.clone(),
+                        registered_generation,
+                    ));
+                    forgotten += 1;
+                }
+            }
         }
         drop(roots);
         if !retired_surfaces.is_empty() {
@@ -26621,13 +26679,39 @@ fn handle_editor_surface_observe(
     // converge, so the editor socket request never blocks on a tmux survey.
     // Cold start (no retained observation) derives `Sync`, which schedules the
     // worker through the in-process publish below.
-    let (rejection, mut receipt) = runtime.editor_surface_graph.observe_classified(
+    let (rejection, mut receipt, muted) = runtime.editor_surface_graph.observe_monitored(
         &runtime._scope,
         &bootstrap.project_root,
         observation,
         None,
     );
     let accepted = rejection.is_none();
+    // `#surfaceretireformal` runtime monitor of `LiveEndpointNeverMuted`: every
+    // retired-endpoint rejection already carries the re-registration directive
+    // (`reregister_above_generation`), so a current editor leaves the retired
+    // endpoint after one round trip. Reaching the threshold means the directive
+    // was ignored K times in a row (an editor that predates it, or one that
+    // keeps publishing a frame it does not consider its own); the directive
+    // stays on every later rejection, and this record is the operator-visible
+    // evidence. Once per streak.
+    if let Some(muted) = muted {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "controller_editor_surface_muted_live_endpoint client={} surface={} generation={} sequence={} consecutive={} threshold={} recovery=reregister_directive reregister_above_generation={} operator_action=reload_editor_plugin_if_persistent",
+                projection_identity.0,
+                projection_identity.1,
+                projection_identity.2,
+                projection_identity.3,
+                muted.consecutive,
+                RETIRED_ENDPOINT_MUTE_THRESHOLD,
+                receipt
+                    .reregister_above_generation
+                    .map(|generation| generation.to_string())
+                    .unwrap_or_default(),
+            ),
+        );
+    }
     // `#idefocusowner`: a deferred observation's installation does not own the
     // shared tmux surface, so a retained retry of its earlier failed effect must
     // not drive tmux either.
@@ -26669,8 +26753,9 @@ fn handle_editor_surface_observe(
         },
     );
     let surface_observation_key = format!(
-        "{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}",
         projection_identity.0,
+        projection_identity.1,
         projection_identity.2,
         accepted,
         surface_intent_label(&receipt.intent),
@@ -26684,8 +26769,9 @@ fn handle_editor_surface_observe(
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "controller_editor_surface_observed client={} generation={} sequence={} accepted={} layout={} pane_action={}{}{}{}",
+                "controller_editor_surface_observed client={} surface={} generation={} sequence={} accepted={} layout={} pane_action={}{}{}{}",
                 projection_identity.0,
+                projection_identity.1,
                 projection_identity.2,
                 projection_identity.3,
                 accepted,
@@ -37345,6 +37431,8 @@ mod tests {
             error: None,
             terminal_decision: Default::default(),
             deferred_to: None,
+            rejected: None,
+            reregister_above_generation: None,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -37382,6 +37470,8 @@ mod tests {
             error: None,
             terminal_decision: Default::default(),
             deferred_to: None,
+            rejected: None,
+            reregister_above_generation: None,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -37443,6 +37533,8 @@ mod tests {
             error: None,
             terminal_decision: Default::default(),
             deferred_to: None,
+            rejected: None,
+            reregister_above_generation: None,
         };
 
         record_editor_surface_focus_outcome(
@@ -42182,6 +42274,132 @@ mod tests {
         assert!(logged("vscode|8|false|focus"), "a new client must log");
     }
 
+    /// `#surfaceretireformal` runtime monitor, end to end through the ingress:
+    /// every retired rejection returns the re-registration directive, the K-th
+    /// consecutive one leaves exactly one `controller_editor_surface_muted_live_endpoint`
+    /// record, and acting on the directive ends the streak.
+    #[test]
+    fn editor_surface_observe_reports_a_muted_live_endpoint_once_per_streak() {
+        let dir = tempfile::tempdir().unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity().unwrap()),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let request = |command: &str, generation: u64, payload: Option<String>| ControllerRequest {
+            command: command.to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(generation),
+            state: None,
+            caller: Some("idea:muted".to_string()),
+            reason: Some("editor_surface_client_retired".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: payload,
+            sequence: None,
+        };
+        let observe = |generation: u64, sequence: u64| {
+            let mut surface = test_editor_surface("/project/observed.md");
+            surface.force_reconcile = false;
+            surface.focus_only = true;
+            let observation = EditorSurfaceObservation {
+                client_id: "idea:muted".to_string(),
+                surface_id: "frame-1".to_string(),
+                generation,
+                sequence,
+                surface,
+            };
+            handle_editor_surface_observe(
+                &bootstrap,
+                runtime.as_ref(),
+                request(
+                    "editor_surface_observe",
+                    generation,
+                    Some(serde_json::to_string(&observation).unwrap()),
+                ),
+            )
+            .unwrap()
+        };
+        let muted_records = || {
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| line.contains("controller_editor_surface_muted_live_endpoint"))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(observe(4, 1).rejected, None);
+        handle_editor_surface_forget(
+            &bootstrap,
+            runtime.as_ref(),
+            request(
+                "editor_surface_forget",
+                4,
+                Some(r#"{"surface_id":"frame-1"}"#.to_string()),
+            ),
+        )
+        .unwrap();
+        let mut sequence = 1;
+        for n in 1..=RETIRED_ENDPOINT_MUTE_THRESHOLD + 2 {
+            sequence += 1;
+            let receipt = observe(4, sequence);
+            assert_eq!(
+                receipt.rejected,
+                Some(SurfaceObservationRejection::RetiredEndpoint)
+            );
+            assert_eq!(
+                receipt.reregister_above_generation,
+                Some(4),
+                "every retired rejection carries the directive (rejection {n})"
+            );
+            let expected = usize::from(n >= RETIRED_ENDPOINT_MUTE_THRESHOLD);
+            assert_eq!(muted_records().len(), expected, "after rejection {n}");
+        }
+        let records = muted_records();
+        assert!(
+            records[0].contains("client=idea:muted surface=frame-1 generation=4")
+                && records[0].contains(&format!(
+                    "consecutive={RETIRED_ENDPOINT_MUTE_THRESHOLD} threshold={RETIRED_ENDPOINT_MUTE_THRESHOLD}"
+                ))
+                && records[0].contains("recovery=reregister_directive reregister_above_generation=4"),
+            "{records:?}"
+        );
+
+        sequence += 1;
+        let next = agent_doc_editor_surface::reregistration_generation(4, 4);
+        assert_eq!(
+            observe(next, sequence).rejected,
+            None,
+            "the directive re-registers"
+        );
+        assert_eq!(
+            muted_records().len(),
+            1,
+            "an accepted re-registration raises nothing"
+        );
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains(
+                "controller_editor_surface_observed client=idea:muted surface=frame-1 generation=4"
+            ),
+            "the ingress receipt names the surface endpoint: {ops_log}"
+        );
+    }
+
     #[test]
     fn editor_surface_observe_logs_an_ingress_receipt_for_accepted_and_rejected_facts() {
         let dir = tempfile::tempdir().unwrap();
@@ -42379,6 +42597,289 @@ mod tests {
             graph.observe_classified(&scope, root, observation(6, 1, "/project/b.md"), None);
         assert_eq!(rejoined, None, "only a newer connection generation rejoins");
         assert!(effects.lock().len() > effects_before);
+    }
+
+    fn surface_retire_graph() -> (
+        agent_doc_state_scope::ProcessScope,
+        ControllerEditorSurfaceGraph,
+        Arc<Mutex<Vec<SurfaceIntent>>>,
+    ) {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let effects = Arc::new(Mutex::new(Vec::<SurfaceIntent>::new()));
+        let recorded = Arc::clone(&effects);
+        let graph = ControllerEditorSurfaceGraph::new(Arc::new(move |_, intent| {
+            recorded.lock().push(intent.clone());
+            Ok("recorded".to_string())
+        }));
+        (scope, graph, effects)
+    }
+
+    fn surface_retire_observation(
+        generation: u64,
+        sequence: u64,
+        focused: &str,
+    ) -> EditorSurfaceObservation {
+        EditorSurfaceObservation {
+            client_id: "jetbrains@IU.abc-pid:7".to_string(),
+            surface_id: "frame-1".to_string(),
+            generation,
+            sequence,
+            surface: test_editor_surface(focused),
+        }
+    }
+
+    /// `#surfaceretireformal` (`EditorReregister`): the retired receipt is the
+    /// re-registration directive, and acting on it ends the mute in one round
+    /// trip without lifting the fence for the retired generation.
+    #[test]
+    fn retired_endpoint_receipt_directs_a_reregistration_that_ends_the_mute() {
+        let (scope, graph, effects) = surface_retire_graph();
+        let root = Path::new("/project");
+        let (accepted, _) = graph.observe(
+            &scope,
+            root,
+            surface_retire_observation(5, 27, "/project/a.md"),
+            None,
+        );
+        assert!(accepted);
+        assert!(
+            graph
+                .forget_surface(root, "jetbrains@IU.abc-pid:7", "frame-1", 5)
+                .0
+        );
+
+        let (rejection, receipt) = graph.observe_classified(
+            &scope,
+            root,
+            surface_retire_observation(5, 28, "/project/b.md"),
+            None,
+        );
+        assert_eq!(
+            rejection,
+            Some(SurfaceObservationRejection::RetiredEndpoint)
+        );
+        assert_eq!(
+            receipt.rejected, rejection,
+            "the receipt carries the typed fence"
+        );
+        assert_eq!(receipt.reregister_above_generation, Some(5));
+        let wire = serde_json::to_value(&receipt).unwrap();
+        assert_eq!(wire["rejected"], "retired_endpoint");
+        assert_eq!(wire["reregister_above_generation"], 5);
+
+        let effects_before = effects.lock().len();
+        let next = agent_doc_editor_surface::reregistration_generation(5, 5);
+        let (rejection, receipt) = graph.observe_classified(
+            &scope,
+            root,
+            surface_retire_observation(next, 29, "/project/b.md"),
+            None,
+        );
+        assert_eq!(rejection, None, "the re-registered endpoint is accepted");
+        assert_eq!(receipt.rejected, None);
+        assert_eq!(receipt.reregister_above_generation, None);
+        assert!(
+            effects.lock().len() > effects_before,
+            "and drives tmux again"
+        );
+
+        let (stale, receipt) = graph.observe_classified(
+            &scope,
+            root,
+            surface_retire_observation(5, 30, "/project/a.md"),
+            None,
+        );
+        assert_eq!(
+            stale,
+            Some(SurfaceObservationRejection::StaleGeneration),
+            "the retired generation stays fenced after the re-registration"
+        );
+        assert_eq!(
+            receipt.reregister_above_generation, None,
+            "only a retired endpoint carries the directive"
+        );
+    }
+
+    /// `#surfaceretireformal` (`RetireRaisesFence`): a forget at a generation
+    /// NEWER than the root retires it and raises its fence, so a re-registering
+    /// observation the forget overtook cannot resurrect the frame
+    /// (`PassiveTmuxSyncRetireNetExactForgetWedge`). A forget OLDER than the
+    /// root never retires a re-registration.
+    #[test]
+    fn forget_raises_the_fence_to_its_generation_and_never_retires_a_newer_one() {
+        let (scope, graph, _effects) = surface_retire_graph();
+        let root = Path::new("/project");
+        let client = "jetbrains@IU.abc-pid:7";
+        assert!(
+            graph
+                .observe(
+                    &scope,
+                    root,
+                    surface_retire_observation(5, 1, "/project/a.md"),
+                    None
+                )
+                .0
+        );
+
+        assert!(
+            graph.forget_surface(root, client, "frame-1", 6).0,
+            "a newer forget retires an older registration"
+        );
+        let (rejection, receipt) = graph.observe_classified(
+            &scope,
+            root,
+            surface_retire_observation(6, 2, "/project/b.md"),
+            None,
+        );
+        assert_eq!(
+            rejection,
+            Some(SurfaceObservationRejection::RetiredEndpoint),
+            "the forget's own generation is fenced: the overtaken observation is not resurrected"
+        );
+        assert_eq!(receipt.reregister_above_generation, Some(6));
+        assert!(
+            !graph.forget_surface(root, client, "frame-1", 6).0,
+            "an equal forget of a retired endpoint changes nothing"
+        );
+        assert!(
+            graph.forget_surface(root, client, "frame-1", 8).0,
+            "a newer forget of a retired endpoint raises its fence"
+        );
+        assert_eq!(
+            graph
+                .observe_classified(
+                    &scope,
+                    root,
+                    surface_retire_observation(8, 3, "/project/b.md"),
+                    None
+                )
+                .0,
+            Some(SurfaceObservationRejection::RetiredEndpoint)
+        );
+        assert_eq!(
+            graph
+                .observe_classified(
+                    &scope,
+                    root,
+                    surface_retire_observation(9, 4, "/project/b.md"),
+                    None
+                )
+                .0,
+            None,
+            "above the fence re-registers"
+        );
+
+        assert!(
+            !graph.forget_surface(root, client, "frame-1", 8).0,
+            "a delayed older forget never retires the re-registration"
+        );
+        assert!(
+            !graph.forget(root, client, 8),
+            "nor does a delayed older client-wide forget"
+        );
+        assert_eq!(
+            graph.forget_client_family(root, client, 8),
+            0,
+            "nor a delayed older family forget"
+        );
+        assert_eq!(
+            graph
+                .observe_classified(
+                    &scope,
+                    root,
+                    surface_retire_observation(9, 5, "/project/a.md"),
+                    None
+                )
+                .0,
+            None
+        );
+
+        assert!(
+            graph.forget(root, client, 10),
+            "a client-wide forget raises too"
+        );
+        assert_eq!(
+            graph
+                .observe_classified(
+                    &scope,
+                    root,
+                    surface_retire_observation(10, 6, "/project/a.md"),
+                    None
+                )
+                .0,
+            Some(SurfaceObservationRejection::RetiredEndpoint)
+        );
+        assert_eq!(
+            graph.forget_client_family(root, client, 11),
+            0,
+            "a family forget of an already-retired root only raises its fence"
+        );
+        assert_eq!(
+            graph
+                .observe_classified(
+                    &scope,
+                    root,
+                    surface_retire_observation(11, 7, "/project/a.md"),
+                    None
+                )
+                .0,
+            Some(SurfaceObservationRejection::RetiredEndpoint)
+        );
+    }
+
+    /// `#surfaceretireformal` runtime monitor: K consecutive retired rejections
+    /// of one endpoint raise one alert per streak; an accepted re-registration
+    /// ends the streak.
+    #[test]
+    fn retired_endpoint_monitor_alerts_once_per_streak_of_k_rejections() {
+        let (scope, graph, _effects) = surface_retire_graph();
+        let root = Path::new("/project");
+        let observe = |generation: u64, sequence: u64| {
+            graph.observe_monitored(
+                &scope,
+                root,
+                surface_retire_observation(generation, sequence, "/project/a.md"),
+                None,
+            )
+        };
+        assert_eq!(observe(5, 1).2, None);
+        assert!(
+            graph
+                .forget_surface(root, "jetbrains@IU.abc-pid:7", "frame-1", 5)
+                .0
+        );
+        let mut sequence = 1;
+        let mut alerts = Vec::new();
+        for _ in 0..(2 * RETIRED_ENDPOINT_MUTE_THRESHOLD) {
+            sequence += 1;
+            let (rejection, _, alert) = observe(5, sequence);
+            assert_eq!(
+                rejection,
+                Some(SurfaceObservationRejection::RetiredEndpoint)
+            );
+            alerts.push(alert.map(|alert| alert.consecutive));
+        }
+        let expected = (1..=2 * RETIRED_ENDPOINT_MUTE_THRESHOLD)
+            .map(|n| (n == RETIRED_ENDPOINT_MUTE_THRESHOLD).then_some(n))
+            .collect::<Vec<_>>();
+        assert_eq!(alerts, expected, "exactly one alert, on the K-th rejection");
+
+        sequence += 1;
+        assert_eq!(observe(6, sequence).0, None, "re-registered");
+        assert!(
+            graph
+                .forget_surface(root, "jetbrains@IU.abc-pid:7", "frame-1", 6)
+                .0
+        );
+        for n in 1..=RETIRED_ENDPOINT_MUTE_THRESHOLD {
+            sequence += 1;
+            let alert = observe(6, sequence).2;
+            assert_eq!(
+                alert.is_some(),
+                n == RETIRED_ENDPOINT_MUTE_THRESHOLD,
+                "a new streak after a re-registration alerts again at K"
+            );
+        }
     }
 
     fn document_turn_authority_frame(

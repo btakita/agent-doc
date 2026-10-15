@@ -1,0 +1,49 @@
+# Action-set conformance for formal/tla/PassiveTmuxSyncRetireNet.tla (`#surfaceretireformal`).
+#
+# Checked by agent-doc-controller-io `surface_retire_conformance::every_editor_surface_transition_in_the_code_is_a_named_action_of_the_model`.
+# The LEFT column is derived from the code, never maintained by hand:
+#   graph_mutator       ControllerEditorSurfaceGraph methods / free fns that change endpoint fence state (rpc.rs, parsed with syn)
+#   graph_caller        production fns that call a graph mutator through `.editor_surface_graph`
+#   controller_command  dispatch arms (string commands) that call a graph_caller
+#   plugin_rpc          CpRouteClient functions that send editor_surface_observe / editor_surface_forget
+#   plugin_call         `<File>.<member fn>-><rpc>` call sites of those RPCs in JetBrains main sources (classic + 262/263)
+#   plugin_liveness     writes of EditorTabSyncListener.projectionRetired and calls of retire/resumeControllerProjection
+#   model_only          a model action with no code site, and why
+# A derived site without a row, a row whose site no longer exists, an action that is not a leaf action of the
+# model, or a leaf action no row names all fail the check.
+#
+# kind	site	tla_actions(|-separated)	note
+graph_mutator	ControllerEditorSurfaceGraph::observe_monitored	ControllerRecvObs	the controller fence (SurfaceObservationRejection::classify), re-registration by a newer generation, the typed retired receipt
+graph_mutator	ControllerEditorSurfaceGraph::forget_surface	ControllerRecvRetire	exact (client, surface) forget
+graph_mutator	ControllerEditorSurfaceGraph::forget	ControllerRecvRetire	client-wide forget, applied per endpoint root
+graph_mutator	ControllerEditorSurfaceGraph::forget_client_family	ControllerRecvRetire	family forget (replacement JVM / root retirement), applied per endpoint root
+graph_mutator	retire_editor_surface_root	ControllerRecvRetire	RetireRaisesFence: retire at <= g and raise the fence to g
+graph_caller	handle_editor_surface_observe	ControllerRecvObs	also the muted-live-endpoint runtime monitor (LiveEndpointNeverMuted)
+graph_caller	handle_editor_surface_forget	ControllerRecvRetire	
+controller_command	editor_surface_observe	ControllerRecvObs	
+controller_command	editor_surface_forget	ControllerRecvRetire	
+plugin_rpc	CpRouteClient.observeEditorSurface	RefocusLive|ResendFocus|Fallback|EditorReregister|EditorAck	surface lane
+plugin_rpc	CpRouteClient.observeEditorFocus	RefocusLive|ResendFocus|Fallback|EditorReregister|EditorAck	focus lane
+plugin_rpc	CpRouteClient.observeEditorSurfaceWithClient	RefocusLive|ResendFocus|Fallback|EditorReregister|EditorAck|Handoff	publish; on a typed retired receipt from a live frame re-register above it and re-send once; retire again if a handoff overtook it
+plugin_rpc	CpRouteClient.forgetEditorSurface	Handoff|EndFrame	
+plugin_rpc	CpRouteClient.forgetEditorFocus	Handoff|EndFrame	
+plugin_rpc	CpRouteClient.forgetEditorFocusWithReceipt	EndFrame	
+plugin_rpc	CpRouteClient.forgetEditorSurfaceClient	Handoff|EndFrame	
+plugin_call	EditorTabSyncListener.projectLatestSurfaceOnEditorThread->observeEditorSurface	RefocusLive|ResendFocus|Fallback|EditorReregister|EditorAck	the serialized surface delivery and its retained retry
+plugin_call	EditorTabSyncListener.projectLatestSurfaceOnEditorThread->forgetEditorSurface	Handoff|EndFrame	in-flight delivery across a handoff (InFlightSurfaceDelivery) / a superseded root
+plugin_call	EditorTabSyncListener.projectLatestSurfaceOnEditorThread->forgetEditorFocus	Handoff|EndFrame	as above, focus lane
+plugin_call	EditorTabSyncListener.requestFocusProjection->observeEditorFocus	RefocusLive|EditorReregister|EditorAck	focus projection
+plugin_call	EditorTabSyncListener.retireClosedSurfaceEndpoints->forgetEditorSurface	EndFrame	a closed editor frame
+plugin_call	EditorTabSyncListener.retireClosedSurfaceEndpoints->forgetEditorFocusWithReceipt	EndFrame	
+plugin_call	EditorTabSyncListener.retireControllerProjection->forgetEditorSurface	Handoff	frontend surface authority accepted
+plugin_call	EditorTabSyncListener.retireControllerProjection->forgetEditorFocus	Handoff	
+plugin_call	EditorTabSyncListener.shutdown->forgetEditorSurface	EndFrame	project or plugin disposal
+plugin_call	EditorTabSyncListener.shutdown->forgetEditorFocus	EndFrame	
+plugin_liveness	EditorTabSyncListener.retireControllerProjection:projectionRetired	Handoff	live' = FALSE
+plugin_liveness	EditorTabSyncListener.resumeControllerProjection:projectionRetired	Fallback	live' = TRUE
+plugin_liveness	BackendGuestSelectionFallback.install->retireControllerProjection	Handoff	Remote Dev frontend snapshot accepted
+plugin_liveness	BackendGuestSelectionFallback.install->resumeControllerProjection	Fallback	Remote Dev backend fallback forwards a selection again
+model_only	AdversaryStep	AdversaryStep	the NetChannel adversary: drop, duplicate, reconnect
+model_only	RefocusHandedOff	RefocusHandedOff	the operator switches tabs while another publisher owns the surface
+model_only	FrontendSync	FrontendSync	the authenticated frontend publisher (its own endpoint, outside this model)
+model_only	EditorRetireSuperseded	EditorRetireSuperseded	the v0.35.502/503 self-retirement, removed in 9ad4fdcd04; kept only as the RetireOnNewerReply wedge knob. A code site for it is a regression (EditorTabSyncListenerTest pins its absence)

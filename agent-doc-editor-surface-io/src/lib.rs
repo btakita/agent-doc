@@ -197,6 +197,8 @@ impl Registry {
             error,
             terminal_decision: Default::default(),
             deferred_to: None,
+            rejected: None,
+            reregister_above_generation: None,
         }
     }
 
@@ -319,6 +321,8 @@ pub fn observe(project_root: &Path, surface: EditorSurface) -> SurfaceObservatio
             error: Some(format!("controller observation unavailable: {error:#}")),
             terminal_decision: Default::default(),
             deferred_to: None,
+            rejected: None,
+            reregister_above_generation: None,
         }
     })
 }
@@ -331,6 +335,8 @@ fn quiescing_receipt() -> SurfaceObservationReceipt {
         error: Some("native editor generation is quiescing".to_string()),
         terminal_decision: Default::default(),
         deferred_to: None,
+        rejected: None,
+        reregister_above_generation: None,
     }
 }
 

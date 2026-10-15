@@ -107,6 +107,25 @@ class EditorTabSyncListener : FileEditorManagerListener {
     @Volatile
     private var closed = false
 
+    /**
+     * True between [retireControllerProjection] (an authenticated frontend took authority) and
+     * [resumeControllerProjection] (the backend fallback owns the selection edge again). Guarded by
+     * [lifecycleLock]. A retired-endpoint receipt re-registers only while this is false: the model's
+     * `live` (`formal/tla/PassiveTmuxSyncRetireNet.tla`), so a frame this listener no longer owns stays
+     * fenced (`#surfaceretireformal`).
+     */
+    private var projectionRetired = false
+
+    /**
+     * Whether this listener still owns the frames it publishes, so a typed retired-endpoint receipt
+     * is a muted LIVE endpoint that must re-register rather than a correct fence
+     * ([CpRouteClient.SurfaceEndpointReregistration]).
+     */
+    internal fun projectionLive(): Boolean =
+        synchronized(lifecycleLock) {
+            !closed && !projectionRetired
+        }
+
     private val surfaceDeliveryExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-editor-surface-delivery").apply { isDaemon = true }
     }
@@ -963,6 +982,7 @@ private data class CapturedSurface(
                             projectRoot = pending.projectRoot,
                             surfaceJson = pending.surfaceJson,
                             surfaceId = pending.surfaceId,
+                            mayReregister = ::projectionLive,
                         )
                     if (receipt.exitCode != 0) {
                         val retained =
@@ -1422,6 +1442,7 @@ private data class CapturedSurface(
                                         projectRoot = request.projectRoot,
                                         surfaceJson = request.surfaceJson,
                                         surfaceId = request.surfaceId,
+                                        mayReregister = ::projectionLive,
                                     ),
                             )
                         synchronized(lifecycleLock) {
@@ -1523,6 +1544,7 @@ private data class CapturedSurface(
         invalidateFocusProjection()
         latestSurfaceObservation.set(null)
         val (roots, endpoints) = synchronized(lifecycleLock) {
+            projectionRetired = true
             projectionAuthorityEpoch.incrementAndGet()
             surfaceRoots.drain() to surfaceEndpoints.drain()
         }
@@ -1543,6 +1565,23 @@ private data class CapturedSurface(
                 isDaemon = true
                 start()
             }
+    }
+
+    /**
+     * The Remote Dev backend selection fallback owns this listener's selection edge again (the
+     * frontend surface authority went away). Frames this listener publishes from now on are live, so
+     * the first observation into an endpoint the earlier handoff retired re-registers above the
+     * retired generation instead of staying muted at the process generation (`#surfaceretireformal`,
+     * model action `Fallback`). No-op for a classic listener, which is never retired.
+     */
+    internal fun resumeControllerProjection() {
+        val resumed =
+            synchronized(lifecycleLock) {
+                val wasRetired = projectionRetired && !closed
+                if (wasRetired) projectionRetired = false
+                wasRetired
+            }
+        if (resumed) log("observe: controller projection resumed by the backend selection fallback")
     }
 
     private fun shutdown(policy: EditorSurfaceShutdownPolicy) {

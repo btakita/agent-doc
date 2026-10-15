@@ -1,0 +1,40 @@
+# Trace fixture for formal/tla/PassiveTmuxSyncRetireNet.tla (`#surfaceretireformal`).
+#
+# Extracted READ-ONLY from a live rig's ops.log and anonymized: client
+# installation hashes and pids, connection generations (process nanoTime
+# values), surface ids and document names are replaced; event order,
+# timestamps, sequences, verdicts and `repeats=` counts are verbatim. Only the
+# editor-surface observe/forget receipts of the affected plugin process and
+# controller recycles are kept. The observed lines predate the `surface=` field;
+# the plugin published one frame endpoint, `frame-1`.
+#
+# Generations: the surface lane is the plugin's `jetbrains` client, the focus
+# lane its `jetbrains-focus` client (a separate endpoint key, never observed in
+# this window, so its forget finds nothing to retire).
+#
+# 00:45:43Z wedge (v0.35.502): the delivery of sequence 6 returned after a newer
+# observation was admitted and retired its own live endpoint at the live
+# generation; every later tab switch was fenced (accepted=false) until the
+# controller self-recycled at 01:23:14Z, which dropped the retired-set fence.
+[2026-10-15T00:39:15Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=1 accepted=true layout=observed pane_action=structural_sync
+[2026-10-15T00:39:17Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=2 accepted=true layout=observed pane_action=none
+[2026-10-15T00:39:17Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=3 accepted=true layout=observed pane_action=none repeats=1
+[2026-10-15T00:39:31Z] controller_self_recycle_started reason=operator_request
+[2026-10-15T00:40:10Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=4 accepted=true layout=observed pane_action=structural_sync
+[2026-10-15T00:40:50Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=5 accepted=true layout=observed pane_action=none
+[2026-10-15T00:45:43Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=6 accepted=true layout=observed pane_action=focus_only
+[2026-10-15T00:45:43Z] controller_editor_surface_forgotten client=jetbrains@IDE.0-pid:1 surface=frame-1 generation=100 client_family=false forgotten_clients=1
+[2026-10-15T00:45:43Z] controller_editor_surface_forgotten client=jetbrains-focus@IDE.0-pid:1 surface=frame-1 generation=101 client_family=false forgotten_clients=0
+[2026-10-15T00:45:43Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=7 accepted=false layout=observed pane_action=none
+[2026-10-15T00:45:44Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=8 accepted=false layout=observed pane_action=none repeats=1
+[2026-10-15T00:45:44Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=9 accepted=false layout=observed pane_action=none repeats=2
+[2026-10-15T00:45:50Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=11 accepted=false layout=observed pane_action=none repeats=4
+[2026-10-15T00:47:02Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=15 accepted=false layout=observed pane_action=none repeats=8
+[2026-10-15T00:47:49Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=23 accepted=false layout=observed pane_action=none repeats=16
+[2026-10-15T00:56:27Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=39 accepted=false layout=observed pane_action=none repeats=32
+[2026-10-15T01:20:51Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=71 accepted=false layout=observed pane_action=none repeats=64
+[2026-10-15T01:23:14Z] controller_self_recycle_started reason=operator_force_request
+[2026-10-15T01:23:16Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=74 accepted=true layout=observed pane_action=structural_sync
+[2026-10-15T01:23:17Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=75 accepted=true layout=observed pane_action=none
+[2026-10-15T01:23:20Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=76 accepted=true layout=observed pane_action=none repeats=1
+[2026-10-15T01:23:22Z] controller_editor_surface_observed client=jetbrains@IDE.0-pid:1 generation=100 sequence=77 accepted=true layout=observed pane_action=none repeats=2

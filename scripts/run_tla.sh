@@ -230,7 +230,7 @@ work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 isolate_run "${work_dir}"
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet LifecycleSequence LayoutWidthBound RemoteLayoutProvisional EditorTransportHealth ControllerLifecycle)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutProvisional EditorTransportHealth ControllerLifecycle)
 
 # Library modules: INSTANCE'd by the models above, never checked on their own
 # (no Spec, no .cfg). They only need to sit next to the importing model.
@@ -242,6 +242,15 @@ libraries=(NetChannel)
 must_pass=(
     VisibleDeliveryReceiptNet:VisibleDeliveryReceiptNetSafety
     PassiveTmuxSyncNet:PassiveTmuxSyncNetSafety
+    # `#surfaceretireformal`: the retirement channel. Safety twice (reconnect at
+    # the larger bound, duplication at the smaller one: both at once is >10^8
+    # states), liveness with duplication, and SelfHeal: the shipped
+    # self-retirement edge put BACK still converges once a live endpoint
+    # re-registers on the typed retired receipt (recovery by construction).
+    PassiveTmuxSyncRetireNet:PassiveTmuxSyncRetireNetSafety
+    PassiveTmuxSyncRetireNet:PassiveTmuxSyncRetireNetDuplicateSafety
+    PassiveTmuxSyncRetireNet:PassiveTmuxSyncRetireNetDuplicateLive
+    PassiveTmuxSyncRetireNet:PassiveTmuxSyncRetireNetSelfHeal
     LifecycleSequence:LifecycleSequenceSafety
     # Target design for ADC-fence (NOT in code yet): a fenced commit is what
     # makes one-commit-per-cycle hold; the Fence wedge below shows the gap.
@@ -428,6 +437,19 @@ must_violate=(
     PassiveTmuxSyncNet:PassiveTmuxSyncNetAdvanceFirstWedge
     PassiveTmuxSyncNet:PassiveTmuxSyncNetReorderWedge
     PassiveTmuxSyncNet:PassiveTmuxSyncNetReach
+    # `#tmuxautosyncretired` / `#surfaceretireformal`: the editor-surface
+    # retirement channel the model above never contained. WrongRetire is the
+    # v0.35.502/503 self-retirement (TLC finds the 02:54:03Z trace);
+    # FallbackMute is the Remote Dev sibling (a backend fallback resuming on a
+    # frame the frontend handoff retired, same per-process generation) with no
+    # re-registration; ExactForget proves the forget fence raise is
+    # load-bearing once re-registration exists; NoFence proves the recovery did
+    # not lift the retired fence. Reach: a live endpoint re-registers.
+    PassiveTmuxSyncRetireNet:PassiveTmuxSyncRetireNetWrongRetireWedge
+    PassiveTmuxSyncRetireNet:PassiveTmuxSyncRetireNetFallbackMuteWedge
+    PassiveTmuxSyncRetireNet:PassiveTmuxSyncRetireNetExactForgetWedge
+    PassiveTmuxSyncRetireNet:PassiveTmuxSyncRetireNetNoFenceWedge
+    PassiveTmuxSyncRetireNet:PassiveTmuxSyncRetireNetReach
     LifecycleSequence:LifecycleSequenceReorderWedge
     LifecycleSequence:LifecycleSequenceReach
     # GH #136(a): every publisher runs over NetChannel. The wedge proves the

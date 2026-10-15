@@ -17,18 +17,18 @@ use agent_doc_supervisor::startup_miss::{SessionLogStatus, StartupMiss, format_t
 use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
 use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_turn_executor_tmux::context_clear::{
-    CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES, ContextClearLastFrame,
-    ContextClearSubmitObservation, ContextClearSubmitPollState, ContextClearSubmitRetryAction,
-    ContextClearSubmitRetryFacts, ContextClearSubmitRetryProofFacts, ContextClearSubmitStatus,
-    InterruptClearTimeoutFacts, busy_clear_already_deferred_message, busy_clear_deferred_message,
-    busy_clear_refusal_message, context_clear_capture_shows_queued_input,
-    context_clear_command_visible_in_active_input, context_clear_history_proves_cleared_state,
-    context_clear_submit_blocked_line, context_clear_submit_blocked_message,
-    context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
-    context_clear_submit_retry_action, interrupt_clear_timeout_message,
-    ABANDONED_PROMPT_SETTLING_EVIDENCE, abandoned_prompt_clear_queued_message,
-    live_turn_clear_queued_message, live_turn_clear_refusal_message, operator_interrupt_key_plan,
-    operator_interrupt_step_delay, protected_clear_refusal_message, terminal_editor_command,
+    ABANDONED_PROMPT_SETTLING_EVIDENCE, CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+    ContextClearLastFrame, ContextClearSubmitObservation, ContextClearSubmitPollState,
+    ContextClearSubmitRetryAction, ContextClearSubmitRetryFacts, ContextClearSubmitRetryProofFacts,
+    ContextClearSubmitStatus, InterruptClearTimeoutFacts, abandoned_prompt_clear_queued_message,
+    busy_clear_already_deferred_message, busy_clear_deferred_message, busy_clear_refusal_message,
+    context_clear_capture_shows_queued_input, context_clear_command_visible_in_active_input,
+    context_clear_history_proves_cleared_state, context_clear_submit_blocked_line,
+    context_clear_submit_blocked_message, context_clear_submit_observation_line,
+    context_clear_submit_resubmit_proof_line, context_clear_submit_retry_action,
+    interrupt_clear_timeout_message, live_turn_clear_queued_message,
+    live_turn_clear_refusal_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
+    protected_clear_refusal_message, terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
@@ -1500,11 +1500,30 @@ fn settling_abandoned_prompt_for_clear(
     pane: &str,
     live_evidence: &str,
 ) -> Option<agent_doc_turn_status_io::SettlingAbandonedPrompt> {
+    settling_abandoned_prompt_for_clear_at(
+        ctx,
+        pane,
+        live_evidence,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default(),
+    )
+}
+
+/// [`settling_abandoned_prompt_for_clear`] evaluated at an explicit `now`.
+fn settling_abandoned_prompt_for_clear_at(
+    ctx: &SessionContext,
+    pane: &str,
+    live_evidence: &str,
+    now: u64,
+) -> Option<agent_doc_turn_status_io::SettlingAbandonedPrompt> {
     (live_evidence == "turn_active_lease")
         .then(|| {
-            agent_doc_turn_status_io::settling_abandoned_prompt_for_pane_for_file(
+            agent_doc_turn_status_io::settling_abandoned_prompt_for_pane_for_file_at(
                 &ctx.canonical_file,
                 pane,
+                now,
             )
         })
         .flatten()
@@ -6108,8 +6127,9 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         );
         // `#clearctxslow`: the queued clear names the settling abandoned
         // prompt and the seconds left (snapshot 2s old), instead of a live turn.
-        let settling = settling_abandoned_prompt_for_clear(&ctx, "%180", "turn_active_lease")
-            .expect("an unsettled abandoned prompt behind the lease");
+        let settling =
+            settling_abandoned_prompt_for_clear_at(&ctx, "%180", "turn_active_lease", now)
+                .expect("an unsettled abandoned prompt behind the lease");
         assert_eq!(settling.snapshot_at, lease_at + 2);
         assert!(
             (agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 3
@@ -6118,7 +6138,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "{settling:?}"
         );
         assert_eq!(
-            settling_abandoned_prompt_for_clear(&ctx, "%180", "dispatch_turn_running"),
+            settling_abandoned_prompt_for_clear_at(&ctx, "%180", "dispatch_turn_running", now),
             None,
             "only lease evidence can be an abandoned prompt"
         );
@@ -6137,7 +6157,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         .unwrap();
         write_incident(lease_at);
         assert_eq!(
-            settling_abandoned_prompt_for_clear(&ctx, "%180", "turn_active_lease"),
+            settling_abandoned_prompt_for_clear_at(&ctx, "%180", "turn_active_lease", now),
             None,
             "a settled snapshot is not waiting on anything"
         );

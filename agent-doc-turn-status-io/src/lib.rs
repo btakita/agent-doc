@@ -24,9 +24,10 @@ use agent_doc_sqlite::state_store::{
 };
 use agent_doc_turn::turn_status::{
     TRANSCRIPT_TAIL_PROBE_BYTES, TranscriptTailEvidence, TurnActiveMarker,
-    abandoned_prompt_settle_remaining_secs, classify_transcript_tail, pane_title_for_status, transcript_turn_end_reason,
-    turn_active_expiry_cutoff, turn_active_marker_is_fresh, turn_active_marker_matches_pane,
-    turn_lease_ended_by_interrupt, turn_lease_ended_by_withdrawn_prompt,
+    abandoned_prompt_settle_remaining_secs, classify_transcript_tail, pane_title_for_status,
+    transcript_turn_end_reason, turn_active_expiry_cutoff, turn_active_marker_is_fresh,
+    turn_active_marker_matches_pane, turn_lease_ended_by_interrupt,
+    turn_lease_ended_by_withdrawn_prompt,
 };
 use anyhow::Result;
 use std::io::{Read, Seek, SeekFrom};
@@ -502,8 +503,20 @@ pub fn settling_abandoned_prompt_for_pane_for_file(
     file: &Path,
     pane: &str,
 ) -> Option<SettlingAbandonedPrompt> {
+    settling_abandoned_prompt_for_pane_for_file_at(file, pane, now_secs())
+}
+
+/// [`settling_abandoned_prompt_for_pane_for_file`] evaluated at an explicit
+/// `now`, so a caller that already holds its clock reading (a test fixture
+/// stamping its records from it) gets a settle window that cannot drift with
+/// how long its own setup took.
+pub fn settling_abandoned_prompt_for_pane_for_file_at(
+    file: &Path,
+    pane: &str,
+    now: u64,
+) -> Option<SettlingAbandonedPrompt> {
     let root = agent_doc_project_root_io::project_root_containing(file)?;
-    settling_abandoned_prompt_for_pane_at(&root, pane, now_secs())
+    settling_abandoned_prompt_for_pane_at(&root, pane, now)
 }
 
 /// [`reclaim_interrupted_turn_for_pane_at`] for the project containing `file`.
@@ -1856,9 +1869,8 @@ mod tests {
             reclaim_interrupted_turn_for_pane_at(&world.base, world.pane, world.now).is_none(),
             "transcript evidence alone still waits out the settle window"
         );
-        let retired =
-            reclaim_withdrawn_prompt_turn_for_pane_at(&world.base, world.pane, world.now)
-                .expect("a withdrawn abandoned prompt retires its lease at once");
+        let retired = reclaim_withdrawn_prompt_turn_for_pane_at(&world.base, world.pane, world.now)
+            .expect("a withdrawn abandoned prompt retires its lease at once");
         assert_eq!(retired.reason, "abandoned_prompt");
         assert_eq!(retired.written_at, lease_at);
         assert_eq!(retired.interrupted_at, snapshot_at);

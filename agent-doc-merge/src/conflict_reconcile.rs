@@ -285,14 +285,55 @@ pub fn reconcile(
     {
         return Err(ReconcileError::CursorOutOfBounds);
     }
+    let (y_edits, g_edits) = side_edits(base, yours, agent);
+    reconcile_edits(base, yours, yours_cursor, &y_edits, &g_edits)
+}
+
+/// Both sides' edits against `base`. Identical edits apply once: an editor that
+/// already holds the agent's text (a replayed delivery) must not receive it
+/// twice, so the agent's copy is dropped.
+fn side_edits(base: &str, yours: &str, agent: &str) -> (Vec<Edit>, Vec<Edit>) {
     let y_edits = edits(base, yours);
-    // Identical edits apply once: an editor that already holds the agent's
-    // text (a replayed delivery) must not receive it twice.
     let g_edits: Vec<Edit> = edits(base, agent)
         .into_iter()
         .filter(|g| !y_edits.contains(g))
         .collect();
-    let clusters = clusters(base, &y_edits, &g_edits);
+    (y_edits, g_edits)
+}
+
+/// `#heldbatchmerge` (GH #273): [`reconcile`] for a captured editor batch
+/// replayed after its receipt may have been lost. Answers `Ok(None)` when an
+/// operator insertion and an agent insertion land at the SAME base offset:
+/// rule 1 (agent first) is right for two live authors, but for a replayed batch
+/// canonical text placed exactly at the operator's anchor may be the
+/// controller's transformation of a burst it already consumed. Each side is
+/// diffed once.
+pub(crate) fn reconcile_without_same_point_insertions(
+    base: &str,
+    yours: &str,
+    agent: &str,
+) -> Result<Option<Reconciled>, ReconcileError> {
+    let (y_edits, g_edits) = side_edits(base, yours, agent);
+    let same_point = y_edits.iter().any(|ours| {
+        ours.is_insert()
+            && g_edits
+                .iter()
+                .any(|theirs| theirs.is_insert() && theirs.range.start == ours.range.start)
+    });
+    if same_point {
+        return Ok(None);
+    }
+    reconcile_edits(base, yours, None, &y_edits, &g_edits).map(Some)
+}
+
+fn reconcile_edits(
+    base: &str,
+    yours: &str,
+    yours_cursor: Option<usize>,
+    y_edits: &[Edit],
+    g_edits: &[Edit],
+) -> Result<Reconciled, ReconcileError> {
+    let clusters = clusters(base, y_edits, g_edits);
 
     let in_cluster = |side: Side, i: usize| clusters.iter().any(|c| c.members.contains(&(side, i)));
 
@@ -384,8 +425,8 @@ pub fn reconcile(
                 at = e.range.end;
             }
             Event::Cluster(c) => {
-                let ys = members(c, Side::Yours, &y_edits);
-                let gs = members(c, Side::Agent, &g_edits);
+                let ys = members(c, Side::Yours, y_edits);
+                let gs = members(c, Side::Agent, g_edits);
                 let yours_side = apply_in(base, &c.region, &ys);
                 let agent_side = apply_in(base, &c.region, &gs);
                 let from = Some(ypos..ypos + yours_side.len());

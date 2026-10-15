@@ -915,6 +915,149 @@ fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independen
     let _ = vscode.disconnect().unwrap();
 }
 
+/// GH #273 (`#heldbatchmerge`) end to end. After a controller recycle the
+/// JetBrains buffer took operator typing against a base that lacked the
+/// ` (HEAD)` suffix canonical carried; a closeout then struck the queue line
+/// beside the operator's new one and appended its response. Every operator
+/// change sits beside a canonical change, never on one. The exact planner
+/// refused that batch forever (`await-missing-base`), each re-registration
+/// deferred canonical behind it, and the editor and replica stayed forked while
+/// every native save was refused. The planner must merge the batch forward so
+/// the replacement replica converges every peer on the union.
+#[test]
+fn held_captured_batch_beside_head_marker_and_closeout_merges_forward_across_peers() {
+    let _env_guard = agent_doc_test_support::env_lock();
+    let temp = tempfile::TempDir::new().unwrap();
+    let project_root = temp.path();
+    let baseline = concat!(
+        "<!-- agent:exchange -->\n",
+        "### Re: earlier 🌍\n",
+        "\n",
+        "answer\n",
+        "<!-- /agent:exchange -->\n",
+        "<!-- agent:queue -->\n",
+        "- do [#a]: first\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let file = agent_doc_test_support::init_repo_with_doc(project_root, "held.md", baseline);
+    std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
+    std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
+    agent_doc_test_support::seed_reliable_sync_editor_registration(
+        &file,
+        "held-batch-simworld",
+        &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+    );
+    agent_doc()
+        .args([
+            "controller",
+            "status",
+            "--project-root",
+            &project_root.to_string_lossy(),
+            "--ensure",
+        ])
+        .assert()
+        .success();
+    let _controller = ControllerGuard {
+        project_root: project_root.to_path_buf(),
+    };
+
+    let mut jetbrains =
+        PluginProtocolHarness::attach(PluginHarnessKind::JetBrains, project_root, &file).unwrap();
+    let mut vscode =
+        PluginProtocolHarness::attach(PluginHarnessKind::VsCode, project_root, &file).unwrap();
+    let captured_base = jetbrains.text();
+    assert_eq!(captured_base, baseline);
+
+    // The operator's burst, one code point per splice: a note under the
+    // heading and a new queue line after the one the closeout will strike.
+    let note = "operator note\n";
+    let queued = "- do [#b]: typed while detached\n";
+    let note_at = code_point_offset(&captured_base, "\nanswer") + 1;
+    let queue_at = code_point_offset(&captured_base, "<!-- /agent:queue -->");
+    let mut edits: Vec<_> = note
+        .chars()
+        .enumerate()
+        .map(|(index, ch)| splice(note_at + index, 0, &ch.to_string()))
+        .collect();
+    let shifted_queue_at = queue_at + note.chars().count();
+    edits.extend(
+        queued
+            .chars()
+            .enumerate()
+            .map(|(index, ch)| splice(shifted_queue_at + index, 0, &ch.to_string())),
+    );
+    let captured = captured_splice_batch(&captured_base, edits);
+
+    // Canonical advances beside every operator change: the disk projection's
+    // ` (HEAD)` suffix, the closeout's response, and its strike-through.
+    let mut canonical_edit = |needle: &str, after: bool, text: &str| {
+        let current = vscode.text();
+        let at =
+            code_point_offset(&current, needle) + if after { needle.chars().count() } else { 0 };
+        vscode.edit_without_pulling(at, text).unwrap();
+        vscode.pull_and_project().unwrap();
+    };
+    canonical_edit("### Re: earlier 🌍", true, " (HEAD)");
+    canonical_edit("answer\n", true, "\n### Re: closeout\n\nclosed it.\n");
+    canonical_edit("do [#a]", false, "~~");
+    canonical_edit(": first", true, "~~");
+
+    let canonical = controller_canonical_text(project_root, &file).unwrap();
+    assert!(
+        canonical.contains("### Re: earlier 🌍 (HEAD)\n"),
+        "{canonical:?}"
+    );
+    assert!(
+        canonical.contains("- ~~do [#a]: first~~\n"),
+        "{canonical:?}"
+    );
+    let expected = concat!(
+        "<!-- agent:exchange -->\n",
+        "### Re: earlier 🌍 (HEAD)\n",
+        "\n",
+        "operator note\n",
+        "answer\n",
+        "\n### Re: closeout\n\nclosed it.\n",
+        "<!-- /agent:exchange -->\n",
+        "<!-- agent:queue -->\n",
+        "- ~~do [#a]: first~~\n",
+        "- do [#b]: typed while detached\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    let planned = agent_doc_merge::captured_splice::rebase(&captured_base, &canonical, &captured)
+        .expect("a batch beside canonical changes must merge forward, not hold");
+    assert_eq!(planned.resulting_text, expected);
+    assert_eq!(
+        planned
+            .resulting_text
+            .matches("typed while detached")
+            .count(),
+        1
+    );
+
+    jetbrains
+        .reregister_at_canonical_cut(&agent_doc_hash::content_hash(&canonical))
+        .unwrap();
+    assert_eq!(jetbrains.text(), canonical);
+    jetbrains.project_visible_state().unwrap();
+    jetbrains.forward_local_edits(&planned).unwrap();
+    jetbrains.project_visible_state().unwrap();
+    for _ in 0..3 {
+        vscode.pull_and_project().unwrap();
+    }
+    assert_eq!(jetbrains.text(), expected);
+    assert_eq!(vscode.text(), expected);
+    assert_eq!(
+        controller_canonical_text(project_root, &file).unwrap(),
+        expected,
+        "the controller canonical converges on the merge, so a native save of it can succeed"
+    );
+
+    let _ = jetbrains.disconnect().unwrap();
+    let _ = vscode.disconnect().unwrap();
+}
+
 #[test]
 #[ignore = "run through `make cross-editor-simworld` after compiling both editor harnesses"]
 fn native_plugin_harnesses_peer_through_real_agent_doc_controller() {

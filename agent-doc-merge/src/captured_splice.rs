@@ -24,7 +24,9 @@ pub struct CapturedSpliceBatch {
 
 /// Translate each range through equal spans only. The complete resulting cut
 /// verifies that the caller supplied the actual captured stream, not a guessed
-/// edit. Any overlap fails before a replacement replica is registered.
+/// edit. A batch the exact translation refuses falls back to a conflict-free
+/// three-way merge ([`merge_forward`], `#heldbatchmerge`); any true overlap
+/// still fails before a replacement replica is registered.
 pub fn rebase(
     base: &str,
     canonical: &str,
@@ -72,15 +74,156 @@ pub fn rebase(
         &captured_result,
         &captured_changes,
     );
-    if windows.iter().any(|window| window.canonical_ops > 0) {
-        return merge_windows(&captured_result, &current, &canonical_changes, &windows);
-    }
-    match translate_edits(&old, &current, batch) {
-        Ok(rebased) => Ok(rebased),
+    let exact = if windows.iter().any(|window| window.canonical_ops > 0) {
+        merge_windows(&captured_result, &current, &canonical_changes, &windows)
+    } else {
         // A splice inside the burst may touch a canonical change even when
         // the burst's net change does not; the net change still translates.
-        Err(_) => merge_windows(&captured_result, &current, &canonical_changes, &windows),
+        translate_edits(&old, &current, batch)
+            .or_else(|_| merge_windows(&captured_result, &current, &canonical_changes, &windows))
+    };
+    exact.or_else(|refusal| {
+        merge_forward(&old, &current, &captured_result, &windows)
+            .map_err(|merge| anyhow::anyhow!("{refusal}; merge-forward refused: {merge}"))
+    })
+}
+
+/// `#heldbatchmerge` (GH #273): the exit for a captured batch the exact planner
+/// refused only because an operator change sits BESIDE a canonical change.
+///
+/// The exact planner widens every change over its slide range and refuses any
+/// window a canonical change touches, so independent edits that merely share a
+/// line boundary refuse too: typing under a heading whose ` (HEAD)` suffix
+/// canonical moved, or a queue line added next to the line a closeout struck.
+/// The JetBrains plugin then held the batch (`await-missing-base`), every
+/// re-registration deferred canonical behind it, and the visible buffer stayed
+/// forked from the replica for good while every native save was refused.
+///
+/// The fallback is the formally checked three-way reconcile
+/// ([`crate::conflict_reconcile::reconcile`], base = the captured base, yours =
+/// the captured cut, agent = canonical): the editor text is the base and the
+/// unapplied canonical changes roll forward onto it. It is accepted only when
+/// (1) no edit of either side overlaps the other (`conflicts == 0`), so no
+/// winner is chosen; (2) canonical has not already ingested the operator's
+/// text, so a lost receipt cannot insert a burst twice; and (3) no canonical
+/// insertion sits at the operator's own anchor, where foreign controller text
+/// may be the transformation of a burst it already consumed. Otherwise the
+/// refusal stands. The answer is the canonical-relative splices that produce the merge,
+/// forwarded on a replica registered at exactly `canonical`.
+fn merge_forward(
+    base: &[char],
+    canonical: &[char],
+    captured_result: &[char],
+    windows: &[CapturedWindow],
+) -> Result<CapturedSpliceBatch> {
+    ensure!(
+        !operator_text_already_in_canonical(base, canonical, captured_result, windows),
+        "canonical already carries captured operator text"
+    );
+    let base_text: String = base.iter().collect();
+    let captured_text: String = captured_result.iter().collect();
+    let canonical_text: String = canonical.iter().collect();
+    let merged = crate::conflict_reconcile::reconcile_without_same_point_insertions(
+        &base_text,
+        &captured_text,
+        &canonical_text,
+    )
+    .map_err(|error| anyhow::anyhow!("three-way reconcile unavailable: {error:?}"))?
+    .ok_or_else(|| anyhow::anyhow!("canonical inserted text at the operator's own anchor"))?;
+    ensure!(
+        merged.conflicts == 0,
+        "operator and canonical edits overlap ({} conflict region(s))",
+        merged.conflicts
+    );
+    let target: Vec<char> = merged.text.chars().collect();
+    let edits = splices_between(canonical, &target);
+    let mut replayed = canonical.to_vec();
+    for edit in &edits {
+        apply(&mut replayed, edit)?;
     }
+    ensure!(
+        replayed == target,
+        "merge-forward splices did not reproduce the merge"
+    );
+    Ok(CapturedSpliceBatch {
+        edits,
+        resulting_text: merged.text,
+    })
+}
+
+/// `#heldbatchmerge` lost-receipt guard. A burst the controller already
+/// ingested (whole or in part) shows up in canonical as text the base lacks.
+/// Merging it again would place the operator's text twice, so the fallback
+/// refuses when canonical gained an occurrence of a window's operator text, or
+/// when a canonical change in the same window begins or ends with the start of
+/// that text (a partially ingested prefix). Whitespace-only overlap is not
+/// evidence. A false positive only keeps the pre-existing hold.
+fn operator_text_already_in_canonical(
+    base: &[char],
+    canonical: &[char],
+    captured_result: &[char],
+    windows: &[CapturedWindow],
+) -> bool {
+    let shifted = |at: usize, shift: isize| (at as isize + shift) as usize;
+    let base_text: String = base.iter().collect();
+    let canonical_text: String = canonical.iter().collect();
+    windows.iter().any(|window| {
+        let base_window = &base[window.old.clone()];
+        let ours = &captured_result[shifted(window.old.start, window.captured_shift_before)
+            ..shifted(
+                window.old.end,
+                window.captured_shift_before + window.captured_shift_within,
+            )];
+        let operator: Vec<char> = trimmed_splice(0, base_window, ours)
+            .insert
+            .chars()
+            .collect();
+        let operator_text: String = operator.iter().collect();
+        let needle = operator_text.trim();
+        if needle.is_empty() {
+            return false;
+        }
+        if canonical_text.matches(needle).count() > base_text.matches(needle).count() {
+            return true;
+        }
+        if window.canonical_ops == 0 {
+            return false;
+        }
+        let theirs = &canonical[shifted(window.old.start, window.canonical_shift_before)
+            ..shifted(
+                window.old.end,
+                window.canonical_shift_before + window.canonical_shift_within,
+            )];
+        let agent: Vec<char> = trimmed_splice(0, base_window, theirs)
+            .insert
+            .chars()
+            .collect();
+        let shared = (1..=operator.len().min(agent.len()))
+            .rev()
+            .find(|&len| agent.starts_with(&operator[..len]) || agent.ends_with(&operator[..len]))
+            .unwrap_or(0);
+        operator[..shared].iter().any(|ch| !ch.is_whitespace())
+    })
+}
+
+/// The splices turning `from` into `to`, one per changed hunk, in order and in
+/// the coordinates of the text each is applied to.
+fn splices_between(from: &[char], to: &[char]) -> Vec<CapturedSplice> {
+    let mut shift = 0isize;
+    char_diff(from, to)
+        .into_iter()
+        .filter(|op| op.tag() != DiffTag::Equal)
+        .map(|op| {
+            let (old, new) = (op.old_range(), op.new_range());
+            let splice = CapturedSplice {
+                offset_code_points: (old.start as isize + shift) as usize,
+                delete_code_points: old.len(),
+                insert: to[new.clone()].iter().collect(),
+            };
+            shift += new.len() as isize - old.len() as isize;
+            splice
+        })
+        .collect()
 }
 
 /// The original splice-by-splice translation through equal spans.
@@ -1141,5 +1284,223 @@ mod tests {
             rebase(&base, &elsewhere, &captured).is_err(),
             "an unrelated equal string cannot consume operator intent"
         );
+    }
+
+    /// GH #273 (`#heldbatchmerge`), incident shape. After a controller
+    /// recycle the operator typed into a buffer whose base lacked the
+    /// ` (HEAD)` suffix canonical carried (the 7-char shadow/base gap), then a
+    /// closeout struck a queue line and appended its response. Each operator
+    /// change sits beside, not on, a canonical change, so the exact planner's
+    /// widened windows refused it; the plugin held the 609-splice batch with
+    /// `await-missing-base` and the visible buffer stayed forked for good.
+    #[test]
+    fn gh273_batch_beside_head_marker_and_closeout_merges_forward() {
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier\n",
+            "\n",
+            "answer\n",
+            "<!-- agent:boundary:5a1b2c3d -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#a]: first\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let under_heading = "### Re: earlier\n";
+        let after_line = "- do [#a]: first\n";
+        let at_heading = base[..base.find(under_heading).unwrap() + under_heading.len()]
+            .chars()
+            .count();
+        let mut edits = typed(at_heading, "operator note under the heading\n");
+        let queue_at = base[..base.find(after_line).unwrap() + after_line.len()]
+            .chars()
+            .count()
+            + "operator note under the heading\n".chars().count();
+        edits.extend(typed(queue_at, "- do [#b]: typed while detached\n"));
+        let captured = batch(base, edits);
+        let canonical = base
+            .replace("### Re: earlier\n", "### Re: earlier (HEAD)\n")
+            .replace("- do [#a]: first", "- ~~do [#a]: first~~")
+            .replace(
+                "answer\n",
+                "answer\n\n### Re: closeout (HEAD)\n\nclosed it.\n",
+            )
+            .replace("### Re: earlier (HEAD)", "### Re: earlier");
+
+        let out = rebase(base, &canonical, &captured)
+            .expect("independent edits beside canonical changes must merge forward");
+        assert_eq!(
+            out.resulting_text,
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "### Re: earlier\n",
+                "operator note under the heading\n",
+                "\n",
+                "answer\n",
+                "\n### Re: closeout (HEAD)\n\nclosed it.\n",
+                "<!-- agent:boundary:5a1b2c3d -->\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:queue go -->\n",
+                "- ~~do [#a]: first~~\n",
+                "- do [#b]: typed while detached\n",
+                "<!-- /agent:queue -->\n",
+            )
+        );
+        // The splices are canonical-relative, so forwarding them on a replica
+        // registered at exactly `canonical` reproduces the merge.
+        let mut replay: Vec<char> = canonical.chars().collect();
+        for edit in &out.edits {
+            apply(&mut replay, edit).unwrap();
+        }
+        assert_eq!(replay.iter().collect::<String>(), out.resulting_text);
+        assert!(
+            out.edits.iter().all(|edit| edit.delete_code_points == 0),
+            "no canonical code point is deleted"
+        );
+
+        // The ` (HEAD)` half alone: the shadow the plugin held carried the
+        // suffix the operator's base lacked.
+        let head_only = base.replace("### Re: earlier\n", "### Re: earlier (HEAD)\n");
+        let out = rebase(base, &head_only, &captured).expect("a moved marker is not a conflict");
+        assert!(
+            out.resulting_text
+                .contains("### Re: earlier (HEAD)\noperator note under the heading\n")
+        );
+        assert_eq!(
+            out.resulting_text.matches("typed while detached").count(),
+            1
+        );
+    }
+
+    /// `#heldbatchmerge` refusals: the fallback never chooses a winner, never
+    /// re-inserts text canonical already ingested, and never places operator
+    /// text beside controller text written at the operator's own anchor.
+    #[test]
+    fn merge_forward_keeps_every_ambiguous_refusal() {
+        let base = "<!-- agent:queue -->\n- do [#a]: first\n<!-- /agent:queue -->\nnotes\n";
+        let line = "- do [#a]: first";
+        let at = base[..base.find(line).unwrap()].chars().count();
+        // Overlap: both sides rewrote the same queue line.
+        let first = at + "- do [#a]: ".chars().count();
+        let operator = batch(base, vec![edit(first, 5, "third")]);
+        let rewritten = base.replace("[#a]: first", "[#a]: second");
+        let error = rebase(base, &rewritten, &operator).unwrap_err().to_string();
+        assert!(error.contains("merge-forward refused"), "{error}");
+        // Lost receipt, partially ingested: canonical holds the operator's
+        // first characters at the anchor plus a controller line after them.
+        let notes_at = base[..base.find("notes").unwrap()].chars().count();
+        let typed_burst = batch(base, typed(notes_at, "follow up on #a\n"));
+        let partial = base.replace("notes\n", "follow up\n- controller line\nnotes\n");
+        assert!(rebase(base, &partial, &typed_burst).is_err());
+        // Lost receipt, whole burst ingested beside a canonical change in the
+        // operator's window.
+        let ingested = base.replace("notes\n", "follow up on #a\n- controller line\nnotes\n");
+        let out = rebase(base, &ingested, &typed_burst);
+        assert!(
+            out.as_ref().map_or(true, |out| out
+                .resulting_text
+                .matches("follow up on #a")
+                .count()
+                == 1),
+            "{out:?}"
+        );
+        // Same anchor: controller text exactly where the operator typed.
+        let same_point = base.replace("notes\n", "controller summary\nnotes\n");
+        assert!(rebase(base, &same_point, &typed_burst).is_err());
+    }
+
+    /// `#heldbatchmerge` property: for every generated document where the
+    /// operator and canonical edit different lines (adjacent allowed, never the
+    /// same line or the same insertion point), the planner answers a batch, the
+    /// batch replayed on canonical reproduces its own cut, and that cut is the
+    /// line-wise union of both sides. Deterministic xorshift, no new deps.
+    #[test]
+    fn independent_line_edits_always_rebase_or_merge_forward_to_their_union() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |bound: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % bound as u64) as usize
+        };
+        for case in 0..300 {
+            let lines = 4 + next(10);
+            let base_lines: Vec<String> = (0..lines).map(|n| format!("- item {n} body;")).collect();
+            let mut canonical_lines = Vec::new();
+            let mut merged_lines = Vec::new();
+            let mut operator_lines = Vec::new();
+            for (n, line) in base_lines.iter().enumerate() {
+                // Canonical: 0 untouched, 1 ` (HEAD)` suffix, 2 struck, 3 a
+                // boundary marker line after it. Operator: 0 untouched, 1 a
+                // typed line after it, 2 amended at its end. A pair that would
+                // share one insertion point (amend + any canonical line edit,
+                // typed line + marker) is outside the property: those refuse.
+                let canonical_op = next(4);
+                let operator_op = match canonical_op {
+                    0 => next(3),
+                    3 => 0,
+                    _ => next(2),
+                };
+                let canonical_line = match canonical_op {
+                    1 => format!("{line} (HEAD)"),
+                    2 => line.replace("- item", "- ~~item").replace(';', ";~~"),
+                    _ => line.clone(),
+                };
+                let operator_line = match operator_op {
+                    2 => format!("{line} operator {case} amended {n}"),
+                    _ => line.clone(),
+                };
+                canonical_lines.push(canonical_line.clone());
+                operator_lines.push(operator_line.clone());
+                merged_lines.push(if operator_op == 2 {
+                    operator_line
+                } else {
+                    canonical_line
+                });
+                if operator_op == 1 {
+                    let typed_line = format!("> operator {case} typed {n}");
+                    operator_lines.push(typed_line.clone());
+                    merged_lines.push(typed_line);
+                }
+                if canonical_op == 3 {
+                    let marker = format!("<!-- agent:boundary:{case:08x}{n} -->");
+                    canonical_lines.push(marker.clone());
+                    merged_lines.push(marker);
+                }
+            }
+            let join = |lines: &[String]| {
+                lines
+                    .iter()
+                    .map(|line| format!("{line}\n"))
+                    .collect::<String>()
+            };
+            let base = join(&base_lines);
+            let canonical = join(&canonical_lines);
+            let typed_text = join(&operator_lines);
+            // The operator's whole change as one splice per typed code point.
+            let ops = splices_between(
+                &base.chars().collect::<Vec<_>>(),
+                &typed_text.chars().collect::<Vec<_>>(),
+            );
+            let mut edits = Vec::new();
+            for op in ops {
+                edits.push(edit(op.offset_code_points, op.delete_code_points, ""));
+                edits.extend(typed(op.offset_code_points, &op.insert));
+            }
+            let captured = batch(&base, edits);
+            assert_eq!(captured.resulting_text, typed_text, "case {case}");
+            let out = rebase(&base, &canonical, &captured)
+                .unwrap_or_else(|error| panic!("case {case}: {error}\nbase:\n{base}\ncanonical:\n{canonical}\nyours:\n{typed_text}"));
+            assert_eq!(out.resulting_text, join(&merged_lines), "case {case}");
+            let mut replay: Vec<char> = canonical.chars().collect();
+            for edit in &out.edits {
+                apply(&mut replay, edit).unwrap();
+            }
+            assert_eq!(
+                replay.iter().collect::<String>(),
+                out.resulting_text,
+                "case {case}"
+            );
+        }
     }
 }

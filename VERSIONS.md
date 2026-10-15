@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.508
+
+- **Run Agent Doc keeps working on an exact-263 IDE after an upgrade without a
+  restart (GH #267).** The superseded-plugin gate (#76) refused every
+  `editor_route` as soon as the IDE's mapped jar was no longer the installed
+  one, even though that IDE had hot-reloaded the new native library and kept
+  replicating edits. Admission now probes the editor's native endpoint once.
+  - **Endpoint answers with the controller's build:** the route is admitted, and
+    a `plugin_bytes_superseded_advisory` line says a restart only loads the new
+    plugin UI.
+  - **Another build, no answer, or no endpoint:** the route is still refused
+    before dispatch, and the refusal names which case it saw. For another build
+    it suggests `agent-doc admin reload-lib` first; otherwise it gives the
+    existing restart/reinstall remedy.
+
 ## 0.35.507
 
 - **`agent:todo` completion flags.** `agent-doc write` gains `--todo-done`,

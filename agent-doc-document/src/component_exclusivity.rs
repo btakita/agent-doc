@@ -36,13 +36,19 @@
 //! editor's in-flight typing, which no text-only rule can tell from
 //! independent work).
 //!
-//! Two entry points:
+//! Entry points:
 //! - [`project_disk_for_cut_exclusivity`]: the input projection. Disk's body of
 //!   every concurrently changed component reverts to the baseline before any
 //!   merge rung runs, so no rung can see two versions.
 //! - [`merge_mixes_component_versions`]: the fail-closed guard every candidate
 //!   must clear. It refuses a candidate whose concurrently changed component is
 //!   neither the authority's nor disk's body.
+//! - [`project_disk_for_editor_provenance`] and its guard
+//!   [`merge_changes_editor_attributed`] (`#keylogrebase`): with a correctly
+//!   based, editor-attested op ledger, a component only DISK changed whose body
+//!   is a state of that ledger's replay is the editor's in-flight typing, and
+//!   keeps the authority's body too. This closes the boundary above whenever
+//!   the ledger covers the native save.
 //!
 //! Bodies are compared in the DURABLE domain (`#admissionmarkersplit`):
 //! transient agent-doc markers are transport state, not a writer's text.
@@ -237,6 +243,188 @@ pub fn merge_mixes_component_versions(
     (!mixed.is_empty()).then(|| mixed.join(","))
 }
 
+/// Result of [`project_disk_for_editor_provenance`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorProvenanceProjection {
+    /// Disk with every provenance-attributed component's body reverted to the
+    /// baseline body. Equal to the input when nothing was attributed.
+    pub disk_text: String,
+    /// Disk-only components whose disk body is a state of the editor's own
+    /// verified op lineage, in document order.
+    pub editor_attributed: Vec<ComponentKey>,
+}
+
+/// A component only disk changed since the baseline.
+struct DiskOnly {
+    key: ComponentKey,
+    disk_raw: String,
+    disk_durable: String,
+    disk_range: Range<usize>,
+    baseline_range: Range<usize>,
+}
+
+/// Components aligned across the three planes that disk changed and the
+/// authority did not (in the durable domain).
+fn disk_only_components(baseline: &str, authority: &str, disk: &str) -> Option<Vec<DiskOnly>> {
+    let base = top_level_bodies(baseline)?;
+    let auth = top_level_bodies(authority)?;
+    let disk_bodies = top_level_bodies(disk)?;
+    let (base_counts, auth_counts, disk_counts) = (
+        name_counts(&base),
+        name_counts(&auth),
+        name_counts(&disk_bodies),
+    );
+    let mut keys: Vec<&ComponentKey> = base.keys().collect();
+    keys.sort();
+    let mut disk_only = Vec::new();
+    for key in keys {
+        let name = key.name.as_str();
+        let count = base_counts.get(name).copied();
+        if auth_counts.get(name).copied() != count || disk_counts.get(name).copied() != count {
+            continue;
+        }
+        let (Some(base_range), Some(auth_range), Some(disk_range)) =
+            (base.get(key), auth.get(key), disk_bodies.get(key))
+        else {
+            continue;
+        };
+        let base_durable = durable_body(baseline, base_range);
+        let disk_durable = durable_body(disk, disk_range);
+        if durable_body(authority, auth_range) == base_durable && disk_durable != base_durable {
+            disk_only.push(DiskOnly {
+                key: key.clone(),
+                disk_raw: disk[disk_range.clone()].to_string(),
+                disk_durable,
+                disk_range: disk_range.clone(),
+                baseline_range: base_range.clone(),
+            });
+        }
+    }
+    Some(disk_only)
+}
+
+/// Input projection with provenance (`#keylogrebase`): revert disk's body of a
+/// component only DISK changed when that body is a state the editor's own
+/// verified op lineage passed through.
+///
+/// [`project_disk_for_cut_exclusivity`] cannot touch such a component: with
+/// text alone, the editor's in-flight typing on disk (the native save is ahead
+/// of the authority's op stream) is indistinguishable from an independent disk
+/// write, and merging it lets the in-flight ops land it a second time. A
+/// correctly based op ledger is the provenance that tells them apart. The
+/// caller feeds `visit_lineage` every replay state of the editor's ops from
+/// the baseline (the baseline itself included); a component whose disk body
+/// equals the same component in one of those states is the editor's own text,
+/// so the authority's (unchanged) body is kept and the editor's ops roll it
+/// forward exactly once.
+///
+/// Callers must only pass a lineage that is proven: the ops are based on the
+/// baseline, attested end to end by the editor, and pass through the
+/// authority's cut. A component mixing in-flight typing with independent work
+/// matches no lineage state and still merges (the stated residual).
+pub fn project_disk_for_editor_provenance(
+    baseline: &str,
+    authority: &str,
+    disk: &str,
+    visit_lineage: impl FnOnce(&mut dyn FnMut(&str) -> bool),
+) -> EditorProvenanceProjection {
+    let unchanged = || EditorProvenanceProjection {
+        disk_text: disk.to_string(),
+        editor_attributed: Vec::new(),
+    };
+    let Some(candidates) = disk_only_components(baseline, authority, disk) else {
+        return unchanged();
+    };
+    if candidates.is_empty() {
+        return unchanged();
+    }
+    let baseline_counts = top_level_bodies(baseline).map(|bodies| {
+        name_counts(&bodies)
+            .into_iter()
+            .map(|(name, count)| (name.to_string(), count))
+            .collect::<HashMap<String, usize>>()
+    });
+    let Some(baseline_counts) = baseline_counts else {
+        return unchanged();
+    };
+    let mut matched = vec![false; candidates.len()];
+    visit_lineage(&mut |state: &str| {
+        // Cheap prefilter: a state can only match a body it contains verbatim.
+        let open: Vec<usize> = (0..candidates.len())
+            .filter(|&i| !matched[i] && state.contains(candidates[i].disk_raw.as_str()))
+            .collect();
+        if !open.is_empty()
+            && let Some(bodies) = top_level_bodies(state)
+        {
+            let counts = name_counts(&bodies);
+            for i in open {
+                let candidate = &candidates[i];
+                let name = candidate.key.name.as_str();
+                if counts.get(name).copied() != baseline_counts.get(name).copied() {
+                    continue;
+                }
+                if bodies
+                    .get(&candidate.key)
+                    .is_some_and(|range| durable_body(state, range) == candidate.disk_durable)
+                {
+                    matched[i] = true;
+                }
+            }
+        }
+        // Keep visiting while any candidate is still unattributed.
+        matched.iter().any(|m| !m)
+    });
+    let mut attributed: Vec<&DiskOnly> = candidates
+        .iter()
+        .zip(&matched)
+        .filter_map(|(candidate, matched)| matched.then_some(candidate))
+        .collect();
+    if attributed.is_empty() {
+        return unchanged();
+    }
+    attributed.sort_by_key(|c| std::cmp::Reverse(c.disk_range.start));
+    let mut disk_text = disk.to_string();
+    for c in &attributed {
+        disk_text.replace_range(c.disk_range.clone(), &baseline[c.baseline_range.clone()]);
+    }
+    let mut editor_attributed: Vec<ComponentKey> =
+        attributed.into_iter().map(|c| c.key.clone()).collect();
+    editor_attributed.sort_by(|a, b| a.ordinal.cmp(&b.ordinal).then(a.name.cmp(&b.name)));
+    EditorProvenanceProjection {
+        disk_text,
+        editor_attributed,
+    }
+}
+
+/// Fail-closed guard for [`project_disk_for_editor_provenance`]: `Some(reason)`
+/// when `merged` does not hold the authority's body for every component the
+/// provenance projection attributed to the editor's in-flight typing. Such a
+/// component must reach the authority only through the editor's own ops.
+pub fn merge_changes_editor_attributed(
+    authority: &str,
+    merged: &str,
+    attributed: &[ComponentKey],
+) -> Option<String> {
+    if attributed.is_empty() {
+        return None;
+    }
+    let Some(auth) = top_level_bodies(authority) else {
+        return Some("unparseable_authority".to_string());
+    };
+    let Some(merged_bodies) = top_level_bodies(merged) else {
+        return Some("unparseable_candidate".to_string());
+    };
+    let changed: Vec<String> = attributed
+        .iter()
+        .filter(|key| match (auth.get(*key), merged_bodies.get(*key)) {
+            (Some(a), Some(m)) => durable_body(authority, a) != durable_body(merged, m),
+            _ => true,
+        })
+        .map(ToString::to_string)
+        .collect();
+    (!changed.is_empty()).then(|| changed.join(","))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,6 +506,72 @@ mod tests {
             merge_mixes_component_versions(&b, &a, broken, &a).as_deref(),
             Some("unparseable_input")
         );
+    }
+
+    fn history_visitor<'a>(states: &'a [String]) -> impl FnOnce(&mut dyn FnMut(&str) -> bool) + 'a {
+        move |visit: &mut dyn FnMut(&str) -> bool| {
+            for state in states {
+                if !visit(state) {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// `#keylogrebase` residual: the authority has not received the typing
+    /// yet, the native save has. A disk-only component whose body is a state
+    /// of the editor's verified lineage reverts to the baseline, so the
+    /// in-flight ops land it exactly once.
+    #[test]
+    fn a_disk_only_component_on_the_editor_lineage_reverts_to_the_baseline() {
+        let b = doc("", "");
+        let typed = "- [ ] [#gh-fix] typed in the backlog\n";
+        let lineage = vec![b.clone(), doc("", "- [ ] [#gh-f"), doc("", typed)];
+        let a = b.clone(); // the authority's cut predates the typing
+        let d = doc("", typed);
+        let projection = project_disk_for_editor_provenance(&b, &a, &d, history_visitor(&lineage));
+        assert_eq!(projection.disk_text, b);
+        assert_eq!(
+            projection.editor_attributed,
+            vec![ComponentKey {
+                name: "backlog".into(),
+                ordinal: 0
+            }]
+        );
+    }
+
+    /// Reach: independent disk work is not on the lineage and still merges.
+    #[test]
+    fn independent_disk_work_is_not_attributed_to_the_editor() {
+        let b = doc("", "");
+        let lineage = vec![b.clone(), doc(DIX, "")];
+        let d = doc("", "- [ ] [#ind] independent\n");
+        let projection = project_disk_for_editor_provenance(&b, &b, &d, history_visitor(&lineage));
+        assert_eq!(projection.disk_text, d);
+        assert!(projection.editor_attributed.is_empty());
+    }
+
+    /// The stated residual: in-flight typing and independent work in ONE
+    /// component match no lineage state, so the component is left to the merge.
+    #[test]
+    fn a_component_mixing_typing_and_independent_work_is_left_to_the_merge() {
+        let b = doc("", "");
+        let typed = "- [ ] [#gh-fix] typed\n";
+        let lineage = vec![b.clone(), doc("", typed)];
+        let d = doc("", &format!("{typed}- [ ] [#ind] independent\n"));
+        let projection = project_disk_for_editor_provenance(&b, &b, &d, history_visitor(&lineage));
+        assert_eq!(projection.disk_text, d);
+        assert!(projection.editor_attributed.is_empty());
+    }
+
+    /// A component the authority changed is cut exclusivity's, never provenance's.
+    #[test]
+    fn provenance_never_touches_a_component_the_authority_changed() {
+        let (b, a, d) = (doc("", ""), doc(DIX, ""), doc(FIX, ""));
+        let lineage = vec![b.clone(), a.clone(), d.clone()];
+        let projection = project_disk_for_editor_provenance(&b, &a, &d, history_visitor(&lineage));
+        assert_eq!(projection.disk_text, d);
+        assert!(projection.editor_attributed.is_empty());
     }
 
     /// Exhaustive check over two cuts of one editor history: every pair of

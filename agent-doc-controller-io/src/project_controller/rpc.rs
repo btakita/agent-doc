@@ -21917,6 +21917,11 @@ enum EditorOpCaptureUpdate {
         ops_json: String,
         updated_ms: u64,
         event_nonce: String,
+        /// `#keylogrebase`: the editor's attestation of the text the burst was
+        /// typed into and the text it produced. Absent for producers that
+        /// supply none (they keep the legacy stamped-base rule).
+        #[serde(default)]
+        lineage: Option<agent_doc_state_backbone::EditorOpBurstLineage>,
     },
     Clear {
         event_nonce: String,
@@ -21968,24 +21973,49 @@ fn handle_editor_op_capture_update(
             ops_json,
             updated_ms,
             event_nonce,
+            lineage,
         } => {
             let mut incoming: Vec<serde_json::Value> =
                 serde_json::from_str(&ops_json).context("decode incoming editor-op batch")?;
             if incoming.is_empty() {
                 return Ok(false);
             }
-            let (epoch, complete_ops) = match current
+            let active = current
                 .as_ref()
-                .and_then(|document| document.document.editor_op_capture.as_ref())
-            {
-                Some(active) if active.base_hash == base_hash => {
+                .and_then(|document| document.document.editor_op_capture.as_ref());
+            // `#keylogrebase`: the epoch's base is the text the burst's offsets
+            // are relative to, decided by one shared rule for the controller and
+            // the cold path.
+            let plan = agent_doc_state_backbone::plan_editor_op_epoch_append(
+                active.map(|active| (active.base_hash.as_str(), active.tip_hash.as_str())),
+                &base_hash,
+                lineage.as_ref(),
+            );
+            let (epoch, complete_ops, base_hash, tip_hash) = match (plan, active) {
+                (
+                    agent_doc_state_backbone::EditorOpEpochAppend::Continue {
+                        base_hash,
+                        tip_hash,
+                    },
+                    Some(active),
+                ) => {
                     let mut complete: Vec<serde_json::Value> =
                         serde_json::from_str(&active.ops_json)
                             .context("decode active editor-op epoch")?;
                     complete.append(&mut incoming);
-                    (active.epoch, complete)
+                    (active.epoch, complete, base_hash, tip_hash)
                 }
-                _ => (generation.saturating_add(1), incoming),
+                (
+                    agent_doc_state_backbone::EditorOpEpochAppend::Continue {
+                        base_hash,
+                        tip_hash,
+                    }
+                    | agent_doc_state_backbone::EditorOpEpochAppend::Open {
+                        base_hash,
+                        tip_hash,
+                    },
+                    _,
+                ) => (generation.saturating_add(1), incoming, base_hash, tip_hash),
             };
             let event_id =
                 format!("editor-op-capture-checkpoint:{document_hash}:{epoch}:{event_nonce}");
@@ -21999,6 +22029,7 @@ fn handle_editor_op_capture_update(
                     ops_json: serde_json::to_string(&complete_ops)
                         .context("encode complete editor-op epoch")?,
                     updated_ms,
+                    tip_hash,
                 },
             )
         }
@@ -22037,6 +22068,7 @@ fn handle_editor_op_capture_update(
                     base_hash: active.base_hash.clone(),
                     ops_json: active.ops_json.clone(),
                     updated_ms,
+                    tip_hash: active.tip_hash.clone(),
                 },
             )
         }
@@ -49892,6 +49924,78 @@ mod tests {
             .unwrap();
         assert!(projected.document.editor_op_capture.is_none());
         assert_eq!(projected.document.editor_op_capture_generation, 2);
+    }
+
+    /// `#keylogrebase` on the live controller: an attested burst opens its
+    /// epoch at the text it was typed into, chains on the attested tip across a
+    /// change of the stamped merge baseline, and re-bases after a projection
+    /// fence instead of inheriting the lagging baseline's hash.
+    #[test]
+    fn editor_op_capture_update_bases_attested_bursts_on_their_pre_text() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/op-lineage.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let send = |payload: serde_json::Value| {
+            let request: ControllerRequest = serde_json::from_value(serde_json::json!({
+                "command": "editor_op_capture_update",
+                "file": doc,
+                "diagnostic_payload": serde_json::to_string(&payload).unwrap(),
+            }))
+            .unwrap();
+            handle_editor_op_capture_update(&bootstrap, &runtime, request).unwrap();
+        };
+        let append = |nonce: &str, stamped: &str, pre: &str, post: &str| {
+            serde_json::json!({
+                "action": "append",
+                "base_hash": stamped,
+                "ops_json": r#"[{"kind":"insert","offset":0,"text":"x"}]"#,
+                "updated_ms": 10,
+                "event_nonce": nonce,
+                "lineage": {"pre_hash": pre, "post_hash": post},
+            })
+        };
+        let active = || {
+            runtime
+                .document_state_projection(&document_hash)
+                .unwrap()
+                .and_then(|document| document.document.editor_op_capture)
+        };
+
+        // Compaction fenced the epoch; the editor stamps the stale baseline.
+        send(serde_json::json!({"action": "clear", "event_nonce": "fence"}));
+        send(append("one", "pre-compaction", "compacted", "t1"));
+        let capture = active().expect("attested burst opens an epoch");
+        assert_eq!(capture.base_hash, "compacted");
+        assert_eq!(capture.tip_hash, "t1");
+        let opened = capture.epoch;
+
+        // The commit advanced the baseline: the stamp changes, the chain holds.
+        send(append("two", "compacted", "t1", "t2"));
+        let capture = active().unwrap();
+        assert_eq!(capture.epoch, opened);
+        assert_eq!(capture.base_hash, "compacted");
+        assert_eq!(capture.tip_hash, "t2");
+        assert_eq!(
+            serde_json::from_str::<Vec<serde_json::Value>>(&capture.ops_json)
+                .unwrap()
+                .len(),
+            2
+        );
+
+        // An activity refresh keeps the tip.
+        send(serde_json::json!({"action": "touch", "updated_ms": 20, "event_nonce": "touch"}));
+        assert_eq!(active().unwrap().tip_hash, "t2");
+
+        // A burst that does not start at the tip re-bases on its own pre-text.
+        send(append("three", "compacted", "elsewhere", "t3"));
+        let capture = active().unwrap();
+        assert!(capture.epoch > opened);
+        assert_eq!(capture.base_hash, "elsewhere");
+        assert_eq!(capture.tip_hash, "t3");
     }
 
     /// `#editoropscheckpointfail`: during a typing burst the state-ingress lock

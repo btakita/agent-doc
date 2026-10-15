@@ -425,6 +425,12 @@ pub enum StateFact {
         base_hash: String,
         ops_json: String,
         updated_ms: u64,
+        /// `#keylogrebase`: SHA-256 of the editor text the epoch's ops produce
+        /// (`replay(base, ops)`), as the editor itself attested. Empty when a
+        /// producer supplied no lineage evidence, in which case the epoch
+        /// cannot be chained onto and is never treated as verified.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        tip_hash: String,
     },
     /// Clear the active editor-op epoch while retaining a monotonic epoch.
     EditorOpCaptureCleared { document_hash: String, epoch: u64 },
@@ -1878,6 +1884,7 @@ impl DocumentStateProjection {
                 base_hash,
                 ops_json,
                 updated_ms,
+                tip_hash,
                 ..
             } => {
                 if *epoch >= self.document.editor_op_capture_generation {
@@ -1888,6 +1895,7 @@ impl DocumentStateProjection {
                         base_hash: base_hash.clone(),
                         ops_json: ops_json.clone(),
                         updated_ms: *updated_ms,
+                        tip_hash: tip_hash.clone(),
                     };
                     self.document.last_editor_op_capture = Some(capture.clone());
                     self.document.editor_op_capture = Some(capture);
@@ -3384,6 +3392,80 @@ pub struct EditorOpCaptureProjection {
     /// Opaque serialized `Vec<EditorOp>` owned by op-capture I/O.
     pub ops_json: String,
     pub updated_ms: u64,
+    /// `#keylogrebase`: hash of `replay(base, ops)` as attested by the editor;
+    /// empty for an epoch recorded without lineage evidence.
+    #[serde(default)]
+    pub tip_hash: String,
+}
+
+/// Lineage evidence an editor attaches to one captured burst (`#keylogrebase`).
+///
+/// `pre_hash` is the SHA-256 of the editor text the burst's offsets are
+/// relative to (the buffer immediately before its first op); `post_hash` is
+/// the SHA-256 of the buffer after its last op. An epoch's `base_hash` used to
+/// be the merge baseline the editor looked up, which lags the editor whenever a
+/// non-operator projection (a compaction, an agent write) lands before its
+/// commit checkpoint. The ledger then carried offsets relative to one text
+/// under the hash of another (live 2026-10-15: `merge_base=97b41a5fa5b6` for
+/// ops typed into the compacted `c9a1a6...` buffer), so no consumer could ever
+/// replay it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorOpBurstLineage {
+    pub pre_hash: String,
+    pub post_hash: String,
+}
+
+/// How one incoming burst joins the editor-op ledger (`#keylogrebase`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditorOpEpochAppend {
+    /// Append to the active epoch; it keeps `base_hash` and advances to `tip_hash`.
+    Continue { base_hash: String, tip_hash: String },
+    /// Open a fresh epoch at `base_hash`, superseding any active one.
+    Open { base_hash: String, tip_hash: String },
+}
+
+/// Decide how a burst joins the ledger so the epoch's `base_hash` is always the
+/// text its offsets are relative to (`#keylogrebase`).
+///
+/// With lineage evidence the stamped base is irrelevant: the burst continues the
+/// active epoch only when that epoch's attested tip IS the burst's pre-text, and
+/// otherwise opens a fresh epoch based on the pre-text itself. Every consumer
+/// clear, projection fence, lost burst or restart therefore re-bases the ledger
+/// on the text the editor actually typed into, never on a hash looked up beside
+/// it. Without lineage (internal producers that know their base text, and older
+/// editor builds) the legacy rule applies and the resulting epoch has no tip, so
+/// it can never be chained onto or treated as verified.
+pub fn plan_editor_op_epoch_append(
+    active: Option<(&str, &str)>,
+    stamped_base_hash: &str,
+    lineage: Option<&EditorOpBurstLineage>,
+) -> EditorOpEpochAppend {
+    match lineage {
+        Some(lineage) => match active {
+            Some((base_hash, tip_hash)) if !tip_hash.is_empty() && tip_hash == lineage.pre_hash => {
+                EditorOpEpochAppend::Continue {
+                    base_hash: base_hash.to_string(),
+                    tip_hash: lineage.post_hash.clone(),
+                }
+            }
+            _ => EditorOpEpochAppend::Open {
+                base_hash: lineage.pre_hash.clone(),
+                tip_hash: lineage.post_hash.clone(),
+            },
+        },
+        None => match active {
+            Some((base_hash, _)) if base_hash == stamped_base_hash => {
+                EditorOpEpochAppend::Continue {
+                    base_hash: base_hash.to_string(),
+                    tip_hash: String::new(),
+                }
+            }
+            _ => EditorOpEpochAppend::Open {
+                base_hash: stamped_base_hash.to_string(),
+                tip_hash: String::new(),
+            },
+        },
+    }
 }
 
 /// The newest write that converged on a document.
@@ -10540,6 +10622,7 @@ mod tests {
             base_hash: "base-a".into(),
             ops_json: r#"[{"insert":"a"}]"#.into(),
             updated_ms: 10,
+            tip_hash: String::new(),
         });
         projection.apply_fact(&StateFact::EditorOpCaptureCheckpointed {
             document_hash: "doc".into(),
@@ -10548,6 +10631,7 @@ mod tests {
             base_hash: "base-b".into(),
             ops_json: r#"[{"insert":"b"}]"#.into(),
             updated_ms: 20,
+            tip_hash: String::new(),
         });
         projection.apply_fact(&StateFact::EditorOpCaptureCheckpointed {
             document_hash: "doc".into(),
@@ -10556,6 +10640,7 @@ mod tests {
             base_hash: "stale".into(),
             ops_json: "[]".into(),
             updated_ms: 30,
+            tip_hash: String::new(),
         });
 
         let active = projection
@@ -10576,6 +10661,89 @@ mod tests {
         assert_eq!(projection.rejected_stale_events.len(), 1);
     }
 
+    /// `#keylogrebase`: a burst with lineage evidence continues the active
+    /// epoch only from its attested tip, and otherwise opens an epoch based on
+    /// the text it was typed into -- never on the stamped merge baseline.
+    #[test]
+    fn editor_op_epoch_append_rebases_on_the_burst_pre_text() {
+        let lineage = |pre: &str, post: &str| EditorOpBurstLineage {
+            pre_hash: pre.into(),
+            post_hash: post.into(),
+        };
+        // Compaction closed the epoch; the baseline still names the
+        // pre-compaction text. The first burst opens at the compacted text.
+        assert_eq!(
+            plan_editor_op_epoch_append(None, "pre-compaction", Some(&lineage("compacted", "t1"))),
+            EditorOpEpochAppend::Open {
+                base_hash: "compacted".into(),
+                tip_hash: "t1".into()
+            }
+        );
+        // The next burst chains from the tip, whatever baseline is stamped.
+        assert_eq!(
+            plan_editor_op_epoch_append(
+                Some(("compacted", "t1")),
+                "committed-later",
+                Some(&lineage("t1", "t2"))
+            ),
+            EditorOpEpochAppend::Continue {
+                base_hash: "compacted".into(),
+                tip_hash: "t2".into()
+            }
+        );
+        // A burst that does not start at the tip (a lost burst, a fence the
+        // editor did not see) can never be appended: it re-bases on itself.
+        assert_eq!(
+            plan_editor_op_epoch_append(
+                Some(("compacted", "t2")),
+                "compacted",
+                Some(&lineage("elsewhere", "t3"))
+            ),
+            EditorOpEpochAppend::Open {
+                base_hash: "elsewhere".into(),
+                tip_hash: "t3".into()
+            }
+        );
+        // An epoch without an attested tip is never chained onto.
+        assert_eq!(
+            plan_editor_op_epoch_append(Some(("b", "")), "b", Some(&lineage("", "t"))),
+            EditorOpEpochAppend::Open {
+                base_hash: String::new(),
+                tip_hash: "t".into()
+            }
+        );
+        // Legacy producers keep the stamped-base rule and leave no tip.
+        assert_eq!(
+            plan_editor_op_epoch_append(Some(("b", "t")), "b", None),
+            EditorOpEpochAppend::Continue {
+                base_hash: "b".into(),
+                tip_hash: String::new()
+            }
+        );
+        assert_eq!(
+            plan_editor_op_epoch_append(Some(("b", "t")), "c", None),
+            EditorOpEpochAppend::Open {
+                base_hash: "c".into(),
+                tip_hash: String::new()
+            }
+        );
+    }
+
+    #[test]
+    fn editor_op_checkpoint_without_tip_round_trips_legacy_payloads() {
+        let legacy = r#"{"type":"editor_op_capture_checkpointed","document_hash":"d","canonical_path":"/p","epoch":1,"base_hash":"b","ops_json":"[]","updated_ms":1}"#;
+        let fact: StateFact = serde_json::from_str(legacy).expect("legacy payload decodes");
+        match &fact {
+            StateFact::EditorOpCaptureCheckpointed { tip_hash, .. } => assert!(tip_hash.is_empty()),
+            other => panic!("unexpected fact {other:?}"),
+        }
+        assert_eq!(
+            serde_json::to_string(&fact).unwrap(),
+            legacy,
+            "an untipped checkpoint must serialize byte-identically to the legacy shape"
+        );
+    }
+
     #[test]
     fn abandoning_cycle_atomically_clears_editor_op_epoch() {
         let mut projection = DocumentStateProjection::new("doc");
@@ -10586,6 +10754,7 @@ mod tests {
             base_hash: "base".into(),
             ops_json: "[]".into(),
             updated_ms: 10,
+            tip_hash: String::new(),
         });
         projection.apply_fact(&StateFact::CycleAbandoned {
             document_hash: "doc".into(),

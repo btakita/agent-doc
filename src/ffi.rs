@@ -1649,8 +1649,17 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
 
 /// Record an ordered editor-op burst in one bounded state-ledger transaction.
 ///
-/// `ops_json` is a JSON array of [`agent_doc_merge::crdt::EditorOp`] values,
-/// e.g. `[{"kind":"insert","offset":3,"text":"x"}]`. Returns `1` when the
+/// `ops_json` is either a JSON array of [`agent_doc_merge::crdt::EditorOp`]
+/// values, e.g. `[{"kind":"insert","offset":3,"text":"x"}]` (legacy, no lineage
+/// evidence), or a lineage-attested burst (`#keylogrebase`):
+/// `{"pre_hash":"<sha256 of the buffer before the first op>",
+///   "post_hash":"<sha256 of the buffer after the last op>","ops":[...]}`.
+/// With lineage the ledger labels the ops with the text they were typed into
+/// (`pre_hash`) unless they continue the active epoch from exactly its attested
+/// tip; `base_hash` is then only the editor's view of the merge baseline. That
+/// view lags the editor after every non-operator projection until the next
+/// commit checkpoint, which is how a compaction left the ledger labelled with
+/// the pre-compaction hash (`merge_base=97b41a5fa5b6`, 2026-10-15). Returns `1` when the
 /// complete batch was durably recorded, or was retained for in-order retry by
 /// the binary after a transient controller/store failure
 /// (`#editoropscheckpointfail`), and `0` on malformed input or a definitive
@@ -1676,7 +1685,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
         );
         return 0;
     };
-    let Ok(ops) = serde_json::from_str::<Vec<agent_doc_merge::crdt::EditorOp>>(ops_json) else {
+    let Some((ops, lineage)) = parse_editor_ops_batch_json(ops_json) else {
         eprintln!(
             "[op-capture] agent_doc_record_editor_ops_json: malformed ops JSON; ignoring batch"
         );
@@ -1694,7 +1703,13 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
     // tests — could be satisfied ONLY by the one-op FFI the JetBrains TypingTracker
     // never calls. Same false-negative shape as `#opcaptureverifybatchproducer`.
     let op_log_summary = agent_doc_merge::crdt::summarize_editor_ops_for_log(&ops);
-    match agent_doc_op_capture_io::record_editor_ops_retaining(&file_path_buf, base, ops) {
+    let base_receipt = agent_doc_op_capture_io::editor_ops_base_receipt(base, lineage.as_ref());
+    match agent_doc_op_capture_io::record_editor_ops_retaining_with_lineage(
+        &file_path_buf,
+        base,
+        ops,
+        lineage,
+    ) {
         Ok(agent_doc_op_capture_io::EditorOpsRecordOutcome::Retained {
             pending_batches,
             cause,
@@ -1705,8 +1720,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
             agent_doc_ops_log_io::log_op(
                 &file_path_buf,
                 &format!(
-                    "editor_ops_retained count={op_count} base={} pending={pending_batches} transaction=batch cause={cause} #qbasehashmemo #editoropscheckpointfail",
-                    base.get(..12).unwrap_or(base),
+                    "editor_ops_retained count={op_count} {base_receipt} pending={pending_batches} transaction=batch cause={cause} #qbasehashmemo #editoropscheckpointfail",
                 ),
             );
             1
@@ -1715,8 +1729,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
             agent_doc_ops_log_io::log_op(
                 &file_path_buf,
                 &format!(
-                    "editor_ops_recorded count={op_count} base={} transaction=batch {op_log_summary} #qbasehashmemo",
-                    base.get(..12).unwrap_or(base),
+                    "editor_ops_recorded count={op_count} {base_receipt} transaction=batch {op_log_summary} #qbasehashmemo",
                 ),
             );
             1
@@ -1729,6 +1742,47 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
                 ),
             );
             0
+        }
+    }
+}
+
+/// Decode the `ops_json` argument of [`agent_doc_record_editor_ops_json`]: a
+/// bare op array (legacy, no lineage) or a lineage-attested burst object
+/// (`#keylogrebase`). `None` when it is neither, or when an attested burst
+/// leaves either hash empty -- an attestation that names no text proves nothing.
+fn parse_editor_ops_batch_json(
+    ops_json: &str,
+) -> Option<(
+    Vec<agent_doc_merge::crdt::EditorOp>,
+    Option<agent_doc_state_backbone::EditorOpBurstLineage>,
+)> {
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Batch {
+        Legacy(Vec<agent_doc_merge::crdt::EditorOp>),
+        Attested {
+            pre_hash: String,
+            post_hash: String,
+            ops: Vec<agent_doc_merge::crdt::EditorOp>,
+        },
+    }
+    match serde_json::from_str::<Batch>(ops_json).ok()? {
+        Batch::Legacy(ops) => Some((ops, None)),
+        Batch::Attested {
+            pre_hash,
+            post_hash,
+            ops,
+        } => {
+            if pre_hash.is_empty() || post_hash.is_empty() {
+                return None;
+            }
+            Some((
+                ops,
+                Some(agent_doc_state_backbone::EditorOpBurstLineage {
+                    pre_hash,
+                    post_hash,
+                }),
+            ))
         }
     }
 }
@@ -4610,6 +4664,67 @@ mod tests {
             delta.contains("\"ops\":[]"),
             "caller-current delta must be empty: {delta}"
         );
+    }
+
+    #[test]
+    fn record_editor_ops_json_ffi_bases_an_attested_burst_on_its_pre_text() {
+        // `#keylogrebase`: the JetBrains reporter stamps the merge baseline its
+        // memo resolved, which lags the buffer after a compaction. An attested
+        // burst must be labelled by the text it was typed into instead, and the
+        // receipt must say both so the window is visible in ops.log.
+        use agent_doc_op_capture_io as op_capture;
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let stale_baseline = "pre-compaction text with a long history\n";
+        let typed_into = "compacted\n";
+        let ops = vec![agent_doc_merge::crdt::EditorOp::Insert {
+            offset: 0,
+            text: "- ".into(),
+        }];
+        let after = agent_doc_merge::crdt::replay_editor_ops(typed_into, &ops).unwrap();
+        let attested = serde_json::json!({
+            "pre_hash": agent_doc_hash::content_hash(typed_into),
+            "post_hash": agent_doc_hash::content_hash(&after),
+            "ops": ops,
+        });
+        let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+        let base_c = CString::new(agent_doc_hash::content_hash(stale_baseline)).unwrap();
+        let ops_c = CString::new(attested.to_string()).unwrap();
+        let rc = unsafe {
+            agent_doc_record_editor_ops_json(file_c.as_ptr(), base_c.as_ptr(), ops_c.as_ptr())
+        };
+        assert_eq!(rc, 1, "an attested burst must record");
+        assert!(
+            op_capture::editor_ops_for_base(&doc, stale_baseline)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            op_capture::verified_editor_ops_for_base(&doc, typed_into).unwrap(),
+            Some(ops)
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let receipt = log
+            .lines()
+            .find(|line| line.contains("editor_ops_recorded count=1"))
+            .expect("recorded receipt");
+        assert!(
+            receipt.contains(&format!(
+                "lineage_pre={}",
+                &agent_doc_hash::content_hash(typed_into)[..12]
+            )) && receipt.contains("#keylogrebase"),
+            "{receipt}"
+        );
+
+        // An attestation that names no text is malformed, not a legacy batch.
+        let empty = CString::new(r#"{"pre_hash":"","post_hash":"x","ops":[]}"#).unwrap();
+        let rc = unsafe {
+            agent_doc_record_editor_ops_json(file_c.as_ptr(), base_c.as_ptr(), empty.as_ptr())
+        };
+        assert_eq!(rc, 0);
     }
 
     #[test]

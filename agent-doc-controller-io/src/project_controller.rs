@@ -22301,6 +22301,7 @@ revised operator request
                 base_hash: "base".to_string(),
                 ops_json: "[]".to_string(),
                 updated_ms: 15_000,
+                tip_hash: String::new(),
             },
         );
 

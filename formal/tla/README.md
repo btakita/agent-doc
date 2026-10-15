@@ -241,10 +241,22 @@ cut, GH #198 / `opcutahead`) and `AdmissionCutExclusivityInflightWedge.cfg`
 The shipped rule, CutExclusivity (a component both planes changed takes the
 authority's version), holds `NoDuplicateInConcurrentComponent` and
 `ConvergesConcurrent`. `AdmissionCutExclusivityReach.cfg` must show independent
-disk work in a component the authority left alone still lands, and
-`AdmissionCutExclusivityResidual.cfg` must violate the all-component
-`NoDuplicateItem`: a disk-only component's in-flight typing is the stated
-boundary a text-only rule cannot close.
+disk work in a component the authority left alone still lands.
+
+A disk-only component's in-flight typing is the boundary a text-only rule
+cannot close (`AdmissionCutExclusivityResidualTextOnly.cfg` must violate
+`NoDuplicateWhenCovered`). `#keylogrebase` closes it with provenance: policy
+`provenance` reverts disk's body of a component only disk changed when that body
+is a replay state of the editor's op ledger and the replay passes through the
+authority's cut. `AdmissionCutExclusivityResidual.cfg` holds
+`NoDuplicateWhenCovered` and `ConvergesAttributed` with a correctly based ledger
+that covers both cuts. `AdmissionCutExclusivityResidualMislabelled.cfg`
+(`LedgerBased = FALSE`, the 2026-10-15 ledger stamped with the pre-compaction
+merge baseline) must violate it, so the ledger fix carries the claim.
+`AdmissionCutExclusivityBoundary.cfg` must still violate the all-case
+`NoDuplicateItem`: a ledger that does not yet hold the saved keystrokes, or one
+component holding both the editor's typing and independent work, remains the
+stated boundary.
 
 `RemoteLayoutProvisional.tla` checks the recurring Coder/Remote Dev ordering
 race from GH #250. It exhausts every ordered two-column layout over four

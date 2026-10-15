@@ -110,6 +110,9 @@ pub struct OpCaptureState {
     pub ops: Vec<EditorOp>,
     /// Last-update wall-clock (ms since epoch), best-effort, for GC.
     pub updated_ms: u64,
+    /// `#keylogrebase`: SHA-256 of `replay(base, ops)` as the editor attested
+    /// it. Empty when the epoch was recorded without lineage evidence.
+    pub tip_hash: String,
 }
 
 fn state_db_identity(doc: &Path) -> Result<(PathBuf, String, String)> {
@@ -140,6 +143,7 @@ fn decode_capture(
         base_hash: capture.base_hash.clone(),
         ops,
         updated_ms: capture.updated_ms,
+        tip_hash: capture.tip_hash.clone(),
     })
 }
 
@@ -367,6 +371,7 @@ pub fn refresh_op_capture_activity(doc: &Path) -> Result<bool> {
             base_hash: active.base_hash.clone(),
             ops_json: active.ops_json.clone(),
             updated_ms,
+            tip_hash: active.tip_hash.clone(),
         },
     );
     let payload_json = serde_json::to_string(&event)?;
@@ -396,6 +401,9 @@ struct EditorOpsBatch {
     ops: Vec<EditorOp>,
     updated_ms: u64,
     nonce: String,
+    /// `#keylogrebase`: the editor's attestation of the text the burst was
+    /// typed into and the text it produced; `None` for legacy producers.
+    lineage: Option<agent_doc_state_backbone::EditorOpBurstLineage>,
 }
 
 /// Why one append attempt did not record its batch.
@@ -439,6 +447,7 @@ pub fn record_editor_ops(doc: &Path, base_hash: &str, ops: Vec<EditorOp>) -> Res
         ops,
         updated_ms: now_millis(),
         nonce: event_nonce(),
+        lineage: None,
     };
     append_editor_ops_batch(doc, &batch, EDITOR_OP_CAPTURE_BUSY_TIMEOUT)
         .map_err(AppendAttemptError::into_error)
@@ -457,13 +466,18 @@ fn append_editor_ops_batch(
         .map_err(AppendAttemptError::Rejected)?;
     let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
     if controller_socket.exists() && !agent_doc_state_wire::in_controller_request() {
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "action": "append",
             "base_hash": batch.base_hash,
             "ops_json": ops_json,
             "updated_ms": batch.updated_ms,
             "event_nonce": batch.nonce,
         });
+        if let Some(lineage) = &batch.lineage {
+            payload["lineage"] = serde_json::to_value(lineage)
+                .context("encode editor-op burst lineage")
+                .map_err(AppendAttemptError::Rejected)?;
+        }
         let request = serde_json::json!({
             "command": "editor_op_capture_update",
             "file": doc,
@@ -541,9 +555,39 @@ fn append_editor_ops_batch_cold(
             (generation, active)
         }
     };
-    let (epoch, mut complete_ops) = match existing {
-        Some(existing) if existing.base_hash == batch.base_hash => (existing.epoch, existing.ops),
-        _ => (generation.saturating_add(1), Vec::new()),
+    // `#keylogrebase`: one shared rule with the controller decides whether the
+    // burst continues the active epoch or re-bases on the text it was typed into.
+    let plan = agent_doc_state_backbone::plan_editor_op_epoch_append(
+        existing
+            .as_ref()
+            .map(|existing| (existing.base_hash.as_str(), existing.tip_hash.as_str())),
+        &batch.base_hash,
+        batch.lineage.as_ref(),
+    );
+    let (epoch, mut complete_ops, base_hash, tip_hash) = match (plan, existing) {
+        (
+            agent_doc_state_backbone::EditorOpEpochAppend::Continue {
+                base_hash,
+                tip_hash,
+            },
+            Some(existing),
+        ) => (existing.epoch, existing.ops, base_hash, tip_hash),
+        (
+            agent_doc_state_backbone::EditorOpEpochAppend::Continue {
+                base_hash,
+                tip_hash,
+            }
+            | agent_doc_state_backbone::EditorOpEpochAppend::Open {
+                base_hash,
+                tip_hash,
+            },
+            _,
+        ) => (
+            generation.saturating_add(1),
+            Vec::new(),
+            base_hash,
+            tip_hash,
+        ),
     };
     complete_ops.extend(batch.ops.iter().cloned());
     let event = agent_doc_state_backbone::StateEvent::new(
@@ -555,9 +599,10 @@ fn append_editor_ops_batch_cold(
             document_hash: document_hash.to_string(),
             canonical_path,
             epoch,
-            base_hash: batch.base_hash.clone(),
+            base_hash,
             ops_json: serde_json::to_string(&complete_ops)?,
             updated_ms: batch.updated_ms,
+            tip_hash,
         },
     );
     let payload_json = serde_json::to_string(&event)?;
@@ -659,14 +704,38 @@ pub fn record_editor_ops_retaining(
     base_hash: &str,
     ops: Vec<EditorOp>,
 ) -> Result<EditorOpsRecordOutcome> {
+    record_editor_ops_retaining_with_lineage(doc, base_hash, ops, None)
+}
+
+/// [`record_editor_ops_retaining`] for a burst that carries the editor's
+/// lineage attestation (`#keylogrebase`).
+///
+/// With `lineage`, the ledger's epoch base is the burst's `pre_hash` (the text
+/// its offsets are relative to) unless the burst continues the active epoch
+/// from exactly its attested tip; `base_hash` is then only the editor's view of
+/// the merge baseline and never labels the ops. Retained bursts keep their
+/// lineage, so a re-send after a controller stall chains exactly as the first
+/// attempt would have.
+pub fn record_editor_ops_retaining_with_lineage(
+    doc: &Path,
+    base_hash: &str,
+    ops: Vec<EditorOp>,
+    lineage: Option<agent_doc_state_backbone::EditorOpBurstLineage>,
+) -> Result<EditorOpsRecordOutcome> {
     if ops.is_empty() {
         return Ok(EditorOpsRecordOutcome::Recorded);
+    }
+    if let Some(lineage) = &lineage
+        && (lineage.pre_hash.is_empty() || lineage.post_hash.is_empty())
+    {
+        anyhow::bail!("editor-op burst lineage must name both its pre and post text hashes");
     }
     let batch = EditorOpsBatch {
         base_hash: base_hash.to_string(),
         ops,
         updated_ms: now_millis(),
         nonce: event_nonce(),
+        lineage,
     };
     let key = retained_key(doc);
     let store = retained_editor_ops();
@@ -738,6 +807,29 @@ pub fn record_editor_ops_retaining(
         store.changed.notify_all();
     }
     outcome
+}
+
+/// The `base=` field of an `editor_ops_recorded` receipt (`#keylogrebase`).
+///
+/// A burst with lineage evidence is labelled by the text it was typed into, so
+/// the receipt names that (`lineage_pre=`/`lineage_post=`) beside the merge
+/// baseline the editor looked up. The two differing is not an error: it is
+/// exactly the window after a non-operator projection and before its commit
+/// checkpoint, in which the old ledger mislabelled every burst.
+pub fn editor_ops_base_receipt(
+    stamped_base_hash: &str,
+    lineage: Option<&agent_doc_state_backbone::EditorOpBurstLineage>,
+) -> String {
+    let short = |hash: &str| hash.get(..12).unwrap_or(hash).to_string();
+    match lineage {
+        Some(lineage) => format!(
+            "base={} lineage_pre={} lineage_post={} #keylogrebase",
+            short(stamped_base_hash),
+            short(&lineage.pre_hash),
+            short(&lineage.post_hash)
+        ),
+        None => format!("base={} lineage=none", short(stamped_base_hash)),
+    }
 }
 
 /// Bursts retained for `doc` that the controller has not yet acknowledged.
@@ -842,16 +934,12 @@ fn run_retained_editor_ops_drainer() {
             continue;
         }
         let summary = agent_doc_merge::crdt::summarize_editor_ops_for_log(&batch.ops);
-        let base = batch
-            .base_hash
-            .get(..12)
-            .unwrap_or(&batch.base_hash)
-            .to_string();
+        let base = editor_ops_base_receipt(&batch.base_hash, batch.lineage.as_ref());
         let line = match attempt {
             Ok(()) => {
                 let head = queue.pop_front().expect("head checked above");
                 Some(format!(
-                    "editor_ops_recorded count={} base={base} transaction=batch {summary} retained_retry=true attempts={} retained_ms={} #qbasehashmemo #editoropscheckpointfail",
+                    "editor_ops_recorded count={} {base} transaction=batch {summary} retained_retry=true attempts={} retained_ms={} #qbasehashmemo #editoropscheckpointfail",
                     batch.ops.len(),
                     head.attempts + 1,
                     head.retained_at.elapsed().as_millis(),
@@ -985,6 +1073,38 @@ pub fn editor_ops_for_base_or_retained(
         return Ok(None);
     }
     Ok(Some(capture.ops))
+}
+
+/// Editor ops for `base_text` whose lineage the editor attested end to end
+/// (`#keylogrebase`).
+///
+/// Unlike [`editor_ops_for_base_or_retained`], which trusts any epoch stamped
+/// with the base's hash, this returns ops only when the epoch carries an
+/// attested tip AND replaying the ops onto `base_text` reproduces that tip
+/// exactly. A ledger labelled with the wrong base (the pre-`#keylogrebase`
+/// failure: offsets typed into the compacted buffer under the hash of the
+/// pre-compaction baseline) cannot satisfy both, so a caller that acts on
+/// provenance -- not merely on a replay that happens to apply -- reads `None`
+/// and keeps the provenance-free behaviour. The active epoch is preferred; the
+/// retained checkpoint covers an epoch already fenced by a projection.
+pub fn verified_editor_ops_for_base(doc: &Path, base_text: &str) -> Result<Option<Vec<EditorOp>>> {
+    let base_hash = content_hash(base_text);
+    for capture in [load_op_capture(doc)?, load_last_op_capture(doc)?]
+        .into_iter()
+        .flatten()
+    {
+        if capture.ops.is_empty() || capture.tip_hash.is_empty() || capture.base_hash != base_hash {
+            continue;
+        }
+        let Some(tip_text) = agent_doc_merge::crdt::replay_editor_ops(base_text, &capture.ops)
+        else {
+            continue;
+        };
+        if content_hash(&tip_text) == capture.tip_hash {
+            return Ok(Some(capture.ops));
+        }
+    }
+    Ok(None)
 }
 
 /// Replay the newest durable editor operation checkpoint when, and only when,
@@ -1491,6 +1611,188 @@ mod tests {
         );
     }
 
+    /// The editor's side of a quiet-boundary hand-over: a burst typed into
+    /// `pre` that produced `post`, attested by hash (`#keylogrebase`).
+    fn attest(
+        pre: &str,
+        ops: &[EditorOp],
+    ) -> (String, agent_doc_state_backbone::EditorOpBurstLineage) {
+        let post = agent_doc_merge::crdt::replay_editor_ops(pre, ops).expect("burst applies");
+        let lineage = agent_doc_state_backbone::EditorOpBurstLineage {
+            pre_hash: content_hash(pre),
+            post_hash: content_hash(&post),
+        };
+        (post, lineage)
+    }
+
+    fn insert(offset: usize, text: &str) -> EditorOp {
+        EditorOp::Insert {
+            offset,
+            text: text.into(),
+        }
+    }
+
+    fn record_attested(
+        doc: &Path,
+        stamped_merge_base: &str,
+        ops: Vec<EditorOp>,
+        lineage: agent_doc_state_backbone::EditorOpBurstLineage,
+    ) {
+        let outcome =
+            record_editor_ops_retaining_with_lineage(doc, stamped_merge_base, ops, Some(lineage))
+                .unwrap();
+        assert_eq!(outcome, EditorOpsRecordOutcome::Recorded);
+    }
+
+    /// `#keylogrebase` regression, replaying the 2026-10-15 16:29:43Z sequence:
+    /// a compaction (a non-operator projection) closes the epoch while the
+    /// merge baseline still names the pre-compaction text, the operator keeps
+    /// typing into the compacted buffer, and the commit later advances the
+    /// baseline to the compacted text. The old ledger stamped the burst with
+    /// the lagging baseline (`merge_base=97b41a5fa5b6`) and then reset the
+    /// epoch when the baseline advanced; the ledger was never replayable onto
+    /// the text its offsets were relative to. It must be based on exactly that
+    /// text, survive the baseline change, and give admission a verified proof.
+    #[test]
+    fn epoch_reopened_after_a_compaction_is_based_on_the_compacted_text() {
+        let (_dir, doc) = setup_doc();
+        let pre_compaction = "# plan\n\n<!-- agent:exchange -->\nlong history\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        let compacted = "# plan\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        let stale_merge_base = content_hash(pre_compaction);
+
+        // Typing before the compaction belongs to the pre-compaction epoch.
+        let early = vec![insert(pre_compaction.find("long").unwrap(), "x")];
+        let (_, lineage) = attest(pre_compaction, &early);
+        record_attested(&doc, &stale_merge_base, early, lineage);
+        assert_eq!(
+            load_op_capture(&doc).unwrap().unwrap().base_hash,
+            stale_merge_base
+        );
+
+        // Compaction: a non-operator projection fences the epoch. The merge
+        // baseline is NOT yet advanced (the compaction's commit is retained).
+        clear_op_capture_for_editor_projection(&doc).unwrap();
+        assert!(load_op_capture(&doc).unwrap().is_none());
+
+        // The operator types into the COMPACTED buffer; the editor still
+        // stamps the lagging merge baseline beside its attestation.
+        let queue_at = compacted.find("<!-- /agent:queue -->").unwrap();
+        let burst1 = vec![insert(queue_at, "- #gh-dix")];
+        let (after1, lineage1) = attest(compacted, &burst1);
+        record_attested(&doc, &stale_merge_base, burst1.clone(), lineage1);
+        let reopened = load_op_capture(&doc).unwrap().unwrap();
+        assert_eq!(
+            reopened.base_hash,
+            content_hash(compacted),
+            "the reopened ledger must be based on the text its offsets are relative to, \
+             not the lagging merge baseline"
+        );
+        assert_ne!(reopened.base_hash, stale_merge_base);
+
+        // The commit advances the merge baseline to the compacted text; the
+        // next burst stamps THAT. It must continue the same epoch from its tip,
+        // not reset it and drop the burst above.
+        let fix_at = after1.find("dix").unwrap();
+        let burst2 = vec![
+            EditorOp::Delete {
+                offset: fix_at,
+                len: 3,
+            },
+            insert(fix_at, "fix https://x/issues/268\n"),
+        ];
+        let (after2, lineage2) = attest(&after1, &burst2);
+        record_attested(&doc, &content_hash(compacted), burst2.clone(), lineage2);
+        let epoch = load_op_capture(&doc).unwrap().unwrap();
+        assert_eq!(
+            epoch.epoch, reopened.epoch,
+            "the baseline change must not reset the epoch"
+        );
+        assert_eq!(epoch.base_hash, content_hash(compacted));
+        assert_eq!(epoch.ops.len(), burst1.len() + burst2.len());
+        assert_eq!(epoch.tip_hash, content_hash(&after2));
+
+        // Admission's provenance read: verified against the compacted
+        // baseline, and NOT available against the stale pre-compaction one.
+        let verified = verified_editor_ops_for_base(&doc, compacted)
+            .unwrap()
+            .expect("a correctly based, attested epoch is verified provenance");
+        assert_eq!(
+            agent_doc_merge::crdt::replay_editor_ops(compacted, &verified).as_deref(),
+            Some(after2.as_str())
+        );
+        assert!(
+            verified_editor_ops_for_base(&doc, pre_compaction)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            editor_ops_for_base(&doc, pre_compaction).unwrap().is_none(),
+            "no consumer may find these ops under the pre-compaction hash"
+        );
+    }
+
+    /// `#keylogrebase` fail-closed: a burst that does not start at the active
+    /// epoch's attested tip (a burst lost or refused in between, or a fence the
+    /// editor never saw) can never be appended, whatever base it is stamped
+    /// with. It opens an epoch based on its own pre-text instead.
+    #[test]
+    fn a_burst_that_does_not_start_at_the_tip_rebases_instead_of_appending() {
+        let (_dir, doc) = setup_doc();
+        let base = "alpha\n";
+        let burst1 = vec![insert(0, "1")];
+        let (after1, lineage1) = attest(base, &burst1);
+        record_attested(&doc, &content_hash(base), burst1, lineage1);
+        let first = load_op_capture(&doc).unwrap().unwrap();
+
+        // A burst typed into a text the ledger never saw (the "2" burst was lost).
+        let skipped = format!("2{after1}");
+        let burst3 = vec![insert(0, "3")];
+        let (after3, lineage3) = attest(&skipped, &burst3);
+        record_attested(&doc, &content_hash(base), burst3.clone(), lineage3);
+        let rebased = load_op_capture(&doc).unwrap().unwrap();
+        assert!(rebased.epoch > first.epoch);
+        assert_eq!(rebased.base_hash, content_hash(&skipped));
+        assert_eq!(rebased.ops, burst3);
+        assert!(verified_editor_ops_for_base(&doc, base).unwrap().is_none());
+        assert!(
+            verified_editor_ops_for_base(&doc, &skipped)
+                .unwrap()
+                .is_some(),
+            "{after3}"
+        );
+    }
+
+    /// A legacy producer (no attestation) keeps the stamped-base rule, but its
+    /// epoch carries no tip, so it is never verified provenance -- the
+    /// mislabelled ledger the compaction produced cannot be mistaken for one.
+    #[test]
+    fn a_legacy_mislabelled_epoch_is_never_verified() {
+        let (_dir, doc) = setup_doc();
+        let stale = "stale baseline text\n";
+        record_editor_ops(&doc, &content_hash(stale), vec![insert(3, "typed")]).unwrap();
+        assert!(editor_ops_for_base(&doc, stale).unwrap().is_some());
+        assert!(verified_editor_ops_for_base(&doc, stale).unwrap().is_none());
+        assert!(load_op_capture(&doc).unwrap().unwrap().tip_hash.is_empty());
+    }
+
+    /// An attestation that names no text is refused, never recorded unlabelled.
+    #[test]
+    fn an_empty_attestation_is_refused() {
+        let (_dir, doc) = setup_doc();
+        let err = record_editor_ops_retaining_with_lineage(
+            &doc,
+            "base",
+            vec![insert(0, "x")],
+            Some(agent_doc_state_backbone::EditorOpBurstLineage {
+                pre_hash: String::new(),
+                post_hash: "p".into(),
+            }),
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("pre and post"));
+        assert!(load_op_capture(&doc).unwrap().is_none());
+    }
+
     #[test]
     fn record_against_new_base_resets_epoch() {
         let (_dir, doc) = setup_doc();
@@ -1954,6 +2256,7 @@ mod tests {
                 base_hash: capture.base_hash,
                 ops_json: serde_json::to_string(&capture.ops).unwrap(),
                 updated_ms: 0,
+                tip_hash: capture.tip_hash,
             },
         );
         let payload_json = serde_json::to_string(&event).unwrap();

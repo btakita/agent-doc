@@ -30,4 +30,25 @@ class JetBrainsEditorSurfaceTest {
     fun `old controller receipt is ignored`() {
         assertNull(parseTerminalSurfaceDecision("""{"intent":{"kind":"idle"},"idle":true}"""))
     }
+
+    @Test
+    fun `current detached surface augments lagging window enumeration`() {
+        assertEquals(
+            setOf("main-frame", "frame-detached"),
+            JetBrainsEditorSurfaces.authoritativeLiveSurfaceIds(
+                setOf("main-frame"),
+                "frame-detached",
+            ),
+        )
+    }
+
+    @Test
+    fun `missing backend windows remain unknown despite a current surface hint`() {
+        assertNull(
+            JetBrainsEditorSurfaces.authoritativeLiveSurfaceIds(
+                null,
+                "frame-detached",
+            ),
+        )
+    }
 }

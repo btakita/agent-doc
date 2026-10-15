@@ -62,11 +62,41 @@ internal object JetBrainsEditorSurfaces {
      * empty backend window list is absence of evidence, not evidence that every retained endpoint
      * closed.
      */
-    fun liveSurfaceIds(project: Project): Set<String>? =
-        FileEditorManagerEx.getInstanceEx(project).windows
-            .takeIf { it.isNotEmpty() }
-            ?.map { forEditorWindow(project, it).surfaceId }
-            ?.toSet()
+    fun liveSurfaceIds(
+        project: Project,
+        publishedSurfaceId: String? = null,
+    ): Set<String>? {
+        val manager = FileEditorManagerEx.getInstanceEx(project)
+        val enumeratedSurfaceIds =
+            manager.windows
+                .takeIf { it.isNotEmpty() }
+                ?.map { forEditorWindow(project, it).surfaceId }
+                ?.toSet()
+        val currentSurfaceId =
+            manager.currentWindow?.let { forEditorWindow(project, it).surfaceId }
+        return authoritativeLiveSurfaceIds(
+            enumeratedSurfaceIds,
+            currentSurfaceId,
+            publishedSurfaceId,
+        )
+    }
+
+    /**
+     * A current/published surface is authoritative positive liveness evidence even when IDEA's
+     * `windows` snapshot has not caught up with a detached frame. An absent backend snapshot stays
+     * unknown so Remote Dev frontend-owned surfaces are never retired from negative evidence.
+     */
+    internal fun authoritativeLiveSurfaceIds(
+        enumeratedSurfaceIds: Set<String>?,
+        vararg currentSurfaceIds: String?,
+    ): Set<String>? {
+        val live = enumeratedSurfaceIds?.toMutableSet() ?: return null
+        currentSurfaceIds
+            .filterNotNull()
+            .filter(String::isNotBlank)
+            .forEach(live::add)
+        return live
+    }
 
     fun belongsToAnyEditorSurface(project: Project, component: Component?): Boolean {
         if (component == null) return false

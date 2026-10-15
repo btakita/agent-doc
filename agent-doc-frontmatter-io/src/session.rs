@@ -64,38 +64,40 @@ pub fn parse_for_file_with_context<'a>(
 
 /// Resolve the prompt presets visible to a concrete project document.
 ///
-/// The nearest agent-doc project root contributes defaults from
-/// `.agent-doc/project.md`; declarations in `content` override those defaults by
-/// name. The project file is read on every call, so edits apply to every existing
-/// document without copying or synchronizing frontmatter into those documents.
-/// A missing project file is equivalent to no defaults. Other read failures and
-/// malformed project frontmatter fail closed with the project-file path in the
-/// error. Root discovery never continues above the nearest project boundary.
+/// Every agent-doc project root from the nearest root through its ancestors
+/// contributes defaults from `.agent-doc/project.md`. Nearer project declarations
+/// overlay farther ancestors, and declarations in `content` overlay every project
+/// default by name. Project files are read on every call, so edits apply to every
+/// existing document without copying or synchronizing frontmatter into those
+/// documents. Missing project files are skipped. Other read failures and malformed
+/// project frontmatter fail closed with the project-file path in the error.
 pub fn effective_prompt_presets_for_file(content: &str, file: &Path) -> Result<PromptPresets> {
     let display = file.display().to_string();
     let mut local = agent_doc_frontmatter::frontmatter::parse(content)
         .map_err(|err| contextualize_parse_error(&display, err))?
         .0
         .prompt_presets;
-    if let Some(root) = agent_doc_project_config_io::project_root_for_doc(file) {
-        let project_file = root.join(".agent-doc").join("project.md");
-        let project_content = match std::fs::read_to_string(&project_file) {
-            Ok(content) => Some(content),
-            Err(err) if err.kind() == ErrorKind::NotFound => None,
-            Err(err) => {
-                anyhow::bail!(
-                    "failed to read project preset file {}: {err}",
-                    project_file.display()
-                );
+    if let Some(nearest_root) = agent_doc_project_config_io::project_root_for_doc(file) {
+        for root in agent_doc_fs::ancestors_within_root_ceiling(&nearest_root) {
+            let project_file = root.join(".agent-doc").join("project.md");
+            let project_content = match std::fs::read_to_string(&project_file) {
+                Ok(content) => Some(content),
+                Err(err) if err.kind() == ErrorKind::NotFound => None,
+                Err(err) => {
+                    anyhow::bail!(
+                        "failed to read project preset file {}: {err}",
+                        project_file.display()
+                    );
+                }
+            };
+            if let Some(project_content) = project_content {
+                let project_display = project_file.display().to_string();
+                let defaults = agent_doc_frontmatter::frontmatter::parse(&project_content)
+                    .map_err(|err| contextualize_parse_error(&project_display, err))?
+                    .0
+                    .prompt_presets;
+                local.inherit_defaults(&defaults);
             }
-        };
-        if let Some(project_content) = project_content {
-            let project_display = project_file.display().to_string();
-            let defaults = agent_doc_frontmatter::frontmatter::parse(&project_content)
-                .map_err(|err| contextualize_parse_error(&project_display, err))?
-                .0
-                .prompt_presets;
-            local.inherit_defaults(&defaults);
         }
     }
     local.resolve_nested_references().map_err(|err| {
@@ -409,27 +411,43 @@ mod tests {
     }
 
     #[test]
-    fn nearest_project_root_is_the_preset_inheritance_boundary() {
+    fn nested_project_presets_overlay_ancestor_presets() {
         let outer = TempDir::new().unwrap();
         setup_project(outer.path());
+        let outer_project = outer.path().join(".agent-doc/project.md");
         std::fs::write(
-            outer.path().join(".agent-doc/project.md"),
-            "---\npresets:\n  '#outer': outer\n---\n",
+            &outer_project,
+            "---\npresets:\n  '#outer': outer\n  '#shared': outer\n  '#masked': outer\n---\n",
         )
         .unwrap();
         let inner = outer.path().join("nested");
         setup_project(&inner);
         std::fs::write(
             inner.join(".agent-doc/project.md"),
-            "---\npresets:\n  '#inner': inner\n---\n",
+            "---\npresets:\n  '#inner': inner\n  '#shared': inner\n  '#masked':\n---\n",
         )
         .unwrap();
         let doc = inner.join("work.md");
-        std::fs::write(&doc, "body\n").unwrap();
+        let content = "---\npresets:\n  '#shared': document\n---\nbody\n";
+        std::fs::write(&doc, content).unwrap();
 
-        let effective = effective_prompt_presets_for_file("body\n", &doc).unwrap();
+        let effective = effective_prompt_presets_for_file(content, &doc).unwrap();
         assert_eq!(effective.get("#inner").map(String::as_str), Some("inner"));
-        assert!(effective.get("#outer").is_none());
+        assert_eq!(effective.get("#outer").map(String::as_str), Some("outer"));
+        assert_eq!(
+            effective.get("#shared").map(String::as_str),
+            Some("document")
+        );
+        assert!(effective.get("#masked").is_none());
+        assert_eq!(effective.unset_keys().collect::<Vec<_>>(), vec!["#masked"]);
+
+        std::fs::write(&outer_project, "---\npresets: [broken\n---\n").unwrap();
+        let err = effective_prompt_presets_for_file(content, &doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(&outer_project.display().to_string())
+        );
+        assert!(err.to_string().contains("invalid YAML frontmatter"));
     }
 
     #[test]

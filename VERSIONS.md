@@ -29,6 +29,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **Project-wide prompt preset setup is documented and contract-tested.** A
   copy-paste `.agent-doc/project.md` example explains quoted `#name` keys,
   structured runbooks, live inheritance, and session-local overrides.
+- **Nested projects inherit workspace prompt presets.** Every ancestor
+  `.agent-doc/project.md` within the configured root ceiling contributes
+  defaults; nearer project values overlay parents, and document declarations
+  remain the final override, including unset-value masking.
 - **The tag release helper accepts dedicated Lazily dependency
   configurations.** Its pin resolver now reads the exact coordinate across
   `compileOnly`, test, and embedded configurations, requires one unique

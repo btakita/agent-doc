@@ -64,18 +64,21 @@ as a session document. Presets are resolved dynamically on every preset-aware
 operation; they are never copied into existing documents and do not require a
 template-sync command.
 
-Resolution stops at the nearest project root selected by the existing
-`.agent-doc` project-root discovery. The effective map starts with presets from
-`<project-root>/.agent-doc/project.md`, then overlays the target document's
-declarations by name. A document declaration wins, including an unset YAML
-entry (`'#name':`) that is still being typed; such an entry masks the inherited
-value. Structured preset bodies and their `runbook` metadata inherit together.
+Resolution starts at the nearest project root selected by the existing
+`.agent-doc` project-root discovery, then walks through its ancestors within the
+configured root ceiling. The effective map starts with the farthest ancestor's
+`.agent-doc/project.md`, overlays each nearer project's declarations by name,
+then overlays the target document. A nearer project or document declaration
+wins, including an unset YAML entry (`'#name':`) that is still being typed; such
+an entry masks the inherited value. Structured preset bodies and their `runbook`
+metadata inherit together.
 
 A missing `project.md` means there are no project defaults. A read failure or
 malformed project frontmatter is an actionable preset-resolution error; a
 preset-aware admission must not silently continue with a stale or partial map.
-No ancestor project file is consulted beyond the nearest root. The similarly
-named `.agent-doc/config.toml` remains runtime configuration, not a prompt
+Nested repositories therefore inherit a workspace parent's presets while their
+own `project.md` remains the overlay. The similarly named
+`.agent-doc/config.toml` remains runtime configuration, not a prompt
 preset source, and `.agent-doc/project.yaml` is not an alternative spelling.
 
 New-document templates may reference or demonstrate these presets, but must not

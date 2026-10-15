@@ -202,11 +202,12 @@ Quote names that begin with `#`; otherwise YAML treats the rest of the key as
 a comment. `prompt_presets:` is accepted as an alias for `presets:`.
 
 Invoke a preset by adding its name to a session prompt or queue, for example
-`#review` in `agent:exchange` or `- #review` in `agent:queue`. The nearest
-`.agent-doc/project.md` supplies live defaults to every session under that
-project root. A session document can override a preset by defining the same
-exact name in its own frontmatter. Relative `runbook` paths resolve from the
-project root and are loaded only when the preset is invoked.
+`#review` in `agent:exchange` or `- #review` in `agent:queue`. Every ancestor
+`.agent-doc/project.md` supplies live defaults within the configured root
+ceiling. A nested project's values overlay its parent's values, and a session
+document can override either by defining the same exact name in its own
+frontmatter. Relative `runbook` paths resolve from the project root and are
+loaded only when the preset is invoked.
 
 See [Document Format](../guide/document-format.md#prompt-presets) for the full
 inheritance and masking rules.

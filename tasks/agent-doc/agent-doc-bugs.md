@@ -80,7 +80,20 @@ All seven subagents have reported, and every branch is merged into `batch-gh268-
 **`state.db` corruption, now proven:** `controller serve` closed every fd above stdio, including its own debug-log file. SQLite reused that number for `state.db`, and the queued `tracing initialized` line landed at byte 0 ("file is not a database"). This is the recurring production incident in memory. The flaky test reproduced it 9 of 600 times on an optimized pre-fix build, and 0 of 600 with the fix.
 
 **Process notes:** the claims expired after 2 h, so this cycle's preflight listed every item for dispatch again. I re-claimed them for the batch rather than starting new workers. I'll close the issues, the queue items and the release item once `make release` finishes; the queue-duplication commit and #273 close on merge to `main`.
-<!-- agent:boundary:06765b07 -->
+> **Chat prompt (#chatprompt):** is the release published?
+
+### Re: is v0.35.509 published? — opus-5-5 · 2026-10-15T14:58-04:00
+
+Not yet. Tagging and the push to `main` are done; the GitHub build and publish are still running.
+
+- **Local gates passed:** `make check` on the version-bumped tree ran 10662 tests, all passed (168 skipped). `make tmux-ci` passed, and the release check reused its proof.
+- **Tag and `main`:** `v0.35.509` and `main` both point to `62cfd2af54`, so all nine fixes are on `main`.
+- **GitHub Release run `38788644925`:** the `plugins` job passed. All six platform builds are still running (about 9 min in), and publishing to GitHub Releases and PyPI comes after them.
+- **Latest published:** both still show **0.35.508**.
+- **Local install:** still compiling.
+
+When the run is green I'll close GH #268–#272. #273 should close on its own from its `Fixes` commit, and I'll check that. Then I'll close the queue items and add the follow-ups to the backlog.
+<!-- agent:boundary:956b73e3 -->
 <!-- /agent:exchange -->
 
 <!--

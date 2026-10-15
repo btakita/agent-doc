@@ -918,7 +918,7 @@ private fun reportEditorOps(
         return ReportOutcome.RETRYABLE
     }
     val baseHash = try {
-        baseHashPtr.getString(0)
+        baseHashPtr.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(baseHashPtr)
     }

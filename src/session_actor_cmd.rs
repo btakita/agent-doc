@@ -6108,14 +6108,25 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         );
         // `#clearctxslow`: the queued clear names the settling abandoned
         // prompt and the seconds left (snapshot 2s old), instead of a live turn.
+        // The probe reads the wall clock itself, so bound the expected wait by
+        // the clock read on either side of the call. A fixed window around the
+        // test's start time failed whenever setup took more than a second.
+        let wall_secs = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        };
+        let before = wall_secs();
         let settling = settling_abandoned_prompt_for_clear(&ctx, "%180", "turn_active_lease")
             .expect("an unsettled abandoned prompt behind the lease");
+        let after = wall_secs();
         assert_eq!(settling.snapshot_at, lease_at + 2);
+        let settle = agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS;
         assert!(
-            (agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 3
-                ..=agent_doc_turn::turn_status::ABANDONED_PROMPT_SETTLE_SECS - 2)
+            (settle - (after - settling.snapshot_at)..=settle - (before - settling.snapshot_at))
                 .contains(&settling.settles_in_secs),
-            "{settling:?}"
+            "{settling:?} before={before} after={after}"
         );
         assert_eq!(
             settling_abandoned_prompt_for_clear(&ctx, "%180", "dispatch_turn_running"),

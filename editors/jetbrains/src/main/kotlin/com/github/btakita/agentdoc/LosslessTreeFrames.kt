@@ -16,7 +16,7 @@ object LosslessTreeFrames {
     /** The advertised capability token, or null if the native library is unavailable. */
     val CAPABILITY: String? by lazy {
         // Borrowed static C string — must NOT be freed.
-        AgentDocLib.get()?.agent_doc_lossless_tree_capability()?.getString(0)
+        AgentDocLib.get()?.agent_doc_lossless_tree_capability()?.readNativeUtf8()
     }
 
     /** Render a durable tree projection JSON back to document text, or null on failure. */
@@ -24,7 +24,7 @@ object LosslessTreeFrames {
         val lib = AgentDocLib.get() ?: return null
         val ptr = lib.agent_doc_lossless_tree_render(projectionJson) ?: return null
         return try {
-            ptr.getString(0)
+            ptr.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(ptr)
         }
@@ -35,7 +35,7 @@ object LosslessTreeFrames {
         val lib = AgentDocLib.get() ?: return null
         val ptr = lib.agent_doc_lossless_tree_project(docText) ?: return null
         return try {
-            ptr.getString(0)
+            ptr.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(ptr)
         }

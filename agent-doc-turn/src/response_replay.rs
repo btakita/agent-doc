@@ -1120,6 +1120,13 @@ fn is_response_heading(trimmed: &str) -> bool {
         || trimmed == "## Assistant"
 }
 
+/// Normalized response blocks (heading through the line before the next
+/// response heading or component close), in document order. Shared with the
+/// committed-text integrity guard so both read one block shape.
+pub(crate) fn response_blocks(content: &str) -> Vec<String> {
+    split_scaffold_and_responses(content).1
+}
+
 fn split_scaffold_and_responses(content: &str) -> (Vec<String>, Vec<String>) {
     let lines: Vec<&str> = content.lines().collect();
     let mut scaffold = Vec::new();

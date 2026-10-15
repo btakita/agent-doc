@@ -23,7 +23,18 @@ pub fn show_rev(file: &Path, rev: &str) -> Result<Option<String>> {
         return Ok(None);
     }
 
-    Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
+    // GH #274: committed document text is authority for recovery and for the
+    // committed-text integrity guard. A lossy decode would substitute U+FFFD
+    // and let a corrupted copy read as committed, so a non-UTF-8 blob fails
+    // closed instead.
+    let content = String::from_utf8(output.stdout).map_err(|err| {
+        anyhow::anyhow!(
+            "refusing to read {rev}:{} as document text: the committed blob is not valid UTF-8 (first invalid byte at offset {})",
+            rel_path.display(),
+            err.utf8_error().valid_up_to(),
+        )
+    })?;
+    Ok(Some(content))
 }
 
 /// Visit the committed versions of `file`, newest first, for at most `limit`
@@ -336,6 +347,37 @@ mod tests {
         fs::write(&doc, "working tree\n").unwrap();
 
         assert_eq!(show_head(&doc).unwrap(), Some("committed\n".to_string()));
+    }
+
+    /// GH #274: committed text round-trips byte-exact, and a non-UTF-8 blob
+    /// fails closed instead of decoding to U+FFFD.
+    #[test]
+    fn show_head_is_byte_exact_utf8_and_fails_closed_on_invalid_utf8() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        let doc = root.join("doc.md");
+        let text = "### Re: x \u{2014} opus \u{b7} 0.35.505 \u{2192} 0.35.508 \u{1F600}\n";
+        fs::write(&doc, text).unwrap();
+        for args in [vec!["add", "doc.md"], vec!["commit", "-m", "utf8"]] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+        assert_eq!(show_head(&doc).unwrap().as_deref(), Some(text));
+
+        fs::write(&doc, b"latin-1 \xb7 middle dot\n").unwrap();
+        for args in [vec!["add", "doc.md"], vec!["commit", "-m", "latin1"]] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+        let err = show_head(&doc).expect_err("non-UTF-8 HEAD must fail closed");
+        assert!(format!("{err:#}").contains("not valid UTF-8"), "{err:#}");
     }
 
     #[test]

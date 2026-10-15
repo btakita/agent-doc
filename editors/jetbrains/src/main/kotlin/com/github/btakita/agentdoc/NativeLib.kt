@@ -1190,7 +1190,10 @@ interface AgentDocLib : Library {
             companion object {
                 fun load(path: String): LoadedGeneration {
                     val handler =
-                        Library.Handler(path, AgentDocLib::class.java, emptyMap<String, Any>())
+                        // GH #274: bind UTF-8 explicitly. JNA's default follows the JVM locale
+                        // (`native.encoding`), and an ASCII locale turned every non-ASCII
+                        // character of document text into `?` at this boundary.
+                        Library.Handler(path, AgentDocLib::class.java, NATIVE_LIBRARY_OPTIONS)
                     val delegate =
                         Proxy.newProxyInstance(
                             AgentDocLib::class.java.classLoader,
@@ -1206,6 +1209,7 @@ interface AgentDocLib : Library {
                             AgentDocLib::class.java.classLoader,
                             arrayOf(AgentDocLib::class.java),
                         ) { _, method, args ->
+                            requireLosslessNativeStringArgs(method.name, args)
                             synchronized(generation.callMonitor) {
                                 if (!generation.acceptingCalls) {
                                     throw IllegalStateException("native generation is quiescing")
@@ -1546,7 +1550,7 @@ interface AgentDocLib : Library {
                 lib.agent_doc_version()
                     ?: throw IllegalStateException("agent_doc_version() returned null at $path")
             try {
-                val version = ptr.getString(0)
+                val version = ptr.readNativeUtf8()
                 require(version.isNotBlank()) {
                     "agent_doc_version() returned an empty version at $path"
                 }
@@ -1684,7 +1688,7 @@ interface AgentDocLib : Library {
                 try {
                     generation.proxy.agent_doc_build_info_json()?.let { ptr ->
                         try {
-                            ptr.getString(0)
+                            ptr.readNativeUtf8()
                         } finally {
                             generation.proxy.agent_doc_free_string(ptr)
                         }
@@ -2024,13 +2028,13 @@ object NativeAdminControls {
     ): String? {
         try {
             if (result.error != null) {
-                val error = result.error!!.getString(0)
+                val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] $label error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }
             if (result.json == null) return null
-            return result.json!!.getString(0)
+            return result.json!!.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(result.json)
         }
@@ -2059,7 +2063,7 @@ object NativePatching {
                 val result = lib.agent_doc_apply_node_patches("", "[]")
                 try {
                     if (result.error != null) {
-                        val error = result.error!!.getString(0)
+                        val error = result.error!!.readNativeUtf8()
                         LOG.debug("[native] apply_node_patches probe rejected: $error")
                         false
                     } else {
@@ -2104,13 +2108,13 @@ object NativePatching {
             }
         try {
             if (result.error != null) {
-                val error = result.error!!.getString(0)
+                val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] apply_node_patches error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }
             if (result.text == null) return null
-            return result.text!!.getString(0)
+            return result.text!!.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(result.text)
         }
@@ -2130,13 +2134,13 @@ object NativePatching {
         val result = lib.agent_doc_apply_patch(doc, component, content, mode)
         try {
             if (result.error != null) {
-                val error = result.error!!.getString(0)
+                val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] apply_patch error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }
             if (result.text == null) return null
-            val text = result.text!!.getString(0)
+            val text = result.text!!.readNativeUtf8()
             return text
         } finally {
             lib.agent_doc_free_string(result.text)
@@ -2160,13 +2164,13 @@ object NativePatching {
             lib.agent_doc_apply_patch_with_caret(doc, component, content, mode, caretOffset)
         try {
             if (result.error != null) {
-                val error = result.error!!.getString(0)
+                val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] apply_patch_with_caret error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }
             if (result.text == null) return null
-            val text = result.text!!.getString(0)
+            val text = result.text!!.readNativeUtf8()
             return text
         } finally {
             lib.agent_doc_free_string(result.text)
@@ -2189,13 +2193,13 @@ object NativePatching {
             lib.agent_doc_apply_patch_with_boundary(doc, component, content, mode, boundaryId)
         try {
             if (result.error != null) {
-                val error = result.error!!.getString(0)
+                val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] apply_patch_with_boundary error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }
             if (result.text == null) return null
-            val text = result.text!!.getString(0)
+            val text = result.text!!.readNativeUtf8()
             return text
         } finally {
             lib.agent_doc_free_string(result.text)
@@ -2217,13 +2221,13 @@ object NativePatching {
             }
         try {
             if (result.error != null) {
-                val error = result.error!!.getString(0)
+                val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] reposition_boundary error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }
             if (result.text == null) return null
-            val text = result.text!!.getString(0)
+            val text = result.text!!.readNativeUtf8()
             return text
         } finally {
             lib.agent_doc_free_string(result.text)
@@ -2245,13 +2249,13 @@ object NativePatching {
             }
         try {
             if (result.error != null) {
-                val error = result.error!!.getString(0)
+                val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] reposition_boundary_preserve_head error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }
             if (result.text == null) return null
-            val text = result.text!!.getString(0)
+            val text = result.text!!.readNativeUtf8()
             return text
         } finally {
             lib.agent_doc_free_string(result.text)
@@ -2267,13 +2271,13 @@ object NativePatching {
         val result = lib.agent_doc_normalize_template_structure(doc)
         try {
             if (result.error != null) {
-                val error = result.error!!.getString(0)
+                val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] normalize_template_structure error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }
             if (result.text == null) return null
-            return result.text!!.getString(0)
+            return result.text!!.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(result.text)
         }
@@ -2287,7 +2291,7 @@ object NativePatching {
         val lib = AgentDocLib.get() ?: return null
         val ptr = lib.agent_doc_merge_crdt(base, ours, theirs)
         try {
-            return ptr?.getString(0)
+            return ptr?.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(ptr)
         }
@@ -2308,7 +2312,7 @@ object NativePatching {
                 return null
             }
         try {
-            return ptr?.getString(0)
+            return ptr?.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(ptr)
         }
@@ -2322,7 +2326,7 @@ object NativePatching {
         val lib = AgentDocLib.get() ?: return null
         val ptr = lib.agent_doc_deferred_write_reconnect_content(filePath, editorContent)
         try {
-            return ptr?.getString(0)
+            return ptr?.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(ptr)
         }
@@ -2342,7 +2346,7 @@ object NativePatching {
                 return null
             }
         try {
-            return ptr?.getString(0)
+            return ptr?.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(ptr)
         }
@@ -2382,7 +2386,7 @@ object NativePatching {
         try {
             val rootPtr = result.project_root ?: return null
             val relPtr = result.relative_path ?: return null
-            return Pair(rootPtr.getString(0), relPtr.getString(0))
+            return Pair(rootPtr.readNativeUtf8(), relPtr.readNativeUtf8())
         } finally {
             lib.agent_doc_free_string(result.project_root)
             lib.agent_doc_free_string(result.relative_path)
@@ -2406,7 +2410,7 @@ object NativePatching {
             }
         val ptr = result.json ?: return null
         try {
-            return AgentDocComponentOutline.spansFromNativeJson(ptr.getString(0, "UTF-8"), doc)
+            return AgentDocComponentOutline.spansFromNativeJson(ptr.readNativeUtf8(), doc)
         } catch (e: Exception) {
             LOG.warn("[native] parse_components json error: ${e.message}")
             return null
@@ -2420,7 +2424,7 @@ object NativePatching {
         val lib = AgentDocLib.get() ?: return null
         val ptr = lib.agent_doc_visual_tokens_json(doc) ?: return null
         try {
-            val raw = ptr.getString(0)
+            val raw = ptr.readNativeUtf8()
             val root = com.google.gson.JsonParser.parseString(raw).asJsonArray
             return root.mapNotNull { element ->
                 val obj = element.asJsonObject
@@ -2458,10 +2462,10 @@ object NativePatching {
         }
         try {
             if (result.error != null) {
-                LOG.warn("[native] captured splice rebase retained: ${result.error!!.getString(0)}")
+                LOG.warn("[native] captured splice rebase retained: ${result.error!!.readNativeUtf8()}")
                 return null
             }
-            val json = result.text?.getString(0) ?: return null
+            val json = result.text?.readNativeUtf8() ?: return null
             return gson.fromJson(json, PreparedLocalEditorBatch::class.java)
         } finally {
             lib.agent_doc_free_string(result.error)
@@ -2489,10 +2493,10 @@ object NativePatching {
         }
         try {
             if (result.error != null) {
-                LOG.warn("[native] captured splice containment proof unavailable: ${result.error!!.getString(0)}")
+                LOG.warn("[native] captured splice containment proof unavailable: ${result.error!!.readNativeUtf8()}")
                 return null
             }
-            return result.text?.getString(0)?.toBooleanStrictOrNull()
+            return result.text?.readNativeUtf8()?.toBooleanStrictOrNull()
         } finally {
             lib.agent_doc_free_string(result.error)
             lib.agent_doc_free_string(result.text)
@@ -2504,13 +2508,13 @@ object NativePatching {
         val result = lib.agent_doc_merge_frontmatter(doc, yamlFields)
         try {
             if (result.error != null) {
-                val error = result.error!!.getString(0)
+                val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] merge_frontmatter error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }
             if (result.text == null) return null
-            val text = result.text!!.getString(0)
+            val text = result.text!!.readNativeUtf8()
             return text
         } finally {
             lib.agent_doc_free_string(result.text)
@@ -2528,13 +2532,13 @@ object NativePatching {
         val result = lib.agent_doc_converge_queue_auto(doc, if (wantAuto) 1 else 0)
         try {
             if (result.error != null) {
-                val error = result.error!!.getString(0)
+                val error = result.error!!.readNativeUtf8()
                 LOG.warn("[native] converge_queue_auto error: $error")
                 lib.agent_doc_free_string(result.error)
                 return null
             }
             if (result.text == null) return null
-            return result.text!!.getString(0)
+            return result.text!!.readNativeUtf8()
         } finally {
             lib.agent_doc_free_string(result.text)
         }

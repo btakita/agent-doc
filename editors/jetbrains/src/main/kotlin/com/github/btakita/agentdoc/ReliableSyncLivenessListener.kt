@@ -261,7 +261,7 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
     private fun resolveDocumentHash(lib: AgentDocLib, filePath: String): String? {
         val ptr = lib.agent_doc_document_id_for_path(filePath) ?: return null
         return try {
-            ptr.getString(0).takeUnless { it.isNullOrEmpty() }
+            ptr.readNativeUtf8().takeUnless { it.isNullOrEmpty() }
         } finally {
             lib.agent_doc_free_string(ptr)
         }

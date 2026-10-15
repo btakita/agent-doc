@@ -1613,4 +1613,107 @@ mod tests {
         let ok: i32 = ffi_guard!(ERR_FFI_PANIC, 42);
         assert_eq!(ok, 42);
     }
+
+    fn replica_text_utf8(replica_id: u64) -> String {
+        let ptr = unsafe { agent_doc_replica_text(replica_id) };
+        assert!(!ptr.is_null(), "replica {replica_id} must be open");
+        let text = unsafe { CStr::from_ptr(ptr) }
+            .to_str()
+            .expect("replica projection must be valid UTF-8")
+            .to_string();
+        unsafe { agent_doc_free_string(ptr) };
+        text
+    }
+
+    fn take_state(ptr: *mut u8, len: usize) -> Vec<u8> {
+        assert!(!ptr.is_null());
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec();
+        unsafe { agent_doc_free_state(ptr, len) };
+        bytes
+    }
+
+    fn non_ascii_document() -> impl proptest::strategy::Strategy<Value = Vec<String>> {
+        use proptest::prelude::*;
+        let piece = prop_oneof![
+            "[a-zA-Z0-9 #*`-]{1,8}".prop_map(|s| s),
+            Just("\u{2014}".to_string()),
+            Just("\u{b7}".to_string()),
+            Just("\u{2192}".to_string()),
+            Just("\u{2013}".to_string()),
+            Just("\u{25CF}".to_string()),
+            Just("\u{276F} ".to_string()),
+            Just("\u{1F600}".to_string()),
+            Just("\u{3042}".to_string()),
+            Just("\n".to_string()),
+        ];
+        proptest::collection::vec(piece, 1..40)
+    }
+
+    proptest::proptest! {
+        /// GH #274: the editor-to-replica projection path is byte-exact UTF-8.
+        /// Every local insert (codepoint offsets, as the plugin sends them) of
+        /// text carrying em dashes, `·`, `→`, `●`, `❯`, emoji and CJK projects
+        /// back unchanged, and a peer replica synced from it by delta projects
+        /// the identical bytes. No `?` and no U+FFFD can appear that the input
+        /// did not carry.
+        #[test]
+        fn replica_projection_round_trips_non_ascii_byte_exact(pieces in non_ascii_document()) {
+            static NEXT_ID: std::sync::atomic::AtomicU64 =
+                std::sync::atomic::AtomicU64::new(0x2740_0000);
+            let source = NEXT_ID.fetch_add(2, std::sync::atomic::Ordering::Relaxed);
+            let peer = source + 1;
+            assert_eq!(unsafe { agent_doc_replica_open(source, ptr::null(), 0) }, 0);
+            assert_eq!(unsafe { agent_doc_replica_open(peer, ptr::null(), 0) }, 0);
+
+            let mut expected = String::new();
+            for piece in &pieces {
+                let offset = expected.chars().count() as u32;
+                let insert = CString::new(piece.as_str()).unwrap();
+                proptest::prop_assert_eq!(
+                    unsafe { agent_doc_replica_apply_local(source, offset, 0, insert.as_ptr()) },
+                    0
+                );
+                expected.push_str(piece);
+            }
+            let projected = replica_text_utf8(source);
+            proptest::prop_assert_eq!(projected.as_bytes(), expected.as_bytes());
+
+            let mut sv_len = 0usize;
+            let sv = take_state(
+                unsafe { agent_doc_replica_state_vector(peer, &mut sv_len) },
+                sv_len,
+            );
+            let mut diff_len = 0usize;
+            let diff = take_state(
+                unsafe { agent_doc_replica_diff(source, sv.as_ptr(), sv.len(), &mut diff_len) },
+                diff_len,
+            );
+            proptest::prop_assert_eq!(
+                unsafe { agent_doc_replica_apply_update(peer, diff.as_ptr(), diff.len()) },
+                0
+            );
+            let peer_text = replica_text_utf8(peer);
+            proptest::prop_assert_eq!(peer_text.as_bytes(), expected.as_bytes());
+
+            unsafe {
+                agent_doc_replica_close(source);
+                agent_doc_replica_close(peer);
+            }
+        }
+    }
+
+    /// GH #274: a non-UTF-8 insert is refused (`-2`), never substituted.
+    #[test]
+    fn replica_apply_local_refuses_non_utf8_insert() {
+        let id = 0x2741_0000;
+        assert_eq!(unsafe { agent_doc_replica_open(id, ptr::null(), 0) }, 0);
+        // `·` (U+00B7) as a Latin-1 byte: not UTF-8.
+        let latin1 = CString::new(vec![b'a', 0xB7, b'b']).unwrap();
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_local(id, 0, 0, latin1.as_ptr()) },
+            -2
+        );
+        assert_eq!(replica_text_utf8(id), "");
+        unsafe { agent_doc_replica_close(id) };
+    }
 }

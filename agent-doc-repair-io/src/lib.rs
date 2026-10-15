@@ -671,6 +671,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         )?;
         if let Some(recovery) = select_structural_history_recovery(&doc_content, active, &history) {
             let prior_content = doc_content;
+            refuse_added_committed_text_copy(
+                &canonical,
+                &recovery.content,
+                "repair_structural_response_history",
+            )?;
             agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
                 &canonical,
                 &recovery.content,
@@ -741,6 +746,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             select_lossy_editor_projection_recovery(&doc_content, &operator_projection, &history)
         {
             let prior_content = doc_content;
+            refuse_added_committed_text_copy(
+                &canonical,
+                &recovery.content,
+                "repair_lossy_editor_projection",
+            )?;
             agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
                 &canonical,
                 &recovery.content,
@@ -922,6 +932,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         capture.as_ref(),
         historical_capture.as_ref(),
     )? {
+        refuse_added_committed_text_copy(
+            &canonical,
+            &reconciliation.content,
+            "repair_partial_captured_response",
+        )?;
         agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
             &canonical,
             &reconciliation.content,
@@ -950,6 +965,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             &response,
         )
     {
+        refuse_added_committed_text_copy(
+            &canonical,
+            &reassembled,
+            "repair_retained_response_replay_fragments",
+        )?;
         doc_content = RepairIoEffects::atomic_write_if_current(
             effects.repair_io_effects,
             &canonical,
@@ -1052,6 +1072,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             })
             .unwrap_or(true);
         if (state_is_open || visible_response_recovery.is_some()) && snapshot_missing_response {
+            refuse_added_committed_text_copy(
+                file,
+                &repaired_doc,
+                "repair_adopt_existing_response",
+            )?;
             agent_doc_snapshot_io::checkpoint_document_baseline(
                 file,
                 &repaired_doc,
@@ -1889,6 +1914,7 @@ pub fn repair_template_doc_if_needed(
             None => true,
         };
         let repair_target = repaired.clone();
+        refuse_added_committed_text_copy(file, &repair_target, "repair_template_normalization")?;
         repaired = effects.atomic_write_if_current(
             file,
             &repair_target,
@@ -2014,6 +2040,7 @@ pub fn repair_response_body_prompt_prefixes_if_needed(
         None => true,
     };
     let repair_target = repaired;
+    refuse_added_committed_text_copy(file, &repair_target, "repair_response_body_prompt_prefixes")?;
     let repaired = effects.atomic_write_if_current(
         file,
         &repair_target,
@@ -2065,6 +2092,7 @@ pub fn repair_duplicate_exchange_scaffold_if_needed(
         None => true,
     };
     let repair_target = repaired;
+    refuse_added_committed_text_copy(file, &repair_target, "repair_duplicate_exchange_scaffold")?;
     let repaired = effects.atomic_write_if_current(
         file,
         &repair_target,
@@ -2110,6 +2138,7 @@ fn repair_inline_boundary_fragmentation_if_needed(
         }
         None => true,
     };
+    refuse_added_committed_text_copy(file, &repaired, "repair_inline_boundary_fragmentation")?;
     let settled = effects.atomic_write_if_current(
         file,
         &repaired,
@@ -4007,6 +4036,49 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+/// GH #274 choke point: every repair candidate that becomes a recovery baseline
+/// (and so the content the following commit stages) passes through here before
+/// the repair writes or baselines it.
+///
+/// Invariant: a repair never commits a candidate that **adds** a copy of
+/// committed text — a second exact copy of a committed response block, or a
+/// line that differs from a committed line only by encoder replacement
+/// characters (`?` / U+FFFD in place of non-ASCII). Agent-authored text is never
+/// produced by an encoder, so such a line is a lossy projection (GH #274: an
+/// ASCII-locale JVM marshalled document text through JNA as US-ASCII), not
+/// authorship. The repair fails closed — it neither rewrites the visible
+/// document nor advances the snapshot — and names the line, because deleting
+/// operator-visible text is the operator's decision. Committed `HEAD` is the
+/// reference, so corruption or duplicates `HEAD` already carries never wedge it.
+pub fn refuse_added_committed_text_copy(file: &Path, candidate: &str, site: &str) -> Result<()> {
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(());
+    };
+    let Some(violation) =
+        agent_doc_turn::committed_text_integrity::committed_text_violation(candidate, &head)
+    else {
+        return Ok(());
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "repair_committed_text_copy_refused file={} site={} kind={} candidate_hash={} head_hash={}",
+            file.display(),
+            site,
+            violation.kind.as_str(),
+            agent_doc_hash::content_hash(candidate),
+            agent_doc_hash::content_hash(&head),
+        ),
+    );
+    anyhow::bail!(
+        "refusing {site} for {}: the candidate adds a {} of committed text, so committing it would duplicate or corrupt an already-committed response. Candidate line: `{}`; committed line: `{}`. Remove that copy from the visible document (keep the committed line), then rerun.",
+        file.display(),
+        violation.kind.as_str(),
+        violation.candidate_line,
+        violation.committed_line,
+    )
 }
 
 #[cfg(test)]

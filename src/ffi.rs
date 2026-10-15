@@ -2678,6 +2678,51 @@ fn deferred_write_reconnect_candidate(
     file: &std::path::Path,
     editor_content: &str,
 ) -> Option<String> {
+    let candidate = deferred_write_reconnect_candidate_unchecked(file, editor_content)?;
+    refuse_reconnect_candidate_adding_lossy_copy(file, editor_content, candidate)
+}
+
+/// GH #274: a reconnect/re-register projection never yields a candidate that
+/// adds a line beside its own encoder-replaced (`?` / U+FFFD) rendering. The
+/// incident's editor baseline already held a lossy copy of a committed
+/// response; replaying the retained write next to it produced a document with
+/// both copies, which a later repair committed. The projection fails closed
+/// (no candidate) and names both lines; removing operator-visible text is the
+/// operator's decision.
+fn refuse_reconnect_candidate_adding_lossy_copy(
+    file: &std::path::Path,
+    editor_content: &str,
+    candidate: String,
+) -> Option<String> {
+    let Some(violation) = agent_doc_turn::committed_text_integrity::added_lossy_copy_pair(
+        &candidate,
+        editor_content,
+    ) else {
+        return Some(candidate);
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "deferred_write_lossy_copy_refused file={} kind={} editor_hash={} candidate_hash={}",
+            file.display(),
+            violation.kind.as_str(),
+            agent_doc_hash::content_hash(editor_content),
+            agent_doc_hash::content_hash(&candidate),
+        ),
+    );
+    eprintln!(
+        "[deferred-write] reconnect candidate refused for {}: it would place `{}` beside its lossy rendering `{}`",
+        file.display(),
+        violation.committed_line,
+        violation.candidate_line,
+    );
+    None
+}
+
+fn deferred_write_reconnect_candidate_unchecked(
+    file: &std::path::Path,
+    editor_content: &str,
+) -> Option<String> {
     mark_embedded_editor_host();
     let project_root = agent_doc_project_root_io::project_root_containing(file)?;
     match editor_reconnect_projection_from_ffi(&project_root, file, editor_content) {
@@ -4278,6 +4323,71 @@ mod tests {
             std::fs::read_to_string(&file).unwrap(),
             baseline,
             "post-registration FFI is transport-only and must not write disk",
+        );
+    }
+
+    /// GH #274 reproduction: the editor baseline holds a lossy (`?` for every
+    /// non-ASCII character) copy of the response the retained write carries.
+    /// The semantic replay alone puts the correct response beside the lossy
+    /// one; the reconnect candidate must refuse instead of projecting both.
+    #[test]
+    fn gh274_post_register_reconnect_refuses_original_beside_lossy_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let response = concat!(
+            "### Re: upgrade to 0.35.508 and viewpane issue dispatched \u{2014} opus-5.5 \u{b7} 2026-10-15T11:20-04:00\n\n",
+            "- **Upgraded 0.35.505 \u{2192} 0.35.508** (`agent-doc upgrade`, exit 0).\n",
+        );
+        let lossy: String = response
+            .chars()
+            .map(|ch| if ch.is_ascii() { ch } else { '?' })
+            .collect();
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "\u{276f} upgrade please\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let target = baseline.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{response}<!-- /agent:exchange -->"),
+        );
+        let editor_cut = baseline.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{lossy}<!-- /agent:exchange -->"),
+        );
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &file,
+            baseline,
+            &target,
+            "ffi_gh274_test",
+            agent_doc_state_backbone::DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+        )
+        .unwrap();
+
+        let unchecked = deferred_write_reconnect_candidate_unchecked(&file, &editor_cut)
+            .expect("the retained write replays over the lossy editor cut");
+        assert!(unchecked.contains(response) && unchecked.contains(&lossy));
+
+        let path = CString::new(file.to_string_lossy().as_bytes()).unwrap();
+        let editor = CString::new(editor_cut.as_bytes()).unwrap();
+        let ptr = unsafe {
+            agent_doc_deferred_write_post_register_content(path.as_ptr(), editor.as_ptr())
+        };
+        assert!(ptr.is_null(), "a candidate carrying both copies must not be returned");
+        let projected = unsafe {
+            agent_doc_deferred_write_post_register_project(path.as_ptr(), editor.as_ptr())
+        };
+        assert_eq!(projected, 1, "nothing is projected; the editor keeps its bytes");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            ops.contains("deferred_write_lossy_copy_refused")
+                && ops.contains("kind=lossy_committed_text_copy"),
+            "{ops}"
         );
     }
 

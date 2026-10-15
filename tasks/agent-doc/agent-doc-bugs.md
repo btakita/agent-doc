@@ -160,7 +160,7 @@ The new `agent:todo` item is claimed for `subagent:todoids`, branch `feat/todo-i
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/274
-- `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.
+- 🚧 `agent:todo` items should either reuse an existing id or mint a new id. For example, if an item is in review, the todo should use the review item id with an actionable prompt. If the operator needs to take action, then there should be a good flow for the operator to declare the todo done. Ideally the agents will check if the todo items are done at opportune events.
 - 🚧 do [#keylogrebase]
 - 🚧 do [#claimfollowedit]
 - 🚧 do [#splicesessionack]

@@ -1814,9 +1814,11 @@ pub fn repair_layout(
         } else if agent_doc_owned && window.effective_window_size == "manual" {
             // GH #244: a per-window `window-size manual` pin (left by tmux's
             // `resize-window -A`, e.g. an operator's "fit window" key) holds
-            // the window at an old client size; once the terminal grows the
-            // window stays small and dot-padded. Release the pin only when the
-            // window is smaller than every client attached to this session.
+            // the window at an old client size: dot-padded in a larger client,
+            // cropped in a smaller one, or both when `-A` ran with two
+            // differently sized clients attached (GH #268). Release the pin
+            // unless some client attached to this session shows the window at
+            // exactly the pinned size.
             let clients = attached_clients.get_or_insert_with(|| {
                 agent_doc_tmux_io::list_attached_client_viewports(tmux, session_name)
             });
@@ -9218,6 +9220,90 @@ mod tests {
             LayoutRepairOutcome::AlreadyConverged,
             "the re-fit converges"
         );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn repair_layout_releases_a_pin_taken_across_two_clients_gh268() {
+        // GH #268: `resize-window -A` with a narrow-tall and a wide-short
+        // client attached pins the owned window at the larger width and the
+        // larger height. That pin is larger than each client in one dimension,
+        // so the #244 "smaller than every client" guard never released it, not
+        // even after the extra client detached.
+        let iso = agent_doc_tmux_io::isolated_test_tmux("sync-repair-gh268-two-client-pin");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _pane = iso.new_session("test", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        let _ = iso.ensure_stash_window("test");
+        iso.raw_cmd(&["set-option", "-g", "window-size", "latest"])
+            .unwrap();
+        iso.raw_cmd(&["select-window", "-t", "test:agent-doc"])
+            .unwrap();
+
+        let attached = || {
+            gh244_tmux_value(
+                &iso,
+                &[
+                    "list-clients",
+                    "-t",
+                    "test",
+                    "-F",
+                    "#{client_width}x#{client_height}",
+                ],
+            )
+            .lines()
+            .count()
+        };
+        let pin_across_both = || {
+            iso.raw_cmd(&["resize-window", "-A", "-t", "test:agent-doc"])
+                .unwrap();
+            assert_eq!(gh244_local_window_size(&iso, "test:agent-doc"), "manual");
+            assert_eq!(
+                gh244_window_size(&iso, "test:agent-doc"),
+                "202x29",
+                "-A takes the larger width and the larger height"
+            );
+        };
+
+        let ide = Gh244PtyClient::attach(&iso, "test", 202, 15);
+        gh244_wait_until("the IDE client attaches", || attached() == 1);
+        let powershell = Gh244PtyClient::attach(&iso, "test", 120, 30);
+        gh244_wait_until("the second client attaches", || attached() == 2);
+
+        // Both clients attached: the pin crops one and pads the other.
+        pin_across_both();
+        assert_eq!(
+            repair_layout(&iso, "test", "agent-doc").unwrap(),
+            LayoutRepairOutcome::Repaired,
+            "a pin no attached client is shown correctly at is not converged"
+        );
+        assert_eq!(
+            gh244_local_window_size(&iso, "test:agent-doc"),
+            "",
+            "repair must release the pin while both clients are attached"
+        );
+        assert_eq!(
+            repair_layout(&iso, "test", "agent-doc").unwrap(),
+            LayoutRepairOutcome::AlreadyConverged,
+            "the release converges"
+        );
+
+        // Re-pinned, then the extra client goes away: the window is still
+        // taller than the IDE client's 14 rows and must be released.
+        pin_across_both();
+        drop(powershell);
+        gh244_wait_until("the second client detaches", || attached() == 1);
+        assert_eq!(gh244_window_size(&iso, "test:agent-doc"), "202x29");
+        assert_eq!(
+            repair_layout(&iso, "test", "agent-doc").unwrap(),
+            LayoutRepairOutcome::Repaired
+        );
+        assert_eq!(gh244_local_window_size(&iso, "test:agent-doc"), "");
+        gh244_wait_until("window re-fits the 202x15 client", || {
+            gh244_window_size(&iso, "test:agent-doc") == "202x14"
+        });
+        drop(ide);
     }
 
     #[test]

@@ -60,6 +60,7 @@ Combine any number of flags in one `agent-doc write` call:
 | `--review-add "text"` | Add a new `[/]` item directly to `agent:review`; usually prefer `--backlog-gate`. |
 | `--review-edit "id=new text"` | Rewrite a review item's text, preserve hash. |
 | `--review-resolve <id>` | Resolve a review item: remove it from `agent:review` and archive to `agent:done` (the completion path when the gated work is actually finished). |
+| `--todo-add "action"` | `#operatortodo`: append `- [ ] <action>` to `agent:todo` for something the operator must do. The binary creates `agent:todo` if the document has none, keeps every existing item, and skips an action already listed. |
 | `--review-remove <id>` | Delete a review item by id, clearing **every** entry that shares the id — use for a stale or duplicate review entry (e.g. the identical `[/]` pair an interleaved finalize leaves behind, flagged as `preset_item_id_collision`). |
 
 Finalize also auto-dedupes identical same-id review entries during closeout maintenance, so an interleaved-finalize duplicate collapses without an explicit flag; distinct items that merely share an id are preserved so the ambiguity warning still surfaces.

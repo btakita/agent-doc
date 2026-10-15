@@ -1867,6 +1867,66 @@ fn validate_tracked_work_mutations(
     .map(|_| ())
 }
 
+/// `#operatortodo`: ids this closeout put behind a human gate in
+/// `agent:review` — new review items, gated adds, and `--backlog-gate` moves —
+/// deduplicated in first-seen order.
+fn operator_gate_ids_opened_this_cycle(
+    review_added_ids: &[String],
+    gated_added_ids: &[String],
+    pending_gate: &[String],
+) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for id in review_added_ids
+        .iter()
+        .chain(gated_added_ids.iter())
+        .chain(pending_gate.iter())
+    {
+        let id = agent_doc_element_backlog::backlog::normalize_pending_id(id);
+        if !id.is_empty() && !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// `#operatortodo`: the advisory text for gates the operator todo list does
+/// not mention. Pure so the wording is pinned by a unit test.
+fn operator_todo_advisory(file: &Path, unreferenced_gate_ids: &[String]) -> Option<String> {
+    if unreferenced_gate_ids.is_empty() {
+        return None;
+    }
+    let ids = unreferenced_gate_ids
+        .iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let example = &unreferenced_gate_ids[0];
+    Some(format!(
+        "[todo] advisory (#operatortodo): this closeout gated {ids} in agent:review but agent:todo does not reference {}. If a gate needs an operator action, record it in the next closeout: agent-doc write --commit {} --backlog-only --todo-add \"<action> [#{example}]\"",
+        if unreferenced_gate_ids.len() == 1 {
+            "it"
+        } else {
+            "them"
+        },
+        file.display(),
+    ))
+}
+
+fn emit_operator_todo_advisory(file: &Path, unreferenced_gate_ids: &[String]) {
+    let Some(advisory) = operator_todo_advisory(file, unreferenced_gate_ids) else {
+        return;
+    };
+    eprintln!("{advisory}");
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "operator_todo_advisory file={} unreferenced_gate_ids={}",
+            file.display(),
+            unreferenced_gate_ids.join(",")
+        ),
+    );
+}
+
 fn apply_pending_and_status_mutations_with_mode(
     file: &Path,
     options: &CommandOptions,
@@ -1937,6 +1997,7 @@ fn apply_pending_and_status_mutations_with_mode(
                     let reap_outcome = std::cell::RefCell::new(None);
                     let composed_queue_completion = std::cell::RefCell::new(None);
                     let queue_projection_target = std::cell::RefCell::new(None);
+                    let unreferenced_gate_ids = std::cell::RefCell::new(Vec::<String>::new());
                     let tracked_work_envelope = || {
                         if options.pending_clear {
                             backlog_cmd::clear(file)?;
@@ -1967,6 +2028,11 @@ fn apply_pending_and_status_mutations_with_mode(
                         for id in &options.review_remove {
                             backlog_cmd::review_remove(file, id)?;
                         }
+                        // `#operatortodo`: operator actions land in `agent:todo`,
+                        // which `todo_add` creates when the document lacks it.
+                        for text in &options.todo_add {
+                            backlog_cmd::todo_add(file, text)?;
+                        }
                         for id in &options.pending_ungate {
                             backlog_cmd::ungate(file, id)?;
                         }
@@ -1990,11 +2056,9 @@ fn apply_pending_and_status_mutations_with_mode(
                                 )
                             })?;
                         }
-                        same_cycle_added_ids.extend(backlog_cmd::add_many(
-                            file,
-                            &options.pending_add_gated,
-                            true,
-                        )?);
+                        let gated_added_ids =
+                            backlog_cmd::add_many(file, &options.pending_add_gated, true)?;
+                        same_cycle_added_ids.extend(gated_added_ids.iter().cloned());
                         // #ah0s: explicit-position adds (after/before <id>, tail). Applied after
                         // the front-insert default so anchor ids added this same cycle resolve.
                         for pair in options.pending_add_after.chunks(2) {
@@ -2201,6 +2265,17 @@ fn apply_pending_and_status_mutations_with_mode(
                             let ids = parse_id_order(order);
                             backlog_cmd::icebox_reorder(file, &ids)?;
                         }
+                        // `#operatortodo`: a human gate opened by this closeout is
+                        // an operator action. Read (not write) the final virtual
+                        // document so the advisory sees the response's own
+                        // `patch:todo` and this envelope's `--todo-add` lines.
+                        let opened_gate_ids = operator_gate_ids_opened_this_cycle(
+                            &review_added_ids,
+                            &gated_added_ids,
+                            &options.pending_gate,
+                        );
+                        unreferenced_gate_ids
+                            .replace(backlog_cmd::todo_unreferenced_ids(file, &opened_gate_ids)?);
                         added_ids.replace(Some((
                             same_cycle_added_ids,
                             review_added_ids,
@@ -2263,6 +2338,7 @@ fn apply_pending_and_status_mutations_with_mode(
                         }
                     }
                     transaction?;
+                    emit_operator_todo_advisory(file, &unreferenced_gate_ids.into_inner());
                     // `#mutplanwitness`: the envelope published. Anything that
                     // retains or fails the mutation write propagates above and
                     // leaves this unset, which is exactly what the resume,
@@ -3055,6 +3131,7 @@ fn run_command_inner_within_pass(
             pending_upsert: &options.pending_upsert,
             review_add: &options.review_add,
             review_edit: &options.review_edit,
+            todo_add: &options.todo_add,
             allow_replace_pending: options.allow_replace_pending,
             pending_only: options.pending_only,
             status: options.status.as_deref(),
@@ -3086,6 +3163,7 @@ fn run_command_inner_within_pass(
         || !options.pending_upsert.is_empty()
         || !options.review_add.is_empty()
         || !options.review_edit.is_empty()
+        || !options.todo_add.is_empty()
         || options.status.is_some();
 
     let baseline = match guard_no_baseline_replay_after_committed_cycle(
@@ -5165,6 +5243,35 @@ mod tests {
                 "phase2".to_string(),
             ])
         );
+    }
+
+    #[test]
+    fn operator_gate_ids_cover_review_adds_gated_adds_and_gate_moves_once() {
+        let ids = operator_gate_ids_opened_this_cycle(
+            &["rev1".to_string()],
+            &["gat1".to_string(), "rev1".to_string()],
+            &["#mov1".to_string()],
+        );
+        assert_eq!(ids, vec!["rev1", "gat1", "mov1"]);
+        assert!(operator_gate_ids_opened_this_cycle(&[], &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn operator_todo_advisory_names_unreferenced_gates_and_the_todo_add_command() {
+        let file = Path::new("tasks/session.md");
+        assert_eq!(operator_todo_advisory(file, &[]), None);
+        let one = operator_todo_advisory(file, &["gate1".to_string()]).unwrap();
+        assert_eq!(
+            one,
+            "[todo] advisory (#operatortodo): this closeout gated #gate1 in agent:review but agent:todo does not reference it. If a gate needs an operator action, record it in the next closeout: agent-doc write --commit tasks/session.md --backlog-only --todo-add \"<action> [#gate1]\""
+        );
+        let two =
+            operator_todo_advisory(file, &["gate1".to_string(), "gate2".to_string()]).unwrap();
+        assert!(
+            two.contains("gated #gate1, #gate2 in agent:review"),
+            "{two}"
+        );
+        assert!(two.contains("does not reference them"), "{two}");
     }
 
     #[test]

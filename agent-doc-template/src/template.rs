@@ -18,7 +18,10 @@
 //!      `mode=`) > `.agent-doc/config.toml ([components] section)` > built-in defaults (`exchange`/`findings`
 //!      default to `append`, all others to `replace`).
 //!   3. For `append` mode, uses boundary-aware insertion when a boundary marker exists.
-//!   4. Patches targeting missing component names are routed as overflow to `exchange`/`output`.
+//!   4. A `patch:todo` against a document without `agent:todo` first creates the
+//!      component (`#operatortodo`, placement owned by `agent_doc_element::todo`).
+//!      Patches targeting other missing component names are routed as overflow to
+//!      `exchange`/`output`.
 //!   5. Unmatched text and overflow are merged and appended to `exchange`/`output` (or an
 //!      auto-created `exchange` component if none exists).
 //!   6. Post-patch: if the boundary was consumed, re-inserts a fresh one at the end of exchange.
@@ -41,7 +44,8 @@
 //! - A boundary marker always exists at the end of `exchange` after `apply_patches_with_overrides`
 //!   returns. Callers that perform incremental (CRDT/stream) writes may rely on this invariant.
 //! - Missing-component patches never cause errors; content is silently routed to `exchange`/
-//!   `output` with a diagnostic written to stderr.
+//!   `output` with a diagnostic written to stderr. The one exception is `patch:todo`, which
+//!   creates the missing `agent:todo` component instead so operator actions stay visible.
 //! - Mode precedence is deterministic: stream override > inline attr (`patch=` > `mode=`) >
 //!   `config.toml ([components] section)` (`patch` key > `mode` key) > built-in default. Callers can rely on this
 //!   ordering when constructing overrides for stream mode.
@@ -67,6 +71,8 @@
 //! - `apply_patches_post_patch_merges_duplicate_exchange_opener`: post-patch guard merges duplicate exchange openers created during patching
 //! - `apply_patches_missing_component_routes_to_exchange`: patch targeting unknown component name appears in exchange
 //! - `apply_patches_missing_component_creates_exchange`: missing component + no exchange → auto-creates exchange with overflow
+//! - `apply_patches_todo_patch_creates_missing_todo_component`: `patch:todo` + no todo → todo created after review, checklist not in exchange
+//! - `apply_patches_todo_patch_uses_existing_todo_component`: `patch:todo` + existing todo → no second todo component
 //! - `inline_attr_mode_overrides_config`: `mode=replace` on tag wins over `config.toml ([components] section)` append config
 //! - `inline_attr_mode_overrides_default`: `mode=replace` on exchange wins over built-in append default
 //! - `no_inline_attr_falls_back_to_config`: no inline attr → `config.toml ([components] section)` append config applies
@@ -1070,6 +1076,24 @@ pub fn apply_patches_with_overrides_pure(
             "[template] pre-patch boundary {} inserted at end of exchange",
             id
         );
+    }
+
+    // `#operatortodo`: `agent:todo` is the operator action checklist, and most
+    // session documents predate it. A `patch:todo` must land in a todo
+    // component rather than spill its checklist into the exchange as overflow,
+    // so create the component (at the deterministic operator-facing slot next
+    // to `agent:review`) before resolving patch targets.
+    if patches
+        .iter()
+        .any(|patch| agent_doc_element::todo::is_todo_component(&patch.name))
+    {
+        let (ensured, _, created) =
+            agent_doc_element::todo::ensure_todo_component_in_document(&result)
+                .context("failed to create agent:todo component for patch:todo")?;
+        if created {
+            eprintln!("[template] patch target 'todo' missing; created agent:todo component");
+            result = ensured;
+        }
     }
 
     // Apply patches in reverse order (by position) to preserve byte offsets
@@ -2277,6 +2301,73 @@ All green.
         assert!(
             result.contains("overflow data"),
             "overflow content should be in exchange"
+        );
+    }
+    #[test]
+    fn apply_patches_todo_patch_creates_missing_todo_component() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:exchange -->\nprevious\n<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n<!-- agent:backlog -->\n- [ ] [#work] do work\n<!-- /agent:backlog -->\n\n",
+            "## Review\n\n<!-- agent:review -->\n- [/] [#gate] gated\n<!-- /agent:review -->\n\n",
+            "## Done\n\n<!-- agent:done -->\n<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![
+            PatchBlock::new("exchange", "### Re: ship\n\nShipped.\n"),
+            PatchBlock::new("todo", "- [ ] Verify [#gate] in a live pane\n"),
+        ];
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
+        let components = element::parse(&result).unwrap();
+        let todo = components
+            .iter()
+            .find(|c| c.name == "todo")
+            .expect("patch:todo must create agent:todo");
+        assert_eq!(
+            todo.content(&result),
+            "- [ ] Verify [#gate] in a live pane\n"
+        );
+        assert_eq!(result.matches("<!-- agent:todo -->").count(), 1);
+        let exchange = components.iter().find(|c| c.name == "exchange").unwrap();
+        assert!(
+            !exchange.content(&result).contains("Verify [#gate]"),
+            "todo checklist must not spill into exchange:\n{result}"
+        );
+        let review_end = result.find("<!-- /agent:review -->").unwrap();
+        let todo_start = result.find("<!-- agent:todo -->").unwrap();
+        let done_start = result.find("<!-- agent:done -->").unwrap();
+        assert!(
+            review_end < todo_start && todo_start < done_start,
+            "{result}"
+        );
+        assert!(
+            result.contains("\n## Todo\n\n<!-- agent:todo -->\n"),
+            "{result}"
+        );
+    }
+    #[test]
+    fn apply_patches_todo_patch_uses_existing_todo_component() {
+        let dir = setup_project();
+        let doc_path = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:exchange -->\nprevious\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:review -->\n<!-- /agent:review -->\n\n",
+            "## Todo\n\n<!-- agent:todo -->\n- [ ] Rotate key\n<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc_path, doc).unwrap();
+
+        let patches = vec![PatchBlock::new(
+            "todo",
+            "- [ ] Rotate key\n- [ ] Publish draft docs/note.md\n",
+        )];
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
+        assert_eq!(result.matches("<!-- agent:todo -->").count(), 1, "{result}");
+        assert_eq!(result.matches("## Todo").count(), 1, "{result}");
+        assert!(
+            result.contains("<!-- agent:todo -->\n- [ ] Rotate key\n- [ ] Publish draft docs/note.md\n<!-- /agent:todo -->"),
+            "{result}"
         );
     }
     #[test]

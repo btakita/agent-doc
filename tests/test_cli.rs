@@ -30330,7 +30330,9 @@ fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfac
         "MUST preserve every existing item",
         "--todo-add",
         "**Auto-created `todo` component.**",
-        "directly after the last `agent:review` component",
+        "directly after the last `agent:backlog` / legacy",
+        "`agent:review` is never",
+        "**Default template order.**",
         "**Operator-todo advisory.**",
     ] {
         assert!(

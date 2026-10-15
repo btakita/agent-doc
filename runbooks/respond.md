@@ -535,7 +535,7 @@ in the same cycle. Start with the action and keep only the context needed to act
 Record it with the closeout flag `--todo-add "<action>"` (repeatable), for
 example `agent-doc write --commit <FILE> --todo-add "Verify [#gate1] in a live pane"`.
 The binary appends `- [ ] <action>`, creates `agent:todo` when the document has
-none (right after `agent:review`), keeps every existing checklist item, and
+none (right below `agent:backlog`), keeps every existing checklist item, and
 skips an action that is already listed. A missing `agent:todo` component is
 never a reason to skip the TODO.
 

@@ -1081,8 +1081,8 @@ pub fn apply_patches_with_overrides_pure(
     // `#operatortodo`: `agent:todo` is the operator action checklist, and most
     // session documents predate it. A `patch:todo` must land in a todo
     // component rather than spill its checklist into the exchange as overflow,
-    // so create the component (at the deterministic operator-facing slot next
-    // to `agent:review`) before resolving patch targets.
+    // so create the component (at the deterministic operator-facing slot
+    // directly below `agent:backlog`) before resolving patch targets.
     if patches
         .iter()
         .any(|patch| agent_doc_element::todo::is_todo_component(&patch.name))
@@ -2335,15 +2335,16 @@ All green.
             !exchange.content(&result).contains("Verify [#gate]"),
             "todo checklist must not spill into exchange:\n{result}"
         );
-        let review_end = result.find("<!-- /agent:review -->").unwrap();
+        // Todo lands directly below the backlog, above `## Review`.
+        let backlog_end = result.find("<!-- /agent:backlog -->").unwrap();
         let todo_start = result.find("<!-- agent:todo -->").unwrap();
-        let done_start = result.find("<!-- agent:done -->").unwrap();
+        let review_heading = result.find("## Review").unwrap();
         assert!(
-            review_end < todo_start && todo_start < done_start,
+            backlog_end < todo_start && todo_start < review_heading,
             "{result}"
         );
         assert!(
-            result.contains("\n## Todo\n\n<!-- agent:todo -->\n"),
+            result.contains("<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n"),
             "{result}"
         );
     }

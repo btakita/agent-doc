@@ -8,11 +8,14 @@
 //! ## Spec
 //! - [`ensure_todo_component_in_document`] returns the document unchanged when
 //!   an `agent:todo` component exists. Otherwise it inserts an empty
-//!   `## Todo` section at one deterministic location, next to the other
-//!   operator-facing tracked-work components: directly after the last
-//!   `agent:review` component; else after the last `agent:backlog` /
-//!   legacy `agent:pending`; else after the last `agent:queue`; else after the
-//!   last `agent:exchange`; else at the end of the document.
+//!   `## Todo` section at one deterministic location, matching the default
+//!   template scaffold order (`backlog`, `todo`, `review`): directly after the
+//!   last `agent:backlog` / legacy `agent:pending` component (so it lands
+//!   before any `## Review` section that follows the backlog); else after the
+//!   last `agent:queue`; else after the last `agent:exchange`; else at the end
+//!   of the document. `agent:review` is never an anchor: inserting after it
+//!   would put Todo below Review, and inserting before its marker would split
+//!   the `## Review` heading from its component.
 //! - [`add_todo_item_to_document`] appends one `- [ ] <action>` line to the end
 //!   of the component body, creating the component first when absent. It never
 //!   removes, reorders, or rewrites an existing line, so every existing
@@ -85,8 +88,7 @@ pub fn find_todo_component(content: &str) -> Result<Option<Component>> {
 
 /// Byte offset where a missing `agent:todo` section is inserted.
 fn todo_insertion_offset(content: &str, components: &[Component]) -> usize {
-    let anchors: [fn(&str) -> bool; 4] = [
-        element::is_review_component,
+    let anchors: [fn(&str) -> bool; 3] = [
         element::is_backlog_component,
         |name| name == "queue",
         |name| name == "exchange",
@@ -242,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_inserts_todo_after_review_with_scaffold_heading() {
+    fn ensure_inserts_todo_below_backlog_and_above_review_with_scaffold_heading() {
         let content = concat!(
             "<!-- agent:exchange -->\n### Re: prior\n<!-- /agent:exchange -->\n\n",
             "## Backlog\n\n<!-- agent:backlog -->\n- [ ] [#work] do work\n<!-- /agent:backlog -->\n\n",
@@ -252,15 +254,15 @@ mod tests {
         let (updated, todo, created) = ensure_todo_component_in_document(content).unwrap();
         assert!(created);
         assert_eq!(todo.content(&updated), "");
-        let review_end = updated.find("<!-- /agent:review -->").unwrap();
+        let backlog_end = updated.find("<!-- /agent:backlog -->").unwrap();
         let todo_start = updated.find("<!-- agent:todo -->").unwrap();
-        let done_start = updated.find("<!-- agent:done -->").unwrap();
+        let review_heading = updated.find("## Review").unwrap();
         assert!(
-            review_end < todo_start && todo_start < done_start,
+            backlog_end < todo_start && todo_start < review_heading,
             "{updated}"
         );
         assert!(
-            updated.contains("<!-- /agent:review -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n\n## Done"),
+            updated.contains("<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n\n## Review\n\n<!-- agent:review -->"),
             "{updated}"
         );
         // Everything outside the inserted section is byte-identical.
@@ -268,11 +270,33 @@ mod tests {
     }
 
     #[test]
-    fn ensure_falls_back_to_backlog_then_queue_then_exchange_then_end() {
-        let backlog = "<!-- agent:queue -->\n<!-- /agent:queue -->\n<!-- agent:pending -->\n- [ ] a\n<!-- /agent:pending -->\n<!-- agent:notes -->\n<!-- /agent:notes -->\n";
-        let (updated, _, _) = ensure_todo_component_in_document(backlog).unwrap();
+    fn ensure_anchors_on_the_last_backlog_and_never_on_review() {
+        // Legacy `agent:pending` counts as backlog; review after it does not
+        // pull Todo below Review.
+        let content = concat!(
+            "<!-- agent:review -->\n<!-- /agent:review -->\n",
+            "<!-- agent:pending -->\n- [ ] a\n<!-- /agent:pending -->\n",
+            "<!-- agent:backlog -->\n- [ ] b\n<!-- /agent:backlog -->\n",
+            "## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n",
+        );
+        let (updated, _, _) = ensure_todo_component_in_document(content).unwrap();
         assert!(
-            updated.contains("<!-- /agent:pending -->\n\n## Todo\n\n<!-- agent:todo -->"),
+            updated.contains("<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n## Review"),
+            "{updated}"
+        );
+    }
+
+    #[test]
+    fn ensure_falls_back_to_queue_then_exchange_then_end_without_backlog() {
+        // No backlog: after the queue, which keeps Todo above a later Review.
+        let queue_and_review = concat!(
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- do x\n<!-- /agent:queue -->\n",
+            "## Review\n\n<!-- agent:review -->\n- [/] [#gate] gated\n<!-- /agent:review -->\n",
+        );
+        let (updated, _, _) = ensure_todo_component_in_document(queue_and_review).unwrap();
+        assert!(
+            updated.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n<!-- /agent:todo -->\n## Review"),
             "{updated}"
         );
 
@@ -283,6 +307,16 @@ mod tests {
             "{updated}"
         );
 
+        // Exchange + review only: after the exchange, still above Review.
+        let exchange_and_review = "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n<!-- agent:review -->\n<!-- /agent:review -->\n";
+        let (updated, _, _) = ensure_todo_component_in_document(exchange_and_review).unwrap();
+        assert_eq!(
+            updated,
+            format!(
+                "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n{TODO_SECTION}<!-- agent:review -->\n<!-- /agent:review -->\n"
+            )
+        );
+
         let exchange = "# Title\n\n<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->";
         let (updated, _, _) = ensure_todo_component_in_document(exchange).unwrap();
         assert_eq!(
@@ -291,6 +325,11 @@ mod tests {
                 "# Title\n\n<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n{TODO_SECTION}"
             )
         );
+
+        // Review alone is not an anchor: end of document.
+        let review_only = "# Notes\n\n<!-- agent:review -->\n<!-- /agent:review -->\nprose";
+        let (updated, _, _) = ensure_todo_component_in_document(review_only).unwrap();
+        assert_eq!(updated, format!("{review_only}\n{TODO_SECTION}"));
 
         let plain = "# Notes only\n\nprose";
         let (updated, _, _) = ensure_todo_component_in_document(plain).unwrap();

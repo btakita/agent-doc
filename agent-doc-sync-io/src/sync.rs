@@ -10186,7 +10186,7 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status", "exchange", "queue", "backlog", "review", "icebox", "done", "todo",
+                "status", "exchange", "queue", "backlog", "todo", "review", "icebox", "done",
                 "notes",
             ],
             "sync must render the same complete scaffold as claim"

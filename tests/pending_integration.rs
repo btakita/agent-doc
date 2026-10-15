@@ -1264,8 +1264,8 @@ fn write_review_add_and_edit_mutate_review_component() {
     assert!(review.contains("- [/] [#rvw1] review text updated"));
 }
 
-/// `#operatortodo`: `--todo-add` creates `agent:todo` (after `agent:review`)
-/// when the document has none, appends `- [ ] <action>`, keeps every existing
+/// `#operatortodo`: `--todo-add` creates `agent:todo` (directly below the
+/// backlog, above `agent:review`) when the document has none, appends `- [ ] <action>`, keeps every existing
 /// item, and treats an identical action as a no-op.
 #[test]
 fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
@@ -1299,9 +1299,13 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
         component_body(&content, "todo"),
         "- [ ] Verify [#rvw1] in a live pane"
     );
-    let review_close = content.find("<!-- /agent:review -->").unwrap();
+    let pending_close = content.find("<!-- /agent:pending -->").unwrap();
     let todo_open = content.find("## Todo\n\n<!-- agent:todo -->").unwrap();
-    assert!(review_close < todo_open, "{content}");
+    let review_open = content.find("<!-- agent:review -->").unwrap();
+    assert!(
+        pending_close < todo_open && todo_open < review_open,
+        "Todo must sit below the backlog and above Review:\n{content}"
+    );
 
     // The operator checks the item off and adds their own note.
     let edited = content.replace(

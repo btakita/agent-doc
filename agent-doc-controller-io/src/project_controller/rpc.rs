@@ -16355,9 +16355,6 @@ pub(crate) fn launch_detached_at(
     // inside 500ms, and recovery required starting `controller serve` by hand.
     // Span a realistic install instead, with exponential backoff so the common
     // microsecond case still resolves on the first retry.
-    use launch_enoent::{
-        LAUNCH_ENOENT_BACKOFF_INITIAL, LAUNCH_ENOENT_BACKOFF_MAX, LAUNCH_ENOENT_TOTAL_BUDGET,
-    };
     // `#ctrlrespawnenoent2`: an empty or missing project root makes
     // `Command::current_dir` fail with ENOENT no matter how healthy the binary
     // is, and no amount of retrying can fix it. Without this guard the
@@ -16370,60 +16367,11 @@ pub(crate) fn launch_detached_at(
             project_root,
         );
     }
-    let launch_started = std::time::Instant::now();
-    let mut backoff = LAUNCH_ENOENT_BACKOFF_INITIAL;
-    let mut attempt: u32 = 0;
-    let child = loop {
-        let exe = current_agent_doc_binary()?;
-        match build_command(&exe)?.spawn() {
-            Ok(child) => {
-                if attempt > 0 {
-                    agent_doc_ops_log_io::log_op(
-                        project_root,
-                        &format!(
-                            "controller_launch_recovered_after_enoent project_root={} binary={} spawn_attempts={} waited_ms={} (#ctrlrespawnenoent)",
-                            project_root.display(),
-                            exe.display(),
-                            attempt + 1,
-                            launch_started.elapsed().as_millis(),
-                        ),
-                    );
-                }
-                break child;
-            }
-            Err(err)
-                if err.kind() == std::io::ErrorKind::NotFound
-                    && launch_started.elapsed() + backoff < LAUNCH_ENOENT_TOTAL_BUDGET =>
-            {
-                attempt += 1;
-                std::thread::sleep(backoff);
-                backoff = (backoff * 2).min(LAUNCH_ENOENT_BACKOFF_MAX);
-                continue;
-            }
-            Err(err) => {
-                // Name the cause. This used to surface to the operator wrapped in
-                // `editor_attached_model_missing`, which points diagnosis at the
-                // editor when the editor is fine and the controller is simply
-                // absent.
-                let enoent = err.kind() == std::io::ErrorKind::NotFound;
-                let hint = if enoent {
-                    format!(
-                        "; the binary path was still missing after {}ms — a concurrent `cargo install` / `make install` may have been replacing it. \
-                         This is a MISSING CONTROLLER, not an editor problem. Recover with `agent-doc controller serve --project-root {} --launch-mode lazy`",
-                        launch_started.elapsed().as_millis(),
-                        project_root.display(),
-                    )
-                } else {
-                    String::new()
-                };
-                return Err(anyhow::Error::new(err).context(format!(
-                    "failed to launch project controller (binary={}, spawn_attempts={}){hint}",
-                    exe.display(),
-                    attempt + 1
-                )));
-            }
-        }
-    };
+    let (child, _spawn_retries) = spawn_detached_controller_with_launch_enoent_retry(
+        project_root,
+        current_agent_doc_binary,
+        build_command,
+    )?;
     // Reap the detached controller instead of dropping the handle: under a
     // long-lived launcher (the route-owned supervisor re-`ensure`ing every
     // reconcile tick) a replacement controller that immediately finds a live
@@ -16461,6 +16409,82 @@ pub(crate) fn launch_detached_at(
         pid,
         exit: Some(exit_rx),
     })
+}
+
+/// Spawn the detached controller child, retrying a launch `ENOENT` across a
+/// concurrent install's binary replacement (`#ctrlrespawnenoent`).
+///
+/// `resolve_binary` is re-run before every attempt so a freshly installed path
+/// is picked up. Returns the child and the number of `ENOENT` retries it took.
+///
+/// The retry only works if `spawn()` actually reports an exec failure. On Unix
+/// std learns that through a `CLOEXEC` pipe the child writes `errno` into when
+/// `execve` fails; a `pre_exec` hook that closed that pipe made a missing binary
+/// look like a successful spawn of a child that exited 127, so this loop never
+/// retried. [`close_inherited_fds_on_exec`] therefore marks descriptors
+/// `FD_CLOEXEC` instead of closing them.
+fn spawn_detached_controller_with_launch_enoent_retry(
+    project_root: &Path,
+    mut resolve_binary: impl FnMut() -> Result<PathBuf>,
+    build_command: impl Fn(&Path) -> Result<Command>,
+) -> Result<(std::process::Child, u32)> {
+    use launch_enoent::{
+        LAUNCH_ENOENT_BACKOFF_INITIAL, LAUNCH_ENOENT_BACKOFF_MAX, LAUNCH_ENOENT_TOTAL_BUDGET,
+    };
+    let launch_started = std::time::Instant::now();
+    let mut backoff = LAUNCH_ENOENT_BACKOFF_INITIAL;
+    let mut attempt: u32 = 0;
+    loop {
+        let exe = resolve_binary()?;
+        match build_command(&exe)?.spawn() {
+            Ok(child) => {
+                if attempt > 0 {
+                    agent_doc_ops_log_io::log_op(
+                        project_root,
+                        &format!(
+                            "controller_launch_recovered_after_enoent project_root={} binary={} spawn_attempts={} waited_ms={} (#ctrlrespawnenoent)",
+                            project_root.display(),
+                            exe.display(),
+                            attempt + 1,
+                            launch_started.elapsed().as_millis(),
+                        ),
+                    );
+                }
+                return Ok((child, attempt));
+            }
+            Err(err)
+                if err.kind() == std::io::ErrorKind::NotFound
+                    && launch_started.elapsed() + backoff < LAUNCH_ENOENT_TOTAL_BUDGET =>
+            {
+                attempt += 1;
+                std::thread::sleep(backoff);
+                backoff = (backoff * 2).min(LAUNCH_ENOENT_BACKOFF_MAX);
+                continue;
+            }
+            Err(err) => {
+                // Name the cause. This used to surface to the operator wrapped in
+                // `editor_attached_model_missing`, which points diagnosis at the
+                // editor when the editor is fine and the controller is simply
+                // absent.
+                let enoent = err.kind() == std::io::ErrorKind::NotFound;
+                let hint = if enoent {
+                    format!(
+                        "; the binary path was still missing after {}ms — a concurrent `cargo install` / `make install` may have been replacing it. \
+                         This is a MISSING CONTROLLER, not an editor problem. Recover with `agent-doc controller serve --project-root {} --launch-mode lazy`",
+                        launch_started.elapsed().as_millis(),
+                        project_root.display(),
+                    )
+                } else {
+                    String::new()
+                };
+                return Err(anyhow::Error::new(err).context(format!(
+                    "failed to launch project controller (binary={}, spawn_attempts={}){hint}",
+                    exe.display(),
+                    attempt + 1
+                )));
+            }
+        }
+    }
 }
 
 fn launch_detached_via_helper(
@@ -16552,19 +16576,25 @@ fn launch_detached_via_helper(
 fn close_inherited_fds_on_exec(command: &mut Command) {
     use std::os::unix::process::CommandExt;
 
-    let close_limit = inherited_fd_close_limit();
+    let fallback_limit = inherited_fd_close_limit();
     // The controller is often launched by an editor plugin or harness process.
     // Start a new session so terminal/harness process-group cleanup cannot kill
     // the daemon when the launcher crashes. Some editor file descriptors are not
-    // CLOEXEC, so explicitly drop everything except stdio before exec as well.
+    // CLOEXEC, so mark everything except stdio CLOEXEC before exec as well.
+    //
+    // Mark, never close (`#execfailpipe`): std's own exec-failure pipe is one of
+    // those descriptors. Closing it here made a failed `execve` (a binary
+    // mid-replacement by `make install`) return `Ok(child)` from `spawn()`; the
+    // child then aborted on the dead pipe (SIGABRT, core dumped) and the
+    // launch-ENOENT retry never ran. Marked CLOEXEC, every descriptor still
+    // closes when `execve` succeeds, and the pipe stays open to report the
+    // errno when it fails.
     unsafe {
         command.pre_exec(move || {
             if libc::setsid() == -1 {
                 return Err(std::io::Error::last_os_error());
             }
-            for fd in 3..close_limit {
-                libc::close(fd);
-            }
+            mark_fds_cloexec_from(3, fallback_limit);
             Ok(())
         });
     }
@@ -16572,6 +16602,42 @@ fn close_inherited_fds_on_exec(command: &mut Command) {
 
 #[cfg(not(unix))]
 fn close_inherited_fds_on_exec(_command: &mut Command) {}
+
+/// Mark every descriptor from `first` up `FD_CLOEXEC`, so `execve` closes them
+/// and a failed `execve` does not. Runs in the forked child, so it must stay
+/// async-signal-safe: raw syscalls only, no allocation.
+#[cfg(unix)]
+fn mark_fds_cloexec_from(first: i32, fallback_limit: i32) {
+    #[cfg(target_os = "linux")]
+    {
+        // Linux 5.11+: one syscall covers every descriptor, whatever the
+        // rlimit. Older kernels return ENOSYS/EINVAL and fall through.
+        let marked = unsafe {
+            libc::syscall(
+                libc::SYS_close_range,
+                first as libc::c_uint,
+                libc::c_uint::MAX,
+                libc::CLOSE_RANGE_CLOEXEC,
+            )
+        };
+        if marked == 0 {
+            return;
+        }
+    }
+    mark_fds_cloexec_with_fcntl(first, fallback_limit);
+}
+
+/// Portable fallback for [`mark_fds_cloexec_from`]: `F_SETFD` each open
+/// descriptor in `first..limit`. Async-signal-safe.
+#[cfg(unix)]
+fn mark_fds_cloexec_with_fcntl(first: i32, limit: i32) {
+    for fd in first..limit {
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        if flags != -1 && flags & libc::FD_CLOEXEC == 0 {
+            unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
+        }
+    }
+}
 
 #[cfg(unix)]
 fn inherited_fd_close_limit() -> i32 {
@@ -53326,6 +53392,189 @@ mod tests {
         assert_eq!(sid, pid, "detached daemon must own a new process session");
         child.kill().expect("stop detached-session probe");
         child.wait().expect("reap detached-session probe");
+    }
+
+    /// A `close_inherited_fds_on_exec` command with `stdio` nulled, the way the
+    /// detached controller launch builds its child.
+    #[cfg(unix)]
+    fn detached_probe_command(program: &Path) -> Command {
+        let mut command = Command::new(program);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        close_inherited_fds_on_exec(&mut command);
+        command
+    }
+
+    /// Unix std reports an `execve` failure through a `CLOEXEC` pipe the child
+    /// writes `errno` into. Closing every descriptor above stderr in `pre_exec`
+    /// closed that pipe too, so a missing binary came back as `Ok(child)` and the
+    /// child just exited 127. The launch-ENOENT retry keys on `NotFound` from
+    /// `spawn()`, so it never ran.
+    #[cfg(unix)]
+    #[test]
+    fn detached_controller_command_reports_exec_enoent_as_a_spawn_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let missing = dir.path().join("agent-doc-being-replaced");
+        match detached_probe_command(&missing).spawn() {
+            Err(err) => assert_eq!(err.kind(), std::io::ErrorKind::NotFound, "{err}"),
+            Ok(mut child) => {
+                let status = child.wait();
+                panic!(
+                    "exec of a missing binary reported a successful spawn (child status {status:?}): \
+                     the pre_exec hook closed std's exec-failure pipe"
+                );
+            }
+        }
+    }
+
+    /// Same pipe, different errno: a non-executable file must surface as
+    /// `PermissionDenied`, not as a child that exits immediately.
+    #[cfg(unix)]
+    #[test]
+    fn detached_controller_command_reports_exec_eacces_as_a_spawn_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let not_executable = dir.path().join("agent-doc");
+        std::fs::write(&not_executable, b"#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&not_executable, std::fs::Permissions::from_mode(0o644)).unwrap();
+        match detached_probe_command(&not_executable).spawn() {
+            Err(err) => assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{err}"),
+            Ok(mut child) => {
+                let status = child.wait();
+                panic!(
+                    "exec of a non-executable file reported a successful spawn (child status {status:?})"
+                );
+            }
+        }
+    }
+
+    /// The `#ctrlrespawnenoent` retry, driven through the real retry loop and the
+    /// real `pre_exec` hook: the binary path is missing on the first attempt (an
+    /// install is replacing it) and present on the second. The launch must
+    /// retry once and then spawn, not report the missing binary as a success.
+    #[cfg(unix)]
+    #[test]
+    fn launch_enoent_retry_runs_when_the_binary_is_missing_at_first_spawn() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let installed = dir.path().join("agent-doc");
+        let mut resolves = 0u32;
+        let resolve = || {
+            resolves += 1;
+            if resolves == 2 {
+                // The install lands. A symlink, not a written script: a file
+                // still open for writing in any forked child fails exec with
+                // ETXTBSY, which concurrent tests would make flaky.
+                std::os::unix::fs::symlink("/usr/bin/true", &installed).unwrap();
+            }
+            Ok(installed.clone())
+        };
+        let (mut child, retries) =
+            spawn_detached_controller_with_launch_enoent_retry(dir.path(), resolve, |exe| {
+                Ok(detached_probe_command(exe))
+            })
+            .expect("the retry must outlast the install window");
+        let status = child.wait().unwrap();
+        assert_eq!(
+            retries, 1,
+            "the first spawn hit a missing binary and must have retried (child status {status})"
+        );
+        assert!(status.success(), "{status}");
+        assert_eq!(resolves, 2, "the binary is re-resolved on each attempt");
+    }
+
+    /// A launcher descriptor open without `CLOEXEC` at a number the child would
+    /// inherit: open a scratch file, then move it above `floor` with `F_DUPFD`
+    /// (which does not set `FD_CLOEXEC`).
+    #[cfg(unix)]
+    fn leaked_launcher_fd(dir: &Path, floor: i32) -> i32 {
+        use std::os::unix::io::AsRawFd;
+        let file = std::fs::File::create(dir.join("leaked-by-launcher")).unwrap();
+        let fd = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_DUPFD, floor) };
+        assert!(fd >= floor, "F_DUPFD failed");
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        assert_eq!(
+            flags & libc::FD_CLOEXEC,
+            0,
+            "the sentinel must not be CLOEXEC"
+        );
+        fd
+    }
+
+    /// Run `sh` and report whether descriptor `fd` is open in it.
+    #[cfg(unix)]
+    fn child_sees_fd(mut command: Command, fd: i32) -> String {
+        command.arg("-c").arg(format!(
+            "if [ -e /dev/fd/{fd} ]; then echo leaked; else echo clean; fi"
+        ));
+        let output = command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .expect("spawn fd probe");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// Marking descriptors `FD_CLOEXEC` instead of closing them must keep the
+    /// leak protection the closing was for: a descriptor the launcher leaked
+    /// without `CLOEXEC` still does not reach the detached child, and the
+    /// launcher's own copy stays open and unchanged.
+    #[cfg(unix)]
+    #[test]
+    fn detached_controller_command_does_not_leak_a_non_cloexec_descriptor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sentinel = leaked_launcher_fd(dir.path(), 300);
+
+        // Negative control: without the hook the sentinel reaches the child, so
+        // the probe can see a leak at all.
+        let leaked = child_sees_fd(Command::new("/bin/sh"), sentinel);
+        let mut hooked = Command::new("/bin/sh");
+        close_inherited_fds_on_exec(&mut hooked);
+        let protected = child_sees_fd(hooked, sentinel);
+        let parent_flags = unsafe { libc::fcntl(sentinel, libc::F_GETFD) };
+        unsafe { libc::close(sentinel) };
+
+        assert_eq!(leaked, "leaked", "the probe must detect an inherited fd");
+        assert_eq!(
+            protected, "clean",
+            "fd {sentinel} leaked into the detached child"
+        );
+        assert_eq!(
+            parent_flags, 0,
+            "the hook runs in the child; the launcher's own fd stays open and non-CLOEXEC"
+        );
+    }
+
+    /// The portable fallback (`fcntl` over every descriptor below the limit),
+    /// used where `close_range(CLOSE_RANGE_CLOEXEC)` is unavailable, must give
+    /// the same protection.
+    #[cfg(unix)]
+    #[test]
+    fn fcntl_cloexec_fallback_does_not_leak_a_non_cloexec_descriptor() {
+        use std::os::unix::process::CommandExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let sentinel = leaked_launcher_fd(dir.path(), 300);
+        let limit = inherited_fd_close_limit().max(sentinel + 1);
+        let mut command = Command::new("/bin/sh");
+        unsafe {
+            command.pre_exec(move || {
+                mark_fds_cloexec_with_fcntl(3, limit);
+                Ok(())
+            });
+        }
+        let protected = child_sees_fd(command, sentinel);
+        unsafe { libc::close(sentinel) };
+        assert_eq!(
+            protected, "clean",
+            "fd {sentinel} leaked through the fallback"
+        );
     }
 
     #[test]

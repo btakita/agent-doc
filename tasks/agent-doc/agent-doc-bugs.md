@@ -307,6 +307,31 @@ When it reports back, I'll integrate it, run one `make install`, and close the i
 > **Queue prompt:** release + publish
 
 **Deferred:** the v0.35.505 Release workflow (run 38690867071) is still running. The GitHub Release and PyPI are both still on 0.35.504. The `coordinator:release-v0.35.505` claim stays in place until that run finishes, so that a fresh drain doesn't cut a second release.
+
+### Re: Todo placement merged and v0.35.505 published — opus-5.5 · 2026-10-15T02:58-04:00
+
+> **Queue prompt:** Place the TODO: below the backlog in the agent-doc template.
+
+This is done and installed. The subagent's commit `4afd57595c` ("feat(todo): place agent:todo directly below agent:backlog") fast-forwarded onto `main`, and `make install` from that commit exited 0.
+
+- **Default template order:** Status, Exchange, Queue, Backlog, **Todo**, Review, Icebox, Done, Notes. Before this change, Todo came after Done.
+- **When a document is missing the Todo section:** `--todo-add` and `patch:todo` share one placement function. It puts the section directly after the last `agent:backlog` (or the older name `agent:pending`). If there is no backlog, it goes after the queue. If there is no queue, it goes after the exchange. Otherwise it goes at the end of the document.
+  - `agent:review` is no longer used as an anchor. Placing Todo after it would put Todo below Review. Placing it before the review marker would separate the `## Review` heading from its section.
+  - A Todo section that already exists is not moved.
+- **Specs and runbooks:** `specs/02-document-format.md` now has a "Default template order" paragraph. `specs/pending-system.md` has the updated `--todo-add` row. `runbooks/respond.md` and the 5 harness copies of it now say "right below `agent:backlog`".
+- **Tests:** new tests pin these cases:
+  - With a backlog and a review, Todo lands between them.
+  - With several backlogs, Todo goes after the last one.
+  - The fallbacks: queue, then exchange, then end of document.
+  - A document with only a review section gets Todo at the end.
+- **Verification:** the subagent's `make check` passed 10569 tests with exit 0, 167 skipped. CI for the new `main` (run 38695290461) is still running. The previous CI run is green.
+- **Not done:** I didn't add a `VERSIONS.md` entry. That goes in with the next release.
+
+This document's own `## Todo` section is still below `## Review`. The new rule only places Todo when a document is missing the section, and it never moves an existing one. I didn't hand-move it either, because the editor has this document open. To match the new order, cut the `## Todo` block and paste it right after the backlog in the editor.
+
+> **Queue prompt:** release + publish
+
+This is done. The v0.35.505 Release workflow (run 38690867071) finished successfully. The GitHub Release `agent-doc v0.35.505` is marked Latest (published 2026-10-15T06:40:40Z), and PyPI shows `agent-doc` 0.35.505. That release includes the #265 JetBrains fix. The Todo-placement change above landed after the tag, so it will ship in the next release.
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
@@ -315,7 +340,7 @@ When it reports back, I'll integrate it, run one `make install`, and close the i
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- Place the TODO: below the backlog in the agent-doc template.
+- ~~Place the TODO: below the backlog in the agent-doc template.~~
 - 🚧 release + publish
 <!-- /agent:queue -->
 

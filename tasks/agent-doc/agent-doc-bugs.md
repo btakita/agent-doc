@@ -18,7 +18,6 @@ presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -160,36 +159,7 @@ Done items stay checked in `agent:todo`; they do not move to `agent:done`, becau
 -->
 
 ## Pending / Not Built
-<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#runsdkcaused]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/266~~
-- ~~Make sure agent:todo items are marked complete as they are finished. Provide a similar api as agent:backlog + agent:icebox + agent:reviews.~~
----
-🚧 In sdk.md the "Decide the haiven-api merge order of #645 vs #715" todo item was duplicated. The duplicate was marked done but the original not marked done:
-```
-- [ ] Decide the haiven-api merge order of #645 vs #715 (#apimigrationcollide)
-...
-- [x] Decide the haiven-api merge order of #645 vs #715 (#apimigrationcollide) — moot: #715 renumbered to 00115, either order works
-```
-Same with:
-```
-- [ ] Approve/merge haiven-contracts #160 and decide the next release version bump (#publicbundleadopt)
-...
-- [x] Approve/merge haiven-contracts #160 and decide the next release version bump (#publicbundleadopt) — #160 merged into sdk-dev; continues as #162 below
-```
----
----
-🚧 Compact Exchange error on sdk.md: `agent:salient-response cycle="cycle-1792051137843"` tag in the exchange.
-```
-Agent Doc couldn't compact this document because a document directive is malformed.
-
-sdk.md, line 1325
-Unknown agent-doc close tag `/agent:salient-response`.
-
-Fix the directive, then try again.
-```
----
-- release + publish
+<!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

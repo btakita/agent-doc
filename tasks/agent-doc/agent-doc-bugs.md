@@ -76,6 +76,12 @@ The authoritative `make check` passed with exit 0 and zero failures (`tart-a5d98
 Released and published v0.35.502. The tag and 15 release assets are available at https://github.com/btakita/agent-doc/releases/tag/v0.35.502; the release workflow, PyPI publication, and Homebrew publication all succeeded. This tagged release contains #259, #260, and nested-project configuration inheritance.
 
 We are on the new `agent-doc 0.35.502` locally. One precise release boundary: the tmux auto-sync fix arrived immediately after the v0.35.502 tag, so it is installed locally from current main under version 0.35.502, but it is not contained in the public v0.35.502 release artifacts.
+
+### Re: GitHub issue 259 closeout — gpt-5 · 2026-10-14T21:26-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/259
+
+Fixed on main in `7abf135dd7`, included in v0.35.502, and verified CLOSED on GitHub at 2026-10-15T00:24:33Z. JetBrains 263 modular packages now use the modular-package classification and truthful restart-required messaging.
 <!-- agent:boundary:3599dd10 -->
 <!-- /agent:exchange -->
 
@@ -84,7 +90,7 @@ We are on the new `agent-doc 0.35.502` locally. One precise release boundary: th
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/259
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/259~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/260
 - ~~Make .agent-doc/project.md work with nested projects...such as boost-client or haiven-dev. The parent project.md should be picked up with the child project.md presets overlaid on top.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~tmux pane auto-sync not working~~ — auto-struck: answered this cycle (#ftstrike)

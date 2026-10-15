@@ -243,9 +243,31 @@ fn poll_closing_cycle(
     cycle_id: &str,
     window: std::time::Duration,
     poll: std::time::Duration,
-    mut load: impl FnMut() -> Option<agent_doc_cycle_state_io::CycleState>,
+    load: impl FnMut() -> Option<agent_doc_cycle_state_io::CycleState>,
 ) -> Option<agent_doc_cycle_state_io::CycleState> {
-    let deadline = std::time::Instant::now() + window;
+    let started = std::time::Instant::now();
+    poll_closing_cycle_with(
+        cycle_id,
+        window,
+        poll,
+        load,
+        || started.elapsed(),
+        std::thread::sleep,
+    )
+}
+
+/// [`poll_closing_cycle`] over an injected clock (`elapsed` since the poll
+/// began) and `sleep`, so the window logic is testable without wall time: a
+/// test asserting "polled more than once before giving up" must not depend on
+/// how long a loaded machine takes to run `load`.
+fn poll_closing_cycle_with(
+    cycle_id: &str,
+    window: std::time::Duration,
+    poll: std::time::Duration,
+    mut load: impl FnMut() -> Option<agent_doc_cycle_state_io::CycleState>,
+    mut elapsed: impl FnMut() -> std::time::Duration,
+    mut sleep: impl FnMut(std::time::Duration),
+) -> Option<agent_doc_cycle_state_io::CycleState> {
     loop {
         let state = load();
         let in_flight = state.as_ref().is_some_and(|state| {
@@ -256,10 +278,10 @@ fn poll_closing_cycle(
                         | agent_doc_turn::CyclePhase::WriteApplied
                 )
         });
-        if !in_flight || std::time::Instant::now() + poll > deadline {
+        if !in_flight || elapsed() + poll > window {
             return state;
         }
-        std::thread::sleep(poll);
+        sleep(poll);
     }
 }
 
@@ -1646,8 +1668,12 @@ mod respond_settle_tests {
 
     #[test]
     fn polling_gives_up_when_the_window_closes() {
+        // Injected clock: the poll count is a function of window/poll alone,
+        // never of how long `load` takes on a loaded machine (the wall-clock
+        // version polled once and failed under a shared `make check`).
         let calls = std::cell::Cell::new(0);
-        let settled = poll_closing_cycle(
+        let clock = std::cell::Cell::new(std::time::Duration::ZERO);
+        let settled = poll_closing_cycle_with(
             "c1",
             std::time::Duration::from_millis(20),
             std::time::Duration::from_millis(5),
@@ -1655,8 +1681,13 @@ mod respond_settle_tests {
                 calls.set(calls.get() + 1);
                 Some(cycle("c1", "write_applied"))
             },
+            || clock.get(),
+            |step| clock.set(clock.get() + step),
         );
-        assert!(calls.get() > 1);
+        // Loads at 0, 5, 10, 15 and 20 ms; at 20 ms the next poll would pass
+        // the window, so it gives up there.
+        assert_eq!(calls.get(), 5);
+        assert_eq!(clock.get(), std::time::Duration::from_millis(20));
         assert!(!failed_closeout_settled(
             &cycle("c1", "write_applied"),
             settled.as_ref()

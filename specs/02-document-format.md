@@ -138,7 +138,15 @@ Built-in element descriptors live in the `agent-doc-element-*` crate family;
 the built-in registry is `agent-doc-element-registry`. Each descriptor owns an
 explicit turn role. Unknown components remain turn triggers by default so an
 unregistered prompt cannot be silently ignored; `notes` and `todo` are the
-built-in informational exceptions. `todo` is not runnable agent work: it has
+built-in informational exceptions. The registry also lists the binary-written
+components that only ever appear nested inside another element and have no
+descriptor of their own (`NESTED_BINARY_COMPONENTS`: `salient-response`, the
+non-final checkpoint node inside `agent:exchange`, and `referral`, the
+`transfer --referral` pointer block). Every marker-level gate, the tagpath
+dialect lint above all, must accept every marker the binary itself writes; a
+source-scan test enumerates the `agent:NAME` marker literals in production code
+and fails when the lint gate rejects one that is not a documented in-memory
+parse probe. `todo` is not runnable agent work: it has
 no scheduling role and is never promoted into `queue` or `backlog`. When a turn
 leaves a concrete operator action, the agent MUST add a brief, action-first
 Markdown checklist item to `todo` in the same cycle (`#operatortodo`). The item

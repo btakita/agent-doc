@@ -605,6 +605,13 @@ fn registry_known_agent_marker_name(name: &str) -> bool {
     if agent_doc_element_registry::find_built_in(name).is_some() {
         return true;
     }
+    // Tagpath's dialect only knows the top-level component
+    // set, so the nested markers the binary itself writes (a live cycle's
+    // `agent:salient-response`, a `transfer --referral` block) would otherwise
+    // block compact/write with "unknown agent-doc close tag".
+    if agent_doc_element_registry::is_nested_binary_component(name) {
+        return true;
+    }
 
     let Some((base, _suffix)) = name.split_once(':') else {
         return false;
@@ -1311,5 +1318,196 @@ operator-owned scratch state\n\
             <!-- /agent:done -->\n";
         let file = write_doc(&dir, "proj.md", doc);
         run(&file, None).expect("project [lint] dialect = off must skip gate");
+    }
+
+    /// A live cycle's `salient-checkpoint` node sits inside
+    /// `agent:exchange` until final response insertion removes it. Compact
+    /// Exchange during that window refused with "unknown agent-doc close tag
+    /// `/agent:salient-response`" and told the operator to fix a directive the
+    /// binary had written; hand-deleting its markers then stranded the body as
+    /// history. Render the node with the production renderer so the marker
+    /// shape this test accepts is the shape the binary writes.
+    #[test]
+    fn live_salient_response_checkpoint_passes_integrity_and_dialect_lint() {
+        let salient = agent_doc_markdown_ast::exchange_tree::render_salient_response(
+            "cycle-1792051137843",
+            "**Awaiting developer choice**\n\n1. **fix-first** — fix it first",
+        );
+        let doc = format!(
+            "---\nagent_doc_session: test\n---\n\n\
+             <!-- agent:exchange -->\n\
+             ❯ consolidate the PRs\n\n\
+             {salient}\
+             <!-- agent:boundary:0123abcd -->\n\
+             <!-- /agent:exchange -->\n"
+        );
+        let dir = TempDir::new().unwrap();
+        let file = write_doc(&dir, "salient.md", &doc);
+        let findings = dialect_findings(&file, &doc);
+        assert!(
+            findings.is_empty(),
+            "a binary-written salient node must not produce dialect findings: {findings:?}"
+        );
+        run_on_content_with_logger(&file, &doc, Some(LintCliMode::Strict), noop_ops_logger)
+            .expect("strict lint + integrity must accept a live salient-response node");
+    }
+
+    /// `transfer --referral` writes an `agent:referral` block into the target
+    /// component; the same gate gap would refuse every later compact/write.
+    #[test]
+    fn transfer_referral_block_passes_dialect_lint() {
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\n\
+            <!-- agent:referral src=\"../tsift.md\" component=\"exchange\" created=\"2026-10-15T00:00:00Z\" -->\n\
+            *Context from [tsift.md](../tsift.md) — read source for full history.*\n\
+            <!-- /agent:referral -->\n\
+            <!-- /agent:exchange -->\n";
+        let dir = TempDir::new().unwrap();
+        let file = write_doc(&dir, "referral.md", doc);
+        let findings = dialect_findings(&file, doc);
+        assert!(findings.is_empty(), "{findings:?}");
+        run_on_content_with_logger(&file, doc, Some(LintCliMode::Strict), noop_ops_logger)
+            .expect("strict lint must accept a transfer referral block");
+    }
+
+    /// Markers that production code builds only as in-memory parse probes and
+    /// never writes into a session document. Each needs a reason; anything the
+    /// binary can persist must instead be lint-accepted.
+    const IN_MEMORY_PROBE_MARKERS: &[(&str, &str)] = &[
+        (
+            "landability-probe",
+            "agent-doc-template response_materialization wraps a body to parse it",
+        ),
+        (
+            "scaffold",
+            "agent-doc-template prompt_comment_repair wraps a prompt to parse it",
+        ),
+        (
+            "patch",
+            "agent-doc-template response_materialization detects a mistyped `agent:patch:` response marker; it is read, never written",
+        ),
+    ];
+
+    fn workspace_production_sources() -> Vec<std::path::PathBuf> {
+        fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crate lives in the agent-doc workspace")
+            .to_path_buf();
+        let mut src_dirs = vec![root.join("src")];
+        for entry in std::fs::read_dir(&root).unwrap().flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with("agent-doc-") {
+                src_dirs.push(entry.path().join("src"));
+            }
+        }
+        let mut files = Vec::new();
+        for dir in src_dirs {
+            walk(&dir, &mut files);
+        }
+        files.sort();
+        files
+    }
+
+    /// Every `agent:NAME` marker literal in production (non-test, non-comment)
+    /// source, with one file that writes it.
+    fn binary_written_marker_names() -> std::collections::BTreeMap<String, std::path::PathBuf> {
+        let mut names = std::collections::BTreeMap::new();
+        for file in workspace_production_sources() {
+            let source = std::fs::read_to_string(&file).unwrap_or_default();
+            let production = source
+                .split_once("#[cfg(test)]")
+                .map_or(source.as_str(), |(before, _)| before);
+            for line in production.lines() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for prefix in ["<!-- agent:", "<!-- /agent:"] {
+                    let mut rest = line;
+                    while let Some(at) = rest.find(prefix) {
+                        rest = &rest[at + prefix.len()..];
+                        let name: String = rest
+                            .chars()
+                            .take_while(|ch| {
+                                ch.is_ascii_lowercase() || ch.is_ascii_digit() || *ch == '-'
+                            })
+                            .collect();
+                        if !name.is_empty() {
+                            names.entry(name).or_insert_with(|| file.clone());
+                        }
+                    }
+                }
+            }
+        }
+        names
+    }
+
+    /// Regression guard: the lint gate's known-marker set is
+    /// checked against every marker the binary's own source writes, so adding
+    /// a new binary-written marker without teaching the gate fails here instead
+    /// of as an operator-facing "malformed directive" refusal.
+    #[test]
+    fn every_binary_written_marker_passes_the_dialect_lint() {
+        let names = binary_written_marker_names();
+        for required in [
+            "exchange",
+            "boundary",
+            "queue",
+            "salient-response",
+            "referral",
+        ] {
+            assert!(
+                names.contains_key(required),
+                "source scan lost `agent:{required}`; the enumeration is broken: {:?}",
+                names.keys().collect::<Vec<_>>()
+            );
+        }
+        let dir = TempDir::new().unwrap();
+        let file = write_doc(&dir, "markers.md", "");
+        let mut rejected = Vec::new();
+        for (name, source) in &names {
+            if IN_MEMORY_PROBE_MARKERS
+                .iter()
+                .any(|(probe, _)| probe == name)
+            {
+                continue;
+            }
+            let doc = format!(
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange -->\nprompt\n<!-- /agent:exchange -->\n\n\
+                 <!-- agent:{name} -->\nbody\n<!-- /agent:{name} -->\n"
+            );
+            let unknown: Vec<_> = dialect_findings(&file, &doc)
+                .into_iter()
+                .filter(|finding| finding.rule == "agent-doc/unknown-component")
+                .map(|finding| finding.message)
+                .collect();
+            if !unknown.is_empty() {
+                rejected.push(format!(
+                    "agent:{name} (written in {}): {unknown:?}",
+                    source.display()
+                ));
+            }
+        }
+        assert!(
+            rejected.is_empty(),
+            "binary-written markers the lint gate rejects as unknown; register them in \
+             agent-doc-element-registry (NESTED_BINARY_COMPONENTS for nested markers) or, \
+             if they are never persisted, list them in IN_MEMORY_PROBE_MARKERS:\n{}",
+            rejected.join("\n")
+        );
     }
 }

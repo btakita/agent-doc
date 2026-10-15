@@ -551,6 +551,44 @@ pub fn remove_all_salient_responses(inner: &str) -> String {
     )
 }
 
+/// Exchange content with its non-final salient nodes separated out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SalientPartition {
+    /// The exchange content with every salient node removed.
+    pub content: String,
+    /// The rendered salient node owned by the still-open cycle, if any.
+    pub live: Option<String>,
+    /// Salient nodes owned by any other (ended or abandoned) cycle.
+    pub dropped_stale: usize,
+}
+
+/// Separate every salient node from `inner`.
+///
+/// A salient node is display state for one open cycle, never history, so
+/// compaction must neither archive nor commit it. The node owned by
+/// `open_cycle_id` is returned in [`SalientPartition::live`] so the live
+/// projection can keep showing it until final response insertion removes it;
+/// a node from any other cycle is a stale orphan and is dropped.
+pub fn partition_salient_responses(inner: &str, open_cycle_id: Option<&str>) -> SalientPartition {
+    let mut kept = Vec::new();
+    let mut live = String::new();
+    let mut dropped_stale = 0;
+    for node in parse_exchange_nodes(inner) {
+        match &node.kind {
+            ExchangeNodeKind::Salient { cycle_id } if Some(cycle_id.as_str()) == open_cycle_id => {
+                live.push_str(&node.render());
+            }
+            ExchangeNodeKind::Salient { .. } => dropped_stale += 1,
+            _ => kept.push(node),
+        }
+    }
+    SalientPartition {
+        content: render_exchange_nodes(&kept),
+        live: (!live.trim().is_empty()).then_some(live),
+        dropped_stale,
+    }
+}
+
 pub fn salient_response_materialized(inner: &str, cycle_id: &str, body: &str) -> bool {
     let expected = render_salient_response(cycle_id, body);
     parse_exchange_nodes(inner).into_iter().any(|node| {
@@ -723,6 +761,33 @@ mod tests {
             remove_all_salient_responses(&second).trim_end(),
             initial.trim_end()
         );
+    }
+
+    #[test]
+    fn salient_partition_keeps_open_cycle_live_and_drops_stale_orphans() {
+        let history = "### Re: Older\n\nDone.\n";
+        let stale = upsert_salient_response(history, "cycle-old", "Abandoned finding.");
+        let both = upsert_salient_response(&stale, "cycle-open", "Live finding.");
+
+        let partition = partition_salient_responses(&both, Some("cycle-open"));
+        assert_eq!(partition.content.trim_end(), history.trim_end());
+        assert_eq!(partition.dropped_stale, 1);
+        let live = partition.live.expect("the open cycle's node stays live");
+        assert!(live.contains("Live finding.") && !live.contains("Abandoned finding."));
+        assert!(salient_response_materialized(
+            &live,
+            "cycle-open",
+            "Live finding."
+        ));
+
+        let no_open_cycle = partition_salient_responses(&both, None);
+        assert_eq!(no_open_cycle.live, None);
+        assert_eq!(no_open_cycle.dropped_stale, 2);
+        assert_eq!(no_open_cycle.content.trim_end(), history.trim_end());
+
+        let untouched = partition_salient_responses(history, Some("cycle-open"));
+        assert_eq!(untouched.content, history);
+        assert_eq!((untouched.live, untouched.dropped_stale), (None, 0));
     }
 
     // --- Phase 4 structural operations ---

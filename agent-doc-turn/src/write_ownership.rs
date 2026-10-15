@@ -148,6 +148,21 @@ pub struct RetainedWriteOwnership {
     /// Only a site that has actually observed the replica may set it; the
     /// default `false` keeps the conservative reading.
     pub replica_unserved: bool,
+    /// The controller spent its replica-rebuild budget on this document's
+    /// retained native save and the editor still refuses that exact content
+    /// (`#splicesessionack`, GH #273): the editor's VISIBLE buffer holds text
+    /// the retained write lacks — typically operator typing held as an
+    /// unmerged local batch.
+    ///
+    /// Every holder completes through that save, and the controller
+    /// deliberately never overwrites the buffer, so nothing that can fire will
+    /// converge it: the operator has to reconcile the buffer with the retained
+    /// write. Before this bit the state existed only as one controller log line
+    /// (`retained_persistence_replica_rebuild_exhausted`), and every reader
+    /// reported the `Deferred` wait. Only a site that has read the durable
+    /// record (`agent_doc_controller_io::retained_persistence_exhaustion`) may
+    /// set it; the default `false` keeps the conservative reading.
+    pub editor_holds_unmerged_visible_text: bool,
 }
 
 impl RetainedWriteOwnership {
@@ -164,6 +179,7 @@ impl RetainedWriteOwnership {
         delivery_rejected: false,
         editor_route_unowned: false,
         replica_unserved: false,
+        editor_holds_unmerged_visible_text: false,
     };
 
     pub const fn new(cycle_open: bool, retained_capture: bool) -> Self {
@@ -177,6 +193,7 @@ impl RetainedWriteOwnership {
             delivery_rejected: false,
             editor_route_unowned: false,
             replica_unserved: false,
+            editor_holds_unmerged_visible_text: false,
         }
     }
 
@@ -196,6 +213,7 @@ impl RetainedWriteOwnership {
             delivery_rejected: false,
             editor_route_unowned: false,
             replica_unserved: false,
+            editor_holds_unmerged_visible_text: false,
         }
     }
 
@@ -244,6 +262,18 @@ impl RetainedWriteOwnership {
         self
     }
 
+    /// Record that the editor refuses the retained native save after the
+    /// controller's replica-rebuild budget for that content was spent
+    /// (`#splicesessionack`). Only a site that has read the durable record may
+    /// set it.
+    pub const fn with_editor_holds_unmerged_visible_text(
+        mut self,
+        editor_holds_unmerged_visible_text: bool,
+    ) -> Self {
+        self.editor_holds_unmerged_visible_text |= editor_holds_unmerged_visible_text;
+        self
+    }
+
     /// Refine ownership with a response capture proven by the current caller.
     ///
     /// Some guards already hold the loaded capture. Keeping that evidence is
@@ -287,6 +317,13 @@ impl RetainedWriteOwnership {
             // by the same integrity gate, so the one terminating move is the
             // replica recovery the integrity gate names.
             RetainedWriteVerdict::ReplicaUnserved
+        } else if self.editor_holds_unmerged_visible_text {
+            // `#splicesessionack` (GH #273): the replica is served and the
+            // controller already rebuilt it; the editor still refuses the save
+            // because its visible buffer holds text the retained write lacks.
+            // Waiting cannot end that and committing would adopt neither
+            // text, so the one terminating move belongs to the operator.
+            RetainedWriteVerdict::EditorHoldsUnmergedVisibleText
         } else if self.retained_capture || self.retained_projection {
             RetainedWriteVerdict::Deferred
         } else if self.write_applied {
@@ -361,6 +398,18 @@ pub enum RetainedWriteVerdict {
     /// why this verdict and that gate derive the instruction from one owner
     /// instead of one forbidding what the other prescribes.
     ReplicaUnserved,
+    /// The editor keeps refusing the retained native save after the
+    /// controller's replica-rebuild budget for that content was spent: its
+    /// visible buffer holds unmerged text the retained write lacks
+    /// (`#splicesessionack`, GH #273).
+    ///
+    /// Between [`Self::Deferred`] and [`Self::Stranded`]: the retained write is
+    /// durable and NOT lost, but the convergence it waits on is refused by an
+    /// editor whose buffer the controller will not overwrite, so waiting never
+    /// ends. The operator reconciles that buffer with the retained write
+    /// (`operator_action=reconcile_editor_buffer_with_retained_write`); the
+    /// controller's capped native-save retry then persists it on its own.
+    EditorHoldsUnmergedVisibleText,
 }
 
 impl RetainedWriteVerdict {
@@ -373,6 +422,7 @@ impl RetainedWriteVerdict {
             Self::UnansweredEditPending => "unanswered_edit_pending",
             Self::DeliveryRejected => "delivery_rejected",
             Self::ReplicaUnserved => "replica_unserved",
+            Self::EditorHoldsUnmergedVisibleText => "editor_holds_unmerged_visible_text",
         }
     }
 
@@ -402,7 +452,8 @@ impl RetainedWriteVerdict {
             | Self::CaptureResumeUnowned
             | Self::UnansweredEditPending
             | Self::DeliveryRejected
-            | Self::ReplicaUnserved => false,
+            | Self::ReplicaUnserved
+            | Self::EditorHoldsUnmergedVisibleText => false,
             Self::Stranded | Self::AwaitingTerminalCommit => true,
         }
     }
@@ -569,6 +620,36 @@ pub fn editor_replica_recovery() -> &'static str {
      same command; restart that editor only if the retry is refused again (#84)."
 }
 
+/// The state token every reader of the exhausted replica-rebuild record names
+/// (`#splicesessionack`). Mirrors the controller's
+/// `retained_persistence_replica_rebuild_exhausted ... state=` field.
+pub const EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE: &str = "editor_holds_unmerged_visible_text";
+/// The operator action every reader of that record names. Mirrors the
+/// controller log's `operator_action=` field.
+pub const RECONCILE_EDITOR_BUFFER_OPERATOR_ACTION: &str =
+    "reconcile_editor_buffer_with_retained_write";
+
+/// The one instruction for an editor whose visible buffer holds text the
+/// retained write lacks after the controller's replica-rebuild budget is spent
+/// (`#splicesessionack`, GH #273). `session-check`'s terminal report and the
+/// write path's retained refusal both render it, so they cannot disagree.
+pub fn editor_holds_unmerged_visible_text_remedy(file: &str) -> String {
+    format!(
+        "The editor that has {file} open refused every native save of the retained write, and \
+         the controller's replica rebuilds did not change that: its VISIBLE buffer holds text the \
+         retained write does not contain — typically operator typing held as an unmerged local \
+         batch (state={EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE}). Waiting will not converge it, \
+         and the controller deliberately never overwrites that buffer. The retained write is \
+         durable and NOT lost: do NOT re-send it, force disk (that discards the operator's \
+         text), or run `admin recycle` or `admin reload-lib` (the replica was already rebuilt). \
+         Do NOT run `agent-doc commit {file}` either; it adopts neither text. Operator action \
+         (operator_action={RECONCILE_EDITOR_BUFFER_OPERATOR_ACTION}): ask the operator to \
+         reconcile the editor buffer of {file} with the retained write, keeping the text they \
+         typed. Once the buffer and the retained write agree, the controller's capped \
+         native-save retry persists it on its own; then run `agent-doc session-check {file}`"
+    )
+}
+
 /// When `admin reload-lib` is sanctioned, stated once for every remedy that
 /// otherwise tells the agent to wait (GH #131).
 ///
@@ -642,6 +723,9 @@ fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) ->
              recovery it names",
             editor_replica_recovery()
         ),
+        RetainedWriteVerdict::EditorHoldsUnmergedVisibleText => {
+            editor_holds_unmerged_visible_text_remedy(file)
+        }
         RetainedWriteVerdict::Stranded => {
             let evidence = if ownership.editor_route_unowned {
                 "The refusing editor endpoint is UNREGISTERED and document authority reports \
@@ -711,7 +795,8 @@ pub const fn tracked_work_repair_admission(
 ) -> TrackedWorkRepairAdmission {
     match ownership.with_retained_projection(true).verdict() {
         verdict @ (RetainedWriteVerdict::ReplicaUnserved
-        | RetainedWriteVerdict::DeliveryRejected) => {
+        | RetainedWriteVerdict::DeliveryRejected
+        | RetainedWriteVerdict::EditorHoldsUnmergedVisibleText) => {
             TrackedWorkRepairAdmission::RecoverEditorFirst(verdict)
         }
         _ => TrackedWorkRepairAdmission::Admissible,
@@ -1744,6 +1829,7 @@ mod tests {
             RetainedWriteVerdict::UnansweredEditPending,
             RetainedWriteVerdict::DeliveryRejected,
             RetainedWriteVerdict::ReplicaUnserved,
+            RetainedWriteVerdict::EditorHoldsUnmergedVisibleText,
         ] {
             let ownership = match verdict {
                 RetainedWriteVerdict::Deferred => RetainedWriteOwnership::new(true, false),
@@ -1762,6 +1848,10 @@ mod tests {
                 }
                 RetainedWriteVerdict::ReplicaUnserved => {
                     RetainedWriteOwnership::new(true, false).with_replica_unserved(true)
+                }
+                RetainedWriteVerdict::EditorHoldsUnmergedVisibleText => {
+                    RetainedWriteOwnership::new(true, true)
+                        .with_editor_holds_unmerged_visible_text(true)
                 }
             };
             assert_eq!(ownership.verdict(), verdict, "fixture builds {verdict:?}");
@@ -1945,7 +2035,7 @@ mod tests {
     /// Every input combination, so a new verdict branch cannot quietly
     /// reintroduce the contradiction.
     fn every_ownership() -> Vec<RetainedWriteOwnership> {
-        (0u16..512)
+        (0u16..1024)
             .map(|bits| {
                 let bit = |n: u16| bits & (1 << n) != 0;
                 RetainedWriteOwnership::new_with_phase(bit(0), bit(1), bit(2))
@@ -1955,8 +2045,90 @@ mod tests {
                     .with_delivery_rejected(bit(6))
                     .with_editor_route_unowned(bit(7))
                     .with_replica_unserved(bit(8))
+                    .with_editor_holds_unmerged_visible_text(bit(9))
             })
             .collect()
+    }
+
+    /// `#splicesessionack` (GH #273 remainder): after the controller's
+    /// replica-rebuild budget was spent on a refused save, `session-check` and
+    /// the write path both still said "wait for the acknowledgement". Every
+    /// holder shape reading the durable record must instead name the state and
+    /// the operator action, never the self-completing deferral, and never a
+    /// commit that would adopt neither text.
+    #[test]
+    fn an_exhausted_rebuild_budget_names_the_operator_reconcile_not_a_wait() {
+        for owned in [
+            RetainedWriteOwnership::new(true, false),
+            RetainedWriteOwnership::new(false, true),
+            RetainedWriteOwnership::new_with_phase(true, false, true),
+            RetainedWriteOwnership::UNOWNED.with_retained_projection(true),
+            RetainedWriteOwnership::UNOWNED,
+        ] {
+            let held = owned.with_editor_holds_unmerged_visible_text(true);
+            assert_eq!(
+                held.verdict(),
+                RetainedWriteVerdict::EditorHoldsUnmergedVisibleText,
+                "{held:?}"
+            );
+            let remedy = retained_write_remedy(held, "plan.md");
+            assert!(
+                remedy.contains("state=editor_holds_unmerged_visible_text"),
+                "{remedy}"
+            );
+            assert!(
+                remedy.contains("operator_action=reconcile_editor_buffer_with_retained_write"),
+                "{remedy}"
+            );
+            assert!(
+                remedy.contains("agent-doc session-check plan.md"),
+                "{remedy}"
+            );
+            assert!(
+                remedy.contains("Do NOT run `agent-doc commit plan.md`"),
+                "{remedy}"
+            );
+            for invented in ["re-send", "force disk", "admin recycle"] {
+                assert!(remedy.contains(invented), "{invented}: {remedy}");
+            }
+            assert!(
+                !remedy.contains("deferral, not a lost response"),
+                "waiting cannot end this state: {remedy}"
+            );
+            assert!(!held.verdict().commit_is_the_named_recovery());
+            assert_eq!(
+                retained_queue_gate(Some(RetainedQueueHolder::WriteIntent), held),
+                RetainedQueueGate::Recover(RetainedWriteVerdict::EditorHoldsUnmergedVisibleText)
+            );
+            assert_eq!(
+                tracked_work_repair_admission(held),
+                TrackedWorkRepairAdmission::RecoverEditorFirst(
+                    RetainedWriteVerdict::EditorHoldsUnmergedVisibleText
+                )
+            );
+        }
+        // Observations that prove a more fundamental fault keep their verdict.
+        let base =
+            RetainedWriteOwnership::new(true, true).with_editor_holds_unmerged_visible_text(true);
+        assert_eq!(
+            base.with_replica_unserved(true).verdict(),
+            RetainedWriteVerdict::ReplicaUnserved
+        );
+        assert_eq!(
+            base.with_delivery_rejected(true).verdict(),
+            RetainedWriteVerdict::DeliveryRejected
+        );
+        assert_eq!(
+            base.with_editor_route_unowned(true).verdict(),
+            RetainedWriteVerdict::Stranded
+        );
+        // Not read == not exhausted: the default keeps the deferral.
+        assert_eq!(
+            RetainedWriteOwnership::new(true, true)
+                .with_editor_holds_unmerged_visible_text(false)
+                .verdict(),
+            RetainedWriteVerdict::Deferred
+        );
     }
 
     /// GH #131 shape 2: `session-check`'s integrity gate prescribed `admin
@@ -2054,7 +2226,9 @@ mod tests {
             let instruction = tracked_work_repair_instruction(ownership, "plan.md", repair);
             assert!(instruction.contains(repair), "{instruction}");
             match write_path_verdict {
-                RetainedWriteVerdict::ReplicaUnserved | RetainedWriteVerdict::DeliveryRejected => {
+                RetainedWriteVerdict::ReplicaUnserved
+                | RetainedWriteVerdict::DeliveryRejected
+                | RetainedWriteVerdict::EditorHoldsUnmergedVisibleText => {
                     assert_eq!(
                         admission,
                         TrackedWorkRepairAdmission::RecoverEditorFirst(write_path_verdict)

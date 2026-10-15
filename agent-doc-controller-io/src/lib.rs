@@ -7,5 +7,6 @@ pub mod inherited_fds;
 pub mod process;
 pub mod process_exit_watcher;
 pub mod project_controller;
+pub mod retained_persistence_exhaustion;
 pub mod route_snapshot;
 pub mod starting_actor_timeout;

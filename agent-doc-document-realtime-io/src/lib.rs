@@ -6960,6 +6960,36 @@ pub fn observed_retained_write_ownership(
     agent_doc_capture_io::retained_write_ownership(file)
         .with_replica_unserved(editor_replica_unserved(file))
         .with_editor_route_unowned(editor_route_unowned(file))
+        .with_editor_holds_unmerged_visible_text(editor_holds_unmerged_visible_text(file).is_some())
+}
+
+/// The durable exhausted replica-rebuild record for `file`, when it still
+/// describes the document (`#splicesessionack`, GH #273 remainder).
+///
+/// The controller writes the record when the editor keeps refusing one
+/// retained native save after every delivered replica rebuild, and clears it
+/// when a save is applied or a different content is refused. This read adds
+/// the two observations a reader can make without the controller: disk has not
+/// reached the refused content, and the live canonical is still that content.
+/// A detached editor holds no visible buffer, so the record does not describe
+/// it; an authority that cannot be read keeps the durable fact (fail closed).
+/// Only consulted when a record exists, so the common path makes no authority
+/// query.
+pub fn editor_holds_unmerged_visible_text(
+    file: &Path,
+) -> Option<
+    agent_doc_controller_io::retained_persistence_exhaustion::RetainedPersistenceRebuildExhausted,
+> {
+    let exhausted = agent_doc_controller_io::retained_persistence_exhaustion::observe(file)?;
+    match query_live_editor_authority(file, "editor_holds_unmerged_visible_text_probe") {
+        Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => None,
+        Ok(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })
+            if !exhausted.matches_authority(&text) =>
+        {
+            None
+        }
+        _ => Some(exhausted),
+    }
 }
 
 /// Whether the rejected editor route has been removed and document authority
@@ -7052,6 +7082,15 @@ fn defer_visible_delivery_projection_with_ownership(
             if owned.verdict()
                 == agent_doc_turn::write_ownership::RetainedWriteVerdict::DeliveryRejected
     );
+    // `#splicesessionack` (GH #273): an editor that keeps refusing the save
+    // after every replica rebuild voids the same promise; the operator, not a
+    // converging replica, ends it.
+    let unmerged_visible_text = matches!(
+        ownership,
+        agent_doc_turn::write_ownership::RetainedProjectionOwnership::ResponseWrite(owned)
+            if owned.verdict()
+                == agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorHoldsUnmergedVisibleText
+    );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -7062,17 +7101,21 @@ fn defer_visible_delivery_projection_with_ownership(
             live_editors,
             if delivery_rejected {
                 "editor_receipt_rejected"
+            } else if unmerged_visible_text {
+                agent_doc_turn::write_ownership::EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE
             } else {
                 "lazy_projection_pending"
             },
             if delivery_rejected {
                 "restart_rejecting_editor"
+            } else if unmerged_visible_text {
+                agent_doc_turn::write_ownership::RECONCILE_EDITOR_BUFFER_OPERATOR_ACTION
             } else {
                 "none"
             },
         ),
     );
-    let pending_marker = if delivery_rejected {
+    let pending_marker = if delivery_rejected || unmerged_visible_text {
         String::new()
     } else {
         format!(

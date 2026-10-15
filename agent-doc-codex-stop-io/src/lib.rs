@@ -2744,6 +2744,11 @@ fn retained_write_queue_recovery_response(
             agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED
                 .with_editor_route_unowned(true)
         }
+        agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorHoldsUnmergedVisibleText => {
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED
+                .with_retained_projection(true)
+                .with_editor_holds_unmerged_visible_text(true)
+        }
         _ => agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED,
     };
     let message = format!(
@@ -4755,6 +4760,7 @@ Done.\n\
             RetainedWriteVerdict::AwaitingTerminalCommit,
             RetainedWriteVerdict::UnansweredEditPending,
             RetainedWriteVerdict::DeliveryRejected,
+            RetainedWriteVerdict::EditorHoldsUnmergedVisibleText,
         ] {
             assert!(
                 !closeout_failure_is_binary_owned_deferral(&refusal, verdict),
@@ -5001,6 +5007,24 @@ Done.\n\
         ))
         .unwrap();
         assert!(stranded.contains("UNREGISTERED"), "{stranded}");
+
+        // `#splicesessionack`: an editor that refuses the save after every
+        // replica rebuild names the operator reconcile, not a wait.
+        let unmerged = serde_json::to_string(&retained_write_queue_recovery_response(
+            file,
+            "intent-4",
+            RetainedWriteVerdict::EditorHoldsUnmergedVisibleText,
+            false,
+        ))
+        .unwrap();
+        assert!(
+            unmerged.contains("verdict=editor_holds_unmerged_visible_text"),
+            "{unmerged}"
+        );
+        assert!(
+            unmerged.contains("operator_action=reconcile_editor_buffer_with_retained_write"),
+            "{unmerged}"
+        );
 
         // The gate consults the shared predicate before rendering a wait.
         let source = include_str!("lib.rs");
@@ -5280,6 +5304,7 @@ Done.\n\
             delivery_rejected: false,
             editor_route_unowned: false,
             replica_unserved: false,
+            editor_holds_unmerged_visible_text: false,
         };
         let note = closeout_repair_retained_note(&err, owned, Path::new("/p/fpe.md"));
         assert!(note.contains("intent_id=abc"), "{note}");
@@ -5309,6 +5334,7 @@ Done.\n\
             delivery_rejected: false,
             editor_route_unowned: false,
             replica_unserved: false,
+            editor_holds_unmerged_visible_text: false,
         };
         let remedy = agent_doc_turn::write_ownership::retained_write_remedy(owned, "/p/fpe.md");
         let err = anyhow::anyhow!("editor projection pending. {remedy}");

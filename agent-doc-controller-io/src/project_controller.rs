@@ -4844,6 +4844,95 @@ fn refund_undelivered_retained_persistence_rebuild(
     }
 }
 
+/// `#splicesessionack`: the retained-persistence worker's refusal bookkeeping
+/// for out-of-crate SimWorld models. Each call runs the SAME per-content streak
+/// step and durable exhausted-state projection the worker runs after a native
+/// save completes, so a model can drive the rebuild-exhaustion path and read
+/// what `session-check` reads, without a live editor route.
+#[cfg(any(test, feature = "test-support"))]
+pub struct TestSupportRetainedPersistenceLedger {
+    sink: RetainedWriteSettleSink,
+    retries: std::collections::HashMap<String, RetainedPersistenceRefusalStreak>,
+    epoch: u64,
+}
+
+/// What one modeled save completion decided.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TestSupportRetainedPersistenceStep {
+    pub request_replica_rebuild: bool,
+    pub report_rebuild_exhausted: bool,
+    pub refusals: u32,
+    pub rebuilds: u32,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl TestSupportRetainedPersistenceLedger {
+    pub fn new(project_root: &Path, first_epoch: u64) -> Self {
+        Self {
+            sink: RetainedWriteSettleSink {
+                project_root: project_root.to_path_buf(),
+                runtime: std::sync::Weak::new(),
+            },
+            retries: std::collections::HashMap::new(),
+            epoch: first_epoch,
+        }
+    }
+
+    fn projection(&self, file: &Path, content: &str) -> RetainedPersistenceProjection {
+        RetainedPersistenceProjection {
+            file: file.to_path_buf(),
+            content_hash: agent_doc_hash::content_hash(content),
+            content_len: content.len(),
+            delivery_version: self.epoch,
+            controller_generation: 1,
+        }
+    }
+
+    /// The editor refused the save of `content`. A delivered replica rebuild
+    /// re-registers the replica, which re-delivers the same bytes on a newer
+    /// epoch, exactly as in the GH #273 loop.
+    pub fn refuse(&mut self, file: &Path, content: &str) -> TestSupportRetainedPersistenceStep {
+        let projection = self.projection(file, content);
+        let decision = retained_persistence_retry_step(
+            &mut self.retries,
+            &file.display().to_string(),
+            self.epoch,
+            (&projection.content_hash, projection.content_len),
+            false,
+            false,
+        )
+        .expect("a refused current epoch retries");
+        self.sink
+            .project_rebuild_exhaustion(&projection, 1, self.epoch, false, Some(&decision));
+        if decision.request_replica_rebuild {
+            self.epoch += 3;
+        }
+        TestSupportRetainedPersistenceStep {
+            request_replica_rebuild: decision.request_replica_rebuild,
+            report_rebuild_exhausted: decision.report_rebuild_exhausted,
+            refusals: decision.refusals,
+            rebuilds: decision.rebuilds,
+        }
+    }
+
+    /// The editor applied the save of `content`.
+    pub fn apply(&mut self, file: &Path, content: &str) {
+        let projection = self.projection(file, content);
+        let decision = retained_persistence_retry_step(
+            &mut self.retries,
+            &file.display().to_string(),
+            self.epoch,
+            (&projection.content_hash, projection.content_len),
+            true,
+            false,
+        );
+        assert_eq!(decision, None, "an applied save never retries");
+        self.sink
+            .project_rebuild_exhaustion(&projection, 1, self.epoch, true, None);
+    }
+}
+
 /// Wait out the backoff off every lock, then re-claim the refused epoch.
 fn schedule_refused_retained_persistence_retry(
     runtime: std::sync::Weak<ControllerRuntime>,
@@ -5433,6 +5522,80 @@ impl RetainedWriteSettleSink {
         }
     }
 
+    /// `#splicesessionack` (GH #273 remainder): carry the refusal streak's
+    /// operator-visible state across processes. The exhausted rebuild budget
+    /// used to exist only as one ops-log line, so `session-check` and the
+    /// write path kept reporting a pending acknowledgement for a state that
+    /// waiting cannot end. The record is written when the budget is exhausted,
+    /// kept while the same content is refused, and cleared by an applied save
+    /// or by a different content starting a new streak. Bookkeeping only: a
+    /// failure is logged and never changes the save or its retry.
+    fn project_rebuild_exhaustion(
+        &self,
+        projection: &RetainedPersistenceProjection,
+        generation: u64,
+        epoch: u64,
+        applied: bool,
+        retry: Option<&RetainedPersistenceRetryDecision>,
+    ) {
+        use crate::retained_persistence_exhaustion as exhaustion;
+        let outcome = if applied {
+            exhaustion::clear_unless(&self.project_root, &projection.file, None)
+                .map(|cleared| cleared.then_some("cleared_applied"))
+        } else if let Some(retry) = retry {
+            if retry.report_rebuild_exhausted {
+                exhaustion::record(
+                    &self.project_root,
+                    &projection.file,
+                    &exhaustion::RetainedPersistenceRebuildExhausted {
+                        content_hash: projection.content_hash.clone(),
+                        content_len: projection.content_len,
+                        epoch,
+                        controller_generation: generation,
+                        refusals: retry.refusals,
+                        rebuilds: retry.rebuilds,
+                        recorded_at_ms: SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map(|elapsed| elapsed.as_millis() as u64)
+                            .unwrap_or_default(),
+                    },
+                )
+                .map(|()| Some("recorded"))
+            } else if retry.refusals == 1 {
+                exhaustion::clear_unless(
+                    &self.project_root,
+                    &projection.file,
+                    Some(&projection.content_hash),
+                )
+                .map(|cleared| cleared.then_some("cleared_content_changed"))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        };
+        match outcome {
+            Ok(None) => {}
+            Ok(Some(action)) => agent_doc_ops_log_io::log_op(
+                &projection.file,
+                &format!(
+                    "retained_persistence_rebuild_exhausted_state action={action} generation={generation} epoch={epoch} content_hash={} content_len={} state={} operator_action={}",
+                    projection.content_hash,
+                    projection.content_len,
+                    exhaustion::STATE,
+                    exhaustion::OPERATOR_ACTION,
+                ),
+            ),
+            Err(error) => agent_doc_ops_log_io::log_op(
+                &projection.file,
+                &format!(
+                    "retained_persistence_rebuild_exhausted_state_failed generation={generation} epoch={epoch} content_hash={} error={error:#}",
+                    projection.content_hash,
+                ),
+            ),
+        }
+    }
+
     /// Project a typed derived recovery identity into the existing
     /// captured-finalize state-plane channel.
     fn resume(&self, document_hash: &str, signal: &RetainedResumeSignal) -> bool {
@@ -5941,13 +6104,21 @@ impl ControllerDocumentGraphs {
                         let document_hash = command.document_hash.clone();
                         let epoch = command.envelope.epoch;
                         let generation = command.envelope.generation;
-                        let file = command.envelope.value.file.clone();
-                        let content_hash = command.envelope.value.content_hash.clone();
-                        let content_len = command.envelope.value.content_len;
+                        let projection = command.envelope.value.clone();
+                        let file = projection.file.clone();
+                        let content_hash = projection.content_hash.clone();
+                        let content_len = projection.content_len;
                         let retry = runtime
                             .document_graphs
                             .complete_retained_persistence(command, applied);
                         drop(runtime);
+                        worker_sink.project_rebuild_exhaustion(
+                            &projection,
+                            generation,
+                            epoch,
+                            applied,
+                            retry.as_ref(),
+                        );
                         if let Some(retry) = retry {
                             if retry.request_replica_rebuild {
                                 let delivered = match agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
@@ -23792,6 +23963,152 @@ mod retained_persistence_retry_tests {
         .unwrap();
         assert_eq!(after.rebuilds, RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS);
         assert!(after.refusals > 200);
+    }
+
+    /// `#splicesessionack` (GH #273 remainder): the exhausted rebuild budget
+    /// was one ops-log line, so `session-check` kept saying the editor
+    /// acknowledgement was pending. Drive the measured refusal loop through
+    /// the real streak and the worker's own durable projection, against a
+    /// real `state.db`: the state appears exactly when the budget is spent,
+    /// survives the capped retries of the same content, and clears when the
+    /// content converges (disk proof, then the applied save) or changes.
+    #[test]
+    fn exhausted_rebuild_budget_is_a_durable_state_until_the_content_converges_or_changes() {
+        use crate::retained_persistence_exhaustion as exhaustion;
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+        let file = project.path().join("doc-a.md");
+        let visible = "operator buffer with an unmerged local batch\n";
+        let retained = "retained closeout the editor refuses to save\n";
+        std::fs::write(&file, visible).unwrap();
+        let sink = RetainedWriteSettleSink {
+            project_root: project.path().to_path_buf(),
+            runtime: std::sync::Weak::new(),
+        };
+        let projection = |content: &str, epoch: u64| RetainedPersistenceProjection {
+            file: file.clone(),
+            content_hash: agent_doc_hash::content_hash(content),
+            content_len: content.len(),
+            delivery_version: epoch,
+            controller_generation: 2,
+        };
+        let mut retries = std::collections::HashMap::new();
+        let mut epoch = 126u64;
+        let mut first_observed_at = None;
+        for refusal in 1u32..=40 {
+            // The editor answers every save of this content `projection_changed`.
+            let refused = projection(retained, epoch);
+            assert!(!retained_persistence_has_exact_disk_proof(&refused).unwrap());
+            let decision = retained_persistence_retry_step(
+                &mut retries,
+                "doc-a",
+                epoch,
+                (&refused.content_hash, refused.content_len),
+                false,
+                false,
+            )
+            .expect("a refused save keeps retrying");
+            sink.project_rebuild_exhaustion(&refused, 2, epoch, false, Some(&decision));
+            let observed = exhaustion::observe(&file);
+            if decision.report_rebuild_exhausted {
+                first_observed_at = Some(refusal);
+            }
+            match first_observed_at {
+                None => assert_eq!(observed, None, "refusal {refusal}: budget not spent yet"),
+                Some(_) => {
+                    let observed = observed.expect("the exhausted state stays durable");
+                    assert_eq!(observed.content_hash, refused.content_hash);
+                    assert_eq!(observed.rebuilds, RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS);
+                }
+            }
+            if decision.request_replica_rebuild {
+                // The rebuild's re-registration re-delivers the same bytes.
+                epoch += 3;
+            }
+        }
+        assert_eq!(
+            first_observed_at,
+            Some(
+                RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS
+                    * (RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS + 1)
+            ),
+            "reported on the escalation after the last delivered rebuild"
+        );
+
+        // Converge: the operator reconciles the buffer and the editor saves the
+        // retained content. Disk proof alone retires the read before the
+        // controller observes the save; the applied save clears the row.
+        std::fs::write(&file, retained).unwrap();
+        assert_eq!(exhaustion::observe(&file), None, "disk reached the content");
+        let converged = projection(retained, epoch);
+        assert!(sink.persist_current_delivery("doc-a", &converged));
+        assert_eq!(
+            retained_persistence_retry_step(
+                &mut retries,
+                "doc-a",
+                epoch,
+                (&converged.content_hash, converged.content_len),
+                true,
+                false,
+            ),
+            None
+        );
+        sink.project_rebuild_exhaustion(&converged, 2, epoch, true, None);
+        assert_eq!(exhaustion::load(project.path(), &file).unwrap(), None);
+
+        // Change: a stale record for an older content is cleared by the first
+        // refusal of a different content, never by a refusal of its own.
+        std::fs::write(&file, visible).unwrap();
+        let stale = projection(retained, epoch);
+        let mut stale_streak = std::collections::HashMap::new();
+        let exhausted = (0..9)
+            .map(|_| {
+                retained_persistence_retry_step(
+                    &mut stale_streak,
+                    "doc-a",
+                    epoch,
+                    (&stale.content_hash, stale.content_len),
+                    false,
+                    false,
+                )
+                .unwrap()
+            })
+            .last()
+            .unwrap();
+        assert!(exhausted.report_rebuild_exhausted);
+        sink.project_rebuild_exhaustion(&stale, 2, epoch, false, Some(&exhausted));
+        assert!(exhaustion::observe(&file).is_some());
+        let restart = retained_persistence_retry_step(
+            &mut std::collections::HashMap::new(),
+            "doc-a",
+            epoch + 1,
+            (&stale.content_hash, stale.content_len),
+            false,
+            false,
+        )
+        .unwrap();
+        sink.project_rebuild_exhaustion(&stale, 3, epoch + 1, false, Some(&restart));
+        assert!(
+            exhaustion::observe(&file).is_some(),
+            "a restarted streak of the SAME content keeps the state"
+        );
+        let newer = projection("a newer write\n", epoch + 2);
+        let fresh = retained_persistence_retry_step(
+            &mut stale_streak,
+            "doc-a",
+            epoch + 2,
+            (&newer.content_hash, newer.content_len),
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(fresh.refusals, 1);
+        sink.project_rebuild_exhaustion(&newer, 3, epoch + 2, false, Some(&fresh));
+        assert_eq!(
+            exhaustion::observe(&file),
+            None,
+            "different content clears it"
+        );
     }
 
     #[test]

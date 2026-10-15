@@ -1058,6 +1058,135 @@ fn held_captured_batch_beside_head_marker_and_closeout_merges_forward_across_pee
     let _ = vscode.disconnect().unwrap();
 }
 
+/// GH #273 remainder (`#splicesessionack`) end to end through the real
+/// controller and the real `agent-doc session-check` CLI. The editor's visible
+/// buffer (= disk) holds operator typing the controller canonical lacks, and
+/// the controller spent its replica-rebuild budget on the canonical's native
+/// save. Before, session-check said "the exact editor delivery acknowledgement
+/// is pending" and waited out its 45 s settle window. It must read the durable
+/// exhausted state, name it and the operator action, and stay non-OK; once
+/// disk reaches the retained content the state no longer holds.
+///
+/// The exhausted record is the one the controller's retained-persistence
+/// worker writes (driven through its real refusal streak by
+/// `exhausted_rebuild_budget_is_a_durable_state_until_the_content_converges_or_changes`
+/// and the `retained_persistence_rebuild_exhausted_model` SimWorld); this test
+/// proves the reader against a live controller canonical.
+#[test]
+fn session_check_reports_exhausted_replica_rebuilds_as_an_operator_state() {
+    let _env_guard = agent_doc_test_support::env_lock();
+    let temp = tempfile::TempDir::new().unwrap();
+    let project_root = temp.path();
+    let baseline = "<!-- agent:exchange -->\nanswer\n<!-- /agent:exchange -->\n";
+    let file = agent_doc_test_support::init_repo_with_doc(project_root, "held.md", baseline);
+    std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
+    std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
+    agent_doc_test_support::seed_reliable_sync_editor_registration(
+        &file,
+        "exhausted-rebuild-simworld",
+        &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+    );
+    agent_doc()
+        .args([
+            "controller",
+            "status",
+            "--project-root",
+            &project_root.to_string_lossy(),
+            "--ensure",
+        ])
+        .assert()
+        .success();
+    let _controller = ControllerGuard {
+        project_root: project_root.to_path_buf(),
+    };
+    let mut jetbrains =
+        PluginProtocolHarness::attach(PluginHarnessKind::JetBrains, project_root, &file).unwrap();
+
+    // The retained closeout lands in the controller canonical; the editor's
+    // visible buffer, which equals disk, never takes it.
+    let at = code_point_offset(baseline, "answer\n") + "answer\n".chars().count();
+    jetbrains
+        .edit_without_pulling(at, "\n### Re: closeout\n\nclosed it.\n")
+        .unwrap();
+    let canonical = controller_canonical_text(project_root, &file).unwrap();
+    assert!(canonical.contains("closed it."), "{canonical:?}");
+    let disk = std::fs::read_to_string(&file).unwrap();
+    assert_ne!(disk, canonical);
+
+    let session_check = || {
+        let output = agent_doc()
+            .current_dir(project_root)
+            .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+            .args(["session-check", &file.to_string_lossy()])
+            .output()
+            .unwrap();
+        (
+            output.status.code(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        )
+    };
+
+    let (_, before) = session_check();
+    assert!(
+        !before.contains("editor_holds_unmerged_visible_text"),
+        "no durable record, no exhausted state: {before}"
+    );
+
+    use agent_doc_controller_io::retained_persistence_exhaustion as exhaustion;
+    exhaustion::record(
+        project_root,
+        &file,
+        &exhaustion::RetainedPersistenceRebuildExhausted {
+            content_hash: agent_doc_hash::content_hash(&canonical),
+            content_len: canonical.len(),
+            epoch: 130,
+            controller_generation: 1,
+            refusals: 9,
+            rebuilds: 2,
+            recorded_at_ms: 1,
+        },
+    )
+    .unwrap();
+    let started = Instant::now();
+    let (code, report) = session_check();
+    assert_ne!(code, Some(0), "fail closed while the state holds: {report}");
+    assert!(
+        report.contains("state=editor_holds_unmerged_visible_text"),
+        "{report}"
+    );
+    assert!(
+        report.contains("operator_action=reconcile_editor_buffer_with_retained_write"),
+        "{report}"
+    );
+    assert!(
+        !report.contains("acknowledgement is pending"),
+        "the generic pending-ack line is replaced: {report}"
+    );
+    assert!(
+        !report.contains("pending-save"),
+        "the refused save is not reported as one the controller will make: {report}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(40),
+        "an operator-owned state is not waited out"
+    );
+
+    // Converge: the buffer and the retained write agree and land on disk.
+    std::fs::write(&file, &canonical).unwrap();
+    assert_eq!(exhaustion::observe(&file), None);
+    let (_, report) = session_check();
+    assert!(
+        !report.contains("editor_holds_unmerged_visible_text"),
+        "the state clears once disk reaches the retained content: {report}"
+    );
+
+    let _ = jetbrains.disconnect().unwrap();
+}
+
 #[test]
 #[ignore = "run through `make cross-editor-simworld` after compiling both editor harnesses"]
 fn native_plugin_harnesses_peer_through_real_agent_doc_controller() {

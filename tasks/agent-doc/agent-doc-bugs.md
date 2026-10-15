@@ -51,7 +51,7 @@ Here is what the issue says is wrong, and what the subagent was asked to fix:
 > **Queue prompt:** release + publish
 
 **Deferred:** this release has to include the #266 fix, so it waits until the subagent reports and the branch is merged and installed. The next queue cycle cuts it.
-❯ 🚧 Run Agent Doc on sdk.md caused queue item to partially duplicate. Note the "fork" between "not to" and "not f":
+❯ Run Agent Doc on sdk.md caused queue item to partially duplicate. Note the "fork" between "not to" and "not f":
 ```
 - Does gh support 2 types of PR? One for our dev which is not to be blocked on a review...and a PR type for main which is for review?
 - Does gh support 2 types of PR? One for our dev which is not f
@@ -160,6 +160,7 @@ Done items stay checked in `agent:todo`; they do not move to `agent:done`, becau
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority -->
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

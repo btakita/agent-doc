@@ -5308,6 +5308,7 @@ mod read_only_retained_projection_model {
                 Some(self.phase),
                 self.retained_write_blocks,
                 self.delivery_converged,
+                false,
             ) {
                 ReadOnlyTerminalProjectionDecision::Converged
                 | ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery => {}
@@ -5317,7 +5318,8 @@ mod read_only_retained_projection_model {
                         self.native_save_requests += 1;
                     }
                 }
-                ReadOnlyTerminalProjectionDecision::ObserveOnly => {
+                ReadOnlyTerminalProjectionDecision::ObserveOnly
+                | ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText => {
                     self.operator_exit_requested = true;
                 }
             }
@@ -5406,6 +5408,168 @@ mod read_only_retained_projection_model {
         assert_eq!(world.native_save_requests, 0);
         assert_eq!(world.response_replays, 0);
         assert!(!world.operator_exit_requested);
+    }
+}
+
+/// SimWorld for GH #273's remainder (`#splicesessionack`). After a controller
+/// recycle the operator typed into a document whose replica was not attached;
+/// the plugin held that typing as an unmerged local batch, a closeout's
+/// retained write landed, and the editor refused every native save of it.
+/// `#rebuildconverge` bounded the controller's replica rebuilds and logged the
+/// exhausted state once, but `session-check` still reported "the exact editor
+/// delivery acknowledgement is pending" — a self-converging wait for a state
+/// only the operator can end.
+///
+/// The model drives the controller's REAL refusal streak and durable
+/// exhausted-state projection (`TestSupportRetainedPersistenceLedger`, the same
+/// code the retained-persistence worker runs), against a real `state.db`, and
+/// asks session-check's REAL decision and rendering what they report from the
+/// durable read alone. The editor's visible buffer is the disk projection, as
+/// measured.
+mod retained_persistence_rebuild_exhausted_model {
+    use agent_doc_controller_io::project_controller::TestSupportRetainedPersistenceLedger;
+    use agent_doc_controller_io::retained_persistence_exhaustion;
+    use agent_doc_session_check_io::command::{
+        ReadOnlyTerminalProjectionDecision, decide_read_only_terminal_projection,
+        is_self_converging_interruption, read_only_terminal_projection_detail,
+    };
+    use agent_doc_turn::CyclePhase;
+    use agent_doc_turn::write_ownership::{
+        RetainedWriteOwnership, RetainedWriteVerdict, retained_write_remedy,
+    };
+    use std::path::PathBuf;
+
+    struct World {
+        _project: tempfile::TempDir,
+        file: PathBuf,
+        /// Controller canonical: the retained closeout write.
+        authority: String,
+        ledger: TestSupportRetainedPersistenceLedger,
+    }
+
+    impl World {
+        fn after_recycle_with_held_operator_batch() -> Self {
+            let project = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+            let file = project.path().join("doc-a.md");
+            // The visible buffer equals disk and holds the operator's batch.
+            std::fs::write(&file, "## Queue\n- typed while detached\n").unwrap();
+            let ledger = TestSupportRetainedPersistenceLedger::new(project.path(), 126);
+            Self {
+                _project: project,
+                file,
+                authority: "## Exchange\n### Re: closeout\n\nclosed it.\n## Queue\n".to_string(),
+                ledger,
+            }
+        }
+
+        fn disk(&self) -> String {
+            std::fs::read_to_string(&self.file).unwrap()
+        }
+
+        /// What a read-only session-check reports from the durable state and
+        /// the planes it observes. Returns the decision and its INTERRUPTED
+        /// detail (or `None` when converged).
+        fn session_check(&self) -> (ReadOnlyTerminalProjectionDecision, Option<String>) {
+            let holds = retained_persistence_exhaustion::observe(&self.file)
+                .is_some_and(|exhausted| exhausted.matches_authority(&self.authority));
+            let ownership = RetainedWriteOwnership::new_with_phase(true, true, true)
+                .with_retained_projection(true)
+                .with_editor_holds_unmerged_visible_text(holds);
+            let converged = self.authority == self.disk();
+            let decision = decide_read_only_terminal_projection(
+                converged,
+                Some(CyclePhase::WriteApplied),
+                true,
+                false,
+                holds,
+            );
+            if decision == ReadOnlyTerminalProjectionDecision::Converged {
+                return (decision, None);
+            }
+            let detail = format!(
+                "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for doc-a.md; {}. {}",
+                read_only_terminal_projection_detail(decision),
+                retained_write_remedy(ownership, "doc-a.md"),
+            );
+            (decision, Some(detail))
+        }
+    }
+
+    #[test]
+    fn exhausted_rebuilds_are_reported_as_an_operator_state_until_the_buffer_converges() {
+        let mut world = World::after_recycle_with_held_operator_batch();
+        let mut exhausted_at = None;
+        for refusal in 1..=40u32 {
+            let step = world.ledger.refuse(&world.file, &world.authority);
+            if step.report_rebuild_exhausted {
+                exhausted_at = Some(refusal);
+            }
+            let (decision, detail) = world.session_check();
+            let detail = detail.expect("disk never reaches the retained write here");
+            if exhausted_at.is_none() {
+                // Rebuilds remain: this really is a wait for the editor.
+                assert_eq!(
+                    decision,
+                    ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery
+                );
+                assert!(detail.contains("acknowledgement is pending"), "{detail}");
+                assert!(is_self_converging_interruption(&detail), "{detail}");
+                continue;
+            }
+            assert_eq!(
+                decision,
+                ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText,
+                "refusal {refusal}"
+            );
+            assert!(!detail.contains("acknowledgement is pending"), "{detail}");
+            assert!(
+                detail.contains("state=editor_holds_unmerged_visible_text"),
+                "{detail}"
+            );
+            assert!(
+                detail.contains("operator_action=reconcile_editor_buffer_with_retained_write"),
+                "{detail}"
+            );
+            assert!(
+                !is_self_converging_interruption(&detail),
+                "the settle window must not wait out an operator-owned state: {detail}"
+            );
+        }
+        assert_eq!(exhausted_at, Some(9), "after the second delivered rebuild");
+        assert_eq!(
+            RetainedWriteOwnership::new_with_phase(true, true, true)
+                .with_retained_projection(true)
+                .with_editor_holds_unmerged_visible_text(true)
+                .verdict(),
+            RetainedWriteVerdict::EditorHoldsUnmergedVisibleText
+        );
+
+        // The operator reconciles the buffer; the editor's save of the retained
+        // write lands. Disk proof retires the state before the controller
+        // observes the receipt, and the applied save clears the durable row.
+        std::fs::write(&world.file, &world.authority).unwrap();
+        assert_eq!(
+            world.session_check().0,
+            ReadOnlyTerminalProjectionDecision::Converged
+        );
+        world.ledger.apply(&world.file, &world.authority);
+        let project_root = world.file.parent().unwrap().to_path_buf();
+        assert_eq!(
+            retained_persistence_exhaustion::load(&project_root, &world.file).unwrap(),
+            None
+        );
+
+        // A later, different write starts its own streak; the old state is gone
+        // and the new write waits on the editor again until its own budget.
+        std::fs::write(&world.file, "operator keeps typing\n").unwrap();
+        world.authority = "a newer retained write\n".to_string();
+        let step = world.ledger.refuse(&world.file, &world.authority);
+        assert_eq!((step.refusals, step.rebuilds), (1, 0));
+        assert_eq!(
+            world.session_check().0,
+            ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery
+        );
     }
 }
 

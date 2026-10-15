@@ -97,7 +97,8 @@ write intent by `intent_id`, a retained compact by `continuation_id`. A pause
 that cannot name a holder is not a pause — the Codex auto-queue gate continues
 instead of waiting on an unobserved holder, and an observed write intent that
 the shared ownership predicate proves cannot converge (`DeliveryRejected`,
-`ReplicaUnserved`, unregistered refusing endpoint) names that recovery.
+`ReplicaUnserved`, `EditorHoldsUnmergedVisibleText`, unregistered refusing
+endpoint) names that recovery.
 
 No terminal response may answer an identical recurring queue command introduced
 for a later task. Native save is an external editor-authority effect after exact
@@ -403,11 +404,28 @@ re-decided at a site:
   replica. No verdict forbids `admin reload-lib` outright, and an observed
   unserved replica never reads as `Deferred` (exhaustive predicate test).
   `retained_write_ownership_guard.rs` owns both phrases.
+- **An exhausted rebuild budget is the operator's to end
+  (`#splicesessionack`, GH #273).** `RetainedWriteOwnership` carries
+  `editor_holds_unmerged_visible_text`, set only from the durable
+  `retained_persistence_rebuild_exhausted` record. Its verdict
+  `EditorHoldsUnmergedVisibleText` ranks after `ReplicaUnserved` (a served,
+  already-rebuilt replica is what makes the visible buffer the culprit) and
+  before every holder's `Deferred` wait. Its remedy
+  (`editor_holds_unmerged_visible_text_remedy`) names
+  `state=editor_holds_unmerged_visible_text` and
+  `operator_action=reconcile_editor_buffer_with_retained_write`, forbids
+  re-send, force disk, `admin recycle`/`reload-lib`, and `agent-doc commit`
+  (it adopts neither text), and returns to `session-check` once the buffer and
+  the retained write agree. A tracked-work repair under it is
+  `RecoverEditorFirst`; the Codex auto-queue gate returns its recovery; the
+  write path's retained refusal withholds `retained=delivery_projection_pending`
+  and logs `recovery=editor_holds_unmerged_visible_text
+  operator_action=reconcile_editor_buffer_with_retained_write`.
 - **A tracked-work repair is named only when it can complete
   (`#trackedrepairterminates`).** `tracked_work_repair_admission` asks the
   ownership exactly as the write path's own delivery refusal will
-  (`with_retained_projection(true)`): `ReplicaUnserved` and `DeliveryRejected`
-  return `RecoverEditorFirst`, and the guard text
+  (`with_retained_projection(true)`): `ReplicaUnserved`, `DeliveryRejected`
+  and `EditorHoldsUnmergedVisibleText` return `RecoverEditorFirst`, and the guard text
   (`tracked_work_repair_instruction`) puts that verdict's recovery before the
   command; every other verdict renders the bare command. `session-check`'s
   pending-done, expect-done-or-gate and blocked-follow-up guards, and finalize's
@@ -1351,7 +1369,27 @@ the retained write; the controller logs
 state=editor_holds_unmerged_visible_text
 operator_action=reconcile_editor_buffer_with_retained_write` once and never
 overwrites that buffer. Only an applied save clears the streak, and only
-different content starts a new one. In
+different content starts a new one.
+
+The exhausted state is durable, not just a log line (`#splicesessionack`, GH
+#273 remainder): `session-check` kept reporting "the exact editor delivery
+acknowledgement is pending" — a self-converging wait — for a state only the
+operator can end. When the streak reports exhaustion, the persistence worker
+upserts a `state.db` `document_runtime_state` row (kind
+`retained_persistence_rebuild_exhausted`, keyed by the document state hash,
+payload: the refused `content_hash`/`content_len`, epoch, generation, refusal
+and rebuild counts). An applied save clears it, the first refusal of different
+content clears it, and a refusal of the same content keeps it, so a restarted
+controller's fresh streak does not erase the fact before it re-earns it.
+`agent_doc_controller_io::retained_persistence_exhaustion` owns the row;
+`agent_doc_document_realtime_io::editor_holds_unmerged_visible_text` reads it
+as holding only while disk has not reached the refused content and the live
+canonical is still that content (a detached editor holds no visible buffer).
+The read sets `RetainedWriteOwnership::editor_holds_unmerged_visible_text`,
+whose verdict `EditorHoldsUnmergedVisibleText` names the state and
+`operator_action=reconcile_editor_buffer_with_retained_write` in every
+retained-write refusal and in `session-check`, which stays INTERRUPTED while
+it holds (see [session-check](07-closeout-commands.md#session-check)). In
 particular, a stale native baseline quarantines the local delta and schedules a
 pull of the current controller canonical projection.
 
@@ -2109,7 +2147,10 @@ balanced component markers, and at most one live exchange boundary marker.
   existing persistence Effect requests an idempotent editor-replica rebuild,
   up to two delivered rebuilds per refused content (`#rebuildconverge`); an
   unreachable signal is refunded and therefore does not latch recovery, and the
-  epochs a rebuild itself mints never restart the streak.
+  epochs a rebuild itself mints never restart the streak. An exhausted budget
+  is projected into the durable `retained_persistence_rebuild_exhausted` record
+  (`#splicesessionack`) by that same completion, cleared by an applied save or
+  a different refused content; it is bookkeeping and never changes the save.
   The ordinary idempotent persistence retry remains responsible for the final
   exact-disk proof. This extracts recovery from the pull-only imperative path.
   The capped retry timer remains the one-shot wall-clock adapter.

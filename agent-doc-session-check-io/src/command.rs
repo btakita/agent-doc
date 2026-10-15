@@ -168,6 +168,11 @@ pub enum ReadOnlyTerminalProjectionDecision {
     AwaitEditorDelivery,
     RequestNativeEditorSave,
     ObserveOnly,
+    /// `#splicesessionack` (GH #273 remainder): the controller's durable
+    /// exhausted replica-rebuild record says the editor keeps refusing the
+    /// retained native save because its visible buffer holds unmerged text.
+    /// Neither waiting nor another save request can end it; the operator does.
+    EditorHoldsUnmergedVisibleText,
 }
 
 /// A direct `session-check` remains unable to replay, repair, or commit document
@@ -175,12 +180,21 @@ pub enum ReadOnlyTerminalProjectionDecision {
 /// buffer when a durable `write_applied` closeout is blocked solely on the disk
 /// projection. This is an editor-owned persistence effect, not a competing
 /// document replacement.
+///
+/// `#splicesessionack`: a durable exhausted replica-rebuild record wins over
+/// every other reading, scoped convergence included, so the check stays
+/// non-OK while the editor holds unmerged visible text (fail closed). The
+/// record is only read as holding while disk has not reached its content.
 pub fn decide_read_only_terminal_projection(
     authority_matches_required_scope: bool,
     cycle_phase: Option<CyclePhase>,
     retained_document_write_blocks: bool,
     editor_delivery_converged: bool,
+    editor_holds_unmerged_visible_text: bool,
 ) -> ReadOnlyTerminalProjectionDecision {
+    if editor_holds_unmerged_visible_text {
+        return ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText;
+    }
     if authority_matches_required_scope {
         return ReadOnlyTerminalProjectionDecision::Converged;
     }
@@ -488,6 +502,7 @@ fn terminal_divergence_ownership(
     .with_delivery_rejected(observed.delivery_rejected)
     .with_editor_route_unowned(observed.editor_route_unowned)
     .with_replica_unserved(observed.replica_unserved)
+    .with_editor_holds_unmerged_visible_text(observed.editor_holds_unmerged_visible_text)
 }
 
 /// CLI entry: check the end-of-cycle write invariant for `file`.
@@ -1072,6 +1087,19 @@ fn ensure_terminal_authority_disk_convergence(
         )?;
         return Ok(());
     }
+    // `#splicesessionack` (GH #273 remainder): the controller already spent
+    // its replica-rebuild budget on this exact content and the editor still
+    // refuses it. Scheduling another replica recycle cannot change a visible
+    // buffer, and "settlement is scheduled automatically" is false here: name
+    // the state and the operator action instead, and stay non-OK.
+    if let Some(exhausted) =
+        agent_doc_document_realtime_io::editor_holds_unmerged_visible_text(file)
+    {
+        anyhow::bail!(
+            "{}",
+            editor_holds_unmerged_visible_text_interruption(file, &exhausted)
+        );
+    }
     if operator_edit_lead_over_disk(
         file,
         authority_content,
@@ -1279,7 +1307,7 @@ const SELF_CONVERGING_INTERRUPTIONS: &[&str] = &[
 /// Describe the read-only projection transition while preserving its owner.
 /// The two controller-owned states deliberately carry the existing
 /// `remains unsettled` settle-window token; terminal observations do not.
-fn read_only_terminal_projection_detail(
+pub fn read_only_terminal_projection_detail(
     decision: ReadOnlyTerminalProjectionDecision,
 ) -> &'static str {
     match decision {
@@ -1295,7 +1323,32 @@ fn read_only_terminal_projection_detail(
         ReadOnlyTerminalProjectionDecision::Converged => {
             "the projection changed after its converged observation"
         }
+        // Deliberately carries none of the `SELF_CONVERGING_INTERRUPTIONS`
+        // needles: the settle window must not wait out an operator-owned state.
+        ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText => {
+            "the editor holds unmerged visible text (state=editor_holds_unmerged_visible_text, operator_action=reconcile_editor_buffer_with_retained_write): it refused every native save of the retained write after the controller's replica rebuilds, so this is not a pending acknowledgement and waiting will not converge it"
+        }
     }
+}
+
+/// `#splicesessionack` (GH #273 remainder): the INTERRUPTED line for a durable
+/// exhausted replica-rebuild record, shared by every session-check site that
+/// would otherwise report a generic pending delivery for the same state.
+fn editor_holds_unmerged_visible_text_interruption(
+    file: &Path,
+    exhausted: &agent_doc_controller_io::retained_persistence_exhaustion::RetainedPersistenceRebuildExhausted,
+) -> String {
+    format!(
+        "[session-check] INTERRUPTED: the editor holds unmerged visible text for {} ({}); {}. {}",
+        file.display(),
+        exhausted.facts(),
+        read_only_terminal_projection_detail(
+            ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText
+        ),
+        agent_doc_turn::write_ownership::editor_holds_unmerged_visible_text_remedy(
+            &file.display().to_string()
+        ),
+    )
 }
 
 /// Whether `message` reports a state the binary converges without the agent.
@@ -1615,11 +1668,17 @@ fn run_with_options_inner(
                 &authority_content,
                 "session_check_read_only_retained_delivery_gate",
             )?;
+        // `#splicesessionack`: one observation of the write ownership feeds
+        // both the projection decision and the owner note below, so the two
+        // halves of the report cannot disagree about an exhausted rebuild.
+        let observed_ownership =
+            agent_doc_document_realtime_io::observed_retained_write_ownership(file);
         let terminal_projection_decision = decide_read_only_terminal_projection(
             terminal_projection_converged,
             cycle_phase,
             retained_document_write_blocks,
             editor_delivery_converged,
+            observed_ownership.editor_holds_unmerged_visible_text,
         );
         let retained_closeout_resume = ReadOnlyRetainedCloseoutResumeProjection::new(
             authority_content == disk_content,
@@ -1713,7 +1772,7 @@ fn run_with_options_inner(
             )
         });
         let ownership = terminal_divergence_ownership(
-            agent_doc_document_realtime_io::observed_retained_write_ownership(file),
+            observed_ownership,
             cycle_phase,
             retained_capture,
             retained_document_write_blocks,
@@ -1747,7 +1806,8 @@ fn run_with_options_inner(
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::CaptureResumeUnowned
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::DeliveryRejected
-            | agent_doc_turn::write_ownership::RetainedWriteVerdict::ReplicaUnserved => {
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::ReplicaUnserved
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorHoldsUnmergedVisibleText => {
                 agent_doc_turn::write_ownership::retained_write_remedy(
                     ownership,
                     &file.display().to_string(),
@@ -1756,7 +1816,12 @@ fn run_with_options_inner(
         };
         let projection_matches =
             terminal_projection_matches_required_scope(file, &authority_content, &disk_content)?;
+        // `#splicesessionack`: an exhausted rebuild is not "the editor leads
+        // disk and persists it as delivery allows" — that save is the one being
+        // refused — so it never prints the pending-save line.
         let operator_edit_lead = !projection_matches
+            && terminal_projection_decision
+                != ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText
             && operator_edit_lead_over_disk(
                 file,
                 &authority_content,
@@ -1772,8 +1837,12 @@ fn run_with_options_inner(
                 "read_only_terminal_convergence",
             );
         }
+        // `#splicesessionack`: fail closed while the exhausted state holds,
+        // whatever scoped equality or operator lead says.
         anyhow::ensure!(
-            projection_matches || operator_edit_lead,
+            (projection_matches || operator_edit_lead)
+                && terminal_projection_decision
+                    != ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText,
             "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}, component_divergence={}); {}. {}{}",
             file.display(),
             agent_doc_hash::content_hash(&authority_content),
@@ -2762,6 +2831,16 @@ fn retained_write_gate_status(
             SessionCheckStatus::Ok(_) | SessionCheckStatus::SteeringPending(_)
         )
     {
+        // `#splicesessionack`: the retained write is not "unsettled while
+        // reconciliation is scheduled" when the editor refuses it after every
+        // replica rebuild; that wording also made the settle window wait it out.
+        if let Some(exhausted) =
+            agent_doc_document_realtime_io::editor_holds_unmerged_visible_text(file)
+        {
+            return SessionCheckStatus::Interrupted(
+                editor_holds_unmerged_visible_text_interruption(file, &exhausted),
+            );
+        }
         SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: retained document-write delivery remains unsettled for {}; automatic controller reconciliation remains scheduled. Refusing a false clean closeout because preflight would block the same effect. Run only `agent-doc session-check {}` after recovery settles; do not resubmit finalize/write, force disk, or replace the queued edit.",
             file.display(),
@@ -3238,6 +3317,7 @@ fn retained_pending_write_message(
         verdict,
         agent_doc_turn::write_ownership::RetainedWriteVerdict::DeliveryRejected
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::ReplicaUnserved
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorHoldsUnmergedVisibleText
     ) {
         let kind = if captured_closeout {
             "response delivery"
@@ -4343,17 +4423,25 @@ mod terminal_convergence_tests {
                 Some(CyclePhase::WriteApplied),
                 true,
                 false,
+                false,
             ),
             ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery,
         );
         assert_eq!(
-            decide_read_only_terminal_projection(false, Some(CyclePhase::WriteApplied), true, true,),
+            decide_read_only_terminal_projection(
+                false,
+                Some(CyclePhase::WriteApplied),
+                true,
+                true,
+                false
+            ),
             ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave,
         );
         assert_eq!(
             decide_read_only_terminal_projection(
                 false,
                 Some(CyclePhase::WriteApplied),
+                false,
                 false,
                 false,
             ),
@@ -4365,13 +4453,34 @@ mod terminal_convergence_tests {
                 Some(CyclePhase::ResponseCaptured),
                 true,
                 true,
+                false,
             ),
             ReadOnlyTerminalProjectionDecision::ObserveOnly,
         );
         assert_eq!(
-            decide_read_only_terminal_projection(true, Some(CyclePhase::WriteApplied), true, false,),
+            decide_read_only_terminal_projection(
+                true,
+                Some(CyclePhase::WriteApplied),
+                true,
+                false,
+                false
+            ),
             ReadOnlyTerminalProjectionDecision::Converged,
         );
+        // `#splicesessionack`: the durable exhausted replica-rebuild record wins
+        // over every other reading, converged scope included (fail closed),
+        // and never asks for another native save.
+        for (converged, phase, blocks, delivered) in [
+            (false, Some(CyclePhase::WriteApplied), true, false),
+            (false, Some(CyclePhase::WriteApplied), true, true),
+            (false, Some(CyclePhase::Committed), false, true),
+            (true, Some(CyclePhase::Committed), true, true),
+        ] {
+            assert_eq!(
+                decide_read_only_terminal_projection(converged, phase, blocks, delivered, true),
+                ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText,
+            );
+        }
     }
 
     /// `#unowneddivergence`: a divergence whose cycle is already terminal and
@@ -4391,7 +4500,7 @@ mod terminal_convergence_tests {
             Some(CyclePhase::Abandoned),
         ] {
             assert_eq!(
-                decide_read_only_terminal_projection(false, phase, false, true),
+                decide_read_only_terminal_projection(false, phase, false, true, false),
                 ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave,
                 "terminal phase {phase:?} with no retained block must try to converge"
             );
@@ -4399,7 +4508,13 @@ mod terminal_convergence_tests {
         // A retained write still has an owner, so it keeps waiting rather than
         // racing the controller with an editor save.
         assert_eq!(
-            decide_read_only_terminal_projection(false, Some(CyclePhase::Committed), true, true),
+            decide_read_only_terminal_projection(
+                false,
+                Some(CyclePhase::Committed),
+                true,
+                true,
+                false
+            ),
             ReadOnlyTerminalProjectionDecision::ObserveOnly,
         );
         // An OPEN cycle is owned by definition — unchanged.
@@ -4408,7 +4523,8 @@ mod terminal_convergence_tests {
                 false,
                 Some(CyclePhase::PreflightStarted),
                 false,
-                true
+                true,
+                false,
             ),
             ReadOnlyTerminalProjectionDecision::ObserveOnly,
         );
@@ -5555,6 +5671,56 @@ mod settle_window_tests {
         assert!(!is_self_converging_interruption(
             "will resume automatically"
         ));
+    }
+
+    /// `#splicesessionack` (GH #273 remainder): the exhausted replica-rebuild
+    /// state names itself and its operator action, and the settle window
+    /// returns it at once instead of waiting 45 s on a state only the operator
+    /// can end.
+    #[test]
+    fn an_exhausted_rebuild_is_reported_at_once_with_its_operator_action() {
+        let exhausted = agent_doc_controller_io::retained_persistence_exhaustion::RetainedPersistenceRebuildExhausted {
+            content_hash: "08f64ff1".to_string(),
+            content_len: 5687,
+            epoch: 130,
+            controller_generation: 2,
+            refusals: 9,
+            rebuilds: 2,
+            recorded_at_ms: 1,
+        };
+        let line =
+            editor_holds_unmerged_visible_text_interruption(Path::new("doc-a.md"), &exhausted);
+        for needle in [
+            "[session-check] INTERRUPTED: the editor holds unmerged visible text for doc-a.md",
+            "state=editor_holds_unmerged_visible_text",
+            "content_hash=08f64ff1 content_len=5687 refusals=9 rebuilds=2",
+            "operator_action=reconcile_editor_buffer_with_retained_write",
+            "agent-doc session-check doc-a.md",
+            "Do NOT run `agent-doc commit doc-a.md`",
+        ] {
+            assert!(line.contains(needle), "{needle}: {line}");
+        }
+        assert!(!line.contains("acknowledgement is pending"), "{line}");
+        assert!(!is_self_converging_interruption(&line), "{line}");
+        let detail = read_only_terminal_projection_detail(
+            ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText,
+        );
+        assert!(
+            !SELF_CONVERGING_INTERRUPTIONS
+                .iter()
+                .any(|needle| detail.contains(needle)),
+            "{detail}"
+        );
+        let calls = Cell::new(0);
+        let outcome = settle_until_converged(
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+            || {
+                calls.set(calls.get() + 1);
+                anyhow::bail!(line.clone());
+            });
+        assert_eq!(calls.get(), 1, "an operator-owned state is not resampled");
+        assert!(format!("{:#}", outcome.unwrap_err()).contains("operator_action="));
     }
 
     #[test]

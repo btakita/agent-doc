@@ -291,6 +291,22 @@ This is fixed and released, and the issue is closed.
 **Deferred:** the `v0.35.505` tag is pushed and the Release workflow (run 38690867071) is still running. Its `plugins` job and the linux-gnu build have passed; the musl, aarch64, macOS and Windows builds are still going. The tag push publishes the GitHub Release and PyPI automatically, so nothing is left to do by hand. Once that run is green, this item can be closed. The claim `coordinator:release-v0.35.505` is still held, and I've kept it so that a fresh drain doesn't start a second release. It expires about two hours after it was taken.
 
 One more thing for you: preflight reports that the running JetBrains plugin is 0.2.618, and that's also the version installed on disk. That's behind the build this binary expects. To get the #265 fix into the IDE you'll need to install the new plugin (`agent-doc plugin install jetbrains`) and restart the IDE.
+
+### Re: dispatching the Todo-placement item — opus-5.5 · 2026-10-15T02:39-04:00
+
+The new queue item, "Place the TODO: below the backlog in the agent-doc template.", is claimed by `subagent:todoplace`. It is running in the background in its own worktree, `~/work/btakita/agent-doc-wt/todoplace`, on branch `feat/todo-below-queue`, which is based on `v0.35.505`. You changed the item from "below the queue" to "below the backlog" before I dispatched it, so the subagent is working from the backlog version. The branch name still says "queue".
+
+The subagent's brief:
+- Put `## Todo` / `<!-- agent:todo -->` directly after `agent:backlog`, which is before `agent:review`. Today it goes after review.
+- Apply that in three places: the default template, the logic that creates the section when a document is missing it, and the `patch:todo` create path.
+- Write down the fallback order for documents with no backlog, and add tests that pin the placement.
+- Update the spec and any runbook text that still describes the old placement.
+
+When it reports back, I'll integrate it, run one `make install`, and close the item. This document's own `## Todo` section is still below `## Review`. I'll move it once the new placement ships.
+
+> **Queue prompt:** release + publish
+
+**Deferred:** the v0.35.505 Release workflow (run 38690867071) is still running. The GitHub Release and PyPI are both still on 0.35.504. The `coordinator:release-v0.35.505` claim stays in place until that run finishes, so that a fresh drain doesn't cut a second release.
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
@@ -299,9 +315,7 @@ One more thing for you: preflight reports that the running JetBrains plugin is 0
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/265~~
-- ~~do your formal logic suggestions~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#ctrltimingflakes]~~
+- Place the TODO: below the backlog in the agent-doc template.
 - 🚧 release + publish
 <!-- /agent:queue -->
 

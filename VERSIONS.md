@@ -2,6 +2,52 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.509
+
+- **Run Agent Doc no longer duplicates the queue when the editor and disk hold
+  two cuts of one edit (`queuecutexclusive`).** Admission's three-way merge
+  unioned the editor's delivered text with its own newer save, so a mid-line
+  correction (`#gh-dix` -> `#gh-fix`) landed twice, then late keystrokes doubled
+  the whole queue. For any component both the editor and disk changed since the
+  baseline, admission now keeps the editor's version and lets its ops roll it
+  forward once; a fail-closed guard refuses any merge that mixes component
+  versions. Checked in TLA+ (`AdmissionCutExclusivity`), with must-violate
+  configs reproducing this and earlier incidents on the old ladder.
+- **`state.db` is no longer overwritten by a tracing line.** `controller serve`
+  closed every fd above stdio, including its own debug-log file; SQLite reused
+  that number for `state.db` and a late `tracing initialized` line landed at
+  byte 0 ("file is not a database"). The process now records inherited fds
+  (number + device/inode) as its first statement and closes only those; fds 0-2
+  are reopened onto `/dev/null` if missing.
+- **Upgrade recycles no longer freeze every pane for 31-90 s (GH #270).** A
+  re-exec'd supervisor bridges its PTY from the first line of `main` until the
+  normal reader/writer take over, so startup waits on `state.db` no longer stall
+  output or keystrokes.
+- **A draining handoff predecessor is not reaped by the orphan scan (GH #269).**
+  Both orphaned-preparing scans honour the drain lease before any age test, and
+  reaps log the reaped process's own controller generation.
+- **Held captured splice batches merge forward instead of forking the buffer
+  (GH #273).** An edit merely adjacent to a canonical change (a moved `(HEAD)`
+  marker, a struck neighbour) falls back to a guarded three-way merge; replica
+  rebuild-on-refusal is bounded per refused content, not per delivery epoch.
+- **Run Agent Doc pressed while typing waits for a transient `missing_replica`
+  (GH #272)** for up to 20 s (re-registering every 5 s) and then admits on the
+  editor's current buffer, instead of "did not run".
+- **Clear Session Context proves a Claude `/clear` under a custom statusLine or
+  "Update installed" notice (GH #271).** Rows below the closed composer frame are
+  classified as harness footer by position, not by text.
+- **Clear Session Context queued behind a cancelled prompt says when it runs.**
+  The IDEA notice now reads "queued ... runs automatically in about Ns" instead
+  of implying a live turn.
+- **Layout repair releases a `window-size manual` pin no attached client sees at
+  its pinned size (GH #268),** including pins larger than a client left by
+  `resize-window -A` with two clients attached.
+- **Queue maintenance fails closed on unreadable rearm evidence.** A failed read
+  of the operator's captured edits was treated as "no evidence" and re-struck an
+  unstruck head; it now retries and refuses without writing. A launched
+  controller that exits before ready is reported with its exit status and
+  stderr tail instead of a bare timeout.
+
 ## 0.35.508
 
 - **Run Agent Doc keeps working on an exact-263 IDE after an upgrade without a

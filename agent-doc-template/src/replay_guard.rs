@@ -10,8 +10,12 @@
 //!   replayed automatically: agent component dumps (a line-anchored component
 //!   marker outside code and quoted prose — a marker named inside inline
 //!   backticks or a fence is prose, GH 90), transcript prompt lines,
-//!   `## User` / `## Assistant` headings, multiple `### Re:` headings, or
-//!   malformed patch payloads.
+//!   `## User` / `## Assistant` headings, the same `### Re:` topic twice in
+//!   one payload, a `### Re:` topic the document already holds, or malformed
+//!   patch payloads.
+//! - Binary-attested subagent completion cells (`#subagentcompletionfeedback`)
+//!   are binary feedback, not assistant responses: their headings never count
+//!   as a repeated or already-committed topic.
 //! - Patch-bearing payloads are replayable only when `template::parse_patches`
 //!   returns at least one patch and at least one `patch:exchange` block.
 //! - Patch-bearing payloads may carry only known replay guard comments outside
@@ -40,6 +44,8 @@
 //! - `classify_blocks_a_heading_already_committed_in_the_document`
 //! - `classify_allows_fresh_headings_against_a_document`
 //! - `topic_normalization_splits_on_the_last_em_dash`
+//! - `classify_admits_several_legacy_completion_cells_in_one_payload`
+//! - `classify_still_blocks_a_repeated_completion_shaped_heading_without_the_binary_cell`
 //! - `classify_blocks_patch_payload_with_unmatched_transcript`
 //! - `classify_patch_payload_with_leading_guard_marker_as_replayable`
 //! - `classify_patch_payload_with_safe_leading_commentary_extracts_patch_body`
@@ -292,9 +298,20 @@ pub fn classify_replay_payload_against_document<'a>(
 /// `### Re: topic — model · timestamp`, and a topic may itself contain an em
 /// dash. Splitting on the first one would truncate such a topic and make two
 /// different headings compare equal.
+///
+/// `#subagentcompletionfeedback`: a heading that opens a binary-attested
+/// subagent completion cell (heading grammar + fixed binary body + keyed
+/// marker) is binary feedback, not an assistant response, so it is never a
+/// replayed heading. Legacy cells all normalized to the topic `subagent
+/// completed`; counting them made two or more uncommitted reports refuse every
+/// later turn as a "repeated heading".
 fn re_heading_topics(text: &str) -> Vec<String> {
+    let completion_headings =
+        agent_doc_document::subagent_completion::completion_cell_heading_lines(text);
     text.lines()
-        .filter_map(|line| {
+        .enumerate()
+        .filter(|(index, _)| !completion_headings.contains(index))
+        .filter_map(|(_, line)| {
             let line = line.trim();
             let rest = line.strip_prefix("### Re:")?;
             let topic = match rest.rfind(" — ") {
@@ -487,6 +504,52 @@ mod tests {
         );
         assert_eq!(topics.len(), 2);
         assert!(first_duplicate(&topics).is_none(), "{topics:?}");
+    }
+
+    /// `#subagentcompletionfeedback` — the exact old-format payload four
+    /// `queue report-complete` calls left uncommitted (0.35.503). Every legacy
+    /// heading normalized to `subagent completed`, so preflight recovery
+    /// refused the coordinator's next turn as a repeated heading. They are
+    /// binary cells, not assistant headings.
+    #[test]
+    fn classify_admits_several_legacy_completion_cells_in_one_payload() {
+        let mut payload = String::from("<!-- patch:exchange -->\n");
+        for (owner, issue) in [
+            ("gh262", "262"),
+            ("gh264", "264"),
+            ("gh263", "263"),
+            ("gh261", "261"),
+        ] {
+            payload.push_str(&format!(
+                concat!(
+                    "### Re: Subagent completed — agent-doc: `subagent:{owner}` returned work for queue item “#gh-fix https://github.com/example/project/issues/{issue}”; coordinator integration and closeout are pending.\n",
+                    "Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.\n",
+                    "<!-- agent-doc-subagent-completion key=k{issue} -->\n",
+                ),
+                owner = owner,
+                issue = issue,
+            ));
+        }
+        payload.push_str("<!-- /patch:exchange -->\n");
+        let document = format!("## Exchange\n{payload}");
+        match classify_replay_payload_against_document(&payload, Some(&document)) {
+            ReplayPayloadClassification::Replayable(_) => {}
+            other => panic!("expected replayable, got {other:?}"),
+        }
+        assert!(re_heading_topics(&payload).is_empty());
+    }
+
+    /// The exemption is structural: the same heading words twice WITHOUT the
+    /// binary body and keyed marker are an ordinary repeated heading.
+    #[test]
+    fn classify_still_blocks_a_repeated_completion_shaped_heading_without_the_binary_cell() {
+        assert_blocked(
+            concat!(
+                "### Re: Subagent completed — agent-doc: `subagent:a` returned work.\n\nbody one\n",
+                "### Re: Subagent completed — agent-doc: `subagent:b` returned work.\n\nbody two\n",
+            ),
+            "repeated the assistant response heading `subagent completed`",
+        );
     }
 
     #[test]

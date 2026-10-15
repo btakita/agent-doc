@@ -135,6 +135,12 @@ pub fn extract_visible_response_patch_between(
         return None;
     }
 
+    // `#subagentcompletionfeedback`: binary-attested completion cells are
+    // already-materialized binary feedback, never part of an agent response to
+    // replay. Skip their lines so a bypassed response beside them is extracted
+    // alone, and completion-only drift never becomes a replay payload.
+    let completion_cells =
+        agent_doc_document::subagent_completion::completion_cell_line_ranges(&current_norm);
     let diff = similar::TextDiff::from_lines(&snapshot_norm, &current_norm);
     let mut collected = String::new();
     let mut collecting = false;
@@ -142,6 +148,10 @@ pub fn extract_visible_response_patch_between(
         let line = change.value();
         let trimmed = line.trim_end_matches('\n').trim();
         match change.tag() {
+            similar::ChangeTag::Insert
+                if change.new_index().is_some_and(|index| {
+                    completion_cells.iter().any(|cell| cell.contains(&index))
+                }) => {}
             similar::ChangeTag::Insert => {
                 if !collecting && !crate::closeout_signal::is_exchange_response_heading(trimmed) {
                     continue;
@@ -2134,6 +2144,59 @@ mod tests {
             extract_visible_response_patch_between(snapshot, current, false),
             Some("### Re: do #ship — gpt-5\n\nDone.\n".to_string())
         );
+    }
+
+    /// `#subagentcompletionfeedback`: binary completion cells are not an
+    /// orphaned agent response. Completion-only drift yields no replay payload
+    /// (0.35.503 replayed four cells as one response and the replay guard
+    /// refused every later turn), and a real bypassed response beside them is
+    /// extracted without them.
+    #[test]
+    fn visible_response_patch_never_carries_binary_completion_cells() {
+        let snapshot = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: dispatch — gpt-5\n\nDispatched.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let cells = format!(
+            "\n{}\n\n{}\n",
+            agent_doc_document::subagent_completion::cell("subagent:a", "finish a", "k1"),
+            agent_doc_document::subagent_completion::cell("subagent:b", "finish b", "k2"),
+        );
+        let legacy_cells = concat!(
+            "\n### Re: Subagent completed — agent-doc: `subagent:a` returned work for queue item “a”; coordinator integration and closeout are pending.\n",
+            "Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.\n",
+            "<!-- agent-doc-subagent-completion key=k1 -->\n",
+            "\n### Re: Subagent completed — agent-doc: `subagent:b` returned work for queue item “b”; coordinator integration and closeout are pending.\n",
+            "Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.\n",
+            "<!-- agent-doc-subagent-completion key=k2 -->\n",
+        );
+        for cells in [cells.as_str(), legacy_cells] {
+            let current = snapshot.replace(
+                "<!-- /agent:exchange -->",
+                &format!("{cells}<!-- /agent:exchange -->"),
+            );
+            assert_eq!(
+                extract_visible_response_patch_between(snapshot, &current, true),
+                None,
+                "completion-only drift is not a response to replay"
+            );
+            assert_eq!(
+                crate::document_drift::detect_bypassed_response_write_between(snapshot, &current),
+                None
+            );
+
+            let with_response = snapshot.replace(
+                "<!-- /agent:exchange -->",
+                &format!("{cells}### Re: do #ship — gpt-5\n\nShipped.\n<!-- /agent:exchange -->"),
+            );
+            assert_eq!(
+                extract_visible_response_patch_between(snapshot, &with_response, false)
+                    .as_deref()
+                    .map(str::trim_end),
+                Some("### Re: do #ship — gpt-5\n\nShipped.")
+            );
+        }
     }
 
     #[test]

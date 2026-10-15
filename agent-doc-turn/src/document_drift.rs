@@ -100,6 +100,13 @@ pub fn detect_bypassed_response_write_between(
 
     let diff_text = agent_doc_diff::unified_diff_from_contents(&snap_norm, &cur_norm)?;
 
+    // `#subagentcompletionfeedback`: a `### Re:` heading that opens a
+    // binary-attested completion cell (completion heading grammar + fixed
+    // binary body + keyed marker) was written by `queue report-complete`, not
+    // by an agent bypassing the write path. Recognize it structurally, by line
+    // position in the current document, never by its prose.
+    let completion_headings =
+        agent_doc_document::subagent_completion::completion_cell_heading_lines(&cur_norm);
     let diff = similar::TextDiff::from_lines(&snap_norm, &cur_norm);
     for change in diff.iter_all_changes() {
         if change.tag() != similar::ChangeTag::Insert {
@@ -107,6 +114,12 @@ pub fn detect_bypassed_response_write_between(
         }
         let trimmed = change.value().trim();
         if crate::closeout_signal::is_binary_authored_recovery_diagnostic_heading(trimmed) {
+            continue;
+        }
+        if change
+            .new_index()
+            .is_some_and(|index| completion_headings.contains(&index))
+        {
             continue;
         }
         if crate::closeout_signal::is_direct_response_patchback_heading(trimmed) {
@@ -286,6 +299,30 @@ mod tests {
         assert_eq!(
             detect_bypassed_response_write_between(snapshot, current),
             None
+        );
+    }
+
+    /// `#subagentcompletionfeedback`: a binary-attested completion cell is not
+    /// a direct patchback, but the same heading words without the binary body
+    /// and keyed marker still are.
+    #[test]
+    fn bypassed_response_write_exempts_only_binary_attested_completion_cells() {
+        let snapshot = session_doc("### Re: older — gpt-5\n\nDone.\n");
+        let cell = agent_doc_document::subagent_completion::cell("subagent:a", "finish a", "k1");
+        let current = session_doc(&format!("### Re: older — gpt-5\n\nDone.\n\n{cell}\n"));
+        assert_eq!(
+            detect_bypassed_response_write_between(&snapshot, &current),
+            None
+        );
+
+        let forged = session_doc(concat!(
+            "### Re: older — gpt-5\n\nDone.\n\n",
+            "### Re: Subagent completed: `subagent:a` returned work for queue item “finish a” — agent-doc\n\n",
+            "I wrote this directly.\n",
+        ));
+        assert!(
+            detect_bypassed_response_write_between(&snapshot, &forged)
+                .is_some_and(|marker| marker.contains("Subagent completed"))
         );
     }
 

@@ -4889,6 +4889,11 @@ fn init_tracing() {
 }
 
 fn main() -> ExitCode {
+    // `#statedbfdclobber`: record the launcher's descriptors before this
+    // process opens any of its own (tracing's debug log, sockets, state.db).
+    // `controller serve` later closes only these. It must stay the first
+    // statement, because a descriptor opened before it would count as inherited.
+    agent_doc_controller_io::inherited_fds::capture_process_entry_fds();
     // GH 92: anchors defined in agent-doc's own Rust comments vouch for a cited
     // id in both coined-id guards (`agent_doc_fs::instruction_surface_anchors`).
     agent_doc_fs::register_source_anchors(include_str!(concat!(

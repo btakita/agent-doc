@@ -36300,11 +36300,22 @@ pub fn run_serve(
     handoff_state: &str,
 ) -> Result<()> {
     let project_root = agent_doc_project_root_io::project_root_from_arg(root)?;
-    let closed_fds = sanitize_controller_serve_inherited_fds();
-    if closed_fds > 0 {
+    // `#statedbfdclobber`: close only descriptors `main` proved it inherited.
+    // Listing the live fd table here closed this process's own debug-log
+    // descriptor, and SQLite's next open reused the number under the appender.
+    let inherited = crate::inherited_fds::close_process_entry_fds();
+    if inherited.snapshot_missing {
         agent_doc_ops_log_io::log_op(
             &project_root,
-            &format!("controller_serve_inherited_fds_closed count={closed_fds}"),
+            "controller_serve_inherited_fds_snapshot_missing closed=0",
+        );
+    } else if inherited.closed > 0 || inherited.skipped_not_inherited > 0 {
+        agent_doc_ops_log_io::log_op(
+            &project_root,
+            &format!(
+                "controller_serve_inherited_fds_closed count={} skipped_not_inherited={}",
+                inherited.closed, inherited.skipped_not_inherited
+            ),
         );
     }
     serve_with_options(
@@ -36337,45 +36348,6 @@ pub fn run_launch_detached(
     )?;
     println!("controller_pid={}", launch.pid);
     Ok(())
-}
-
-#[cfg(all(unix, not(test)))]
-fn sanitize_controller_serve_inherited_fds() -> usize {
-    let fds = controller_serve_inherited_fds_to_close()
-        .unwrap_or_else(|| (3..inherited_fd_close_limit()).collect());
-    let mut closed = 0usize;
-    for fd in fds {
-        if fd <= 2 {
-            continue;
-        }
-        if unsafe { libc::close(fd) } == 0 {
-            closed += 1;
-        }
-    }
-    closed
-}
-
-#[cfg(all(unix, not(test)))]
-fn controller_serve_inherited_fds_to_close() -> Option<Vec<i32>> {
-    let entries = std::fs::read_dir("/proc/self/fd").ok()?;
-    let mut fds = Vec::new();
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let Ok(fd) = name.parse::<i32>() else {
-            continue;
-        };
-        if fd > 2 {
-            fds.push(fd);
-        }
-    }
-    Some(fds)
-}
-
-#[cfg(any(not(unix), test))]
-fn sanitize_controller_serve_inherited_fds() -> usize {
-    0
 }
 
 pub fn run_shutdown(root: Option<&Path>) -> Result<()> {

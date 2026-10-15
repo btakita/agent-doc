@@ -18,7 +18,6 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish'
-queue: go
 ---
 
 ## Status
@@ -215,16 +214,52 @@ Worker request, verbatim:
 **My recommendation:** don't put the cohort gate in each binding's release workflow. A reusable workflow's `uses:` ref has to be a literal, and the spec commit must postdate the binding release it verifies, so a binding-side caller can never be pinned correctly ahead of time. Run the cohort gate on the spec side instead: a `workflow_dispatch` (or tag-triggered) job in lazily-spec that takes the nine binding tags and SHAs as inputs, reads the manifest from spec (the `#lzcorecohort` location), and uploads one evidence artifact. Bindings then need no new release workflows, and the cpp/dart/go/zig question goes away.
 
 This needs your answer before the remaining part of the item can be written. Gated `#lzcoreciactivationfixes` holds the full state.
+
+### Re: #lzcoreevidencedarttimeout — opus-5-5 · 2026-10-14T21:24-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcoreevidencedarttimeout]
+
+
+`subagent:darttimeout` reported back. The fix is done and verified, uncommitted. I've gated it on commit authorization.
+
+**Root cause (reproduced):** this wasn't slowness. The first `dart` on `PATH` is `/usr/sbin/dart`, the AUR flutter wrapper `/opt/flutter/bin/aur_dart`. When its unionfs mount fails, it runs `dart` again, finds itself, and loops forever. The generator never replayed a fixture, and the verifier waited out its 600000ms. A 45000ms repro timed out with an empty `dart/` directory, while the real SDK takes about 1.2s per replay. Two orphaned looping wrapper processes were killed, one of them 31 hours old.
+
+**Fix (lazily-dart):** `scripts/generate-core-conformance-report.py`:
+- Checks each distinct `dart` on `PATH` with `dart --version` and rejects one that hangs or prints no SDK version line. `DART=` pins one SDK with no `PATH` fallback. The rejected candidates and the chosen SDK are recorded in the evidence file.
+- Runs each replay in its own process group, capped by the verifier's remaining budget (`LAZILY_CORE_COMMAND_TIMEOUT_MS`), and the timeout error names the phase.
+- On SIGTERM, kills the group, removes its scratch directory and exits 143.
+- New hermetic self-test with 10 fake-`dart` cases: `make core-conformance-report-self-test`.
+
+**Fix (lazily-spec):** `scripts/check-core-evidence.mjs`:
+- Delete-before-spawn is unchanged.
+- It passes its timeout budget through to the commands.
+- A start marker rejects and deletes any report, evidence or proof older than the command's start.
+- OK lines now print the report date and command start time.
+- `--self-test` gains timeout and stale-output cases.
+
+**Verification:**
+- All nine reports were regenerated into a fresh `reports-final-20261014-212130`, and `--require-all` exits 0 in 147.4s with every report dated after its command started. Dart took about 43s there, including about 10s spent rejecting the broken wrapper.
+- Verifier mutations: 6/6 caught. Generator mutations: 9/9 caught, with no hangs or leftover processes.
+- Spec pytest: 288 passed. Dart `check-ci-reach.sh`: pass.
+
+This green nine-binding `--require-all` run was the evidence `#lzrustcoreprofiledivergence` was waiting for. It still lands only after this fix is integrated.
+
+**Left over:**
+- **Commit/push:** needs authorization (`#lzcommitpresetresolve`). The work sits on top of the uncommitted Phase 2 `#lzcoreclaims` changes in the same worktree, so it integrates with Phase 2.
+- **CI:** `core-conformance-report-self-test` should go into lazily-dart CI. That belongs with `#lzcoreciactivationfixes` when they integrate together.
+- **Your machine:** `/opt/flutter/bin/aur_dart` is broken. Every Dart run now pays about 10s to reject it until the AUR flutter package is fixed or removed.
+- **Leftovers:** eight leftover scratch dirs are in lazily-dart's ignored `build/`. A safety hook blocked `rm -rf` there.
+- **Zig trust:** the worktree's `lazily-zig/.mise.toml` isn't mise-trusted. The run used `MISE_TRUSTED_CONFIG_PATHS` for that run only.
+
+All four dispatched heads have now reported. Everything integration-ready is waiting on commit authorization.
 <!-- agent:boundary:02e242a9 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue subagents preset="#spec-test-commit-push" priority go -->
-- 🚧 do [#lzcoreevidencedarttimeout]
-- ~~do [#lzcoreciactivationfixes]~~
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~[from:operator-correction key=restore-gh-249] #gh-fix https://github.com/btakita/agent-doc/issues/249~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue subagents preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -232,12 +267,12 @@ This needs your answer before the remaining part of the item can be written. Gat
 <!-- agent:backlog priority queue -->
 - [/] [#gh249builddir] [operator-decision, btakita/agent-doc] Integrate the issue-249 follow-up fix: /home/brian/worktrees/agent-doc-gh249-restore on branch fix/gh249-263-local-build-dir from origin/main 6ddc004207 (uncommitted; src/plugin.rs, agent-doc-reliable-sync-io/src/liveness.rs, editors/jetbrains/SPEC.md, scripts/jetbrains-custom-repository.py; exclude the untracked .gh249-*.log files). build_project_dir now maps JetBrains 263 to editors/jetbrains-262 so 'agent-doc plugin install jetbrains --local' cannot pick a stale classic 263 ZIP without frame isolation. make check exit 0 (10505 passed), and a mutation check shows 2 regression tests fail when the old mapping is restored. No plugin version bump needed. Blocked only on commit/push authorization (#lzcommitpresetresolve); then commit, push, and run the single coordinator make install. Old worktree /home/brian/worktrees/agent-doc-gh249-20261013 is superseded.
 - [/] [#lzcohortrelease] [operator-decision] Lazily cohort release: no public main warrants a release today (readiness report /home/brian/worktrees/agent-loop-lzreleasepublish-readiness-20261014/.audit-work/lazily-release-readiness-20261014.md, 2026-10-14). Blocked on #lzcommitpresetresolve plus explicit commit/push/version-bump/tag/publish authorization, a pre-1.0-cohort vs Core Beta decision (#lzbetascope), and #lzrustpublish. Once unblocked: Go CI fix, #lzcoreevidencedarttimeout, Core Phases 1-5 (rebase the Zig/Go worktrees first), Phase 6, interop cold-start, then minor-version releases rs 0.60.0, py 0.44.0, js 0.36.0, kt 0.45.0, cs 0.8.0, go v0.30.0, cpp v0.32.0, zig v0.38.0, dart 0.34.0 (operator pub.dev login), spec v0.42.0 last, then refresh release pins.
-- [ ] 🚧 [#lzcoreevidencedarttimeout] Reproduce and fix Dart Core evidence report generation exceeding the verifier 600000ms per-command timeout; preserve the delete-before-spawn fail-closed behavior, add deterministic timeout/freshness coverage, then regenerate all nine reports into a fresh directory and require --require-all to pass with every report freshly dated.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] 🚧 [#lzcoreevidencedarttimeout] [operator-decision] Dart Core evidence timeout is fixed and verified but uncommitted in /home/brian/worktrees/lzcoreevidencedarttimeout-20261012 (branch task/lzcoreevidencedarttimeout-20261012, layered on the uncommitted #lzcoreclaims Phase 2 work). Root cause: the first dart on PATH, /usr/sbin/dart (the AUR flutter wrapper /opt/flutter/bin/aur_dart), re-execs itself forever when unionfs fails. Fix in lazily-dart scripts/generate-core-conformance-report.py: probe each dart candidate (DART= pins one), per-replay process groups capped by LAZILY_CORE_COMMAND_TIMEOUT_MS, SIGTERM cleanup, and a 10-test hermetic self-test (make core-conformance-report-self-test). Fix in lazily-spec scripts/check-core-evidence.mjs: pass the timeout budget through, reject stale reports/evidence/proofs via a start marker, extend --self-test. All nine reports were regenerated fresh in reports-final-20261014-212130 and --require-all passed (exit 0, 147.4s); mutation checks killed 6/6 (verifier) and 9/9 (generator). Blocked only on commit/push authorization (#lzcommitpresetresolve). On integration, wire core-conformance-report-self-test into lazily-dart CI alongside #lzcoreciactivationfixes.
 - [/] 🚧 [#lzcoreciactivationfixes] [operator-decision] Core Phase 1-5 CI activation is complete and verified but uncommitted in /home/brian/worktrees/lzcoreciactivationfixes-20261013/<repo> (branch task/lzcoreciactivationfixes-20261013 in all nine bindings plus lazily-spec). Every Core gate step is named, reach-pinned, and unconditional or has its step-level if:/continue-on-error: pinned. This run closed a guard bypass where those keys silently skipped steps in 7/9 bindings plus spec. All guards PASS and all mutation attacks are killed; logs are in _logs/. Remaining: (1) Phase 6 release-workflow callers, blocked on an operator design decision (see the #waypostrequest in exchange): the lazily-spec commit pin for core-cohort-publish-gate.yml, the candidate manifest location, the evidence artifact name, and whether cpp/dart/go/zig get new release workflows. (2) The wiring must land with or after the Phase 1-5 integration, since make check fails without their scripts. (3) Commit/push authorization (#lzcommitpresetresolve).
 - [/] [#lzrustcoreprofiledivergence] Rust corrected-profile provenance is implemented and verified in /home/brian/worktrees/lzrustcoreprofiledivergence-rs-20261012 on branch task/lzrustcoreprofiledivergence-20261012 from base 87da9e7494f6cec0cc5deb981361519f5af9eedf; profile-derived compatibility, 30 reactive-graph runs, full async tests, profile checks, and diff checks pass. Blocked only on #lzcoreevidencedarttimeout for a green nine-binding --require-all rerun and explicit commit/integration authorization because #spec-test-commit-push is undefined.
 - [/] [#lzcorecireachaudit] After #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1-5 integration are complete, run the supplied per-binding post-integration CI audit matrix against settled commits; require every standalone Core target to have a named workflow step, exact reach mapping, mutation evidence, Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates before Phase 6 finalization.

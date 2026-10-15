@@ -2,6 +2,36 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.507
+
+- **`agent:todo` completion flags.** `agent-doc write` gains `--todo-done`,
+  `--todo-edit "sel=text"`, `--todo-reopen` and `--todo-remove`. They match an
+  item by its own `[#id]`, then the single item that mentions `#id`, then its
+  exact text. `--todo-done` checks an item off where it sits, can be run again
+  safely, and folds duplicate copies into one line. `--todo-add` now gives each
+  item a leading `[#id]`. Agents are told to check a todo off in the same
+  closeout as the action, and `--done` prints a `[todo] advisory` when it
+  resolves an id that an open todo still mentions.
+- **`agent:todo` merges per item.** An agent `patch:todo` racing operator edits
+  was merged character by character, so it could duplicate a checked item and
+  leave the open original. The todo now merges per item like the other list
+  components, and copies of one item collapse after every todo write.
+- **Half-typed queue lines no longer fork into duplicates.** When the editor's
+  keystroke history ran ahead of the authority text, the history proof gave up
+  silently. A half-typed disk copy (`...not f`) then survived as a second queue
+  line beside the finished one. The proof now accepts the authority at any
+  point in the replay, not only at the end.
+- **A queued report about compaction is not a compact command.** Lines inside
+  queue, backlog, review, todo, icebox and done no longer count as a bare
+  `compact exchange` directive, and report nouns such as "error" and "bug" after
+  the prefix read as a statement. Closeout no longer refuses the turn.
+- **The lint gate accepts the markers the binary writes.**
+  `agent:salient-response` and `agent:referral` are registered, so compact no
+  longer fails with "Unknown agent-doc close tag" while a live salient
+  checkpoint is visible. Compaction never archives salient blocks, and patch
+  fallback paths strip them. A source-scanning test fails if a binary-written
+  marker is rejected.
+
 ## 0.35.506
 
 - **Clear Session Context proves a Claude Code `/clear` on long panes (GH #266).**

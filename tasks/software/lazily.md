@@ -373,6 +373,58 @@ All nine bindings are integrated and pushed on `integrate/core-cohort-20261015`.
 - lazily-rs publish: configure Trusted Publishing, or OK one more manual `cargo publish` (`#lzrustpublish`).
 - Dart: the pub.dev publish needs your login.
 - This machine is at 172/186 GB swap. Something besides these agents is probably leaking processes.
+
+### Re: #release progress (main fast-forwarded, spec v0.42.0 released) — opus-5-5 · 2026-10-15T17:36-04:00
+
+**Negative-control audit:** the cs over-credit pattern was real in 6 of the 8 other generators, and all are fixed:
+
+| Binding | Over-credit and fix |
+|---|---|
+| cpp `42d77a4` | Fixed, with a self-test |
+| zig `c8fa039` | Fixed, with a self-test |
+| py `d913266` | 12/16 "kills" were runner errors |
+| js `03293ec` | 12/16; the runner now prints a `DIVERGENCE` line |
+| kt `8ec0c1c` | All 11 family controls were killed by the key tracker, not a divergence |
+| dart `b2962fe` | Its guard over-credited, but all 16 current claims were real divergences |
+
+rs and go never credit a mutant, which I proved by attacking them.
+
+**`#lzjscireachtimeout`: done** (js `ec15eac`). `runGuard()` no longer puts a 30 s wall-clock limit on a correctness assertion. With the guard slowed by `sleep 31`, the old test fails ("not green: null !== 0") and the new one passes. js `make check` is now 709/709 green.
+
+**Aggregate gates passed:**
+- `core-evidence-check --require-all` passed for all nine bindings, each report freshly dated.
+- `core-artifact-consumers-check-all` passed for all nine.
+
+One caveat on the evidence run: I ran it locally with `CORE_EVIDENCE_TIMEOUT_MS=1800000`, because an unrelated Unreal Engine build had load at about 130. On that run no binding needed more than about 3 minutes (csharp took 22 s). Under that load earlier, csharp timed out at 600 s and then took 721 s alone. The CI default stays 600 s.
+
+The first aggregate rust failure printed only "Compiling ..." lines. The verifier now reports the tail of a failed command's output (spec `5cc24cf`, with a self-test proved by a mutant).
+
+**Released and fast-forwarded:**
+- **lazily-spec v0.42.0 is released** (tag plus GitHub release; spec CI green).
+- All nine binding `main`s are fast-forwarded.
+
+**Fixes for `main` CI failures** (each reproduced locally first):
+
+| Repo | Failure | Fix |
+|---|---|---|
+| py | The "Core facade contract" step tripped the conformance vacuity guard after "2 passed". It opens no fixtures by design. | It runs with `--noconftest` (`14f3eb6`). |
+| kt | The new consumer job had no `../lazily-spec` sibling, so the protobuf codec could not compile. | The consumer job clones the spec (`783171e`). |
+| dart | Dart 3.14 beta flags the old write-only `_naiveScanSink` field as `unused_field`. | A justified ignore (`55b7651`); clean on 3.14 beta and 3.13.5. |
+
+**Release-prep commits:**
+- **Pushed:** js 0.36.0, go v0.30.0, cpp v0.32.0 (interop peer fixed from 0.29.0), cs 0.8.0 (with the consumer pins), zig v0.38.0 (interop peer fixed from 0.35.0).
+- **Prepared locally, waiting for green CI on `main`:** py 0.44.0, kt 0.45.0 (with the consumer pin), dart 0.34.0, rs 0.60.0 (`RELEASE_NOTES_v0.60.0.md`).
+
+Every bump passed all nine consumer checks, and cpp, go and zig also passed `make check`.
+
+**Next:** tag each repo once CI is green on its release commit.
+- npm, NuGet, PyPI and GitHub Packages publish from the tag workflow.
+- Go needs a proxy warm.
+- cpp and zig are GitHub releases only.
+
+**Still needed from you:**
+- **pub.dev:** `dart pub publish` for 0.34.0 needs your login.
+- **crates.io:** rs 0.60.0 needs Trusted Publishing configured, or your OK for a manual `cargo publish` (`#lzrustpublish`). The tag workflow will fail at OIDC otherwise.
 <!-- agent:boundary:02e242a9 -->
 <!-- /agent:exchange -->
  
@@ -385,7 +437,6 @@ All nine bindings are integrated and pushed on `integrate/core-cohort-20261015`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzjscireachtimeout] lazily-js test/ci-reach-activation.test.js gives each guard run a fixed 30s wall-clock limit; at load average ~108 two runs timed out (one on the unmutated baseline) though the guard takes 0.6-2.1s alone. Make the test deterministic under load (no wall-clock bound on a correctness assertion, or measure CPU time), never by raising the timeout.
 - [/] [#gh249builddir] [operator-decision, btakita/agent-doc] Integrate the issue-249 follow-up fix: /home/brian/worktrees/agent-doc-gh249-restore on branch fix/gh249-263-local-build-dir from origin/main 6ddc004207 (uncommitted; src/plugin.rs, agent-doc-reliable-sync-io/src/liveness.rs, editors/jetbrains/SPEC.md, scripts/jetbrains-custom-repository.py; exclude the untracked .gh249-*.log files). build_project_dir now maps JetBrains 263 to editors/jetbrains-262 so 'agent-doc plugin install jetbrains --local' cannot pick a stale classic 263 ZIP without frame isolation. make check exit 0 (10505 passed), and a mutation check shows 2 regression tests fail when the old mapping is restored. No plugin version bump needed. Blocked only on commit/push authorization (#lzcommitpresetresolve); then commit, push, and run the single coordinator make install. Old worktree /home/brian/worktrees/agent-doc-gh249-20261013 is superseded.
 - [/] [#lzcohortrelease] [operator-decision] Lazily cohort release: no public main warrants a release today (readiness report /home/brian/worktrees/agent-loop-lzreleasepublish-readiness-20261014/.audit-work/lazily-release-readiness-20261014.md, 2026-10-14). Blocked on #lzcommitpresetresolve plus explicit commit/push/version-bump/tag/publish authorization, a pre-1.0-cohort vs Core Beta decision (#lzbetascope), and #lzrustpublish. Once unblocked: Go CI fix, #lzcoreevidencedarttimeout, Core Phases 1-5 (rebase the Zig/Go worktrees first), Phase 6, interop cold-start, then minor-version releases rs 0.60.0, py 0.44.0, js 0.36.0, kt 0.45.0, cs 0.8.0, go v0.30.0, cpp v0.32.0, zig v0.38.0, dart 0.34.0 (operator pub.dev login), spec v0.42.0 last, then refresh release pins.
 <!-- /agent:backlog -->

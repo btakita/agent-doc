@@ -2485,6 +2485,12 @@ struct ControllerStatePlaneGraph {
     channel_dependencies: Arc<Mutex<BTreeMap<String, Arc<ControllerStatePlaneChannelDependency>>>>,
     sinks: Arc<Mutex<BTreeMap<String, Arc<dyn ControllerStatePlaneSink>>>>,
     next_plane_version: AtomicU64,
+    /// `#drainingpredecessor` (GH #261): set once this process's successor was
+    /// promoted. A long-poll subscriber here can never see another frame the
+    /// editor needs (the editor now publishes to the successor), so every
+    /// subscriber returns at once instead of holding its client connection —
+    /// and with it the predecessor's drain — open.
+    retired: AtomicBool,
 }
 
 struct ControllerStatePlaneChannelDependency {
@@ -2615,7 +2621,24 @@ impl ControllerStatePlaneGraph {
             channel_dependencies: Arc::new(Mutex::new(BTreeMap::new())),
             sinks,
             next_plane_version: AtomicU64::new(first_plane_version.max(1)),
+            retired: AtomicBool::new(false),
         }
+    }
+
+    /// `#drainingpredecessor` (GH #261): release every parked subscriber and
+    /// make every later one return immediately. One-way.
+    fn retire_subscribers(&self) {
+        self.retired.store(true, Ordering::SeqCst);
+        // Collect first: `project_change` takes each channel's `change_lock`,
+        // which must never nest inside the dependency-map lock.
+        let dependencies: Vec<_> = self.channel_dependencies.lock().values().cloned().collect();
+        for dependency in dependencies {
+            dependency.project_change();
+        }
+    }
+
+    fn subscribers_retired(&self) -> bool {
+        self.retired.load(Ordering::SeqCst)
     }
 
     fn install_sink(&self, channel: &str, sink: Arc<dyn ControllerStatePlaneSink>) {
@@ -2860,7 +2883,10 @@ impl ControllerStatePlaneGraph {
             } else {
                 after_version
             };
-            if latest_version > effective_after_version || Instant::now() >= deadline {
+            if latest_version > effective_after_version
+                || Instant::now() >= deadline
+                || self.subscribers_retired()
+            {
                 let frames = if effective_after_version == 0 {
                     history
                 } else {
@@ -8213,6 +8239,26 @@ impl ControllerRuntime {
 
     fn bootstrap_snapshot(&self) -> Result<ControllerBootstrap> {
         Ok(self.bootstrap.lock().clone())
+    }
+
+    /// `#drainingpredecessor` (GH #261): whether this process handed the public
+    /// socket to a promoted successor. Such a process only finishes requests it
+    /// had already accepted; it runs no controller work of its own.
+    pub(crate) fn successor_promoted(&self) -> bool {
+        self.async_editor_commands.successor_promoted()
+    }
+
+    /// `#drainingpredecessor` (GH #261): give up every authority this process
+    /// held once its successor is promoted. Async editor workers forward to the
+    /// successor, parked state-plane subscribers (the editor's document-turn
+    /// authority streams) return so their connections close and reconnect to
+    /// the successor, and this process's relay hubs stop answering reads as
+    /// current — they froze at the handoff. Idempotent and one-way.
+    pub(crate) fn retire_after_successor_promotion(&self) {
+        self.async_editor_commands.mark_successor_promoted();
+        self.state_plane_graph.retire_subscribers();
+        let project_root = self.bootstrap.lock().project_root.clone();
+        agent_doc_crdt_relay_io::retire_relay_authority_for_project(&project_root);
     }
 
     fn actor_record(

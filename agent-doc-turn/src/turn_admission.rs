@@ -91,6 +91,52 @@ impl TurnAdmission {
             Self::ContinueWithSteering | Self::ContinueWithExplicitRoute
         )
     }
+
+    /// How preflight treats a document-hygiene finding the admitted turn can
+    /// repair itself (`#rundocsstop`).
+    ///
+    /// A tracked-work placement finding (an open `- [ ] [#id]` row outside the
+    /// live `agent:backlog`) loses nothing: the row is still in the document. On
+    /// 0.35.509 preflight refused the operator's Run Agent Doc over one, the hook
+    /// told the agent "do not start a response", and the operator's edit went
+    /// unanswered while the only party allowed to fix the row was the operator.
+    /// When the operator's intent is this turn's prompt, the turn is admitted and
+    /// the finding becomes a repair directive in the cycle contract. Without
+    /// operator intent the refusal stays, so an unattended run still stops for a
+    /// person. Integrity guards (lost rows, closeout drift, authority) are not
+    /// routed through here and keep refusing.
+    pub const fn repairable_finding(self) -> RepairableFindingAdmission {
+        if self.continues_with_operator_intent() {
+            RepairableFindingAdmission::AdmitWithRepairDirective
+        } else {
+            RepairableFindingAdmission::Refuse
+        }
+    }
+}
+
+/// Preflight's verdict on a repairable document-hygiene finding
+/// ([`TurnAdmission::repairable_finding`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepairableFindingAdmission {
+    /// Admit the turn; the cycle contract carries the finding as a repair the
+    /// turn performs alongside answering the operator's edit.
+    AdmitWithRepairDirective,
+    /// Refuse admission, as before: no operator prompt is waiting on this turn.
+    Refuse,
+}
+
+impl RepairableFindingAdmission {
+    /// The verdict for preflight's entry admission; `None` (a probe) refuses.
+    pub const fn for_entry_admission(admission: Option<TurnAdmission>) -> Self {
+        match admission {
+            Some(admission) => admission.repairable_finding(),
+            None => Self::Refuse,
+        }
+    }
+
+    pub const fn admits(self) -> bool {
+        matches!(self, Self::AdmitWithRepairDirective)
+    }
 }
 
 /// Recovery token rendered in place of an absorbing recovery while steering is
@@ -197,6 +243,46 @@ mod tests {
         assert!(admission.continues_with_operator_intent());
         assert!(!admission.continues_with_steering());
         assert!(!admission.requires_clean_closeout());
+    }
+
+    /// `#rundocsstop`: a repairable finding admits exactly the turns that carry
+    /// operator intent, and refuses the rest (including a probe with no entry
+    /// admission).
+    #[test]
+    fn repairable_findings_admit_operator_intent_and_refuse_otherwise() {
+        for cycle_open in [false, true] {
+            for steering_pending in [false, true] {
+                for explicit_route_pending in [false, true] {
+                    let admission = TurnAdmission::decide(TurnAdmissionFacts {
+                        cycle_open,
+                        steering_pending,
+                        explicit_route_pending,
+                    });
+                    let verdict = RepairableFindingAdmission::for_entry_admission(Some(admission));
+                    assert_eq!(
+                        verdict.admits(),
+                        admission.continues_with_operator_intent(),
+                        "{} must admit iff the operator's intent is this turn's prompt",
+                        admission.as_str()
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            RepairableFindingAdmission::for_entry_admission(None),
+            RepairableFindingAdmission::Refuse
+        );
+        assert!(
+            TurnAdmission::ContinueWithExplicitRoute
+                .repairable_finding()
+                .admits()
+        );
+        assert!(
+            !TurnAdmission::RequireCleanCloseout
+                .repairable_finding()
+                .admits()
+        );
+        assert!(!TurnAdmission::OpenCycle.repairable_finding().admits());
     }
 
     #[test]

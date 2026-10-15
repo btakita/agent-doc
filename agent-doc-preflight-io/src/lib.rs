@@ -2584,7 +2584,28 @@ fn run_gate_verify_with_options(
     Ok(results)
 }
 
+/// Warning code preflight emits when it admits a turn over shadow-only open
+/// backlog rows (`#rundocsstop`).
+pub const SHADOW_OPEN_BACKLOG_REPAIR_WARNING: &str = "shadow_open_backlog_repair";
+
+/// Refuse when an open backlog row exists only outside the live
+/// `agent:backlog`. The strict form of [`shadow_open_backlog_admission`], for a
+/// caller that has no operator intent to honour.
 pub fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {
+    shadow_open_backlog_admission(file, None).map(|_| ())
+}
+
+/// The shadow-backlog preflight gate (`#rundocsstop`).
+///
+/// A shadow-only open row is a placement finding, not lost data, so it defers to
+/// operator intent through [`agent_doc_turn::turn_admission::TurnAdmission::repairable_finding`]:
+/// with the operator's edit or explicit route as this turn's prompt, preflight
+/// admits and returns a repair directive for the cycle contract instead of
+/// refusing and stranding that prompt; otherwise it refuses as before.
+pub fn shadow_open_backlog_admission(
+    file: &Path,
+    entry_admission: Option<agent_doc_turn::turn_admission::TurnAdmission>,
+) -> Result<Option<PreflightWarning>> {
     let content = std::fs::read_to_string(file).with_context(|| {
         format!(
             "failed to inspect backlog shadow state in {}",
@@ -2598,13 +2619,38 @@ pub fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {
             format_shadow_refs(&report.duplicated_in_live_backlog)
         );
     }
-    if !report.shadow_only.is_empty() {
+    if report.shadow_only.is_empty() {
+        return Ok(None);
+    }
+    let refs = format_shadow_refs(&report.shadow_only);
+    let verdict = agent_doc_turn::turn_admission::RepairableFindingAdmission::for_entry_admission(
+        entry_admission,
+    );
+    if !verdict.admits() {
         anyhow::bail!(
-            "open backlog item(s) exist only outside live agent:backlog: {}. Move them back into the live backlog or mark them complete before continuing",
-            format_shadow_refs(&report.shadow_only)
+            "open backlog item(s) exist only outside live agent:backlog: {refs}. Move them back into the live backlog or mark them complete before continuing"
         );
     }
-    Ok(())
+    let admission = entry_admission.map_or("none", |admission| admission.as_str());
+    eprintln!(
+        "[preflight] shadow backlog admitted as a repair directive ({admission}): open backlog item(s) exist only outside live agent:backlog: {refs}"
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "preflight_shadow_backlog_admitted file={} admission={admission} shadow_only={} (#rundocsstop)",
+            file.display(),
+            report.shadow_only.len()
+        ),
+    );
+    Ok(Some(PreflightWarning {
+        code: SHADOW_OPEN_BACKLOG_REPAIR_WARNING.to_string(),
+        message: format!(
+            "open backlog item(s) exist only outside live agent:backlog: {refs}. Preflight admitted this turn anyway because the operator's edit is its prompt (`#rundocsstop`): answer that edit, and in this same turn move each listed item back into agent:backlog or mark it complete. The closeout session-check keeps reporting them until they are restored."
+        ),
+        document_agent: None,
+        active_harness: None,
+    }))
 }
 
 pub fn enforce_no_dropped_backlog(
@@ -18138,6 +18184,75 @@ mod tests {
             vec!["do [#qsr]", "do [#rsc]", "do [#g76]", "#release"],
             "{body}"
         );
+    }
+
+    /// `#rundocsstop`: the haiven-dev `tasks/docs.md` refusal (2026-10-15
+    /// 21:39Z). The operator pressed Run Agent Doc (an explicit route) on a
+    /// document holding two open `- [ ] [#id]` rows outside `agent:backlog`;
+    /// preflight refused, and the operator's edit went unanswered. With operator
+    /// intent at entry the same document is admitted with a repair directive;
+    /// without it (no admission, or a bare re-run) the refusal stands.
+    #[test]
+    fn shadow_open_backlog_admits_operator_intent_with_a_repair_directive() {
+        use agent_doc_turn::turn_admission::TurnAdmission;
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("docs.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n\nWhy int32?\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:backlog -->\n- [ ] [#live1] Real backlog work\n<!-- /agent:backlog -->\n\n",
+                "## Parked\n\n",
+                "- [ ] [#todopr49answers] Answer the ADR 0025 questions\n",
+                "- [ ] [#todopr49automerge] Disarm squash auto-merge\n",
+            ),
+        )
+        .unwrap();
+
+        for admission in [
+            TurnAdmission::ContinueWithExplicitRoute,
+            TurnAdmission::ContinueWithSteering,
+        ] {
+            let warning = shadow_open_backlog_admission(&doc, Some(admission))
+                .unwrap_or_else(|err| panic!("{} must admit: {err}", admission.as_str()))
+                .expect("admitted shadow rows carry a repair directive");
+            assert_eq!(warning.code, SHADOW_OPEN_BACKLOG_REPAIR_WARNING);
+            assert!(
+                warning.message.contains("#todopr49answers")
+                    && warning.message.contains("#todopr49automerge")
+                    && warning.message.contains("answer that edit")
+                    && warning
+                        .message
+                        .contains("move each listed item back into agent:backlog"),
+                "{}",
+                warning.message
+            );
+        }
+
+        for admission in [None, Some(TurnAdmission::RequireCleanCloseout)] {
+            let err = shadow_open_backlog_admission(&doc, admission)
+                .expect_err("no operator intent keeps the refusal")
+                .to_string();
+            assert!(
+                err.contains("exist only outside live agent:backlog")
+                    && err.contains("#todopr49answers"),
+                "{err}"
+            );
+        }
+        assert!(enforce_no_shadow_open_backlog(&doc).is_err());
+
+        std::fs::write(
+            &doc,
+            "<!-- agent:backlog -->\n- [ ] [#live1] Real backlog work\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+        assert_eq!(
+            shadow_open_backlog_admission(&doc, Some(TurnAdmission::ContinueWithExplicitRoute))
+                .unwrap(),
+            None,
+            "a clean document adds no directive"
+        );
+        enforce_no_shadow_open_backlog(&doc).unwrap();
     }
 }
 

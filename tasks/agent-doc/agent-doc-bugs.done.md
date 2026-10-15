@@ -552,3 +552,8 @@
 - 2026-10-14 [#defineprojectwide] How do I define project-wide presets?
 - 2026-10-15 [#sensemixdeterministic] Would it make sense to mix in deterministic logic into agent-doc documents? Like a programming language that is agentic first but can escape to detministic logic?
 - 2026-10-15 [#ctrltimingflakes] Two existing controller-io tests fail under concurrent libtest load (16 threads, 40 runs: 5x actor_binding_observation_uses_one_caller_deadline_without_retry, 3x mark_write_applied_routes_through_command_plane_when_controller_live). Both predate the 0.35.504 batch and passed both full make check runs. The first asserts a wall-clock bound (elapsed < 2x deadline); count connection attempts instead. Diagnose the second the same way: replace timing assumptions with structural signals, never longer timeouts.
+- 2026-10-15 [#runsdkcaused] Run Agent Doc on sdk.md caused queue item to partially duplicate. Note the "fork" between "not to" and "not f":
+  ```
+  - Does gh support 2 types of PR? One for our dev which is not to be blocked on a review...and a PR type for main which is for review?
+  - Does gh support 2 types of PR? One for our dev which is not f
+  ```

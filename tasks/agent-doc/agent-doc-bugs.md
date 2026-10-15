@@ -52,6 +52,54 @@ Here is what the issue says is wrong, and what the subagent was asked to fix:
 > **Queue prompt:** release + publish
 
 **Deferred:** this release has to include the #266 fix, so it waits until the subagent reports and the branch is merged and installed. The next queue cycle cuts it.
+❯ 🚧 Run Agent Doc on sdk.md caused queue item to partially duplicate. Note the "fork" between "not to" and "not f":
+```
+- Does gh support 2 types of PR? One for our dev which is not to be blocked on a review...and a PR type for main which is for review?
+- Does gh support 2 types of PR? One for our dev which is not f
+```
+
+### Re: v0.35.506 released; #266 closed; fork-dup + compact false positive on main — opus-5-5 · 2026-10-15T04:31-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/266
+
+**Fixed and closed.** The fix is commit `3165b6b11d`, shipped in v0.35.506.
+- **The fix:** Claude Code `/clear` is now proven from the pane tail after the last startup banner that `/clear` redraws. The proof requires the `/clear` echo, followed by nothing but prompt/status chrome and a ready prompt. It still fails closed when the old conversation is visible, and it covers blank-viewport (`pane_not_rendered`) observations.
+- **Queued input:** detection reads only the live input line, so stale `Press up to edit queued messages` copies left in scrollback no longer cause a misfire.
+- **Harness:** session commands resolve the real harness (document `agent:` → actor record → supervisor harness → ambient) instead of `default`.
+- **Coverage:** 43 `context_clear` tests, including a long Claude pane where `/clear` ran (proven) and nine still-visible shapes (blocked). End-to-end proofs ran under the `claude-code`, `claude` and `default` labels. A read-only replay across 51 live panes found no false proof.
+- **Log change:** the probe now logs `result=fresh_chat_proven`, not `cleared_state_proven`.
+- GitHub issue #266 is closed with a comment.
+
+> **Queue prompt:** release + publish
+
+**Released v0.35.506.**
+- Release commit `a470c0dfa8`, a fast-forward on `main`, tagged `v0.35.506` and pushed. The tag starts the Release and CI workflows, which publish the GitHub Release and PyPI.
+- **Checks:** the full `make check` on the final version-projected tree passed: exit 0, 10575 passed, 167 skipped, no failures. The first run had failed only because `editors/release-parity.tsv` had no row for 0.35.506. I added the row and re-ran.
+- **Installed:** `make install-full` exited 0, and `agent-doc --version` reports `0.35.506`.
+
+> **Queue prompt:** do [#runsdkcaused]
+
+**Fixed, on `main`, and installed.** This answers the report "Run Agent Doc on sdk.md caused queue item to partially duplicate". The fix is commit `9fa07acab1`; this is unreleased work on top of v0.35.506.
+- **What happened:** "Run Agent Doc" fired at 07:24:25Z while you were still typing. Preflight queue maintenance found a three-way split: the baseline, the live editor at `...which is not to be b`, and disk at `...which is not f`. The editor had saved that disk copy before you deleted the `f`. The merge adopted both lines as separate additions.
+- **Why both guards missed it:**
+  - **Prefix guard:** it only drops a disk line that is a prefix of the editor line, and `not f` is not a prefix of `not to be b`.
+  - **Keystroke-history proof (`#admissionopancestor`):** it required replaying all recorded keystrokes to land exactly on the editor text. Keystrokes are recorded one at a time, while the editor text the merge reads updates in batches, and you were still typing. So the history was a few keystrokes ahead, the replay didn't match, and the proof gave up silently.
+- **The fix:** the proof now accepts the editor text at any point in the keystroke replay, not only at the end. It still drops only a line that appeared during your typing and is in neither the editor text nor the end of the replay.
+- **Tests:** two merge-crate unit tests plus an end-to-end preflight test with anonymized text. All three fail when the old check is put back. The spec is updated in `specs/14-realtime-workflow.md`.
+- **Left for you:** the half-typed echo is still in sdk.md (~line 1167). I left it for you; it is in `agent:todo`.
+
+**Also fixed this cycle: closeout refused the "Compact Exchange error" queue report (`qcompactnoun`).**
+- **What happened:** this turn's first `respond` was rejected with `bare compact exchange directive detected`. The cause was your queue entry "Compact Exchange error on sdk.md: …": a multi-line `---`-separated free-text head starts with plain prose, so the bullet skip missed it, and the continuation word "error" was not recognized as a report.
+- **The fix:** the detector now tracks the managed list components (queue, backlog, review, todo, icebox, done) from the marker lines in each hunk, and skips every line inside them. Report nouns after the prefix (`error`, `bug`, `issue`, `failure`, …) now read as a statement about compaction, not a request.
+- **Tests:** two new tests. One covers the queue entry, and checks that exchange prose after the component closes, a new hunk, and `agent:exchange` itself still count as directives. The other covers the noun report. Removing the component guard fails the test. The spec is updated in `specs/07-closeout-commands.md`. The commit is `86e24508ce`.
+
+**Batch verification:** the batch merges `9fa07acab1` and `86e24508ce` on top of v0.35.506.
+- Full `make check`: exit 0, 10580 passed, 167 skipped, no `result: FAILED`.
+- Pushed to `main` as a fast-forward (`a470c0dfa8..86e24508ce`), and `make install` exited 0.
+
+**Still in flight (claimed):**
+- **`agent:todo` completion API**, plus the sdk.md todo duplicate-on-done bug (`#apimigrationcollide` / `#publicbundleadopt`): one subagent, branch `feat/todo-complete-api`. Its full `make check` is running.
+- **Compact Exchange "Unknown close tag `/agent:salient-response`"**: one subagent, branch `fix/salient-response-close-tag`. Its full `make check` is running.
 <!-- agent:boundary:77c3a41f -->
 <!-- /agent:exchange -->
 
@@ -60,20 +108,40 @@ Here is what the issue says is wrong, and what the subagent was asked to fix:
 
 ## Pending / Not Built
 <!-- agent:queue subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#runsdkcaused]
+- ~~do [#runsdkcaused]~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/266
-- Make sure agent:todo items are marked complete as they are finished. Provide a similar api as agent:backlog + agent:icebox + agent:reviews.
+- 🚧 Make sure agent:todo items are marked complete as they are finished. Provide a similar api as agent:backlog + agent:icebox + agent:reviews.
+---
+🚧 In sdk.md the "Decide the haiven-api merge order of #645 vs #715" todo item was duplicated. The duplicate was marked done but the original not marked done:
+```
+- [ ] Decide the haiven-api merge order of #645 vs #715 (#apimigrationcollide)
+...
+- [x] Decide the haiven-api merge order of #645 vs #715 (#apimigrationcollide) — moot: #715 renumbered to 00115, either order works
+```
+Same with:
+```
+- [ ] Approve/merge haiven-contracts #160 and decide the next release version bump (#publicbundleadopt)
+...
+- [x] Approve/merge haiven-contracts #160 and decide the next release version bump (#publicbundleadopt) — #160 merged into sdk-dev; continues as #162 below
+```
+---
+---
+🚧 Compact Exchange error on sdk.md: `agent:salient-response cycle="cycle-1792051137843"` tag in the exchange.
+```
+Agent Doc couldn't compact this document because a document directive is malformed.
+
+sdk.md, line 1325
+Unknown agent-doc close tag `/agent:salient-response`.
+
+Fix the directive, then try again.
+```
+---
 - release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#runsdkcaused] Run Agent Doc on sdk.md caused queue item to partially duplicate. Note the "fork" between "not to" and "not f":
-  ```
-  - Does gh support 2 types of PR? One for our dev which is not to be blocked on a review...and a PR type for main which is for review?
-  - Does gh support 2 types of PR? One for our dev which is not f
-  ```
 <!-- /agent:backlog -->
 
 ## Review
@@ -87,6 +155,7 @@ Here is what the issue says is wrong, and what the subagent was asked to fix:
 
 <!-- agent:todo -->
 - [ ] Next Remote Dev session: confirm tab switches move tmux (GH #262 fix, plugin 263 0.2.617 after v0.35.504 is installed on the backend)
+- [ ] sdk.md cleanup: delete the leftover half-typed `> **Queue prompt:** ... which is not f` echo (~line 1167; the full question is ~line 1147), and the open `[ ]` copies of #apimigrationcollide / #publicbundleadopt whose `[x]` duplicates exist
 <!-- /agent:todo -->
 
 <!-- agent:icebox -->
